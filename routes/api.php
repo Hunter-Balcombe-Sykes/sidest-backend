@@ -13,7 +13,7 @@ Route::middleware(['supabase.jwt'])->post('/bootstrap', [BootstrapController::cl
 // Split route files (keeps api.php tidy)
 require __DIR__ . '/api/professional.php';
 require __DIR__ . '/api/staff.php';
-require __DIR__ . '/api/public.php';
+require __DIR__ . '/api/publicSite.php';
 
 Route::get('/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::class, 'unsubscribe'])
     ->where('token', '[A-Za-z0-9]+')
