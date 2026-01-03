@@ -1,0 +1,210 @@
+<?php
+
+namespace App\Http\Controllers\Api\Public;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\Public\CustomerLeads\PublicCustomerLeadRequest;
+use App\Models\Analytics\LeadSubmission;
+use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteSubdomainAlias;
+use Illuminate\Http\JsonResponse;
+use App\Models\Core\Notifications\EmailSubscription;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Str;
+use Illuminate\Http\Request;
+
+class PublicCustomerLeadController extends Controller
+{
+    public function store(PublicCustomerLeadRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+        $marketingOptIn = (bool)($data['marketing_opt_in'] ?? false);
+
+        $subdomain = $this->resolveSubdomainFromHost($request);
+        $subdomain = $subdomain ? strtolower($subdomain) : null;
+
+        // 1) Honeypot: if filled, pretend success but do nothing
+        $honeypot = $data['website'] ?? null;
+        if (is_string($honeypot) && trim($honeypot) !== '') {
+            $this->logLead($request, $subdomain, null, null, null, 'honeypot', $data['form_started_at_ms'] ?? null);
+            return response()->json(['ok' => true], 201);
+        }
+
+        // 2) Timing check (optional field, but enforced if provided)
+        $startedMs = $data['form_started_at_ms'] ?? null;
+        if (is_int($startedMs)) {
+            $nowMs = (int)floor(microtime(true) * 1000);
+            $delta = $nowMs - $startedMs;
+
+            $minMs = 2500;                  // 2.5s minimum fill time
+            $maxMs = 12 * 60 * 60 * 1000;   // 12h max (stale form)
+
+            if ($delta < $minMs || $delta > $maxMs) {
+                $this->logLead($request, $subdomain, null, null, null, 'too_fast', $startedMs);
+                return response()->json(['message' => 'Invalid submission.'], 422);
+            }
+        }
+
+        if (!$subdomain) {
+            $this->logLead($request, null, null, null, null, 'no_subdomain', $startedMs);
+            return response()->json(['message' => 'Could not determine site from URL.'], 400);
+        }
+
+        // Only allow leads for published sites
+        $site = Site::query()->published()
+            ->whereRaw('lower(subdomain) = ?', [$subdomain])
+            ->first();
+
+        if (!$site) {
+            $alias = SiteSubdomainAlias::query()
+                ->whereRaw('lower(subdomain) = ?', [$subdomain])
+                ->first();
+
+            if ($alias) {
+                $site = Site::query()->published()->find($alias->site_id);
+            }
+        }
+
+        if (!$site) {
+            $this->logLead($request, $subdomain, null, null, null, 'site_not_found', $startedMs);
+            return response()->json([
+                'message' => 'Site not found.',
+            ], 404);
+        }
+
+        if (!$site->professional_id) {
+            $this->logLead($request, $subdomain, $site->id, null, null, 'site_unlinked', $startedMs);
+            return response()->json([
+                'message' => 'Site is not linked to a professional.',
+            ], 422);
+        }
+
+        $site->loadMissing('professional');
+
+        if (!$site->professional) {
+            $this->logLead($request, $subdomain, $site->id, null, null, 'site_unlinked', $startedMs);
+            return response()->json(['message' => 'Site is not linked to a professional.'], 422);
+        }
+
+        $pro = $site->professional;
+
+        $customer = $pro->customers()->create([
+            'full_name' => $data['full_name'],
+            'email' => $data['email'],
+            'phone' => $data['phone'],
+            'notes' => $data['notes'] ?? null,
+            'external_id' => $data['external_id'] ?? null,
+            'source' => 'site',
+        ]);
+
+        if ($marketingOptIn && !empty($data['email'])) {
+            $this->upsertMarketingSubscription(
+                professionalId: $pro->id,
+                email: (string) $data['email'],
+                fullName: $data['full_name'] ?? null,
+                request: $request
+            );
+        }
+
+        $this->logLead($request, $subdomain, $site->id, $pro->id, $customer->id, 'created', $startedMs);
+        return response()->json([
+            'ok' => true,
+            'customer_id' => $customer->id,
+        ], 201);
+    }
+
+    private function resolveSubdomainFromHost(Request $request): ?string
+    {
+        $routeSubdomain = $request->route('subdomain');
+        if (is_string($routeSubdomain) && $routeSubdomain !== '') {
+            return $routeSubdomain;
+        }
+
+        $host = $request->getHost(); // e.g. josh.example.com
+        $parts = explode('.', $host);
+
+        if (count($parts) < 3) {
+            return null;
+        }
+
+        return $parts[0];
+    }
+
+    private function logLead(
+        Request $request,
+        ?string $subdomain,
+        ?string $siteId,
+        ?string $professionalId,
+        ?string $customerId,
+        string  $outcome,
+        ?int    $formStartedAtMs
+    ): void
+    {
+        LeadSubmission::query()->create([
+            'occurred_at' => now(),
+            'subdomain' => $subdomain,
+            'site_id' => $siteId,
+            'professional_id' => $professionalId,
+            'customer_id' => $customerId,
+            'ip_hash' => $this->hashIp($request->ip()),
+            'user_agent' => $request->userAgent(),
+            'referrer' => $request->headers->get('referer'),
+            'outcome' => $outcome,
+            'form_started_at_ms' => $formStartedAtMs,
+        ]);
+    }
+
+    private function hashIp(?string $ip): ?string
+    {
+        if (!$ip) return null;
+        return hash('sha256', $ip . config('app.key'));
+    }
+
+    private function upsertMarketingSubscription(string $professionalId, string $email, ?string $fullName, Request $request): void
+    {
+        $email = strtolower(trim($email));
+        if ($email === '') return;
+
+        $listKey = 'marketing';
+
+        try {
+            $sub = EmailSubscription::query()
+                ->where('professional_id', $professionalId)
+                ->where('list_key', $listKey)
+                ->whereRaw('lower(email) = ?', [$email])
+                ->first();
+
+            if (!$sub) {
+                $sub = new EmailSubscription([
+                    'professional_id' => $professionalId,
+                    'list_key' => $listKey,
+                    'email' => $email,
+                    'full_name' => $fullName,
+                    'unsubscribe_token' => EmailSubscription::newUnsubscribeToken(),
+                ]);
+            } else {
+                if ($fullName) {
+                    $sub->full_name = $fullName;
+                }
+                if (!$sub->unsubscribe_token) {
+                    $sub->unsubscribe_token = EmailSubscription::newUnsubscribeToken();
+                }
+            }
+
+            $sub->markSubscribed([
+                'source' => 'site_lead',
+                'ip_hash' => $this->hashIp($request->ip()),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            $sub->save();
+        } catch (QueryException $e) {
+            // If a race creates the row first, just ignore.
+            if ($e->getCode() !== '23505') {
+                throw $e;
+            }
+        }
+    }
+
+
+}

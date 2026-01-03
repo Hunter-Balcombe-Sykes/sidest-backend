@@ -1,0 +1,143 @@
+<?php
+
+namespace App\Http\Controllers\Api\Staff\StaffSite;
+
+use App\Http\Controllers\Controller;
+use App\Models\Core\Professional\Professional;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Throwable;
+
+class StaffAnalyticsController extends Controller
+{
+    /**
+     * GET /api/staff/professionals/{professional}/analytics?days=30
+     * Optional: ?from=YYYY-MM-DD&to=YYYY-MM-DD
+     */
+    public function summary(Request $request, Professional $professional): JsonResponse
+    {
+        $days = (int) $request->query('days', 30);
+        $days = max(1, min(365, $days));
+
+        $fromParam = $request->query('from');
+        $toParam = $request->query('to');
+
+        try {
+            if ($fromParam || $toParam) {
+                $from = $fromParam
+                    ? Carbon::parse($fromParam)->startOfDay()
+                    : Carbon::now()->subDays($days)->startOfDay();
+
+                $to = $toParam
+                    ? Carbon::parse($toParam)->endOfDay()
+                    : Carbon::now()->endOfDay();
+            } else {
+                $to = Carbon::now()->endOfDay();
+                $from = Carbon::now()->subDays($days)->startOfDay();
+            }
+        } catch (Throwable $e) {
+            return response()->json([
+                'message' => 'Invalid date range. Use YYYY-MM-DD for from/to.',
+                'errors' => [
+                    'from' => $fromParam ? ['Invalid date.'] : [],
+                    'to'   => $toParam ? ['Invalid date.'] : [],
+                ],
+            ], 422);
+        }
+
+        if ($from->gt($to)) {
+            return response()->json([
+                'message' => 'Invalid date range: from must be before to.',
+            ], 422);
+        }
+
+        $site = $professional->site()->first();
+        if (!$site) {
+            return response()->json(['message' => 'professional has no site.'], 404);
+        }
+
+        // Totals (visits)
+        $visitsAgg = DB::table('analytics.site_visits')
+            ->where('professional_id', $professional->id)
+            ->whereBetween('occurred_at', [$from, $to])
+            ->selectRaw('COUNT(*) as total_visits')
+            ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id, ip_hash)) as unique_visitors')
+            ->selectRaw('MAX(occurred_at) as last_visit_at')
+            ->first();
+
+        // Totals (clicks)
+        $clicksAgg = DB::table('analytics.link_clicks')
+            ->where('professional_id', $professional->id)
+            ->whereBetween('occurred_at', [$from, $to])
+            ->selectRaw('COUNT(*) as total_clicks')
+            ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id, ip_hash)) as unique_clickers')
+            ->selectRaw('MAX(occurred_at) as last_click_at')
+            ->first();
+
+        $totalVisits = (int) ($visitsAgg->total_visits ?? 0);
+        $totalClicks = (int) ($clicksAgg->total_clicks ?? 0);
+
+        // Daily charts
+        $visitsByDay = DB::table('analytics.site_visits')
+            ->where('professional_id', $professional->id)
+            ->whereBetween('occurred_at', [$from, $to])
+            ->selectRaw('DATE(occurred_at) as day, COUNT(*) as count')
+            ->groupByRaw('DATE(occurred_at)')
+            ->orderBy('day')
+            ->get();
+
+        $clicksByDay = DB::table('analytics.link_clicks')
+            ->where('professional_id', $professional->id)
+            ->whereBetween('occurred_at', [$from, $to])
+            ->selectRaw('DATE(occurred_at) as day, COUNT(*) as count')
+            ->groupByRaw('DATE(occurred_at)')
+            ->orderBy('day')
+            ->get();
+
+        // Top links
+        $topLinks = DB::table('analytics.link_clicks as lc')
+            ->join('core.blocks as b', 'b.id', '=', 'lc.block_id')
+            ->where('lc.professional_id', $professional->id)
+            ->whereBetween('lc.occurred_at', [$from, $to])
+            ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
+            ->groupBy('b.id', 'b.title', 'b.url')
+            ->orderByDesc('clicks')
+            ->limit(10)
+            ->get();
+
+        $ctr = $totalVisits > 0 ? round(($totalClicks / $totalVisits) * 100, 2) : 0.0;
+
+        return response()->json([
+            'range' => [
+                'from' => $from->toDateString(),
+                'to'   => $to->toDateString(),
+            ],
+            'professional' => [
+                'id'           => $professional->id,
+                'handle'       => $professional->handle,
+                'display_name' => $professional->display_name,
+            ],
+            'site' => [
+                'id'        => $site->id,
+                'subdomain' => $site->subdomain,
+                'published' => (bool) $site->is_published,
+            ],
+            'totals' => [
+                'visits'          => $totalVisits,
+                'unique_visitors' => (int) ($visitsAgg->unique_visitors ?? 0),
+                'clicks'          => $totalClicks,
+                'unique_clickers' => (int) ($clicksAgg->unique_clickers ?? 0),
+                'ctr_percent'     => $ctr,
+                'last_visit_at'   => $visitsAgg->last_visit_at ? Carbon::parse($visitsAgg->last_visit_at)->toISOString() : null,
+                'last_click_at'   => $clicksAgg->last_click_at ? Carbon::parse($clicksAgg->last_click_at)->toISOString() : null,
+            ],
+            'charts' => [
+                'visits_by_day' => $visitsByDay,
+                'clicks_by_day' => $clicksByDay,
+            ],
+            'top_links' => $topLinks,
+        ]);
+    }
+}

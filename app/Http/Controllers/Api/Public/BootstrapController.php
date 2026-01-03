@@ -1,0 +1,218 @@
+<?php
+
+namespace App\Http\Controllers\Api\Public;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\BootstrapRequest;
+use App\Models\Core\Professional\Professional;
+use App\Models\Core\Site\Site;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use RuntimeException;
+use App\Models\Core\Notifications\EmailSubscription;
+
+
+
+class BootstrapController extends Controller
+{
+    public function bootstrap(BootstrapRequest $request)
+    {
+        $uid = $request->attributes->get('supabase_uid');
+        if (!is_string($uid) || $uid === '') {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        $data = $request->validated();
+
+        $result = DB::transaction(function () use ($uid, $data) {
+
+            $professional = Professional::query()->where('auth_user_id', $uid)->first();
+
+            if (!$professional) {
+                $professional = new Professional([
+                    'handle'          => $data['handle'],
+                    'display_name'    => $data['display_name'],
+                    'bio'             => null,
+                    'country_code'    => $data['country_code'] ?? null,
+                    'timezone'        => $data['timezone'] ?? null,
+                    'status'          => 'active',
+                    'onboarding_step' => 0,
+                    'phone' => $data['phone'] ?? null,
+                    'primary_email'   => $data['primary_email'],
+                    'first_name'      => $data['first_name'] ?? '',
+                    'last_name'       => $data['last_name'] ?? null,
+
+                    // Defaults to Main phone/email if NULL
+                    'public_contact_number' => $data['phone'] ?? null,
+                    'public_contact_email' => $data['primary_email'] ?? null,
+                ]);
+                $professional->auth_user_id = $uid;
+            } else {
+                $fill = [
+                    'handle'        => $data['handle'],
+                    'display_name'  => $data['display_name'],
+                    'primary_email' => $data['primary_email'],
+                    'phone'         => $data['phone'] ?? $professional->phone,
+                    'first_name'    => $data['first_name'] ?? $professional->first_name,
+                    'last_name'     => $data['last_name'] ?? $professional->last_name,
+                    'country_code'  => $data['country_code'] ?? $professional->country_code,
+                    'timezone'      => $data['timezone'] ?? $professional->timezone,
+                ];
+
+                if (array_key_exists('phone', $data)) {
+                    $fill['phone'] = $data['phone'];
+                    // only change public_contact_number if phone is being set in this request
+                    $fill['public_contact_number'] = $data['phone'] ?: null;
+                }
+
+                if (array_key_exists('primary_email', $data)) {
+                    // only change public_contact_email if email is being set in this request
+                    $fill['public_contact_email'] = $data['primary_email'] ?: null;
+                }
+
+                $professional->fill($fill);
+            }
+            $professional->save();
+
+            // Add to Comet updates list once (global list). Do NOT overwrite if they already unsubscribed.
+            $this->ensureCometUpdatesSubscription($professional->primary_email);
+
+
+            $site = Site::query()->where('professional_id', $professional->id)->first();
+
+            if (!$site) {
+                $base = $this->subdomainBaseFromHandle($data['handle']);
+
+                $site = $this->createSiteWithRetry($professional->id, $base);
+            }
+
+            return [
+                'professional' => $professional->fresh(),
+                'site' => $site->fresh(),
+            ];
+        });
+
+        return response()->json($result);
+    }
+
+    private function createSiteWithRetry(string $professionalId, string $base): Site
+    {
+        $reserved = array_map('strtolower', config('comet.reserved_subdomains', []));
+        $base = strtolower($base);
+        $baseIsReserved = in_array($base, $reserved, true);
+
+        // If reserved: only try base-1...base-20
+        if ($baseIsReserved) {
+            for ($i = 1; $i <= 20; $i++) {
+                $candidate = $this->buildCandidate($base, (string) $i);
+                $site = $this->tryCreateSite($professionalId, $candidate);
+                if ($site) return $site;
+            }
+        } else {
+            // Not reserved: base, base-1...base-19
+            for ($i = 0; $i < 20; $i++) {
+                $suffix = $i === 0 ? null : (string) $i;
+                $candidate = $this->buildCandidate($base, $suffix);
+                $site = $this->tryCreateSite($professionalId, $candidate);
+                if ($site) return $site;
+            }
+        }
+
+        // Fallback: random suffix
+        for ($i = 0; $i < 10; $i++) {
+            $rand = Str::lower(Str::random(6));
+            $candidate = $this->buildCandidate($base, $rand);
+            $site = $this->tryCreateSite($professionalId, $candidate);
+            if ($site) return $site;
+        }
+
+        throw new RuntimeException('Could not allocate a unique subdomain.');
+    }
+
+    private function isUniqueViolation(QueryException $e): bool
+    {
+        // Postgres unique_violation
+        return $e->getCode() === '23505';
+    }
+
+    private function buildCandidate(string $base, ?string $suffix): string
+    {
+        if ($suffix === null) {
+            return $base;
+        }
+
+        $base = $this->limitSubdomainBase($base, '-' . $suffix);
+        return $base . '-' . $suffix;
+    }
+
+    private function limitSubdomainBase(string $base, string $suffixIncludingHyphen): string
+    {
+        // max subdomain length is 63
+        $max = 63 - strlen($suffixIncludingHyphen);
+        if ($max < 1) {
+            return substr($base, 0, 1);
+        }
+        return substr($base, 0, $max);
+    }
+
+    private function subdomainBaseFromHandle(string $handle): string
+    {
+        $v = mb_strtolower(trim($handle));
+        $v = preg_replace('/[^a-z0-9]+/', '-', $v);
+        $v = trim($v, '-');
+        return $v !== '' ? $v : 'barber';
+    }
+
+    private function tryCreateSite(string $professionalId, string $candidate): ?Site
+    {
+        try {
+            $site = new Site([
+                'subdomain'    => $candidate,
+                'theme_id'     => null,
+                'is_published' => false,
+                'settings'     => [],
+            ]);
+
+            $site->professional_id = $professionalId;
+            $site->save();
+
+            return $site;
+        } catch (QueryException $e) {
+            if ($this->isUniqueViolation($e)) {
+                return null; // collision -> caller retries
+            }
+            throw $e;
+        }
+    }
+
+    private function ensureCometUpdatesSubscription(?string $email): void
+    {
+        $email = is_string($email) ? strtolower(trim($email)) : '';
+        if ($email === '') return;
+
+        $listKey = 'comet_updates';
+
+        $existing = EmailSubscription::query()
+            ->whereNull('professional_id')
+            ->where('list_key', $listKey)
+            ->whereRaw('lower(email) = ?', [$email])
+            ->first();
+
+        if ($existing) {
+            return; // keep whatever status they chose
+        }
+
+        $sub = new EmailSubscription([
+            'professional_id' => null,
+            'list_key' => $listKey,
+            'email' => $email,
+            'full_name' => null,
+            'unsubscribe_token' => EmailSubscription::newUnsubscribeToken(),
+        ]);
+
+        $sub->markSubscribed(['source' => 'bootstrap']);
+        $sub->save();
+    }
+
+}
