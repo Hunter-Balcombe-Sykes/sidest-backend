@@ -2,11 +2,10 @@
 
 namespace App\Http\Requests\Api\Professional\Services;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 
-class UpdateServiceRequest extends FormRequest
+class UpdateServiceRequest extends BaseFormRequest
 {
-    public function authorize(): bool { return true; }
 
     public function rules(): array
     {

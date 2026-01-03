@@ -2,15 +2,11 @@
 
 namespace App\Http\Requests\Api\PublicSite;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
-class PublicEmailSubscribeRequest extends FormRequest
+class PublicEmailSubscribeRequest extends BaseFormRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
 
     protected function prepareForValidation(): void
     {

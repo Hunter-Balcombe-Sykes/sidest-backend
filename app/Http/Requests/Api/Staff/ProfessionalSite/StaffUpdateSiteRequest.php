@@ -3,17 +3,13 @@
 namespace App\Http\Requests\Api\Staff\ProfessionalSite;
 
 use App\Models\Core\Site\Site;
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
-class StaffUpdateSiteRequest extends FormRequest
+class StaffUpdateSiteRequest extends BaseFormRequest
 {
-    public function authorize(): bool
-    {
-        // You already protect routes with middleware (supabase.jwt + staff/admin).
-        return true;
-    }
+
 
     protected function prepareForValidation(): void
     {

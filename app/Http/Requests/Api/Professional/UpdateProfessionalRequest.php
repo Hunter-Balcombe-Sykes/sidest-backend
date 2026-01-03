@@ -2,18 +2,11 @@
 
 namespace App\Http\Requests\Api\Professional;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
-class UpdateProfessionalRequest extends FormRequest
+class UpdateProfessionalRequest extends BaseFormRequest
 {
-    /**
-     * Determine if the user is authorized to make this request.
-     */
-    public function authorize(): bool
-    {
-        return true;
-    }
 
     public function rules(): array
     {

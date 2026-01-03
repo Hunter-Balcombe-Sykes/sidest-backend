@@ -163,7 +163,13 @@ class BootstrapController extends Controller
         $v = mb_strtolower(trim($handle));
         $v = preg_replace('/[^a-z0-9]+/', '-', $v);
         $v = trim($v, '-');
-        return $v !== '' ? $v : 'barber';
+        
+        // Generate UUID-based fallback if handle is empty
+        if ($v === '') {
+            $v = 'user-' . substr(Str::uuid()->toString(), 0, 8);
+        }
+        
+        return $v;
     }
 
     private function tryCreateSite(string $professionalId, string $candidate): ?Site

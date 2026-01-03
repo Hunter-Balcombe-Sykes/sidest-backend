@@ -2,11 +2,10 @@
 
 namespace App\Http\Requests\Api\Staff\ProfessionalSite;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 
-class StaffUpdateCustomerRequest extends FormRequest
+class StaffUpdateCustomerRequest extends BaseFormRequest
 {
-    public function authorize(): bool { return true; }
 
     public function rules(): array
     {

@@ -2,14 +2,10 @@
 
 namespace App\Http\Requests\Api\PublicSite;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 
-class PublicSiteShowRequest extends FormRequest
+class PublicSiteShowRequest extends BaseFormRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
 
     protected function prepareForValidation(): void
     {

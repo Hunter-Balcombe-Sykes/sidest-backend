@@ -90,7 +90,7 @@ class StaffProfessionalController extends Controller
      */
     public function show(Professional $professional): JsonResponse
     {
-        $professional->load(['site.theme']);
+        $professional->load(['site.theme', 'services', 'blocks']);
 
         return response()->json([
             'professional' => [

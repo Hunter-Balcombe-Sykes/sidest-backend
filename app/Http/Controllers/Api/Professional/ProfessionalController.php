@@ -15,18 +15,18 @@ class ProfessionalController extends Controller
     public function show(ProfessionalShowRequest $request)
     {
         $uid = $request->attributes->get('supabase_uid');
-        $professional = $this->currentProfessional($request); // set by current.pro
+        $pro = $this->currentProfessional($request); // set by current.pro
 
         // Load related rows for dashboard
-        $professional->load(['site', 'linkBlocks',]);
+        $pro->load(['site', 'services', 'linkBlocks']);
 
-        $customersCount = $professional->customers()->count();
+        $customersCount = $pro->customers()->count();
 
         return response()->json([
             'uid' => $uid,
-            'professional' => $professional,
-            'site' => $professional->site,
-            'blocks' => $professional->linkBlocks,
+            'professional' => $pro,
+            'site' => $pro->site,
+            'blocks' => $pro->linkBlocks,
             'customers_count' => $customersCount,
         ]);
     }

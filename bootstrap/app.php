@@ -20,7 +20,57 @@ return Application::configure(basePath: dirname(__DIR__))
         'lead.log'     => \App\Http\Middleware\Logging\LogLeadRateLimits::class,
     ]);
     })
+
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Handle API exceptions with JSON responses
+        $exceptions->render(function (Throwable $e, Request $request) {
+            // Only handle API routes
+            if (! $request->is('api/*')) {
+                return null;
+            }
+
+            // Validation errors (422)
+            if ($e instanceof ValidationException) {
+                return response()->json([
+                    'message' => 'Validation failed',
+                    'errors' => $e->errors(),
+                ], 422);
+            }
+
+            // Model not found (404)
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'message' => 'Resource not found',
+                ], 404);
+            }
+
+            // Not found (404)
+            if ($e instanceof NotFoundHttpException) {
+                return response()->json([
+                    'message' => 'Endpoint not found',
+                ], 404);
+            }
+
+            // Forbidden (403)
+            if ($e instanceof AccessDeniedHttpException) {
+                return response()->json([
+                    'message' => $e->getMessage() ?: 'Access denied',
+                ], 403);
+            }
+
+            // Generic error handling
+            $statusCode = method_exists($e, 'getStatusCode')
+                ? $e->getStatusCode()
+                : 500;
+
+            // Don't expose internal errors in production
+            $message = config('app.debug')
+                ? $e->getMessage()
+                : 'An error occurred';
+
+            return response()->json([
+                'message' => $message,
+            ], $statusCode);
+        });
     })->create();
 

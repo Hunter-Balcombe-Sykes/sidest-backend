@@ -3,13 +3,12 @@
 namespace App\Http\Requests\Api\Professional\Site;
 
 use App\Models\Core\Site\Site;
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
-class UpdateSiteRequest extends FormRequest
+class UpdateSiteRequest extends BaseFormRequest
 {
-    public function authorize(): bool { return true; }
 
     protected function prepareForValidation(): void
     {

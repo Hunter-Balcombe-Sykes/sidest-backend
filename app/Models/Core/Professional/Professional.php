@@ -31,6 +31,8 @@ class Professional extends Model
     public $incrementing = false;
     protected $keyType = 'string';
 
+    protected $with = ['site'];
+
     protected $fillable = [
         'handle',
         'display_name',

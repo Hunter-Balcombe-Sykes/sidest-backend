@@ -2,12 +2,11 @@
 
 namespace App\Http\Requests\Api\Professional\Site;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
-class StoreLinkBlockRequest extends FormRequest
+class StoreLinkBlockRequest extends BaseFormRequest
 {
-    public function authorize(): bool { return true; }
 
     protected function prepareForValidation(): void
     {

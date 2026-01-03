@@ -2,14 +2,10 @@
 
 namespace App\Http\Requests\Api\Professional;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 
-class ProfessionalShowRequest extends FormRequest
+class ProfessionalShowRequest extends BaseFormRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
 
     public function rules(): array
     {

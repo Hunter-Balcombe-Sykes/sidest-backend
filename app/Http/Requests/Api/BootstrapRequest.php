@@ -2,16 +2,12 @@
 
 namespace App\Http\Requests\Api;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
-class BootstrapRequest extends FormRequest
+class BootstrapRequest extends BaseFormRequest
 {
 
-    public function authorize(): bool
-    {
-        return true; // JWT middleware already authenticated them
-    }
 
     public function rules(): array
     {

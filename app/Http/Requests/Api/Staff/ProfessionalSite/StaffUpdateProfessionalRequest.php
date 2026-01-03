@@ -2,17 +2,10 @@
 
 namespace App\Http\Requests\Api\Staff\ProfessionalSite;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 
-class StaffUpdateProfessionalRequest extends FormRequest
+class StaffUpdateProfessionalRequest extends BaseFormRequest
 {
-    /**
-     * Determine if the user is authorized to make this request.
-     */
-    public function authorize(): bool
-    {
-        return true;
-    }
 
     public function rules(): array
     {

@@ -2,12 +2,11 @@
 
 namespace App\Http\Requests\Api\Professional\Uploads;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
-class PrepareUploadRequest extends FormRequest
+class PrepareUploadRequest extends BaseFormRequest
 {
-    public function authorize(): bool { return true; }
 
     public function rules(): array
     {

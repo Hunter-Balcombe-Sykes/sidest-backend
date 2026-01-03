@@ -2,15 +2,12 @@
 
 namespace App\Http\Requests\Api\PublicSite\Analytics;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
-class ClickRequest extends FormRequest
+class ClickRequest extends BaseFormRequest
 {
-    public function authorize(): bool
-    {
-        return true; // Public endpoint
-    }
+
 
     protected function prepareForValidation(): void
     {

@@ -2,11 +2,10 @@
 
 namespace App\Http\Requests\Api\Professional\Site;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 
-class ReorderBlocksRequest extends FormRequest
+class ReorderBlocksRequest extends BaseFormRequest
 {
-    public function authorize(): bool { return true; }
 
     public function rules(): array
     {

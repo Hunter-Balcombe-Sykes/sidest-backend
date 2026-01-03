@@ -2,12 +2,11 @@
 
 namespace App\Http\Requests\Api\Professional\ImageGallery;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
-class StoreGalleryImageRequest extends FormRequest
+class StoreGalleryImageRequest extends BaseFormRequest
 {
-    public function authorize(): bool { return true; }
 
     public function rules(): array
     {

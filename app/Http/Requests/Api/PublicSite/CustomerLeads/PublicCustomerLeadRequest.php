@@ -2,15 +2,11 @@
 
 namespace App\Http\Requests\Api\PublicSite\CustomerLeads;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 
-class PublicCustomerLeadRequest extends FormRequest
+class PublicCustomerLeadRequest extends BaseFormRequest
 {
-    public function authorize(): bool
-    {
-        // Public endpoint, no login required
-        return true;
-    }
+
 
     protected function prepareForValidation(): void
     {
