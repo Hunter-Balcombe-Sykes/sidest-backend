@@ -41,6 +41,7 @@ class Professional extends Model
         'timezone',
         'status',
         'onboarding_step',
+        'qr_slug',
         'phone',
         'primary_email',
         'first_name',

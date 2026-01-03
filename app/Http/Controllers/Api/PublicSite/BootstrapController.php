@@ -38,6 +38,7 @@ class BootstrapController extends Controller
                     'timezone'        => $data['timezone'] ?? null,
                     'status'          => 'active',
                     'onboarding_step' => 0,
+                    'qr_slug'         => $this->generateQrSlug($data['handle'] ?? null),
                     'phone' => $data['phone'] ?? null,
                     'primary_email'   => $data['primary_email'],
                     'first_name'      => $data['first_name'] ?? '',
@@ -74,6 +75,9 @@ class BootstrapController extends Controller
                 }
 
                 $professional->fill($fill);
+            }
+            if (!is_string($professional->qr_slug) || $professional->qr_slug === '') {
+                $professional->qr_slug = $this->generateQrSlug($professional->handle ?? null);
             }
             $professional->save();
 
@@ -222,6 +226,21 @@ class BootstrapController extends Controller
 
         $sub->markSubscribed(['source' => 'bootstrap']);
         $sub->save();
+    }
+
+    private function generateQrSlug(?string $handle): string
+    {
+        $base = is_string($handle) ? Str::slug($handle) : '';
+        if ($base === '') {
+            $base = 'pro';
+        }
+
+        do {
+            $suffix = Str::lower(Str::random(6));
+            $slug = $base . '-' . $suffix;
+        } while (Professional::query()->where('qr_slug', $slug)->exists());
+
+        return $slug;
     }
 
 }

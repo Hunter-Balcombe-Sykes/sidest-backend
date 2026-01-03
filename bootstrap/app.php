@@ -1,8 +1,18 @@
 <?php
 
+use App\Http\Middleware\Auth\EnsureCometAdmin;
+use App\Http\Middleware\Auth\EnsureCometStaff;
+use App\Http\Middleware\Auth\VerifySupabaseJwt;
+use App\Http\Middleware\Context\LoadCurrentProfessional;
+use App\Http\Middleware\Logging\LogLeadRateLimits;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -13,11 +23,11 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-        'supabase.jwt' => \App\Http\Middleware\Auth\VerifySupabaseJwt::class,
-        'current.pro'  => \App\Http\Middleware\Context\LoadCurrentProfessional::class,
-        'staff' => \App\Http\Middleware\Auth\EnsureCometStaff::class,
-        'staff.admin' => \App\Http\Middleware\Auth\EnsureCometAdmin::class,
-        'lead.log'     => \App\Http\Middleware\Logging\LogLeadRateLimits::class,
+        'supabase.jwt' => VerifySupabaseJwt::class,
+        'current.pro'  => LoadCurrentProfessional::class,
+        'staff' => EnsureCometStaff::class,
+        'staff.admin' => EnsureCometAdmin::class,
+        'lead.log'     => LogLeadRateLimits::class,
     ]);
     })
 
