@@ -1,42 +1,28 @@
 <?php
 
-namespace App\Http\Controllers\Api\Public;
+namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Api\Public\PublicEmailSubscribeRequest;
+use App\Http\Requests\Api\PublicSite\PublicEmailSubscribeRequest;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Services\PublicSiteResolver;
 
 class PublicEmailSubscriptionController extends Controller
 {
-    public function subscribe(PublicEmailSubscribeRequest $request): JsonResponse
+    public function subscribe(PublicEmailSubscribeRequest $request, PublicSiteResolver $resolver): JsonResponse
     {
         $data = $request->validated();
 
-        // Resolve site from host (same pattern as your public lead controller)
         $subdomain = $this->resolveSubdomainFromHost($request);
         if (!$subdomain) {
             return response()->json(['message' => 'Could not determine site from URL.'], 400);
         }
-        $subdomain = strtolower($subdomain);
 
-        // Only allow subscribing for published sites (reduces spam / random subscription)
-        $site = Site::query()->published()
-            ->whereRaw('lower(subdomain) = ?', [$subdomain])
-            ->first();
-
-        if (!$site) {
-            $alias = SiteSubdomainAlias::query()
-                ->whereRaw('lower(subdomain) = ?', [$subdomain])
-                ->first();
-
-            if ($alias) {
-                $site = Site::query()->published()->find($alias->site_id);
-            }
-        }
+        $site = $resolver->resolvePublishedSite($subdomain);
 
         if (!$site) {
             return response()->json(['message' => 'Site not found.'], 404);
@@ -97,24 +83,6 @@ class PublicEmailSubscriptionController extends Controller
             'subscribed' => true,
             'list_key' => $listKey,
         ]);
-    }
-
-    public function unsubscribe(Request $request, string $token): JsonResponse
-    {
-        $subscription = EmailSubscription::query()
-            ->where('unsubscribe_token', $token)
-            ->first();
-
-        if (!$subscription) {
-            return response()->json(['message' => 'Invalid or expired unsubscribe link.'], 404);
-        }
-
-        if ($subscription->status !== 'unsubscribed') {
-            $subscription->markUnsubscribed();
-            $subscription->save();
-        }
-
-        return response()->json(['ok' => true, 'unsubscribed' => true]);
     }
 
     private function resolveSubdomainFromHost(Request $request): ?string

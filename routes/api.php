@@ -1,7 +1,7 @@
 <?php
 
-use App\Http\Controllers\Api\Public\BootstrapController;
-use App\Http\Controllers\Api\Public\PublicEmailUnsubscribeController;
+use App\Http\Controllers\Api\PublicSite\BootstrapController;
+use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
 use Illuminate\Support\Facades\Route;
 
 // Ping

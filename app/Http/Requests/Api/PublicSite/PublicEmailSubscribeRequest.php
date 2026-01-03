@@ -1,8 +1,9 @@
 <?php
 
-namespace App\Http\Requests\Api\Public;
+namespace App\Http\Requests\Api\PublicSite;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class PublicEmailSubscribeRequest extends FormRequest
 {
@@ -13,10 +14,13 @@ class PublicEmailSubscribeRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        $listKey = is_string($this->list_key) ? trim($this->list_key) : null;
+        if ($listKey === '') $listKey = null;
+
         $this->merge([
             'email' => is_string($this->email) ? strtolower(trim($this->email)) : $this->email,
             'full_name' => is_string($this->full_name) ? trim($this->full_name) : $this->full_name,
-            'list_key' => is_string($this->list_key) ? trim($this->list_key) : $this->list_key,
+            'list_key' => $listKey ?? 'marketing',
         ]);
     }
 
@@ -25,8 +29,12 @@ class PublicEmailSubscribeRequest extends FormRequest
         return [
             'email' => ['required', 'email:rfc,dns'],
             'full_name' => ['nullable', 'string', 'max:200'],
-            // keep it simple for now; you can restrict allowed list_keys later via config
-            'list_key' => ['nullable', 'string', 'max:50'],
+            'list_key' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::in(config('subscriptions.public_list_keys', ['marketing'])),
+            ],
         ];
     }
 }

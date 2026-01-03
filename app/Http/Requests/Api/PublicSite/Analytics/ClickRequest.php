@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Http\Requests\Api\Public\Analytics;
+namespace App\Http\Requests\Api\PublicSite\Analytics;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class PageviewRequest extends FormRequest
+class ClickRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -25,6 +25,7 @@ class PageviewRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'block_id' => ['required', 'uuid', Rule::exists('blocks', 'id')],
             'site_id'       => ['required_without:subdomain', 'uuid', Rule::exists('sites', 'id')],
             'subdomain'     => ['required_without:site_id', 'string', 'max:63'],
             'session_id'    => ['nullable', 'uuid'],

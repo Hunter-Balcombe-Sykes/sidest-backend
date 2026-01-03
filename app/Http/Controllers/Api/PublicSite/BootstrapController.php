@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Api\Public;
+namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\BootstrapRequest;
@@ -46,6 +46,7 @@ class BootstrapController extends Controller
                     // Defaults to Main phone/email if NULL
                     'public_contact_number' => $data['phone'] ?? null,
                     'public_contact_email' => $data['primary_email'] ?? null,
+                    'handle_lc' => $data['handle_lc'],
                 ]);
                 $professional->auth_user_id = $uid;
             } else {
@@ -58,6 +59,7 @@ class BootstrapController extends Controller
                     'last_name'     => $data['last_name'] ?? $professional->last_name,
                     'country_code'  => $data['country_code'] ?? $professional->country_code,
                     'timezone'      => $data['timezone'] ?? $professional->timezone,
+                    'handle_lc' => $data['handle_lc'],
                 ];
 
                 if (array_key_exists('phone', $data)) {
@@ -196,7 +198,7 @@ class BootstrapController extends Controller
         $existing = EmailSubscription::query()
             ->whereNull('professional_id')
             ->where('list_key', $listKey)
-            ->whereRaw('lower(email) = ?', [$email])
+            ->where('email_lc', $email)
             ->first();
 
         if ($existing) {
@@ -207,6 +209,7 @@ class BootstrapController extends Controller
             'professional_id' => null,
             'list_key' => $listKey,
             'email' => $email,
+            'email_lc' => $email,
             'full_name' => null,
             'unsubscribe_token' => EmailSubscription::newUnsubscribeToken(),
         ]);

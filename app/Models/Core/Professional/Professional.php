@@ -60,6 +60,8 @@ class Professional extends Model
         'location_state',
         'location_postcode',
         'location_country',
+
+        'handle_lc',
     ];
 
     protected $casts = [

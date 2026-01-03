@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Api\Public;
+namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Controller;
 use App\Models\Core\Notifications\EmailSubscription;

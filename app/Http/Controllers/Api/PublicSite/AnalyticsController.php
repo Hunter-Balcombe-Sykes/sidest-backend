@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Http\Controllers\Api\Public;
+namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Api\Public\Analytics\ClickRequest;
-use App\Http\Requests\Api\Public\Analytics\PageviewRequest;
+use App\Http\Requests\Api\PublicSite\Analytics\ClickRequest;
+use App\Http\Requests\Api\PublicSite\Analytics\PageviewRequest;
 use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
 use App\Models\Core\Site\Block;

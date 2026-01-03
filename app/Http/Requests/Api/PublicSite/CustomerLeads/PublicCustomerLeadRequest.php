@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Requests\Api\Public\CustomerLeads;
+namespace App\Http\Requests\Api\PublicSite\CustomerLeads;
 
 use Illuminate\Foundation\Http\FormRequest;
 

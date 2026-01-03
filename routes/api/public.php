@@ -2,10 +2,10 @@
 
 use Illuminate\Support\Facades\Route;
 
-use App\Http\Controllers\Api\Public\PublicSiteController;
-use App\Http\Controllers\Api\Public\AnalyticsController;
-use App\Http\Controllers\Api\Public\PublicCustomerLeadController;
-use App\Http\Controllers\Api\Public\PublicEmailSubscriptionController;
+use App\Http\Controllers\Api\PublicSite\PublicSiteController;
+use App\Http\Controllers\Api\PublicSite\AnalyticsController;
+use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
+use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 
 $publicDomain = config('comet.public_domain');
 

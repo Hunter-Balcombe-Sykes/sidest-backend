@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Http\Controllers\Api\Public;
+namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Api\Public\PublicSiteShowRequest;
+use App\Http\Requests\Api\PublicSite\PublicSiteShowRequest;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Views\PublicSitePayload;

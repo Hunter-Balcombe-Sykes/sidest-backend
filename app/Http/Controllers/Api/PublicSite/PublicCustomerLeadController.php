@@ -1,21 +1,19 @@
 <?php
 
-namespace App\Http\Controllers\Api\Public;
+namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Api\Public\CustomerLeads\PublicCustomerLeadRequest;
+use App\Http\Requests\Api\PublicSite\CustomerLeads\PublicCustomerLeadRequest;
 use App\Models\Analytics\LeadSubmission;
-use App\Models\Core\Site\Site;
-use App\Models\Core\Site\SiteSubdomainAlias;
 use Illuminate\Http\JsonResponse;
 use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Str;
+use App\Services\PublicSiteResolver;
 use Illuminate\Http\Request;
 
 class PublicCustomerLeadController extends Controller
 {
-    public function store(PublicCustomerLeadRequest $request): JsonResponse
+    public function store(PublicCustomerLeadRequest $request, PublicSiteResolver $resolver): JsonResponse
     {
         $data = $request->validated();
         $marketingOptIn = (bool)($data['marketing_opt_in'] ?? false);
@@ -50,20 +48,7 @@ class PublicCustomerLeadController extends Controller
             return response()->json(['message' => 'Could not determine site from URL.'], 400);
         }
 
-        // Only allow leads for published sites
-        $site = Site::query()->published()
-            ->whereRaw('lower(subdomain) = ?', [$subdomain])
-            ->first();
-
-        if (!$site) {
-            $alias = SiteSubdomainAlias::query()
-                ->whereRaw('lower(subdomain) = ?', [$subdomain])
-                ->first();
-
-            if ($alias) {
-                $site = Site::query()->published()->find($alias->site_id);
-            }
-        }
+        $site = $resolver->resolvePublishedSite($subdomain);
 
         if (!$site) {
             $this->logLead($request, $subdomain, null, null, null, 'site_not_found', $startedMs);
@@ -171,7 +156,7 @@ class PublicCustomerLeadController extends Controller
             $sub = EmailSubscription::query()
                 ->where('professional_id', $professionalId)
                 ->where('list_key', $listKey)
-                ->whereRaw('lower(email) = ?', [$email])
+                ->where('email_lc', $email)
                 ->first();
 
             if (!$sub) {
@@ -179,6 +164,7 @@ class PublicCustomerLeadController extends Controller
                     'professional_id' => $professionalId,
                     'list_key' => $listKey,
                     'email' => $email,
+                    'email_lc' => $email,
                     'full_name' => $fullName,
                     'unsubscribe_token' => EmailSubscription::newUnsubscribeToken(),
                 ]);
