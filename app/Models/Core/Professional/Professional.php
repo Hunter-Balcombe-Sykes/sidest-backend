@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * @property string $id
@@ -24,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 
 class Professional extends Model
 {
-    use HasUuids;
+    use HasUuids, SoftDeletes;
 
     protected $table = 'core.professionals';
 
@@ -47,7 +48,7 @@ class Professional extends Model
         'first_name',
         'last_name',
 
-        // Public Accessable Contacts
+        // Public Accessible Contacts
         'public_contact_number',
         'public_contact_email',
 
@@ -71,6 +72,7 @@ class Professional extends Model
         'onboarding_step' => 'integer',
         'created_at'      => 'datetime',
         'updated_at'      => 'datetime',
+        'deleted_at'      => 'datetime',
     ];
 
     public function site(): HasOne

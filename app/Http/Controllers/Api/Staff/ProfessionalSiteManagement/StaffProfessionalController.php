@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateProfessionalRequest;
 use App\Models\Core\Professional\Professional;
+use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -159,6 +160,62 @@ class StaffProfessionalController extends ApiController
         return $this->success([
             'professional' => $professional->fresh(),
         ]);
+    }
+
+    /**
+     * Soft delete - Normal staff operation
+     * DELETE /api/staff/professionals/{professional}
+     */
+    public function destroy(Professional $professional): JsonResponse
+    {
+        // Soft delete (sets deleted_at)
+        if (! $professional->trashed()) {
+            $professional->delete();
+        }
+
+        return $this->success([
+            'message' => 'Professional archived successfully',
+            'archived' => true
+        ]);
+    }
+
+    public function restore(Professional $professional): JsonResponse
+    {
+        if ($professional->trashed()) {
+            $professional->restore();
+        }
+
+        return $this->success([
+            'message' => 'Professional restored successfully',
+            'professional' => $professional->fresh()
+        ]);
+    }
+
+    public function forceDestroy(Professional $professional): JsonResponse
+    {
+        // Additional admin check (customize based on your auth)
+        $staff = auth()->user(); // or however you get current staff
+
+        if ($staff->role !== 'admin') {
+            abort(403, 'Only administrators can permanently delete professionals.');
+        }
+
+        // Hard delete - PERMANENT
+        $handle = $professional->handle;
+
+        try {
+            $professional->forceDelete();
+
+            return $this->success([
+                'message' => "Professional '{$handle}' permanently deleted",
+                'permanently_deleted' => true
+            ]);
+        } catch (Exception $e) {
+            return $this->error(
+                'Cannot delete:  Professional has related data that must be removed first.',
+                409
+            );
+        }
     }
 
 }
