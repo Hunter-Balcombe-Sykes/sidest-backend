@@ -31,6 +31,7 @@ class UpdateLinkBlockRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
+            'id' => ['required', 'uuid'],
             'title' => ['sometimes','string','max:80'],
             'url' => ['sometimes','url','max:2048'],
             'icon_key' => ['nullable','string', Rule::in(config('comet.link_block_icon_keys', []))],

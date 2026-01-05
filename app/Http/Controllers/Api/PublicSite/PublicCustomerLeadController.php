@@ -2,19 +2,22 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\HashesClientData;
+use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Http\Requests\Api\PublicSite\CustomerLeads\PublicCustomerLeadRequest;
 use App\Models\Analytics\LeadSubmission;
-use Illuminate\Http\JsonResponse;
 use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Database\QueryException;
-use App\Services\PublicSiteResolver;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Concerns\HashesClientData;
+use App\Services\PublicSiteResolver;
 
-class PublicCustomerLeadController extends Controller
+class PublicCustomerLeadController extends ApiController
 {
     use HashesClientData;
+    use ResolvesSubdomainFromHost;
+
     public function store(PublicCustomerLeadRequest $request, PublicSiteResolver $resolver): JsonResponse
     {
         $data = $request->validated();
@@ -27,7 +30,7 @@ class PublicCustomerLeadController extends Controller
         $honeypot = $data['website'] ?? null;
         if (is_string($honeypot) && trim($honeypot) !== '') {
             $this->logLead($request, $subdomain, null, null, null, 'honeypot', $data['form_started_at_ms'] ?? null);
-            return response()->json(['ok' => true], 201);
+            return $this->success(['ok' => true], 201);
         }
 
         // 2) Timing check (optional field, but enforced if provided)
@@ -41,36 +44,32 @@ class PublicCustomerLeadController extends Controller
 
             if ($delta < $minMs || $delta > $maxMs) {
                 $this->logLead($request, $subdomain, null, null, null, 'too_fast', $startedMs);
-                return response()->json(['message' => 'Invalid submission.'], 422);
+                return $this->error('Invalid submission.', 422);
             }
         }
 
         if (!$subdomain) {
             $this->logLead($request, null, null, null, null, 'no_subdomain', $startedMs);
-            return response()->json(['message' => 'Could not determine site from URL.'], 400);
+            return $this->error('Could not determine site from URL.', 400);
         }
 
         $site = $resolver->resolvePublishedSite($subdomain);
 
         if (!$site) {
             $this->logLead($request, $subdomain, null, null, null, 'site_not_found', $startedMs);
-            return response()->json([
-                'message' => 'Site not found.',
-            ], 404);
+            return $this->error('Site not found.', 404);
         }
 
         if (!$site->professional_id) {
             $this->logLead($request, $subdomain, $site->id, null, null, 'site_unlinked', $startedMs);
-            return response()->json([
-                'message' => 'Site is not linked to a professional.',
-            ], 422);
+            return $this->error('Site is not linked to a professional.', 422);
         }
 
         $site->loadMissing('professional');
 
         if (!$site->professional) {
             $this->logLead($request, $subdomain, $site->id, null, null, 'site_unlinked', $startedMs);
-            return response()->json(['message' => 'Site is not linked to a professional.'], 422);
+            return $this->error('Site is not linked to a professional.', 422);
         }
 
         $pro = $site->professional;
@@ -94,27 +93,10 @@ class PublicCustomerLeadController extends Controller
         }
 
         $this->logLead($request, $subdomain, $site->id, $pro->id, $customer->id, 'created', $startedMs);
-        return response()->json([
+        return $this->success([
             'ok' => true,
             'customer_id' => $customer->id,
         ], 201);
-    }
-
-    private function resolveSubdomainFromHost(Request $request): ?string
-    {
-        $routeSubdomain = $request->route('subdomain');
-        if (is_string($routeSubdomain) && $routeSubdomain !== '') {
-            return $routeSubdomain;
-        }
-
-        $host = $request->getHost(); // e.g. josh.example.com
-        $parts = explode('.', $host);
-
-        if (count($parts) < 3) {
-            return null;
-        }
-
-        return $parts[0];
     }
 
     private function logLead(

@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Staff\StaffSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -10,7 +10,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
-class StaffAnalyticsController extends Controller
+class StaffAnalyticsController extends ApiController
 {
     /**
      * GET /api/staff/professionals/{professional}/analytics?days=30
@@ -38,24 +38,23 @@ class StaffAnalyticsController extends Controller
                 $from = Carbon::now()->subDays($days)->startOfDay();
             }
         } catch (Throwable $e) {
-            return response()->json([
-                'message' => 'Invalid date range. Use YYYY-MM-DD for from/to.',
-                'errors' => [
+            return $this->error(
+                'Invalid date range. Use YYYY-MM-DD for from/to.',
+                422,
+                [
                     'from' => $fromParam ? ['Invalid date.'] : [],
                     'to'   => $toParam ? ['Invalid date.'] : [],
-                ],
-            ], 422);
+                ]
+            );
         }
 
         if ($from->gt($to)) {
-            return response()->json([
-                'message' => 'Invalid date range: from must be before to.',
-            ], 422);
+            return $this->error('Invalid date range: from must be before to.', 422);
         }
 
         $site = $professional->site()->first();
         if (!$site) {
-            return response()->json(['message' => 'professional has no site.'], 404);
+            return $this->error('professional has no site.', 404);
         }
 
         // Totals (visits)
@@ -109,7 +108,7 @@ class StaffAnalyticsController extends Controller
 
         $ctr = $totalVisits > 0 ? round(($totalClicks / $totalVisits) * 100, 2) : 0.0;
 
-        return response()->json([
+        return $this->success([
             'range' => [
                 'from' => $from->toDateString(),
                 'to'   => $to->toDateString(),

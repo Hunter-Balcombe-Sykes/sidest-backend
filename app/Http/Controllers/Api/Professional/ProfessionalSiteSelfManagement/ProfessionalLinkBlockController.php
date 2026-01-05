@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\Site\DestroyLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\IndexLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\ReorderBlocksRequest;
@@ -12,7 +12,7 @@ use App\Models\Core\Site\Block;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-class ProfessionalLinkBlockController extends Controller
+class ProfessionalLinkBlockController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -20,7 +20,7 @@ class ProfessionalLinkBlockController extends Controller
     {
         $pro = $this->currentProfessional($request);
 
-        return response()->json([
+        return $this->success([
             'blocks' => $pro->linkBlocks()->orderBy('sort_order')->get(),
         ]);
     }
@@ -59,7 +59,7 @@ class ProfessionalLinkBlockController extends Controller
             return $block->fresh();
         });
 
-        return response()->json(['block' => $block], 201);
+        return $this->success(['block' => $block], 201);
     }
 
     public function update(UpdateLinkBlockRequest $request, Block $block)
@@ -79,7 +79,7 @@ class ProfessionalLinkBlockController extends Controller
         $block->fill($data);
         $block->save();
 
-        return response()->json(['block' => $block->fresh()]);
+        return $this->success(['block' => $block->fresh()]);
     }
 
     public function destroy(DestroyLinkBlockRequest $request, Block $block)
@@ -97,7 +97,7 @@ class ProfessionalLinkBlockController extends Controller
 
         $block->delete();
 
-        return response()->json(['deleted' => true]);
+        return $this->success(['deleted' => true]);
     }
 
     public function reorder(ReorderBlocksRequest $request)
@@ -139,6 +139,6 @@ class ProfessionalLinkBlockController extends Controller
             }
         });
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 }

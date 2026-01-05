@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers\Api\Staff\StaffSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Notifications\Notification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Jobs\SendStaffBroadcastEmailsJob;
 
-class StaffNotificationController extends Controller
+class StaffNotificationController extends ApiController
 {
     /** POST /staff/notifications */
     public function store(Request $request): JsonResponse
@@ -50,6 +50,6 @@ class StaffNotificationController extends Controller
         }
 
 
-        return response()->json(['notification' => $notification], 201);
+        return $this->success(['notification' => $notification], 201);
     }
 }

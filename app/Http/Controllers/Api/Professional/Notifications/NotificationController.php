@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional\Notifications;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Notifications\Notification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,7 +11,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use Illuminate\Support\Str;
 
-class NotificationController extends Controller
+class NotificationController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -65,7 +65,7 @@ class NotificationController extends Controller
             ->whereNull('r.dismissed_at')
             ->count();
 
-        return response()->json([
+        return $this->success([
             'unread_count' => $unreadCount,
             'has_more' => $hasMore,
             'notifications' => $rows,
@@ -99,7 +99,7 @@ class NotificationController extends Controller
 
         $this->upsertReceipt($notification->id, $pro->id, ['read_at' => now()]);
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 
     public function dismiss(Request $request, Notification $notification): JsonResponse
@@ -109,7 +109,7 @@ class NotificationController extends Controller
 
         $this->upsertReceipt($notification->id, $pro->id, ['dismissed_at' => now()]);
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 
 

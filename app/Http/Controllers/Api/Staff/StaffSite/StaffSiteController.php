@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers\Api\Staff\StaffSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Professional\Professional;
 use App\Models\Views\AllSiteData;
 use Illuminate\Http\JsonResponse;
 
-class StaffSiteController extends Controller
+class StaffSiteController extends ApiController
 {
     public function show(string $subdomain): JsonResponse
     {
@@ -16,11 +16,11 @@ class StaffSiteController extends Controller
             ->first();
 
         if (!$row) {
-            return response()->json(['message' => 'Site not found.'], 404);
+            return $this->error('Site not found.', 404);
         }
 
         // Staff can see unpublished too, so we return published flag either way
-        return response()->json([
+        return $this->success([
             'published' => (bool) $row->is_published,
 
             'site' => [
@@ -63,10 +63,10 @@ class StaffSiteController extends Controller
             ->first();
 
         if (!$row) {
-            return response()->json(['message' => 'Site not found for professional.'], 404);
+            return $this->error('Site not found for professional.', 404);
         }
 
-        return response()->json([
+        return $this->success([
             'published' => (bool) $row->is_published,
 
             'site' => [

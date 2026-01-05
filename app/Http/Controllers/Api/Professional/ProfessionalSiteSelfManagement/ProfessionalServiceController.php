@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\Services\ReorderServiceRequest;
 use App\Http\Requests\Api\Professional\Services\StoreServiceRequest;
 use App\Http\Requests\Api\Professional\Services\UpdateServiceRequest;
@@ -12,7 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-class ProfessionalServiceController extends Controller
+class ProfessionalServiceController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -34,7 +34,7 @@ class ProfessionalServiceController extends Controller
 
         $services = $query->orderBy('sort_order')->orderBy('created_at')->get();
 
-        return response()->json([
+        return $this->success([
             'services' => $services,
             'filters' => [
         'include_archived' => $includeArchived,
@@ -76,7 +76,7 @@ class ProfessionalServiceController extends Controller
 
         });
 
-        return response()->json(['service' => $service], 201);
+        return $this->success(['service' => $service], 201);
     }
 
     public function show(Request $request, Service $service): JsonResponse
@@ -85,7 +85,7 @@ class ProfessionalServiceController extends Controller
 
         abort_unless($service->professional_id === $pro->id, 404);
 
-        return response()->json(['service' => $service]);
+        return $this->success(['service' => $service]);
     }
 
     public function update(UpdateServiceRequest $request, Service $service): JsonResponse
@@ -97,7 +97,7 @@ class ProfessionalServiceController extends Controller
         $service->fill($request->validated());
         $service->save();
 
-        return response()->json(['service' => $service->fresh()]);
+        return $this->success(['service' => $service->fresh()]);
     }
 
     public function destroy(Request $request, Service $service): JsonResponse
@@ -108,7 +108,7 @@ class ProfessionalServiceController extends Controller
 
         $service->delete();
 
-        return response()->json(['deleted' => true]);
+        return $this->success(['deleted' => true]);
     }
 
     public function reorder(ReorderServiceRequest $request): JsonResponse
@@ -147,7 +147,7 @@ class ProfessionalServiceController extends Controller
             }
         });
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 
     public function restore(Request $request, Service $service): JsonResponse
@@ -159,7 +159,7 @@ class ProfessionalServiceController extends Controller
 
         // If it's not deleted, make it a no-op (nice for frontend retries)
         if (!$service->trashed()) {
-            return response()->json(['restored' => true, 'service' => $service->fresh()]);
+            return $this->success(['restored' => true, 'service' => $service->fresh()]);
         }
 
         DB::transaction(function () use ($pro, $service) {
@@ -176,7 +176,7 @@ class ProfessionalServiceController extends Controller
 
         });
 
-        return response()->json(['restored' => true, 'service' => $service->fresh()]);
+        return $this->success(['restored' => true, 'service' => $service->fresh()]);
     }
 
 }

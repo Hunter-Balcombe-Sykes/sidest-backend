@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ImageGallery\ReorderGalleryImageRequest;
@@ -11,7 +11,7 @@ use App\Models\Core\Site\SiteImage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
-class ProfessionalGalleryController extends Controller
+class ProfessionalGalleryController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -27,7 +27,7 @@ class ProfessionalGalleryController extends Controller
             ->orderBy('created_at')
             ->get();
 
-        return response()->json(['images' => $images]);
+        return $this->success(['images' => $images]);
     }
 
     public function store(StoreGalleryImageRequest $request): JsonResponse
@@ -69,7 +69,7 @@ class ProfessionalGalleryController extends Controller
 
             return $image->fresh();
         });
-        return response()->json(['image' => $image], 201);
+        return $this->success(['image' => $image], 201);
     }
 
     public function reorder(ReorderGalleryImageRequest $request): JsonResponse
@@ -106,7 +106,7 @@ class ProfessionalGalleryController extends Controller
             }
         });
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
 
     }
 
@@ -119,7 +119,7 @@ class ProfessionalGalleryController extends Controller
 
         $image->delete();
 
-        return response()->json(['deleted' => true]);
+        return $this->success(['deleted' => true]);
     }
 
 }

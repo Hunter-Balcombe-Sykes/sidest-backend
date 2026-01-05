@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateCustomerRequest;
 use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class StaffCustomerManagementController extends Controller
+class StaffCustomerManagementController extends ApiController
 {
     /**
      * GET /api/staff/professionals/{professional}/customers?q=...&per_page=...&page=...
@@ -45,7 +45,7 @@ class StaffCustomerManagementController extends Controller
 
         $page = $query->paginate($perPage)->appends($request->query());
 
-        return response()->json([
+        return $this->success([
             'customers' => $page->items(),
             'meta' => [
                 'current_page' => $page->currentPage(),
@@ -71,7 +71,7 @@ class StaffCustomerManagementController extends Controller
             abort(404);
         }
 
-        return response()->json(['customer' => $customer]);
+        return $this->success(['customer' => $customer]);
     }
 
     /**
@@ -84,7 +84,7 @@ class StaffCustomerManagementController extends Controller
         $customer->fill($request->validated());
         $customer->save();
 
-        return response()->json(['customer' => $customer->fresh()]);
+        return $this->success(['customer' => $customer->fresh()]);
     }
 
     /**
@@ -94,21 +94,21 @@ class StaffCustomerManagementController extends Controller
     {
         if (!$customer->trashed()) { $customer->delete(); }
 
-        return response()->json(['archived' => true]);
+        return $this->success(['archived' => true]);
     }
 
     public function restore(Professional $professional, Customer $customer): JsonResponse
     {
         if ($customer->trashed()) { $customer->restore(); }
 
-        return response()->json(['restored' => true, 'customer' => $customer->fresh()]);
+        return $this->success(['restored' => true, 'customer' => $customer->fresh()]);
     }
 
     public function forceDestroy(Professional $professional, Customer $customer): JsonResponse
     {
         $customer->forceDelete();
 
-        return response()->json(['deleted' => true]);
+        return $this->success(['deleted' => true]);
     }
 
 }

@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional\Uploads;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\Uploads\PrepareUploadRequest;
@@ -10,7 +10,7 @@ use App\Models\Core\Site\SiteImage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 
-class ProfessionalUploadController extends Controller
+class ProfessionalUploadController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -41,9 +41,7 @@ class ProfessionalUploadController extends Controller
                 ->count();
 
             if ($activeCount >= 6) {
-                return response()->json([
-                    'message' => 'Gallery limit reached (max 6 images).',
-                ], 422);
+                return $this->error('Gallery limit reached (max 6 images).', 422);
             }
         }
 
@@ -54,7 +52,7 @@ class ProfessionalUploadController extends Controller
             'gallery'  => ["sites/{$site->id}/gallery/" . Str::uuid() . ".{$ext}", false],
         };
 
-        return response()->json([
+        return $this->success([
             'bucket' => $bucket,
             'path' => $path,
             'upsert' => $upsert,

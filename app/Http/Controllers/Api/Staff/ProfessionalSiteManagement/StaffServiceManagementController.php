@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Services\StaffReorderServiceRequest;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Services\StaffStoreServiceRequest;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Services\StaffUpdateServiceRequest;
@@ -12,7 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
-class StaffServiceManagementController extends Controller
+class StaffServiceManagementController extends ApiController
 {
     public function index(Request $request, Professional $professional): JsonResponse
     {
@@ -33,7 +33,7 @@ class StaffServiceManagementController extends Controller
             ->orderBy('created_at')
             ->get();
 
-        return response()->json([
+        return $this->success([
             'services' => $services,
             'filters' => [
                 'include_archived' => $includeArchived,
@@ -73,7 +73,7 @@ class StaffServiceManagementController extends Controller
             return $service->fresh();
         });
 
-        return response()->json(['service' => $service], 201);
+        return $this->success(['service' => $service], 201);
     }
 
     public function show(Request $request, Professional $professional, Service $service): JsonResponse
@@ -82,7 +82,7 @@ class StaffServiceManagementController extends Controller
 
         if (!$includeArchived && $service->trashed()) { abort(404); }
 
-        return response()->json(['service' => $service]);
+        return $this->success(['service' => $service]);
     }
 
     public function update(StaffUpdateServiceRequest $request, Professional $professional, Service $service): JsonResponse
@@ -92,7 +92,7 @@ class StaffServiceManagementController extends Controller
         $service->fill($request->validated());
         $service->save();
 
-        return response()->json(['service' => $service->fresh()]);
+        return $this->success(['service' => $service->fresh()]);
     }
 
     public function destroy(Professional $professional, Service $service): JsonResponse
@@ -100,7 +100,7 @@ class StaffServiceManagementController extends Controller
         if ($service->trashed()) { abort(404); }
         $service->delete();
 
-        return response()->json(['deleted' => true]);
+        return $this->success(['deleted' => true]);
     }
 
     public function reorder(StaffReorderServiceRequest $request, Professional $professional): JsonResponse
@@ -136,7 +136,7 @@ class StaffServiceManagementController extends Controller
             }
         });
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 
 
@@ -145,13 +145,13 @@ class StaffServiceManagementController extends Controller
         // hard delete
         $service->forceDelete();
 
-        return response()->json(['deleted' => true, 'hard' => true]);
+        return $this->success(['deleted' => true, 'hard' => true]);
     }
 
     public function restore(Professional $professional, Service $service): JsonResponse
     {
         if ($service->trashed()) { $service->restore(); }
 
-        return response()->json(['restored' => true, 'service' => $service->fresh()]);
+        return $this->success(['restored' => true, 'service' => $service->fresh()]);
     }
 }

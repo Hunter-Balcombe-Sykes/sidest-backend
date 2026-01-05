@@ -2,30 +2,32 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\HashesClientData;
+use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Http\Requests\Api\PublicSite\PublicEmailSubscribeRequest;
 use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use App\Services\PublicSiteResolver;
-use App\Http\Controllers\Concerns\HashesClientData;
 
-class PublicEmailSubscriptionController extends Controller
+class PublicEmailSubscriptionController extends ApiController
 {
     use HashesClientData;
+    use ResolvesSubdomainFromHost;
+
     public function subscribe(PublicEmailSubscribeRequest $request, PublicSiteResolver $resolver): JsonResponse
     {
         $data = $request->validated();
 
         $subdomain = $this->resolveSubdomainFromHost($request);
         if (!$subdomain) {
-            return response()->json(['message' => 'Could not determine site from URL.'], 400);
+            return $this->error('Could not determine site from URL.', 400);
         }
 
         $site = $resolver->resolvePublishedSite($subdomain);
 
         if (!$site) {
-            return response()->json(['message' => 'Site not found.'], 404);
+            return $this->error('Site not found.', 404);
         }
 
         $listKey = $data['list_key'] ?? 'marketing';
@@ -78,28 +80,10 @@ class PublicEmailSubscriptionController extends Controller
         );
 
 
-        return response()->json([
+        return $this->success([
             'ok' => true,
             'subscribed' => true,
             'list_key' => $listKey,
         ]);
-    }
-
-    private function resolveSubdomainFromHost(Request $request): ?string
-    {
-        $host = $request->getHost(); // e.g. barber name.ours.com
-        $publicDomain = config('comet.public_domain');
-
-        if (!$publicDomain || !str_ends_with($host, $publicDomain)) {
-            return null;
-        }
-
-        $suffix = '.' . ltrim($publicDomain, '.');
-        if (!str_ends_with($host, $suffix)) {
-            return null;
-        }
-
-        $sub = substr($host, 0, -strlen($suffix));
-        return $sub !== '' ? $sub : null;
     }
 }

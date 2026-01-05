@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\PublicSite\PublicSiteShowRequest;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Views\PublicSitePayload;
 use Symfony\Component\HttpFoundation\Response;
 
-class PublicSiteController extends Controller
+class PublicSiteController extends ApiController
 {
     public function show(PublicSiteShowRequest $request): Response
     {
@@ -36,13 +36,13 @@ class PublicSiteController extends Controller
                 }
             }
 
-            return response()->json(['message' => 'Site not found.'], 404);
+            return $this->error('Site not found.', 404);
         }
 
         $payload = $row->payload ?? [];
 
         // Return the consistent JSON shape your mini-site expects
-        return response()->json([
+        return $this->success([
             'published' => true,
             'site' => $payload['site'] ?? null,
             'professional' => $payload['professional'] ?? null,

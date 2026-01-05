@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class PublicEmailUnsubscribeController extends Controller
+class PublicEmailUnsubscribeController extends ApiController
 {
     public function unsubscribe(Request $request, string $token): JsonResponse
     {
@@ -16,7 +16,7 @@ class PublicEmailUnsubscribeController extends Controller
             ->first();
 
         if (!$sub) {
-            return response()->json(['message' => 'Invalid or expired unsubscribe link.'], 404);
+            return $this->error('Invalid or expired unsubscribe link.', 404);
         }
 
         if ($sub->status !== 'unsubscribed') {
@@ -24,6 +24,6 @@ class PublicEmailUnsubscribeController extends Controller
             $sub->save();
         }
 
-        return response()->json(['ok' => true, 'unsubscribed' => true]);
+        return $this->success(['ok' => true, 'unsubscribed' => true]);
     }
 }

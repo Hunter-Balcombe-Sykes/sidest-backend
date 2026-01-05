@@ -3,13 +3,13 @@
 namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 
 use App\Actions\Site\UpdateSiteAction;
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Site\Theme;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
-class ProfessionalThemeController extends Controller
+class ProfessionalThemeController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -20,7 +20,7 @@ class ProfessionalThemeController extends Controller
             ->orderBy('name')
             ->get(['id', 'key', 'name', 'description', 'config', 'is_default']);
 
-        return response()->json(['themes' => $themes]);
+        return $this->success(['themes' => $themes]);
     }
 
     public function select(Request $request, Theme $theme, UpdateSiteAction $action)
@@ -31,6 +31,6 @@ class ProfessionalThemeController extends Controller
             'theme_id' => $theme->id,
         ]);
 
-        return response()->json(['site' => $site]);
+        return $this->success(['site' => $site]);
     }
 }

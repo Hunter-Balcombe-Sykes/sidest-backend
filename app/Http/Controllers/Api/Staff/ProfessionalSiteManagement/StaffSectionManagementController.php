@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\Site\ReorderBlocksRequest;
 use App\Http\Requests\Api\Professional\Site\UpsertSectionBlockRequest;
 use App\Models\Core\Professional\Professional;
@@ -12,7 +12,7 @@ use App\Models\Core\Site\Block;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
-class StaffSectionManagementController extends Controller
+class StaffSectionManagementController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -25,7 +25,7 @@ class StaffSectionManagementController extends Controller
             ->orderBy('sort_order')
             ->get();
 
-        return response()->json([
+        return $this->success([
             'professional_id' => $professional->id,
             'sections' => $sections,
         ]);
@@ -86,7 +86,7 @@ class StaffSectionManagementController extends Controller
             $professional->save();
         }
 
-        return response()->json([
+        return $this->success([
             'section' => $block->fresh()],
             $block->wasRecentlyCreated ? 201 : 200);
 
@@ -127,7 +127,7 @@ class StaffSectionManagementController extends Controller
             }
         });
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 
 
@@ -135,7 +135,7 @@ class StaffSectionManagementController extends Controller
     {
         $site = $professional->site;
         if (!$site) {
-            return response()->json(['message' => 'Professional has no site.'], 422);
+            return $this->error('Professional has no site.', 422);
         }
 
         $block = Block::query()
@@ -146,13 +146,13 @@ class StaffSectionManagementController extends Controller
             ->first();
 
         if (!$block) {
-            return response()->json(['ok' => true]);
+            return $this->success(['ok' => true]);
         }
 
         $block->is_active = false;
         $block->save();
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 
 }

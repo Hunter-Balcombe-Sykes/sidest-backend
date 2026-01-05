@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers\Api\Professional\Notifications;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
-class ProfessionalEmailSubscriptionController extends Controller
+class ProfessionalEmailSubscriptionController extends ApiController
 {
     use ResolveCurrentProfessional;
 
@@ -51,7 +51,7 @@ class ProfessionalEmailSubscriptionController extends Controller
 
         $page = $query->paginate($perPage)->appends($request->query());
 
-        return response()->json([
+        return $this->success([
             'subscriptions' => $page->items(),
             'meta' => [
                 'current_page' => $page->currentPage(),

@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\Site\ReorderBlocksRequest;
 use App\Http\Requests\Api\Professional\Site\UpsertSectionBlockRequest;
 use App\Models\Core\Site\Block;
@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
-class ProfessionalSectionBlockController extends Controller
+class ProfessionalSectionBlockController extends ApiController
 {
 
     use ResolveCurrentProfessional;
@@ -20,7 +20,7 @@ class ProfessionalSectionBlockController extends Controller
     {
         $pro = $this->currentProfessional($request);
 
-        return response()->json([
+        return $this->success([
             'sections' => $pro->sectionBlocks()->get(),
         ]);
     }
@@ -83,7 +83,7 @@ class ProfessionalSectionBlockController extends Controller
         }
 
 
-        return response()->json([
+        return $this->success([
             'section' => $block->fresh(),
         ], $block->wasRecentlyCreated ? 201 : 200);
     }
@@ -125,7 +125,7 @@ class ProfessionalSectionBlockController extends Controller
             }
         });
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 
 
@@ -144,12 +144,12 @@ class ProfessionalSectionBlockController extends Controller
 
         if (!$block) {
             // idempotent delete (nice for UI)
-            return response()->json(['ok' => true]);
+            return $this->success(['ok' => true]);
         }
 
         $block->is_active = false;
         $block->save();
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 }

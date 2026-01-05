@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\Customer\StoreCustomerRequest;
 use App\Http\Requests\Api\Professional\Customer\UpdateCustomerRequest;
 use App\Models\Core\Professional\Customer;
@@ -11,7 +11,7 @@ use Illuminate\Http\Request;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
-class ProfessionalCustomerController extends Controller
+class ProfessionalCustomerController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -51,7 +51,7 @@ class ProfessionalCustomerController extends Controller
 
         $paginator = $query->paginate($perPage)->appends($request->query());
 
-        return response()->json([
+        return $this->success([
             'customers' => $paginator->items(),
             'pagination' => [
                 'current_page' => $paginator->currentPage(),
@@ -77,7 +77,7 @@ class ProfessionalCustomerController extends Controller
 
         $customer = $pro->customers()->create($data);
 
-        return response()->json(['customer' => $customer], 201);
+        return $this->success(['customer' => $customer], 201);
 
     }
 
@@ -91,7 +91,7 @@ class ProfessionalCustomerController extends Controller
             abort(404);
         }
 
-        return response()->json(['customer' => $customer]);
+        return $this->success(['customer' => $customer]);
     }
 
     public function update(UpdateCustomerRequest $request, Customer $customer)
@@ -104,7 +104,7 @@ class ProfessionalCustomerController extends Controller
         $customer->fill($request->validated());
         $customer->save();
 
-        return response()->json(['customer' => $customer->fresh()]);
+        return $this->success(['customer' => $customer->fresh()]);
     }
 
     // Archive Soft Delete
@@ -117,7 +117,7 @@ class ProfessionalCustomerController extends Controller
             $customer->delete(); // soft delete (archive)
         }
 
-        return response()->json(['archived' => true]);
+        return $this->success(['archived' => true]);
     }
 
 
@@ -131,7 +131,7 @@ class ProfessionalCustomerController extends Controller
             $customer->restore();
         }
 
-        return response()->json(['restored' => true, 'customer' => $customer->fresh()]);
+        return $this->success(['restored' => true, 'customer' => $customer->fresh()]);
     }
 
 }

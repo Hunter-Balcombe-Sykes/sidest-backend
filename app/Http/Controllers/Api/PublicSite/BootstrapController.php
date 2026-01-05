@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\BootstrapRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
@@ -14,13 +14,13 @@ use App\Models\Core\Notifications\EmailSubscription;
 
 
 
-class BootstrapController extends Controller
+class BootstrapController extends ApiController
 {
     public function bootstrap(BootstrapRequest $request)
     {
         $uid = $request->attributes->get('supabase_uid');
         if (!is_string($uid) || $uid === '') {
-            return response()->json(['message' => 'Unauthenticated'], 401);
+            return $this->error('Unauthenticated', 401);
         }
 
         $data = $request->validated();
@@ -99,7 +99,7 @@ class BootstrapController extends Controller
             ];
         });
 
-        return response()->json($result);
+        return $this->success($result);
     }
 
     private function createSiteWithRetry(string $professionalId, string $base): Site

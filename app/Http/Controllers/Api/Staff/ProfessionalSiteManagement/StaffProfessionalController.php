@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateProfessionalRequest;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class StaffProfessionalController extends Controller
+class StaffProfessionalController extends ApiController
 {
     /**
      * GET /api/staff/professionals?q=...&status=...&per_page=...
@@ -74,7 +74,7 @@ class StaffProfessionalController extends Controller
             ];
         });
 
-        return response()->json([
+        return $this->success([
             'professionals' => $professionals,
             'meta' => [
                 'current_page' => $page->currentPage(),
@@ -92,7 +92,7 @@ class StaffProfessionalController extends Controller
     {
         $professional->load(['site.theme', 'services', 'blocks']);
 
-        return response()->json([
+        return $this->success([
             'professional' => [
                 'id'            => $professional->id,
                 'auth_user_id'  => $professional->auth_user_id,
@@ -147,7 +147,7 @@ class StaffProfessionalController extends Controller
         $professional->status = $data['status'];
         $professional->save();
 
-        return response()->json([
+        return $this->success([
             'professional' => $professional->fresh(),
         ]);
     }
@@ -157,7 +157,7 @@ class StaffProfessionalController extends Controller
         $professional->fill($request->validated());
         $professional->save();
 
-        return response()->json([
+        return $this->success([
             'professional' => $professional->fresh(),
         ]);
     }

@@ -39,63 +39,63 @@ class UpdateSiteAction
         unset($data['force_publish']);
 
         return DB::transaction(function () use ($professional, $site, $data, $allowForcePublish, $forcePublish, $allowSubdomainOverride): Site {
-
             if (array_key_exists('subdomain', $data)) {
                 $incoming = strtolower($data['subdomain']);
                 $current = strtolower((string) $site->subdomain);
 
-            if ($incoming === $current) {
-                unset($data['subdomain']);
-            } else {
-                if (!$allowSubdomainOverride && $site->subdomain_changed_at) {
-                    $nextAllowed = $site->subdomain_changed_at->copy()->addDays(30);
+                if ($incoming === $current) {
+                    unset($data['subdomain']);
+                } else {
+                    if (!$allowSubdomainOverride && $site->subdomain_changed_at) {
+                        $nextAllowed = $site->subdomain_changed_at->copy()->addDays(30);
 
-                    if (Carbon::now()->lt($nextAllowed)) {
-                        throw ValidationException::withMessages([
-                            'subdomain' => ['You can change your subdomain again on ' . $nextAllowed->toDateString() . '.'],
-                        ]);
-                    }
-                }
-
-                $conflictInSites = DB::table('core.sites')
-                    ->whereRaw('lower(subdomain) = ?', [$incoming])
-                    ->where('id', '!=', $site->id)
-                    ->exists();
-
-                if ($conflictInSites) {
-                    throw ValidationException::withMessages([
-                        'subdomain' => ['This subdomain is already taken.'],
-                    ]);
-                }
-
-                $conflictInAliases = DB::table('core.site_subdomain_aliases')
-                    ->whereRaw('lower(subdomain) = ?', [$incoming])
-                    ->exists();
-
-                if ($conflictInAliases) {
-                    throw ValidationException::withMessages([
-                        'subdomain' => ['This subdomain is already taken.'],
-                    ]);
-                }
-
-                if (!empty($site->subdomain)) {
-                    try {
-                        SiteSubdomainAlias::query()->create([
-                            'site_id'   => $site->id,
-                            'subdomain' => $site->subdomain,
-                        ]);
-                    } catch (QueryException $e) {
-                        if ($e->getCode() !== '23505') {
-                            throw $e;
+                        if (Carbon::now()->lt($nextAllowed)) {
+                            throw ValidationException::withMessages([
+                                'subdomain' => ['You can change your subdomain again on ' . $nextAllowed->toDateString() . '.'],
+                            ]);
                         }
-                        // Ignore duplicate alias writes; uniqueness is enforced in the DB.
                     }
-                }
 
-                $data['subdomain'] = $incoming;
-                $site->subdomain_changed_at = now();
+                    $conflictInSites = DB::table('core.sites')
+                        ->whereRaw('lower(subdomain) = ?', [$incoming])
+                        ->where('id', '!=', $site->id)
+                        ->exists();
+
+                    if ($conflictInSites) {
+                        throw ValidationException::withMessages([
+                            'subdomain' => ['This subdomain is already taken.'],
+                        ]);
+                    }
+
+                    $conflictInAliases = DB::table('core.site_subdomain_aliases')
+                        ->whereRaw('lower(subdomain) = ?', [$incoming])
+                        ->exists();
+
+                    if ($conflictInAliases) {
+                        throw ValidationException::withMessages([
+                            'subdomain' => ['This subdomain is already taken.'],
+                        ]);
+                    }
+
+                    if (!empty($site->subdomain)) {
+                        try {
+                            SiteSubdomainAlias::query()->create([
+                                'site_id'   => $site->id,
+                                'subdomain' => $site->subdomain,
+                                'created_at' => now(),
+                            ]);
+                        } catch (QueryException $e) {
+                            if ($e->getCode() !== '23505') {
+                                throw $e;
+                            }
+                            // Ignore duplicate alias writes; uniqueness is enforced in the DB.
+                        }
+                    }
+
+                    $data['subdomain'] = $incoming;
+                    $site->subdomain_changed_at = now();
+                }
             }
-        }
 
         // Allow sending theme_id=null to reset to default (same behavior as current pro-controller)
         if (array_key_exists('theme_id', $data) && $data['theme_id'] === null) {
@@ -120,7 +120,7 @@ class UpdateSiteAction
         }
 
         // If publishing, enforce completeness unless staff force_publish is allowed + true
-            if (($data['is_published'] ?? null) === true) {
+        if (($data['is_published'] ?? null) === true) {
             $canBypass = $allowForcePublish && $forcePublish;
 
             if (!$canBypass) {
@@ -155,20 +155,19 @@ class UpdateSiteAction
         // Future: staff-only overrides could go here (options['allow_force_publish'] etc.)
 
         $site->fill($data);
-            try {
-                $site->save();
-            } catch (QueryException $e) {
-                // If you have a unique index on subdomain, this is your final safety net.
-                if ($e->getCode() === '23505') {
-                    throw ValidationException::withMessages([
-                        'subdomain' => ['This subdomain is already taken.'],
-                    ]);
-                }
-                throw $e;
+        try {
+            $site->save();
+        } catch (QueryException $e) {
+            // If you have a unique index on subdomain, this is your final safety net.
+            if ($e->getCode() === '23505') {
+                throw ValidationException::withMessages([
+                    'subdomain' => ['This subdomain is already taken.'],
+                ]);
             }
+            throw $e;
+        }
 
         return $site->fresh();
-
         });
     }
 }

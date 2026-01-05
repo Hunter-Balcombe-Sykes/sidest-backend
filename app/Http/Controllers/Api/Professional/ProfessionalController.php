@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers\Api\Professional;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-class ProfessionalController extends Controller
+class ProfessionalController extends ApiController
 {
 
     use ResolveCurrentProfessional;
@@ -22,7 +22,7 @@ class ProfessionalController extends Controller
 
         $customersCount = $pro->customers()->count();
 
-        return response()->json([
+        return $this->success([
             'uid' => $uid,
             'professional' => $pro,
             'site' => $pro->site,
@@ -39,7 +39,7 @@ class ProfessionalController extends Controller
         $professional->save();
 
         // return the updated pro (fresh)
-        return response()->json([
+        return $this->success([
             'professional' => $professional->fresh(),
         ]);
     }

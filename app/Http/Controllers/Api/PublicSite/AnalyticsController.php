@@ -2,34 +2,37 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\DetectsClientInfo;
+use App\Http\Controllers\Concerns\HashesClientData;
+use App\Http\Controllers\Concerns\ResolvesSiteFromRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\ClickRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\PageviewRequest;
 use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
 use App\Models\Core\Site\Block;
-use App\Models\Core\Site\Site;
-use App\Models\Core\Site\SiteSubdomainAlias;
 use Illuminate\Http\JsonResponse;
-use App\Http\Controllers\Concerns\HashesClientData;
 
-class AnalyticsController extends Controller
+class AnalyticsController extends ApiController
 {
+    use DetectsClientInfo;
     use HashesClientData;
+    use ResolvesSiteFromRequest;
+
     public function pageview(PageviewRequest $request): JsonResponse
     {
         $data = $request->validated();
 
         // Resolve site by ID or subdomain
-        $site = $this->resolveSite($data);
+        $site = $this->resolveSiteFromData($data);
 
         if (!$site) {
-            return response()->json(['message' => 'Site not found'], 404);
+            return $this->error('Site not found', 404);
         }
 
         // Check if site is published
         if (!$site->is_published) {
-            return response()->json(['message' => 'Site not published'], 403);
+            return $this->error('Site not published', 403);
         }
 
 
@@ -51,7 +54,7 @@ class AnalyticsController extends Controller
         $visit->site_id = $site->id;
         $visit->save();
 
-        return response()->json([
+        return $this->success([
             'message' => 'Pageview recorded',
             'visit_id' => $visit->id,
         ], 201);
@@ -62,15 +65,15 @@ class AnalyticsController extends Controller
         $data = $request->validated();
 
         // Resolve site by ID or subdomain
-        $site = $this->resolveSite($data);
+        $site = $this->resolveSiteFromData($data);
 
         if (!$site) {
-            return response()->json(['message' => 'Site not found'], 404);
+            return $this->error('Site not found', 404);
         }
 
         // Check if site is published
         if (!$site->is_published) {
-            return response()->json(['message' => 'Site not published'], 403);
+            return $this->error('Site not published', 403);
         }
 
         // Verify link block exists and belongs to this site
@@ -81,12 +84,12 @@ class AnalyticsController extends Controller
             ->first();
 
         if (!$linkBlock) {
-            return response()->json(['message' => 'Link block not found or does not belong to this site'], 404);
+            return $this->error('Link block not found or does not belong to this site', 404);
         }
 
         // Check if link block is active
         if (!$linkBlock->is_active) {
-            return response()->json(['message' => 'Link block is not active'], 403);
+            return $this->error('Link block is not active', 403);
         }
 
         // Create click record
@@ -106,76 +109,9 @@ class AnalyticsController extends Controller
         $click->block_id = $linkBlock->id;
         $click->save();
 
-        return response()->json([
+        return $this->success([
             'message' => 'Click recorded',
             'click_id' => $click->id,
         ], 201);
-    }
-
-    /**
-     * Resolve site from request data (by ID or subdomain)
-     */
-    private function resolveSite(array $data): ?Site
-    {
-        if (!empty($data['site_id'])) {
-            return Site::find($data['site_id']);
-        }
-
-        if (!empty($data['subdomain'])) {
-            $site = Site::whereRaw('lower(subdomain) = lower(?)', [$data['subdomain']])->first();
-            if ($site) {
-                return $site;
-            }
-
-            $alias = SiteSubdomainAlias::whereRaw('lower(subdomain) = lower(?)', [$data['subdomain']])->first();
-            if ($alias) {
-                return Site::find($alias->site_id);
-            }
-        }
-
-        return null;
-    }
-
-    private function detectCountryCode(\Illuminate\Http\Request $request): ?string
-    {
-        // Pick the header your edge/CDN provides (Cloudflare / CloudFront / Vercel etc.)
-        $code =
-            $request->header('CF-IPCountry') // Cloudflare
-            ?? $request->header('CloudFront-Viewer-Country') // AWS CloudFront
-            ?? $request->header('X-Vercel-IP-Country'); // Vercel
-
-        if (!is_string($code)) return null;
-
-        $code = strtoupper(trim($code));
-        if (!preg_match('/^[A-Z]{2}$/', $code)) return null;
-
-        return $code;
-    }
-
-    private function detectDeviceType(?string $ua): ?string
-    {
-        if (!$ua) return null;
-        $u = strtolower($ua);
-
-        // bots (optional)
-        if (str_contains($u, 'bot') || str_contains($u, 'spider') || str_contains($u, 'crawler')) {
-            return 'bot';
-        }
-
-        // tablet
-        if (str_contains($u, 'ipad') || str_contains($u, 'tablet')) {
-            return 'tablet';
-        }
-
-        // mobile
-        if (
-            str_contains($u, 'mobi') ||
-            str_contains($u, 'iphone') ||
-            str_contains($u, 'android')
-        ) {
-            return 'mobile';
-        }
-
-        return 'desktop';
     }
 }

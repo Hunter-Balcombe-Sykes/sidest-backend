@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Links\StaffReorderLinkRequest;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Links\StaffStoreLinkRequest;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Links\StaffUpdateLinkRequest;
@@ -12,12 +12,12 @@ use App\Models\Core\Site\Block;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
-class StaffLinkBlockManagementController extends Controller
+class StaffLinkBlockManagementController extends ApiController
 {
     use ResolveCurrentSite;
     public function index(Professional $professional): JsonResponse
     {
-        return response()->json([
+        return $this->success([
             'blocks' => $professional->linkBlocks()->orderBy('sort_order')->get(),
         ]);
     }
@@ -55,7 +55,7 @@ class StaffLinkBlockManagementController extends Controller
             return $block->fresh();
         });
 
-        return response()->json(['block' => $block], 201);
+        return $this->success(['block' => $block], 201);
     }
 
     public function update(StaffUpdateLinkRequest $request, Professional $professional, Block $block): JsonResponse
@@ -71,7 +71,7 @@ class StaffLinkBlockManagementController extends Controller
         $block->fill($request->validated());
         $block->save();
 
-        return response()->json(['block' => $block->fresh()]);
+        return $this->success(['block' => $block->fresh()]);
     }
 
     public function destroy(Professional $professional, Block $block): JsonResponse
@@ -85,7 +85,7 @@ class StaffLinkBlockManagementController extends Controller
 
         $block->delete();
 
-        return response()->json(['deleted' => true]);
+        return $this->success(['deleted' => true]);
     }
 
     public function reorder(StaffReorderLinkRequest $request, Professional $professional): JsonResponse
@@ -125,7 +125,7 @@ class StaffLinkBlockManagementController extends Controller
             }
         });
 
-        return response()->json(['ok' => true]);
+        return $this->success(['ok' => true]);
     }
 
 }

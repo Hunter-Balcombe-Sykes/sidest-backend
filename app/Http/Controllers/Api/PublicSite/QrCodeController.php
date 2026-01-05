@@ -2,15 +2,18 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\BuildsQrCodeUrls;
 use App\Models\Core\Professional\Professional;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\SvgWriter;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-class QrCodeController extends Controller
+class QrCodeController extends ApiController
 {
+    use BuildsQrCodeUrls;
+
     public function redirect(string $qr_slug, Request $request): Response
     {
         $professional = Professional::query()
@@ -62,25 +65,5 @@ class QrCodeController extends Controller
             'Content-Type' => $result->getMimeType(),
             'Cache-Control' => 'public, max-age=31536000, immutable',
         ]);
-    }
-
-    private function qrUrl(string $qrSlug, Request $request): string
-    {
-        $publicDomain = (string) config('comet.public_domain', '');
-        $scheme = $this->baseScheme($request);
-
-        $host = $publicDomain !== ''
-            ? $publicDomain
-            : (parse_url((string) config('app.url', ''), PHP_URL_HOST) ?: $request->getHost());
-
-        return $scheme . '://' . $host . '/p/' . $qrSlug;
-    }
-
-    private function baseScheme(Request $request): string
-    {
-        $configured = (string) config('app.url', '');
-        $scheme = parse_url($configured, PHP_URL_SCHEME);
-
-        return is_string($scheme) && $scheme !== '' ? $scheme : $request->getScheme();
     }
 }
