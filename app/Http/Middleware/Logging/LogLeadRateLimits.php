@@ -3,11 +3,13 @@
 namespace App\Http\Middleware\Logging;
 
 use App\Models\Analytics\LeadSubmission;
+use App\Http\Controllers\Concerns\HashesClientData;
 use Closure;
 use Illuminate\Http\Request;
 
 class LogLeadRateLimits
 {
+    use HashesClientData;
     public function handle(Request $request, Closure $next)
     {
         $response = $next($request);
@@ -27,11 +29,5 @@ class LogLeadRateLimits
         }
 
         return $response;
-    }
-
-    private function hashIp(?string $ip): ?string
-    {
-        if (!$ip) return null;
-        return hash('sha256', $ip . config('app.key'));
     }
 }

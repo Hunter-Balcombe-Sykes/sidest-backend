@@ -10,9 +10,11 @@ use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Database\QueryException;
 use App\Services\PublicSiteResolver;
 use Illuminate\Http\Request;
+use App\Http\Controllers\Concerns\HashesClientData;
 
 class PublicCustomerLeadController extends Controller
 {
+    use HashesClientData;
     public function store(PublicCustomerLeadRequest $request, PublicSiteResolver $resolver): JsonResponse
     {
         $data = $request->validated();
@@ -137,12 +139,6 @@ class PublicCustomerLeadController extends Controller
             'outcome' => $outcome,
             'form_started_at_ms' => $formStartedAtMs,
         ]);
-    }
-
-    private function hashIp(?string $ip): ?string
-    {
-        if (!$ip) return null;
-        return hash('sha256', $ip . config('app.key'));
     }
 
     private function upsertMarketingSubscription(string $professionalId, string $email, ?string $fullName, Request $request): void

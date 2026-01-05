@@ -5,14 +5,14 @@ namespace App\Http\Controllers\Api\PublicSite;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\PublicSite\PublicEmailSubscribeRequest;
 use App\Models\Core\Notifications\EmailSubscription;
-use App\Models\Core\Site\Site;
-use App\Models\Core\Site\SiteSubdomainAlias;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Services\PublicSiteResolver;
+use App\Http\Controllers\Concerns\HashesClientData;
 
 class PublicEmailSubscriptionController extends Controller
 {
+    use HashesClientData;
     public function subscribe(PublicEmailSubscribeRequest $request, PublicSiteResolver $resolver): JsonResponse
     {
         $data = $request->validated();
@@ -101,12 +101,5 @@ class PublicEmailSubscriptionController extends Controller
 
         $sub = substr($host, 0, -strlen($suffix));
         return $sub !== '' ? $sub : null;
-    }
-
-    private function hashIp(?string $ip): ?string
-    {
-        if (!$ip) return null;
-        // Avoid storing raw IP; HMAC with an app-key
-        return hash_hmac('sha256', $ip, config('app.key'));
     }
 }

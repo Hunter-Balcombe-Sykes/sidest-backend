@@ -11,9 +11,11 @@ use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use Illuminate\Http\JsonResponse;
+use App\Http\Controllers\Concerns\HashesClientData;
 
 class AnalyticsController extends Controller
 {
+    use HashesClientData;
     public function pageview(PageviewRequest $request): JsonResponse
     {
         $data = $request->validated();
@@ -132,18 +134,6 @@ class AnalyticsController extends Controller
         }
 
         return null;
-    }
-
-    /**
-     * Hash IP address for privacy compliance (GDPR)
-     */
-    private function hashIp(?string $ip): ?string
-    {
-        if (!$ip) {
-            return null;
-        }
-
-        return hash('sha256', $ip . config('app.key'));
     }
 
     private function detectCountryCode(\Illuminate\Http\Request $request): ?string
