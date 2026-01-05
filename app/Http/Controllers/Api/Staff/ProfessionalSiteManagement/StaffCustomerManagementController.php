@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\HandlesSearchQueries;
+use App\Http\Controllers\Concerns\NormalizesPerPage;
+use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateCustomerRequest;
 use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
@@ -11,14 +14,18 @@ use Illuminate\Http\Request;
 
 class StaffCustomerManagementController extends ApiController
 {
+    use HandlesSearchQueries;
+    use NormalizesPerPage;
+    use ReturnsPaginatedResponse;
+
     /**
      * GET /api/staff/professionals/{professional}/customers?q=...&per_page=...&page=...
      */
     public function index(Request $request, Professional $professional): JsonResponse
     {
-        $q = trim((string) $request->query('q', $request->query('search', '')));
-        $perPage = (int) $request->query('per_page', 25);
-        $perPage = max(1, min(100, $perPage));
+        $perPage = $this->normalizePerPage($request, 25, 100);
+        $searchLike = $this->prepareSearchLike($request, 'q')
+            ?? $this->prepareSearchLike($request, 'search');
 
         $includeArchived = $request->boolean('include_archived');
         $onlyArchived    = $request->boolean('only_archived');
@@ -33,31 +40,22 @@ class StaffCustomerManagementController extends ApiController
             $query->withTrashed();
         }
 
-        if ($q !== '') {
-            $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $q) . '%';
-
-            $query->where(function ($qq) use ($like) {
-                $qq->where('full_name', 'ilike', $like)
-                    ->orWhere('email', 'ilike', $like)
-                    ->orWhere('phone', 'ilike', $like);
+        if ($searchLike) {
+            $query->where(function ($qq) use ($searchLike) {
+                $qq->where('full_name', 'ilike', $searchLike)
+                    ->orWhere('email', 'ilike', $searchLike)
+                    ->orWhere('phone', 'ilike', $searchLike);
             });
         }
 
         $page = $query->paginate($perPage)->appends($request->query());
 
-        return $this->success([
-            'customers' => $page->items(),
-            'meta' => [
-                'current_page' => $page->currentPage(),
-                'per_page'     => $page->perPage(),
-                'total'        => $page->total(),
-                'last_page'    => $page->lastPage(),
-            ],
+        return $this->success($this->paginatedResponse($page, 'customers', [
             'filters' => [
                 'include_archived' => $includeArchived,
                 'only_archived' => $onlyArchived,
             ],
-        ]);
+        ]));
     }
 
     /**

@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\HandlesSearchQueries;
+use App\Http\Controllers\Concerns\NormalizesPerPage;
+use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateProfessionalRequest;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
@@ -10,15 +13,18 @@ use Illuminate\Http\Request;
 
 class StaffProfessionalController extends ApiController
 {
+    use HandlesSearchQueries;
+    use NormalizesPerPage;
+    use ReturnsPaginatedResponse;
+
     /**
      * GET /api/staff/professionals?q=...&status=...&per_page=...
      */
     public function index(Request $request): JsonResponse
     {
-        $q = trim((string) $request->query('q', ''));
         $status = $request->query('status'); // optional: active|suspended
-        $perPage = (int) $request->query('per_page', 25);
-        $perPage = max(1, min(100, $perPage));
+        $perPage = $this->normalizePerPage($request, 25, 100);
+        $searchLike = $this->prepareSearchLike($request, 'q');
 
         $query = Professional::query()
             ->with(['site.theme'])
@@ -28,18 +34,16 @@ class StaffProfessionalController extends ApiController
             $query->where('status', $status);
         }
 
-        if ($q !== '') {
-            $like = '%' . $q . '%';
-
-            $query->where(function ($qq) use ($like) {
-                $qq->whereRaw('handle ILIKE ?', [$like])
-                    ->orWhereRaw('display_name ILIKE ?', [$like])
-                    ->orWhereRaw('primary_email ILIKE ?', [$like])
-                    ->orWhereRaw('phone ILIKE ?', [$like])
-                    ->orWhereRaw('first_name ILIKE ?', [$like])
-                    ->orWhereRaw('last_name ILIKE ?', [$like])
-                    ->orWhereHas('site', function ($s) use ($like) {
-                        $s->whereRaw('subdomain ILIKE ?', [$like]);
+        if ($searchLike) {
+            $query->where(function ($qq) use ($searchLike) {
+                $qq->whereRaw('handle ILIKE ?', [$searchLike])
+                    ->orWhereRaw('display_name ILIKE ?', [$searchLike])
+                    ->orWhereRaw('primary_email ILIKE ?', [$searchLike])
+                    ->orWhereRaw('phone ILIKE ?', [$searchLike])
+                    ->orWhereRaw('first_name ILIKE ?', [$searchLike])
+                    ->orWhereRaw('last_name ILIKE ?', [$searchLike])
+                    ->orWhereHas('site', function ($s) use ($searchLike) {
+                        $s->whereRaw('subdomain ILIKE ?', [$searchLike]);
                     });
             });
         }
@@ -74,15 +78,10 @@ class StaffProfessionalController extends ApiController
             ];
         });
 
-        return $this->success([
-            'professionals' => $professionals,
-            'meta' => [
-                'current_page' => $page->currentPage(),
-                'per_page'     => $page->perPage(),
-                'total'        => $page->total(),
-                'last_page'    => $page->lastPage(),
-            ],
-        ]);
+        $payload = $this->paginatedResponse($page, 'professionals');
+        $payload['professionals'] = $professionals;
+
+        return $this->success($payload);
     }
 
     /**

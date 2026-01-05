@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api\Professional\Notifications;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\HandlesSearchQueries;
+use App\Http\Controllers\Concerns\NormalizesPerPage;
+use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Http\JsonResponse;
@@ -11,6 +14,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProfessionalEmailSubscriptionController extends ApiController
 {
+    use HandlesSearchQueries;
+    use NormalizesPerPage;
+    use ReturnsPaginatedResponse;
     use ResolveCurrentProfessional;
 
     // GET /api/email-subscribers?list_key=marketing&status=subscribed&search=...
@@ -25,12 +31,9 @@ class ProfessionalEmailSubscriptionController extends ApiController
         $status = $request->query('status', 'subscribed'); // subscribed|unsubscribed|all
         $status = is_string($status) ? trim($status) : 'subscribed';
 
-        $perPage = (int) $request->query('per_page', 50);
-        $perPage = max(1, min(200, $perPage));
-
+        $perPage = $this->normalizePerPage($request, 50, 200);
         $search = $request->query('search');
-        $search = is_string($search) ? trim($search) : null;
-        $like = $search ? '%' . str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $search) . '%' : null;
+        $searchLike = $this->prepareSearchLike($request, 'search');
 
         $query = EmailSubscription::query()
             ->where('professional_id', $pro->id)
@@ -42,29 +45,22 @@ class ProfessionalEmailSubscriptionController extends ApiController
             $query->where('status', $status);
         }
 
-        if ($like) {
-            $query->where(function ($q) use ($like) {
-                $q->where('email', 'ilike', $like)
-                    ->orWhere('full_name', 'ilike', $like);
+        if ($searchLike) {
+            $query->where(function ($q) use ($searchLike) {
+                $q->where('email', 'ilike', $searchLike)
+                    ->orWhere('full_name', 'ilike', $searchLike);
             });
         }
 
         $page = $query->paginate($perPage)->appends($request->query());
 
-        return $this->success([
-            'subscriptions' => $page->items(),
-            'meta' => [
-                'current_page' => $page->currentPage(),
-                'per_page' => $page->perPage(),
-                'total' => $page->total(),
-                'last_page' => $page->lastPage(),
-            ],
+        return $this->success($this->paginatedResponse($page, 'subscriptions', [
             'filters' => [
                 'list_key' => $listKey,
                 'status' => $status,
-                'search' => $search,
+                'search' => is_string($search) ? trim($search) : null,
             ],
-        ]);
+        ]));
     }
 
     // GET /api/email-subscribers/export?list_key=marketing&status=subscribed
