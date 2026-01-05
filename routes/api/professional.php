@@ -102,3 +102,4 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::get('/email-subscribers/export', [ProfessionalEmailSubscriptionController::class, 'export']);
 
     });
+
