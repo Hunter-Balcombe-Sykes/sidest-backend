@@ -6,50 +6,43 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\PublicSite\PublicSiteShowRequest;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
-use App\Models\Views\PublicSitePayload;
 use Symfony\Component\HttpFoundation\Response;
+use App\Services\Cache\SiteCacheService;
 
 class PublicSiteController extends ApiController
 {
+    public function __construct(
+        private SiteCacheService $siteCache
+    ) {}
+
     public function show(PublicSiteShowRequest $request): Response
     {
-        $data = $request->validated();
-        $subdomain = $data['subdomain'];
+        $subdomain = strtolower($request->validated()['subdomain']);
 
-        $row = PublicSitePayload::query()
-            ->whereRaw('lower(subdomain) = lower(?)', [$subdomain])
+        $payload = $this->siteCache->getPublicSitePayload($subdomain);
+        if ($payload) {
+            return $this->success($payload);
+        }
+
+        $alias = SiteSubdomainAlias::query()
+            ->whereRaw('lower(subdomain) = ?', [strtolower($subdomain)])
             ->first();
 
-        // View only contains published sites; if not found, treat as 404
-        if (!$row) {
-            $alias = SiteSubdomainAlias::query()->whereRaw('lower(subdomain) = ?', [strtolower($subdomain)])->first();
-            if ($alias) {
-                $site = Site::find($alias->site_id);
-                $payloadBySite = $site
-                    ? PublicSitePayload::query()->where('site_id', $site->id)->first()
-                    : null;
+        if ($alias) {
+            $site = Site::query()->find($alias->site_id);
 
-                if ($payloadBySite && $site) {
+            if ($site) {
+                // Only redirect if the canonical site is actually published (exists in payload view)
+                $canonicalPayload = $this->siteCache->getPublicSitePayload($site->subdomain);
+
+                if ($canonicalPayload) {
                     $host = $site->subdomain . '.' . config('comet.public_domain');
                     $url = $request->getScheme() . '://' . $host . $request->getRequestUri();
                     return redirect()->to($url, 301);
                 }
             }
-
-            return $this->error('Site not found.', 404);
         }
 
-        $payload = $row->payload ?? [];
-
-        // Return the consistent JSON shape your mini-site expects
-        return $this->success([
-            'published' => true,
-            'site' => $payload['site'] ?? null,
-            'professional' => $payload['professional'] ?? null,
-            'theme' => $payload['theme'] ?? null,
-            'links' => $payload['links'] ?? ($payload['blocks'] ?? []),
-            'sections' => $payload['sections'] ?? [],
-            'blocks' => $payload['blocks'] ?? ($payload['links'] ?? []),
-        ]);
+        return $this->error('Site not found.', 404);
     }
 }

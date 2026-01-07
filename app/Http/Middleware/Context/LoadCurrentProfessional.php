@@ -2,13 +2,16 @@
 
 namespace App\Http\Middleware\Context;
 
-use App\Models\Core\Professional\Professional;
+use App\Services\Cache\ProfessionalCacheService;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class LoadCurrentProfessional
 {
+    public function __construct(
+        private ProfessionalCacheService $professionalCache
+    ) {}
     public function handle(Request $request, Closure $next): Response
     {
         $uid = $request->attributes->get('supabase_uid');
@@ -16,9 +19,8 @@ class LoadCurrentProfessional
             return response()->json(['message' => 'Missing uid'], 401);
         }
 
-        $professional = Professional::query()
-            ->where('auth_user_id', $uid)
-            ->first();
+        // Use cache service instead of a direct query
+        $professional = $this->professionalCache->getByAuthId($uid);
 
         if (!$professional) {
             // Important: /api/bootstrap should create this row

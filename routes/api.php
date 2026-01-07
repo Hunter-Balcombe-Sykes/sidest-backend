@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\HealthController;
 
 // Ping
 Route::get('/ping', fn () => response()->json(['pong' => true]));
@@ -20,5 +21,7 @@ Route::get('/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::cla
     ->middleware('throttle:public-site')
     ->name('public.unsubscribe');
 
+Route::get('/health', fn () => response()->json(['ok' => true]));
+Route::get('/ready', [HealthController::class, 'check']);
 
 

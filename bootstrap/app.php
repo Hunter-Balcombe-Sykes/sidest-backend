@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AddPublicCacheHeaders;
 use App\Http\Middleware\Auth\EnsureCometAdmin;
 use App\Http\Middleware\Auth\EnsureCometStaff;
 use App\Http\Middleware\Auth\VerifySupabaseJwt;
@@ -28,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
         'staff' => EnsureCometStaff::class,
         'staff.admin' => EnsureCometAdmin::class,
         'lead.log'     => LogLeadRateLimits::class,
+            'api' => AddPublicCacheHeaders::class,
     ]);
     })
 
