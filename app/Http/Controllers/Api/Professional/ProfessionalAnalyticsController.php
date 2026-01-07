@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -61,8 +62,7 @@ class ProfessionalAnalyticsController extends ApiController
         }
 
         // Generate a cache key based on professional, date range
-        $cacheKey = sprintf(
-            'analytics: summary:%s:%s:%s',
+        $cacheKey = CacheKeyGenerator::analyticsSummary(
             $professional->id,
             $from->format('Ymd'),
             $to->format('Ymd')

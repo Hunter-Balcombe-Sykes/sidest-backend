@@ -55,14 +55,19 @@ class AnalyticsCacheService
 
     public function invalidateAnalytics(string $professionalId): void
     {
-        // Invalidate last 90 days of analytics cache
+        $keys = [];
         $end = Carbon::now();
+
         for ($i = 0; $i < 90; $i++) {
             $date = $end->copy()->subDays($i);
-            $keys[] = CacheKeyGenerator::analyticsVisits($professionalId, $date->format('Ymd'), $end->format('Ymd'));
-            $keys[] = CacheKeyGenerator::analyticsClicks($professionalId, $date->format('Ymd'), $end->format('Ymd'));
+            $start = $date->format('Ymd');
+            $endStr = $end->format('Ymd');
+
+            $keys[] = CacheKeyGenerator::analyticsVisits($professionalId, $start, $endStr);
+            $keys[] = CacheKeyGenerator::analyticsClicks($professionalId, $start, $endStr);
+            $keys[] = CacheKeyGenerator::analyticsSummary($professionalId, $start, $endStr); // clear summary cache too
         }
 
-        Cache::deleteMultiple($keys ??  []);
+        Cache::deleteMultiple(array_values(array_unique($keys)));
     }
 }

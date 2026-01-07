@@ -89,4 +89,9 @@ class CacheKeyGenerator
         return "pro:map:auth:{$authUserId}";
     }
 
+    public static function analyticsSummary(string $professionalId, string $startDate, string $endDate): string
+    {
+        return "analytics:summary:{$professionalId}:{$startDate}:{$endDate}";
+    }
+
 }

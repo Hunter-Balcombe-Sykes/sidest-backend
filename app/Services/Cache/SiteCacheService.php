@@ -2,6 +2,7 @@
 
 namespace App\Services\Cache;
 
+use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Views\PublicSitePayload;
 use Illuminate\Support\Facades\Cache;
@@ -87,7 +88,7 @@ class SiteCacheService
             ->all();
 
         foreach ($aliasSubdomains as $aliasSubdomain) {
-            $keys[] = CacheKeyGenerator::publicSitePayload($aliasSubdomain);
+            $keys[] = CacheKeyGenerator::publicSitePayload(strtoLower($aliasSubdomain));
         }
 
         Cache::deleteMultiple(array_values(array_unique($keys)));

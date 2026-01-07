@@ -20,7 +20,9 @@ class AddPublicCacheHeaders
         ) {
             $response->headers->set('Cache-Control', 'public, max-age=900, s-maxage=900'); // 15 min
             $response->headers->set('Vary', 'Accept-Encoding');
-            $response->headers->set('X-Cache-Status', 'HIT'); // For debugging
+            if (! $response->headers->has('X-Cache-Status')) {
+                $response->headers->set('X-Cache-Status', 'MISS');
+            }
         }
 
         return $response;
