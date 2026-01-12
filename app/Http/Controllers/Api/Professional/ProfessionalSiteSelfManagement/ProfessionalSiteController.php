@@ -25,4 +25,11 @@ class ProfessionalSiteController extends ApiController
         $site = $action->execute($professional, $data);
         return $this->success(['site' => $site]);
     }
+
+    public function visibility(UpdateSiteRequest $request, UpdateSiteAction $action){
+        $professional = $this->currentProfessional($request);
+        $data = $request->validated();
+        $site = $action->execute($professional, $data);
+        return $this->success(['site' => $site]);
+    }
 }

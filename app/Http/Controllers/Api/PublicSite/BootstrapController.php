@@ -51,6 +51,11 @@ class BootstrapController extends ApiController
                 ]);
                 $professional->auth_user_id = $uid;
             } else {
+
+                if (in_array($professional->status, ['disabled', 'suspended'], true)) {
+                    return $this->error('Account is disabled. Contact support.', 403);
+                }
+
                 $fill = [
                     'handle'        => $data['handle'],
                     'display_name'  => $data['display_name'],
@@ -167,12 +172,12 @@ class BootstrapController extends ApiController
         $v = mb_strtolower(trim($handle));
         $v = preg_replace('/[^a-z0-9]+/', '-', $v);
         $v = trim($v, '-');
-        
+
         // Generate UUID-based fallback if handle is empty
         if ($v === '') {
             $v = 'user-' . substr(Str::uuid()->toString(), 0, 8);
         }
-        
+
         return $v;
     }
 

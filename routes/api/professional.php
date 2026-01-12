@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
+use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
 // Authorised Professional Logged In
@@ -27,6 +28,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
 
     // Update Site Details
     Route::patch('/site', [ProfessionalSiteController::class, 'update']);
+    Route::patch('/site/visibility', [SiteVisibilityController::class, 'update']);
 
     // Service Details and Edit
     Route::get('/services', [ProfessionalServiceController::class, 'index']);

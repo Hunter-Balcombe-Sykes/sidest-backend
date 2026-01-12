@@ -1,0 +1,34 @@
+<?php
+
+namespace App\Http\Controllers\Api\PublicSite;
+
+use App\Http\Controllers\Api\ApiController;
+use App\Http\Requests\Api\PublicSite\UpdateVisibilityRequest;
+use App\Models\Core\Professional\Professional;
+use App\Models\Core\Site\Site;
+use Illuminate\Http\JsonResponse;
+
+class SiteVisibilityController extends ApiController
+{
+    public function update(UpdateVisibilityRequest $request): JsonResponse
+    {
+        /** @var Professional $professional */
+        $professional = $request->attributes->get('professional');
+
+        // Extra safety: if someone ever bypasses middleware, don't allow disabled accounts.
+        if (!$professional || $professional->status !== 'active') {
+            return $this->error('Account is not active.', 403);
+        }
+
+        $site = Site::query()
+            ->where('professional_id', $professional->id)
+            ->firstOrFail();
+
+        $site->published = (bool) $request->validated('published');
+        $site->save();
+
+        return $this->success([
+            'site' => $site->fresh(),
+        ]);
+    }
+}

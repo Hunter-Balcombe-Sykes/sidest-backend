@@ -62,7 +62,7 @@ class StaffAnalyticsController extends ApiController
             ->where('professional_id', $professional->id)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw('COUNT(*) as total_visits')
-            ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id, ip_hash)) as unique_visitors')
+            ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_visitors')
             ->selectRaw('MAX(occurred_at) as last_visit_at')
             ->first();
 
@@ -71,7 +71,7 @@ class StaffAnalyticsController extends ApiController
             ->where('professional_id', $professional->id)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw('COUNT(*) as total_clicks')
-            ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id, ip_hash)) as unique_clickers')
+            ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_clickers')
             ->selectRaw('MAX(occurred_at) as last_click_at')
             ->first();
 

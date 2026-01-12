@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Models\Core\Professional\Professional;
 use Illuminate\Validation\Rule;
 
 class BootstrapRequest extends BaseFormRequest
@@ -11,8 +12,14 @@ class BootstrapRequest extends BaseFormRequest
 
     public function rules(): array
     {
-        $pro = $this->attributes->get('professional');
-        $proId = $pro?->id;
+        $uid = $this->attributes->get('supabase_uid');
+
+        $ignoreId = null;
+        if (is_string($uid) && $uid !== '') {
+            $ignoreId = Professional::query()
+                ->where('auth_user_id', $uid)
+                ->value('id');
+        }
 
         return [
             'handle' => ['required','string','max:40'],
@@ -27,7 +34,7 @@ class BootstrapRequest extends BaseFormRequest
                 'required',
                 'string',
                 'max:50',
-                Rule::unique('core.professionals', 'handle_lc')->ignore($proId, 'id'),
+                Rule::unique('core.professionals', 'handle_lc')->ignore($ignoreId, 'id'),
             ],
         ];
     }

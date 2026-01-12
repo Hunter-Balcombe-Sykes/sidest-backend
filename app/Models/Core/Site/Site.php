@@ -91,4 +91,18 @@ class Site extends Model
     {
         return $this->hasMany(SiteImage::class, 'site_id');
     }
+
+    public function getPublishedAttribute(): bool
+    {
+        return (bool) ($this->attributes['is_published'] ?? false);
+    }
+
+    public function setPublishedAttribute($value): void
+    {
+        $bool = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $bool = $bool ?? (bool) $value;
+
+        // Otherwise store in is_published
+        $this->attributes['is_published'] = $bool;
+    }
 }

@@ -193,12 +193,6 @@ class StaffProfessionalController extends ApiController
 
     public function forceDestroy(Professional $professional): JsonResponse
     {
-        // Additional admin check (customize based on your auth)
-        $staff = auth()->user(); // or however you get current staff
-
-        if ($staff->role !== 'admin') {
-            abort(403, 'Only administrators can permanently delete professionals.');
-        }
 
         // Hard delete - PERMANENT
         $handle = $professional->handle;

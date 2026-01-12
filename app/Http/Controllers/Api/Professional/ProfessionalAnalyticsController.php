@@ -216,7 +216,7 @@ class ProfessionalAnalyticsController extends ApiController
             $topLinks = DB::table('analytics.link_clicks as lc')
                 ->join('core.blocks as b', 'b.id', '=', 'lc.block_id')
                 ->where('lc.professional_id', $professional->id)
-                ->whereBetween('lc. occurred_at', [$from, $to])
+                ->whereBetween('lc.occurred_at', [$from, $to])
                 ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
                 ->groupBy('b.id', 'b.title', 'b.url')
                 ->orderByDesc('clicks')

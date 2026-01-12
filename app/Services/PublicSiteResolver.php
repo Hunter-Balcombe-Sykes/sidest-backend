@@ -11,8 +11,15 @@ class PublicSiteResolver
     {
         $subdomain = strtolower($subdomain);
 
-        $site = Site::query()
-            ->published()
+        $siteQuery = Site::query()
+            ->where('is_published', true)
+            ->whereRaw('lower(subdomain) = ?', [$subdomain])
+            ->whereHas('professional', function ($q) {
+                $q->where('status', 'active');
+            })
+            ->first();
+
+        $site = (clone $siteQuery)::query()
             ->whereRaw('lower(subdomain) = ?', [$subdomain])
             ->first();
 
@@ -24,6 +31,8 @@ class PublicSiteResolver
 
         if (!$alias) return null;
 
-        return Site::query()->published()->find($alias->site_id);
+        return (clone $siteQuery)
+            ->where('id', $alias->site_id)
+            ->first();
     }
 }
