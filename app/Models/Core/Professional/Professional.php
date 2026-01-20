@@ -89,6 +89,7 @@ class Professional extends Model
     {
         return $this->blocks()
             ->where('block_group', 'links')
+            ->where('block_type', 'link')
             ->orderBy('sort_order');
     }
 
@@ -96,6 +97,7 @@ class Professional extends Model
     {
         return $this->blocks()
             ->where('block_group', 'sections')
+            ->where('block_type', 'section')
             ->orderBy('sort_order');
     }
 

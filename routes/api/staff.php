@@ -34,21 +34,24 @@ Route::prefix('staff')
     // Soft delete (regular staff)
     Route::delete('/professionals/{professional}', [StaffProfessionalController::class, 'destroy']);
     // Restore
-    Route::post('/professionals/{professional}/restore', [StaffProfessionalController::class, 'restore']);
+    Route::post('/professionals/{professional}/restore', [StaffProfessionalController::class, 'restore'])
+        ->withTrashed();
 
     // View Customers
     Route::get('/professionals/{professional}/customers', [StaffCustomerManagementController::class, 'index']);
     Route::get('/professionals/{professional}/customers/{customer}', [StaffCustomerManagementController::class, 'show'])
         ->whereUuid('customer');
     Route::post('/professionals/{professional}/customers/{customer}/restore', [StaffCustomerManagementController::class, 'restore'])
-        ->whereUuid('customer');
+        ->whereUuid('customer')
+        ->withTrashed();
 
     // View Services
     Route::get('/professionals/{professional}/services', [StaffServiceManagementController::class, 'index']);
     Route::get('/professionals/{professional}/services/{service}', [StaffServiceManagementController::class, 'show'])
         ->whereUuid('service');
     Route::post('/professionals/{professional}/services/{service}/restore', [StaffServiceManagementController::class, 'restore'])
-        ->whereUuid('service');
+        ->whereUuid('service')
+        ->withTrashed();
 
     // View that barber's site data
     Route::get('/professionals/{professional}/site', [StaffSiteController::class, 'showByProfessional']);
@@ -74,7 +77,8 @@ Route::prefix('staff')
     Route::patch('/professionals/{professional}/status', [StaffProfessionalController::class, 'updateStatus']);
     Route::patch('/professionals/{professional}', [StaffProfessionalController::class, 'update']);
     // Restore
-    Route::post('/professionals/{professional}/restore', [StaffProfessionalController::class, 'restore']);
+    Route::post('/professionals/{professional}/restore', [StaffProfessionalController::class, 'restore'])
+        ->withTrashed();
     // Hard delete (admin only)
     Route::delete('/professionals/{professional}/force', [StaffProfessionalController:: class, 'forceDestroy']);
 
@@ -101,10 +105,10 @@ Route::prefix('staff')
 
     // Edit Link Blocks
     Route::post('/professionals/{professional}/links', [StaffLinkBlockManagementController::class, 'store']);
-    Route::patch('/professionals/{professional}/links/{block}', [StaffLinkBlockManagementController::class, 'update'])
-        ->whereUuid('block');
-    Route::delete('/professionals/{professional}/links/{block}', [StaffLinkBlockManagementController::class, 'destroy'])
-        ->whereUuid('block');
+    Route::patch('/professionals/{professional}/links/{linkBlock}', [StaffLinkBlockManagementController::class, 'update'])
+        ->whereUuid('linkBlock');
+    Route::delete('/professionals/{professional}/links/{linkBlock}', [StaffLinkBlockManagementController::class, 'destroy'])
+        ->whereUuid('linkBlock');
     Route::post('/professionals/{professional}/links/reorder', [StaffLinkBlockManagementController::class, 'reorder']);
 
     // Edit Sections

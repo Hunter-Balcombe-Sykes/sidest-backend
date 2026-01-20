@@ -13,11 +13,9 @@ class PublicSiteResolver
 
         $siteQuery = Site::query()
             ->where('is_published', true)
-            ->whereRaw('lower(subdomain) = ?', [$subdomain])
             ->whereHas('professional', function ($q) {
                 $q->where('status', 'active');
-            })
-            ->first();
+            });
 
         $site = (clone $siteQuery)::query()
             ->whereRaw('lower(subdomain) = ?', [$subdomain])

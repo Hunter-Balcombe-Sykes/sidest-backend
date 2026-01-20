@@ -58,32 +58,32 @@ class StaffLinkBlockManagementController extends ApiController
         return $this->success(['block' => $block], 201);
     }
 
-    public function update(StaffUpdateLinkRequest $request, Professional $professional, Block $block): JsonResponse
+    public function update(StaffUpdateLinkRequest $request, Professional $professional, Block $linkBlock): JsonResponse
     {
         // scoped binding guarantees ownership, but still enforce correct kind of block
         abort_unless(
-            $block->professional_id === $professional->id &&
-            $block->block_group === 'links' &&
-            $block->block_type === 'link',
+            $linkBlock->professional_id === $professional->id &&
+            $linkBlock->block_group === 'links' &&
+            $linkBlock->block_type === 'link',
             404
         );
 
-        $block->fill($request->validated());
-        $block->save();
+        $linkBlock->fill($request->validated());
+        $linkBlock->save();
 
-        return $this->success(['block' => $block->fresh()]);
+        return $this->success(['block' => $linkBlock->fresh()]);
     }
 
-    public function destroy(Professional $professional, Block $block): JsonResponse
+    public function destroy(Professional $professional, Block $linkBlock): JsonResponse
     {
         abort_unless(
-            $block->professional_id === $professional->id &&
-            $block->block_group === 'links' &&
-            $block->block_type === 'link',
+            $linkBlock->professional_id === $professional->id &&
+            $linkBlock->block_group === 'links' &&
+            $linkBlock->block_type === 'link',
             404
         );
 
-        $block->delete();
+        $linkBlock->delete();
 
         return $this->success(['deleted' => true]);
     }

@@ -21,7 +21,7 @@ class StaffSiteController extends ApiController
 
         // Staff can see unpublished too, so we return published flag either way
         return $this->success([
-            'published' => (bool) $row->is_published,
+            'is_published' => (bool) $row->is_published,
 
             'site' => [
                 'id'        => $row->site_id,
@@ -67,7 +67,7 @@ class StaffSiteController extends ApiController
         }
 
         return $this->success([
-            'published' => (bool) $row->is_published,
+            'is_published' => (bool) $row->is_published,
 
             'site' => [
                 'id'        => $row->site_id,

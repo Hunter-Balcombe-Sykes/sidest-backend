@@ -48,6 +48,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::get('/analytics', [ProfessionalAnalyticsController::class, 'summary']);
 
     // Links
+        // TODO: FIX BLOCK TYPES
     Route::get('/links', [ProfessionalLinkBlockController::class, 'index']);
     Route::post('/links', [ProfessionalLinkBlockController::class, 'store']);
     Route::patch('/links/{block}', [ProfessionalLinkBlockController::class, 'update'])
@@ -57,6 +58,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/links/reorder', [ProfessionalLinkBlockController::class, 'reorder']);
 
     // Sections
+        // TODO: FIX BLOCK TYPES
     Route::get('/sections', [ProfessionalSectionBlockController::class, 'index']);
     Route::put('/sections/{blockType}', [ProfessionalSectionBlockController::class, 'upsert'])
         ->where('blockType', '[a-z0-9_-]+');
