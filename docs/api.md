@@ -145,27 +145,72 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 
 
 ### Site
-| Name            | Type    | Nullable | Example           | Constaints / Notes                                                                                                |
-|-----------------|---------|----------|-------------------|-------------------------------------------------------------------------------------------------------------------|
-| id              | uuid    | no       | b8e7...           | Primary Key                                                                                                       |
-| professional_id | uudi    | no       | 4db0...           | Owner / Professional                                                                                              |
-| subdomain       | string  | no       | joshbarber        | unqiue (case-sensitive), 3-63,lowercase letters/numbers/hyphen; no leading/trailing hyphen; reserved list blocked |
-| is_published    | boolean | no       | falase            | if false, public site endpoint returns 404 or 403 depending on route                                              |
-| theme_id        | uuid    | yes      | 9f23              | Must exist in themes table                                                                                        |
-| settings        | object  | no       | josh@example.copm | Max 255                                                                                                           |
-| banner_bucket   | string  | no       | +6140000000       | Max 40                                                                                                            |
-| banner_path     | string  | no       | Josh              | Max 80                                                                                                            |
-| created_at      | string  | no       | Hunter            | Max 80                                                                                                            |
-| updated_at      | string  | yes      | +6140000000       | Max 40, public-facing contact                                                                                     |
+| Name            | Type     | Nullable | Example                   | Constaints / Notes                                                                                                |
+|-----------------|----------|----------|---------------------------|-------------------------------------------------------------------------------------------------------------------|
+| id              | uuid     | no       | b8e7...                   | Primary Key                                                                                                       |
+| professional_id | uudi     | no       | 4db0...                   | Owner / Professional                                                                                              |
+| subdomain       | string   | no       | joshbarber                | unqiue (case-sensitive), 3-63,lowercase letters/numbers/hyphen; no leading/trailing hyphen; reserved list blocked |
+| is_published    | boolean  | no       | false                     | if false, public site endpoint returns 404 or 403 depending on route                                              |
+| theme_id        | uuid     | yes      | 9f23                      | Must exist in themes table                                                                                        |
+| settings        | object   | yes      | {...}                     | Freeform JSON object merged on PATCH                                                                              |
+| banner_bucket   | string   | yes      | public-assets             | Supabase Storage Bucket                                                                                           |
+| banner_path     | string   | yes      | sites/<siteid>/banner.jpg | Path within bucket                                                                                                |
+| created_at      | datetime | yes      | 2026-01...                |                                                                                                                   |
+| updated_at      | datetime | yes      | 2026-01...                |                                                                                                                   |
 
 ### Customer
+| Name            | Type     | Nullable | Example                | Constraints / Notes     |
+|-----------------|----------|----------|------------------------|-------------------------|
+| id              | uuid     | no       | `a3c1...`              | Primary key             |
+| professional_id | uuid     | yes      | `4db0...`              | Set by server on create |
+| full_name       | string   | no       | `Sam Smith`            | Max 120                 |
+| email           | email    | yes      | `sam@example.com`      | Max 255                 |
+| phone           | string   | yes      | `+61411111111`         | Max 40                  |
+| notes           | string   | yes      | `Prefers Fridays`      | Max 5000                |
+| source          | string   | yes      | `manual`               | manual or site_lead     |
+| external_id     | string   | yes      | `square:cus_123`       | Max 255                 |
+| created_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
+| updated_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
+| deleted_at      | datetime | yes      | `2026-01-20T05:12:00Z` | Soft delete timestamp   |
 
 ### Link Block (core.blocks where block_group = links)
+| Name            | Type    | Nullable | Example                       | Constraints / Notes                                                                       |
+|-----------------|---------|----------|-------------------------------|-------------------------------------------------------------------------------------------|
+| id              | uuid    | no       | `d5b0...`                     | Primary key                                                                               |
+| professional_id | uuid    | no       | `4db0...`                     | Owner professional                                                                        |
+| site_id         | uuid    | no       | `b8e7...`                     | Owner site                                                                                |
+| block_group     | string  | no       | `links`                       | Always links                                                                              |
+| block_type      | string  | no       | `link`                        | Always link                                                                               |
+| title           | string  | no       | `Book now`                    | Max 80                                                                                    |
+| url             | string  | no       | `https://booking.example.com` | Max 2048; must be valid URL                                                               |
+| icon_key        | string  | yes      | `calendar`                    | Must be one of config comet.link_block_icon_keys                                          |
+| sort_order      | integer | no       | `0`                           | Non-negative                                                                              |
+| is_active       | boolean | no       | `true`                        | If false: hidden from public site and click tracking is forbidden                         |
+| settings        | object  | yes      | `{ "open_in_new_tab": true }` | Allowed keys only: open_in_new_tab, rel_nofollow, rel_sponsored, rel_ugc, highlight, note |
 
 ### PublicSiteData (view of returned GET /api/public/site)
+| Name         | Type    | Nullable | Example                                                   | Constraints / Notes                            |
+|--------------|---------|----------|-----------------------------------------------------------|------------------------------------------------|
+| published    | boolean | no       | `true`                                                    | Derived from site is_published                 |
+| site         | object  | no       | `{ id, subdomain, settings, banner_bucket, banner_path }` |                                                |
+| professional | object  | no       | `{ id, handle, display_name, bio, ... }`                  | Includes public-facing image + location fields |
+| theme        | object  | yes      | `{ id, key, name, config }`                               | theme.config is an object                      |
+| blocks       | array   | no       | `[ LinkBlock \| SectionBlock ]`                           | Only active blocks are returned                |
+| gallery      | array   | no       | `[ { id, bucket, path, alt_text, sort_order } ]`          | Only active images returned                    |
+| services     | array   | no       | `[ { id, title, price_cents, ... } ]`                     | Only active services returned                  |
 
 ### Analytics Event Payloads
-
+| Name                  | Type     | Nullable | Example                 | Constraints / Notes                                                              |
+|-----------------------|----------|----------|-------------------------|----------------------------------------------------------------------------------|
+| occurred_at           | datetime | no       | `2026-01-12T05:12:00Z`  | Required by validation, but Stage 1-2 currently stores server time (now)         |
+| site_id               | uuid     | yes      | `b8e7...`               | Optional if called on the correct subdomain; the API resolves site from host too |
+| session_id            | string   | yes      | `sess_abc123`           | Max 255                                                                          |
+| visitor_id            | uuid     | yes      | `f2a1...`               | Optional stable client id if you have one                                        |
+| referrer              | string   | yes      | `https://instagram.com` | Max 2048; if missing, backend uses request Referer header                        |
+| utm_source            | string   | yes      | `instagram`             | Max 120                                                                          |
+| utm_medium            | string   | yes      | `social`                | Max 120                                                                          |
+| utm_campaign          | string   | yes      | `jan_promo`             | Max 120                                                                          |
+| block_id (click only) | uuid     | no       | `d5b0...`               | Must be an active link block belonging to the site                               |
 
 ## 5) Conventions (headers, errors, pagination, rate limits)
 
