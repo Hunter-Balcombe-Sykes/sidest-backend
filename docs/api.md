@@ -89,11 +89,15 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 
 ```json
 {
-"professional": { "...": "..." },
-"site": { "...": "..." }
+    "professional": {
+        "...": "..."
+    },
+    "site": {
+        "...": "..."
+    }
+}
 ```
 
-}
 
 ### Common status codes: 200, 201, 401, 422
 
@@ -226,8 +230,13 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 
 ```json
 {
-"message": "Human readable message",
-"errors": { "field": ["Reason"] }
+    "message": "Human readable message",
+    "errors": {
+        "field": [
+            "Reason"
+        ]
+    }
+}
 ```
 
 }
@@ -236,9 +245,8 @@ Some framework-level errors (for example abort(404)) may return only:
 
 ```json
 { "message": "Not Found" }
-Common status codes
 ```
-
+Common status codes
 - 200 OK: successful read or update
 - 201 Created: successful create
 - 204 No Content: no body (not commonly used yet)
@@ -258,7 +266,6 @@ Common status codes
 
 - public-site: 60 requests per minute
 - analytics: 120 requests per minute leads: 10 requests per minute
--
 
 ## 6) Public Mini-Site API
 
@@ -305,8 +312,8 @@ https://{subdomain}.{COMET_PUBLIC_DOMAIN}
 
 ```json
 { "ok": true, "unsubscribed": true }
-Common status codes: 200, 404 (token not found), 429
 ```
+Common status codes: 200, 404 (token not found), 429
 
 ## 7) Professional (Barber) Dashboard API
 
@@ -464,11 +471,11 @@ Uploads are direct-from-frontend to Supabase Storage. Comet provides the path ru
 
 ### Frontend upload flow
 
-- 1. Call POST /api/uploads/prepare with type and content_type.
-- 2. Use Supabase Storage client with the logged-in user session to upload to the returned bucket + path.
-- 3. If type is icon or headshot: PATCH /api/me to set icon_bucket/icon_path or headshot_bucket/headshot_path.
-- 4. If type is banner: PATCH /api/site to set banner_bucket/banner_path.
-- 5. If type is gallery: POST /api/gallery with bucket + path (+ optional alt_text) to create the DB row.
+1. Call POST /api/uploads/prepare with type and content_type.
+2. Use Supabase Storage client with the logged-in user session to upload to the returned bucket + path.
+3. If type is icon or headshot: PATCH /api/me to set icon_bucket/icon_path or headshot_bucket/headshot_path.
+4. If type is banner: PATCH /api/site to set banner_bucket/banner_path.
+5. If type is gallery: POST /api/gallery with bucket + path (+ optional alt_text) to create the DB row.
 
 ### Storage RLS notes
 

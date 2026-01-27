@@ -11,7 +11,7 @@ class StaffStoreServiceRequest extends BaseFormRequest
     {
         return [
             'title'            => ['required', 'string', 'max:255'],
-            'category'         => ['nullable', 'string', 'max:80'],
+            'category_id'      => ['nullable', 'uuid', 'exists:core.service_categories,id'],
             'description'      => ['nullable', 'string', 'max:2000'],
             'price_cents'      => ['required', 'integer', 'min:0'],
             'currency_code'    => ['nullable', 'string', 'size:3'],

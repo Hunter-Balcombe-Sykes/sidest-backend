@@ -5,13 +5,14 @@ namespace App\Models\Core\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Service extends Model
+class ServiceCategory extends Model
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'core.services';
+    protected $table = 'core.service_categories';
 
     public $incrementing = false;
     protected $keyType = 'string';
@@ -19,21 +20,14 @@ class Service extends Model
     protected $fillable = [
         'professional_id',
         'title',
-        'category_id',
-        'description',
-        'price_cents',
-        'currency_code',
-        'duration_minutes',
-        'is_active',
         'sort_order',
     ];
 
     protected $casts = [
-        'is_active' => 'boolean',
-        'price_cents' => 'integer',
-        'sort_order' => 'integer',
-        'duration_minutes' => 'integer',
-        'deleted_at' => 'datetime',
+        'sort_order'  => 'integer',
+        'deleted_at'  => 'datetime',
+        'created_at'  => 'datetime',
+        'updated_at'  => 'datetime',
     ];
 
     public function professional(): BelongsTo
@@ -41,8 +35,16 @@ class Service extends Model
         return $this->belongsTo(Professional::class);
     }
 
-    public function category(): BelongsTo
+    public function services(): HasMany
     {
-        return $this->belongsTo(ServiceCategory::class, 'category_id');
+        return $this->hasMany(Service::class, 'category_id');
     }
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope('ordered', function ($q) {
+            $q->orderBy('sort_order')->orderBy('created_at');
+        });
+    }
+
 }

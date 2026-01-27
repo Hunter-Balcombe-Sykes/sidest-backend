@@ -122,6 +122,11 @@ class Professional extends Model
         return $this->hasMany(Service::class, 'professional_id');
     }
 
+    public function serviceCategories()
+    {
+        return $this->hasMany(\App\Models\Core\Professional\ServiceCategory::class);
+    }
+
     public function emailSubscriptions(): HasMany
     {
         return $this->hasMany(EmailSubscription::class, 'professional_id');

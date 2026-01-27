@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSectionManage
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffProfessionalController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSiteManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceManagementController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceCategoryManagementController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAnalyticsController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffMeController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationController;
@@ -48,9 +49,19 @@ Route::prefix('staff')
     // View Services
     Route::get('/professionals/{professional}/services', [StaffServiceManagementController::class, 'index']);
     Route::get('/professionals/{professional}/services/{service}', [StaffServiceManagementController::class, 'show'])
-        ->whereUuid('service');
+        ->whereUuid('service')
+        ->withTrashed();
     Route::post('/professionals/{professional}/services/{service}/restore', [StaffServiceManagementController::class, 'restore'])
         ->whereUuid('service')
+        ->withTrashed();
+
+    // View Service Categories
+    Route::get('/professionals/{professional}/service-categories', [StaffServiceCategoryManagementController::class, 'index']);
+    Route::get('/professionals/{professional}/service-categories/{category}', [StaffServiceCategoryManagementController::class, 'show'])
+        ->whereUuid('category')
+        ->withTrashed();
+    Route::post('/professionals/{professional}/service-categories/{category}/restore', [StaffServiceCategoryManagementController::class, 'restore'])
+        ->whereUuid('category')
         ->withTrashed();
 
     // View that barber's site data
@@ -99,6 +110,21 @@ Route::prefix('staff')
     Route::delete('/professionals/{professional}/services/{service}/hard', [StaffServiceManagementController::class, 'forceDestroy'])
         ->whereUuid('service');
     Route::post('/professionals/{professional}/services/reorder', [StaffServiceManagementController::class, 'reorder']);
+
+    // Edit Service Categories
+    Route::post('/professionals/{professional}/service-categories', [StaffServiceCategoryManagementController::class, 'store']);
+    Route::patch('/professionals/{professional}/service-categories/{category}', [StaffServiceCategoryManagementController::class, 'update'])
+        ->whereUuid('category');
+    Route::delete('/professionals/{professional}/service-categories/{category}', [StaffServiceCategoryManagementController::class, 'destroy'])
+        ->whereUuid('category');
+    Route::delete('/professionals/{professional}/service-categories/{category}/hard', [StaffServiceCategoryManagementController::class, 'forceDestroy'])
+        ->whereUuid('category');
+
+    // Reorder categories
+    Route::post('/professionals/{professional}/service-categories/reorder', [StaffServiceCategoryManagementController::class, 'reorder']);
+
+    // Full UI layout reorder (categories + services) for staff admin
+    Route::post('/professionals/{professional}/services/reorder-layout', [StaffServiceManagementController::class, 'reorderLayout']);
 
     // Edit site
     Route::patch('/professionals/{professional}/site', [StaffSiteManagementController::class, 'update']);

@@ -6,6 +6,7 @@ use App\Http\Middleware\Auth\EnsureCometStaff;
 use App\Http\Middleware\Auth\VerifySupabaseJwt;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
+use App\Http\Middleware\RequirePlan;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -30,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
         'staff.admin' => EnsureCometAdmin::class,
         'lead.log'     => LogLeadRateLimits::class,
             'api' => AddPublicCacheHeaders::class,
+            'plan' => RequirePlan::class,
     ]);
     })
 

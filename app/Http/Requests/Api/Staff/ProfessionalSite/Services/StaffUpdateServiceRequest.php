@@ -11,7 +11,7 @@ class StaffUpdateServiceRequest extends BaseFormRequest
     {
         return [
             'title'            => ['sometimes', 'required', 'string', 'max:255'],
-            'category'         => ['sometimes', 'nullable', 'string', 'max:80'],
+            'category_id'      => ['sometimes', 'nullable', 'uuid', 'exists:core.service_categories,id'],
             'description'      => ['sometimes', 'nullable', 'string', 'max:2000'],
             'price_cents'      => ['sometimes', 'required', 'integer', 'min:0'],
             'currency_code'    => ['sometimes', 'nullable', 'string', 'size:3'],

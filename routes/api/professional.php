@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSectionBlockController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController;
+use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceCategoryController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSiteController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalThemeController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
@@ -44,21 +45,36 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         ->whereUuid('service')
         ->withTrashed();
 
-    // View Analytics
+    // NEW: Service Categories (CRUD + reorder)
+    Route::get('/service-categories', [ProfessionalServiceCategoryController::class, 'index']);
+    Route::post('/service-categories', [ProfessionalServiceCategoryController::class, 'store']);
+    Route::get('/service-categories/{category}', [ProfessionalServiceCategoryController::class, 'show'])
+        ->whereUuid('category')
+        ->withTrashed();
+    Route::patch('/service-categories/{category}', [ProfessionalServiceCategoryController::class, 'update'])
+        ->whereUuid('category');
+    Route::delete('/service-categories/{category}', [ProfessionalServiceCategoryController::class, 'destroy'])
+        ->whereUuid('category');
+    Route::post('/service-categories/reorder', [ProfessionalServiceCategoryController::class, 'reorder']);
+    Route::post('/service-categories/{category}/restore', [ProfessionalServiceCategoryController::class, 'restore'])
+        ->whereUuid('category')
+        ->withTrashed();
+    Route::post('/services/reorder-layout', [ProfessionalServiceController::class, 'reorderLayout']);
+
+
+        // View Analytics
     Route::get('/analytics', [ProfessionalAnalyticsController::class, 'summary']);
 
     // Links
-        // TODO: FIX BLOCK TYPES
     Route::get('/links', [ProfessionalLinkBlockController::class, 'index']);
     Route::post('/links', [ProfessionalLinkBlockController::class, 'store']);
-    Route::patch('/links/{block}', [ProfessionalLinkBlockController::class, 'update'])
-        ->whereUuid('block');
-    Route::delete('/links/{block}', [ProfessionalLinkBlockController::class, 'destroy'])
-        ->whereUuid('block');
+    Route::patch('/links/{linkBlock}', [ProfessionalLinkBlockController::class, 'update'])
+        ->whereUuid('linkBlock');
+    Route::delete('/links/{linkBlock}', [ProfessionalLinkBlockController::class, 'destroy'])
+        ->whereUuid('linkBlock');
     Route::post('/links/reorder', [ProfessionalLinkBlockController::class, 'reorder']);
 
     // Sections
-        // TODO: FIX BLOCK TYPES
     Route::get('/sections', [ProfessionalSectionBlockController::class, 'index']);
     Route::put('/sections/{blockType}', [ProfessionalSectionBlockController::class, 'upsert'])
         ->where('blockType', '[a-z0-9_-]+');
