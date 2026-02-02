@@ -99,6 +99,7 @@ class ProfessionalSectionBlockController extends ApiController
             $allIds = Block::query()
                 ->where('professional_id', $pro->id)
                 ->where('block_group', 'sections')
+                ->where('block_type', 'section')
                 ->lockForUpdate()
                 ->orderBy('sort_order')
                 ->orderBy('created_at')
@@ -120,6 +121,7 @@ class ProfessionalSectionBlockController extends ApiController
                 Block::query()
                     ->where('professional_id', $pro->id)
                     ->where('block_group', 'sections')
+                    ->where('block_type', 'section')
                     ->where('id', $id)
                     ->update(['sort_order' => $i]);
             }

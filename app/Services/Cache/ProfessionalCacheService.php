@@ -5,6 +5,7 @@ namespace App\Services\Cache;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class ProfessionalCacheService
 {
@@ -46,7 +47,7 @@ class ProfessionalCacheService
             CacheKeyGenerator::professionalPayloadById($id),
             now()->addHour(),
             function () use ($id) {
-                $pro = Professional::query()->find($id);
+                $pro = Professional::query()->with('site')->find($id);
                 return $pro ? $this->toPayload($pro) : null;
             }
         );
@@ -145,7 +146,10 @@ class ProfessionalCacheService
         return Cache::remember(
             CacheKeyGenerator::customerCount($professionalId),
             now()->addMinutes(15),
-            fn () => Professional::query()->find($professionalId)?->customers()->count() ?? 0
+            fn () => DB::table('core.customers')
+                ->where('professional_id', $professionalId)
+                ->whereNull('deleted_at')
+                ->count()
         );
     }
 

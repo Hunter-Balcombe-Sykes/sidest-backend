@@ -32,7 +32,7 @@ class ProfessionalLinkBlockController extends ApiController
 
         $data = $request->validated();
 
-        $block = DB::transaction(function () use ($pro, $site, $data) {
+        $linkBlock = DB::transaction(function () use ($pro, $site, $data) {
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-links:{$site->id}"]);
 
             $maxSort = Block::query()
@@ -42,7 +42,7 @@ class ProfessionalLinkBlockController extends ApiController
 
             $maxSort = is_null($maxSort) ? -1 : (int) $maxSort;
 
-            $block = new Block([
+            $linkBlock = new Block([
                 'block_group' => 'links',
                 'block_type'  => 'link',
                 'title'       => $data['title'],
@@ -53,49 +53,49 @@ class ProfessionalLinkBlockController extends ApiController
                 'settings'    => $data['settings'] ?? [],
             ]);
 
-            $block->professional_id = $pro->id;
-            $block->site_id = $site->id;
-            $block->save();
-            return $block->fresh();
+            $linkBlock->professional_id = $pro->id;
+            $linkBlock->site_id = $site->id;
+            $linkBlock->save();
+            return $linkBlock->fresh();
         });
 
-        return $this->success(['block' => $block], 201);
+        return $this->success(['block' => $linkBlock], 201);
     }
 
-    public function update(UpdateLinkBlockRequest $request, Block $block)
+    public function update(UpdateLinkBlockRequest $request, Block $linkBlock)
     {
         $pro = $this->currentProfessional($request);
 
         abort_unless(
-            $block->professional_id === $pro->id &&
-            $block->block_group === 'links' &&
-            $block->block_type === 'link',
+            $linkBlock->professional_id === $pro->id &&
+            $linkBlock->block_group === 'links' &&
+            $linkBlock->block_type === 'link',
             404
         );
 
         $data = $request->validated();
         unset($data['id']);
 
-        $block->fill($data);
-        $block->save();
+        $linkBlock->fill($data);
+        $linkBlock->save();
 
-        return $this->success(['block' => $block->fresh()]);
+        return $this->success(['block' => $linkBlock->fresh()]);
     }
 
-    public function destroy(DestroyLinkBlockRequest $request, Block $block)
+    public function destroy(DestroyLinkBlockRequest $request, Block $linkBlock)
     {
         $request->validated();
 
         $pro = $this->currentProfessional($request);
 
         abort_unless(
-            $block->professional_id === $pro->id &&
-            $block->block_group === 'links' &&
-            $block->block_type === 'link',
+            $linkBlock->professional_id === $pro->id &&
+            $linkBlock->block_group === 'links' &&
+            $linkBlock->block_type === 'link',
             404
         );
 
-        $block->delete();
+        $linkBlock->delete();
 
         return $this->success(['deleted' => true]);
     }

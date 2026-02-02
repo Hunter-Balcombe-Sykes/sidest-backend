@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Requests\Api\Staff\ProfessionalSite\Services\StaffReorderServiceLayoutRequest;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Services\StaffReorderServiceRequest;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Services\StaffStoreServiceRequest;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Services\StaffUpdateServiceRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
+use App\Models\Core\Professional\ServiceCategory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,56 +20,96 @@ class StaffServiceManagementController extends ApiController
     {
         $includeArchived = $request->boolean('include_archived');
         $onlyArchived    = $request->boolean('only_archived');
+        $grouped         = $request->boolean('grouped');
 
-        $query = Service::query()
+        $servicesQ = Service::query()
             ->where('professional_id', $professional->id);
 
         if ($onlyArchived) {
-            $query->onlyTrashed();
+            $servicesQ->onlyTrashed();
         } elseif ($includeArchived) {
-            $query->withTrashed();
+            $servicesQ->withTrashed();
         }
 
-        $services = $query
+        $services = $servicesQ
             ->orderBy('sort_order')
             ->orderBy('created_at')
             ->get();
 
+        if (!$grouped) {
+            return $this->success([
+                'services' => $services,
+                'filters' => [
+                    'include_archived' => $includeArchived,
+                    'only_archived' => $onlyArchived,
+                    'grouped' => false,
+                ],
+            ]);
+        }
+
+        $catsQ = ServiceCategory::query()
+            ->where('professional_id', $professional->id);
+
+        if ($onlyArchived) {
+            $catsQ->onlyTrashed();
+        } elseif ($includeArchived) {
+            $catsQ->withTrashed();
+        }
+
+        $categories = $catsQ->orderBy('sort_order')->orderBy('created_at')->get();
+
+        $servicesByCategory = $services->groupBy(fn (Service $s) => $s->category_id ?? '__uncategorised__');
+
+        $categoryPayload = $categories->map(function (ServiceCategory $c) use ($servicesByCategory) {
+            return [
+                'id' => $c->id,
+                'professional_id' => $c->professional_id,
+                'title' => $c->title,
+                'sort_order' => $c->sort_order,
+                'deleted_at' => $c->deleted_at,
+                'services' => $servicesByCategory->get($c->id, collect())->values(),
+            ];
+        })->values();
+
         return $this->success([
-            'services' => $services,
+            'categories' => $categoryPayload,
+            'uncategorised_services' => $servicesByCategory->get('__uncategorised__', collect())->values(),
             'filters' => [
                 'include_archived' => $includeArchived,
                 'only_archived' => $onlyArchived,
-                ],
-            ]);
+                'grouped' => true,
+            ],
+        ]);
     }
 
     public function store(StaffStoreServiceRequest $request, Professional $professional): JsonResponse
     {
         $data = $request->validated();
 
+        $this->assertCategoryBelongsToProfessional($professional->id, $data['category_id'] ?? null);
 
         $service = DB::transaction(function () use ($professional, $data) {
-            // One-at-a-time service writes per professional
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["services:{$professional->id}"]);
+
             if (!array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
                 $max = Service::query()
                     ->where('professional_id', $professional->id)
+                    ->where('category_id', $data['category_id'] ?? null)
                     ->max('sort_order');
 
                 $data['sort_order'] = is_null($max) ? 0 : ((int)$max + 1);
             }
 
             $service = Service::query()->create([
-                'professional_id' => $professional->id,
-                'title' => $data['title'],
-                'category' => $data['category'] ?? null,
-                'description' => $data['description'] ?? null,
-                'price_cents' => $data['price_cents'],
-                'currency_code' => $data['currency_code'] ?? 'AUD',
-                'duration_minutes' => $data['duration_minutes'] ?? null,
-                'is_active' => $data['is_active'] ?? true,
-                'sort_order' => $data['sort_order'],
+                'professional_id'   => $professional->id,
+                'category_id'       => $data['category_id'] ?? null,
+                'title'             => $data['title'],
+                'description'       => $data['description'] ?? null,
+                'price_cents'       => $data['price_cents'],
+                'currency_code'     => $data['currency_code'] ?? 'AUD',
+                'duration_minutes'  => $data['duration_minutes'] ?? null,
+                'is_active'         => $data['is_active'] ?? true,
+                'sort_order'        => $data['sort_order'],
             ]);
 
             return $service->fresh();
@@ -78,18 +120,40 @@ class StaffServiceManagementController extends ApiController
 
     public function show(Request $request, Professional $professional, Service $service): JsonResponse
     {
-        $includeArchived = $request->boolean('include_archived');
+        abort_unless($service->professional_id === $professional->id, 404);
 
-        if (!$includeArchived && $service->trashed()) { abort(404); }
+        $includeArchived = $request->boolean('include_archived');
+        if (!$includeArchived && $service->trashed()) {
+            abort(404);
+        }
 
         return $this->success(['service' => $service]);
     }
 
     public function update(StaffUpdateServiceRequest $request, Professional $professional, Service $service): JsonResponse
     {
-        if ($service->trashed()) { abort(404); }
+        abort_unless($service->professional_id === $professional->id, 404);
+        if ($service->trashed()) {
+            abort(404);
+        }
 
-        $service->fill($request->validated());
+        $data = $request->validated();
+
+        if (array_key_exists('category_id', $data)) {
+            $this->assertCategoryBelongsToProfessional($professional->id, $data['category_id']);
+
+            // If moving categories and no explicit sort_order, place at end of new bucket
+            if (($data['category_id'] ?? null) !== $service->category_id && !array_key_exists('sort_order', $data)) {
+                $max = Service::query()
+                    ->where('professional_id', $professional->id)
+                    ->where('category_id', $data['category_id'] ?? null)
+                    ->max('sort_order');
+
+                $data['sort_order'] = is_null($max) ? 0 : ((int)$max + 1);
+            }
+        }
+
+        $service->fill($data);
         $service->save();
 
         return $this->success(['service' => $service->fresh()]);
@@ -97,7 +161,11 @@ class StaffServiceManagementController extends ApiController
 
     public function destroy(Professional $professional, Service $service): JsonResponse
     {
-        if ($service->trashed()) { abort(404); }
+        abort_unless($service->professional_id === $professional->id, 404);
+        if ($service->trashed()) {
+            abort(404);
+        }
+
         $service->delete();
 
         return $this->success(['deleted' => true]);
@@ -139,10 +207,96 @@ class StaffServiceManagementController extends ApiController
         return $this->success(['ok' => true]);
     }
 
+    // NEW: full layout reorder (categories + services)
+    public function reorderLayout(StaffReorderServiceLayoutRequest $request, Professional $professional): JsonResponse
+    {
+        $payload = $request->validated();
+
+        DB::transaction(function () use ($professional, $payload) {
+            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["service-layout:{$professional->id}"]);
+
+            $activeCategoryIds = ServiceCategory::query()
+                ->where('professional_id', $professional->id)
+                ->pluck('id')
+                ->all();
+            $activeCategorySet = array_flip($activeCategoryIds);
+
+            $activeServiceIds = Service::query()
+                ->where('professional_id', $professional->id)
+                ->pluck('id')
+                ->all();
+            $activeServiceSet = array_flip($activeServiceIds);
+
+            $providedCategoryIds = [];
+            $providedServiceIds = [];
+
+            foreach ($payload['categories'] as $catBlock) {
+                $catId = $catBlock['id'] ?? null;
+
+                if ($catId !== null) {
+                    if (!isset($activeCategorySet[$catId])) {
+                        abort(422, 'One or more category IDs are invalid.');
+                    }
+                    $providedCategoryIds[] = $catId;
+                }
+
+                foreach ($catBlock['service_ids'] as $sid) {
+                    if (!isset($activeServiceSet[$sid])) {
+                        abort(422, 'One or more service IDs are invalid.');
+                    }
+                    $providedServiceIds[] = $sid;
+                }
+            }
+
+            // Ensure every service appears exactly once
+            if (count($providedServiceIds) !== count(array_unique($providedServiceIds))) {
+                abort(422, 'Duplicate service IDs detected in layout payload.');
+            }
+            if (count($providedServiceIds) !== count($activeServiceIds)) {
+                abort(422, 'Layout payload must include all service IDs for this professional.');
+            }
+
+            // Ensure all categories included (excluding null bucket)
+            $providedCategoryIds = array_values(array_unique($providedCategoryIds));
+            sort($providedCategoryIds);
+            $sortedActive = $activeCategoryIds;
+            sort($sortedActive);
+
+            if ($providedCategoryIds !== $sortedActive) {
+                abort(422, 'Layout payload must include all category IDs (use one block with id=null for uncategorised).');
+            }
+
+            // Apply category order + service order
+            $categorySort = 0;
+            foreach ($payload['categories'] as $catBlock) {
+                $catId = $catBlock['id'] ?? null;
+
+                if ($catId !== null) {
+                    ServiceCategory::query()
+                        ->where('professional_id', $professional->id)
+                        ->where('id', $catId)
+                        ->update(['sort_order' => $categorySort++]);
+                }
+
+                foreach ($catBlock['service_ids'] as $i => $serviceId) {
+                    Service::query()
+                        ->where('professional_id', $professional->id)
+                        ->where('id', $serviceId)
+                        ->update([
+                            'category_id' => $catId,
+                            'sort_order' => $i,
+                        ]);
+                }
+            }
+        });
+
+        return $this->success(['ok' => true]);
+    }
 
     public function forceDestroy(Professional $professional, Service $service): JsonResponse
     {
-        // hard delete
+        abort_unless($service->professional_id === $professional->id, 404);
+
         $service->forceDelete();
 
         return $this->success(['deleted' => true, 'hard' => true]);
@@ -150,8 +304,29 @@ class StaffServiceManagementController extends ApiController
 
     public function restore(Professional $professional, Service $service): JsonResponse
     {
-        if ($service->trashed()) { $service->restore(); }
+        abort_unless($service->professional_id === $professional->id, 404);
+
+        if ($service->trashed()) {
+            $service->restore();
+        }
 
         return $this->success(['restored' => true, 'service' => $service->fresh()]);
+    }
+
+    private function assertCategoryBelongsToProfessional(string $professionalId, ?string $categoryId): void
+    {
+        if ($categoryId === null) {
+            return;
+        }
+
+        $ok = ServiceCategory::query()
+            ->where('id', $categoryId)
+            ->where('professional_id', $professionalId)
+            ->whereNull('deleted_at')
+            ->exists();
+
+        if (!$ok) {
+            abort(422, 'Category is invalid.');
+        }
     }
 }

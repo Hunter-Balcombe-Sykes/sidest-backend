@@ -3,43 +3,83 @@
 namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Requests\Api\Professional\Services\ReorderServiceLayoutRequest;
 use App\Http\Requests\Api\Professional\Services\ReorderServiceRequest;
 use App\Http\Requests\Api\Professional\Services\StoreServiceRequest;
 use App\Http\Requests\Api\Professional\Services\UpdateServiceRequest;
 use App\Models\Core\Professional\Service;
+use App\Models\Core\Professional\ServiceCategory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+
 class ProfessionalServiceController extends ApiController
 {
     use ResolveCurrentProfessional;
-    use ResolveCurrentSite;
+
     public function index(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
 
         $includeArchived = $request->boolean('include_archived');
         $onlyArchived    = $request->boolean('only_archived');
+        $grouped         = $request->boolean('grouped');
 
-        $query = Service::query()
+        $servicesQuery = Service::query()
             ->where('professional_id', $pro->id);
 
         if ($onlyArchived) {
-            $query->onlyTrashed();
+            $servicesQuery->onlyTrashed();
         } elseif ($includeArchived) {
-            $query->withTrashed();
+            $servicesQuery->withTrashed();
         }
 
-        $services = $query->orderBy('sort_order')->orderBy('created_at')->get();
+        $services = $servicesQuery->orderBy('sort_order')->orderBy('created_at')->get();
+
+        if (!$grouped) {
+            return $this->success([
+                'services' => $services,
+                'filters' => [
+                    'include_archived' => $includeArchived,
+                    'only_archived' => $onlyArchived,
+                ],
+            ]);
+        }
+
+        // Categories list (for grouped UI)
+        $catQuery = ServiceCategory::query()
+            ->where('professional_id', $pro->id);
+
+        if ($onlyArchived) {
+            $catQuery->onlyTrashed();
+        } elseif ($includeArchived) {
+            $catQuery->withTrashed();
+        }
+
+        $categories = $catQuery->orderBy('sort_order')->orderBy('created_at')->get();
+
+        $servicesByCategory = $services->groupBy(fn (Service $s) => $s->category_id ?? '__uncategorised__');
+
+        $categoryPayload = $categories->map(function (ServiceCategory $c) use ($servicesByCategory) {
+            return [
+                'id' => $c->id,
+                'professional_id' => $c->professional_id,
+                'title' => $c->title,
+                'sort_order' => $c->sort_order,
+                'deleted_at' => $c->deleted_at,
+                'services' => $servicesByCategory->get($c->id, collect())->values(),
+            ];
+        })->values();
 
         return $this->success([
-            'services' => $services,
+            'categories' => $categoryPayload,
+            'uncategorised_services' => $servicesByCategory->get('__uncategorised__', collect())->values(),
             'filters' => [
-        'include_archived' => $includeArchived,
-        'only_archived' => $onlyArchived,
-                ],
+                'include_archived' => $includeArchived,
+                'only_archived' => $onlyArchived,
+                'grouped' => true,
+            ],
         ]);
     }
 
@@ -48,13 +88,15 @@ class ProfessionalServiceController extends ApiController
         $pro = $this->currentProfessional($request);
         $data = $request->validated();
 
+        $this->assertCategoryBelongsToProfessional($pro->id, $data['category_id'] ?? null);
+
         $service = DB::transaction(function () use ($pro, $data) {
-            // One-at-a-time service writes per professional
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["services:{$pro->id}"]);
 
             if (!array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
                 $max = Service::query()
                     ->where('professional_id', $pro->id)
+                    ->where('category_id', $data['category_id'] ?? null)
                     ->max('sort_order');
 
                 $data['sort_order'] = is_null($max) ? 0 : ((int)$max + 1);
@@ -62,8 +104,8 @@ class ProfessionalServiceController extends ApiController
 
             $service = Service::query()->create([
                 'professional_id'   => $pro->id,
+                'category_id'       => $data['category_id'] ?? null,
                 'title'             => $data['title'],
-                'category'          => $data['category'] ?? null,
                 'description'       => $data['description'] ?? null,
                 'price_cents'       => $data['price_cents'],
                 'currency_code'     => $data['currency_code'] ?? 'AUD',
@@ -73,7 +115,6 @@ class ProfessionalServiceController extends ApiController
             ]);
 
             return $service->fresh();
-
         });
 
         return $this->success(['service' => $service], 201);
@@ -94,7 +135,13 @@ class ProfessionalServiceController extends ApiController
 
         abort_unless($service->professional_id === $pro->id, 404);
 
-        $service->fill($request->validated());
+        $data = $request->validated();
+
+        if (array_key_exists('category_id', $data)) {
+            $this->assertCategoryBelongsToProfessional($pro->id, $data['category_id']);
+        }
+
+        $service->fill($data);
         $service->save();
 
         return $this->success(['service' => $service->fresh()]);
@@ -111,6 +158,7 @@ class ProfessionalServiceController extends ApiController
         return $this->success(['deleted' => true]);
     }
 
+    // Old flat reorder (kept for compatibility)
     public function reorder(ReorderServiceRequest $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
@@ -127,7 +175,6 @@ class ProfessionalServiceController extends ApiController
                 ->pluck('id')
                 ->all();
 
-            // Validate: every provided id belongs to this professional
             $allSet = array_flip($allIds);
             foreach ($ids as $id) {
                 if (!isset($allSet[$id])) {
@@ -135,7 +182,6 @@ class ProfessionalServiceController extends ApiController
                 }
             }
 
-            // Provided first, then the rest
             $remaining = array_values(array_diff($allIds, $ids));
             $newOrder = array_merge($ids, $remaining);
 
@@ -150,14 +196,100 @@ class ProfessionalServiceController extends ApiController
         return $this->success(['ok' => true]);
     }
 
+    // NEW: full layout reorder (categories + services within each category)
+    public function reorderLayout(ReorderServiceLayoutRequest $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $payload = $request->validated();
+
+        DB::transaction(function () use ($pro, $payload) {
+            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["service-layout:{$pro->id}"]);
+
+            $activeCategoryIds = ServiceCategory::query()
+                ->where('professional_id', $pro->id)
+                ->pluck('id')
+                ->all();
+            $activeCategorySet = array_flip($activeCategoryIds);
+
+            $activeServiceIds = Service::query()
+                ->where('professional_id', $pro->id)
+                ->pluck('id')
+                ->all();
+            $activeServiceSet = array_flip($activeServiceIds);
+
+            $providedCategoryIds = [];
+            $providedServiceIds = [];
+
+            foreach ($payload['categories'] as $catBlock) {
+                $catId = $catBlock['id'] ?? null;
+
+                if ($catId !== null) {
+                    if (!isset($activeCategorySet[$catId])) {
+                        abort(422, 'One or more category IDs are invalid.');
+                    }
+                    $providedCategoryIds[] = $catId;
+                }
+
+                foreach ($catBlock['service_ids'] as $sid) {
+                    if (!isset($activeServiceSet[$sid])) {
+                        abort(422, 'One or more service IDs are invalid.');
+                    }
+                    $providedServiceIds[] = $sid;
+                }
+            }
+
+            // Ensure every service appears exactly once
+            $providedServiceIds = array_values($providedServiceIds);
+            if (count($providedServiceIds) !== count(array_unique($providedServiceIds))) {
+                abort(422, 'Duplicate service IDs detected in layout payload.');
+            }
+            if (count($providedServiceIds) !== count($activeServiceIds)) {
+                abort(422, 'Layout payload must include all service IDs for this professional.');
+            }
+
+            // Ensure all categories are included (excluding uncategorised null bucket)
+            $providedCategoryIds = array_values(array_unique($providedCategoryIds));
+            sort($providedCategoryIds);
+            $sortedActive = $activeCategoryIds;
+            sort($sortedActive);
+
+            if ($providedCategoryIds !== $sortedActive) {
+                abort(422, 'Layout payload must include all category IDs (use one block with id=null for uncategorised).');
+            }
+
+            // Apply category order + service order
+            $categorySort = 0;
+            foreach ($payload['categories'] as $catBlock) {
+                $catId = $catBlock['id'] ?? null;
+
+                if ($catId !== null) {
+                    ServiceCategory::query()
+                        ->where('professional_id', $pro->id)
+                        ->where('id', $catId)
+                        ->update(['sort_order' => $categorySort++]);
+                }
+
+                foreach ($catBlock['service_ids'] as $i => $serviceId) {
+                    Service::query()
+                        ->where('professional_id', $pro->id)
+                        ->where('id', $serviceId)
+                        ->update([
+                            'category_id' => $catId,
+                            'sort_order' => $i,
+                        ]);
+                }
+            }
+        });
+
+        return $this->success(['ok' => true]);
+    }
+
     public function restore(Request $request, Service $service): JsonResponse
     {
         $pro = $this->currentProfessional($request);
 
-        // Ownership guard
         abort_unless($service->professional_id === $pro->id, 404);
 
-        // If it's not deleted, make it a no-op (nice for frontend retries)
         if (!$service->trashed()) {
             return $this->success(['restored' => true, 'service' => $service->fresh()]);
         }
@@ -165,18 +297,32 @@ class ProfessionalServiceController extends ApiController
         DB::transaction(function () use ($pro, $service) {
             $service->restore();
 
-            // Optional but recommended:
-            // put restored service at the end to avoid sort_order collisions
             $max = Service::query()
                 ->where('professional_id', $pro->id)
+                ->where('category_id', $service->category_id)
                 ->max('sort_order');
 
-            $service->sort_order = is_null($max) ? 0 : ($max + 1);
+            $service->sort_order = is_null($max) ? 0 : ((int)$max + 1);
             $service->save();
-
         });
 
         return $this->success(['restored' => true, 'service' => $service->fresh()]);
     }
 
+    private function assertCategoryBelongsToProfessional(string $professionalId, ?string $categoryId): void
+    {
+        if ($categoryId === null) {
+            return;
+        }
+
+        $ok = ServiceCategory::query()
+            ->where('id', $categoryId)
+            ->where('professional_id', $professionalId)
+            ->whereNull('deleted_at')
+            ->exists();
+
+        if (!$ok) {
+            abort(422, 'Category is invalid.');
+        }
+    }
 }

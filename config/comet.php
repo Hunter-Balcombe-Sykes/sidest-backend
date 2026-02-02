@@ -8,7 +8,7 @@ return [
     'reserved_subdomains' => [
         'www', 'api', 'admin', 'app', 'staff', 'dashboard',
         'support', 'help', 'billing', 'static', 'cdn', 'assets',
-        'auth', 'docs', 'status',
+        'auth', 'docs', 'status', 'comet',
     ],
     'link_block_icon_keys' => [
         'scissors',
