@@ -102,6 +102,7 @@ class SiteCacheService
             fn () => Block::query()
                 ->where('site_id', $siteId)
                 ->where('block_group', 'links')
+                ->active()
                 ->orderBy('sort_order')
                 ->get()
                 ->toArray()

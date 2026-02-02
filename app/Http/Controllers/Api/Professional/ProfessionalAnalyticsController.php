@@ -56,7 +56,7 @@ class ProfessionalAnalyticsController extends ApiController
             return $this->error('Invalid date range: from must be before to. ', 422);
         }
 
-        $site = $professional->site()->first();
+        $site = $professional->site;
         if (!$site) {
             return $this->error('professional has no site.', 404);
         }

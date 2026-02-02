@@ -17,6 +17,7 @@ class QrCodeController extends ApiController
     public function redirect(string $qr_slug, Request $request): Response
     {
         $professional = Professional::query()
+            ->with('site')
             ->where('qr_slug', $qr_slug)
             ->first();
 
@@ -24,7 +25,6 @@ class QrCodeController extends ApiController
             abort(404);
         }
 
-        $professional->loadMissing('site');
         $site = $professional->site;
 
         if (!$site || !is_string($site->subdomain) || $site->subdomain === '') {
