@@ -5,6 +5,7 @@ namespace App\Services\Cache;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class ProfessionalCacheService
 {
@@ -145,7 +146,7 @@ class ProfessionalCacheService
         return Cache::remember(
             CacheKeyGenerator::customerCount($professionalId),
             now()->addMinutes(15),
-            fn () => \App\Models\Core\Professional\Customer::query()
+            fn () => DB::table('core.customers')
                 ->where('professional_id', $professionalId)
                 ->whereNull('deleted_at')
                 ->count()
