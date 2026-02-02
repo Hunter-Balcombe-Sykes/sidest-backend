@@ -19,12 +19,12 @@ class Subscription extends Model
         'provider_payload' => 'array',
     ];
 
-    public function plan(): belongsTo
+    public function plan(): BelongsTo
     {
         return $this->belongsTo(Plan::class, 'plan_id');
     }
 
-    public function professional(): belongsTo
+    public function professional(): BelongsTo
     {
         return $this->belongsTo(Professional::class, 'professional_id');
     }

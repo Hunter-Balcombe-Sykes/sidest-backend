@@ -216,6 +216,24 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | utm_campaign          | string   | yes      | `jan_promo`             | Max 120                                                                          |
 | block_id (click only) | uuid     | no       | `d5b0...`               | Must be an active link block belonging to the site                               |
 
+### Plans (core.plans)
+| Name            | Type     | Nullable | Example                | Constraints / Notes     |
+|-----------------|----------|----------|------------------------|-------------------------|
+| id              | uuid     | no       | `a3c1...`              | Primary key             |
+| professional_id | uuid     | yes      | `4db0...`              | Set by server on create |
+| name            | string   | no       | `Monthly`              | Max 120                 |
+| price_cents     | integer  | no       | `1000`                 | Must be positive         |
+| currency_code   | string   | no       | `AUD`                  | Must be a valid ISO 4217 code |
+| duration_months | integer  | no       | `12`                   | Must be positive         |
+| is_active       | boolean  | no       | `true`                 |                         |
+
+### Subscriptions (core.subscriptions)
+| Name            | Type     | Nullable | Example                | Constraints / Notes     |
+|-----------------|----------|----------|------------------------|-------------------------|
+| id              | uuid     | no       | `a3c1...`              | Primary key             |
+| professional_id | uuid     | yes      | `4db0...`              | Set by server on create |
+| list_key        | string   | no       | `marketing`             | Must be one of marketing,
+
 ## 5) Conventions (headers, errors, pagination, rate limits)
 
 ### Standard headers

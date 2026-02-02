@@ -24,4 +24,21 @@ Route::get('/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::cla
 Route::get('/health', fn () => response()->json(['ok' => true]));
 Route::get('/ready', [HealthController::class, 'check']);
 
+Route::get('/debug-db', function () {
+    $start = microtime(true);
 
+    try {
+        DB::connection()->getPdo(); // connect only
+        $duration = microtime(true) - $start;
+
+        return response()->json([
+            'ok'       => true,
+            'duration' => $duration,
+        ]);
+    } catch (Throwable $e) {
+        return response()->json([
+            'ok'    => false,
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+});
