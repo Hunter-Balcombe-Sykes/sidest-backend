@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\PublicSite\BootstrapController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 // Ping
 Route::get('/ping', fn () => response()->json(['pong' => true]));
@@ -28,14 +30,22 @@ Route::get('/debug-db', function () {
     $start = microtime(true);
 
     try {
-        DB::connection()->getPdo(); // connect only
+        Log::info('/api/debug-db before DB connect');
+
+        DB::connection()->getPdo();
         $duration = microtime(true) - $start;
+
+        Log::info('/api/debug-db after DB connect', [
+            'ms' => $duration * 1000,
+        ]);
 
         return response()->json([
             'ok'       => true,
             'duration' => $duration,
         ]);
-    } catch (Throwable $e) {
+    } catch (\Throwable $e) {
+        Log::error('/api/debug-db error', ['message' => $e->getMessage()]);
+
         return response()->json([
             'ok'    => false,
             'error' => $e->getMessage(),
