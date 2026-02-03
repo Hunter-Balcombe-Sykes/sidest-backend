@@ -9,6 +9,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
+use Illuminate\Support\Facades\Log;
 
 class ProfessionalController extends ApiController
 {
@@ -18,9 +19,24 @@ class ProfessionalController extends ApiController
     public function show(ProfessionalShowRequest $request)
     {
         $uid = $request->attributes->get('supabase_uid');
+        Log::info('/api/me start');
+
         $pro = $this->currentProfessional($request);
+        Log::info('/api/me after currentProfessional', ['pro_id' => $pro->id]);
 
         $cache = app(ProfessionalCacheService::class);
+
+        $t = microtime(true);
+        $payload = $cache->getPayloadById($pro->id);
+        Log::info('/api/me after payload', ['ms' => (microtime(true) - $t) * 1000]);
+
+        $t = microtime(true);
+        $services = $cache->getActiveServices($pro->id);
+        Log::info('/api/me after services', ['ms' => (microtime(true) - $t) * 1000]);
+
+        $t = microtime(true);
+        $customersCount = $cache->getCustomerCount($pro->id);
+        Log::info('/api/me after customers', ['ms' => (microtime(true) - $t) * 1000]);
 
         // Use the already-loaded professional to build payload instead of querying again
         $payload = [
