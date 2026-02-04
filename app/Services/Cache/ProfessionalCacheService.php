@@ -24,19 +24,35 @@ class ProfessionalCacheService
                 ->value('id')
         ); */   
 
-        Log::info('ProfessionalCacheService getIdByAuthId start', ['auth_user_id' => $authUserId]);
+            Log::info('ProfessionalCacheService getIdByAuthId start', ['auth_user_id' => $authUserId]);
 
-        // TEMP: no cache, direct DB query
-        $id = Professional::query()
-            ->where('auth_user_id', $authUserId)
-            ->value('id');
+            $t0 = microtime(true);
 
-        Log::info('ProfessionalCacheService getIdByAuthId end', [
-            'auth_user_id' => $authUserId,
-            'id'           => $id,
-        ]);
+            // Force a connection so we can measure connect vs query time
+            $connStart = microtime(true);
+            DB::connection()->getPdo();
+            $connMs = (microtime(true) - $connStart) * 1000;
 
-        return $id;
+            Log::info('ProfessionalCacheService getIdByAuthId after connect', [
+                'auth_user_id' => $authUserId,
+                'connect_ms'   => $connMs,
+            ]);
+
+            $qStart = microtime(true);
+            $id = Professional::query()
+                ->where('auth_user_id', $authUserId)
+                ->value('id');
+            $qMs = (microtime(true) - $qStart) * 1000;
+
+            Log::info('ProfessionalCacheService getIdByAuthId end', [
+                'auth_user_id' => $authUserId,
+                'id'           => $id,
+                'connect_ms'   => $connMs,
+                'query_ms'     => $qMs,
+                'total_ms'     => (microtime(true) - $t0) * 1000,
+            ]);
+
+            return $id;
     }
 
     public function getIdByHandle(string $handle): ?string
