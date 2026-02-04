@@ -26,11 +26,8 @@ class LoadCurrentProfessional
 
         Log::info('LoadCurrentProfessional before cache getByAuthId', ['uid' => $uid]);
 
-        // TEMP: bypass getByAuthId to see if crash disappears
-        $professional = null;
-
         // Use cache service instead of a direct query
-        // $professional = $this->professionalCache->getByAuthId($uid);
+        $professional = $this->professionalCache->getByAuthId($uid);
 
         Log::info('LoadCurrentProfessional after cache getByAuthId', [
             'uid'   => $uid,

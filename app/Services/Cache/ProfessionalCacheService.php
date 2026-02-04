@@ -22,7 +22,7 @@ class ProfessionalCacheService
             fn () => Professional::query()
                 ->where('auth_user_id', $authUserId)
                 ->value('id')
-        ); */
+        ); */   
 
         Log::info('ProfessionalCacheService getIdByAuthId start', ['auth_user_id' => $authUserId]);
 
