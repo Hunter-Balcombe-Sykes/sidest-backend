@@ -6,6 +6,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ProfessionalCacheService
 {
@@ -23,9 +24,19 @@ class ProfessionalCacheService
                 ->value('id')
         ); */
 
-         return Professional::query()
-                ->where('auth_user_id', $authUserId)
-                ->value('id');
+        Log::info('ProfessionalCacheService getIdByAuthId start', ['auth_user_id' => $authUserId]);
+
+        // TEMP: no cache, direct DB query
+        $id = Professional::query()
+            ->where('auth_user_id', $authUserId)
+            ->value('id');
+
+        Log::info('ProfessionalCacheService getIdByAuthId end', [
+            'auth_user_id' => $authUserId,
+        '   id'           => $id,
+        ]);
+
+        return $id;
     }
 
     public function getIdByHandle(string $handle): ?string
@@ -122,8 +133,31 @@ class ProfessionalCacheService
 
     public function getByAuthId(string $authUserId): ?Professional
     {
+        /* $id = $this->getIdByAuthId($authUserId);
+        return $id ? Professional::query()->find($id) : null; */
+
+        Log::info('ProfessionalCacheService getByAuthId start', ['auth_user_id' => $authUserId]);
+
         $id = $this->getIdByAuthId($authUserId);
-        return $id ? Professional::query()->find($id) : null;
+
+        Log::info('ProfessionalCacheService getByAuthId after getIdByAuthId', [
+            'auth_user_id' => $authUserId,
+            'id'           => $id,
+        ]);
+
+        if (!$id) {
+            Log::info('ProfessionalCacheService getByAuthId no id found', ['auth_user_id' => $authUserId]);
+            return null;
+        }
+
+        $pro = Professional::query()->find($id);
+
+        Log::info('ProfessionalCacheService getByAuthId after find', [
+            'auth_user_id' => $authUserId,
+            'pro_id'       => optional($pro)->id,
+        ]);
+
+        return $pro;
     }
 
     /* ---------------------------
