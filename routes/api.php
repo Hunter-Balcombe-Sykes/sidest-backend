@@ -60,29 +60,22 @@ Route::get('/debug-themes', function () {
         Log::info('/api/debug-themes before connect');
 
         // Measure connect
-        $connStart = microtime(true);
         DB::connection()->getPdo();
-        $connMs = (microtime(true) - $connStart) * 1000;
 
-        Log::info('/api/debug-themes after connect', ['connect_ms' => $connMs]);
+        Log::info('/api/debug-themes after connect');
 
         // Measure a simple SELECT against core.themes
-        $qStart = microtime(true);
         $themes = DB::table('core.themes')
             ->select('id', 'key', 'name')
             ->limit(3)
             ->get();
-        $qMs = (microtime(true) - $qStart) * 1000;
 
         Log::info('/api/debug-themes after query', [
-            'query_ms' => $qMs,
             'count'    => $themes->count(),
         ]);
 
         return response()->json([
             'ok'         => true,
-            'connect_ms' => $connMs,
-            'query_ms'   => $qMs,
             'themes'     => $themes,
         ]);
     } catch (\Throwable $e) {

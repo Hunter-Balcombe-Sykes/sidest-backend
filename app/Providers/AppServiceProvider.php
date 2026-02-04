@@ -24,16 +24,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        if (app()->environment('local', 'development')) {
-            DB::listen(function ($query) {
-                Log::info('DB query executed', [
-                    'sql'      => $query->sql,
-                    'bindings' => $query->bindings,
-                    'time_ms'  => $query->time,
-                ]);
-            });
-        }
-
         $this->configureRateLimiting();
     }
 
