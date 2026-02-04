@@ -6,6 +6,8 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log; 
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -22,6 +24,16 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        if (app()->environment('local', 'development')) {
+            DB::listen(function ($query) {
+                Log::info('DB query executed', [
+                    'sql'      => $query->sql,
+                    'bindings' => $query->bindings,
+                    'time_ms'  => $query->time,
+                ]);
+            });
+        }
+
         $this->configureRateLimiting();
     }
 
