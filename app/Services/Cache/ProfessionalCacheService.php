@@ -15,13 +15,17 @@ class ProfessionalCacheService
 
     public function getIdByAuthId(string $authUserId): ?string
     {
-        return Cache::remember(
+        /* return Cache::remember(
             CacheKeyGenerator::professionalIdByAuthId($authUserId),
             now()->addMinutes(30),
             fn () => Professional::query()
                 ->where('auth_user_id', $authUserId)
                 ->value('id')
-        );
+        ); */
+
+         return Professional::query()
+                ->where('auth_user_id', $authUserId)
+                ->value('id');
     }
 
     public function getIdByHandle(string $handle): ?string
