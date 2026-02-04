@@ -33,7 +33,7 @@ class ProfessionalCacheService
 
         Log::info('ProfessionalCacheService getIdByAuthId end', [
             'auth_user_id' => $authUserId,
-        '   id'           => $id,
+            'id'           => $id,
         ]);
 
         return $id;
