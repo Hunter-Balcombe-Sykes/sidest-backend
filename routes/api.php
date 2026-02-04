@@ -83,3 +83,48 @@ Route::get('/debug-themes', function () {
         return response()->json(['ok' => false, 'error' => $e->getMessage()], 500);
     }
 });
+
+Route::get('/debug-db-pdo', function () {
+    $start = microtime(true);
+
+    try {
+        Log::info('/api/debug-db-pdo before connect');
+
+        // 1) Connect timing
+        $connStart = microtime(true);
+        $pdo = DB::connection()->getPdo();
+        $connMs = (microtime(true) - $connStart) * 1000;
+
+        Log::info('/api/debug-db-pdo after connect', [
+            'connect_ms' => $connMs,
+        ]);
+
+        // 2) Super simple query timing
+        $qStart = microtime(true);
+        $stmt = $pdo->query('select 1 as one'); // no params, no schema
+        $row = $stmt ? $stmt->fetch(\PDO::FETCH_ASSOC) : null;
+        $qMs = (microtime(true) - $qStart) * 1000;
+
+        Log::info('/api/debug-db-pdo after query', [
+            'query_ms' => $qMs,
+            'row'      => $row,
+        ]);
+
+        return response()->json([
+            'ok'         => true,
+            'connect_ms' => $connMs,
+            'query_ms'   => $qMs,
+            'row'        => $row,
+            'total_ms'   => (microtime(true) - $start) * 1000,
+        ]);
+    } catch (\Throwable $e) {
+        Log::error('/api/debug-db-pdo error', [
+            'message' => $e->getMessage(),
+        ]);
+
+        return response()->json([
+            'ok'    => false,
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+});
