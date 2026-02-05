@@ -9,7 +9,7 @@ class PublicSitePayload extends BaseModel
 {
     use HasFactory;
 
-    protected $table = 'core.public_site_payload';
+    protected $table = 'public_site_payload';
     protected $primaryKey = 'site_id';
 
     public $incrementing = false;

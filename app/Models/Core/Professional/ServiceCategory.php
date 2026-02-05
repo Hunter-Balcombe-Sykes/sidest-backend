@@ -12,7 +12,7 @@ class ServiceCategory extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'core.service_categories';
+    protected $table = 'service_categories';
 
     public $incrementing = false;
     protected $keyType = 'string';

@@ -13,7 +13,7 @@ class SiteVisit extends BaseModel
 {
     use HasFactory, HasUuids;
 
-    protected $table = 'analytics.site_visits';
+    protected $table = 'site_visits';
 
     public $incrementing = false;
     protected $keyType = 'string';

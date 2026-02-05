@@ -17,7 +17,7 @@ class Site extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'core.sites';
+    protected $table = 'sites';
 
     public $incrementing = false;
     protected $keyType = 'string';

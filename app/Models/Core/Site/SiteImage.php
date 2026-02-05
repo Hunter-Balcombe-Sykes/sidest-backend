@@ -11,7 +11,7 @@ class SiteImage extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'core.site_images';
+    protected $table = 'site_images';
 
     public $incrementing = false;
     protected $keyType = 'string';

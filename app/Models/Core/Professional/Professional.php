@@ -27,7 +27,7 @@ class Professional extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'core.professionals';
+    protected $table = 'professionals';
 
     public $incrementing = false;
     protected $keyType = 'string';

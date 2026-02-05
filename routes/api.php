@@ -65,7 +65,7 @@ Route::get('/debug-themes', function () {
         Log::info('/api/debug-themes after connect');
 
         // Measure a simple SELECT against core.themes
-        $themes = DB::table('core.themes')
+        $themes = DB::table('themes')
             ->select('id', 'key', 'name')
             ->limit(3)
             ->get();

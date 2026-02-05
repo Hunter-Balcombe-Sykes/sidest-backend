@@ -200,7 +200,7 @@ class ProfessionalCacheService
         return Cache::remember(
             CacheKeyGenerator::customerCount($professionalId),
             now()->addMinutes(15),
-            fn () => DB::table('core.customers')
+            fn () => DB::table('customers')
                 ->where('professional_id', $professionalId)
                 ->whereNull('deleted_at')
                 ->count()

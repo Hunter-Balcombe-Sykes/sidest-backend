@@ -1,6 +1,5 @@
 <?php
 
-
 namespace App\Actions\Site;
 
 use App\Models\Core\Professional\Professional;
@@ -56,7 +55,7 @@ class UpdateSiteAction
                         }
                     }
 
-                    $conflictInSites = DB::table('core.sites')
+                    $conflictInSites = DB::table('sites')
                         ->whereRaw('lower(subdomain) = ?', [$incoming])
                         ->where('id', '!=', $site->id)
                         ->exists();
@@ -67,7 +66,7 @@ class UpdateSiteAction
                         ]);
                     }
 
-                    $conflictInAliases = DB::table('core.site_subdomain_aliases')
+                    $conflictInAliases = DB::table('site_subdomain_aliases')
                         ->whereRaw('lower(subdomain) = ?', [$incoming])
                         ->exists();
 

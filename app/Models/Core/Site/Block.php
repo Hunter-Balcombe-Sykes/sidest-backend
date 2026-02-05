@@ -16,7 +16,7 @@ class Block extends BaseModel
     /**
      * @var false|mixed
      */
-    protected $table = 'core.blocks';
+    protected $table = 'blocks';
 
     public $incrementing = false;
     protected $keyType = 'string';

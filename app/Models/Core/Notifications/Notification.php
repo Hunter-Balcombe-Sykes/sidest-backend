@@ -13,7 +13,7 @@ class Notification extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'core.notifications';
+    protected $table = 'notifications';
 
     public $incrementing = false;
     protected $keyType = 'string';

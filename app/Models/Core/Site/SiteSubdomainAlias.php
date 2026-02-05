@@ -10,7 +10,7 @@ class SiteSubdomainAlias extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'core.site_subdomain_aliases';
+    protected $table = 'site_subdomain_aliases';
 
     public $incrementing = false;
     protected $keyType = 'string';

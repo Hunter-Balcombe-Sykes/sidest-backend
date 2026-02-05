@@ -11,7 +11,7 @@ class NotificationReceipt extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'core.notification_receipts';
+    protected $table = 'notification_receipts';
 
     public $incrementing = false;
     protected $keyType = 'string';

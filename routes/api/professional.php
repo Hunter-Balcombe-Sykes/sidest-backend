@@ -24,7 +24,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::get('/me', [ProfessionalController::class, 'show']);
     Route::patch('/me', [ProfessionalController::class, 'update']);
 
-    // View Site Details (optional)
+    // View Site Details
     Route::get('/site', [ProfessionalSiteController::class, 'show']);
 
     // Update Site Details

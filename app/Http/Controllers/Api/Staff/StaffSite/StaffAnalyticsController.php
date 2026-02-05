@@ -58,7 +58,7 @@ class StaffAnalyticsController extends ApiController
         }
 
         // Totals (visits)
-        $visitsAgg = DB::table('analytics.site_visits')
+        $visitsAgg = DB::table('site_visits')
             ->where('professional_id', $professional->id)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw('COUNT(*) as total_visits')
@@ -67,7 +67,7 @@ class StaffAnalyticsController extends ApiController
             ->first();
 
         // Totals (clicks)
-        $clicksAgg = DB::table('analytics.link_clicks')
+        $clicksAgg = DB::table('link_clicks')
             ->where('professional_id', $professional->id)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw('COUNT(*) as total_clicks')
@@ -79,7 +79,7 @@ class StaffAnalyticsController extends ApiController
         $totalClicks = (int) ($clicksAgg->total_clicks ?? 0);
 
         // Daily charts
-        $visitsByDay = DB::table('analytics.site_visits')
+        $visitsByDay = DB::table('site_visits')
             ->where('professional_id', $professional->id)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw('DATE(occurred_at) as day, COUNT(*) as count')
@@ -87,7 +87,7 @@ class StaffAnalyticsController extends ApiController
             ->orderBy('day')
             ->get();
 
-        $clicksByDay = DB::table('analytics.link_clicks')
+        $clicksByDay = DB::table('link_clicks')
             ->where('professional_id', $professional->id)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw('DATE(occurred_at) as day, COUNT(*) as count')
@@ -96,8 +96,8 @@ class StaffAnalyticsController extends ApiController
             ->get();
 
         // Top links
-        $topLinks = DB::table('analytics.link_clicks as lc')
-            ->join('core.blocks as b', 'b.id', '=', 'lc.block_id')
+        $topLinks = DB::table('link_clicks as lc')
+            ->join('blocks as b', 'b.id', '=', 'lc.block_id')
             ->where('lc.professional_id', $professional->id)
             ->whereBetween('lc.occurred_at', [$from, $to])
             ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
