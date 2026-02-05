@@ -27,6 +27,7 @@ class Professional extends Model
 {
     use HasUuids, SoftDeletes;
 
+    protected $connection = 'pgsql';
     protected $table = 'core.professionals';
 
     public $incrementing = false;
