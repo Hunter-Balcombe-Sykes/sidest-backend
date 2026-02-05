@@ -27,13 +27,10 @@ class Professional extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $connection = 'pgsql';
     protected $table = 'core.professionals';
 
     public $incrementing = false;
     protected $keyType = 'string';
-
-    protected $with = ['site'];
 
     protected $fillable = [
         'handle',

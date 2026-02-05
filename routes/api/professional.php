@@ -62,7 +62,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/services/reorder-layout', [ProfessionalServiceController::class, 'reorderLayout']);
 
 
-        // View Analytics
+    // View Analytics
     Route::get('/analytics', [ProfessionalAnalyticsController::class, 'summary']);
 
     // Links
