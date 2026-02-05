@@ -2,10 +2,10 @@
 
 namespace App\Models\Views;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
-class AllSiteData extends Model
+class AllSiteData extends BaseModel
 {
     use HasFactory;
 

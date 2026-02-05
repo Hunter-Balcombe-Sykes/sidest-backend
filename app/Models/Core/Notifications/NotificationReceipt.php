@@ -2,12 +2,12 @@
 
 namespace App\Models\Core\Notifications;
 
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use App\Models\Core\Professional\Professional;
 
-class NotificationReceipt extends Model
+class NotificationReceipt extends BaseModel
 {
     use HasUuids;
 

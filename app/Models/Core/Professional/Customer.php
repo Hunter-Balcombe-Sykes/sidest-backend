@@ -2,12 +2,12 @@
 
 namespace App\Models\Core\Professional;
 
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Customer extends Model
+class Customer extends BaseModel
 {
     use HasUuids, SoftDeletes;
 

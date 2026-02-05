@@ -3,13 +3,13 @@
 namespace App\Models\Core\Site;
 
 use App\Models\Analytics\LinkClick;
+use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Block extends Model
+class Block extends BaseModel
 {
     use HasUuids;
 

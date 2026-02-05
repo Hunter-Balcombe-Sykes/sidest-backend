@@ -4,16 +4,16 @@ namespace App\Models\Core\Site;
 
 use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
+use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property mixed $id
  */
-class Site extends Model
+class Site extends BaseModel
 {
     use HasUuids;
 

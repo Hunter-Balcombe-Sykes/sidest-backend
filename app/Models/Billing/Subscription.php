@@ -2,11 +2,11 @@
 
 namespace App\Models\Billing;
 
+use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class Subscription extends Model
+class Subscription extends BaseModel
 {
     protected $table = 'billing.subscriptions';
     public $incrementing = false;

@@ -2,14 +2,14 @@
 
 namespace App\Models\Core\Notifications;
 
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\Core\Professional\Professional;
 
-class Notification extends Model
+class Notification extends BaseModel
 {
     use HasUuids;
 

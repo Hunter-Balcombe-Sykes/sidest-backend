@@ -2,11 +2,11 @@
 
 namespace App\Models\Core\Staff;
 
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 
-class CometStaff extends Model
+class CometStaff extends BaseModel
 {
     use HasFactory, HasUuids;
 

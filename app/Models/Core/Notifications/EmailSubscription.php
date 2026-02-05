@@ -2,13 +2,13 @@
 
 namespace App\Models\Core\Notifications;
 
+use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
-class EmailSubscription extends Model
+class EmailSubscription extends BaseModel
 {
     use HasUuids;
 

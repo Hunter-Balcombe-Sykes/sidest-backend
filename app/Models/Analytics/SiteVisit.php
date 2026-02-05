@@ -2,14 +2,14 @@
 
 namespace App\Models\Analytics;
 
+use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class SiteVisit extends Model
+class SiteVisit extends BaseModel
 {
     use HasFactory, HasUuids;
 
