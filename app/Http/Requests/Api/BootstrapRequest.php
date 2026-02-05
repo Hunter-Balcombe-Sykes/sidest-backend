@@ -34,7 +34,7 @@ class BootstrapRequest extends BaseFormRequest
                 'required',
                 'string',
                 'max:50',
-                Rule::unique('core.professionals', 'handle_lc')->ignore($ignoreId, 'id'),
+                Rule::unique('professionals', 'handle_lc')->ignore($ignoreId, 'id'),
             ],
         ];
     }
