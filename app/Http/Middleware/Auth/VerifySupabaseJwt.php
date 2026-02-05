@@ -9,11 +9,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Symfony\Component\HttpFoundation\Response;
+use Illuminate\Support\Facades\Log;
 
 class VerifySupabaseJwt
 {
     public function handle(Request $request, Closure $next): Response
     {
+        Log::info('VerifySupabaseJwt start');
+
         $token = $this->getBearerToken($request);
         if (!$token) {
             return response()->json(['message' => 'Missing Bearer token'], 401);
@@ -35,7 +38,7 @@ class VerifySupabaseJwt
 
             $request->attributes->set('supabase_uid', $uid);
             $request->attributes->set('supabase_claims', $claims);
-
+            Log::info('VerifySupabaseJwt after verification', ['uid' => $uid]);
             return $next($request);
         } catch (\Throwable $e) {
             // 2) Fallback for legacy/shared-secret setups:
@@ -47,6 +50,7 @@ class VerifySupabaseJwt
                 }
 
                 $request->attributes->set('supabase_uid', $uid);
+                Log::info('VerifySupabaseJwt after verification', ['uid' => $uid]);
                 return $next($request);
             } catch (\Throwable $e2) {
                 return response()->json(['message' => 'Invalid token'], 401);

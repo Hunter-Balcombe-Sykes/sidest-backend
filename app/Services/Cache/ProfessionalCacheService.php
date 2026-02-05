@@ -6,6 +6,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ProfessionalCacheService
 {
@@ -15,13 +16,43 @@ class ProfessionalCacheService
 
     public function getIdByAuthId(string $authUserId): ?string
     {
-        return Cache::remember(
+        /* return Cache::remember(
             CacheKeyGenerator::professionalIdByAuthId($authUserId),
             now()->addMinutes(30),
             fn () => Professional::query()
                 ->where('auth_user_id', $authUserId)
                 ->value('id')
-        );
+        ); */   
+
+            Log::info('ProfessionalCacheService getIdByAuthId start', ['auth_user_id' => $authUserId]);
+
+            $t0 = microtime(true);
+
+            // Force a connection so we can measure connect vs query time
+            $connStart = microtime(true);
+            DB::connection()->getPdo();
+            $connMs = (microtime(true) - $connStart) * 1000;
+
+            Log::info('ProfessionalCacheService getIdByAuthId after connect', [
+                'auth_user_id' => $authUserId,
+                'connect_ms'   => $connMs,
+            ]);
+
+            $qStart = microtime(true);
+            $id = Professional::query()
+                ->where('auth_user_id', $authUserId)
+                ->value('id');
+            $qMs = (microtime(true) - $qStart) * 1000;
+
+            Log::info('ProfessionalCacheService getIdByAuthId end', [
+                'auth_user_id' => $authUserId,
+                'id'           => $id,
+                'connect_ms'   => $connMs,
+                'query_ms'     => $qMs,
+                'total_ms'     => (microtime(true) - $t0) * 1000,
+            ]);
+
+            return $id;
     }
 
     public function getIdByHandle(string $handle): ?string
@@ -118,8 +149,31 @@ class ProfessionalCacheService
 
     public function getByAuthId(string $authUserId): ?Professional
     {
+        /* $id = $this->getIdByAuthId($authUserId);
+        return $id ? Professional::query()->find($id) : null; */
+
+        Log::info('ProfessionalCacheService getByAuthId start', ['auth_user_id' => $authUserId]);
+
         $id = $this->getIdByAuthId($authUserId);
-        return $id ? Professional::query()->find($id) : null;
+
+        Log::info('ProfessionalCacheService getByAuthId after getIdByAuthId', [
+            'auth_user_id' => $authUserId,
+            'id'           => $id,
+        ]);
+
+        if (!$id) {
+            Log::info('ProfessionalCacheService getByAuthId no id found', ['auth_user_id' => $authUserId]);
+            return null;
+        }
+
+        $pro = Professional::query()->find($id);
+
+        Log::info('ProfessionalCacheService getByAuthId after find', [
+            'auth_user_id' => $authUserId,
+            'pro_id'       => optional($pro)->id,
+        ]);
+
+        return $pro;
     }
 
     /* ---------------------------
