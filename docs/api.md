@@ -177,6 +177,35 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | updated_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
 | deleted_at      | datetime | yes      | `2026-01-20T05:12:00Z` | Soft delete timestamp   |
 
+### Service
+| Name            | Type     | Nullable | Example                | Constraints / Notes     |
+|-----------------|----------|----------|------------------------|-------------------------|
+| id              | uuid     | no       | `a3c1...`              | Primary key             |
+| professional_id | uuid     | no       | `4db0...`              | Owner professional      |
+| category_id     | uuid     | yes      | `c5e2...`              | Optional service category |
+| title           | string   | no       | `Standard Haircut`     | Max 255                 |
+| description     | string   | yes      | `Professional cut`     | Max 2000                |
+| price_cents     | integer  | no       | `3500`                 | Must be positive        |
+| currency_code   | string   | yes      | `AUD`                  | ISO 4217 code           |
+| duration_minutes| integer  | yes      | `30`                   | Must be positive        |
+| is_active       | boolean  | no       | `true`                 | If false: hidden from public site |
+| sort_order      | integer  | no       | `0`                    | Non-negative            |
+| created_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
+| updated_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
+| deleted_at      | datetime | yes      | `2026-01-20T05:12:00Z` | Soft delete timestamp   |
+
+### ServiceCategory
+| Name            | Type     | Nullable | Example                | Constraints / Notes     |
+|-----------------|----------|----------|------------------------|-------------------------|
+| id              | uuid     | no       | `c5e2...`              | Primary key             |
+| professional_id | uuid     | no       | `4db0...`              | Owner professional      |
+| title           | string   | no       | `Men's Cuts`           | Max 255                 |
+| description     | string   | yes      | `All mens haircuts`    | Max 2000                |
+| sort_order      | integer  | no       | `0`                    | Non-negative            |
+| created_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
+| updated_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
+| deleted_at      | datetime | yes      | `2026-01-20T05:12:00Z` | Soft delete timestamp   |
+
 ### Link Block (core.blocks where block_group = links)
 | Name            | Type    | Nullable | Example                       | Constraints / Notes                                                                       |
 |-----------------|---------|----------|-------------------------------|-------------------------------------------------------------------------------------------|
@@ -385,6 +414,55 @@ All routes below require: Authorization header AND a professional profile (curre
 { "ids": ["uuid1","uuid2"] }
 ```
 
+### Service Categories
+
+- GET /api/service-categories
+- POST /api/service-categories
+- GET /api/service-categories/{category}
+- PATCH /api/service-categories/{category}
+- DELETE /api/service-categories/{category}
+- POST /api/service-categories/reorder
+- POST /api/service-categories/{category}/restore (requires trashed binding)
+
+**Store/Update body:**
+
+```json
+{
+"title": "Men's Cuts",
+"description": "Optional",
+"sort_order": 0
+}
+```
+
+**Reorder body:**
+
+```json
+{ "ids": ["uuid1","uuid2"] }
+```
+
+### Service Layout Reorder
+
+- POST /api/services/reorder-layout
+
+**Body:**
+
+```json
+{
+  "layout": [
+    {
+      "type": "category",
+      "id": "category-uuid",
+      "services": ["service-uuid1", "service-uuid2"]
+    },
+    {
+      "type": "category",
+      "id": "category-uuid-2",
+      "services": ["service-uuid3"]
+    }
+  ]
+}
+```
+
 ### `GET /api/analytics`
 
 - Purpose: analytics summary for the logged-in professional
@@ -444,6 +522,9 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - GET /api/staff/professionals/{professional}/services
 - GET /api/staff/professionals/{professional}/services/{service}
 - POST /api/staff/professionals/{professional}/services/{service}/restore
+- GET /api/staff/professionals/{professional}/service-categories
+- GET /api/staff/professionals/{professional}/service-categories/{category}
+- POST /api/staff/professionals/{professional}/service-categories/{category}/restore
 - GET /api/staff/professionals/{professional}/site
 - GET /api/staff/professionals/{professional}/analytics
 - GET /api/staff/professionals/{professional}/links
@@ -459,6 +540,12 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - DELETE /api/staff/professionals/{professional}/services/{service} (soft delete)
 - DELETE /api/staff/professionals/{professional}/services/{service}/hard (hard delete)
 - POST /api/staff/professionals/{professional}/services/reorder
+- POST /api/staff/professionals/{professional}/service-categories (create)
+- PATCH /api/staff/professionals/{professional}/service-categories/{category}
+- DELETE /api/staff/professionals/{professional}/service-categories/{category} (soft delete)
+- DELETE /api/staff/professionals/{professional}/service-categories/{category}/hard (hard delete)
+- POST /api/staff/professionals/{professional}/service-categories/reorder
+- POST /api/staff/professionals/{professional}/services/reorder-layout
 - PATCH /api/staff/professionals/{professional}/site
 - POST /api/staff/professionals/{professional}/links
 - PATCH /api/staff/professionals/{professional}/links/{block}
