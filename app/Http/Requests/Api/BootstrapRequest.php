@@ -22,7 +22,7 @@ class BootstrapRequest extends BaseFormRequest
         }
 
         return [
-            'handle' => ['required','string','max:40'],
+            'handle' => ['sometimes','nullable','string','max:40'],
             'display_name' => ['required','string','max:80'],
             'primary_email' => ['required','email','max:255'],
             'phone' => ['required','string','max:40'],
@@ -31,7 +31,8 @@ class BootstrapRequest extends BaseFormRequest
             'country_code' => ['nullable','string','max:5'],
             'timezone' => ['nullable','string','max:64'],
             'handle_lc' => [
-                'required',
+                'sometimes',
+                'nullable',
                 'string',
                 'max:50',
                 Rule::unique('professionals', 'handle_lc')->ignore($ignoreId, 'id'),
@@ -46,8 +47,36 @@ class BootstrapRequest extends BaseFormRequest
                 'last_name', 'country_code', 'timezone'
             ]);
         $this->sanitizeEmails(['primary_email']);
+
+        // Auto-generate handle from display_name if not provided
+        $handle = $this->handle;
+        if (!is_string($handle) || $handle === '') {
+            $handle = $this->generateHandleFromDisplayName($this->display_name ?? '');
+        }
+
         $this->merge([
-            'handle_lc' => is_string($this->handle) ? strtolower(trim($this->handle)) : null,
+            'handle' => $handle,
+            'handle_lc' => is_string($handle) ? strtolower(trim($handle)) : null,
         ]);
+    }
+
+    private function generateHandleFromDisplayName(string $displayName): string
+    {
+        // Convert display name to slug (e.g., "Josh's Barbershop" -> "joshs-barbershop")
+        $base = \Illuminate\Support\Str::slug($displayName);
+
+        if ($base === '' || $base === '-') {
+            $base = 'professional';
+        }
+
+        // Check if handle is available, if not append numbers
+        $handle = $base;
+        $attempt = 1;
+        while (Professional::query()->where('handle_lc', strtolower($handle))->exists()) {
+            $handle = $base . $attempt;
+            $attempt++;
+        }
+
+        return $handle;
     }
 }

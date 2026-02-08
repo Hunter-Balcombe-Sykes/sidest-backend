@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Notifications\NotificationController;
+use App\Http\Controllers\Api\Professional\PlanController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
 use App\Http\Controllers\Api\Professional\ProfessionalController;
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
+use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSectionBlockController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController;
@@ -15,6 +17,9 @@ use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
+
+// Public Plans
+Route::get('/plans', [PlanController::class, 'index']);
 
 // Authorised Professional Logged In
 Route::middleware(['supabase.jwt', 'current.pro'])
@@ -120,6 +125,13 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     // Email subscribers (marketing list)
     Route::get('/email-subscribers', [ProfessionalEmailSubscriptionController::class, 'index']);
     Route::get('/email-subscribers/export', [ProfessionalEmailSubscriptionController::class, 'export']);
+
+    // Subscription & Plans
+    Route::get('/me/subscription', [SubscriptionController::class, 'show']);
+    Route::post('/me/subscription', [SubscriptionController::class, 'store']);
+    Route::patch('/me/subscription', [SubscriptionController::class, 'update']);
+    Route::post('/me/subscription/cancel', [SubscriptionController::class, 'cancel']);
+    Route::post('/me/subscription/resume', [SubscriptionController::class, 'resume']);
 
     });
 

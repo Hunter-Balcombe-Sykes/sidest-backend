@@ -70,34 +70,242 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 
 ### Auth: Required (Supabase JWT)
 
+**Purpose:** Create a new professional account and associated site. Auto-generates a unique handle from display_name if not provided.
+
 **Request body:**
 
 ```json
 {
-"handle": "joshbarber",
 "display_name": "Josh Barber",
 "primary_email": "josh@example.com",
 "phone": "+61400000000",
 "first_name": "Josh",
 "last_name": "Barber",
 "country_code": "AU",
-"timezone": "Australia/Sydney"
+"timezone": "Australia/Sydney",
+"handle": "joshbarber"
 }
 ```
+
+**Field notes:**
+- `display_name` (required): Public-facing name (e.g., business name)
+- `primary_email` (required): Contact email
+- `phone` (required): Contact phone
+- `first_name` (required): First name
+- `last_name` (optional): Last name
+- `country_code` (optional): 2-5 letter country code
+- `timezone` (optional): IANA timezone
+- `handle` (optional): Unique username/slug (if omitted, auto-generated from display_name)
 
 **Response (201 or 200):**
 
 ```json
 {
     "professional": {
-        "...": "..."
+        "id": "uuid",
+        "handle": "josh-barber",
+        "display_name": "Josh Barber",
+        "primary_email": "josh@example.com",
+        "phone": "+61400000000",
+        "first_name": "Josh",
+        "last_name": "Barber",
+        "country_code": "AU",
+        "timezone": "Australia/Sydney",
+        "status": "active",
+        "onboarding_step": 0
     },
     "site": {
-        "...": "..."
+        "id": "uuid",
+        "professional_id": "uuid",
+        "subdomain": "josh-barber",
+        "is_published": false
     }
 }
 ```
 
+**Common status codes:** 200 (existing user bootstrapped again), 201 (new professional created), 401 (invalid JWT), 422 (validation error)
+
+### Plans and Subscriptions
+
+#### `GET /api/plans`
+
+- Purpose: list all active subscription plans
+- Auth: None
+- Rate limit: general
+
+**Response (200):**
+
+```json
+{
+    "data": [
+        {
+            "id": "plan_basic",
+            "name": "Basic",
+            "description": "Perfect for getting started",
+            "price_cents": 999,
+            "currency_code": "USD",
+            "billing_interval": "month",
+            "entitlements": {
+                "sites": 1,
+                "team_members": 1,
+                "services": 10
+            }
+        },
+        {
+            "id": "plan_pro",
+            "name": "Professional",
+            "description": "For growing businesses",
+            "price_cents": 2499,
+            "currency_code": "USD",
+            "billing_interval": "month",
+            "entitlements": {
+                "sites": 3,
+                "team_members": 5,
+                "services": 100
+            }
+        }
+    ]
+}
+```
+
+**Common status codes: 200**
+
+#### `GET /api/me/subscription`
+
+- Purpose: get the current professional's active subscription
+- Auth: Required (Professional)
+- Rate limit: general
+
+**Response (200):**
+
+```json
+{
+    "data": {
+        "id": "sub-123abc",
+        "plan_id": "plan_basic",
+        "plan": {
+            "id": "plan_basic",
+            "name": "Basic",
+            "price_cents": 999,
+            "currency_code": "USD",
+            "billing_interval": "month",
+            "entitlements": { "sites": 1, "team_members": 1, "services": 10 }
+        },
+        "status": "active",
+        "current_period_start": "2026-01-12T05:12:00Z",
+        "current_period_end": "2026-02-12T05:12:00Z",
+        "trial_ends_at": null,
+        "cancel_at_period_end": false,
+        "ended_at": null
+    }
+}
+```
+
+**Common status codes: 200, 401, 404 (no subscription)**
+
+#### `POST /api/me/subscription`
+
+- Purpose: create a new subscription for the professional (usually during signup)
+- Auth: Required (Professional)
+- Rate limit: general
+
+**Request body:**
+
+```json
+{
+    "plan_id": "plan_basic",
+    "trial_period_days": 14
+}
+```
+
+**Response (201):**
+
+```json
+{
+    "data": {
+        "id": "sub-123abc",
+        "plan_id": "plan_basic",
+        "status": "trialing",
+        "current_period_start": "2026-01-12T05:12:00Z",
+        "current_period_end": "2026-02-12T05:12:00Z",
+        "trial_ends_at": "2026-01-26T05:12:00Z"
+    }
+}
+```
+
+**Common status codes: 201, 401, 422 (already has subscription)**
+
+#### `PATCH /api/me/subscription`
+
+- Purpose: change the professional's current subscription plan
+- Auth: Required (Professional)
+- Rate limit: general
+
+**Request body:**
+
+```json
+{
+    "plan_id": "plan_pro"
+}
+```
+
+**Response (200):**
+
+```json
+{
+    "data": {
+        "id": "sub-123abc",
+        "plan_id": "plan_pro",
+        "status": "active",
+        "current_period_start": "2026-01-12T05:12:00Z",
+        "current_period_end": "2026-02-12T05:12:00Z"
+    }
+}
+```
+
+**Common status codes: 200, 401, 404 (no subscription), 422 (invalid plan)**
+
+#### `POST /api/me/subscription/cancel`
+
+- Purpose: cancel the subscription at the end of the current billing period
+- Auth: Required (Professional)
+- Rate limit: general
+
+**Response (200):**
+
+```json
+{
+    "data": {
+        "id": "sub-123abc",
+        "status": "active",
+        "cancel_at_period_end": true,
+        "ended_at": null
+    }
+}
+```
+
+**Common status codes: 200, 401, 404 (no subscription), 422 (already canceled)**
+
+#### `POST /api/me/subscription/resume`
+
+- Purpose: resume a subscription that was scheduled to be canceled
+- Auth: Required (Professional)
+- Rate limit: general
+
+**Response (200):**
+
+```json
+{
+    "data": {
+        "id": "sub-123abc",
+        "status": "active",
+        "cancel_at_period_end": false,
+        "ended_at": null
+    }
+}
+```
+
+**Common status codes: 200, 401, 404 (no subscription)**
 
 ### Common status codes: 200, 201, 401, 422
 
@@ -205,6 +413,37 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | created_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
 | updated_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
 | deleted_at      | datetime | yes      | `2026-01-20T05:12:00Z` | Soft delete timestamp   |
+
+### Plan
+| Name             | Type     | Nullable | Example       | Constraints / Notes              |
+|------------------|----------|----------|---------------|----------------------------------|
+| id               | string   | no       | `plan_basic`  | Primary key; provider-managed    |
+| name             | string   | no       | `Basic`       | Max 255                          |
+| description      | string   | yes      | `For starters`| Max 2000                         |
+| price_cents      | integer  | no       | `999`         | Price in cents (USD)             |
+| currency_code    | string   | no       | `USD`         | 3-letter code                    |
+| billing_interval | string   | no       | `month`       | month or year                    |
+| entitlements     | object   | no       | See below     | JSON object with plan features   |
+| is_active        | boolean  | no       | `true`        |                                  |
+| sort_order       | integer  | no       | `0`           | Display order                    |
+| created_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                                  |
+| updated_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                                  |
+
+### Subscription
+| Name                | Type     | Nullable | Example              | Constraints / Notes                                 |
+|---------------------|----------|----------|----------------------|-----------------------------------------------------|
+| id                  | uuid     | no       | `sub-123...`         | Primary key                                         |
+| professional_id     | uuid     | no       | `4db0...`            | Owner professional                                  |
+| plan_id             | string   | no       | `plan_basic`         | Foreign key to Plan                                 |
+| status              | string   | no       | `active`             | trialing, active, past_due, canceled, ended        |
+| current_period_start| datetime | no       | `2026-01-12T05:12:00Z` | Billing period start                               |
+| current_period_end  | datetime | no       | `2026-02-12T05:12:00Z` | Billing period end                                 |
+| trial_ends_at       | datetime | yes      | `2026-01-19T05:12:00Z` | When trial period ends (if any)                    |
+| cancel_at_period_end| boolean  | no       | `false`              | Will cancel at period end if true                  |
+| ended_at            | datetime | yes      | `2026-01-20T05:12:00Z` | When subscription ended                            |
+| provider_payload    | object   | no       | `{}`                 | External provider data (Stripe, etc)               |
+| created_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                     |
+| updated_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                     |
 
 ### Link Block (core.blocks where block_group = links)
 | Name            | Type    | Nullable | Example                       | Constraints / Notes                                                                       |

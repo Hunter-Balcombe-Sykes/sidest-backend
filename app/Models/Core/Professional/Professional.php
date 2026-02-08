@@ -5,6 +5,7 @@ namespace App\Models\Core\Professional;
 use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
 use App\Models\BaseModel;
+use App\Models\Billing\Subscription;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
@@ -122,12 +123,17 @@ class Professional extends BaseModel
 
     public function serviceCategories()
     {
-        return $this->hasMany(\App\Models\Core\Professional\ServiceCategory::class);
+        return $this->hasMany(ServiceCategory::class);
     }
 
     public function emailSubscriptions(): HasMany
     {
         return $this->hasMany(EmailSubscription::class, 'professional_id');
+    }
+
+    public function subscription(): HasOne
+    {
+        return $this->hasOne(Subscription::class, 'professional_id');
     }
 
     public function resolveChildRouteBindingQuery($childType, $value, $field): Builder
