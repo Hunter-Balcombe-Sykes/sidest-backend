@@ -71,7 +71,23 @@ class ProfessionalCustomerController extends ApiController
         $data = $request->validated();
         $data['source'] = $data['source'] ?? 'manual';
 
-        $customer = $pro->customers()->create($data);
+        // Check if customer with this email already exists (excluding soft-deleted)
+        $customer = $pro->customers()
+            ->where('email', $data['email'])
+            ->first();
+
+        if ($customer) {
+            // Update existing customer with new data
+            $customer->update([
+                'full_name' => $data['full_name'],
+                'phone' => $data['phone'] ?? $customer->phone,
+                'notes' => $data['notes'] ?? $customer->notes,
+                'source' => $data['source'],
+            ]);
+        } else {
+            // Create new customer
+            $customer = $pro->customers()->create($data);
+        }
 
         return $this->success(['customer' => $customer], 201);
 

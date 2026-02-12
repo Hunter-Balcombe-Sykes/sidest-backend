@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffProfessionalC
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSiteManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceCategoryManagementController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSubscriptionManagementController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAnalyticsController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffMeController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationController;
@@ -75,6 +76,9 @@ Route::prefix('staff')
 
     // View Sections
     Route::get('/professionals/{professional}/sections', [StaffSectionManagementController::class, 'index']);
+
+    // View Subscription
+    Route::get('/professionals/{professional}/subscription', [StaffSubscriptionManagementController::class, 'show']);
 });
 
 // Authorised Staff Admin Editing
@@ -143,6 +147,11 @@ Route::prefix('staff')
     Route::post('/professionals/{professional}/sections/reorder', [StaffSectionManagementController::class, 'reorder']);
     Route::delete('/professionals/{professional}/sections/{blockType}', [StaffSectionManagementController::class, 'remove'])
         ->where('blockType', '[a-z0-9_-]+');
+
+    // Manage Subscription
+    Route::patch('/professionals/{professional}/subscription', [StaffSubscriptionManagementController::class, 'update']);
+    Route::post('/professionals/{professional}/subscription/cancel', [StaffSubscriptionManagementController::class, 'cancel']);
+    Route::post('/professionals/{professional}/subscription/resume', [StaffSubscriptionManagementController::class, 'resume']);
 
     // Notifications
     Route::post('/notifications', [StaffNotificationController::class, 'store']);

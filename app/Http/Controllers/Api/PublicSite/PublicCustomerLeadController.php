@@ -74,14 +74,31 @@ class PublicCustomerLeadController extends ApiController
 
         $pro = $site->professional;
 
-        $customer = $pro->customers()->create([
-            'full_name' => $data['full_name'],
-            'email' => $data['email'],
-            'phone' => $data['phone'],
-            'notes' => $data['notes'] ?? null,
-            'external_id' => $data['external_id'] ?? null,
-            'source' => 'site',
-        ]);
+        // Check if customer with this email already exists (excluding soft-deleted)
+        $customer = $pro->customers()
+            ->where('email', $data['email'])
+            ->first();
+
+        if ($customer) {
+            // Update existing customer with new data
+            $customer->update([
+                'full_name' => $data['full_name'],
+                'phone' => $data['phone'] ?? $customer->phone,
+                'notes' => $data['notes'] ?? $customer->notes,
+                // Don't overwrite external_id if already set
+                'external_id' => $data['external_id'] ?? $customer->external_id,
+            ]);
+        } else {
+            // Create new customer
+            $customer = $pro->customers()->create([
+                'full_name' => $data['full_name'],
+                'email' => $data['email'],
+                'phone' => $data['phone'],
+                'notes' => $data['notes'] ?? null,
+                'external_id' => $data['external_id'] ?? null,
+                'source' => 'site',
+            ]);
+        }
 
         if ($marketingOptIn && !empty($data['email'])) {
             $this->upsertMarketingSubscription(
