@@ -89,7 +89,7 @@ class PublicCustomerLeadController extends ApiController
                 'external_id' => $data['external_id'] ?? $customer->external_id,
             ]);
         } else {
-            // Create new customer
+            // Create new customer (defaults to true via database)
             $customer = $pro->customers()->create([
                 'full_name' => $data['full_name'],
                 'email' => $data['email'],
@@ -97,6 +97,7 @@ class PublicCustomerLeadController extends ApiController
                 'notes' => $data['notes'] ?? null,
                 'external_id' => $data['external_id'] ?? null,
                 'source' => 'site',
+                'marketing_opt_in_cached' => !$marketingOptIn ? false : null, // only set to false if explicitly opted out
             ]);
         }
 

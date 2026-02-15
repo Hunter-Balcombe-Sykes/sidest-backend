@@ -371,19 +371,20 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | updated_at      | datetime | yes      | 2026-01...                |                                                                                                                   |
 
 ### Customer
-| Name            | Type     | Nullable | Example                | Constraints / Notes     |
-|-----------------|----------|----------|------------------------|-------------------------|
-| id              | uuid     | no       | `a3c1...`              | Primary key             |
-| professional_id | uuid     | yes      | `4db0...`              | Set by server on create |
-| full_name       | string   | no       | `Sam Smith`            | Max 120                 |
-| email           | email    | yes      | `sam@example.com`      | Max 255                 |
-| phone           | string   | yes      | `+61411111111`         | Max 40                  |
-| notes           | string   | yes      | `Prefers Fridays`      | Max 5000                |
-| source          | string   | yes      | `manual`               | manual or site_lead     |
-| external_id     | string   | yes      | `square:cus_123`       | Max 255                 |
-| created_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
-| updated_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
-| deleted_at      | datetime | yes      | `2026-01-20T05:12:00Z` | Soft delete timestamp   |
+| Name                      | Type     | Nullable | Example                | Constraints / Notes                                                         |
+|---------------------------|----------|----------|------------------------|-----------------------------------------------------------------------------|
+| id                        | uuid     | no       | `a3c1...`              | Primary key                                                                 |
+| professional_id           | uuid     | yes      | `4db0...`              | Set by server on create                                                     |
+| full_name                 | string   | no       | `Sam Smith`            | Max 120                                                                     |
+| email                     | email    | yes      | `sam@example.com`      | Max 255                                                                     |
+| phone                     | string   | yes      | `+61411111111`         | Max 40                                                                      |
+| notes                     | string   | yes      | `Prefers Fridays`      | Max 5000                                                                    |
+| source                    | string   | yes      | `manual`               | manual, site, or other; staff can set when creating/updating               |
+| external_id               | string   | yes      | `square:cus_123`       | Max 255; external system reference                                         |
+| marketing_opt_in_cached   | boolean  | no       | `true`                 | Cache of EmailSubscription status (defaults to true). Source of truth is EmailSubscription. Set to false if customer explicitly opts-out. |
+| created_at                | datetime | yes      | `2026-01-12T05:12:00Z` |                                                                             |
+| updated_at                | datetime | yes      | `2026-01-12T05:12:00Z` |                                                                             |
+| deleted_at                | datetime | yes      | `2026-01-20T05:12:00Z` | Soft delete timestamp                                                       |
 
 ### Service
 | Name            | Type     | Nullable | Example                | Constraints / Notes     |
@@ -588,18 +589,64 @@ https://{subdomain}.{COMET_PUBLIC_DOMAIN}
 - Auth: None
 - Rate limit: public-site Request body: { "email": "sam@example.com", "full_name": "Sam Smith", "list_key": "marketing" } Response (200): { "ok": true, "subscribed": true, "list_key": "marketing" } Common status codes: 200, 404, 400 (cannot determine site), 422, 429
 
-### `GET /api/public/unsubscribe/{token}`
+### `GET /api/public/marketing-preference`
 
-- Purpose: unsubscribe a recipient using the token stored with the email subscription
+- Purpose: check current marketing subscription status for an email
 - Auth: None
-- Note: this route is not domain-scoped; it is served on the API host.
+- Rate limit: public-site
+- Query params:
+  - `email` (required): customer email address
+  - `subdomain` (required): mini-site subdomain to identify professional
 
 **Response (200):**
 
 ```json
-{ "ok": true, "unsubscribed": true }
+{
+    "email": "sam@example.com",
+    "opted_in": true,
+    "status": "subscribed"
+}
 ```
-Common status codes: 200, 404 (token not found), 429
+
+**Status values:** `subscribed`, `unsubscribed`, `bounced`, `complained`, `unknown`
+
+**Common status codes:** 200, 404 (site not found), 400 (missing params), 429
+
+### `POST /api/public/unsubscribe/{token}`
+
+- Purpose: unsubscribe from marketing emails using token from email link
+- Auth: None
+- Rate limit: public-site
+- Path params: `token` (required): unsubscribe token from email
+
+**Response (200):**
+
+```json
+{
+    "message": "Successfully unsubscribed from marketing emails",
+    "email": "sam@example.com"
+}
+```
+
+**Common status codes:** 200, 404 (token not found), 400 (invalid token), 429
+
+### `POST /api/public/resubscribe/{token}`
+
+- Purpose: resubscribe to marketing emails using the same token
+- Auth: None
+- Rate limit: public-site
+- Path params: `token` (required): unsubscribe token from email
+
+**Response (200):**
+
+```json
+{
+    "message": "Successfully resubscribed to marketing emails",
+    "email": "sam@example.com"
+}
+```
+
+**Common status codes:** 200, 404 (token not found), 400 (invalid token), 429
 
 ## 7) Professional (Barber) Dashboard API
 
@@ -721,12 +768,37 @@ Allowed section block types are defined in config: gallery, services, education,
 
 ### Customers
 
-- GET /api/customers?search=...&page=1&per_page=25
+- GET /api/customers?search=...&marketing_opt_in=true/false&page=1&per_page=25 (filters by marketing opt-in status using cache)
 - GET /api/customers/{customer}
 - POST /api/customers
 - PATCH /api/customers/{customer}
 - DELETE /api/customers/{customer}
-- POST /api/customers/{customer}/restore Store/Update body: { "full_name": "Sam Smith", "email": "sam@example.com", "phone": "+61411111111", "notes": "Optional" } Themes
+- POST /api/customers/{customer}/restore
+
+**Store/Update body:**
+
+```json
+{
+    "full_name": "Sam Smith",
+    "email": "sam@example.com",
+    "phone": "+61411111111",
+    "notes": "Optional",
+    "source": "manual",
+    "external_id": "square:cus_123",
+    "marketing_opt_in_cached": true
+}
+```
+
+**Query params:**
+- `search`: search in full_name, email, phone
+- `marketing_opt_in`: filter by `true`, `false`, or omit (applies to marketing_opt_in_cached field)
+- `page`: pagination (default 1)
+- `per_page`: items per page (default 25, max 100)
+
+**Note:** `marketing_opt_in_cached` is a UX cache of the source-of-truth `EmailSubscription.status`. Defaults to `true` for new customers. When professionals update this field:
+- Setting to `true` enables marketing emails
+- Setting to `false` disables marketing emails
+- Cache auto-syncs when EmailSubscription status changes Themes
 - GET /api/themes
 - POST /api/themes/{theme}/select Select response: { site: ... } Uploads prepare
 - POST /api/uploads/prepare Request body: { "type": "icon", "content_type": "image/jpeg" } Response (200): { "bucket": "public-assets", "path": "professionals/<proId>/icon.jpg", "upsert": true } Gallery

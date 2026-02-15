@@ -16,6 +16,7 @@ class StoreCustomerRequest extends BaseFormRequest
             'notes' => ['nullable', 'string'],
             'source' => ['nullable', 'string', 'max:225'],
             'external_id' => ['nullable', 'string', 'max:255'],
+            'marketing_opt_in_cached' => ['nullable', 'boolean'],
         ];
     }
 
