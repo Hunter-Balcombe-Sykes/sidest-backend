@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Notifications\EmailSubscription;
-use App\Services\PublicSiteResolver;
+use App\Services\Public\PublicSiteResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 

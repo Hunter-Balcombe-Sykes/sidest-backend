@@ -6,10 +6,10 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
-use App\Observers\BlockObserver;
-use App\Observers\ProfessionalObserver;
-use App\Observers\ServiceObserver;
-use App\Observers\SiteObserver;
+use App\Observers\Core\BlockObserver;
+use App\Observers\Professional\ProfessionalObserver;
+use App\Observers\Core\ServiceObserver;
+use App\Observers\Core\SiteObserver;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 
 class EventServiceProvider extends ServiceProvider

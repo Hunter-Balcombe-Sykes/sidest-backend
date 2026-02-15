@@ -11,7 +11,7 @@ use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Services\PublicSiteResolver;
+use App\Services\Public\PublicSiteResolver;
 
 class PublicCustomerLeadController extends ApiController
 {
