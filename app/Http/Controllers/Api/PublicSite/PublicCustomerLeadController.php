@@ -39,8 +39,8 @@ class PublicCustomerLeadController extends ApiController
             $nowMs = (int)floor(microtime(true) * 1000);
             $delta = $nowMs - $startedMs;
 
-            $minMs = 2500;                  // 2.5s minimum fill time
-            $maxMs = 12 * 60 * 60 * 1000;   // 12h max (stale form)
+            $minMs = (int) config('comet.form_timing.min_ms', 2500);
+            $maxMs = (int) config('comet.form_timing.max_ms', 12 * 60 * 60 * 1000);
 
             if ($delta < $minMs || $delta > $maxMs) {
                 $this->logLead($request, $subdomain, null, null, null, 'too_fast', $startedMs);

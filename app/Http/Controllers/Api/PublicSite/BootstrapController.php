@@ -8,6 +8,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use App\Models\Core\Notifications\EmailSubscription;
@@ -25,7 +26,8 @@ class BootstrapController extends ApiController
 
         $data = $request->validated();
 
-        $result = DB::transaction(function () use ($uid, $data) {
+        try {
+            $result = DB::transaction(function () use ($uid, $data) {
 
             $professional = Professional::query()->where('auth_user_id', $uid)->first();
 
@@ -98,11 +100,18 @@ class BootstrapController extends ApiController
                 $site = $this->createSiteWithRetry($professional->id, $base);
             }
 
-            return [
-                'professional' => $professional->fresh(),
-                'site' => $site->fresh(),
-            ];
-        });
+                return [
+                    'professional' => $professional->fresh(),
+                    'site' => $site->fresh(),
+                ];
+            });
+        } catch (\Exception $e) {
+            Log::error('Bootstrap transaction failed', [
+                'error' => $e->getMessage(),
+                'uid' => $uid,
+            ]);
+            throw $e;
+        }
 
         return $this->success($result);
     }
@@ -240,12 +249,27 @@ class BootstrapController extends ApiController
             $base = 'pro';
         }
 
-        do {
+        // Retry with exponential backoff to handle race conditions
+        $maxAttempts = 10;
+        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
             $suffix = Str::lower(Str::random(6));
             $slug = $base . '-' . $suffix;
-        } while (Professional::query()->where('qr_slug', $slug)->exists());
 
-        return $slug;
+            try {
+                // Check if slug exists (optimistic check before insert)
+                if (!Professional::query()->where('qr_slug', $slug)->exists()) {
+                    return $slug;
+                }
+            } catch (QueryException $e) {
+                // If unique violation occurs during insert, keep retrying
+                if ($this->isUniqueViolation($e)) {
+                    continue;
+                }
+                throw $e;
+            }
+        }
+
+        throw new RuntimeException('Could not generate a unique QR slug after ' . $maxAttempts . ' attempts.');
     }
 
 }

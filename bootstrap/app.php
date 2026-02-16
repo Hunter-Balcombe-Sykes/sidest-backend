@@ -73,9 +73,18 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             // Generic error handling
-            $statusCode = method_exists($e, 'getStatusCode')
-                ? $e->getStatusCode()
-                : 500;
+            $statusCode = 500;
+            if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpException) {
+                $statusCode = $e->getStatusCode();
+            }
+
+            // Log full exception for debugging even in production
+            if ($statusCode >= 500) {
+                \Illuminate\Support\Facades\Log::error('API Error', [
+                    'exception' => $e,
+                    'status' => $statusCode,
+                ]);
+            }
 
             // Don't expose internal errors in production
             $message = config('app.debug')
