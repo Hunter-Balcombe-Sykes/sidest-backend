@@ -2,14 +2,14 @@
 
 namespace App\Models\Analytics;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-class LeadSubmission extends Model
+class LeadSubmission extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'analytics.lead_submissions';
+    protected $table = 'lead_submissions';
 
     public $incrementing = false;
     protected $keyType = 'string';

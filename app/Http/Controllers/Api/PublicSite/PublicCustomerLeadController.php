@@ -11,7 +11,7 @@ use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Services\PublicSiteResolver;
+use App\Services\Public\PublicSiteResolver;
 
 class PublicCustomerLeadController extends ApiController
 {
@@ -39,8 +39,8 @@ class PublicCustomerLeadController extends ApiController
             $nowMs = (int)floor(microtime(true) * 1000);
             $delta = $nowMs - $startedMs;
 
-            $minMs = 2500;                  // 2.5s minimum fill time
-            $maxMs = 12 * 60 * 60 * 1000;   // 12h max (stale form)
+            $minMs = (int) config('comet.form_timing.min_ms', 2500);
+            $maxMs = (int) config('comet.form_timing.max_ms', 12 * 60 * 60 * 1000);
 
             if ($delta < $minMs || $delta > $maxMs) {
                 $this->logLead($request, $subdomain, null, null, null, 'too_fast', $startedMs);
@@ -74,14 +74,32 @@ class PublicCustomerLeadController extends ApiController
 
         $pro = $site->professional;
 
-        $customer = $pro->customers()->create([
-            'full_name' => $data['full_name'],
-            'email' => $data['email'],
-            'phone' => $data['phone'],
-            'notes' => $data['notes'] ?? null,
-            'external_id' => $data['external_id'] ?? null,
-            'source' => 'site',
-        ]);
+        // Check if customer with this email already exists (excluding soft-deleted)
+        $customer = $pro->customers()
+            ->where('email', $data['email'])
+            ->first();
+
+        if ($customer) {
+            // Update existing customer with new data
+            $customer->update([
+                'full_name' => $data['full_name'],
+                'phone' => $data['phone'] ?? $customer->phone,
+                'notes' => $data['notes'] ?? $customer->notes,
+                // Don't overwrite external_id if already set
+                'external_id' => $data['external_id'] ?? $customer->external_id,
+            ]);
+        } else {
+            // Create new customer (defaults to true via database)
+            $customer = $pro->customers()->create([
+                'full_name' => $data['full_name'],
+                'email' => $data['email'],
+                'phone' => $data['phone'],
+                'notes' => $data['notes'] ?? null,
+                'external_id' => $data['external_id'] ?? null,
+                'source' => 'site',
+                'marketing_opt_in_cached' => !$marketingOptIn ? false : null, // only set to false if explicitly opted out
+            ]);
+        }
 
         if ($marketingOptIn && !empty($data['email'])) {
             $this->upsertMarketingSubscription(

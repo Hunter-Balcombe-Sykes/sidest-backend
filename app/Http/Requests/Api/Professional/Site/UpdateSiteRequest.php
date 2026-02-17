@@ -44,10 +44,8 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.primary_button_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'settings.bio_text' => ['sometimes', 'nullable', 'string', 'max:500'],
             'settings.primary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'settings.accent_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'settings.background_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.secondary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings.show_branding' => ['sometimes', 'boolean'],
-            'settings.custom_css' => ['sometimes', 'nullable', 'string', 'max:10000'],
 
             // Subdomain: must be unique, not reserved, DNS-safe
             'subdomain' => [

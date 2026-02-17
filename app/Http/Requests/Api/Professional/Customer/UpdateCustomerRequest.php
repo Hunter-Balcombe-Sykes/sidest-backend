@@ -16,6 +16,7 @@ class UpdateCustomerRequest extends BaseFormRequest
             'notes'      => ['sometimes', 'nullable', 'string'],
             'source'     => ['sometimes', 'nullable', 'string', 'max:225'],
             'external_id'=> ['sometimes', 'nullable', 'string', 'max:255'],
+            'marketing_opt_in_cached' => ['sometimes', 'nullable', 'boolean'],
         ];
     }
 }

@@ -2,16 +2,16 @@
 
 namespace App\Models\Core\Site;
 
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class SiteImage extends Model
+class SiteImage extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'core.site_images';
+    protected $table = 'site_images';
 
     public $incrementing = false;
     protected $keyType = 'string';

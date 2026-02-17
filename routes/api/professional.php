@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Notifications\NotificationController;
+use App\Http\Controllers\Api\Professional\PlanController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
 use App\Http\Controllers\Api\Professional\ProfessionalController;
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
+use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSectionBlockController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController;
@@ -16,6 +18,9 @@ use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscri
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
+// Public Plans
+Route::get('/plans', [PlanController::class, 'index']);
+
 // Authorised Professional Logged In
 Route::middleware(['supabase.jwt', 'current.pro'])
     ->group(function () {
@@ -24,7 +29,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::get('/me', [ProfessionalController::class, 'show']);
     Route::patch('/me', [ProfessionalController::class, 'update']);
 
-    // View Site Details (optional)
+    // View Site Details
     Route::get('/site', [ProfessionalSiteController::class, 'show']);
 
     // Update Site Details
@@ -62,7 +67,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/services/reorder-layout', [ProfessionalServiceController::class, 'reorderLayout']);
 
 
-        // View Analytics
+    // View Analytics
     Route::get('/analytics', [ProfessionalAnalyticsController::class, 'summary']);
 
     // Links
@@ -120,6 +125,13 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     // Email subscribers (marketing list)
     Route::get('/email-subscribers', [ProfessionalEmailSubscriptionController::class, 'index']);
     Route::get('/email-subscribers/export', [ProfessionalEmailSubscriptionController::class, 'export']);
+
+    // Subscription & Plans
+    Route::get('/me/subscription', [SubscriptionController::class, 'show']);
+    Route::post('/me/subscription', [SubscriptionController::class, 'store']);
+    Route::patch('/me/subscription', [SubscriptionController::class, 'update']);
+    Route::post('/me/subscription/cancel', [SubscriptionController::class, 'cancel']);
+    Route::post('/me/subscription/resume', [SubscriptionController::class, 'resume']);
 
     });
 

@@ -2,14 +2,14 @@
 
 namespace App\Models\Views;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
-class PublicSitePayload extends Model
+class PublicSitePayload extends BaseModel
 {
     use HasFactory;
 
-    protected $table = 'core.public_site_payload';
+    protected $table = 'public_site_payload';
     protected $primaryKey = 'site_id';
 
     public $incrementing = false;

@@ -30,6 +30,7 @@ class ProfessionalCustomerController extends ApiController
 
         $includeArchived = $request->boolean('include_archived');
         $onlyArchived    = $request->boolean('only_archived');
+        $marketingOptIn  = $request->query('marketing_opt_in');  // null, 'true', 'false'
 
         $query = Customer::query()
             ->where('professional_id', $pro->id)
@@ -39,6 +40,14 @@ class ProfessionalCustomerController extends ApiController
             $query->onlyTrashed();
         } elseif ($includeArchived) {
             $query->withTrashed();
+        }
+
+        // Filter by marketing opt-in status (uses cached field for performance)
+        if ($marketingOptIn !== null) {
+            $isOptedIn = filter_var($marketingOptIn, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($isOptedIn !== null) {
+                $query->where('marketing_opt_in_cached', $isOptedIn);
+            }
         }
 
         if ($searchLike) {
@@ -56,6 +65,7 @@ class ProfessionalCustomerController extends ApiController
             'filters' => [
                 'include_archived' => $includeArchived,
                 'only_archived' => $onlyArchived,
+                'marketing_opt_in' => $marketingOptIn,
             ],
         ]);
         $payload['pagination'] = $payload['meta'];
@@ -71,7 +81,24 @@ class ProfessionalCustomerController extends ApiController
         $data = $request->validated();
         $data['source'] = $data['source'] ?? 'manual';
 
-        $customer = $pro->customers()->create($data);
+        // Check if customer with this email already exists (excluding soft-deleted)
+        $customer = $pro->customers()
+            ->where('email', $data['email'])
+            ->first();
+
+        if ($customer) {
+            // Update existing customer with new data
+            $customer->update([
+                'full_name' => $data['full_name'],
+                'phone' => $data['phone'] ?? $customer->phone,
+                'notes' => $data['notes'] ?? $customer->notes,
+                'source' => $data['source'],
+                'marketing_opt_in_cached' => $data['marketing_opt_in_cached'] ?? $customer->marketing_opt_in_cached,
+            ]);
+        } else {
+            // Create new customer
+            $customer = $pro->customers()->create($data);
+        }
 
         return $this->success(['customer' => $customer], 201);
 

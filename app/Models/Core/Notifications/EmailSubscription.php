@@ -2,17 +2,17 @@
 
 namespace App\Models\Core\Notifications;
 
+use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
-class EmailSubscription extends Model
+class EmailSubscription extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'core.email_subscriptions';
+    protected $table = 'email_subscriptions';
 
     public $incrementing = false;
     protected $keyType = 'string';
@@ -59,6 +59,27 @@ class EmailSubscription extends Model
     {
         $this->status = 'unsubscribed';
         $this->unsubscribed_at = now();
+    }
+
+    /**
+     * Sync customer cache after save (when status changes).
+     * Source of truth is this EmailSubscription.status, but we cache on Customer for UX/perf.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (self $subscription) {
+            if ($subscription->list_key === 'marketing' && $subscription->professional_id && $subscription->email) {
+                $customer = \App\Models\Core\Professional\Customer::query()
+                    ->where('professional_id', $subscription->professional_id)
+                    ->where('email', $subscription->email)
+                    ->first();
+
+                if ($customer) {
+                    $customer->marketing_opt_in_cached = $subscription->status === 'subscribed';
+                    $customer->saveQuietly();
+                }
+            }
+        });
     }
 
     public function professional(): BelongsTo

@@ -40,6 +40,11 @@ return [
 
     'media_bucket' => env('COMET_MEDIA_BUCKET', 'public-assets'),
 
+    'form_timing' => [
+        'min_ms' => (int) env('FORM_TIMING_MIN_MS', 2500),      // 2.5s minimum fill time
+        'max_ms' => (int) env('FORM_TIMING_MAX_MS', 43200000),  // 12h max (stale form)
+    ],
+
     'notification_retention_days' => [
         'policy_update' => 365,
         'incident' => 14,

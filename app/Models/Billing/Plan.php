@@ -2,11 +2,11 @@
 
 namespace App\Models\Billing;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 
-class Plan extends Model
+class Plan extends BaseModel
 {
-    protected $table = 'billing.plans';
+    protected $table = 'plans';
     public $incrementing = false;
     protected $keyType = 'string';
 

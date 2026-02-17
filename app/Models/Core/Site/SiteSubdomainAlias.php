@@ -2,15 +2,15 @@
 
 namespace App\Models\Core\Site;
 
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class SiteSubdomainAlias extends Model
+class SiteSubdomainAlias extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'core.site_subdomain_aliases';
+    protected $table = 'site_subdomain_aliases';
 
     public $incrementing = false;
     protected $keyType = 'string';

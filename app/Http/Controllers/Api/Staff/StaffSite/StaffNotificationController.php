@@ -6,7 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Notifications\Notification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Jobs\SendStaffBroadcastEmailsJob;
+use App\Jobs\Notifications\SendStaffBroadcastEmailsJob;
 
 class StaffNotificationController extends ApiController
 {

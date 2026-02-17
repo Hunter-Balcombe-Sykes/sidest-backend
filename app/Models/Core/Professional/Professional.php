@@ -4,11 +4,12 @@ namespace App\Models\Core\Professional;
 
 use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
+use App\Models\BaseModel;
+use App\Models\Billing\Subscription;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Builder;
@@ -23,16 +24,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int $onboarding_step
  */
 
-class Professional extends Model
+class Professional extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'core.professionals';
+    protected $table = 'professionals';
 
     public $incrementing = false;
     protected $keyType = 'string';
-
-    protected $with = ['site'];
 
     protected $fillable = [
         'handle',
@@ -124,12 +123,17 @@ class Professional extends Model
 
     public function serviceCategories()
     {
-        return $this->hasMany(\App\Models\Core\Professional\ServiceCategory::class);
+        return $this->hasMany(ServiceCategory::class);
     }
 
     public function emailSubscriptions(): HasMany
     {
         return $this->hasMany(EmailSubscription::class, 'professional_id');
+    }
+
+    public function subscription(): HasOne
+    {
+        return $this->hasOne(Subscription::class, 'professional_id');
     }
 
     public function resolveChildRouteBindingQuery($childType, $value, $field): Builder

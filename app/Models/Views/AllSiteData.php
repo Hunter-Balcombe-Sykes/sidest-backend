@@ -2,14 +2,14 @@
 
 namespace App\Models\Views;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
-class AllSiteData extends Model
+class AllSiteData extends BaseModel
 {
     use HasFactory;
 
-    protected $table = 'core.all_site_data';
+    protected $table = 'all_site_data';
     protected $primaryKey = 'site_id';
 
     public $incrementing = false;

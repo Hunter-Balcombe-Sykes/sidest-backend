@@ -2,16 +2,16 @@
 
 namespace App\Models\Core\Professional;
 
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Service extends Model
+class Service extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'core.services';
+    protected $table = 'services';
 
     public $incrementing = false;
     protected $keyType = 'string';

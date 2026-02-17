@@ -2,15 +2,15 @@
 
 namespace App\Models\Core\Staff;
 
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 
-class CometStaff extends Model
+class CometStaff extends BaseModel
 {
     use HasFactory, HasUuids;
 
-    protected $table = 'core.comet_staff';
+    protected $table = 'comet_staff';
 
     public $incrementing = false;
     protected $keyType = 'string';

@@ -78,6 +78,16 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'banner_bucket' => ['sometimes', 'nullable', 'string', 'max:255'],
             'banner_path'   => ['sometimes', 'nullable', 'string', 'max:255'],
 
+            // Settings: allowlist specific keys with validation
+            'settings.hero_title' => ['sometimes', 'string', 'max:100'],
+            'settings.hero_subtitle' => ['sometimes', 'string', 'max:200'],
+            'settings.primary_button_text' => ['sometimes', 'string', 'max:50'],
+            'settings.primary_button_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+            'settings.bio_text' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'settings.primary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.secondary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.show_branding' => ['sometimes', 'boolean'],
+
             // If you plan staff-only overrides later, allow this now.
             // Your UpdateSiteAction can choose to honor it only for staff.
             'force_publish' => ['sometimes', 'boolean'],

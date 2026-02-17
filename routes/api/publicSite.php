@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
+use App\Http\Controllers\Api\PublicSite\PublicMarketingPreferenceController;
 
 $publicDomain = config('comet.public_domain');
 
@@ -33,5 +34,15 @@ Route::group([
         ->middleware(['lead.log', 'throttle:leads']);
 
     Route::post('/subscribe', [PublicEmailSubscriptionController::class, 'subscribe'])
+        ->middleware('throttle:public-site');
+
+    // Marketing Preferences
+    Route::get('/marketing-preference', [PublicMarketingPreferenceController::class, 'show'])
+        ->middleware('throttle:public-site');
+
+    Route::post('/unsubscribe/{token}', [PublicMarketingPreferenceController::class, 'unsubscribe'])
+        ->middleware('throttle:public-site');
+
+    Route::post('/resubscribe/{token}', [PublicMarketingPreferenceController::class, 'resubscribe'])
         ->middleware('throttle:public-site');
 });

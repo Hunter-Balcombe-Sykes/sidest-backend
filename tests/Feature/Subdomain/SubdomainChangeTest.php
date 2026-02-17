@@ -1,5 +1,7 @@
 <?php
 
+/** @phpstan-ignore-all */
+
 use App\Actions\Site\UpdateSiteAction;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
@@ -7,15 +9,22 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Tests\TestCase;
+
+uses(TestCase::class)->in(__FILE__);
+
+/**
+ * @mixin TestCase
+ */
 
 beforeEach(function () {
     setupCoreSchema();
 
-    DB::table('core.site_subdomain_aliases')->delete();
-    DB::table('core.public_site_payload')->delete();
-    DB::table('core.sites')->delete();
-    DB::table('core.professionals')->delete();
-});
+    DB::table('site_subdomain_aliases')->delete();
+    DB::table('public_site_payload')->delete();
+    DB::table('sites')->delete();
+    DB::table('professionals')->delete();
+})->group('subdomain');
 
 it('prevents professionals from changing subdomain within 30 days', function () {
     Carbon::setTestNow('2025-01-15');
@@ -23,12 +32,12 @@ it('prevents professionals from changing subdomain within 30 days', function () 
     $proId = (string) Str::uuid();
     $siteId = (string) Str::uuid();
 
-    DB::table('core.professionals')->insert([
+    DB::table('professionals')->insert([
         'id' => $proId,
         'display_name' => 'Test Pro',
     ]);
 
-    DB::table('core.sites')->insert([
+    DB::table('sites')->insert([
         'id' => $siteId,
         'professional_id' => $proId,
         'subdomain' => 'old',
@@ -49,12 +58,12 @@ it('stores old subdomain as alias after a valid change', function () {
     $proId = (string) Str::uuid();
     $siteId = (string) Str::uuid();
 
-    DB::table('core.professionals')->insert([
+    DB::table('professionals')->insert([
         'id' => $proId,
         'display_name' => 'Test Pro',
     ]);
 
-    DB::table('core.sites')->insert([
+    DB::table('sites')->insert([
         'id' => $siteId,
         'professional_id' => $proId,
         'subdomain' => 'old',
@@ -70,7 +79,7 @@ it('stores old subdomain as alias after a valid change', function () {
     expect($site->subdomain)->toBe('new');
     expect($site->subdomain_changed_at->toDateString())->toBe('2025-01-15');
 
-    $alias = DB::table('core.site_subdomain_aliases')
+    $alias = DB::table('site_subdomain_aliases')
         ->where('site_id', $siteId)
         ->first();
 
@@ -87,26 +96,26 @@ it('redirects old subdomain to new site host', function () {
     $siteId = (string) Str::uuid();
     $aliasId = (string) Str::uuid();
 
-    DB::table('core.professionals')->insert([
+    DB::table('professionals')->insert([
         'id' => $proId,
         'display_name' => 'Test Pro',
     ]);
 
-    DB::table('core.sites')->insert([
+    DB::table('sites')->insert([
         'id' => $siteId,
         'professional_id' => $proId,
         'subdomain' => 'new',
         'is_published' => 1,
     ]);
 
-    DB::table('core.site_subdomain_aliases')->insert([
+    DB::table('site_subdomain_aliases')->insert([
         'id' => $aliasId,
         'site_id' => $siteId,
         'subdomain' => 'old',
         'created_at' => now()->toDateTimeString(),
     ]);
 
-    DB::table('core.public_site_payload')->insert([
+    DB::table('public_site_payload')->insert([
         'site_id' => $siteId,
         'subdomain' => 'new',
         'payload' => json_encode(['site' => ['id' => $siteId]]),
