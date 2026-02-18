@@ -24,6 +24,16 @@ Route::get('/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::cla
     ->name('public.unsubscribe');
 
 Route::get('/health', fn () => response()->json(['ok' => true]));
+
+// TOBIAS ADDED (NEEDS REVIEW)
+// Header-based fallback for path-based frontend routing (e.g. /shloom).
+// When the frontend cannot use subdomain DNS, it sends the subdomain
+// via the X-Site-Subdomain header through the Next.js proxy.
+Route::get('/public/site-by-slug', [\App\Http\Controllers\Api\PublicSite\PublicSiteController::class, 'showByHeader'])
+    ->middleware('throttle:public-site');
+
+// TOBIAS ADDED (NEEDS REVIEW) - deploy verification, remove after confirming
+Route::get('/deploy-check', fn () => response()->json(['deployed' => 'd87b721-v2']));
 Route::get('/ready', [HealthController::class, 'check']);
 
 // TODO: Remove debug routes before production deployment
