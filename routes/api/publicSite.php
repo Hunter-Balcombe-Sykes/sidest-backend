@@ -46,3 +46,12 @@ Route::group([
     Route::post('/resubscribe/{token}', [PublicMarketingPreferenceController::class, 'resubscribe'])
         ->middleware('throttle:public-site');
 });
+
+// TOBIAS ADDED (NEEDS REVIEW)
+// Header-based fallback for path-based frontend routing (e.g. /shloom).
+// When the frontend cannot use subdomain DNS, it sends the subdomain
+// via the X-Site-Subdomain header through the Next.js proxy.
+Route::prefix('public')->group(function () {
+    Route::get('/site', [PublicSiteController::class, 'showByHeader'])
+        ->middleware('throttle:public-site');
+});
