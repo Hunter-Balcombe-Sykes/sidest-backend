@@ -46,3 +46,4 @@ Route::group([
     Route::post('/resubscribe/{token}', [PublicMarketingPreferenceController::class, 'resubscribe'])
         ->middleware('throttle:public-site');
 });
+
