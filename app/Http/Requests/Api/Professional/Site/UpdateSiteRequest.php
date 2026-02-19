@@ -46,6 +46,7 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.primary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings.secondary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings.show_branding' => ['sometimes', 'boolean'],
+            'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
 
             // Subdomain: must be unique, not reserved, DNS-safe
             'subdomain' => [
