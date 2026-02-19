@@ -5,6 +5,7 @@ namespace App\Observers\Core;
 use App\Jobs\Cache\WarmPublicSiteCacheJob;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\SiteCacheService;
+use Illuminate\Support\Facades\Log;
 
 class SiteObserver
 {
@@ -20,7 +21,16 @@ class SiteObserver
 
         // Warm cache asynchronously if published
         if ($site->is_published) {
-            WarmPublicSiteCacheJob::dispatch(strtolower($site->subdomain))->afterCommit();
+            try {
+                WarmPublicSiteCacheJob::dispatch(strtolower($site->subdomain))->afterCommit();
+            } catch (\Throwable $e) {
+                // Never fail the write path because cache warming failed.
+                Log::warning('WarmPublicSiteCacheJob dispatch failed', [
+                    'site_id' => $site->id,
+                    'subdomain' => $site->subdomain,
+                    'message' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
