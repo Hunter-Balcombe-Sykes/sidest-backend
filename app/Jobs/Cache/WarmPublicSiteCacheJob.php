@@ -13,11 +13,11 @@ class WarmPublicSiteCacheJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $queue = 'cache';
-
     public function __construct(
         public string $subdomain
-    ) {}
+    ) {
+        $this->onQueue('cache');
+    }
 
     public function handle(SiteCacheService $siteCache): void
     {
