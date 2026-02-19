@@ -15,13 +15,13 @@ class SyncSquareCatalogDeltaJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $queue = 'integrations';
-
     public function __construct(
         public string $merchantId,
         public ?string $beginTime = null,
         public bool $fullSync = false
-    ) {}
+    ) {
+        $this->onQueue('integrations');
+    }
 
     public function handle(SquareServiceSyncService $syncService): void
     {
@@ -50,4 +50,3 @@ class SyncSquareCatalogDeltaJob implements ShouldQueue
         ]);
     }
 }
-

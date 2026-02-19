@@ -66,7 +66,8 @@ class ServiceObserver
     private function dispatchSquareSync(string $serviceId, string $action): void
     {
         try {
-            PushServiceToSquareJob::dispatch($serviceId, $action);
+            // Run immediately so Square updates work even when no worker cluster is running.
+            PushServiceToSquareJob::dispatchSync($serviceId, $action);
         } catch (\Throwable $e) {
             // Never fail core service CRUD because sync dispatch failed.
             Log::warning('PushServiceToSquareJob dispatch failed', [

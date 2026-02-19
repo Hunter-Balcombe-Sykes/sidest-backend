@@ -14,12 +14,12 @@ class PushServiceToSquareJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $queue = 'integrations';
-
     public function __construct(
         public string $serviceId,
         public string $action = 'upsert'
-    ) {}
+    ) {
+        $this->onQueue('integrations');
+    }
 
     public function handle(SquareServiceSyncService $syncService): void
     {
