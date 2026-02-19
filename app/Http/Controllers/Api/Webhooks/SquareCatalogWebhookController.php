@@ -1,0 +1,85 @@
+<?php
+
+namespace App\Http\Controllers\Api\Webhooks;
+
+use App\Http\Controllers\Api\ApiController;
+use App\Jobs\Square\SyncSquareCatalogDeltaJob;
+use App\Models\Core\Professional\Professional;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+
+class SquareCatalogWebhookController extends ApiController
+{
+    public function __invoke(Request $request): JsonResponse
+    {
+        $rawBody = $request->getContent() ?: '';
+        $signature = (string) $request->header('x-square-hmacsha256-signature', '');
+
+        if (! $this->isValidSignature($request, $rawBody, $signature)) {
+            Log::warning('Square webhook rejected: invalid signature', [
+                'ip' => $request->ip(),
+                'event_type' => $request->input('type'),
+            ]);
+
+            return $this->error('Invalid Square webhook signature.', 401);
+        }
+
+        $payload = $request->json()->all();
+        if (! is_array($payload)) {
+            return $this->success(['received' => true, 'ignored' => 'invalid_payload']);
+        }
+
+        $eventId = trim((string) ($payload['event_id'] ?? ''));
+        if ($eventId !== '') {
+            $dedupeKey = 'square:webhook:event:'.$eventId;
+            if (! Cache::add($dedupeKey, true, now()->addHours(24))) {
+                return $this->success(['received' => true, 'duplicate' => true]);
+            }
+        }
+
+        $eventType = trim((string) ($payload['type'] ?? ''));
+        $merchantId = trim((string) ($payload['merchant_id'] ?? ''));
+        if ($merchantId === '') {
+            return $this->success(['received' => true, 'ignored' => 'missing_merchant_id']);
+        }
+
+        if ($eventType === 'oauth.authorization.revoked') {
+            Professional::query()
+                ->where('square_merchant_id', $merchantId)
+                ->update([
+                    'square_access_token' => null,
+                    'square_refresh_token' => null,
+                    'square_merchant_id' => null,
+                    'square_expires_at' => null,
+                    'square_last_catalog_sync_error' => null,
+                ]);
+
+            return $this->success(['received' => true, 'revoked' => true]);
+        }
+
+        if ($eventType !== 'catalog.version.updated') {
+            return $this->success(['received' => true, 'ignored' => $eventType !== '' ? $eventType : 'unknown_event']);
+        }
+
+        SyncSquareCatalogDeltaJob::dispatch($merchantId, null, false);
+
+        return $this->success(['received' => true, 'queued' => true]);
+    }
+
+    private function isValidSignature(Request $request, string $body, string $signature): bool
+    {
+        $key = trim((string) config('services.square.webhook_signature_key', ''));
+        if ($key === '' || $signature === '') {
+            return false;
+        }
+
+        $configuredUrl = trim((string) config('services.square.webhook_notification_url', ''));
+        $notificationUrl = $configuredUrl !== '' ? $configuredUrl : $request->fullUrl();
+
+        $expected = base64_encode(hash_hmac('sha256', $notificationUrl.$body, $key, true));
+
+        return hash_equals($expected, $signature);
+    }
+}

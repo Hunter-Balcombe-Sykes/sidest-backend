@@ -2,6 +2,7 @@
 
 namespace App\Observers\Core;
 
+use App\Jobs\Square\PushServiceToSquareJob;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use App\Services\Cache\ProfessionalCacheService;
@@ -14,26 +15,53 @@ class ServiceObserver
         private readonly ProfessionalCacheService $professionalCache
     ) {}
 
-    private function bust(Service $service): void
+    private function bust(Service $service): ?Professional
     {
         $pro = Professional::query()->find($service->professional_id);
         if ($pro) {
             $this->professionalCache->invalidateProfessional($pro);
         }
+
+        return $pro;
     }
 
     public function saved(Service $service): void
     {
-        $this->bust($service);
+        $pro = $this->bust($service);
+
+        if ($this->shouldDispatchSquareSync($pro)) {
+            PushServiceToSquareJob::dispatch($service->id, 'upsert');
+        }
     }
 
     public function deleted(Service $service): void
     {
-        $this->bust($service);
+        $pro = $this->bust($service);
+
+        if ($this->shouldDispatchSquareSync($pro)) {
+            PushServiceToSquareJob::dispatch($service->id, 'delete');
+        }
     }
 
     public function restored(Service $service): void
     {
-        $this->bust($service);
+        $pro = $this->bust($service);
+
+        if ($this->shouldDispatchSquareSync($pro)) {
+            PushServiceToSquareJob::dispatch($service->id, 'upsert');
+        }
+    }
+
+    private function shouldDispatchSquareSync(?Professional $professional): bool
+    {
+        if (! $professional) {
+            return false;
+        }
+
+        if (empty($professional->square_access_token) || empty($professional->square_merchant_id)) {
+            return false;
+        }
+
+        return (bool) data_get($professional->site?->settings, 'services_auto_sync_enabled', false);
     }
 }

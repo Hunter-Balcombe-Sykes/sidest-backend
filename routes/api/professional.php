@@ -139,6 +139,6 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/square/connect', [SquareIntegrationController::class, 'connect']);
     Route::post('/square/disconnect', [SquareIntegrationController::class, 'disconnect']);
     Route::get('/square/token', [SquareIntegrationController::class, 'token']);
+    Route::post('/square/services/sync', [SquareIntegrationController::class, 'syncServicesNow']);
 
     });
-

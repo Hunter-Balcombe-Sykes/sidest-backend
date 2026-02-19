@@ -26,6 +26,11 @@ class Service extends BaseModel
         'duration_minutes',
         'is_active',
         'sort_order',
+        'square_catalog_object_id',
+        'square_variation_id',
+        'square_catalog_version',
+        'square_last_synced_at',
+        'square_sync_error',
     ];
 
     protected $casts = [
@@ -34,6 +39,8 @@ class Service extends BaseModel
         'sort_order' => 'integer',
         'duration_minutes' => 'integer',
         'deleted_at' => 'datetime',
+        'square_catalog_version' => 'integer',
+        'square_last_synced_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo

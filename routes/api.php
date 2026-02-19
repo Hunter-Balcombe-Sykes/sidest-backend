@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
+use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
 use Illuminate\Support\Facades\Log;
@@ -9,6 +10,9 @@ use Illuminate\Support\Facades\DB;
 
 // Ping
 Route::get('/ping', fn () => response()->json(['pong' => true]));
+
+// Square webhooks (no auth middleware)
+Route::post('/webhooks/square/catalog', SquareCatalogWebhookController::class);
 
 // bootstrap uses ONLY JWT middleware
 Route::middleware(['supabase.jwt'])->post('/bootstrap', [BootstrapController::class, 'bootstrap']);
