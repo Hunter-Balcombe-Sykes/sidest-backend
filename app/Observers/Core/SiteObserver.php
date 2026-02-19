@@ -17,7 +17,15 @@ class SiteObserver
 
     public function saved(Site $site): void
     {
-        $this->siteCache->invalidateSite($site);
+        try {
+            $this->siteCache->invalidateSite($site);
+        } catch (\Throwable $e) {
+            Log::warning('Site cache invalidation failed on save', [
+                'site_id' => $site->id,
+                'subdomain' => $site->subdomain,
+                'message' => $e->getMessage(),
+            ]);
+        }
 
         // Warm cache asynchronously if published
         if ($site->is_published) {
@@ -36,6 +44,14 @@ class SiteObserver
 
     public function deleted(Site $site): void
     {
-        $this->siteCache->invalidateSite($site);
+        try {
+            $this->siteCache->invalidateSite($site);
+        } catch (\Throwable $e) {
+            Log::warning('Site cache invalidation failed on delete', [
+                'site_id' => $site->id,
+                'subdomain' => $site->subdomain,
+                'message' => $e->getMessage(),
+            ]);
+        }
     }
 }

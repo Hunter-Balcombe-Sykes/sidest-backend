@@ -18,12 +18,22 @@ class ServiceObserver
 
     private function bust(Service $service): ?Professional
     {
-        $pro = Professional::query()->find($service->professional_id);
-        if ($pro) {
-            $this->professionalCache->invalidateProfessional($pro);
+        try {
+            $pro = Professional::query()->find($service->professional_id);
+            if ($pro) {
+                $this->professionalCache->invalidateProfessional($pro);
+            }
+
+            return $pro;
+        } catch (\Throwable $e) {
+            Log::warning('Professional cache invalidation failed on service change', [
+                'service_id' => $service->id,
+                'professional_id' => $service->professional_id,
+                'message' => $e->getMessage(),
+            ]);
         }
 
-        return $pro;
+        return Professional::query()->find($service->professional_id);
     }
 
     public function saved(Service $service): void
