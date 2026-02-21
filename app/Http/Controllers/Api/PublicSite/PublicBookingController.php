@@ -10,6 +10,7 @@ use App\Services\Public\PublicSiteResolver;
 use App\Services\Square\SquareApiClient;
 use App\Services\Square\SquareApiException;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -27,12 +28,12 @@ class PublicBookingController extends ApiController
 
     public function config(Request $request): JsonResponse
     {
-        [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
-        if ($errorResponse) {
-            return $errorResponse;
-        }
-
         try {
+            [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
+            if ($errorResponse) {
+                return $errorResponse;
+            }
+
             $location = $this->resolvePrimaryLocation($professional);
         } catch (SquareApiException $e) {
             Log::warning('Public booking config failed', [
@@ -42,6 +43,12 @@ class PublicBookingController extends ApiController
             ]);
 
             return $this->error('Online booking is temporarily unavailable. Please try again shortly.', 502);
+        } catch (\Throwable $e) {
+            Log::warning('Public booking config failed unexpectedly', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error('Online booking is currently unavailable. Please reconnect your booking integration.', 409);
         }
 
         $applicationId = trim((string) config('services.square.application_id', ''));
@@ -58,12 +65,12 @@ class PublicBookingController extends ApiController
 
     public function services(Request $request): JsonResponse
     {
-        [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
-        if ($errorResponse) {
-            return $errorResponse;
-        }
-
         try {
+            [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
+            if ($errorResponse) {
+                return $errorResponse;
+            }
+
             $fetched = $this->squareApiClient->fetchAppointmentServiceVariations($professional, null);
             $rows = is_array($fetched['services'] ?? null) ? $fetched['services'] : [];
         } catch (SquareApiException $e) {
@@ -74,6 +81,12 @@ class PublicBookingController extends ApiController
             ]);
 
             return $this->error('Services are temporarily unavailable. Please try again shortly.', 502);
+        } catch (\Throwable $e) {
+            Log::warning('Public booking services failed unexpectedly', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error('Services are currently unavailable. Please reconnect your booking integration.', 409);
         }
 
         $services = collect($rows)
@@ -111,18 +124,18 @@ class PublicBookingController extends ApiController
 
     public function availability(Request $request): JsonResponse
     {
-        [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
-        if ($errorResponse) {
-            return $errorResponse;
-        }
-
-        $validated = Validator::make($request->all(), [
-            'date' => ['required', 'date_format:Y-m-d'],
-            'serviceVariationId' => ['required', 'string', 'max:120'],
-            'locationId' => ['nullable', 'string', 'max:120'],
-        ])->validate();
-
         try {
+            [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
+            if ($errorResponse) {
+                return $errorResponse;
+            }
+
+            $validated = Validator::make($request->all(), [
+                'date' => ['required', 'date_format:Y-m-d'],
+                'serviceVariationId' => ['required', 'string', 'max:120'],
+                'locationId' => ['nullable', 'string', 'max:120'],
+            ])->validate();
+
             $location = $this->resolveLocation($professional, $validated['locationId'] ?? null);
             $date = CarbonImmutable::createFromFormat('Y-m-d', (string) $validated['date']);
             $startAt = $date->startOfDay()->toIso8601String();
@@ -150,6 +163,12 @@ class PublicBookingController extends ApiController
             ]);
 
             return $this->error('Available times could not be loaded. Please try another date.', 502);
+        } catch (\Throwable $e) {
+            Log::warning('Public booking availability failed unexpectedly', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error('Available times are currently unavailable. Please reconnect your booking integration.', 409);
         }
 
         $availabilities = is_array($response['availabilities'] ?? null) ? $response['availabilities'] : [];
@@ -183,29 +202,29 @@ class PublicBookingController extends ApiController
 
     public function checkout(Request $request): JsonResponse
     {
-        [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
-        if ($errorResponse) {
-            return $errorResponse;
-        }
-
-        $validated = Validator::make($request->all(), [
-            'serviceVariationId' => ['required', 'string', 'max:120'],
-            'serviceVariationVersion' => ['required', 'integer', 'min:1'],
-            'teamMemberId' => ['required', 'string', 'max:120'],
-            'durationMinutes' => ['nullable', 'integer', 'min:1'],
-            'startAt' => ['required', 'string', 'max:80'],
-            'locationId' => ['nullable', 'string', 'max:120'],
-            'paymentMethod' => ['nullable', 'string', 'in:apple_pay,card'],
-            'sourceId' => ['nullable', 'string', 'max:255'],
-            'customer' => ['required', 'array'],
-            'customer.firstName' => ['required', 'string', 'max:120'],
-            'customer.lastName' => ['required', 'string', 'max:120'],
-            'customer.email' => ['required', 'email', 'max:190'],
-            'customer.phone' => ['nullable', 'string', 'max:60'],
-            'customer.note' => ['nullable', 'string', 'max:1000'],
-        ])->validate();
-
         try {
+            [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
+            if ($errorResponse) {
+                return $errorResponse;
+            }
+
+            $validated = Validator::make($request->all(), [
+                'serviceVariationId' => ['required', 'string', 'max:120'],
+                'serviceVariationVersion' => ['required', 'integer', 'min:1'],
+                'teamMemberId' => ['required', 'string', 'max:120'],
+                'durationMinutes' => ['nullable', 'integer', 'min:1'],
+                'startAt' => ['required', 'string', 'max:80'],
+                'locationId' => ['nullable', 'string', 'max:120'],
+                'paymentMethod' => ['nullable', 'string', 'in:apple_pay,card'],
+                'sourceId' => ['nullable', 'string', 'max:255'],
+                'customer' => ['required', 'array'],
+                'customer.firstName' => ['required', 'string', 'max:120'],
+                'customer.lastName' => ['required', 'string', 'max:120'],
+                'customer.email' => ['required', 'email', 'max:190'],
+                'customer.phone' => ['nullable', 'string', 'max:60'],
+                'customer.note' => ['nullable', 'string', 'max:1000'],
+            ])->validate();
+
             $location = $this->resolveLocation($professional, $validated['locationId'] ?? null);
             $service = $this->resolveBookableServiceVariation(
                 $professional,
@@ -369,8 +388,12 @@ class PublicBookingController extends ApiController
             return [$site, $professional, $this->error('Online booking is not enabled for this site.', 409)];
         }
 
-        if (empty($professional->square_access_token) || empty($professional->square_merchant_id)) {
-            return [$site, $professional, $this->error('Booking integration is not connected for this site.', 409)];
+        try {
+            if (empty($professional->square_access_token) || empty($professional->square_merchant_id)) {
+                return [$site, $professional, $this->error('Booking integration is not connected for this site.', 409)];
+            }
+        } catch (DecryptException) {
+            return [$site, $professional, $this->error('Booking integration needs to be reconnected for this site.', 409)];
         }
 
         return [$site, $professional, null];
@@ -553,4 +576,3 @@ class PublicBookingController extends ApiController
         return 'Payment could not be completed. Please try another payment method.';
     }
 }
-
