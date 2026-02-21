@@ -34,7 +34,7 @@ class SquareApiClient
                 $body['cursor'] = $cursor;
             }
 
-            $data = $this->request($professional, 'POST', '/v2/catalog/search-catalog-objects', [], $body);
+            $data = $this->request($professional, 'POST', '/v2/catalog/search', [], $body);
             $objects = is_array($data['objects'] ?? null) ? $data['objects'] : [];
             $latestTime = is_string($data['latest_time'] ?? null) ? $data['latest_time'] : $latestTime;
             $cursor = is_string($data['cursor'] ?? null) ? $data['cursor'] : null;
