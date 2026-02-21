@@ -161,13 +161,28 @@ class SquareApiClient
         }
 
         if (! $response->successful()) {
-            $message = sprintf('Square API request failed: %s %s (HTTP %s)', $method, $path, $response->status());
+            $status = $response->status();
+            $message = sprintf('Square API request failed: %s %s (HTTP %s)', $method, $path, $status);
             $errors = is_array($payload['errors'] ?? null) ? $payload['errors'] : null;
-            if (is_array($errors) && isset($errors[0]['detail']) && is_string($errors[0]['detail'])) {
-                $message = $errors[0]['detail'];
+            if (is_array($errors) && isset($errors[0]) && is_array($errors[0])) {
+                $first = $errors[0];
+                $detail = isset($first['detail']) && is_string($first['detail']) ? trim($first['detail']) : '';
+                $code = isset($first['code']) && is_string($first['code']) ? trim($first['code']) : '';
+                $category = isset($first['category']) && is_string($first['category']) ? trim($first['category']) : '';
+
+                $parts = [];
+                if ($code !== '') {
+                    $parts[] = $code;
+                }
+                if ($category !== '') {
+                    $parts[] = $category;
+                }
+                $meta = $parts ? sprintf(' [%s]', implode('/', $parts)) : '';
+                $suffix = $detail !== '' ? sprintf(': %s', $detail) : '';
+                $message = sprintf('Square API %s %s failed (HTTP %s)%s%s', strtoupper($method), $path, $status, $meta, $suffix);
             }
 
-            throw new SquareApiException($message, $response->status(), $payload);
+            throw new SquareApiException($message, $status, $payload);
         }
 
         return $payload;
@@ -214,4 +229,3 @@ class SquareApiClient
         return 'https://connect.squareup.com';
     }
 }
-

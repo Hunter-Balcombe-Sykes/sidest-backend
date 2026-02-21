@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Square\SyncSquareCatalogDeltaJob;
 use App\Models\Core\Professional\Service;
+use App\Services\Square\SquareApiException;
 use App\Services\Square\SquareServiceSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -157,6 +158,32 @@ class SquareIntegrationController extends ApiController
 
         try {
             $stats = $syncService->syncFromSquare($pro, fullSync: true);
+        } catch (SquareApiException $e) {
+            $rawMessage = trim($e->getMessage());
+            $message = $rawMessage !== '' ? $rawMessage : 'Square sync failed.';
+            $lower = strtolower($message);
+            $status = $e->status > 0 ? $e->status : 422;
+
+            $shouldSuggestReconnect =
+                str_contains($lower, 'resource not found') ||
+                str_contains($lower, 'unauthorized') ||
+                str_contains($lower, 'access token') ||
+                str_contains($lower, 'merchant');
+
+            if ($shouldSuggestReconnect) {
+                $message .= ' Please reconnect your Square account. If this persists, verify SQUARE_ENVIRONMENT matches the account mode (production vs sandbox).';
+                $status = 409;
+            }
+
+            Log::warning('Manual Square sync failed (Square API)', [
+                'professional_id' => $pro->id,
+                'merchant_id' => $pro->square_merchant_id,
+                'status' => $e->status,
+                'message' => $e->getMessage(),
+                'payload' => $e->payload,
+            ]);
+
+            return $this->error($message, $status);
         } catch (\Throwable $e) {
             Log::warning('Manual Square sync failed', [
                 'professional_id' => $pro->id,
