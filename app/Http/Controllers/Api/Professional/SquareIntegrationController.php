@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\Professional;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Square\SyncSquareCatalogDeltaJob;
+use App\Models\Core\Professional\Service;
+use App\Services\Square\SquareServiceSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -131,6 +133,44 @@ class SquareIntegrationController extends ApiController
         return $this->success([
             'queued' => true,
             'merchant_id' => $pro->square_merchant_id,
+        ]);
+    }
+
+    /**
+     * POST /api/square/services/{service}/push
+     * Pushes one local service update to Square immediately.
+     */
+    public function pushServiceNow(Request $request, Service $service, SquareServiceSyncService $syncService)
+    {
+        $pro = $this->currentProfessional($request);
+
+        abort_unless($service->professional_id === $pro->id, 404);
+
+        if (empty($pro->square_access_token) || empty($pro->square_merchant_id)) {
+            return $this->error('Square account not connected.', 404);
+        }
+
+        try {
+            $syncService->pushServiceToSquare($service, 'upsert');
+        } catch (\Throwable $e) {
+            Log::warning('Manual Square push failed', [
+                'professional_id' => $pro->id,
+                'service_id' => $service->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error($e->getMessage(), 422);
+        }
+
+        $fresh = Service::query()->withTrashed()->find($service->id);
+
+        return $this->success([
+            'pushed' => true,
+            'service_id' => $service->id,
+            'square_catalog_object_id' => $fresh?->square_catalog_object_id,
+            'square_variation_id' => $fresh?->square_variation_id,
+            'square_last_synced_at' => $fresh?->square_last_synced_at?->toIso8601String(),
+            'square_sync_error' => $fresh?->square_sync_error,
         ]);
     }
 }

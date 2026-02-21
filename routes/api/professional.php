@@ -140,5 +140,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/square/disconnect', [SquareIntegrationController::class, 'disconnect']);
     Route::get('/square/token', [SquareIntegrationController::class, 'token']);
     Route::post('/square/services/sync', [SquareIntegrationController::class, 'syncServicesNow']);
+    Route::post('/square/services/{service}/push', [SquareIntegrationController::class, 'pushServiceNow'])
+        ->whereUuid('service');
 
     });
