@@ -203,33 +203,51 @@ class SquareServiceSyncService
      */
     private function applySquareSnapshot(Professional $professional, array $squareRows, bool $fullSync): array
     {
-        $defaultCategory = $this->resolveDefaultCategoryId($professional->id);
         $syncedVariationIds = [];
-        $deletedItemIds = [];
         $syncedCount = 0;
         $deletedCount = 0;
 
         DB::transaction(function () use (
             $professional,
             $squareRows,
-            $defaultCategory,
             &$syncedVariationIds,
-            &$deletedItemIds,
             &$syncedCount,
             &$deletedCount
         ): void {
-            $nextSortOrder = (int) (Service::query()
+            $existingCategories = ServiceCategory::query()
+                ->withTrashed()
                 ->where('professional_id', $professional->id)
-                ->where('category_id', $defaultCategory)
-                ->max('sort_order') ?? -1) + 1;
+                ->orderBy('sort_order')
+                ->orderBy('created_at')
+                ->get();
+
+            $activeCategoryIdByKey = [];
+            $trashedCategoryByKey = [];
+            $nextCategorySort = ((int) ($existingCategories->max('sort_order') ?? -1)) + 1;
+            foreach ($existingCategories as $category) {
+                $key = $this->categoryKey((string) $category->title);
+                if ($key === '') {
+                    continue;
+                }
+
+                if ($category->trashed()) {
+                    $trashedCategoryByKey[$key] = $category;
+                    continue;
+                }
+
+                $activeCategoryIdByKey[$key] = $category->id;
+            }
+
+            $nextSortOrderByCategory = [];
 
             Service::withoutEvents(function () use (
                 $professional,
                 $squareRows,
-                $defaultCategory,
                 &$syncedVariationIds,
-                &$deletedItemIds,
-                &$nextSortOrder,
+                &$nextSortOrderByCategory,
+                &$activeCategoryIdByKey,
+                &$trashedCategoryByKey,
+                &$nextCategorySort,
                 &$syncedCount,
                 &$deletedCount
             ): void {
@@ -245,11 +263,14 @@ class SquareServiceSyncService
 
                     $isDeleted = (bool) ($row['deleted'] ?? false);
                     if ($isDeleted) {
-                        $deletedItemIds[] = $itemId;
-
-                        $toDelete = Service::query()
-                            ->where('professional_id', $professional->id)
-                            ->where('square_catalog_object_id', $itemId)
+                        $variationId = trim((string) ($row['variation_id'] ?? ''));
+                        $toDelete = Service::query()->where('professional_id', $professional->id);
+                        if ($variationId !== '') {
+                            $toDelete->where('square_variation_id', $variationId);
+                        } else {
+                            $toDelete->where('square_catalog_object_id', $itemId);
+                        }
+                        $toDelete = $toDelete
                             ->whereNull('deleted_at')
                             ->get();
 
@@ -272,9 +293,17 @@ class SquareServiceSyncService
 
                     $title = trim((string) ($row['item_name'] ?? 'Service'));
                     $variationName = trim((string) ($row['variation_name'] ?? ''));
-                    if ($variationName !== '' && strcasecmp($variationName, $title) !== 0) {
+                    $isGenericVariationName = in_array(mb_strtolower($variationName), ['regular', 'default'], true);
+                    if ($variationName !== '' && ! $isGenericVariationName && strcasecmp($variationName, $title) !== 0) {
                         $title = sprintf('%s - %s', $title, $variationName);
                     }
+                    $categoryId = $this->resolveCategoryIdFromSquareRow(
+                        $professional->id,
+                        $row,
+                        $activeCategoryIdByKey,
+                        $trashedCategoryByKey,
+                        $nextCategorySort
+                    );
 
                     $service = Service::query()
                         ->withTrashed()
@@ -291,14 +320,14 @@ class SquareServiceSyncService
                     if (! $service) {
                         $service = Service::query()->create([
                             'professional_id' => $professional->id,
-                            'category_id' => $defaultCategory,
+                            'category_id' => $categoryId,
                             'title' => $title,
                             'description' => isset($row['item_description']) ? (string) $row['item_description'] : null,
                             'price_cents' => $priceCents ?? 0,
                             'currency_code' => $currencyCode !== '' ? $currencyCode : 'AUD',
                             'duration_minutes' => $durationMinutes,
                             'is_active' => $availableForBooking,
-                            'sort_order' => $nextSortOrder++,
+                            'sort_order' => $this->nextSortOrderForCategory($professional->id, $categoryId, $nextSortOrderByCategory),
                             'square_catalog_object_id' => $itemId,
                             'square_variation_id' => $variationId,
                             'square_catalog_version' => $itemVersion,
@@ -306,8 +335,9 @@ class SquareServiceSyncService
                             'square_sync_error' => null,
                         ]);
                     } else {
+                        $previousCategoryId = $service->category_id;
                         $service->fill([
-                            'category_id' => $service->category_id ?: $defaultCategory,
+                            'category_id' => $categoryId,
                             'title' => $title,
                             'description' => isset($row['item_description']) ? (string) $row['item_description'] : null,
                             'price_cents' => $priceCents ?? $service->price_cents ?? 0,
@@ -320,6 +350,9 @@ class SquareServiceSyncService
                             'square_last_synced_at' => now(),
                             'square_sync_error' => null,
                         ]);
+                        if ($previousCategoryId !== $categoryId) {
+                            $service->sort_order = $this->nextSortOrderForCategory($professional->id, $categoryId, $nextSortOrderByCategory);
+                        }
                         $service->save();
                     }
 
@@ -332,14 +365,18 @@ class SquareServiceSyncService
             });
         });
 
-        if ($fullSync && ! empty($syncedVariationIds)) {
+        if ($fullSync) {
             Service::withoutEvents(function () use ($professional, $syncedVariationIds, &$deletedCount): void {
-                $missing = Service::query()
+                $missingQuery = Service::query()
                     ->where('professional_id', $professional->id)
                     ->whereNotNull('square_variation_id')
-                    ->whereNotIn('square_variation_id', $syncedVariationIds)
-                    ->whereNull('deleted_at')
-                    ->get();
+                    ->whereNull('deleted_at');
+
+                if (! empty($syncedVariationIds)) {
+                    $missingQuery->whereNotIn('square_variation_id', array_values(array_unique($syncedVariationIds)));
+                }
+
+                $missing = $missingQuery->get();
 
                 foreach ($missing as $service) {
                     $service->is_active = false;
@@ -356,28 +393,85 @@ class SquareServiceSyncService
         ];
     }
 
-    private function resolveDefaultCategoryId(string $professionalId): ?string
+    private function resolveCategoryIdFromSquareRow(
+        string $professionalId,
+        array $row,
+        array &$activeCategoryIdByKey,
+        array &$trashedCategoryByKey,
+        int &$nextCategorySort
+    ): ?string
     {
-        $existing = ServiceCategory::query()
-            ->where('professional_id', $professionalId)
-            ->where('title', 'Services')
-            ->first();
-
-        if ($existing) {
-            return $existing->id;
+        $categoryName = trim((string) ($row['square_category_name'] ?? ''));
+        if ($categoryName === '') {
+            return null;
         }
 
-        $maxSort = ServiceCategory::query()
-            ->where('professional_id', $professionalId)
-            ->max('sort_order');
+        $key = $this->categoryKey($categoryName);
+        if ($key === '') {
+            return null;
+        }
+
+        if (isset($activeCategoryIdByKey[$key])) {
+            return $activeCategoryIdByKey[$key];
+        }
+
+        if (isset($trashedCategoryByKey[$key])) {
+            /** @var ServiceCategory $category */
+            $category = $trashedCategoryByKey[$key];
+            $category->restore();
+            if ($category->title !== $categoryName) {
+                $category->title = $categoryName;
+            }
+            if ($category->sort_order === null) {
+                $category->sort_order = $nextCategorySort++;
+            }
+            $category->save();
+
+            $activeCategoryIdByKey[$key] = $category->id;
+            unset($trashedCategoryByKey[$key]);
+
+            return $category->id;
+        }
 
         $created = ServiceCategory::query()->create([
             'professional_id' => $professionalId,
-            'title' => 'Services',
-            'sort_order' => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
+            'title' => $categoryName,
+            'sort_order' => $nextCategorySort++,
         ]);
 
+        $activeCategoryIdByKey[$key] = $created->id;
+
         return $created->id;
+    }
+
+    private function nextSortOrderForCategory(string $professionalId, ?string $categoryId, array &$nextSortOrderByCategory): int
+    {
+        $bucket = $categoryId ?? '__uncategorised__';
+        if (array_key_exists($bucket, $nextSortOrderByCategory)) {
+            $next = $nextSortOrderByCategory[$bucket];
+            $nextSortOrderByCategory[$bucket] = $next + 1;
+
+            return $next;
+        }
+
+        $max = Service::query()
+            ->where('professional_id', $professionalId)
+            ->when(
+                $categoryId === null,
+                fn ($q) => $q->whereNull('category_id'),
+                fn ($q) => $q->where('category_id', $categoryId)
+            )
+            ->max('sort_order');
+
+        $next = is_null($max) ? 0 : ((int) $max + 1);
+        $nextSortOrderByCategory[$bucket] = $next + 1;
+
+        return $next;
+    }
+
+    private function categoryKey(string $title): string
+    {
+        return mb_strtolower(trim($title));
     }
 
     private function existingOrTempId(?string $existingId, string $prefix, string $serviceId): string
@@ -391,4 +485,3 @@ class SquareServiceSyncService
         return sprintf('#commet-%s-%s', $prefix, $hash);
     }
 }
-

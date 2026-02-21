@@ -18,12 +18,13 @@ class SquareApiClient
     public function fetchAppointmentServiceVariations(Professional $professional, ?string $beginTime = null): array
     {
         $services = [];
+        $categoryNamesById = [];
         $latestTime = null;
         $cursor = null;
 
         do {
             $body = [
-                'object_types' => ['ITEM'],
+                'object_types' => ['ITEM', 'CATEGORY'],
                 'include_deleted_objects' => true,
             ];
 
@@ -45,6 +46,27 @@ class SquareApiClient
                 }
 
                 $type = (string) ($object['type'] ?? '');
+                if ($type === 'CATEGORY') {
+                    $categoryId = (string) ($object['id'] ?? '');
+                    if ($categoryId === '') {
+                        continue;
+                    }
+
+                    $categoryDeleted = (bool) ($object['is_deleted'] ?? false);
+                    if ($categoryDeleted) {
+                        unset($categoryNamesById[$categoryId]);
+                        continue;
+                    }
+
+                    $categoryData = is_array($object['category_data'] ?? null) ? $object['category_data'] : [];
+                    $categoryName = trim((string) ($categoryData['name'] ?? ''));
+                    if ($categoryName !== '') {
+                        $categoryNamesById[$categoryId] = $categoryName;
+                    }
+
+                    continue;
+                }
+
                 if ($type !== 'ITEM') {
                     continue;
                 }
@@ -72,9 +94,40 @@ class SquareApiClient
                     continue;
                 }
 
+                $categoryId = trim((string) ($itemData['category_id'] ?? ''));
+                if ($categoryId === '') {
+                    $categories = is_array($itemData['categories'] ?? null) ? $itemData['categories'] : [];
+                    $firstCategory = $categories[0] ?? null;
+                    if (is_array($firstCategory)) {
+                        $categoryId = trim((string) ($firstCategory['id'] ?? ''));
+                    }
+                }
+                if ($categoryId === '') {
+                    $reportingCategory = is_array($itemData['reporting_category'] ?? null) ? $itemData['reporting_category'] : null;
+                    if (is_array($reportingCategory)) {
+                        $categoryId = trim((string) ($reportingCategory['id'] ?? ''));
+                    }
+                }
+
                 $variations = is_array($itemData['variations'] ?? null) ? $itemData['variations'] : [];
                 foreach ($variations as $variation) {
                     if (! is_array($variation)) {
+                        continue;
+                    }
+
+                    $variationId = trim((string) ($variation['id'] ?? ''));
+                    if ($variationId === '') {
+                        continue;
+                    }
+
+                    $variationDeleted = (bool) ($variation['is_deleted'] ?? false);
+                    if ($variationDeleted) {
+                        $services[] = [
+                            'item_id' => $itemId,
+                            'variation_id' => $variationId,
+                            'item_version' => $itemVersion,
+                            'deleted' => true,
+                        ];
                         continue;
                     }
 
@@ -87,17 +140,29 @@ class SquareApiClient
                         'item_name' => (string) ($itemData['name'] ?? 'Service'),
                         'item_description' => isset($itemData['description']) ? (string) $itemData['description'] : null,
                         'item_version' => $itemVersion,
-                        'variation_id' => (string) ($variation['id'] ?? ''),
+                        'variation_id' => $variationId,
                         'variation_name' => (string) ($variationData['name'] ?? ''),
                         'duration_minutes' => $durationMs !== null ? (int) round($durationMs / 60000) : null,
                         'price_cents' => isset($price['amount']) ? (int) $price['amount'] : null,
                         'currency_code' => isset($price['currency']) ? (string) $price['currency'] : null,
                         'available_for_booking' => (bool) ($variationData['available_for_booking'] ?? false),
+                        'square_category_id' => $categoryId !== '' ? $categoryId : null,
                         'deleted' => false,
                     ];
                 }
             }
         } while ($cursor !== null);
+
+        foreach ($services as &$service) {
+            if (! is_array($service) || (bool) ($service['deleted'] ?? false)) {
+                continue;
+            }
+            $rowCategoryId = trim((string) ($service['square_category_id'] ?? ''));
+            $service['square_category_name'] = $rowCategoryId !== ''
+                ? ($categoryNamesById[$rowCategoryId] ?? null)
+                : null;
+        }
+        unset($service);
 
         return [
             'services' => $services,
