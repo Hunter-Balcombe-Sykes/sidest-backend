@@ -35,6 +35,12 @@ class PublicBookingController extends ApiController
             }
 
             $location = $this->resolvePrimaryLocation($professional);
+        } catch (DecryptException $e) {
+            Log::warning('Public booking config failed (decrypt)', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error('Booking integration credentials could not be read. Please reconnect your booking integration.', 409);
         } catch (SquareApiException $e) {
             Log::warning('Public booking config failed', [
                 'site_id' => $site?->id,
@@ -48,7 +54,7 @@ class PublicBookingController extends ApiController
                 'message' => $e->getMessage(),
             ]);
 
-            return $this->error('Online booking is currently unavailable. Please reconnect your booking integration.', 409);
+            return $this->error(sprintf('Online booking is currently unavailable. (%s)', $this->diagnosticCode($e)), 409);
         }
 
         $applicationId = trim((string) config('services.square.application_id', ''));
@@ -73,6 +79,12 @@ class PublicBookingController extends ApiController
 
             $fetched = $this->squareApiClient->fetchAppointmentServiceVariations($professional, null);
             $rows = is_array($fetched['services'] ?? null) ? $fetched['services'] : [];
+        } catch (DecryptException $e) {
+            Log::warning('Public booking services failed (decrypt)', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error('Booking integration credentials could not be read. Please reconnect your booking integration.', 409);
         } catch (SquareApiException $e) {
             Log::warning('Public booking services failed', [
                 'site_id' => $site?->id,
@@ -155,6 +167,12 @@ class PublicBookingController extends ApiController
                     ],
                 ],
             ]);
+        } catch (DecryptException $e) {
+            Log::warning('Public booking availability failed (decrypt)', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error('Booking integration credentials could not be read. Please reconnect your booking integration.', 409);
         } catch (SquareApiException $e) {
             Log::warning('Public booking availability failed', [
                 'site_id' => $site?->id,
@@ -168,7 +186,7 @@ class PublicBookingController extends ApiController
                 'message' => $e->getMessage(),
             ]);
 
-            return $this->error('Available times are currently unavailable. Please reconnect your booking integration.', 409);
+            return $this->error(sprintf('Available times are currently unavailable. (%s)', $this->diagnosticCode($e)), 409);
         }
 
         $availabilities = is_array($response['availabilities'] ?? null) ? $response['availabilities'] : [];
@@ -348,6 +366,12 @@ class PublicBookingController extends ApiController
             ]);
 
             return $this->error('Booking could not be completed right now. Please try again.', 502);
+        } catch (DecryptException $e) {
+            Log::warning('Public booking checkout failed (decrypt)', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error('Booking integration credentials could not be read. Please reconnect your booking integration.', 409);
         } catch (\Throwable $e) {
             Log::warning('Public booking checkout failed unexpectedly', [
                 'site_id' => $site?->id,
@@ -355,7 +379,7 @@ class PublicBookingController extends ApiController
                 'message' => $e->getMessage(),
             ]);
 
-            return $this->error('Booking could not be completed right now. Please try again.', 500);
+            return $this->error(sprintf('Booking could not be completed right now. (%s)', $this->diagnosticCode($e)), 500);
         }
     }
 
@@ -374,8 +398,7 @@ class PublicBookingController extends ApiController
             return [null, null, $this->error('Site not found.', 404)];
         }
 
-        $site->loadMissing('professional');
-        $professional = $site->professional;
+        $professional = Professional::query()->find($site->professional_id);
         if (! $professional) {
             return [$site, null, $this->error('Booking is not available for this site.', 409)];
         }
@@ -388,12 +411,10 @@ class PublicBookingController extends ApiController
             return [$site, $professional, $this->error('Online booking is not enabled for this site.', 409)];
         }
 
-        try {
-            if (empty($professional->square_access_token) || empty($professional->square_merchant_id)) {
-                return [$site, $professional, $this->error('Booking integration is not connected for this site.', 409)];
-            }
-        } catch (DecryptException) {
-            return [$site, $professional, $this->error('Booking integration needs to be reconnected for this site.', 409)];
+        $rawToken = trim((string) ($professional->getRawOriginal('square_access_token') ?? ''));
+        $merchantId = trim((string) ($professional->square_merchant_id ?? ''));
+        if ($rawToken === '' || $merchantId === '') {
+            return [$site, $professional, $this->error('Booking integration is not connected for this site.', 409)];
         }
 
         return [$site, $professional, null];
@@ -574,5 +595,10 @@ class PublicBookingController extends ApiController
         }
 
         return 'Payment could not be completed. Please try another payment method.';
+    }
+
+    private function diagnosticCode(\Throwable $exception): string
+    {
+        return class_basename($exception);
     }
 }
