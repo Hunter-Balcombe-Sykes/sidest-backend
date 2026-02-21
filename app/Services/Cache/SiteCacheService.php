@@ -50,6 +50,7 @@ class SiteCacheService
             'site' => $payload['site'] ?? null,
             'professional' => $payload['professional'] ?? null,
             'theme' => $payload['theme'] ?? null,
+            'services' => $payload['services'] ?? [],
             'links' => $payload['links'] ?? ($payload['blocks'] ?? []),
             'sections' => $payload['sections'] ?? [],
             'blocks' => $payload['blocks'] ?? ($payload['links'] ?? []),
