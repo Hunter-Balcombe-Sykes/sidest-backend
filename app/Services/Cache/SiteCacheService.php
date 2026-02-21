@@ -2,11 +2,12 @@
 
 namespace App\Services\Cache;
 
+use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Views\PublicSitePayload;
-use Illuminate\Support\Facades\Cache;
 use App\Models\Core\Site\SiteSubdomainAlias;
+use Illuminate\Support\Facades\Cache;
 
 class SiteCacheService
 {
@@ -28,7 +29,12 @@ class SiteCacheService
             return null;
         }
         if (is_array($cached)) {
-            return $cached;
+            // Backward-compatible cache healing for payload shape changes.
+            // Older cache entries may not include `services`.
+            if (array_key_exists('services', $cached)) {
+                return $cached;
+            }
+            Cache::forget($key);
         }
 
         $row = PublicSitePayload::query()
@@ -43,6 +49,9 @@ class SiteCacheService
         }
 
         $payload = $row->payload ?? [];
+        $services = is_array($payload['services'] ?? null)
+            ? $payload['services']
+            : $this->buildServicesPayload((string) ($row->professional_id ?? ''));
 
         // Must match the controller response shape exactly.
         $data = [
@@ -50,7 +59,7 @@ class SiteCacheService
             'site' => $payload['site'] ?? null,
             'professional' => $payload['professional'] ?? null,
             'theme' => $payload['theme'] ?? null,
-            'services' => $payload['services'] ?? [],
+            'services' => $services,
             'links' => $payload['links'] ?? ($payload['blocks'] ?? []),
             'sections' => $payload['sections'] ?? [],
             'blocks' => $payload['blocks'] ?? ($payload['links'] ?? []),
@@ -59,6 +68,40 @@ class SiteCacheService
         Cache::put($key, $data, now()->addMinutes(15));
 
         return $data;
+    }
+
+    /**
+     * Fallback builder for services when the public payload view is missing them.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildServicesPayload(string $professionalId): array
+    {
+        if ($professionalId === '') {
+            return [];
+        }
+
+        return Service::query()
+            ->with('category:id,title')
+            ->where('professional_id', $professionalId)
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->orderBy('sort_order')
+            ->orderBy('created_at')
+            ->get()
+            ->map(fn (Service $service): array => [
+                'id' => $service->id,
+                'title' => $service->title,
+                'description' => $service->description,
+                'price_cents' => $service->price_cents,
+                'currency_code' => $service->currency_code,
+                'duration_minutes' => $service->duration_minutes,
+                'is_active' => (bool) $service->is_active,
+                'sort_order' => $service->sort_order,
+                'category' => $service->category?->title ?? 'Services',
+            ])
+            ->values()
+            ->all();
     }
 
     /**
