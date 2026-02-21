@@ -25,9 +25,16 @@ class ProfessionalServiceController extends ApiController
         $includeArchived = $request->boolean('include_archived');
         $onlyArchived    = $request->boolean('only_archived');
         $grouped         = $request->boolean('grouped');
+        $source          = strtolower((string) $request->query('source', 'all'));
 
         $servicesQuery = Service::query()
             ->where('professional_id', $pro->id);
+
+        if ($source === 'manual') {
+            $servicesQuery->whereNull('square_variation_id');
+        } elseif ($source === 'square' || $source === 'smart') {
+            $servicesQuery->whereNotNull('square_variation_id');
+        }
 
         if ($onlyArchived) {
             $servicesQuery->onlyTrashed();
@@ -43,6 +50,7 @@ class ProfessionalServiceController extends ApiController
                 'filters' => [
                     'include_archived' => $includeArchived,
                     'only_archived' => $onlyArchived,
+                    'source' => $source,
                 ],
             ]);
         }
@@ -50,6 +58,21 @@ class ProfessionalServiceController extends ApiController
         // Categories list (for grouped UI)
         $catQuery = ServiceCategory::query()
             ->where('professional_id', $pro->id);
+
+        if ($source !== 'all') {
+            $categoryIds = $services
+                ->pluck('category_id')
+                ->filter(fn ($id) => !is_null($id))
+                ->unique()
+                ->values()
+                ->all();
+
+            if (empty($categoryIds)) {
+                $catQuery->whereRaw('1 = 0');
+            } else {
+                $catQuery->whereIn('id', $categoryIds);
+            }
+        }
 
         if ($onlyArchived) {
             $catQuery->onlyTrashed();
@@ -79,6 +102,7 @@ class ProfessionalServiceController extends ApiController
                 'include_archived' => $includeArchived,
                 'only_archived' => $onlyArchived,
                 'grouped' => true,
+                'source' => $source,
             ],
         ]);
     }

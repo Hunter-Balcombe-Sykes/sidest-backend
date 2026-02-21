@@ -47,6 +47,8 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.secondary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings.show_branding' => ['sometimes', 'boolean'],
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
+            'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
+            'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
 
             // Subdomain: must be unique, not reserved, DNS-safe
             'subdomain' => [
