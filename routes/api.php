@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
+use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
@@ -35,6 +36,15 @@ Route::get('/health', fn () => response()->json(['ok' => true]));
 // When the frontend cannot use subdomain DNS, it sends the subdomain
 // via the X-Site-Subdomain header through the Next.js proxy.
 Route::get('/public/site-by-slug', [\App\Http\Controllers\Api\PublicSite\PublicSiteController::class, 'showByHeader'])
+    ->middleware('throttle:public-site');
+
+Route::get('/public/booking/config-by-slug', [PublicBookingController::class, 'config'])
+    ->middleware('throttle:public-site');
+Route::get('/public/booking/services-by-slug', [PublicBookingController::class, 'services'])
+    ->middleware('throttle:public-site');
+Route::post('/public/booking/availability-by-slug', [PublicBookingController::class, 'availability'])
+    ->middleware('throttle:public-site');
+Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
     ->middleware('throttle:public-site');
 
 // TOBIAS ADDED (NEEDS REVIEW) - deploy verification, remove after confirming
