@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Api\ApiController;
 use App\Jobs\Square\SyncSquareCatalogDeltaJob;
 use App\Models\Core\Professional\Professional;
+use App\Services\Square\SquareServiceSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -12,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 
 class SquareCatalogWebhookController extends ApiController
 {
-    public function __invoke(Request $request): JsonResponse
+    public function __invoke(Request $request, SquareServiceSyncService $syncService): JsonResponse
     {
         $rawBody = $request->getContent() ?: '';
         $signature = (string) $request->header('x-square-hmacsha256-signature', '');
@@ -63,9 +64,53 @@ class SquareCatalogWebhookController extends ApiController
             return $this->success(['received' => true, 'ignored' => $eventType !== '' ? $eventType : 'unknown_event']);
         }
 
-        SyncSquareCatalogDeltaJob::dispatch($merchantId, null, false);
+        try {
+            SyncSquareCatalogDeltaJob::dispatch($merchantId, null, false);
 
-        return $this->success(['received' => true, 'queued' => true]);
+            return $this->success(['received' => true, 'queued' => true]);
+        } catch (\Throwable $dispatchError) {
+            Log::warning('Square webhook queue dispatch failed; attempting inline sync', [
+                'merchant_id' => $merchantId,
+                'message' => $dispatchError->getMessage(),
+            ]);
+
+            $professional = Professional::query()
+                ->where('square_merchant_id', $merchantId)
+                ->first();
+
+            if (! $professional) {
+                return $this->success([
+                    'received' => true,
+                    'queued' => false,
+                    'ignored' => 'merchant_not_found',
+                ]);
+            }
+
+            try {
+                $stats = $syncService->syncFromSquare($professional, fullSync: false);
+
+                return $this->success([
+                    'received' => true,
+                    'queued' => false,
+                    'synced_inline' => true,
+                    'synced' => $stats['synced'] ?? 0,
+                    'deleted' => $stats['deleted'] ?? 0,
+                    'latest_time' => $stats['latest_time'] ?? null,
+                ]);
+            } catch (\Throwable $syncError) {
+                Log::warning('Square webhook inline sync failed', [
+                    'merchant_id' => $merchantId,
+                    'message' => $syncError->getMessage(),
+                ]);
+
+                // Return 200 to prevent noisy webhook retries; error is logged for investigation.
+                return $this->success([
+                    'received' => true,
+                    'queued' => false,
+                    'synced_inline' => false,
+                ]);
+            }
+        }
     }
 
     private function isValidSignature(Request $request, string $body, string $signature): bool

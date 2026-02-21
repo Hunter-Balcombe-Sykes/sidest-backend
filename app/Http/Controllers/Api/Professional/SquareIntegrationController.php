@@ -37,7 +37,7 @@ class SquareIntegrationController extends ApiController
      * POST /api/square/connect
      * Stores the Square OAuth tokens for this professional.
      */
-    public function connect(Request $request)
+    public function connect(Request $request, SquareServiceSyncService $syncService)
     {
         $request->validate([
             'access_token'  => 'required|string',
@@ -55,8 +55,32 @@ class SquareIntegrationController extends ApiController
         $pro->square_last_catalog_sync_error = null;
         $pro->save();
 
+        $syncQueued = false;
+        $syncFallbackInline = false;
+
         // Pull initial services from Square right after connect.
-        SyncSquareCatalogDeltaJob::dispatch($pro->square_merchant_id, null, true);
+        // Prefer async queue, but gracefully fallback to inline if queue infra is unavailable.
+        try {
+            SyncSquareCatalogDeltaJob::dispatch($pro->square_merchant_id, null, true);
+            $syncQueued = true;
+        } catch (\Throwable $dispatchError) {
+            Log::warning('Queue dispatch failed for initial Square sync; falling back inline', [
+                'professional_id' => $pro->id,
+                'merchant_id' => $pro->square_merchant_id,
+                'message' => $dispatchError->getMessage(),
+            ]);
+
+            try {
+                $syncService->syncFromSquare($pro, fullSync: true);
+                $syncFallbackInline = true;
+            } catch (\Throwable $syncError) {
+                Log::warning('Initial inline Square sync failed after queue dispatch failure', [
+                    'professional_id' => $pro->id,
+                    'merchant_id' => $pro->square_merchant_id,
+                    'message' => $syncError->getMessage(),
+                ]);
+            }
+        }
 
         Log::info('Square connected', [
             'professional_id' => $pro->id,
@@ -67,6 +91,8 @@ class SquareIntegrationController extends ApiController
             'connected'   => true,
             'merchant_id' => $pro->square_merchant_id,
             'expires_at'  => $pro->square_expires_at->toIso8601String(),
+            'sync_queued' => $syncQueued,
+            'sync_fallback_inline' => $syncFallbackInline,
         ]);
     }
 
@@ -118,9 +144,10 @@ class SquareIntegrationController extends ApiController
 
     /**
      * POST /api/square/services/sync
-     * Queues a full pull from Square services into Commet.
+     * Runs a full pull from Square services into Commet immediately.
+     * This endpoint is used by the manual refresh button and must work without queue workers.
      */
-    public function syncServicesNow(Request $request)
+    public function syncServicesNow(Request $request, SquareServiceSyncService $syncService)
     {
         $pro = $this->currentProfessional($request);
 
@@ -128,11 +155,25 @@ class SquareIntegrationController extends ApiController
             return $this->error('Square account not connected.', 404);
         }
 
-        SyncSquareCatalogDeltaJob::dispatch($pro->square_merchant_id, null, true);
+        try {
+            $stats = $syncService->syncFromSquare($pro, fullSync: true);
+        } catch (\Throwable $e) {
+            Log::warning('Manual Square sync failed', [
+                'professional_id' => $pro->id,
+                'merchant_id' => $pro->square_merchant_id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->error($e->getMessage(), 422);
+        }
 
         return $this->success([
-            'queued' => true,
+            'queued' => false,
+            'synced_inline' => true,
             'merchant_id' => $pro->square_merchant_id,
+            'synced' => $stats['synced'] ?? 0,
+            'deleted' => $stats['deleted'] ?? 0,
+            'latest_time' => $stats['latest_time'] ?? null,
         ]);
     }
 
