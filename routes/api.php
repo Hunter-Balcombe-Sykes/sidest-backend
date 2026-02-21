@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 Route::get('/ping', fn () => response()->json(['pong' => true]));
 
 // Square webhooks (no auth middleware)
+Route::post('/webhooks/square', SquareCatalogWebhookController::class);
 Route::post('/webhooks/square/catalog', SquareCatalogWebhookController::class);
 
 // bootstrap uses ONLY JWT middleware

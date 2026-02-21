@@ -121,10 +121,24 @@ class SquareCatalogWebhookController extends ApiController
         }
 
         $configuredUrl = trim((string) config('services.square.webhook_notification_url', ''));
-        $notificationUrl = $configuredUrl !== '' ? $configuredUrl : $request->fullUrl();
+        $requestUrl = $request->fullUrl();
 
-        $expected = base64_encode(hash_hmac('sha256', $notificationUrl.$body, $key, true));
+        $candidateUrls = array_values(array_unique(array_filter([
+            $configuredUrl !== '' ? $configuredUrl : null,
+            $requestUrl,
+            str_ends_with($requestUrl, '/catalog') ? substr($requestUrl, 0, -8) : null,
+            str_ends_with($requestUrl, '/catalog') ? null : rtrim($requestUrl, '/').'/catalog',
+            $configuredUrl !== '' && str_ends_with($configuredUrl, '/catalog') ? substr($configuredUrl, 0, -8) : null,
+            $configuredUrl !== '' && !str_ends_with($configuredUrl, '/catalog') ? rtrim($configuredUrl, '/').'/catalog' : null,
+        ])));
 
-        return hash_equals($expected, $signature);
+        foreach ($candidateUrls as $notificationUrl) {
+            $expected = base64_encode(hash_hmac('sha256', $notificationUrl.$body, $key, true));
+            if (hash_equals($expected, $signature)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
