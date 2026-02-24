@@ -46,5 +46,3 @@ Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class,
     ->middleware('throttle:public-site');
 
 Route::get('/ready', [HealthController::class, 'check']);
-//     }
-// });
