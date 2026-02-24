@@ -26,6 +26,37 @@ class PublicBookingController extends ApiController
         private readonly SquareApiClient $squareApiClient
     ) {}
 
+    /**
+     * Handle common booking error scenarios with consistent error responses.
+     */
+    private function handleBookingError(\Throwable $e, ?Site $site = null, ?Professional $professional = null, string $context = 'booking operation'): JsonResponse
+    {
+        if ($e instanceof DecryptException) {
+            Log::warning("Public {$context} failed (decrypt)", [
+                'site_id' => $site?->id,
+                'professional_id' => $professional?->id,
+                'message' => $e->getMessage(),
+            ]);
+            return $this->error('Booking integration credentials could not be read. Please reconnect your booking integration.', 409);
+        }
+
+        if ($e instanceof SquareApiException) {
+            Log::warning("Public {$context} failed", [
+                'site_id' => $site?->id,
+                'professional_id' => $professional?->id,
+                'message' => $e->getMessage(),
+            ]);
+            return $this->error(ucfirst($context) . ' temporarily unavailable. Please try again shortly.', 502);
+        }
+
+        Log::warning("Public {$context} failed unexpectedly", [
+            'site_id' => $site?->id,
+            'professional_id' => $professional?->id,
+            'message' => $e->getMessage(),
+        ]);
+        return $this->error(sprintf('%s currently unavailable. (%s)', ucfirst($context), $this->diagnosticCode($e)), 409);
+    }
+
     public function config(Request $request): JsonResponse
     {
         try {
@@ -35,26 +66,8 @@ class PublicBookingController extends ApiController
             }
 
             $location = $this->resolvePrimaryLocation($professional);
-        } catch (DecryptException $e) {
-            Log::warning('Public booking config failed (decrypt)', [
-                'message' => $e->getMessage(),
-            ]);
-
-            return $this->error('Booking integration credentials could not be read. Please reconnect your booking integration.', 409);
-        } catch (SquareApiException $e) {
-            Log::warning('Public booking config failed', [
-                'site_id' => $site?->id,
-                'professional_id' => $professional?->id,
-                'message' => $e->getMessage(),
-            ]);
-
-            return $this->error('Online booking is temporarily unavailable. Please try again shortly.', 502);
         } catch (\Throwable $e) {
-            Log::warning('Public booking config failed unexpectedly', [
-                'message' => $e->getMessage(),
-            ]);
-
-            return $this->error(sprintf('Online booking is currently unavailable. (%s)', $this->diagnosticCode($e)), 409);
+            return $this->handleBookingError($e, $site ?? null, $professional ?? null, 'booking config');
         }
 
         $applicationId = trim((string) config('services.square.application_id', ''));
@@ -79,26 +92,8 @@ class PublicBookingController extends ApiController
 
             $fetched = $this->squareApiClient->fetchAppointmentServiceVariations($professional, null);
             $rows = is_array($fetched['services'] ?? null) ? $fetched['services'] : [];
-        } catch (DecryptException $e) {
-            Log::warning('Public booking services failed (decrypt)', [
-                'message' => $e->getMessage(),
-            ]);
-
-            return $this->error('Booking integration credentials could not be read. Please reconnect your booking integration.', 409);
-        } catch (SquareApiException $e) {
-            Log::warning('Public booking services failed', [
-                'site_id' => $site?->id,
-                'professional_id' => $professional?->id,
-                'message' => $e->getMessage(),
-            ]);
-
-            return $this->error('Services are temporarily unavailable. Please try again shortly.', 502);
         } catch (\Throwable $e) {
-            Log::warning('Public booking services failed unexpectedly', [
-                'message' => $e->getMessage(),
-            ]);
-
-            return $this->error('Services are currently unavailable. Please reconnect your booking integration.', 409);
+            return $this->handleBookingError($e, $site ?? null, $professional ?? null, 'booking services');
         }
 
         $services = collect($rows)

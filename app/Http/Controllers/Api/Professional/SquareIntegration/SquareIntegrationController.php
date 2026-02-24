@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Api\Professional;
+namespace App\Http\Controllers\Api\Professional\SquareIntegration;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
@@ -8,12 +8,51 @@ use App\Jobs\Square\SyncSquareCatalogDeltaJob;
 use App\Models\Core\Professional\Service;
 use App\Services\Square\SquareApiException;
 use App\Services\Square\SquareServiceSyncService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 class SquareIntegrationController extends ApiController
 {
     use ResolveCurrentProfessional;
+
+    /**
+     * Check if the professional has Square connected.
+     */
+    private function ensureSquareConnected(Request $request): JsonResponse|null
+    {
+        $pro = $this->currentProfessional($request);
+        
+        if (empty($pro->square_access_token) || empty($pro->square_merchant_id)) {
+            return $this->error('Square account not connected.', 404);
+        }
+
+        return null; // Success: connection exists
+    }
+
+    /**
+     * Build user-friendly error message from Square API exception.
+     */
+    private function buildSquareErrorMessage(SquareApiException $e): array
+    {
+        $rawMessage = trim($e->getMessage());
+        $message = $rawMessage !== '' ? $rawMessage : 'Square sync failed.';
+        $lower = strtolower($message);
+        $status = $e->status > 0 ? $e->status : 422;
+
+        $shouldSuggestReconnect =
+            str_contains($lower, 'resource not found') ||
+            str_contains($lower, 'unauthorized') ||
+            str_contains($lower, 'access token') ||
+            str_contains($lower, 'merchant');
+
+        if ($shouldSuggestReconnect) {
+            $message .= ' Please reconnect your Square account. If this persists, verify SQUARE_ENVIRONMENT matches the account mode (production vs sandbox).';
+            $status = 409;
+        }
+
+        return [$message, $status];
+    }
 
     /**
      * GET /api/square/status
@@ -129,11 +168,11 @@ class SquareIntegrationController extends ApiController
      */
     public function token(Request $request)
     {
-        $pro = $this->currentProfessional($request);
-
-        if (empty($pro->square_access_token)) {
-            return $this->error('Square account not connected.', 404);
+        if ($error = $this->ensureSquareConnected($request)) {
+            return $error;
         }
+
+        $pro = $this->currentProfessional($request);
 
         return $this->success([
             'access_token' => $pro->square_access_token,
@@ -150,30 +189,16 @@ class SquareIntegrationController extends ApiController
      */
     public function syncServicesNow(Request $request, SquareServiceSyncService $syncService)
     {
-        $pro = $this->currentProfessional($request);
-
-        if (empty($pro->square_access_token) || empty($pro->square_merchant_id)) {
-            return $this->error('Square account not connected.', 404);
+        if ($error = $this->ensureSquareConnected($request)) {
+            return $error;
         }
+
+        $pro = $this->currentProfessional($request);
 
         try {
             $stats = $syncService->syncFromSquare($pro, fullSync: true);
         } catch (SquareApiException $e) {
-            $rawMessage = trim($e->getMessage());
-            $message = $rawMessage !== '' ? $rawMessage : 'Square sync failed.';
-            $lower = strtolower($message);
-            $status = $e->status > 0 ? $e->status : 422;
-
-            $shouldSuggestReconnect =
-                str_contains($lower, 'resource not found') ||
-                str_contains($lower, 'unauthorized') ||
-                str_contains($lower, 'access token') ||
-                str_contains($lower, 'merchant');
-
-            if ($shouldSuggestReconnect) {
-                $message .= ' Please reconnect your Square account. If this persists, verify SQUARE_ENVIRONMENT matches the account mode (production vs sandbox).';
-                $status = 409;
-            }
+            [$message, $status] = $this->buildSquareErrorMessage($e);
 
             Log::warning('Manual Square sync failed (Square API)', [
                 'professional_id' => $pro->id,
@@ -214,8 +239,8 @@ class SquareIntegrationController extends ApiController
 
         abort_unless($service->professional_id === $pro->id, 404);
 
-        if (empty($pro->square_access_token) || empty($pro->square_merchant_id)) {
-            return $this->error('Square account not connected.', 404);
+        if ($error = $this->ensureSquareConnected($request)) {
+            return $error;
         }
 
         try {

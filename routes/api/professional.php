@@ -15,7 +15,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
-use App\Http\Controllers\Api\Professional\SquareIntegrationController;
+use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
