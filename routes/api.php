@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
+use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
 
@@ -14,6 +15,10 @@ Route::get('/ping', fn () => response()->json(['pong' => true]));
 // Square webhooks (no auth middleware)
 Route::post('/webhooks/square', SquareCatalogWebhookController::class);
 Route::post('/webhooks/square/catalog', SquareCatalogWebhookController::class);
+
+// Fresha webhooks (no auth middleware)
+Route::post('/webhooks/fresha', FreshaCatalogWebhookController::class);
+Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
 
 // bootstrap uses ONLY JWT middleware
 Route::middleware(['supabase.jwt'])->post('/bootstrap', [BootstrapController::class, 'bootstrap']);

@@ -43,4 +43,12 @@ return [
         'webhook_notification_url' => env('SQUARE_WEBHOOK_NOTIFICATION_URL'),
     ],
 
+    'fresha' => [
+        'client_id' => env('FRESHA_CLIENT_ID'),
+        'client_secret' => env('FRESHA_CLIENT_SECRET'),
+        'environment' => env('FRESHA_ENVIRONMENT', 'production'),
+        'webhook_signature_key' => env('FRESHA_WEBHOOK_SIGNATURE_KEY'),
+        'webhook_notification_url' => env('FRESHA_WEBHOOK_NOTIFICATION_URL'),
+    ],
+
 ];
