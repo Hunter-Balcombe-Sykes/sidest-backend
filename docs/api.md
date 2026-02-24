@@ -354,6 +354,17 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | onboarding_step         | integer  | yes      | 1                                        | 0+                                                         |
 | created_at              | datetime | yes      | 2026-01-12T05:12:00Z                     |                                                            |
 | updated_at              | datetime | yes      | 2026-01-12T05:12:00Z                     |                                                            |
+| square_access_token     | string   | yes      | *(encrypted)*                            | Encrypted; Square OAuth access token                       |
+| square_refresh_token    | string   | yes      | *(encrypted)*                            | Encrypted; Square OAuth refresh token                      |
+| square_merchant_id      | string   | yes      | `MERCHANT_ABC`                           | Square merchant identifier                                 |
+| square_token_expires_at | datetime | yes      | `2026-03-01T00:00:00Z`                   | When the Square access token expires                       |
+| square_last_synced_at   | datetime | yes      | `2026-02-20T12:00:00Z`                   | Last successful Square catalog sync                        |
+| fresha_access_token     | string   | yes      | *(encrypted)*                            | Encrypted; Fresha OAuth access token                       |
+| fresha_refresh_token    | string   | yes      | *(encrypted)*                            | Encrypted; Fresha OAuth refresh token                      |
+| fresha_business_id      | string   | yes      | `biz_123`                                | Fresha business identifier                                 |
+| fresha_token_expires_at | datetime | yes      | `2026-03-01T00:00:00Z`                   | When the Fresha access token expires                       |
+| fresha_partner_id       | string   | yes      | `partner_456`                            | Fresha partner identifier                                  |
+| fresha_last_synced_at   | datetime | yes      | `2026-02-20T12:00:00Z`                   | Last successful Fresha catalog sync                        |
 
 
 ### Site
@@ -402,6 +413,16 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | created_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
 | updated_at      | datetime | yes      | `2026-01-12T05:12:00Z` |                         |
 | deleted_at      | datetime | yes      | `2026-01-20T05:12:00Z` | Soft delete timestamp   |
+| square_catalog_object_id | string | yes | `ITEM_ABC`           | Square catalog item ID  |
+| square_variation_id      | string | yes | `VAR_123`            | Square item variation ID |
+| square_service_version   | integer| yes | `1`                  | Square object version (optimistic locking) |
+| square_last_synced_at    | datetime| yes| `2026-02-20T12:00:00Z` | Last Square sync timestamp |
+| square_sync_error        | string | yes | `null`               | Last Square sync error message |
+| fresha_service_id        | string | yes | `svc_789`            | Fresha service ID       |
+| fresha_variation_id      | string | yes | `var_012`            | Fresha service variation ID |
+| fresha_service_version   | integer| yes | `1`                  | Fresha object version (optimistic locking) |
+| fresha_last_synced_at    | datetime| yes| `2026-02-20T12:00:00Z` | Last Fresha sync timestamp |
+| fresha_sync_error        | string | yes | `null`               | Last Fresha sync error message |
 
 ### ServiceCategory
 | Name            | Type     | Nullable | Example                | Constraints / Notes     |
@@ -1047,6 +1068,98 @@ Square integration manages online booking appointments and service synchronizati
 - Response (200): { "pushed": true, "service_id": "...", "square_catalog_object_id": "...", "square_variation_id": "...", "square_last_synced_at": "...", "square_sync_error": null }
 - Common status codes: 200, 401, 403, 404 (not connected/service not found), 422
 
+### Fresha Integration
+
+Fresha integration manages service catalog synchronization between Comet and Fresha.
+
+Unlike Square (which exposes a full platform API for bookings, payments, and catalog), Fresha restricts third-party integrations to **catalog sync only**. Bookings, payments, and availability remain within the Fresha ecosystem. The Fresha integration therefore focuses on keeping the service catalog in sync between Comet and Fresha. The `FreshaApiClient` does include prepared methods for availability, bookings, and customer creation — these are scaffolded for future use if Fresha opens its API further, but they are not currently wired to any public routes.
+
+#### `GET /api/fresha/status`
+
+- Purpose: get current Fresha connection status and token expiry
+- Auth: Required (professional)
+- Response (200): { "connected": true, "business_id": "biz_123", "partner_id": "partner_456", "expires_at": "2026-02-23T05:12:00Z" }
+- Common status codes: 200, 401, 403
+
+#### `POST /api/fresha/connect`
+
+- Purpose: store Fresha OAuth tokens after user authorizes via Fresha OAuth flow
+- Auth: Required (professional)
+- Request body: { "access_token": "...", "refresh_token": "...", "business_id": "...", "partner_id": "...", "expires_at": "2026-02-23T..." }
+- Response (200): { "connected": true, "business_id": "...", "partner_id": "...", "expires_at": "...", "sync_queued": true, "sync_fallback_inline": false }
+- Behavior: automatically triggers initial service sync from Fresha (queued or inline fallback)
+- Common status codes: 200, 401, 403, 422
+
+#### `POST /api/fresha/disconnect`
+
+- Purpose: clear stored Fresha tokens and stop syncing
+- Auth: Required (professional)
+- Response (200): { "connected": false }
+- Common status codes: 200, 401, 403
+
+#### `GET /api/fresha/token`
+
+- Purpose: fetch decrypted Fresha access token for frontend use
+- Auth: Required (professional)
+- Response (200): { "access_token": "...", "expires_at": "..." }
+- Common status codes: 200, 401, 403, 404 (not connected)
+
+#### `POST /api/fresha/services/sync`
+
+- Purpose: manually trigger full service sync from Fresha
+- Auth: Required (professional)
+- Response (200): { "queued": false, "synced_inline": true, "business_id": "...", "synced": 5, "deleted": 2, "latest_time": "..." }
+- Behavior: always runs inline (no queue required); useful for manual refresh button
+- Common status codes: 200, 401, 403, 404 (not connected), 409 (access issue), 422
+
+#### `POST /api/fresha/services/{service}/push`
+
+- Purpose: push a local service update to Fresha immediately
+- Auth: Required (professional), must own the service
+- Response (200): { "pushed": true, "service_id": "...", "fresha_service_id": "...", "fresha_variation_id": "...", "fresha_last_synced_at": "...", "fresha_sync_error": null }
+- Common status codes: 200, 401, 403, 404 (not connected/service not found), 422
+
+---
+
+### Fresha Webhooks
+
+Fresha sends catalog change notifications to the Comet webhook endpoint. These routes have **no auth middleware** — authentication is performed via HMAC signature validation.
+
+#### `POST /api/webhooks/fresha`
+#### `POST /api/webhooks/fresha/catalog`
+
+- Purpose: receive Fresha catalog change notifications and trigger delta sync
+- Auth: HMAC signature validation via `X-Fresha-Signature` header (uses `FRESHA_WEBHOOK_SIGNATURE_KEY`)
+- Supported event types: `catalog.updated`, `catalog.deleted`, `authorization.revoked`
+- Behavior:
+  - Validates HMAC-SHA256 signature against request body
+  - Deduplicates events using `event_id` (ignores replays within 24 hours via cache)
+  - For `catalog.updated` / `catalog.deleted`: dispatches `SyncFreshaCatalogDeltaJob` to the `integrations` queue
+  - For `authorization.revoked`: clears the professional's stored Fresha tokens
+- Response (200): { "received": true }
+- Common status codes: 200, 400 (missing signature), 403 (invalid signature), 404 (professional not found), 422 (unknown event)
+
+---
+
+### Integration Comparison: Square vs Fresha
+
+| Capability               | Square                         | Fresha                                   |
+|--------------------------|--------------------------------|------------------------------------------|
+| Service catalog sync     | Yes (pull & push)              | Yes (pull & push)                        |
+| Public online booking    | Yes (full checkout flow)       | No (bookings stay in Fresha)             |
+| Payment processing       | Yes (Square Web Payments SDK)  | No (payments stay in Fresha)             |
+| Availability search      | Yes (exposed via public API)   | Prepared in client, not wired to routes  |
+| Customer creation        | Yes (during checkout)          | Prepared in client, not wired to routes  |
+| Webhook delta sync       | No (manual sync only)          | Yes (catalog.updated, catalog.deleted)   |
+| Token refresh            | Manual via connect              | Automatic retry on 401 with refresh flow |
+| Auth revocation webhook  | No                              | Yes (authorization.revoked event)        |
+| Observer auto-sync       | Yes (on service save/delete)   | Yes (on service save/delete)             |
+| Queue                    | `integrations`                 | `integrations`                           |
+
+**Why they differ:** Square exposes a complete platform API — catalog, bookings, payments, availability, customers, and locations are all accessible to third-party developers. Comet leverages this to offer a full public booking + payment flow embedded in the mini-site. Fresha, by contrast, restricts third-party API access to catalog (service) management. Bookings, payments, availability, and customer data remain within the Fresha ecosystem. The Fresha integration therefore focuses exclusively on keeping the service catalog synchronized. The `FreshaApiClient` includes scaffolded methods for availability, bookings, and customer creation to allow rapid expansion if Fresha opens these APIs in the future.
+
+---
+
 ### Notifications
 
 - GET /api/me/notifications
@@ -1203,6 +1316,19 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 - COMET_PUBLIC_DOMAIN (used for domain-scoped public routes)
 - COMET_MEDIA_BUCKET (default: public-assets)
 - SOFT_DELETE_RETENTION_DAYS (default: 30)
+
+### Square integration
+
+- SQUARE_APPLICATION_ID (Square app ID, used by public booking config endpoint)
+- SQUARE_ENVIRONMENT (sandbox or production)
+
+### Fresha integration
+
+- FRESHA_CLIENT_ID (Fresha OAuth client ID)
+- FRESHA_CLIENT_SECRET (Fresha OAuth client secret)
+- FRESHA_ENVIRONMENT (sandbox or production)
+- FRESHA_WEBHOOK_SIGNATURE_KEY (HMAC key for validating Fresha webhook signatures)
+- FRESHA_WEBHOOK_NOTIFICATION_URL (URL Fresha sends webhook events to)
 
 ### Optional: cache, queues, mail (needed for staff broadcast emails)
 
