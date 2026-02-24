@@ -34,7 +34,7 @@ class Service extends BaseModel
         'square_last_synced_at',
         'square_sync_error',
 
-        // Fersha integration
+        // Fresha integration
         'fresha_service_id',
         'fresha_variation_id',
         'fresha_service_version',
@@ -50,6 +50,8 @@ class Service extends BaseModel
         'deleted_at' => 'datetime',
         'square_catalog_version' => 'integer',
         'square_last_synced_at' => 'datetime',
+        'fresha_service_version' => 'integer',
+        'fresha_last_synced_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo
