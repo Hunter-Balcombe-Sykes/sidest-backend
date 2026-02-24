@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
+use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
@@ -141,6 +142,15 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::get('/square/token', [SquareIntegrationController::class, 'token']);
     Route::post('/square/services/sync', [SquareIntegrationController::class, 'syncServicesNow']);
     Route::post('/square/services/{service}/push', [SquareIntegrationController::class, 'pushServiceNow'])
+        ->whereUuid('service');
+
+    // Fresha Integration
+    Route::get('/fresha/status', [FreshaIntegrationController::class, 'status']);
+    Route::post('/fresha/connect', [FreshaIntegrationController::class, 'connect']);
+    Route::post('/fresha/disconnect', [FreshaIntegrationController::class, 'disconnect']);
+    Route::get('/fresha/token', [FreshaIntegrationController::class, 'token']);
+    Route::post('/fresha/services/sync', [FreshaIntegrationController::class, 'syncServicesNow']);
+    Route::post('/fresha/services/{service}/push', [FreshaIntegrationController::class, 'pushServiceNow'])
         ->whereUuid('service');
 
     });

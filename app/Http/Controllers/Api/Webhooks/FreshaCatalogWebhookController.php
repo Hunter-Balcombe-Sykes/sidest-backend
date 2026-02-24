@@ -1,0 +1,157 @@
+<?php
+
+namespace App\Http\Controllers\Api\Webhooks;
+
+use App\Http\Controllers\Api\ApiController;
+use App\Jobs\Fresha\SyncFreshaCatalogDeltaJob;
+use App\Models\Core\Professional\Professional;
+use App\Services\Fresha\FreshaServiceSyncService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+
+class FreshaCatalogWebhookController extends ApiController
+{
+    public function __invoke(Request $request, FreshaServiceSyncService $syncService): JsonResponse
+    {
+        $rawBody = $request->getContent() ?: '';
+        $signature = (string) $request->header('x-fresha-signature', '');
+
+        if (! $this->isValidSignature($request, $rawBody, $signature)) {
+            Log::warning('Fresha webhook rejected: invalid signature', [
+                'ip' => $request->ip(),
+                'event_type' => $request->input('type'),
+            ]);
+
+            return $this->error('Invalid Fresha webhook signature.', 401);
+        }
+
+        $payload = $request->json()->all();
+
+        // NOTE: Update these field names based on actual Fresha webhook payload structure.
+        $eventType = trim((string) ($payload['type'] ?? $payload['event_type'] ?? ''));
+        $businessId = trim((string) ($payload['business_id'] ?? data_get($payload, 'data.business_id', '')));
+
+        // Deduplicate
+        $eventId = trim((string) ($payload['event_id'] ?? $payload['id'] ?? ''));
+        if ($eventId !== '') {
+            $cacheKey = 'fresha_webhook:' . $eventId;
+            if (Cache::has($cacheKey)) {
+                return $this->success(['received' => true, 'duplicate' => true]);
+            }
+            Cache::put($cacheKey, true, now()->addHours(24));
+        }
+
+        Log::info('Fresha webhook received', [
+            'event_type' => $eventType,
+            'business_id' => $businessId,
+        ]);
+
+        // Handle authorization revoked
+        if (in_array($eventType, ['oauth.authorization.revoked', 'authorization.revoked'], true)) {
+            if ($businessId !== '') {
+                Professional::query()
+                    ->where('fresha_business_id', $businessId)
+                    ->update([
+                        'fresha_access_token' => null,
+                        'fresha_refresh_token' => null,
+                        'fresha_business_id' => null,
+                        'fresha_expires_at' => null,
+                        'fresha_last_catalog_sync_error' => null,
+                    ]);
+            }
+
+            return $this->success(['received' => true, 'revoked' => true]);
+        }
+
+        // Handle catalog/service updates
+        if (! in_array($eventType, ['catalog.version.updated', 'service.updated', 'service.created', 'service.deleted'], true)) {
+            return $this->success(['received' => true, 'ignored' => $eventType !== '' ? $eventType : 'unknown_event']);
+        }
+
+        if ($businessId === '') {
+            return $this->success(['received' => true, 'ignored' => 'no_business_id']);
+        }
+
+        try {
+            SyncFreshaCatalogDeltaJob::dispatch($businessId, null, false);
+
+            return $this->success(['received' => true, 'queued' => true]);
+        } catch (\Throwable $dispatchError) {
+            Log::warning('Fresha webhook queue dispatch failed; attempting inline sync', [
+                'business_id' => $businessId,
+                'message' => $dispatchError->getMessage(),
+            ]);
+
+            $professional = Professional::query()
+                ->where('fresha_business_id', $businessId)
+                ->first();
+
+            if (! $professional) {
+                return $this->success([
+                    'received' => true,
+                    'queued' => false,
+                    'ignored' => 'business_not_found',
+                ]);
+            }
+
+            try {
+                $stats = $syncService->syncFromFresha($professional, fullSync: false);
+
+                return $this->success([
+                    'received' => true,
+                    'queued' => false,
+                    'synced_inline' => true,
+                    'synced' => $stats['synced'] ?? 0,
+                    'deleted' => $stats['deleted'] ?? 0,
+                    'latest_time' => $stats['latest_time'] ?? null,
+                ]);
+            } catch (\Throwable $syncError) {
+                Log::warning('Fresha webhook inline sync failed', [
+                    'business_id' => $businessId,
+                    'message' => $syncError->getMessage(),
+                ]);
+
+                // Return 200 to prevent noisy webhook retries; error is logged for investigation.
+                return $this->success([
+                    'received' => true,
+                    'queued' => false,
+                    'synced_inline' => false,
+                    'error' => 'Inline sync failed.',
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Validate the webhook signature from Fresha.
+     *
+     * NOTE: Update this method based on Fresha's actual webhook signature mechanism.
+     * Currently mirrors the Square HMAC-SHA256 pattern.
+     */
+    private function isValidSignature(Request $request, string $rawBody, string $signature): bool
+    {
+        $signatureKey = trim((string) config('services.fresha.webhook_signature_key', ''));
+        $notificationUrl = trim((string) config('services.fresha.webhook_notification_url', ''));
+
+        if ($signatureKey === '' || $notificationUrl === '') {
+            // If not configured, skip validation (log warning).
+            Log::warning('Fresha webhook signature key or notification URL not configured — skipping validation');
+
+            return true;
+        }
+
+        if ($signature === '') {
+            return false;
+        }
+
+        // NOTE: Update this hashing logic based on actual Fresha docs.
+        // This mirrors Square's approach: HMAC-SHA256 of (notification_url + raw_body) with the signature key.
+        $expectedSignature = base64_encode(
+            hash_hmac('sha256', $notificationUrl . $rawBody, $signatureKey, true)
+        );
+
+        return hash_equals($expectedSignature, $signature);
+    }
+}

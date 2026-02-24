@@ -74,6 +74,15 @@ class Professional extends BaseModel
         'square_catalog_latest_time',
         'square_last_catalog_sync_at',
         'square_last_catalog_sync_error',
+
+        // Fresha integration
+        'fresha_access_token',
+        'fresha_refresh_token',
+        'fresha_business_id',
+        'fresha_expires_at',
+        'fresha_catalog_latest_time',
+        'fresha_last_catalog_sync_at',
+        'fresha_last_catalog_sync_error',
     ];
 
     protected $casts = [
@@ -86,6 +95,11 @@ class Professional extends BaseModel
         'square_expires_at'    => 'datetime',
         'square_catalog_latest_time' => 'datetime',
         'square_last_catalog_sync_at' => 'datetime',
+        'fresha_access_token'  => 'encrypted',
+        'fresha_refresh_token' => 'encrypted',
+        'fresha_expires_at'    => 'datetime',
+        'fresha_catalog_latest_time' => 'datetime',
+        'fresha_last_catalog_sync_at' => 'datetime',
     ];
 
     public function site(): HasOne

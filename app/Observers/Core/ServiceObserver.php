@@ -2,6 +2,7 @@
 
 namespace App\Observers\Core;
 
+use App\Jobs\Fresha\PushServiceToFreshaJob;
 use App\Jobs\Square\PushServiceToSquareJob;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
@@ -43,6 +44,10 @@ class ServiceObserver
         if ($this->shouldDispatchSquareSync($pro)) {
             $this->dispatchSquareSync($service->id, 'upsert');
         }
+
+        if ($this->shouldDispatchFreshaSync($pro)) {
+            $this->dispatchFreshaSync($service->id, 'upsert');
+        }
     }
 
     public function deleted(Service $service): void
@@ -52,6 +57,10 @@ class ServiceObserver
         if ($this->shouldDispatchSquareSync($pro)) {
             $this->dispatchSquareSync($service->id, 'delete');
         }
+
+        if ($this->shouldDispatchFreshaSync($pro)) {
+            $this->dispatchFreshaSync($service->id, 'delete');
+        }
     }
 
     public function restored(Service $service): void
@@ -60,6 +69,10 @@ class ServiceObserver
 
         if ($this->shouldDispatchSquareSync($pro)) {
             $this->dispatchSquareSync($service->id, 'upsert');
+        }
+
+        if ($this->shouldDispatchFreshaSync($pro)) {
+            $this->dispatchFreshaSync($service->id, 'upsert');
         }
     }
 
@@ -78,6 +91,21 @@ class ServiceObserver
         }
     }
 
+    private function dispatchFreshaSync(string $serviceId, string $action): void
+    {
+        try {
+            // Run immediately so Fresha updates work even when no worker cluster is running.
+            PushServiceToFreshaJob::dispatchSync($serviceId, $action);
+        } catch (\Throwable $e) {
+            // Never fail core service CRUD because sync dispatch failed.
+            Log::warning('PushServiceToFreshaJob dispatch failed', [
+                'service_id' => $serviceId,
+                'action' => $action,
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
     private function shouldDispatchSquareSync(?Professional $professional): bool
     {
         if (! $professional) {
@@ -85,6 +113,19 @@ class ServiceObserver
         }
 
         if (empty($professional->square_access_token) || empty($professional->square_merchant_id)) {
+            return false;
+        }
+
+        return (bool) data_get($professional->site?->settings, 'services_auto_sync_enabled', false);
+    }
+
+    private function shouldDispatchFreshaSync(?Professional $professional): bool
+    {
+        if (! $professional) {
+            return false;
+        }
+
+        if (empty($professional->fresha_access_token) || empty($professional->fresha_business_id)) {
             return false;
         }
 

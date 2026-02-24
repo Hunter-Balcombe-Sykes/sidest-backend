@@ -91,9 +91,6 @@ Route::prefix('staff')
     // Suspend / unsuspend barber
     Route::patch('/professionals/{professional}/status', [StaffProfessionalController::class, 'updateStatus']);
     Route::patch('/professionals/{professional}', [StaffProfessionalController::class, 'update']);
-    // Restore
-    Route::post('/professionals/{professional}/restore', [StaffProfessionalController::class, 'restore'])
-        ->withTrashed();
     // Hard delete (admin only)
     Route::delete('/professionals/{professional}/force', [StaffProfessionalController:: class, 'forceDestroy']);
 
