@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicMarketingPreferenceController;
+use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 
 $publicDomain = config('comet.public_domain');
 
@@ -19,6 +20,16 @@ Route::group([
 
     // Show Site
     Route::get('/site', [PublicSiteController::class, 'show'])
+        ->middleware('throttle:public-site');
+
+    // Public booking flow
+    Route::get('/booking/config', [PublicBookingController::class, 'config'])
+        ->middleware('throttle:public-site');
+    Route::get('/booking/services', [PublicBookingController::class, 'services'])
+        ->middleware('throttle:public-site');
+    Route::post('/booking/availability', [PublicBookingController::class, 'availability'])
+        ->middleware('throttle:public-site');
+    Route::post('/booking/checkout', [PublicBookingController::class, 'checkout'])
         ->middleware('throttle:public-site');
 
     // Page View Analytics
@@ -46,4 +57,3 @@ Route::group([
     Route::post('/resubscribe/{token}', [PublicMarketingPreferenceController::class, 'resubscribe'])
         ->middleware('throttle:public-site');
 });
-

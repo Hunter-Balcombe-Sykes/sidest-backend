@@ -46,6 +46,8 @@ class ProfessionalController extends ApiController
                 'handle' => $pro->handle,
                 'handle_lc' => $pro->handle_lc,
                 'display_name' => $pro->display_name,
+                'first_name' => $pro->first_name,
+                'last_name' => $pro->last_name,
                 'bio' => $pro->bio,
                 'country_code' => $pro->country_code,
                 'timezone' => $pro->timezone,
@@ -65,6 +67,8 @@ class ProfessionalController extends ApiController
                 'location_country' => $pro->location_country,
                 'created_at' => optional($pro->created_at)->toIso8601String(),
                 'updated_at' => optional($pro->updated_at)->toIso8601String(),
+                'square_connected' => !empty($pro->square_access_token) && !empty($pro->square_merchant_id),
+                'square_merchant_id' => $pro->square_merchant_id,
             ],
             'site' => $pro->site ? [
                 'id' => $pro->site->id,

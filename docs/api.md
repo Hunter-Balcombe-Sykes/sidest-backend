@@ -648,6 +648,197 @@ https://{subdomain}.{COMET_PUBLIC_DOMAIN}
 
 **Common status codes:** 200, 404 (token not found), 400 (invalid token), 429
 
+### Online Booking API
+
+#### Domain-Scoped Booking Endpoints
+
+The following booking endpoints are domain-scoped and accessed via the mini-site subdomain:
+`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/booking/...`
+
+#### `GET /api/public/booking/config`
+
+- Purpose: fetch booking integration configuration and primary location details
+- Auth: None
+- Rate limit: public-site
+
+**Response (200):**
+
+```json
+{
+    "booking_enabled": true,
+    "application_id": "SQ0...",
+    "location": {
+        "id": "location-uuid",
+        "name": "Main Location",
+        "country": "AU",
+        "currency": "AUD",
+        "status": "ACTIVE"
+    }
+}
+```
+
+**Common status codes:** 200, 404 (site not found), 409 (booking not enabled/not connected), 502 (system unavailable), 503 (not configured)
+
+#### `GET /api/public/booking/services`
+
+- Purpose: fetch available appointment services and variations
+- Auth: None
+- Rate limit: public-site
+
+**Response (200):**
+
+```json
+{
+    "services": [
+        {
+            "id": "item-uuid",
+            "variationId": "variation-uuid",
+            "name": "Men's Haircut",
+            "variationName": "Standard",
+            "description": "Professional haircut",
+            "durationMinutes": 30,
+            "priceCents": 3500,
+            "currency": "AUD",
+            "availableForBooking": true,
+            "category": "Haircuts"
+        }
+    ],
+    "count": 1
+}
+```
+
+**Common status codes:** 200, 404, 409, 502, 503
+
+#### `POST /api/public/booking/availability`
+
+- Purpose: search available appointment times for a service on a specific date
+- Auth: None
+- Rate limit: public-site
+
+**Request body:**
+
+```json
+{
+    "date": "2026-02-23",
+    "serviceVariationId": "variation-uuid",
+    "locationId": "optional-location-id"
+}
+```
+
+**Response (200):**
+
+```json
+{
+    "availabilities": [
+        {
+            "startAt": "2026-02-23T09:00:00Z",
+            "locationId": "location-uuid",
+            "teamMemberId": "team-member-uuid",
+            "serviceVariationId": "variation-uuid",
+            "serviceVariationVersion": 1,
+            "durationMinutes": 30
+        }
+    ],
+    "count": 5
+}
+```
+
+**Common status codes:** 200, 404, 409, 422 (invalid date/variation), 502, 503
+
+#### `POST /api/public/booking/checkout`
+
+- Purpose: create and pay for a booking appointment
+- Auth: None
+- Rate limit: public-site
+
+**Request body:**
+
+```json
+{
+    "serviceVariationId": "variation-uuid",
+    "serviceVariationVersion": 1,
+    "teamMemberId": "team-member-uuid",
+    "durationMinutes": 30,
+    "startAt": "2026-02-23T09:00:00Z",
+    "locationId": "optional-location-id",
+    "paymentMethod": "card",
+    "sourceId": "nonce_from_square",
+    "customer": {
+        "firstName": "John",
+        "lastName": "Doe",
+        "email": "john@example.com",
+        "phone": "+61412345678",
+        "note": "No beard trim"
+    }
+}
+```
+
+**Response (201):**
+
+```json
+{
+    "success": true,
+    "booking": {
+        "id": "booking-uuid",
+        "status": "CONFIRMED"
+    },
+    "payment": {
+        "id": "payment-uuid",
+        "status": "COMPLETED",
+        "receiptUrl": "https://..."
+    },
+    "paid": true
+}
+```
+
+**Common status codes:** 201, 400 (missing header), 404 (site/user not found), 409 (booking not enabled), 422 (validation error, payment error), 502, 503
+
+---
+
+#### Header-Based Slug Routing
+
+For frontends that cannot use subdomain DNS routing, the following endpoints accept the subdomain via the `X-Site-Subdomain` header and are accessed on the API host:
+`https://api.{COMET_PUBLIC_DOMAIN}/api/public/...`
+
+#### `GET /api/public/site-by-slug`
+
+- Purpose: fetch the published mini-site payload using header-based subdomain resolution
+- Auth: None
+- Rate limit: public-site
+- Headers: `X-Site-Subdomain` (required): the site subdomain slug
+
+**Response (200):** Same as `GET /api/public/site`
+
+**Common status codes:** 200, 400 (missing header), 404 (site not found), 403 (site not published)
+
+#### `GET /api/public/booking/config-by-slug`
+#### `GET /api/public/booking/services-by-slug`
+#### `POST /api/public/booking/availability-by-slug`
+#### `POST /api/public/booking/checkout-by-slug`
+
+- Purpose: header-based variants of the booking endpoints
+- Auth: None
+- Rate limit: public-site
+- Headers: `X-Site-Subdomain` (required): the site subdomain slug
+
+**Behavior:** Identical to domain-scoped versions above, but resolve subdomain from header instead of domain routing.
+
+**Response:** Same as corresponding domain-scoped endpoints
+
+**Common status codes:** Same as corresponding domain-scoped endpoints, plus 400 (missing header)
+
+---
+
+#### Payment Method Notes
+
+- Square.js Web Payments SDK is required frontend-side to tokenize cards
+- `sourceId` must be a valid Square nonce/token
+- `paymentMethod` options: `card` (default), `apple_pay`
+- Bookings without payment (free services) return `paid: false`
+- If payment fails after booking creation, the booking is automatically cancelled
+
+---
+
 ## 7) Professional (Barber) Dashboard API
 
 All routes below require: Authorization header AND a professional profile (current.pro middleware).
@@ -806,6 +997,55 @@ Allowed section block types are defined in config: gallery, services, education,
 - POST /api/gallery
 - POST /api/gallery/reorder
 - DELETE /api/gallery/{image} Store body: { "bucket": "public-assets", "path": "sites/<siteId>/gallery/<uuid>.jpg", "alt_text": "Optional" } Business rule: max 6 active gallery images (422 if exceeded).
+
+### Square Integration
+
+Square integration manages online booking appointments and service synchronization.
+
+#### `GET /api/square/status`
+
+- Purpose: get current Square connection status and token expiry
+- Auth: Required (professional)
+- Response (200): { "connected": true, "merchant_id": "MERCHANT_ID", "expires_at": "2026-02-23T05:12:00Z" }
+- Common status codes: 200, 401, 403
+
+#### `POST /api/square/connect`
+
+- Purpose: store Square OAuth tokens after user authorizes via Square OAuth flow
+- Auth: Required (professional)
+- Request body: { "access_token": "...", "refresh_token": "...", "merchant_id": "...", "expires_at": "2026-02-23T..." }
+- Response (200): { "connected": true, "merchant_id": "...", "expires_at": "...", "sync_queued": true, "sync_fallback_inline": false }
+- Behavior: automatically triggers initial service sync from Square (queued or inline fallback)
+- Common status codes: 200, 401, 403, 422
+
+#### `POST /api/square/disconnect`
+
+- Purpose: clear stored Square tokens and stop syncing
+- Auth: Required (professional)
+- Response (200): { "connected": false }
+- Common status codes: 200, 401, 403
+
+#### `GET /api/square/token`
+
+- Purpose: fetch decrypted Square access token for frontend use
+- Auth: Required (professional)
+- Response (200): { "access_token": "...", "expires_at": "..." }
+- Common status codes: 200, 401, 403, 404 (not connected)
+
+#### `POST /api/square/services/sync`
+
+- Purpose: manually trigger full service sync from Square
+- Auth: Required (professional)
+- Response (200): { "queued": false, "synced_inline": true, "merchant_id": "...", "synced": 5, "deleted": 2, "latest_time": "..." }
+- Behavior: always runs inline (no queue required); useful for manual refresh button
+- Common status codes: 200, 401, 403, 404 (not connected), 409 (access issue), 422
+
+#### `POST /api/square/services/{service}/push`
+
+- Purpose: push a local service update to Square immediately
+- Auth: Required (professional), must own the service
+- Response (200): { "pushed": true, "service_id": "...", "square_catalog_object_id": "...", "square_variation_id": "...", "square_last_synced_at": "...", "square_sync_error": null }
+- Common status codes: 200, 401, 403, 404 (not connected/service not found), 422
 
 ### Notifications
 

@@ -65,6 +65,15 @@ class Professional extends BaseModel
         'location_country',
 
         'handle_lc',
+
+        // Square integration
+        'square_access_token',
+        'square_refresh_token',
+        'square_merchant_id',
+        'square_expires_at',
+        'square_catalog_latest_time',
+        'square_last_catalog_sync_at',
+        'square_last_catalog_sync_error',
     ];
 
     protected $casts = [
@@ -72,6 +81,11 @@ class Professional extends BaseModel
         'created_at'      => 'datetime',
         'updated_at'      => 'datetime',
         'deleted_at'      => 'datetime',
+        'square_access_token'  => 'encrypted',
+        'square_refresh_token' => 'encrypted',
+        'square_expires_at'    => 'datetime',
+        'square_catalog_latest_time' => 'datetime',
+        'square_last_catalog_sync_at' => 'datetime',
     ];
 
     public function site(): HasOne

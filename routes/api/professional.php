@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
+use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
@@ -133,5 +134,13 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/me/subscription/cancel', [SubscriptionController::class, 'cancel']);
     Route::post('/me/subscription/resume', [SubscriptionController::class, 'resume']);
 
-    });
+    // Square Integration
+    Route::get('/square/status', [SquareIntegrationController::class, 'status']);
+    Route::post('/square/connect', [SquareIntegrationController::class, 'connect']);
+    Route::post('/square/disconnect', [SquareIntegrationController::class, 'disconnect']);
+    Route::get('/square/token', [SquareIntegrationController::class, 'token']);
+    Route::post('/square/services/sync', [SquareIntegrationController::class, 'syncServicesNow']);
+    Route::post('/square/services/{service}/push', [SquareIntegrationController::class, 'pushServiceNow'])
+        ->whereUuid('service');
 
+    });

@@ -47,10 +47,11 @@ class PublicSiteController extends ApiController
         return $this->error('Site not found.', 404);
     }
 
-    // TOBIAS ADDED (NEEDS REVIEW)
-    // Header-based fallback for public site lookup.
-    // Reads subdomain from X-Site-Subdomain header instead of domain routing.
-    // Used by the Next.js frontend proxy for path-based routing (e.g. /slug).
+    /**
+     * Header-based fallback for public site lookup.
+     * Reads subdomain from X-Site-Subdomain header instead of domain routing.
+     * Used by the Next.js frontend proxy for path-based routing (e.g. /slug).
+     */
     public function showByHeader(Request $request)
     {
         $subdomain = $request->header('X-Site-Subdomain');
@@ -65,12 +66,12 @@ class PublicSiteController extends ApiController
             return $this->success($payload);
         }
 
-        $alias = \App\Models\Core\Site\SiteSubdomainAlias::query()
+        $alias = SiteSubdomainAlias::query()
             ->whereRaw('lower(subdomain) = ?', [$subdomain])
             ->first();
 
         if ($alias) {
-            $site = \App\Models\Core\Site\Site::query()->find($alias->site_id);
+            $site = Site::query()->find($alias->site_id);
             if ($site) {
                 $canonicalPayload = $this->siteCache->getPublicSitePayload($site->subdomain);
                 if ($canonicalPayload) {

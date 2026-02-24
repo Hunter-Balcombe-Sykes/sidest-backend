@@ -17,7 +17,7 @@ class PublicSiteResolver
                 $q->where('status', 'active');
             });
 
-        $site = (clone $siteQuery)::query()
+        $site = (clone $siteQuery)
             ->whereRaw('lower(subdomain) = ?', [$subdomain])
             ->first();
 
