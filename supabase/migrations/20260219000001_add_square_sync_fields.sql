@@ -4,12 +4,12 @@
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'professionals' AND column_name = 'square_catalog_latest_time') THEN
-        ALTER TABLE core.professionals ADD COLUMN square_catalog_latest_time timestamp with time zone COLLATE "C" NULL;
+        ALTER TABLE core.professionals ADD COLUMN square_catalog_latest_time timestamp with time zone NULL;
         COMMENT ON COLUMN core.professionals.square_catalog_latest_time IS 'Latest catalog version timestamp from Square API';
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'professionals' AND column_name = 'square_last_catalog_sync_at') THEN
-        ALTER TABLE core.professionals ADD COLUMN square_last_catalog_sync_at timestamp with time zone COLLATE "C" NULL;
+        ALTER TABLE core.professionals ADD COLUMN square_last_catalog_sync_at timestamp with time zone NULL;
         COMMENT ON COLUMN core.professionals.square_last_catalog_sync_at IS 'When we last synced catalog from Square';
     END IF;
 
@@ -38,7 +38,7 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'services' AND column_name = 'square_last_synced_at') THEN
-        ALTER TABLE core.services ADD COLUMN square_last_synced_at timestamp with time zone COLLATE "C" NULL;
+        ALTER TABLE core.services ADD COLUMN square_last_synced_at timestamp with time zone NULL;
         COMMENT ON COLUMN core.services.square_last_synced_at IS 'When this service was last synced to/from Square';
     END IF;
 

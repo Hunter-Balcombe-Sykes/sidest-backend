@@ -17,7 +17,7 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'services' AND column_name = 'fresha_last_synced_at') THEN
-        ALTER TABLE core.services ADD COLUMN fresha_last_synced_at timestamp with time zone COLLATE "C" NULL;
+        ALTER TABLE core.services ADD COLUMN fresha_last_synced_at timestamp with time zone NULL;
         COMMENT ON COLUMN core.services.fresha_last_synced_at IS 'When this service was last synced to/from Fresha';
     END IF;
 

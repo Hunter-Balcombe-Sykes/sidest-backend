@@ -17,7 +17,7 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'professionals' AND column_name = 'square_expires_at') THEN
-        ALTER TABLE core.professionals ADD COLUMN square_expires_at timestamp with time zone COLLATE "C" NULL;
+        ALTER TABLE core.professionals ADD COLUMN square_expires_at timestamp with time zone NULL;
         COMMENT ON COLUMN core.professionals.square_expires_at IS 'Timestamp when Square access token expires';
     END IF;
 END $$;

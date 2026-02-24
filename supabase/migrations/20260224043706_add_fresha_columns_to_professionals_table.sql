@@ -17,17 +17,17 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'professionals' AND column_name = 'fresha_expires_at') THEN
-        ALTER TABLE core.professionals ADD COLUMN fresha_expires_at timestamp with time zone COLLATE "C" NULL;
+        ALTER TABLE core.professionals ADD COLUMN fresha_expires_at timestamp with time zone NULL;
         COMMENT ON COLUMN core.professionals.fresha_expires_at IS 'Timestamp when Fresha access token expires';
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'professionals' AND column_name = 'fresha_catalog_latest_time') THEN
-        ALTER TABLE core.professionals ADD COLUMN fresha_catalog_latest_time timestamp with time zone COLLATE "C" NULL;
+        ALTER TABLE core.professionals ADD COLUMN fresha_catalog_latest_time timestamp with time zone NULL;
         COMMENT ON COLUMN core.professionals.fresha_catalog_latest_time IS 'Latest catalog version timestamp from Fresha API';
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'professionals' AND column_name = 'fresha_last_catalog_sync_at') THEN
-        ALTER TABLE core.professionals ADD COLUMN fresha_last_catalog_sync_at timestamp with time zone COLLATE "C" NULL;
+        ALTER TABLE core.professionals ADD COLUMN fresha_last_catalog_sync_at timestamp with time zone NULL;
         COMMENT ON COLUMN core.professionals.fresha_last_catalog_sync_at IS 'When we last synced catalog from Fresha';
     END IF;
 
