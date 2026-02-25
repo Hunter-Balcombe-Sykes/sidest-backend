@@ -3,6 +3,7 @@
 namespace App\Services\Fresha;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
@@ -11,6 +12,17 @@ class FreshaApiClient
     public function __construct(
         private readonly FreshaTokenService $tokenService
     ) {}
+
+    private function businessId(Professional $professional): string
+    {
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_FRESHA);
+        $businessId = trim((string) ($integration?->external_account_id ?? ''));
+        if ($businessId === '') {
+            throw new FreshaApiException('Fresha business ID is missing.');
+        }
+
+        return $businessId;
+    }
 
     /**
      * Fetch services from the Fresha business.
@@ -36,7 +48,7 @@ class FreshaApiClient
             }
 
             // NOTE: Update endpoint path based on actual Fresha Partner API docs.
-            $data = $this->request($professional, 'GET', '/v1/businesses/'.$professional->fresha_business_id.'/services', $query);
+            $data = $this->request($professional, 'GET', '/v1/businesses/'.$this->businessId($professional).'/services', $query);
 
             $items = is_array($data['data'] ?? null) ? $data['data'] : (is_array($data['services'] ?? null) ? $data['services'] : []);
 
@@ -85,7 +97,7 @@ class FreshaApiClient
      */
     public function createService(Professional $professional, array $serviceData): array
     {
-        return $this->request($professional, 'POST', '/v1/businesses/'.$professional->fresha_business_id.'/services', [], $serviceData);
+        return $this->request($professional, 'POST', '/v1/businesses/'.$this->businessId($professional).'/services', [], $serviceData);
     }
 
     /**
@@ -95,7 +107,7 @@ class FreshaApiClient
      */
     public function updateService(Professional $professional, string $serviceId, array $serviceData): array
     {
-        return $this->request($professional, 'PUT', '/v1/businesses/'.$professional->fresha_business_id.'/services/'.$serviceId, [], $serviceData);
+        return $this->request($professional, 'PUT', '/v1/businesses/'.$this->businessId($professional).'/services/'.$serviceId, [], $serviceData);
     }
 
     /**
@@ -103,7 +115,7 @@ class FreshaApiClient
      */
     public function deleteService(Professional $professional, string $serviceId): void
     {
-        $this->request($professional, 'DELETE', '/v1/businesses/'.$professional->fresha_business_id.'/services/'.$serviceId);
+        $this->request($professional, 'DELETE', '/v1/businesses/'.$this->businessId($professional).'/services/'.$serviceId);
     }
 
     /**
@@ -111,7 +123,7 @@ class FreshaApiClient
      */
     public function retrieveService(Professional $professional, string $serviceId): array
     {
-        $response = $this->request($professional, 'GET', '/v1/businesses/'.$professional->fresha_business_id.'/services/'.$serviceId);
+        $response = $this->request($professional, 'GET', '/v1/businesses/'.$this->businessId($professional).'/services/'.$serviceId);
 
         return is_array($response['data'] ?? null) ? $response['data'] : $response;
     }
@@ -121,7 +133,7 @@ class FreshaApiClient
      */
     public function getBusiness(Professional $professional): array
     {
-        return $this->request($professional, 'GET', '/v1/businesses/'.$professional->fresha_business_id);
+        return $this->request($professional, 'GET', '/v1/businesses/'.$this->businessId($professional));
     }
 
     /**
@@ -131,7 +143,7 @@ class FreshaApiClient
      */
     public function searchAvailability(Professional $professional, array $body): array
     {
-        return $this->request($professional, 'POST', '/v1/businesses/'.$professional->fresha_business_id.'/availability/search', [], $body);
+        return $this->request($professional, 'POST', '/v1/businesses/'.$this->businessId($professional).'/availability/search', [], $body);
     }
 
     /**
@@ -142,7 +154,7 @@ class FreshaApiClient
      */
     public function createBooking(Professional $professional, array $body): array
     {
-        return $this->request($professional, 'POST', '/v1/businesses/'.$professional->fresha_business_id.'/bookings', [], $body);
+        return $this->request($professional, 'POST', '/v1/businesses/'.$this->businessId($professional).'/bookings', [], $body);
     }
 
     /**
@@ -150,7 +162,7 @@ class FreshaApiClient
      */
     public function cancelBooking(Professional $professional, string $bookingId): array
     {
-        return $this->request($professional, 'POST', '/v1/businesses/'.$professional->fresha_business_id.'/bookings/'.$bookingId.'/cancel');
+        return $this->request($professional, 'POST', '/v1/businesses/'.$this->businessId($professional).'/bookings/'.$bookingId.'/cancel');
     }
 
     /**
@@ -158,7 +170,7 @@ class FreshaApiClient
      */
     public function createCustomer(Professional $professional, array $customerData): array
     {
-        return $this->request($professional, 'POST', '/v1/businesses/'.$professional->fresha_business_id.'/customers', [], $customerData);
+        return $this->request($professional, 'POST', '/v1/businesses/'.$this->businessId($professional).'/customers', [], $customerData);
     }
 
     /**

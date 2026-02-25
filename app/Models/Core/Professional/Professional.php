@@ -66,23 +66,6 @@ class Professional extends BaseModel
 
         'handle_lc',
 
-        // Square integration
-        'square_access_token',
-        'square_refresh_token',
-        'square_merchant_id',
-        'square_expires_at',
-        'square_catalog_latest_time',
-        'square_last_catalog_sync_at',
-        'square_last_catalog_sync_error',
-
-        // Fresha integration
-        'fresha_access_token',
-        'fresha_refresh_token',
-        'fresha_business_id',
-        'fresha_expires_at',
-        'fresha_catalog_latest_time',
-        'fresha_last_catalog_sync_at',
-        'fresha_last_catalog_sync_error',
     ];
 
     protected $casts = [
@@ -90,16 +73,6 @@ class Professional extends BaseModel
         'created_at'      => 'datetime',
         'updated_at'      => 'datetime',
         'deleted_at'      => 'datetime',
-        'square_access_token'  => 'encrypted',
-        'square_refresh_token' => 'encrypted',
-        'square_expires_at'    => 'datetime',
-        'square_catalog_latest_time' => 'datetime',
-        'square_last_catalog_sync_at' => 'datetime',
-        'fresha_access_token'  => 'encrypted',
-        'fresha_refresh_token' => 'encrypted',
-        'fresha_expires_at'    => 'datetime',
-        'fresha_catalog_latest_time' => 'datetime',
-        'fresha_last_catalog_sync_at' => 'datetime',
     ];
 
     public function site(): HasOne
@@ -162,6 +135,38 @@ class Professional extends BaseModel
     public function subscription(): HasOne
     {
         return $this->hasOne(Subscription::class, 'professional_id');
+    }
+
+    public function integrations(): HasMany
+    {
+        return $this->hasMany(ProfessionalIntegration::class, 'professional_id');
+    }
+
+    public function squareIntegration(): HasOne
+    {
+        return $this->hasOne(ProfessionalIntegration::class, 'professional_id')
+            ->where('provider', ProfessionalIntegration::PROVIDER_SQUARE);
+    }
+
+    public function freshaIntegration(): HasOne
+    {
+        return $this->hasOne(ProfessionalIntegration::class, 'professional_id')
+            ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA);
+    }
+
+    public function integrationForProvider(string $provider): ?ProfessionalIntegration
+    {
+        $provider = mb_strtolower(trim($provider));
+
+        if ($provider === '') {
+            return null;
+        }
+
+        if ($this->relationLoaded('integrations')) {
+            return $this->integrations->firstWhere('provider', $provider);
+        }
+
+        return $this->integrations()->where('provider', $provider)->first();
     }
 
     public function resolveChildRouteBindingQuery($childType, $value, $field): Builder

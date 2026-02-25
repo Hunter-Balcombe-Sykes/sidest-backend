@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Api\ApiController;
 use App\Jobs\Fresha\SyncFreshaCatalogDeltaJob;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Fresha\FreshaServiceSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -51,15 +52,10 @@ class FreshaCatalogWebhookController extends ApiController
         // Handle authorization revoked
         if (in_array($eventType, ['oauth.authorization.revoked', 'authorization.revoked'], true)) {
             if ($businessId !== '') {
-                Professional::query()
-                    ->where('fresha_business_id', $businessId)
-                    ->update([
-                        'fresha_access_token' => null,
-                        'fresha_refresh_token' => null,
-                        'fresha_business_id' => null,
-                        'fresha_expires_at' => null,
-                        'fresha_last_catalog_sync_error' => null,
-                    ]);
+                ProfessionalIntegration::query()
+                    ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA)
+                    ->where('external_account_id', $businessId)
+                    ->delete();
             }
 
             return $this->success(['received' => true, 'revoked' => true]);
@@ -84,9 +80,14 @@ class FreshaCatalogWebhookController extends ApiController
                 'message' => $dispatchError->getMessage(),
             ]);
 
-            $professional = Professional::query()
-                ->where('fresha_business_id', $businessId)
+            $integration = ProfessionalIntegration::query()
+                ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA)
+                ->where('external_account_id', $businessId)
                 ->first();
+
+            $professional = $integration
+                ? Professional::query()->find($integration->professional_id)
+                : null;
 
             if (! $professional) {
                 return $this->success([

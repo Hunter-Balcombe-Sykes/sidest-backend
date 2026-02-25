@@ -3,6 +3,7 @@
 namespace App\Services\Square;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 
@@ -10,12 +11,17 @@ class SquareTokenService
 {
     public function getAccessToken(Professional $professional): string
     {
-        $token = trim((string) ($professional->square_access_token ?? ''));
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+        if (! $integration) {
+            throw new SquareApiException('Square access token is missing.');
+        }
+
+        $token = trim((string) ($integration->access_token ?? ''));
         if ($token === '') {
             throw new SquareApiException('Square access token is missing.');
         }
 
-        $expiresAt = $professional->square_expires_at;
+        $expiresAt = $integration->expires_at;
         if ($expiresAt && $expiresAt->greaterThan(now()->addMinutes(5))) {
             return $token;
         }
@@ -25,7 +31,12 @@ class SquareTokenService
 
     public function refreshAccessToken(Professional $professional): string
     {
-        $refreshToken = trim((string) ($professional->square_refresh_token ?? ''));
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+        if (! $integration) {
+            throw new SquareApiException('Square refresh token is missing.');
+        }
+
+        $refreshToken = trim((string) ($integration->refresh_token ?? ''));
         if ($refreshToken === '') {
             throw new SquareApiException('Square refresh token is missing.');
         }
@@ -61,12 +72,12 @@ class SquareTokenService
             throw new SquareApiException('Square token refresh response did not include access_token.');
         }
 
-        $professional->square_access_token = $accessToken;
-        $professional->square_refresh_token = $payload['refresh_token'] ?? $professional->square_refresh_token;
-        $professional->square_expires_at = isset($payload['expires_at'])
+        $integration->access_token = $accessToken;
+        $integration->refresh_token = $payload['refresh_token'] ?? $integration->refresh_token;
+        $integration->expires_at = isset($payload['expires_at'])
             ? CarbonImmutable::parse((string) $payload['expires_at'])
             : null;
-        $professional->save();
+        $integration->save();
 
         return $accessToken;
     }
@@ -81,4 +92,3 @@ class SquareTokenService
         return 'https://connect.squareup.com';
     }
 }
-

@@ -3,6 +3,7 @@
 namespace App\Services\Fresha;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 
@@ -10,12 +11,17 @@ class FreshaTokenService
 {
     public function getAccessToken(Professional $professional): string
     {
-        $token = trim((string) ($professional->fresha_access_token ?? ''));
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_FRESHA);
+        if (! $integration) {
+            throw new FreshaApiException('Fresha access token is missing.');
+        }
+
+        $token = trim((string) ($integration->access_token ?? ''));
         if ($token === '') {
             throw new FreshaApiException('Fresha access token is missing.');
         }
 
-        $expiresAt = $professional->fresha_expires_at;
+        $expiresAt = $integration->expires_at;
         if ($expiresAt && $expiresAt->greaterThan(now()->addMinutes(5))) {
             return $token;
         }
@@ -25,7 +31,12 @@ class FreshaTokenService
 
     public function refreshAccessToken(Professional $professional): string
     {
-        $refreshToken = trim((string) ($professional->fresha_refresh_token ?? ''));
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_FRESHA);
+        if (! $integration) {
+            throw new FreshaApiException('Fresha refresh token is missing.');
+        }
+
+        $refreshToken = trim((string) ($integration->refresh_token ?? ''));
         if ($refreshToken === '') {
             throw new FreshaApiException('Fresha refresh token is missing.');
         }
@@ -62,12 +73,12 @@ class FreshaTokenService
             throw new FreshaApiException('Fresha token refresh response did not include access_token.');
         }
 
-        $professional->fresha_access_token = $accessToken;
-        $professional->fresha_refresh_token = $payload['refresh_token'] ?? $professional->fresha_refresh_token;
-        $professional->fresha_expires_at = isset($payload['expires_at'])
+        $integration->access_token = $accessToken;
+        $integration->refresh_token = $payload['refresh_token'] ?? $integration->refresh_token;
+        $integration->expires_at = isset($payload['expires_at'])
             ? CarbonImmutable::parse((string) $payload['expires_at'])
             : null;
-        $professional->save();
+        $integration->save();
 
         return $accessToken;
     }

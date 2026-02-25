@@ -3,6 +3,7 @@
 namespace App\Services\Square;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Professional\ServiceCategory;
 use Carbon\CarbonImmutable;
@@ -22,25 +23,26 @@ class SquareServiceSyncService
      */
     public function syncFromSquare(Professional $professional, bool $fullSync = false, ?string $beginTimeOverride = null): array
     {
-        if (empty($professional->square_access_token) || empty($professional->square_merchant_id)) {
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+        if (! $integration || empty($integration->access_token) || empty($integration->external_account_id)) {
             return ['synced' => 0, 'deleted' => 0, 'latest_time' => null];
         }
 
         $beginTime = $beginTimeOverride;
-        if ($beginTime === null && ! $fullSync && $professional->square_catalog_latest_time) {
-            $beginTime = CarbonImmutable::parse($professional->square_catalog_latest_time)->toIso8601String();
+        if ($beginTime === null && ! $fullSync && $integration->catalog_latest_time) {
+            $beginTime = CarbonImmutable::parse($integration->catalog_latest_time)->toIso8601String();
         }
 
         try {
             $fetched = $this->squareApiClient->fetchAppointmentServiceVariations($professional, $beginTime);
             $stats = $this->applySquareSnapshot($professional, $fetched['services'] ?? [], $fullSync);
 
-            $professional->square_catalog_latest_time = isset($fetched['latest_time']) && is_string($fetched['latest_time'])
+            $integration->catalog_latest_time = isset($fetched['latest_time']) && is_string($fetched['latest_time'])
                 ? CarbonImmutable::parse($fetched['latest_time'])
                 : now();
-            $professional->square_last_catalog_sync_at = now();
-            $professional->square_last_catalog_sync_error = null;
-            $professional->save();
+            $integration->last_catalog_sync_at = now();
+            $integration->last_catalog_sync_error = null;
+            $integration->save();
 
             return [
                 'synced' => $stats['synced'],
@@ -48,9 +50,9 @@ class SquareServiceSyncService
                 'latest_time' => $fetched['latest_time'] ?? null,
             ];
         } catch (\Throwable $e) {
-            $professional->square_last_catalog_sync_error = mb_substr($e->getMessage(), 0, 2000);
-            $professional->square_last_catalog_sync_at = now();
-            $professional->save();
+            $integration->last_catalog_sync_error = mb_substr($e->getMessage(), 0, 2000);
+            $integration->last_catalog_sync_at = now();
+            $integration->save();
             throw $e;
         }
     }
@@ -64,7 +66,8 @@ class SquareServiceSyncService
         if (! $professional) {
             return;
         }
-        if (empty($professional->square_access_token) || empty($professional->square_merchant_id)) {
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+        if (! $integration || empty($integration->access_token) || empty($integration->external_account_id)) {
             return;
         }
 

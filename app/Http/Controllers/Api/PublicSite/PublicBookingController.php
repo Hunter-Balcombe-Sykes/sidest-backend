@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\PublicSite;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Services\Public\PublicSiteResolver;
 use App\Services\Square\SquareApiClient;
@@ -406,8 +407,9 @@ class PublicBookingController extends ApiController
             return [$site, $professional, $this->error('Online booking is not enabled for this site.', 409)];
         }
 
-        $rawToken = trim((string) ($professional->getRawOriginal('square_access_token') ?? ''));
-        $merchantId = trim((string) ($professional->square_merchant_id ?? ''));
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+        $rawToken = trim((string) ($integration?->getRawOriginal('access_token') ?? ''));
+        $merchantId = trim((string) ($integration?->external_account_id ?? ''));
         if ($rawToken === '' || $merchantId === '') {
             return [$site, $professional, $this->error('Booking integration is not connected for this site.', 409)];
         }

@@ -3,6 +3,7 @@
 namespace App\Jobs\Fresha;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Fresha\FreshaServiceSyncService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -25,9 +26,16 @@ class SyncFreshaCatalogDeltaJob implements ShouldQueue
 
     public function handle(FreshaServiceSyncService $syncService): void
     {
-        $professional = Professional::query()
-            ->where('fresha_business_id', $this->businessId)
+        $integration = ProfessionalIntegration::query()
+            ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA)
+            ->where('external_account_id', $this->businessId)
             ->first();
+
+        if (! $integration) {
+            return;
+        }
+
+        $professional = Professional::query()->find($integration->professional_id);
 
         if (! $professional) {
             return;

@@ -3,6 +3,7 @@
 namespace App\Jobs\Square;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Square\SquareServiceSyncService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -25,9 +26,16 @@ class SyncSquareCatalogDeltaJob implements ShouldQueue
 
     public function handle(SquareServiceSyncService $syncService): void
     {
-        $professional = Professional::query()
-            ->where('square_merchant_id', $this->merchantId)
+        $integration = ProfessionalIntegration::query()
+            ->where('provider', ProfessionalIntegration::PROVIDER_SQUARE)
+            ->where('external_account_id', $this->merchantId)
             ->first();
+
+        if (! $integration) {
+            return;
+        }
+
+        $professional = Professional::query()->find($integration->professional_id);
 
         if (! $professional) {
             return;

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional\SquareIntegration;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Square\SyncSquareCatalogDeltaJob;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Services\Square\SquareApiException;
 use App\Services\Square\SquareServiceSyncService;
@@ -16,14 +17,24 @@ class SquareIntegrationController extends ApiController
 {
     use ResolveCurrentProfessional;
 
+    private function currentSquareIntegration(Request $request): ?ProfessionalIntegration
+    {
+        $pro = $this->currentProfessional($request);
+
+        return $pro->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+    }
+
     /**
      * Check if the professional has Square connected.
      */
     private function ensureSquareConnected(Request $request): JsonResponse|null
     {
-        $pro = $this->currentProfessional($request);
-        
-        if (empty($pro->square_access_token) || empty($pro->square_merchant_id)) {
+        $integration = $this->currentSquareIntegration($request);
+        if (! $integration) {
+            return $this->error('Square account not connected.', 404);
+        }
+
+        if (empty($integration->access_token) || empty($integration->external_account_id)) {
             return $this->error('Square account not connected.', 404);
         }
 
@@ -60,15 +71,16 @@ class SquareIntegrationController extends ApiController
      */
     public function status(Request $request)
     {
-        $pro = $this->currentProfessional($request);
-
-        $connected = !empty($pro->square_access_token) && !empty($pro->square_merchant_id);
+        $integration = $this->currentSquareIntegration($request);
+        $connected = $integration
+            && ! empty($integration->access_token)
+            && ! empty($integration->external_account_id);
 
         return $this->success([
             'connected' => $connected,
-            'merchant_id' => $connected ? $pro->square_merchant_id : null,
-            'expires_at' => $connected && $pro->square_expires_at
-                ? $pro->square_expires_at->toIso8601String()
+            'merchant_id' => $connected ? $integration->external_account_id : null,
+            'expires_at' => $connected && $integration->expires_at
+                ? $integration->expires_at->toIso8601String()
                 : null,
         ]);
     }
@@ -87,13 +99,24 @@ class SquareIntegrationController extends ApiController
         ]);
 
         $pro = $this->currentProfessional($request);
+        $merchantId = trim((string) $request->input('merchant_id'));
+        if ($merchantId === '') {
+            return $this->error('merchant_id is required.', 422);
+        }
 
-        $pro->square_access_token  = $request->input('access_token');
-        $pro->square_refresh_token = $request->input('refresh_token');
-        $pro->square_merchant_id   = $request->input('merchant_id');
-        $pro->square_expires_at    = $request->input('expires_at');
-        $pro->square_last_catalog_sync_error = null;
-        $pro->save();
+        $integration = ProfessionalIntegration::query()->updateOrCreate(
+            [
+                'professional_id' => $pro->id,
+                'provider' => ProfessionalIntegration::PROVIDER_SQUARE,
+            ],
+            [
+                'external_account_id' => $merchantId !== '' ? $merchantId : null,
+                'access_token' => $request->input('access_token'),
+                'refresh_token' => $request->input('refresh_token'),
+                'expires_at' => $request->input('expires_at'),
+                'last_catalog_sync_error' => null,
+            ]
+        );
 
         $syncQueued = false;
         $syncFallbackInline = false;
@@ -101,12 +124,12 @@ class SquareIntegrationController extends ApiController
         // Pull initial services from Square right after connect.
         // Prefer async queue, but gracefully fallback to inline if queue infra is unavailable.
         try {
-            SyncSquareCatalogDeltaJob::dispatch($pro->square_merchant_id, null, true);
+            SyncSquareCatalogDeltaJob::dispatch((string) $integration->external_account_id, null, true);
             $syncQueued = true;
         } catch (\Throwable $dispatchError) {
             Log::warning('Queue dispatch failed for initial Square sync; falling back inline', [
                 'professional_id' => $pro->id,
-                'merchant_id' => $pro->square_merchant_id,
+                'merchant_id' => $integration->external_account_id,
                 'message' => $dispatchError->getMessage(),
             ]);
 
@@ -116,7 +139,7 @@ class SquareIntegrationController extends ApiController
             } catch (\Throwable $syncError) {
                 Log::warning('Initial inline Square sync failed after queue dispatch failure', [
                     'professional_id' => $pro->id,
-                    'merchant_id' => $pro->square_merchant_id,
+                    'merchant_id' => $integration->external_account_id,
                     'message' => $syncError->getMessage(),
                 ]);
             }
@@ -124,13 +147,13 @@ class SquareIntegrationController extends ApiController
 
         Log::info('Square connected', [
             'professional_id' => $pro->id,
-            'merchant_id'     => $pro->square_merchant_id,
+            'merchant_id'     => $integration->external_account_id,
         ]);
 
         return $this->success([
             'connected'   => true,
-            'merchant_id' => $pro->square_merchant_id,
-            'expires_at'  => $pro->square_expires_at->toIso8601String(),
+            'merchant_id' => $integration->external_account_id,
+            'expires_at'  => $integration->expires_at?->toIso8601String(),
             'sync_queued' => $syncQueued,
             'sync_fallback_inline' => $syncFallbackInline,
         ]);
@@ -143,15 +166,9 @@ class SquareIntegrationController extends ApiController
     public function disconnect(Request $request)
     {
         $pro = $this->currentProfessional($request);
-
-        $pro->square_access_token  = null;
-        $pro->square_refresh_token = null;
-        $pro->square_merchant_id   = null;
-        $pro->square_expires_at    = null;
-        $pro->square_catalog_latest_time = null;
-        $pro->square_last_catalog_sync_at = null;
-        $pro->square_last_catalog_sync_error = null;
-        $pro->save();
+        $pro->integrations()
+            ->where('provider', ProfessionalIntegration::PROVIDER_SQUARE)
+            ->delete();
 
         Log::info('Square disconnected', [
             'professional_id' => $pro->id,
@@ -172,12 +189,12 @@ class SquareIntegrationController extends ApiController
             return $error;
         }
 
-        $pro = $this->currentProfessional($request);
+        $integration = $this->currentSquareIntegration($request);
 
         return $this->success([
-            'access_token' => $pro->square_access_token,
-            'expires_at'   => $pro->square_expires_at
-                ? $pro->square_expires_at->toIso8601String()
+            'access_token' => $integration?->access_token,
+            'expires_at'   => $integration?->expires_at
+                ? $integration->expires_at->toIso8601String()
                 : null,
         ]);
     }
@@ -194,6 +211,7 @@ class SquareIntegrationController extends ApiController
         }
 
         $pro = $this->currentProfessional($request);
+        $integration = $this->currentSquareIntegration($request);
 
         try {
             $stats = $syncService->syncFromSquare($pro, fullSync: true);
@@ -202,7 +220,7 @@ class SquareIntegrationController extends ApiController
 
             Log::warning('Manual Square sync failed (Square API)', [
                 'professional_id' => $pro->id,
-                'merchant_id' => $pro->square_merchant_id,
+                'merchant_id' => $integration?->external_account_id,
                 'status' => $e->status,
                 'message' => $e->getMessage(),
                 'payload' => $e->payload,
@@ -212,7 +230,7 @@ class SquareIntegrationController extends ApiController
         } catch (\Throwable $e) {
             Log::warning('Manual Square sync failed', [
                 'professional_id' => $pro->id,
-                'merchant_id' => $pro->square_merchant_id,
+                'merchant_id' => $integration?->external_account_id,
                 'message' => $e->getMessage(),
             ]);
 
@@ -222,7 +240,7 @@ class SquareIntegrationController extends ApiController
         return $this->success([
             'queued' => false,
             'synced_inline' => true,
-            'merchant_id' => $pro->square_merchant_id,
+            'merchant_id' => $integration?->external_account_id,
             'synced' => $stats['synced'] ?? 0,
             'deleted' => $stats['deleted'] ?? 0,
             'latest_time' => $stats['latest_time'] ?? null,

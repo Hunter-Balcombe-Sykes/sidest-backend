@@ -7,6 +7,7 @@ use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\Log;
@@ -22,6 +23,7 @@ class ProfessionalController extends ApiController
         Log::info('/api/me start');
 
         $pro = $this->currentProfessional($request);
+        $squareIntegration = $pro->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
         Log::info('/api/me after currentProfessional', ['pro_id' => $pro->id]);
 
         $cache = app(ProfessionalCacheService::class);
@@ -67,8 +69,10 @@ class ProfessionalController extends ApiController
                 'location_country' => $pro->location_country,
                 'created_at' => optional($pro->created_at)->toIso8601String(),
                 'updated_at' => optional($pro->updated_at)->toIso8601String(),
-                'square_connected' => !empty($pro->square_access_token) && !empty($pro->square_merchant_id),
-                'square_merchant_id' => $pro->square_merchant_id,
+                'square_connected' => $squareIntegration
+                    && ! empty($squareIntegration->access_token)
+                    && ! empty($squareIntegration->external_account_id),
+                'square_merchant_id' => $squareIntegration?->external_account_id,
             ],
             'site' => $pro->site ? [
                 'id' => $pro->site->id,
