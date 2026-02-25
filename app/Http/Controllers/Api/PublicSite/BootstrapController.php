@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use App\Models\Core\Notifications\EmailSubscription;
+use App\Models\Billing\Plan;
+use App\Models\Billing\Subscription;
 
 
 
@@ -99,6 +101,9 @@ class BootstrapController extends ApiController
 
                 $site = $this->createSiteWithRetry($professional->id, $base);
             }
+
+            // Ensure the professional has a subscription – seed the free plan if none exists
+            $this->ensureFreeSubscription($professional);
 
                 return [
                     'professional' => $professional->fresh(),
@@ -210,6 +215,39 @@ class BootstrapController extends ApiController
             }
             throw $e;
         }
+    }
+
+    /**
+     * Seed the free plan subscription if the professional has none.
+     */
+    private function ensureFreeSubscription(Professional $professional): void
+    {
+        // Reload the relationship in case it was cached as null during this transaction
+        $professional->load('subscription');
+
+        // Already has a current (non-ended) subscription – nothing to do
+        if ($professional->subscription && $professional->subscription->ended_at === null) {
+            return;
+        }
+
+        $freePlan = Plan::where('plan_key', 'free')->where('is_active', true)->first();
+        if (!$freePlan) {
+            Log::warning('No active free plan found – skipping subscription seed', [
+                'professional_id' => $professional->id,
+            ]);
+            return;
+        }
+
+        Subscription::create([
+            'id' => Str::uuid()->toString(),
+            'professional_id' => $professional->id,
+            'plan_id' => $freePlan->id,
+            'provider' => 'internal',
+            'status' => 'active',
+            'current_period_start' => now(),
+            'current_period_end' => null,
+            'cancel_at_period_end' => false,
+        ]);
     }
 
     private function ensureCometUpdatesSubscription(?string $email): void

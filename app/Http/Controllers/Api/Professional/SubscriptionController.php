@@ -115,7 +115,7 @@ class SubscriptionController extends ApiController
     }
 
     /**
-     * Resume a canceled subscription
+     * Resume a canceled subscription (only if cancel_at_period_end and still within period)
      */
     public function resume(Request $request)
     {
@@ -128,9 +128,26 @@ class SubscriptionController extends ApiController
             ], 404);
         }
 
+        if (!$subscription->isActive()) {
+            return response()->json([
+                'message' => 'Subscription is no longer active and cannot be resumed.',
+            ], 422);
+        }
+
+        if (!$subscription->cancel_at_period_end) {
+            return response()->json([
+                'message' => 'Subscription is not scheduled for cancellation.',
+            ], 422);
+        }
+
+        if ($subscription->current_period_end && $subscription->current_period_end->isPast()) {
+            return response()->json([
+                'message' => 'Subscription period has already ended.',
+            ], 422);
+        }
+
         $subscription->update([
             'cancel_at_period_end' => false,
-            'ended_at' => null,
         ]);
 
         return response()->json([

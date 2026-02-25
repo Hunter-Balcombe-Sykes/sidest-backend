@@ -125,6 +125,8 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 
 **Common status codes:** 200 (existing user bootstrapped again), 201 (new professional created), 401 (invalid JWT), 422 (validation error)
 
+**Note:** Bootstrap automatically creates a free-tier subscription for new professionals. If a free plan (plan_key = `free`) exists in the plans table, the professional will be subscribed to it with status `active` and provider `internal`.
+
 ### Plans and Subscriptions
 
 #### `GET /api/plans`
@@ -233,6 +235,8 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 }
 ```
 
+**Status logic:** If `trial_period_days` is provided and > 0, the subscription starts with status `trialing`. Otherwise it starts as `active`.
+
 **Common status codes: 201, 401, 422 (already has subscription)**
 
 #### `PATCH /api/me/subscription`
@@ -292,6 +296,12 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 - Auth: Required (Professional)
 - Rate limit: general
 
+**Validation rules:**
+- Subscription must exist (404 if not)
+- Subscription must be active (status in `trialing` or `active`, and `ended_at` is null) — returns 422 otherwise
+- Subscription must be scheduled for cancellation (`cancel_at_period_end` = true) — returns 422 otherwise
+- Current billing period must not have ended (`current_period_end` must be in the future) — returns 422 otherwise
+
 **Response (200):**
 
 ```json
@@ -305,7 +315,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 }
 ```
 
-**Common status codes: 200, 401, 404 (no subscription)**
+**Common status codes: 200, 401, 404 (no subscription), 422 (not active / not scheduled for cancellation / period ended)**
 
 ### Common status codes: 200, 201, 401, 422
 
@@ -439,33 +449,38 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 ### Plan
 | Name             | Type     | Nullable | Example       | Constraints / Notes              |
 |------------------|----------|----------|---------------|----------------------------------|
-| id               | string   | no       | `plan_basic`  | Primary key; provider-managed    |
-| name             | string   | no       | `Basic`       | Max 255                          |
+| id               | uuid     | no       | `a1b2...`     | Primary key                      |
+| plan_key         | string   | no       | `free`        | Unique slug: free / pro / elite  |
+| name             | string   | no       | `Free`        | Max 255                          |
 | description      | string   | yes      | `For starters`| Max 2000                         |
-| price_cents      | integer  | no       | `999`         | Price in cents (USD)             |
-| currency_code    | string   | no       | `USD`         | 3-letter code                    |
+| stripe_price_id  | string   | no       | `price_...`   | Stripe price ID (unique)         |
+| price_cents      | integer  | no       | `0`           | Price in smallest currency unit  |
+| currency_code    | string   | no       | `AUD`         | ISO 4217, default AUD            |
 | billing_interval | string   | no       | `month`       | month or year                    |
-| entitlements     | object   | no       | See below     | JSON object with plan features   |
+| entitlements     | object   | yes      | See below     | JSON object with plan features   |
 | is_active        | boolean  | no       | `true`        |                                  |
 | sort_order       | integer  | no       | `0`           | Display order                    |
-| created_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                                  |
-| updated_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                                  |
+| created_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                        |
+| updated_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                        |
 
 ### Subscription
 | Name                | Type     | Nullable | Example              | Constraints / Notes                                 |
 |---------------------|----------|----------|----------------------|-----------------------------------------------------|
 | id                  | uuid     | no       | `sub-123...`         | Primary key                                         |
 | professional_id     | uuid     | no       | `4db0...`            | Owner professional                                  |
-| plan_id             | string   | no       | `plan_basic`         | Foreign key to Plan                                 |
-| status              | string   | no       | `active`             | trialing, active, past_due, canceled, ended        |
-| current_period_start| datetime | no       | `2026-01-12T05:12:00Z` | Billing period start                               |
-| current_period_end  | datetime | no       | `2026-02-12T05:12:00Z` | Billing period end                                 |
-| trial_ends_at       | datetime | yes      | `2026-01-19T05:12:00Z` | When trial period ends (if any)                    |
-| cancel_at_period_end| boolean  | no       | `false`              | Will cancel at period end if true                  |
-| ended_at            | datetime | yes      | `2026-01-20T05:12:00Z` | When subscription ended                            |
-| provider_payload    | object   | no       | `{}`                 | External provider data (Stripe, etc)               |
-| created_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                     |
-| updated_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                     |
+| plan_id             | uuid     | no       | `a1b2...`            | Foreign key to Plan                                 |
+| provider            | string   | no       | `stripe`             | stripe (default) or internal (free plan seed)       |
+| stripe_customer_id  | string   | yes      | `cus_...`            | Stripe customer ID                                  |
+| stripe_subscription_id | string | yes     | `sub_...`            | Stripe subscription ID (unique)                     |
+| status              | string   | no       | `active`             | trialing, active, past_due, canceled, ended         |
+| current_period_start| datetime | yes      | `2026-01-12T05:12:00Z` | Billing period start                              |
+| current_period_end  | datetime | yes      | `2026-02-12T05:12:00Z` | Billing period end (null for free plans)           |
+| trial_ends_at       | datetime | yes      | `2026-01-19T05:12:00Z` | When trial period ends (if any)                   |
+| cancel_at_period_end| boolean  | no       | `false`              | Will cancel at period end if true                   |
+| ended_at            | datetime | yes      | `2026-01-20T05:12:00Z` | When subscription ended                           |
+| provider_payload    | object   | yes      | `{}`                 | External provider data (Stripe, etc)                |
+| created_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                   |
+| updated_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                   |
 
 ### Link Block (core.blocks where block_group = links)
 | Name            | Type    | Nullable | Example                       | Constraints / Notes                                                                       |
@@ -1218,6 +1233,10 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - PUT /api/staff/professionals/{professional}/sections/{blockType}
 - POST /api/staff/professionals/{professional}/sections/reorder
 - DELETE /api/staff/professionals/{professional}/sections/{blockType}
+- GET /api/staff/professionals/{professional}/subscription
+- PATCH /api/staff/professionals/{professional}/subscription
+- POST /api/staff/professionals/{professional}/subscription/cancel
+- POST /api/staff/professionals/{professional}/subscription/resume
 - POST /api/staff/notifications Staff analytics summary endpoints Stage 1-2 staff analytics is:
 - GET /api/staff/professionals/{professional}/analytics It returns totals, daily charts, and top links for the selected professional.
 
