@@ -52,7 +52,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         ->whereUuid('service')
         ->withTrashed();
 
-    // NEW: Service Categories (CRUD + reorder)
+    // Service Categories (CRUD + reorder)
     Route::get('/service-categories', [ProfessionalServiceCategoryController::class, 'index']);
     Route::post('/service-categories', [ProfessionalServiceCategoryController::class, 'store']);
     Route::get('/service-categories/{category}', [ProfessionalServiceCategoryController::class, 'show'])
