@@ -7,7 +7,7 @@ This document is the single source of truth for backend so the frontend can buil
 - Staff dashboard (staff-only browsing + admin editing tools)
 - Backend: Laravel API (this repo)
 - Auth: Supabase Auth (JWT access token)
-- Media: Supabase Storage (direct-from-frontend upload)
+- Media: Laravel Cloud Object Storage (S3-compatible / Cloudflare R2) with server-side WebP processing
 
 ## Contents
 
@@ -19,7 +19,7 @@ This document is the single source of truth for backend so the frontend can buil
 - Public Mini-Site API
 - Professional (Barber) Dashboard API
 - Staff API
-- Supabase Storage uploads (RLS behavior + frontend upload flow)
+- Image uploads & processing (server-side WebP via queue)
 - Test users and getting tokens
 - Insomnia collection
 - Frontend env var checklist
@@ -331,7 +331,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 Comet reads/writes Postgres through Laravel using the configured database user.
 
 - Database table RLS does not gate Comet API calls if the DB user bypasses RLS (typical for server-side roles).
-- Supabase Storage DOES use RLS policies. Upload access is controlled by storage.objects policies.
+- Image uploads go through the Comet API (server-side), not through Supabase Storage. No storage RLS policies are involved.
 
 ## 4) Data Models
 
@@ -351,10 +351,10 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | last_name               | string   | no       | Hunter                                   | Max 80                                                     |
 | public_contact_number   | string   | yes      | +6140000000                              | Max 40, public-facing contact                              |
 | public_contact_email    | string   | yes      | bookings@example.com                     | Max 255, public-facing contact                             |
-| icon_bucket             | string   | yes      | public-assets                            | Supabase Storage bucket                                    |
-| icon_path               | string   | yes      | professionals/<proid>/icon.jpg           | Path within bucket                                         |
-| headshot_bucket         | string   | yes      | public-assets                            | Supabase Storage Bucket                                    |
-| headshot_path           | string   | yes      | professionals/<proid>/headshot.jpg       | Path wihtin bucket                                         |
+| icon_bucket             | string   | yes      | media                                    | **Legacy** – being replaced by image pools     |
+| icon_path               | string   | yes      | professionals/<proid>/icon.jpg           | **Legacy** – being replaced by image pools     |
+| headshot_bucket         | string   | yes      | media                                    | **Legacy** – being replaced by image pools     |
+| headshot_path           | string   | yes      | professionals/<proid>/headshot.jpg       | **Legacy** – being replaced by image pools     |
 | location_street_address | string   | yes      | 1 Smith Street                           | Max 255                                                    |
 | location_city           | string   | yes      | Darwin                                   | Max 120                                                    |
 | location_state          | string   | yes      | NT                                       | Max 120                                                    |
@@ -386,10 +386,61 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | is_published    | boolean  | no       | false                     | if false, public site endpoint returns 404 or 403 depending on route                                              |
 | theme_id        | uuid     | yes      | 9f23                      | Must exist in themes table                                                                                        |
 | settings        | object   | yes      | {...}                     | Freeform JSON object merged on PATCH                                                                              |
-| banner_bucket   | string   | yes      | public-assets             | Supabase Storage Bucket                                                                                           |
-| banner_path     | string   | yes      | sites/<siteid>/banner.jpg | Path within bucket                                                                                                |
+| banner_bucket   | string   | yes      | media                     | **Legacy** – being replaced by image pools                                                                        |
+| banner_path     | string   | yes      | sites/<siteid>/banner.jpg | **Legacy** – being replaced by image pools                                                                        |
 | created_at      | datetime | yes      | 2026-01...                |                                                                                                                   |
 | updated_at      | datetime | yes      | 2026-01...                |                                                                                                                   |
+
+### SiteImage (core.site_images)
+
+All images (gallery showcase and content/branding) live in the `site_images` table, organised into **pools**. The frontend assigns purpose (icon, headshot, banner, etc.) by picking the appropriate variant size from any image in the relevant pool.
+
+| Name       | Type     | Nullable | Example                                        | Constraints / Notes                                              |
+|------------|----------|----------|-------------------------------------------------|------------------------------------------------------------------|
+| id         | uuid     | no       | `f7a2...`                                       | Primary key                                                      |
+| site_id    | uuid     | no       | `b8e7...`                                       | FK → sites.id                                                    |
+| pool       | string   | no       | `gallery`                                       | `gallery` or `content`                                           |
+| bucket     | string   | no       | `media`                                         | Storage disk name (matches COMET_MEDIA_DISK)                     |
+| path       | string   | no       | `images/<proId>/<imageId>/original_abc123.jpg`  | Path to original file on the media disk                          |
+| alt_text   | string   | yes      | `Fade haircut example`                          | Max 255                                                          |
+| sort_order | integer  | no       | `0`                                             | Non-negative; used for gallery ordering                          |
+| is_active  | boolean  | no       | `true`                                          | Soft visibility flag                                             |
+| created_at | datetime | yes      | `2026-03-02T10:00:00Z`                          |                                                                  |
+| updated_at | datetime | yes      | `2026-03-02T10:00:00Z`                          |                                                                  |
+| deleted_at | datetime | yes      | `null`                                          | Soft delete                                                      |
+
+**Pool limits** (configurable via env):
+- `gallery`: max 5 images (env `COMET_GALLERY_IMAGE_MAX`)
+- `content`: max 5 images (env `COMET_CONTENT_IMAGE_MAX`)
+
+### ImageVariant (core.image_variants)
+
+Each `SiteImage` gets a set of universal WebP variants generated server-side via a queue job. Content-hashed filenames enable aggressive CDN caching (`Cache-Control: public, max-age=31536000, immutable`).
+
+| Name         | Type     | Nullable | Example                                         | Constraints / Notes                               |
+|--------------|----------|----------|--------------------------------------------------|----------------------------------------------------|
+| id           | uuid     | no       | `c3d4...`                                        | Primary key                                        |
+| image_id     | uuid     | no       | `f7a2...`                                        | FK → site_images.id (cascade delete)               |
+| variant      | string   | no       | `thumb`                                          | One of: thumb, small, medium, large, hero          |
+| disk         | string   | no       | `media`                                          | Storage disk name                                  |
+| path         | string   | no       | `images/<proId>/<imgId>/thumb_abc123def456.webp` | Content-hashed filename                            |
+| format       | string   | no       | `webp`                                           | Always WebP                                        |
+| width        | integer  | no       | `64`                                             | Actual output width in pixels                      |
+| height       | integer  | no       | `64`                                             | Actual output height in pixels                     |
+| file_size    | integer  | no       | `3200`                                           | Bytes                                              |
+| content_hash | string   | no       | `abc123def456ghij`                               | First 16 hex chars of SHA-256                      |
+| created_at   | datetime | yes      | `2026-03-02T10:00:05Z`                           |                                                    |
+| updated_at   | datetime | yes      | `2026-03-02T10:00:05Z`                           |                                                    |
+
+**Variant sizes:**
+
+| Variant | Max Width | Max Height | Quality | Fit     | Typical use                     |
+|---------|-----------|------------|---------|---------|----------------------------------|
+| thumb   | 64px      | 64px       | 80      | cover   | Icons, tiny avatars              |
+| small   | 200px     | 200px      | 80      | cover   | Card thumbnails, small headshots |
+| medium  | 600px     | 600px      | 80      | inside  | Gallery previews, profile images |
+| large   | 1200px    | 1200px     | 85      | inside  | Full-size gallery views          |
+| hero    | 1920px    | 1080px     | 85      | cover   | Banners, hero sections           |
 
 ### Customer
 | Name                      | Type     | Nullable | Example                | Constraints / Notes                                                         |
@@ -498,15 +549,15 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | settings        | object  | yes      | `{ "open_in_new_tab": true }` | Allowed keys only: open_in_new_tab, rel_nofollow, rel_sponsored, rel_ugc, highlight, note |
 
 ### PublicSiteData (view of returned GET /api/public/site)
-| Name         | Type    | Nullable | Example                                                   | Constraints / Notes                            |
-|--------------|---------|----------|-----------------------------------------------------------|------------------------------------------------|
-| published    | boolean | no       | `true`                                                    | Derived from site is_published                 |
-| site         | object  | no       | `{ id, subdomain, settings, banner_bucket, banner_path }` |                                                |
-| professional | object  | no       | `{ id, handle, display_name, bio, ... }`                  | Includes public-facing image + location fields |
-| theme        | object  | yes      | `{ id, key, name, config }`                               | theme.config is an object                      |
-| blocks       | array   | no       | `[ LinkBlock \| SectionBlock ]`                           | Only active blocks are returned                |
-| gallery      | array   | no       | `[ { id, bucket, path, alt_text, sort_order } ]`          | Only active images returned                    |
-| services     | array   | no       | `[ { id, title, price_cents, ... } ]`                     | Only active services returned                  |
+| Name         | Type    | Nullable | Example                                                   | Constraints / Notes                                       |
+|--------------|---------|----------|-----------------------------------------------------------|-----------------------------------------------------------|
+| published    | boolean | no       | `true`                                                    | Derived from site is_published                            |
+| site         | object  | no       | `{ id, subdomain, settings }`                             | Legacy banner_bucket/banner_path may still be present     |
+| professional | object  | no       | `{ id, handle, display_name, bio, ... }`                  | Includes public-facing location fields                    |
+| theme        | object  | yes      | `{ id, key, name, config }`                               | theme.config is an object                                 |
+| blocks       | array   | no       | `[ LinkBlock \| SectionBlock ]`                           | Only active blocks are returned                           |
+| gallery      | array   | no       | `[ { id, pool, alt_text, sort_order, variants: {...} } ]` | Only active gallery-pool images; variants are URL maps    |
+| services     | array   | no       | `[ { id, title, price_cents, ... } ]`                     | Only active services returned                             |
 
 ### Analytics Event Payloads
 | Name                  | Type     | Nullable | Example                 | Constraints / Notes                                                              |
@@ -599,7 +650,7 @@ https://{subdomain}.{COMET_PUBLIC_DOMAIN}
 
 - Purpose: fetch the published mini-site payload for rendering
 - Auth: None
-- Rate limit: public-site Response (200): { "published": true, "site": { "id": "…", "subdomain": "…", "settings": { }, "banner_bucket": null, "banner_path": null }, "professional": { "id": "…", "handle": "…", "display_name": "…", "bio": null, "icon_bucket": null, "icon_path": null }, "theme": { "id": "…", "key": "…", "name": "…", "config": { } }, "blocks": [], "gallery": [], "services": [] } Common status codes: 200, 404 (site not found), 403 (site not published)
+- Rate limit: public-site Response (200): { "published": true, "site": { "id": "…", "subdomain": "…", "settings": { } }, "professional": { "id": "…", "handle": "…", "display_name": "…", "bio": null }, "theme": { "id": "…", "key": "…", "name": "…", "config": { } }, "blocks": [], "gallery": [ { "id": "…", "pool": "gallery", "alt_text": null, "sort_order": 0, "variants": { "thumb": "https://…", "small": "https://…", "medium": "https://…", "large": "https://…", "hero": "https://…" } } ], "services": [] } Common status codes: 200, 404 (site not found), 403 (site not published)
 
 ### `POST /api/public/analytics/pageviews`
 
@@ -886,7 +937,8 @@ All routes below require: Authorization header AND a professional profile (curre
 
 ### `PATCH /api/me`
 
-- Purpose: update professional profile fields Request body (all fields optional; if provided they are validated): { "display_name": "Josh Barber", "bio": "Mobile barber", "public_contact_email": "bookings@example.com", "icon_bucket": "public-assets", "icon_path": "professionals/<proId>/icon.jpg" } Response (200): { professional: ... } Common status codes: 200, 401, 403, 422
+- Purpose: update professional profile fields Request body (all fields optional; if provided they are validated): { "display_name": "Josh Barber", "bio": "Mobile barber", "public_contact_email": "bookings@example.com" } Response (200): { professional: ... } Common status codes: 200, 401, 403, 422
+- Note: icon_bucket/icon_path and headshot_bucket/headshot_path are legacy fields still accepted but deprecated. Use the image pool system (POST /api/uploads with pool=content) instead.
 
 ### `GET /api/site`
 
@@ -894,7 +946,8 @@ All routes below require: Authorization header AND a professional profile (curre
 
 ### `PATCH /api/site`
 
-- Purpose: update site settings, subdomain, theme_id, and banner image fields Request body: { "subdomain": "joshbarber", "theme_id": "uuid or null", "settings": { "primary_color": "#000000" }, "banner_bucket": "public-assets", "banner_path": "sites/<siteId>/banner.jpg" } Response (200): { site: ... } Common status codes: 200, 401, 403, 422
+- Purpose: update site settings, subdomain, and theme_id. Request body: { "subdomain": "joshbarber", "theme_id": "uuid or null", "settings": { "primary_color": "#000000" } } Response (200): { site: ... } Common status codes: 200, 401, 403, 422
+- Note: banner_bucket/banner_path are legacy fields still accepted but deprecated. Use the image pool system (POST /api/uploads with pool=content) and assign the hero variant as the banner.
 
 ### `PATCH /api/site/visibility`
 
@@ -1027,12 +1080,86 @@ Allowed section block types are defined in config: gallery, services, education,
 - Setting to `false` disables marketing emails
 - Cache auto-syncs when EmailSubscription status changes Themes
 - GET /api/themes
-- POST /api/themes/{theme}/select Select response: { site: ... } Uploads prepare
-- POST /api/uploads/prepare Request body: { "type": "icon", "content_type": "image/jpeg" } Response (200): { "bucket": "public-assets", "path": "professionals/<proId>/icon.jpg", "upsert": true } Gallery
-- GET /api/gallery
-- POST /api/gallery
-- POST /api/gallery/reorder
-- DELETE /api/gallery/{image} Store body: { "bucket": "public-assets", "path": "sites/<siteId>/gallery/<uuid>.jpg", "alt_text": "Optional" } Business rule: max 6 active gallery images (422 if exceeded).
+- POST /api/themes/{theme}/select Select response: { site: ... }
+
+### Image Uploads (server-side processing)
+
+Images are uploaded through the Comet API (not directly to storage). The server stores the original on the S3-compatible media disk (Cloudflare R2 / Laravel Cloud Object Storage) and dispatches a background queue job to generate WebP variants at multiple sizes. The upload endpoint returns immediately with `processing: true`.
+
+#### `POST /api/uploads`
+
+- Auth: Required (professional)
+- Content-Type: `multipart/form-data`
+- Request body:
+  - `pool` (required): `gallery` or `content`
+  - `image` (required): file upload (JPEG, PNG, or WebP; max 10 MB)
+  - `alt_text` (optional): string, max 255
+- Response (201):
+```json
+{
+  "id": "uuid",
+  "pool": "gallery",
+  "original_path": "images/<proId>/<imageId>/original_abc123.jpg",
+  "processing": true
+}
+```
+- Business rules:
+  - Max 5 gallery images per professional (configurable via `COMET_GALLERY_IMAGE_MAX`)
+  - Max 5 content images per professional (configurable via `COMET_CONTENT_IMAGE_MAX`)
+  - Race-safe: uses PostgreSQL advisory locks to enforce pool limits under concurrent uploads
+- Processing: a queue job (`images` queue) generates 5 WebP variants (thumb 64px, small 200px, medium 600px, large 1200px, hero 1920px) with content-hashed filenames for CDN immutability
+- Common status codes: 201, 401, 403, 422 (pool limit exceeded or validation errors)
+
+#### `GET /api/images`
+
+- Auth: Required (professional)
+- Query params:
+  - `pool` (optional): `gallery` or `content` — filters by pool; omit for all images
+- Response (200):
+```json
+{
+  "images": [
+    {
+      "id": "uuid",
+      "pool": "gallery",
+      "alt_text": "Fade haircut",
+      "sort_order": 0,
+      "variants": {
+        "thumb": "https://cdn.example.com/images/.../thumb_abc123.webp",
+        "small": "https://cdn.example.com/images/.../small_def456.webp",
+        "medium": "https://cdn.example.com/images/.../medium_ghi789.webp",
+        "large": "https://cdn.example.com/images/.../large_jkl012.webp",
+        "hero": "https://cdn.example.com/images/.../hero_mno345.webp"
+      },
+      "processing": false,
+      "created_at": "2026-03-02T10:00:00Z",
+      "updated_at": "2026-03-02T10:00:05Z"
+    }
+  ],
+  "limits": {
+    "gallery": 5,
+    "content": 5
+  }
+}
+```
+- Note: `processing: true` means variants have not been generated yet (queue job still running). `variants` will be an empty object in that case.
+- Common status codes: 200, 401, 403
+
+#### `DELETE /api/images/{image}`
+
+- Auth: Required (professional)
+- Deletes the image, all its WebP variants from storage, and the original file
+- Response (200): `{ "deleted": true }`
+- Common status codes: 200, 401, 403, 404
+
+### Gallery (ordering & legacy routes)
+
+Gallery-pool images can also be accessed / managed via the legacy gallery routes:
+
+- `GET /api/gallery` — list gallery-pool images with variants (same format as GET /api/images?pool=gallery)
+- `POST /api/gallery` — **deprecated (410)**: use `POST /api/uploads` with `pool=gallery` instead
+- `POST /api/gallery/reorder` — reorder gallery images; body: `{ "ids": ["uuid1", "uuid2", ...] }`
+- `DELETE /api/gallery/{image}` — delete a gallery image and its variants
 
 ### Square Integration
 
@@ -1242,34 +1369,45 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 
 It requires a staff JWT (core.comet_staff).
 
-## 9) Supabase Storage uploads (RLS behavior + frontend upload flow)
+## 9) Image uploads & processing (server-side WebP via queue)
 
-Uploads are direct-from-frontend to Supabase Storage. Comet provides the path rules via /api/uploads/prepare.
+Images are uploaded through the Comet API and processed entirely server-side. No direct-to-storage uploads from the frontend.
 
-### Supported upload types
+### Architecture
 
-### icon: professionals/<professional_id>/icon.<ext> (upsert true)
+1. Frontend sends `POST /api/uploads` with `pool` (gallery or content) and the image file as `multipart/form-data`.
+2. The server validates the file, stores the original on the S3-compatible **media disk** (Cloudflare R2 / Laravel Cloud Object Storage), creates a `site_images` row, and returns immediately (201).
+3. A background queue job (`ProcessImageVariantsJob` on the `images` queue) downloads the original, generates 5 responsive WebP variants via GD, uploads them to the media disk, and inserts `image_variants` rows.
+4. Frontend polls `GET /api/images` — when `processing` flips to `false`, the `variants` map is populated with CDN URLs for each size.
 
--
-- headshot: professionals/<professional_id>/headshot.<ext> (upsert true)
-- banner: sites/<site_id>/banner.<ext> (upsert true)
-- gallery: sites/<site_id>/gallery/<uuid>.<ext> (upsert false, max 6 active images)
+### Image pools
 
-### Allowed content types: image/jpeg, image/png, image/webp
+Each professional has two image pools:
 
-### Frontend upload flow
+- **gallery** — portfolio / work showcase images (max configurable, default 5)
+- **content** — general-purpose branding images; the frontend assigns purpose by picking the right variant size:
+  - Icon → use the `thumb` (64px) or `small` (200px) variant
+  - Headshot → use the `medium` (600px) variant
+  - Banner → use the `hero` (1920×1080) variant
 
-1. Call POST /api/uploads/prepare with type and content_type.
-2. Use Supabase Storage client with the logged-in user session to upload to the returned bucket + path.
-3. If type is icon or headshot: PATCH /api/me to set icon_bucket/icon_path or headshot_bucket/headshot_path.
-4. If type is banner: PATCH /api/site to set banner_bucket/banner_path.
-5. If type is gallery: POST /api/gallery with bucket + path (+ optional alt_text) to create the DB row.
+### Content-hashed filenames & CDN caching
 
-### Storage RLS notes
+All variant filenames include a 16-char SHA-256 hash: `thumb_abc123def456.webp`. The media disk is configured with `Cache-Control: public, max-age=31536000, immutable`, so CDN / browser caches are aggressive. When an image is re-processed, the hash (and therefore URL) changes, automatically busting the cache.
 
-- Storage access is controlled by policies on storage.objects.
-- Paths are validated server-side when creating gallery DB rows.
-- If storage upload returns 403, the bucket policy does not allow that path for the current user.
+### Frontend upload flow (new)
+
+1. `POST /api/uploads` with `pool=gallery` (or `content`), `image=<file>`, optional `alt_text`.
+2. Poll `GET /api/images?pool=gallery` until `processing: false`.
+3. Use the `variants` map to pick the right URL for each UI context (e.g., `variants.thumb` for icon, `variants.hero` for banner).
+4. To delete: `DELETE /api/images/{image}`.
+5. To reorder gallery: `POST /api/gallery/reorder` with `{ "ids": [...] }`.
+
+### Supported file types
+
+- JPEG (`image/jpeg`)
+- PNG (`image/png`)
+- WebP (`image/webp`)
+- Max upload size: 10 MB (configurable via `COMET_IMAGE_MAX_UPLOAD_KB`)
 
 ## 10) Test users and getting tokens
 
@@ -1307,8 +1445,9 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 - SUPABASE_ANON_KEY
 - API_BASE_URL (example: https://api.comet.app/api)
 - PUBLIC_DOMAIN (example: comet.app or localtest.me)
-- MEDIA_BUCKET (default: public-assets)
 - Optionally: STAFF_DASHBOARD_ENABLED flag if you ship staff tooling in the same frontend
+
+Note: The frontend no longer needs MEDIA_BUCKET — all image URLs come from the API `variants` map.
 
 ## 13) Backend env var checklist
 
@@ -1333,8 +1472,21 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 ### Comet app settings
 
 - COMET_PUBLIC_DOMAIN (used for domain-scoped public routes)
-- COMET_MEDIA_BUCKET (default: public-assets)
+- COMET_MEDIA_DISK (default: media — the Laravel filesystem disk name)
+- COMET_MEDIA_BUCKET (legacy, default: public-assets)
+- COMET_GALLERY_IMAGE_MAX (default: 5)
+- COMET_CONTENT_IMAGE_MAX (default: 5)
+- COMET_IMAGE_MAX_UPLOAD_KB (default: 10240 = 10 MB)
 - SOFT_DELETE_RETENTION_DAYS (default: 30)
+
+### Media disk (S3-compatible / Cloudflare R2 / Laravel Cloud Object Storage)
+
+- MEDIA_DISK_KEY (S3 access key)
+- MEDIA_DISK_SECRET (S3 secret key)
+- MEDIA_DISK_REGION (default: auto)
+- MEDIA_DISK_BUCKET (default: comet-media)
+- MEDIA_DISK_URL (public CDN base URL)
+- MEDIA_DISK_ENDPOINT (R2/custom S3 endpoint URL)
 
 ### Square integration
 
@@ -1370,5 +1522,9 @@ Send the current time anyway.
 
 ### Gallery limits and ordering
 
-- Max 6 active gallery images. The prepare endpoint and the gallery store endpoint both enforce this.
-- Reorder endpoints accept an ids array; any omitted ids will be appended in existing order.
+- Gallery pool: max 5 active images (configurable via `COMET_GALLERY_IMAGE_MAX`). Content pool: max 5 (via `COMET_CONTENT_IMAGE_MAX`).
+- Pool limits are enforced server-side with PostgreSQL advisory locks for race safety.
+- `POST /api/uploads` validates the pool limit before creating a new image.
+- Reorder endpoint (`POST /api/gallery/reorder`) accepts an `ids` array; any omitted ids will be appended in existing order.
+- Variants are generated asynchronously — poll `GET /api/images` until `processing: false`.
+- Content-hashed variant URLs are immutable for CDN caching; re-processing generates new URLs automatically.

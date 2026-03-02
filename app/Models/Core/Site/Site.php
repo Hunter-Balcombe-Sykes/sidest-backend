@@ -28,7 +28,7 @@ class Site extends BaseModel
         'is_published',
         'settings',
 
-        // Site Images
+        // Legacy image columns (phasing out – images now in site_images + image_variants)
         'banner_bucket',
         'banner_path',
 

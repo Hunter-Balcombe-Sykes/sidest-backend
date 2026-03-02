@@ -107,12 +107,17 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/themes/{theme}/select', [ProfessionalThemeController::class, 'select'])
         ->whereUuid('theme');
 
-    // Image Upload
-    Route::post('/uploads/prepare', [ProfessionalUploadController::class, 'prepare']);
+    // Image Upload (server-side processing → WebP variants via queue)
+    Route::post('/uploads', [ProfessionalUploadController::class, 'upload']);
 
-    // Image Gallery
+    // Image Management (pool-based: gallery / content)
+    Route::get('/images', [ProfessionalUploadController::class, 'index']);
+    Route::delete('/images/{image}', [ProfessionalUploadController::class, 'destroy'])
+        ->whereUuid('image');
+
+    // Image Gallery (gallery-pool ordering & legacy routes)
     Route::get('/gallery', [ProfessionalGalleryController::class, 'index']);
-    Route::post('/gallery', [ProfessionalGalleryController::class, 'store']);
+    Route::post('/gallery', [ProfessionalGalleryController::class, 'store']); // deprecated → 410
     Route::delete('/gallery/{image}', [ProfessionalGalleryController::class, 'destroy'])
         ->whereUuid('image');
     Route::post('/gallery/reorder', [ProfessionalGalleryController::class, 'reorder']);

@@ -60,6 +60,31 @@ return [
             'report' => false,
         ],
 
+        /*
+        |----------------------------------------------------------------------
+        | Media disk – S3-compatible (Laravel Cloud R2 / Cloudflare R2 / AWS S3)
+        |----------------------------------------------------------------------
+        | All user-uploaded images (originals + WebP variants) live here.
+        | On Laravel Cloud this maps to a zero-egress R2 bucket.
+        | Set MEDIA_DISK_URL to the public CDN/custom-domain URL for the bucket.
+        */
+        'media' => [
+            'driver' => 's3',
+            'key' => env('MEDIA_DISK_KEY', env('AWS_ACCESS_KEY_ID')),
+            'secret' => env('MEDIA_DISK_SECRET', env('AWS_SECRET_ACCESS_KEY')),
+            'region' => env('MEDIA_DISK_REGION', env('AWS_DEFAULT_REGION', 'auto')),
+            'bucket' => env('MEDIA_DISK_BUCKET', 'comet-media'),
+            'url' => env('MEDIA_DISK_URL'),               // e.g. https://media.cometpages.com
+            'endpoint' => env('MEDIA_DISK_ENDPOINT'),      // e.g. https://<account>.r2.cloudflarestorage.com
+            'use_path_style_endpoint' => env('MEDIA_DISK_PATH_STYLE', false),
+            'throw' => true,
+            'report' => true,
+            'visibility' => 'public',
+            'options' => [
+                'CacheControl' => 'public, max-age=31536000, immutable',
+            ],
+        ],
+
     ],
 
     /*

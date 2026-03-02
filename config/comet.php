@@ -39,6 +39,41 @@ return [
     'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),
 
     'media_bucket' => env('COMET_MEDIA_BUCKET', 'public-assets'),
+    'media_disk' => env('COMET_MEDIA_DISK', 'media'),
+
+    /*
+    |----------------------------------------------------------------------
+    | Image pools – per-professional limits
+    |----------------------------------------------------------------------
+    | gallery = showcase images (portfolio, work samples)
+    | content = broad-use images (icon, headshot, banner, etc. – frontend assigns purpose)
+    */
+    'image_pools' => [
+        'gallery' => ['max' => (int) env('COMET_GALLERY_IMAGE_MAX', 5)],
+        'content' => ['max' => (int) env('COMET_CONTENT_IMAGE_MAX', 5)],
+    ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Image processing – universal variant definitions
+    |----------------------------------------------------------------------
+    | Every uploaded image (gallery or content) gets the same set of
+    | responsive WebP variants. The frontend picks the right size for
+    | each use case (icon → thumb, banner → hero, etc.).
+    |
+    | width / height = max dimension (aspect ratio preserved).
+    | quality = WebP quality (1-100).
+    | fit: cover = centre-crop to fill, inside = fit within bounds.
+    */
+    'image_variants' => [
+        'thumb'  => ['width' => 64,   'height' => 64,   'quality' => 80, 'format' => 'webp', 'fit' => 'cover'],
+        'small'  => ['width' => 200,  'height' => 200,  'quality' => 80, 'format' => 'webp', 'fit' => 'cover'],
+        'medium' => ['width' => 600,  'height' => 600,  'quality' => 80, 'format' => 'webp', 'fit' => 'inside'],
+        'large'  => ['width' => 1200, 'height' => 1200, 'quality' => 85, 'format' => 'webp', 'fit' => 'inside'],
+        'hero'   => ['width' => 1920, 'height' => 1080, 'quality' => 85, 'format' => 'webp', 'fit' => 'cover'],
+    ],
+
+    'image_max_upload_size' => (int) env('COMET_IMAGE_MAX_UPLOAD_KB', 10240), // 10 MB
 
     'form_timing' => [
         'min_ms' => (int) env('FORM_TIMING_MIN_MS', 2500),      // 2.5s minimum fill time

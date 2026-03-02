@@ -5,57 +5,172 @@ namespace App\Http\Controllers\Api\Professional\Uploads;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Requests\Api\Professional\Uploads\PrepareUploadRequest;
+use App\Http\Requests\Api\Professional\Uploads\UploadImageRequest;
+use App\Jobs\ProcessImageVariantsJob;
 use App\Models\Core\Site\SiteImage;
+use App\Services\Media\ImageVariantService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 
 class ProfessionalUploadController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
 
-    public function prepare(PrepareUploadRequest $request): JsonResponse
+    public function __construct(
+        private readonly ImageVariantService $mediaService,
+    ) {}
+
+    /**
+     * Upload an image to a pool (gallery or content).
+     *
+     * Stores the original on the media disk and dispatches a queue job
+     * to generate WebP variants (thumb → hero). Returns immediately.
+     *
+     * POST /api/uploads  { pool: gallery|content, image: <file>, alt_text?: string }
+     */
+    public function upload(UploadImageRequest $request): JsonResponse
     {
-        $pro = $this->currentProfessional($request);
+        $pro  = $this->currentProfessional($request);
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        $bucket = (string) config('comet.media_bucket', 'media');
+        $pool = $request->validated('pool');
+        $file = $request->file('image');
 
-        $type = $request->validated('type');
-        $contentType = $request->validated('content_type');
+        $maxImages = (int) config("comet.image_pools.{$pool}.max", 5);
 
-        $ext = match ($contentType) {
-            'image/jpeg' => 'jpg',
-            'image/png' => 'png',
-            'image/webp' => 'webp',
-            default => 'jpg',
-        };
+        // --- Pool limit check (fast, non-locking) ---
+        $activeCount = SiteImage::query()
+            ->where('site_id', $site->id)
+            ->where('pool', $pool)
+            ->where('is_active', true)
+            ->count();
 
-        // Prevent wasted uploads (we also enforce this again when inserting the DB row)
-        if ($type === 'gallery') {
+        if ($activeCount >= $maxImages) {
+            return $this->error(
+                ucfirst($pool) . " image limit reached (max {$maxImages}).", 422
+            );
+        }
+
+        // --- Create SiteImage row (with advisory lock for race safety) ---
+        $image = DB::transaction(function () use ($site, $pool, $maxImages, $request) {
+            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["{$pool}:{$site->id}"]);
+
             $activeCount = SiteImage::query()
                 ->where('site_id', $site->id)
+                ->where('pool', $pool)
                 ->where('is_active', true)
+                ->lockForUpdate()
                 ->count();
 
-            if ($activeCount >= 6) {
-                return $this->error('Gallery limit reached (max 6 images).', 422);
+            if ($activeCount >= $maxImages) {
+                abort(422, ucfirst($pool) . " image limit reached (max {$maxImages}).");
+            }
+
+            $maxSort = SiteImage::query()
+                ->where('site_id', $site->id)
+                ->where('pool', $pool)
+                ->where('is_active', true)
+                ->max('sort_order');
+
+            return SiteImage::create([
+                'site_id'    => $site->id,
+                'pool'       => $pool,
+                'bucket'     => config('comet.media_disk', 'media'),
+                'path'       => '', // populated after original is stored
+                'alt_text'   => $request->validated('alt_text'),
+                'sort_order' => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
+                'is_active'  => true,
+            ]);
+        });
+
+        // --- Store original on media disk ---
+        $basePath     = "images/{$pro->id}/{$image->id}";
+        $originalPath = $this->mediaService->storeOriginal($file, $basePath);
+
+        $image->update(['path' => $originalPath]);
+
+        // --- Dispatch variant generation (runs async in queue) ---
+        ProcessImageVariantsJob::dispatch(
+            originalPath: $originalPath,
+            imageId: $image->id,
+            basePath: $basePath,
+        );
+
+        return $this->success([
+            'id'            => $image->id,
+            'pool'          => $pool,
+            'original_path' => $originalPath,
+            'processing'    => true,
+        ], 201);
+    }
+
+    /**
+     * List all images for the authenticated professional, grouped by pool,
+     * with their processed variant URLs.
+     *
+     * GET /api/images?pool=gallery|content  (pool is optional)
+     */
+    public function index(): JsonResponse
+    {
+        $pro  = $this->currentProfessional(request());
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        $query = SiteImage::query()
+            ->where('site_id', $site->id)
+            ->where('is_active', true)
+            ->with('variants')
+            ->orderBy('pool')
+            ->orderBy('sort_order')
+            ->orderBy('created_at');
+
+        if (request()->has('pool')) {
+            $pool = strtolower(trim(request()->input('pool')));
+            if (in_array($pool, ['gallery', 'content'], true)) {
+                $query->where('pool', $pool);
             }
         }
 
-        [$path, $upsert] = match ($type) {
-            'icon'     => ["professionals/{$pro->id}/icon.{$ext}", true],
-            'headshot' => ["professionals/{$pro->id}/headshot.{$ext}", true],
-            'banner'   => ["sites/{$site->id}/banner.{$ext}", true],
-            'gallery'  => ["sites/{$site->id}/gallery/" . Str::uuid() . ".{$ext}", false],
-        };
+        $images = $query->get()->map(fn (SiteImage $img) => [
+            'id'         => $img->id,
+            'pool'       => $img->pool,
+            'alt_text'   => $img->alt_text,
+            'sort_order' => $img->sort_order,
+            'variants'   => $img->variantUrls(),
+            'processing' => $img->variants->isEmpty(),
+            'created_at' => $img->created_at,
+            'updated_at' => $img->updated_at,
+        ]);
 
         return $this->success([
-            'bucket' => $bucket,
-            'path' => $path,
-            'upsert' => $upsert,
+            'images' => $images,
+            'limits' => [
+                'gallery' => config('comet.image_pools.gallery.max', 5),
+                'content' => config('comet.image_pools.content.max', 5),
+            ],
         ]);
+    }
+
+    /**
+     * Delete an image and all its variants from storage.
+     *
+     * DELETE /api/images/{image}
+     */
+    public function destroy(SiteImage $image): JsonResponse
+    {
+        $pro  = $this->currentProfessional(request());
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        abort_unless($image->site_id === $site->id, 404);
+
+        // Delete variant files + original + DB rows
+        $this->mediaService->deleteVariants($image->id, $image->path);
+
+        $image->delete();
+
+        return $this->success(['deleted' => true]);
     }
 }

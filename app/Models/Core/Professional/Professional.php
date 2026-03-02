@@ -51,7 +51,7 @@ class Professional extends BaseModel
         'public_contact_number',
         'public_contact_email',
 
-        // Images
+        // Legacy image columns (phasing out – images now in site_images + image_variants)
         'icon_bucket',
         'icon_path',
         'headshot_bucket',
