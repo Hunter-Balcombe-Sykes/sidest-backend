@@ -41,31 +41,53 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     public function handle(ImageVariantService $service): void
     {
+        Log::info('ProcessImageVariantsJob: starting variant processing', [
+            'image_id' => $this->imageId,
+            'original_path' => $this->originalPath,
+        ]);
+
         $disk = Storage::disk((string) config('comet.media_disk', 'media'));
 
         if (!$disk->exists($this->originalPath)) {
-            Log::warning('ProcessImageVariantsJob: original not found on disk.', [
+            Log::error('ProcessImageVariantsJob: original file not found on disk.', [
                 'path' => $this->originalPath,
+                'image_id' => $this->imageId,
             ]);
+            $this->fail(new \Exception('Original file not found on media disk.'));
             return;
         }
 
-        // Download to a local temp file so GD can read it.
-        $localTmp = tempnam(sys_get_temp_dir(), 'comet_orig_');
-        file_put_contents($localTmp, $disk->get($this->originalPath));
-
         try {
+            // Download to a local temp file so GD can read it.
+            $localTmp = tempnam(sys_get_temp_dir(), 'comet_orig_');
+            if (!$localTmp) {
+                throw new \RuntimeException('Failed to create temporary file.');
+            }
+
+            $content = $disk->get($this->originalPath);
+            if (!file_put_contents($localTmp, $content)) {
+                throw new \RuntimeException('Failed to write original to temp file.');
+            }
+
             $service->processVariants(
                 originalTmpPath: $localTmp,
                 imageId: $this->imageId,
                 basePath: $this->basePath,
             );
-        } finally {
-            @unlink($localTmp);
-        }
 
-        Log::info('ProcessImageVariantsJob: variants generated.', [
-            'image_id' => $this->imageId,
-        ]);
+            Log::info('ProcessImageVariantsJob: variants generated successfully.', [
+                'image_id' => $this->imageId,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('ProcessImageVariantsJob: variant generation failed.', [
+                'image_id' => $this->imageId,
+                'error' => $e->getMessage(),
+            ]);
+            $this->fail($e);
+        } finally {
+            if (isset($localTmp) && file_exists($localTmp)) {
+                @unlink($localTmp);
+            }
+        }
     }
 }

@@ -11,6 +11,7 @@ use App\Models\Core\Site\SiteImage;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ProfessionalUploadController extends ApiController
 {
@@ -37,6 +38,13 @@ class ProfessionalUploadController extends ApiController
 
         $pool = $request->validated('pool');
         $file = $request->file('image');
+
+        Log::info('Image upload started', [
+            'pro_id' => $pro->id,
+            'site_id' => $site->id,
+            'pool' => $pool,
+            'file_size_kb' => $file->getSize() / 1024,
+        ]);
 
         $maxImages = (int) config("comet.image_pools.{$pool}.max", 5);
 
@@ -77,7 +85,7 @@ class ProfessionalUploadController extends ApiController
                 ->where('is_active', true)
                 ->max('sort_order');
 
-            return SiteImage::create([
+            $image = SiteImage::create([
                 'site_id'    => $site->id,
                 'pool'       => $pool,
                 'path'       => '', // populated after original is stored
@@ -85,17 +93,32 @@ class ProfessionalUploadController extends ApiController
                 'sort_order' => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
                 'is_active'  => true,
             ]);
+            
+            Log::info('SiteImage row created', ['image_id' => $image->id]);
+            
+            return $image;
         });
 
         // --- Store original on media disk ---
-        $basePath     = "images/{$pro->id}/{$image->id}";
-        $originalPath = $this->mediaService->storeOriginal($file, $basePath);
+        $basePath = "images/{$pro->id}/{$image->id}";
+        
+        try {
+            Log::info('Storing original image to media disk', ['image_id' => $image->id, 'base_path' => $basePath]);
+            $originalPath = $this->mediaService->storeOriginal($file, $basePath);
+            Log::info('Original image stored successfully', ['image_id' => $image->id, 'path' => $originalPath]);
+        } catch (\Exception $e) {
+            Log::error('Failed to store original image', ['image_id' => $image->id, 'error' => $e->getMessage()]);
+            // Clean up orphaned image row
+            $image->delete();
+            return $this->error('Failed to store image: ' . $e->getMessage(), 500);
+        }
 
         $image->update(['path' => $originalPath]);
 
         // --- Dispatch variant generation ---
         // With QUEUE_CONNECTION=sync the job runs inline before the
         // response is sent; with a real queue it runs in the background.
+        Log::info('Dispatching ProcessImageVariantsJob', ['image_id' => $image->id]);
         ProcessImageVariantsJob::dispatch(
             originalPath: $originalPath,
             imageId: $image->id,

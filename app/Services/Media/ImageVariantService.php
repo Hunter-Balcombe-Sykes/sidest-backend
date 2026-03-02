@@ -36,6 +36,20 @@ class ImageVariantService
         string $imageId,
         string $basePath,
     ): array {
+        // Ensure GD extension is available with WebP support
+        if (!extension_loaded('gd')) {
+            throw new \RuntimeException('GD extension is not loaded. Cannot process image variants.');
+        }
+        
+        if (!function_exists('imagewebp')) {
+            throw new \RuntimeException('GD WebP support is not available. Cannot generate WebP variants.');
+        }
+
+        \Illuminate\Support\Facades\Log::info('Starting image variant processing', [
+            'image_id' => $imageId,
+            'base_path' => $basePath,
+        ]);
+
         $disk        = $this->disk();
         $definitions = $this->variantDefinitions();
 
@@ -109,6 +123,11 @@ class ImageVariantService
         } finally {
             imagedestroy($sourceImage);
         }
+
+        \Illuminate\Support\Facades\Log::info('Image variant processing completed', [
+            'image_id' => $imageId,
+            'variant_count' => count($created),
+        ]);
 
         return $created;
     }
