@@ -1084,7 +1084,11 @@ Allowed section block types are defined in config: gallery, services, education,
 
 ### Image Uploads (server-side processing)
 
-Images are uploaded through the Comet API (not directly to storage). The server stores the original on the S3-compatible media disk (Cloudflare R2 / Laravel Cloud Object Storage) and dispatches a background queue job to generate WebP variants at multiple sizes. The upload endpoint returns immediately with `processing: true`.
+Images are uploaded through the Comet API (not directly to storage). The server stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and generates WebP variants at multiple sizes.
+
+**Queue modes:**
+- `QUEUE_CONNECTION=sync` (default for dev / early production): variants are generated **inline** during the upload request (~2-5 sec). The response contains completed variants immediately with `processing: false`. No queue worker needed.
+- `QUEUE_CONNECTION=database` or `redis` (recommended for scale): the upload returns instantly with `processing: true`, and a background queue job generates variants async. Frontend polls `GET /api/images` until `processing: false`.
 
 #### `POST /api/uploads`
 
@@ -1103,11 +1107,12 @@ Images are uploaded through the Comet API (not directly to storage). The server 
   "processing": true
 }
 ```
+- `processing` will be `false` (variants already done) when `QUEUE_CONNECTION=sync`; `true` (processing async) when using a queue worker.
 - Business rules:
   - Max 5 gallery images per professional (configurable via `COMET_GALLERY_IMAGE_MAX`)
   - Max 5 content images per professional (configurable via `COMET_CONTENT_IMAGE_MAX`)
   - Race-safe: uses PostgreSQL advisory locks to enforce pool limits under concurrent uploads
-- Processing: a queue job (`images` queue) generates 5 WebP variants (thumb 64px, small 200px, medium 600px, large 1200px, hero 1920px) with content-hashed filenames for CDN immutability
+- Variants: 5 WebP sizes (thumb 64px, small 200px, medium 600px, large 1200px, hero 1920px) with content-hashed filenames for CDN immutability
 - Common status codes: 201, 401, 403, 422 (pool limit exceeded or validation errors)
 
 #### `GET /api/images`
@@ -1369,16 +1374,25 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 
 It requires a staff JWT (core.comet_staff).
 
-## 9) Image uploads & processing (server-side WebP via queue)
+## 9) Image uploads & processing (server-side WebP)
 
 Images are uploaded through the Comet API and processed entirely server-side. No direct-to-storage uploads from the frontend.
 
 ### Architecture
 
 1. Frontend sends `POST /api/uploads` with `pool` (gallery or content) and the image file as `multipart/form-data`.
-2. The server validates the file, stores the original on the S3-compatible **media disk** (Cloudflare R2 / Laravel Cloud Object Storage), creates a `site_images` row, and returns immediately (201).
-3. A background queue job (`ProcessImageVariantsJob` on the `images` queue) downloads the original, generates 5 responsive WebP variants via GD, uploads them to the media disk, and inserts `image_variants` rows.
-4. Frontend polls `GET /api/images` — when `processing` flips to `false`, the `variants` map is populated with CDN URLs for each size.
+2. The server validates the file, stores the original on the **media disk** (Laravel Cloud Object Storage / Cloudflare R2), creates a `site_images` row.
+3. Variant generation runs either **inline** (`QUEUE_CONNECTION=sync` — no worker needed, ~2-5 sec response) or **async** via queue job (`QUEUE_CONNECTION=database`/`redis` — returns instantly, worker processes in background).
+4. When async: frontend polls `GET /api/images` — when `processing` flips to `false`, the `variants` map is populated with CDN URLs. When sync: variants are ready in the upload response.
+
+### Queue modes
+
+| Mode | Env var | Worker needed? | Upload response time | Frontend polling? |
+|------|---------|---------------|---------------------|------------------|
+| **Sync** (dev / early prod) | `QUEUE_CONNECTION=sync` | No | ~2-5 seconds | No — variants ready immediately |
+| **Async** (scaled prod) | `QUEUE_CONNECTION=database` or `redis` | Yes (1+ worker) | ~50-100ms | Yes — poll until `processing: false` |
+
+Switch between modes with zero code changes — just change the env var and optionally add a queue worker.
 
 ### Image pools
 
@@ -1394,10 +1408,10 @@ Each professional has two image pools:
 
 All variant filenames include a 16-char SHA-256 hash: `thumb_abc123def456.webp`. The media disk is configured with `Cache-Control: public, max-age=31536000, immutable`, so CDN / browser caches are aggressive. When an image is re-processed, the hash (and therefore URL) changes, automatically busting the cache.
 
-### Frontend upload flow (new)
+### Frontend upload flow
 
 1. `POST /api/uploads` with `pool=gallery` (or `content`), `image=<file>`, optional `alt_text`.
-2. Poll `GET /api/images?pool=gallery` until `processing: false`.
+2. If response has `processing: true` → poll `GET /api/images?pool=gallery` until `processing: false`. If `processing: false` → variants are already available in the response.
 3. Use the `variants` map to pick the right URL for each UI context (e.g., `variants.thumb` for icon, `variants.hero` for banner).
 4. To delete: `DELETE /api/images/{image}`.
 5. To reorder gallery: `POST /api/gallery/reorder` with `{ "ids": [...] }`.
@@ -1479,8 +1493,14 @@ Note: The frontend no longer needs MEDIA_BUCKET — all image URLs come from the
 - COMET_IMAGE_MAX_UPLOAD_KB (default: 10240 = 10 MB)
 - SOFT_DELETE_RETENTION_DAYS (default: 30)
 
-### Media disk (S3-compatible / Cloudflare R2 / Laravel Cloud Object Storage)
+### Media disk (Laravel Cloud Object Storage / Cloudflare R2)
 
+**On Laravel Cloud:** No manual env vars needed. Create a bucket in the Cloud dashboard, and set:
+- `COMET_MEDIA_DISK` = the disk name from `LARAVEL_CLOUD_DISK_CONFIG` (e.g., `public_dev`)
+
+Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The image system reads `COMET_MEDIA_DISK` to find the right disk.
+
+**Self-managed (standalone R2 / AWS S3):** Configure the `media` disk manually:
 - MEDIA_DISK_KEY (S3 access key)
 - MEDIA_DISK_SECRET (S3 secret key)
 - MEDIA_DISK_REGION (default: auto)
@@ -1501,10 +1521,10 @@ Note: The frontend no longer needs MEDIA_BUCKET — all image URLs come from the
 - FRESHA_WEBHOOK_SIGNATURE_KEY (HMAC key for validating Fresha webhook signatures)
 - FRESHA_WEBHOOK_NOTIFICATION_URL (URL Fresha sends webhook events to)
 
-### Optional: cache, queues, mail (needed for staff broadcast emails)
+### Optional: cache, queues, mail
 
 - CACHE_STORE, REDIS_URL or REDIS_HOST/REDIS_PASSWORD
-- QUEUE_CONNECTION (redis recommended)
+- QUEUE_CONNECTION: `sync` (no worker needed — processes inline) | `database` | `redis` (worker required; recommended for scale)
 - MAIL_MAILER, MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_FROM_ADDRESS
 
 ## 14) Known implementation gotchas
@@ -1526,5 +1546,5 @@ Send the current time anyway.
 - Pool limits are enforced server-side with PostgreSQL advisory locks for race safety.
 - `POST /api/uploads` validates the pool limit before creating a new image.
 - Reorder endpoint (`POST /api/gallery/reorder`) accepts an `ids` array; any omitted ids will be appended in existing order.
-- Variants are generated asynchronously — poll `GET /api/images` until `processing: false`.
+- Variants are generated inline (sync mode) or asynchronously (queue mode). If async, poll `GET /api/images` until `processing: false`.
 - Content-hashed variant URLs are immutable for CDN caching; re-processing generates new URLs automatically.
