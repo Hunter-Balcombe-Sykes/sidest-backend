@@ -21,7 +21,8 @@ DROP POLICY IF EXISTS "public read professional assets when published" ON storag
 -- ============================================================
 -- 2. Rebuild public_site_payload to use image_variants + pools
 -- ============================================================
-CREATE OR REPLACE VIEW core.public_site_payload
+DROP VIEW IF EXISTS core.public_site_payload;
+CREATE VIEW core.public_site_payload
 WITH (security_invoker='on') AS
 SELECT
   s.id as site_id,
@@ -152,7 +153,8 @@ COMMENT ON VIEW core.public_site_payload IS 'Complete public site payload with i
 -- ============================================================
 -- 3. Rebuild all_site_data view (remove legacy image columns)
 -- ============================================================
-CREATE OR REPLACE VIEW core.all_site_data AS
+DROP VIEW IF EXISTS core.all_site_data;
+CREATE VIEW core.all_site_data AS
 SELECT
     s.id AS site_id,
     s.subdomain,
