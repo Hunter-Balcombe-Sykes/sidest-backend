@@ -46,12 +46,14 @@ class ProcessImageVariantsJob implements ShouldQueue
             'original_path' => $this->originalPath,
         ]);
 
-        $disk = Storage::disk((string) config('comet.media_disk', 'media'));
+        $diskName = $service->resolvedDiskName();
+        $disk = Storage::disk($diskName);
 
         if (!$disk->exists($this->originalPath)) {
             Log::error('ProcessImageVariantsJob: original file not found on disk.', [
                 'path' => $this->originalPath,
                 'image_id' => $this->imageId,
+                'disk' => $diskName,
             ]);
             $this->fail(new \Exception('Original file not found on media disk.'));
             return;

@@ -183,6 +183,14 @@ class ImageVariantService
             ->all();
     }
 
+    /**
+     * Resolve the effective media disk name used for all reads/writes.
+     */
+    public function resolvedDiskName(): string
+    {
+        return $this->diskName();
+    }
+
     /* ------------------------------------------------------------------ */
     /*  Internal helpers                                                    */
     /* ------------------------------------------------------------------ */

@@ -12,6 +12,7 @@ use App\Services\Media\ImageVariantService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProfessionalUploadController extends ApiController
 {
@@ -103,7 +104,7 @@ class ProfessionalUploadController extends ApiController
         $basePath = "images/{$pro->id}/{$image->id}";
         
         try {
-            $mediaDisk = (string) config('comet.media_disk', 'media');
+            $mediaDisk = $this->mediaService->resolvedDiskName();
             $disk = config("filesystems.disks.{$mediaDisk}", []);
 
             Log::info('Storing original image to media disk', [
@@ -122,7 +123,7 @@ class ProfessionalUploadController extends ApiController
                 'image_id' => $image->id,
                 'error' => $e->getMessage(),
                 'exception' => get_class($e),
-                'media_disk' => (string) config('comet.media_disk', 'media'),
+                'media_disk' => $this->mediaService->resolvedDiskName(),
             ]);
             // Clean up orphaned image row
             $image->delete();
@@ -135,11 +136,24 @@ class ProfessionalUploadController extends ApiController
         // With QUEUE_CONNECTION=sync the job runs inline before the
         // response is sent; with a real queue it runs in the background.
         Log::info('Dispatching ProcessImageVariantsJob', ['image_id' => $image->id]);
-        ProcessImageVariantsJob::dispatch(
-            originalPath: $originalPath,
-            imageId: $image->id,
-            basePath: $basePath,
-        );
+        try {
+            ProcessImageVariantsJob::dispatch(
+                originalPath: $originalPath,
+                imageId: $image->id,
+                basePath: $basePath,
+            );
+        } catch (Throwable $e) {
+            Log::error('Queue dispatch failed; processing image variants synchronously.', [
+                'image_id' => $image->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            ProcessImageVariantsJob::dispatchSync(
+                originalPath: $originalPath,
+                imageId: $image->id,
+                basePath: $basePath,
+            );
+        }
 
         // After dispatch (sync = already done, async = still processing)
         $image->loadCount('variants');
