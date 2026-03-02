@@ -68,22 +68,22 @@ class ProfessionalUploadController extends ApiController
                 DB::select('select pg_advisory_xact_lock(hashtext(?))', ["{$pool}:{$site->id}"]);
             }
 
-            $activeCount = SiteImage::query()
+            // Postgres does not allow FOR UPDATE with aggregate functions,
+            // so lock matching rows first, then derive count/sort in memory.
+            $activeImages = SiteImage::query()
                 ->where('site_id', $site->id)
                 ->where('pool', $pool)
                 ->where('is_active', true)
                 ->lockForUpdate()
-                ->count();
+                ->get(['id', 'sort_order']);
+
+            $activeCount = $activeImages->count();
 
             if ($activeCount >= $maxImages) {
                 abort(422, ucfirst($pool) . " image limit reached (max {$maxImages}).");
             }
 
-            $maxSort = SiteImage::query()
-                ->where('site_id', $site->id)
-                ->where('pool', $pool)
-                ->where('is_active', true)
-                ->max('sort_order');
+            $maxSort = $activeImages->max('sort_order');
 
             $image = SiteImage::create([
                 'site_id'    => $site->id,
