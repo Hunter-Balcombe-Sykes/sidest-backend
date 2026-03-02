@@ -4,6 +4,7 @@ namespace App\Services\Media;
 
 use App\Models\Core\ImageVariant;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -188,7 +189,38 @@ class ImageVariantService
 
     private function diskName(): string
     {
-        return (string) config('comet.media_disk', 'media');
+        $configured = (string) config('comet.media_disk', 'media');
+
+        // If COMET_MEDIA_DISK is explicitly set, always honour it.
+        $explicit = $_ENV['COMET_MEDIA_DISK'] ?? $_SERVER['COMET_MEDIA_DISK'] ?? null;
+        if (is_string($explicit) && trim($explicit) !== '') {
+            return $configured;
+        }
+
+        // Laravel Cloud injects disks dynamically and may set a non-"media"
+        // filesystems.default disk. If media disk is only a fallback value,
+        // prefer the Cloud default to avoid missing/empty media credentials.
+        if ($configured === 'media') {
+            $default = (string) config('filesystems.default', 'local');
+            $defaultConfig = config("filesystems.disks.{$default}");
+
+            if (
+                $default !== '' &&
+                $default !== 'local' &&
+                $default !== 'media' &&
+                is_array($defaultConfig) &&
+                (($defaultConfig['driver'] ?? null) === 's3')
+            ) {
+                Log::warning('COMET_MEDIA_DISK not set; using filesystems.default disk for media operations.', [
+                    'configured_media_disk' => $configured,
+                    'fallback_disk' => $default,
+                ]);
+
+                return $default;
+            }
+        }
+
+        return $configured;
     }
 
     private function disk(): \Illuminate\Contracts\Filesystem\Filesystem

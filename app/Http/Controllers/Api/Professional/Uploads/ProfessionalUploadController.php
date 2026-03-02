@@ -103,11 +103,27 @@ class ProfessionalUploadController extends ApiController
         $basePath = "images/{$pro->id}/{$image->id}";
         
         try {
-            Log::info('Storing original image to media disk', ['image_id' => $image->id, 'base_path' => $basePath]);
+            $mediaDisk = (string) config('comet.media_disk', 'media');
+            $disk = config("filesystems.disks.{$mediaDisk}", []);
+
+            Log::info('Storing original image to media disk', [
+                'image_id' => $image->id,
+                'base_path' => $basePath,
+                'media_disk' => $mediaDisk,
+                'disk_driver' => is_array($disk) ? ($disk['driver'] ?? null) : null,
+                'disk_bucket' => is_array($disk) ? ($disk['bucket'] ?? null) : null,
+                'disk_endpoint' => is_array($disk) ? ($disk['endpoint'] ?? null) : null,
+                'disk_url' => is_array($disk) ? ($disk['url'] ?? null) : null,
+            ]);
             $originalPath = $this->mediaService->storeOriginal($file, $basePath);
             Log::info('Original image stored successfully', ['image_id' => $image->id, 'path' => $originalPath]);
         } catch (\Exception $e) {
-            Log::error('Failed to store original image', ['image_id' => $image->id, 'error' => $e->getMessage()]);
+            Log::error('Failed to store original image', [
+                'image_id' => $image->id,
+                'error' => $e->getMessage(),
+                'exception' => get_class($e),
+                'media_disk' => (string) config('comet.media_disk', 'media'),
+            ]);
             // Clean up orphaned image row
             $image->delete();
             return $this->error('Failed to store image: ' . $e->getMessage(), 500);
