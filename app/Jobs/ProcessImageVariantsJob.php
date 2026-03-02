@@ -80,10 +80,11 @@ class ProcessImageVariantsJob implements ShouldQueue
             Log::info('ProcessImageVariantsJob: variants generated successfully.', [
                 'image_id' => $this->imageId,
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('ProcessImageVariantsJob: variant generation failed.', [
                 'image_id' => $this->imageId,
                 'error' => $e->getMessage(),
+                'exception' => get_class($e),
             ]);
             $this->fail($e);
         } finally {

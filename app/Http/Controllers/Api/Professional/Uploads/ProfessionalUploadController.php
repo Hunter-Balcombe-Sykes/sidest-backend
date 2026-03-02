@@ -132,27 +132,62 @@ class ProfessionalUploadController extends ApiController
 
         $image->update(['path' => $originalPath]);
 
-        // --- Dispatch variant generation ---
-        // With QUEUE_CONNECTION=sync the job runs inline before the
-        // response is sent; with a real queue it runs in the background.
-        Log::info('Dispatching ProcessImageVariantsJob', ['image_id' => $image->id]);
-        try {
-            ProcessImageVariantsJob::dispatch(
-                originalPath: $originalPath,
-                imageId: $image->id,
-                basePath: $basePath,
-            );
-        } catch (Throwable $e) {
-            Log::error('Queue dispatch failed; processing image variants synchronously.', [
+        // --- Variant generation ---
+        // In local/testing, process inline so uploads work without a queue worker.
+        $queueConnection = (string) config('queue.default', 'sync');
+        $processInline = in_array(app()->environment(), ['local', 'testing'], true)
+            || $queueConnection === 'sync';
+
+        if ($processInline) {
+            Log::info('Processing image variants inline', [
                 'image_id' => $image->id,
-                'error' => $e->getMessage(),
+                'queue_connection' => $queueConnection,
             ]);
 
-            ProcessImageVariantsJob::dispatchSync(
-                originalPath: $originalPath,
-                imageId: $image->id,
-                basePath: $basePath,
-            );
+            try {
+                ProcessImageVariantsJob::dispatchSync(
+                    originalPath: $originalPath,
+                    imageId: $image->id,
+                    basePath: $basePath,
+                );
+            } catch (Throwable $syncError) {
+                Log::error('Inline variant processing failed.', [
+                    'image_id' => $image->id,
+                    'error' => $syncError->getMessage(),
+                ]);
+                // Keep upload successful; image can be re-processed later.
+            }
+        } else {
+            Log::info('Dispatching ProcessImageVariantsJob', [
+                'image_id' => $image->id,
+                'queue_connection' => $queueConnection,
+            ]);
+            try {
+                ProcessImageVariantsJob::dispatch(
+                    originalPath: $originalPath,
+                    imageId: $image->id,
+                    basePath: $basePath,
+                );
+            } catch (Throwable $e) {
+                Log::error('Queue dispatch failed; processing image variants synchronously.', [
+                    'image_id' => $image->id,
+                    'error' => $e->getMessage(),
+                ]);
+
+                try {
+                    ProcessImageVariantsJob::dispatchSync(
+                        originalPath: $originalPath,
+                        imageId: $image->id,
+                        basePath: $basePath,
+                    );
+                } catch (Throwable $syncError) {
+                    Log::error('Synchronous variant processing failed after queue dispatch failure.', [
+                        'image_id' => $image->id,
+                        'error' => $syncError->getMessage(),
+                    ]);
+                    // Keep upload successful; image can be re-processed later.
+                }
+            }
         }
 
         // After dispatch (sync = already done, async = still processing)
