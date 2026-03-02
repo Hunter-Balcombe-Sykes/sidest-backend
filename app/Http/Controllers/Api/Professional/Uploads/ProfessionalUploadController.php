@@ -55,7 +55,10 @@ class ProfessionalUploadController extends ApiController
 
         // --- Create SiteImage row (with advisory lock for race safety) ---
         $image = DB::transaction(function () use ($site, $pool, $maxImages, $request) {
-            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["{$pool}:{$site->id}"]);
+            // PostgreSQL advisory lock (optional optimization; lockForUpdate below provides locking on all DBs)
+            if (DB::getDriverName() === 'pgsql') {
+                DB::select('select pg_advisory_xact_lock(hashtext(?))', ["{$pool}:{$site->id}"]);
+            }
 
             $activeCount = SiteImage::query()
                 ->where('site_id', $site->id)
