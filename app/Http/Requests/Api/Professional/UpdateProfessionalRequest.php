@@ -3,21 +3,12 @@
 namespace App\Http\Requests\Api\Professional;
 
 use App\Http\Requests\BaseFormRequest;
-use Illuminate\Validation\Rule;
 
 class UpdateProfessionalRequest extends BaseFormRequest
 {
 
     public function rules(): array
     {
-        $professional = $this->attributes->get('professional');
-        $proId = $professional?->id;
-
-        $bucket = (string) config('comet.media_bucket', 'media');
-
-        $iconPrefix = $proId ? "professionals/{$proId}/icon." : 'professionals/';
-        $headshotPrefix = $proId ? "professionals/{$proId}/headshot." : 'professionals/';
-
         return [
             // keep handle out of this endpoint (handle changes should be a dedicated flow)
             'display_name'  => ['sometimes', 'required', 'string', 'max:255'],
@@ -33,41 +24,6 @@ class UpdateProfessionalRequest extends BaseFormRequest
 
             'country_code'  => ['sometimes', 'nullable', 'string', 'min:2', 'max:3'],
             'timezone'      => ['sometimes', 'nullable', 'string', 'max:64'],
-
-            // Images (STRICT)
-            'icon_bucket' => ['sometimes', 'nullable', 'string', 'max:255', Rule::in([$bucket])],
-            'icon_path' => [
-                'sometimes', 'nullable', 'string', 'max:255',
-                function ($attribute, $value, $fail) use ($iconPrefix) {
-                    if ($value === null) return;
-
-                    if (!is_string($value) || !str_starts_with($value, $iconPrefix)) {
-                        $fail('Invalid icon_path: must match your prepared upload path.');
-                        return;
-                    }
-
-                    if (!preg_match('/\.(jpg|png|webp)$/i', $value)) {
-                        $fail('Invalid icon_path extension.');
-                    }
-                },
-            ],
-
-            'headshot_bucket' => ['sometimes', 'nullable', 'string', 'max:255', Rule::in([$bucket])],
-            'headshot_path' => [
-                'sometimes', 'nullable', 'string', 'max:255',
-                function ($attribute, $value, $fail) use ($headshotPrefix) {
-                    if ($value === null) return;
-
-                    if (!is_string($value) || !str_starts_with($value, $headshotPrefix)) {
-                        $fail('Invalid headshot_path: must match your prepared upload path.');
-                        return;
-                    }
-
-                    if (!preg_match('/\.(jpg|png|webp)$/i', $value)) {
-                        $fail('Invalid headshot_path extension.');
-                    }
-                },
-            ],
 
             // Location
             'location_street_address' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -93,14 +49,6 @@ class UpdateProfessionalRequest extends BaseFormRequest
             $this->merge(['public_contact_number' => $public === '' ? null : $public]);
         }
 
-        // trim paths/buckets so "" becomes null instead of weirdness
-        foreach (['icon_bucket','icon_path','headshot_bucket','headshot_path'] as $k) {
-            if ($this->has($k) && is_string($this->input($k))) {
-                $v = trim($this->input($k));
-                $this->merge([$k => $v === '' ? null : $v]);
-            }
-        }
-
         $merge = [];
 
         if ($this->has('primary_email')) {
@@ -113,41 +61,6 @@ class UpdateProfessionalRequest extends BaseFormRequest
 
         if ($merge) {
             $this->merge($merge);
-        }
-    }
-
-    public function withValidator($validator): void
-    {
-        $validator->after(function ($validator) {
-            $this->enforcePair($validator, 'icon_bucket', 'icon_path');
-            $this->enforcePair($validator, 'headshot_bucket', 'headshot_path');
-        });
-    }
-
-    private function enforcePair($validator, string $bucketKey, string $pathKey): void
-    {
-        $bucketProvided = $this->has($bucketKey);
-        $pathProvided   = $this->has($pathKey);
-
-        // If updating either, require both keys present in the payload
-        if ($bucketProvided xor $pathProvided) {
-            $validator->errors()->add($bucketKey, "Provide both {$bucketKey} and {$pathKey} together.");
-            $validator->errors()->add($pathKey, "Provide both {$bucketKey} and {$pathKey} together.");
-            return;
-        }
-
-        // If neither provided, fine
-        if (!$bucketProvided && !$pathProvided) {
-            return;
-        }
-
-        $bucketVal = $this->input($bucketKey);
-        $pathVal   = $this->input($pathKey);
-
-        // Clearing must clear both
-        if (($bucketVal === null) xor ($pathVal === null)) {
-            $validator->errors()->add($bucketKey, "To clear, set BOTH {$bucketKey} and {$pathKey} to null.");
-            $validator->errors()->add($pathKey, "To clear, set BOTH {$bucketKey} and {$pathKey} to null.");
         }
     }
 

@@ -27,11 +27,6 @@ class Site extends BaseModel
         'theme_id',
         'is_published',
         'settings',
-
-        // Legacy image columns (phasing out – images now in site_images + image_variants)
-        'banner_bucket',
-        'banner_path',
-
     ];
 
     protected $casts = [

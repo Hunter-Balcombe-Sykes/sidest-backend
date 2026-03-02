@@ -38,7 +38,6 @@ return [
 
     'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),
 
-    'media_bucket' => env('COMET_MEDIA_BUCKET', 'public-assets'),
     'media_disk' => env('COMET_MEDIA_DISK', 'media'),
 
     /*

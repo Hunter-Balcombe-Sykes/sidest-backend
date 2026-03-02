@@ -77,7 +77,6 @@ class ProfessionalUploadController extends ApiController
             return SiteImage::create([
                 'site_id'    => $site->id,
                 'pool'       => $pool,
-                'bucket'     => config('comet.media_disk', 'media'),
                 'path'       => '', // populated after original is stored
                 'alt_text'   => $request->validated('alt_text'),
                 'sort_order' => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
@@ -91,19 +90,33 @@ class ProfessionalUploadController extends ApiController
 
         $image->update(['path' => $originalPath]);
 
-        // --- Dispatch variant generation (runs async in queue) ---
+        // --- Dispatch variant generation ---
+        // With QUEUE_CONNECTION=sync the job runs inline before the
+        // response is sent; with a real queue it runs in the background.
         ProcessImageVariantsJob::dispatch(
             originalPath: $originalPath,
             imageId: $image->id,
             basePath: $basePath,
         );
 
-        return $this->success([
+        // After dispatch (sync = already done, async = still processing)
+        $image->loadCount('variants');
+        $processing = $image->variants_count === 0;
+
+        $payload = [
             'id'            => $image->id,
             'pool'          => $pool,
             'original_path' => $originalPath,
-            'processing'    => true,
-        ], 201);
+            'processing'    => $processing,
+        ];
+
+        // When processing is already complete, include variant URLs
+        if (! $processing) {
+            $image->load('variants');
+            $payload['variants'] = $image->variantUrls();
+        }
+
+        return $this->success($payload, 201);
     }
 
     /**

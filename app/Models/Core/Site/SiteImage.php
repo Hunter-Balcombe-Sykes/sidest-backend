@@ -29,7 +29,6 @@ class SiteImage extends BaseModel
     protected $fillable = [
         'site_id',
         'pool',
-        'bucket',
         'path',
         'alt_text',
         'sort_order',

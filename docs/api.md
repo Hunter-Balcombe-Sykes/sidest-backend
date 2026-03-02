@@ -331,7 +331,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 Comet reads/writes Postgres through Laravel using the configured database user.
 
 - Database table RLS does not gate Comet API calls if the DB user bypasses RLS (typical for server-side roles).
-- Image uploads go through the Comet API (server-side), not through Supabase Storage. No storage RLS policies are involved.
+- Image uploads go through the Comet API (server-side), not through Supabase Storage. Supabase Storage is not used at all — all media is stored on Laravel Cloud Object Storage (Cloudflare R2).
 
 ## 4) Data Models
 
@@ -351,10 +351,6 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | last_name               | string   | no       | Hunter                                   | Max 80                                                     |
 | public_contact_number   | string   | yes      | +6140000000                              | Max 40, public-facing contact                              |
 | public_contact_email    | string   | yes      | bookings@example.com                     | Max 255, public-facing contact                             |
-| icon_bucket             | string   | yes      | media                                    | **Legacy** – being replaced by image pools     |
-| icon_path               | string   | yes      | professionals/<proid>/icon.jpg           | **Legacy** – being replaced by image pools     |
-| headshot_bucket         | string   | yes      | media                                    | **Legacy** – being replaced by image pools     |
-| headshot_path           | string   | yes      | professionals/<proid>/headshot.jpg       | **Legacy** – being replaced by image pools     |
 | location_street_address | string   | yes      | 1 Smith Street                           | Max 255                                                    |
 | location_city           | string   | yes      | Darwin                                   | Max 120                                                    |
 | location_state          | string   | yes      | NT                                       | Max 120                                                    |
@@ -386,8 +382,6 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | is_published    | boolean  | no       | false                     | if false, public site endpoint returns 404 or 403 depending on route                                              |
 | theme_id        | uuid     | yes      | 9f23                      | Must exist in themes table                                                                                        |
 | settings        | object   | yes      | {...}                     | Freeform JSON object merged on PATCH                                                                              |
-| banner_bucket   | string   | yes      | media                     | **Legacy** – being replaced by image pools                                                                        |
-| banner_path     | string   | yes      | sites/<siteid>/banner.jpg | **Legacy** – being replaced by image pools                                                                        |
 | created_at      | datetime | yes      | 2026-01...                |                                                                                                                   |
 | updated_at      | datetime | yes      | 2026-01...                |                                                                                                                   |
 
@@ -400,7 +394,6 @@ All images (gallery showcase and content/branding) live in the `site_images` tab
 | id         | uuid     | no       | `f7a2...`                                       | Primary key                                                      |
 | site_id    | uuid     | no       | `b8e7...`                                       | FK → sites.id                                                    |
 | pool       | string   | no       | `gallery`                                       | `gallery` or `content`                                           |
-| bucket     | string   | no       | `media`                                         | Storage disk name (matches COMET_MEDIA_DISK)                     |
 | path       | string   | no       | `images/<proId>/<imageId>/original_abc123.jpg`  | Path to original file on the media disk                          |
 | alt_text   | string   | yes      | `Fade haircut example`                          | Max 255                                                          |
 | sort_order | integer  | no       | `0`                                             | Non-negative; used for gallery ordering                          |
@@ -552,7 +545,7 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 | Name         | Type    | Nullable | Example                                                   | Constraints / Notes                                       |
 |--------------|---------|----------|-----------------------------------------------------------|-----------------------------------------------------------|
 | published    | boolean | no       | `true`                                                    | Derived from site is_published                            |
-| site         | object  | no       | `{ id, subdomain, settings }`                             | Legacy banner_bucket/banner_path may still be present     |
+| site         | object  | no       | `{ id, subdomain, settings, gallery, content_images }` | Includes gallery + content image pools with variant URLs  |
 | professional | object  | no       | `{ id, handle, display_name, bio, ... }`                  | Includes public-facing location fields                    |
 | theme        | object  | yes      | `{ id, key, name, config }`                               | theme.config is an object                                 |
 | blocks       | array   | no       | `[ LinkBlock \| SectionBlock ]`                           | Only active blocks are returned                           |
@@ -938,7 +931,7 @@ All routes below require: Authorization header AND a professional profile (curre
 ### `PATCH /api/me`
 
 - Purpose: update professional profile fields Request body (all fields optional; if provided they are validated): { "display_name": "Josh Barber", "bio": "Mobile barber", "public_contact_email": "bookings@example.com" } Response (200): { professional: ... } Common status codes: 200, 401, 403, 422
-- Note: icon_bucket/icon_path and headshot_bucket/headshot_path are legacy fields still accepted but deprecated. Use the image pool system (POST /api/uploads with pool=content) instead.
+- Images are managed via `POST /api/uploads` (pool=gallery or pool=content). No image fields are accepted on this endpoint.
 
 ### `GET /api/site`
 
@@ -947,7 +940,7 @@ All routes below require: Authorization header AND a professional profile (curre
 ### `PATCH /api/site`
 
 - Purpose: update site settings, subdomain, and theme_id. Request body: { "subdomain": "joshbarber", "theme_id": "uuid or null", "settings": { "primary_color": "#000000" } } Response (200): { site: ... } Common status codes: 200, 401, 403, 422
-- Note: banner_bucket/banner_path are legacy fields still accepted but deprecated. Use the image pool system (POST /api/uploads with pool=content) and assign the hero variant as the banner.
+- Banners are managed via `POST /api/uploads` (pool=content) and the frontend picks the `hero` variant. No banner fields are accepted on this endpoint.
 
 ### `PATCH /api/site/visibility`
 
@@ -1461,7 +1454,7 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 - PUBLIC_DOMAIN (example: comet.app or localtest.me)
 - Optionally: STAFF_DASHBOARD_ENABLED flag if you ship staff tooling in the same frontend
 
-Note: The frontend no longer needs MEDIA_BUCKET — all image URLs come from the API `variants` map.
+Note: The frontend does not need any storage credentials — all image URLs come from the API `variants` map.
 
 ## 13) Backend env var checklist
 
@@ -1487,7 +1480,6 @@ Note: The frontend no longer needs MEDIA_BUCKET — all image URLs come from the
 
 - COMET_PUBLIC_DOMAIN (used for domain-scoped public routes)
 - COMET_MEDIA_DISK (default: media — the Laravel filesystem disk name)
-- COMET_MEDIA_BUCKET (legacy, default: public-assets)
 - COMET_GALLERY_IMAGE_MAX (default: 5)
 - COMET_CONTENT_IMAGE_MAX (default: 5)
 - COMET_IMAGE_MAX_UPLOAD_KB (default: 10240 = 10 MB)

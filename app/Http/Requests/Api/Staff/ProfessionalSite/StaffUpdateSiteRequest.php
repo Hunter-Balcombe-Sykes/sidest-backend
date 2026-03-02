@@ -75,9 +75,6 @@ class StaffUpdateSiteRequest extends BaseFormRequest
 
             'is_published' => ['sometimes', 'boolean'],
 
-            'banner_bucket' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'banner_path'   => ['sometimes', 'nullable', 'string', 'max:255'],
-
             // Settings: allowlist specific keys with validation
             'settings.hero_title' => ['sometimes', 'string', 'max:100'],
             'settings.hero_subtitle' => ['sometimes', 'string', 'max:200'],

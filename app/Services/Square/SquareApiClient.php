@@ -42,7 +42,7 @@ class SquareApiClient
             $cursor = is_string($data['cursor'] ?? null) ? $data['cursor'] : null;
 
             foreach ($objects as $object) {
-                if (! is_array($object)) {
+                if (!is_array($object)) {
                     continue;
                 }
 

@@ -120,11 +120,6 @@ class ProfessionalCacheService
                 'public_contact_number' => $pro->public_contact_number,
                 'public_contact_email' => $pro->public_contact_email,
 
-                'icon_bucket' => $pro->icon_bucket,
-                'icon_path' => $pro->icon_path,
-                'headshot_bucket' => $pro->headshot_bucket,
-                'headshot_path' => $pro->headshot_path,
-
                 'location_street_address' => $pro->location_street_address,
                 'location_city' => $pro->location_city,
                 'location_state' => $pro->location_state,
