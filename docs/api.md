@@ -1091,7 +1091,23 @@ Images are uploaded through the Comet API (not directly to storage). The server 
   - `pool` (required): `gallery` or `content`
   - `image` (required): file upload (JPEG, PNG, or WebP; max 10 MB)
   - `alt_text` (optional): string, max 255
-- Response (201):
+- Response (201) — sync mode (default):
+```json
+{
+  "id": "uuid",
+  "pool": "gallery",
+  "original_path": "images/<proId>/<imageId>/original_abc123.jpg",
+  "processing": false,
+  "variants": {
+    "thumb": "https://cdn.example.com/images/.../thumb_abc123.webp",
+    "small": "https://cdn.example.com/images/.../small_def456.webp",
+    "medium": "https://cdn.example.com/images/.../medium_ghi789.webp",
+    "large": "https://cdn.example.com/images/.../large_jkl012.webp",
+    "hero": "https://cdn.example.com/images/.../hero_mno345.webp"
+  }
+}
+```
+- Response (201) — async mode (`QUEUE_CONNECTION=database` or `redis`):
 ```json
 {
   "id": "uuid",
@@ -1100,7 +1116,7 @@ Images are uploaded through the Comet API (not directly to storage). The server 
   "processing": true
 }
 ```
-- `processing` will be `false` (variants already done) when `QUEUE_CONNECTION=sync`; `true` (processing async) when using a queue worker.
+- `processing: false` + `variants` when `QUEUE_CONNECTION=sync` (variants generated inline). `processing: true` (no `variants` key) when using a queue worker — poll `GET /api/images` until done.
 - Business rules:
   - Max 5 gallery images per professional (configurable via `COMET_GALLERY_IMAGE_MAX`)
   - Max 5 content images per professional (configurable via `COMET_CONTENT_IMAGE_MAX`)
