@@ -17,6 +17,9 @@ use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
 use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
+// ------ TOBIAS ADDITIONS TO REVIEW --------
+use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
+// ------ END TOBIAS ADDITIONS --------
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
@@ -148,6 +151,12 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/square/services/sync', [SquareIntegrationController::class, 'syncServicesNow']);
     Route::post('/square/services/{service}/push', [SquareIntegrationController::class, 'pushServiceNow'])
         ->whereUuid('service');
+
+    // ------ TOBIAS ADDITIONS TO REVIEW --------
+    // Store: Featured Products
+    Route::get('/store/featured-products', [FeaturedProductsController::class, 'index']);
+    Route::put('/store/featured-products', [FeaturedProductsController::class, 'update']);
+    // ------ END TOBIAS ADDITIONS --------
 
     // Fresha Integration
     Route::get('/fresha/status', [FreshaIntegrationController::class, 'status']);

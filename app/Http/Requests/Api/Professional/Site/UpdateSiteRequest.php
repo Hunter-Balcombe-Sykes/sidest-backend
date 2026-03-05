@@ -39,6 +39,12 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
             'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
 
+            // ------ TOBIAS ADDITIONS TO REVIEW --------
+            // Store: featured Shopify product GIDs (max 10)
+            'settings.selected_products'   => ['sometimes', 'array', 'max:10'],
+            'settings.selected_products.*' => ['string', 'max:255'],
+            // ------ END TOBIAS ADDITIONS --------
+
             // Subdomain: must be unique, not reserved, DNS-safe
             'subdomain' => [
                 'sometimes',
