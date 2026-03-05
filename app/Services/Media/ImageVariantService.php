@@ -90,7 +90,6 @@ class ImageVariantService
                 // --- Encode to WebP ---
                 $tmpFile = tempnam(sys_get_temp_dir(), 'comet_img_');
                 imagewebp($canvas, $tmpFile, $quality);
-                imagedestroy($canvas);
 
                 $fileBytes = filesize($tmpFile);
                 $hash      = substr(hash_file('sha256', $tmpFile), 0, 16);
@@ -122,7 +121,7 @@ class ImageVariantService
                 $created[$variantName] = $variant;
             }
         } finally {
-            imagedestroy($sourceImage);
+            // GD resources are automatically freed in PHP 8.0+
         }
 
         \Illuminate\Support\Facades\Log::info('Image variant processing completed', [
