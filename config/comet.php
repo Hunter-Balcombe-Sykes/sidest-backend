@@ -33,8 +33,7 @@ return [
         'note',
     ],
 
-    'section_block_types' => ['gallery','services','education','social','booking', 'bio',
-        'work_history', 'promotional_text'],
+    'section_block_types' => ['gallery', 'services', 'shop', 'booking'],
 
     'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),
 

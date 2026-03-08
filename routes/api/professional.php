@@ -88,7 +88,6 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::get('/sections', [ProfessionalSectionBlockController::class, 'index']);
     Route::put('/sections/{blockType}', [ProfessionalSectionBlockController::class, 'upsert'])
         ->where('blockType', '[a-z0-9_-]+');
-    Route::post('/sections/reorder', [ProfessionalSectionBlockController::class, 'reorder']);
     Route::delete('/sections/{blockType}', [ProfessionalSectionBlockController::class, 'remove'])
     ->where('blockType', '[a-z0-9_-]+');
 
