@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
+use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
@@ -49,5 +50,11 @@ Route::post('/public/booking/availability-by-slug', [PublicBookingController::cl
     ->middleware('throttle:public-site');
 Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
     ->middleware('throttle:public-site');
+
+// Header/site-id based fallback for path-based frontend routing.
+Route::post('/public/analytics/pageviews', [AnalyticsController::class, 'pageview'])
+    ->middleware('throttle:analytics');
+Route::post('/public/analytics/clicks', [AnalyticsController::class, 'click'])
+    ->middleware('throttle:analytics');
 
 Route::get('/ready', [HealthController::class, 'check']);

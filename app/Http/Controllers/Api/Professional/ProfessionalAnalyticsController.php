@@ -217,11 +217,42 @@ class ProfessionalAnalyticsController extends ApiController
                 ->join('blocks as b', 'b.id', '=', 'lc.block_id')
                 ->where('lc.professional_id', $professional->id)
                 ->whereBetween('lc.occurred_at', [$from, $to])
+                ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
+                ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
                 ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
                 ->groupBy('b.id', 'b.title', 'b.url')
                 ->orderByDesc('clicks')
                 ->limit(10)
                 ->get();
+
+            // Top sections (total opens)
+            $topSections = DB::table('link_clicks as lc')
+                ->join('blocks as b', 'b.id', '=', 'lc.block_id')
+                ->where('lc.professional_id', $professional->id)
+                ->whereBetween('lc.occurred_at', [$from, $to])
+                ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'sections'")
+                ->whereRaw("LOWER(COALESCE(b.block_type, '')) IN ('gallery', 'services', 'shop', 'booking')")
+                ->selectRaw("LOWER(COALESCE(b.block_type, '')) as section_key, COUNT(*) as clicks")
+                ->groupBy('section_key')
+                ->orderByDesc('clicks')
+                ->get()
+                ->map(function ($entry) {
+                    $sectionKey = (string) $entry->section_key;
+                    $title = match ($sectionKey) {
+                        'gallery' => 'Gallery of Work',
+                        'services' => 'Services & Pricing',
+                        'shop' => 'Shop',
+                        'booking' => 'Booking',
+                        default => ucfirst($sectionKey),
+                    };
+
+                    return [
+                        'key' => $sectionKey,
+                        'title' => $title,
+                        'clicks' => (int) ($entry->clicks ?? 0),
+                    ];
+                })
+                ->values();
 
             $ctr = $totalVisits > 0 ? round(($totalClicks / $totalVisits) * 100, 2) : 0.0;
 
@@ -259,6 +290,7 @@ class ProfessionalAnalyticsController extends ApiController
                     'clicks_by_day' => $clicksByDay,
                     'visits_by_day_by_device' => $visitsByDayByDevice,
                 ],
+                'top_sections' => $topSections,
                 'top_links' => $topLinks,
             ];
         });

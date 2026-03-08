@@ -12,9 +12,14 @@ class ClickRequest extends BaseFormRequest
     protected function prepareForValidation(): void
     {
         $routeSubdomain = $this->route('subdomain');
-        if (is_string($routeSubdomain) && $routeSubdomain !== '') {
+        $headerSubdomain = $this->header('X-Site-Subdomain');
+        $candidateSubdomain = is_string($routeSubdomain) && $routeSubdomain !== ''
+            ? $routeSubdomain
+            : (is_string($headerSubdomain) ? trim($headerSubdomain) : '');
+
+        if ($candidateSubdomain !== '') {
             $this->merge([
-                'subdomain' => strtolower($routeSubdomain),
+                'subdomain' => strtolower($candidateSubdomain),
             ]);
         }
     }
