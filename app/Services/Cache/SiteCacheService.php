@@ -2,6 +2,7 @@
 
 namespace App\Services\Cache;
 
+use App\Models\Core\ImageVariant;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
@@ -32,6 +33,11 @@ class SiteCacheService
             // Backward-compatible cache healing for payload shape changes.
             // Older cache entries may not include `services`.
             if (array_key_exists('services', $cached)) {
+                // Always resolve image variant paths to URLs (handles pre-URL-resolution cache entries)
+                $site = $cached['site'] ?? null;
+                if (is_array($site)) {
+                    $cached['site'] = $this->resolveImageVariantUrlsInSite($site, '');
+                }
                 return $cached;
             }
             Cache::forget($key);
@@ -53,10 +59,15 @@ class SiteCacheService
             ? $payload['services']
             : $this->buildServicesPayload((string) ($row->professional_id ?? ''));
 
+        $site = $payload['site'] ?? null;
+        if (is_array($site)) {
+            $site = $this->resolveImageVariantUrlsInSite($site, (string) ($row->site_id ?? ''));
+        }
+
         // Must match the controller response shape exactly.
         $data = [
             'published' => true,
-            'site' => $payload['site'] ?? null,
+            'site' => $site,
             'professional' => $payload['professional'] ?? null,
             'theme' => $payload['theme'] ?? null,
             'services' => $services,
@@ -68,6 +79,68 @@ class SiteCacheService
         Cache::put($key, $data, now()->addMinutes(15));
 
         return $data;
+    }
+
+    /**
+     * Resolve image variant paths to public URLs in the site payload.
+     * The view returns storage paths; we need full URLs for the frontend.
+     *
+     * @param  array<string, mixed>  $site
+     * @return array<string, mixed>
+     */
+    private function resolveImageVariantUrlsInSite(array $site, string $siteId): array
+    {
+        $imageIds = [];
+        foreach (['gallery', 'content_images'] as $key) {
+            $items = $site[$key] ?? [];
+            if (! is_array($items)) {
+                continue;
+            }
+            foreach ($items as $item) {
+                if (is_array($item) && ! empty($item['id'])) {
+                    $imageIds[] = $item['id'];
+                }
+            }
+        }
+        if ($imageIds === []) {
+            return $site;
+        }
+
+        $variants = ImageVariant::query()
+            ->whereIn('image_id', array_unique($imageIds))
+            ->get();
+
+        $urlByImageAndVariant = [];
+        foreach ($variants as $v) {
+            $urlByImageAndVariant[$v->image_id][$v->variant] = $v->url;
+        }
+
+        foreach (['gallery', 'content_images'] as $key) {
+            $items = $site[$key] ?? [];
+            if (! is_array($items)) {
+                continue;
+            }
+            foreach ($items as $i => $item) {
+                if (! is_array($item) || empty($item['id'])) {
+                    continue;
+                }
+                $imageId = $item['id'];
+                $pathVariants = $item['variants'] ?? [];
+                if (! is_array($pathVariants)) {
+                    continue;
+                }
+                $urlVariants = [];
+                foreach ($pathVariants as $variantName => $path) {
+                    $url = $urlByImageAndVariant[$imageId][$variantName] ?? null;
+                    if ($url !== null) {
+                        $urlVariants[$variantName] = $url;
+                    }
+                }
+                $site[$key][$i]['variants'] = $urlVariants;
+            }
+        }
+
+        return $site;
     }
 
     /**
