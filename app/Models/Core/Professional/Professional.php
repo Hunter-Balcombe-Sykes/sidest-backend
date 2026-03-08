@@ -91,7 +91,6 @@ class Professional extends BaseModel
     {
         return $this->blocks()
             ->where('block_group', 'sections')
-            ->where('block_type', 'section')
             ->orderBy('sort_order');
     }
 
