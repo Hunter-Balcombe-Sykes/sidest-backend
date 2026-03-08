@@ -9,6 +9,7 @@ use App\Http\Requests\Api\Professional\Uploads\ReorderPoolImagesRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadImageRequest;
 use App\Jobs\ProcessImageVariantsJob;
 use App\Models\Core\Site\SiteImage;
+use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -211,6 +212,8 @@ class ProfessionalUploadController extends ApiController
             $payload['variants'] = $image->variantUrls();
         }
 
+        app(SiteCacheService::class)->invalidateSite($site);
+
         return $this->success($payload, 201);
     }
 
@@ -340,6 +343,8 @@ class ProfessionalUploadController extends ApiController
             }
         });
 
+        app(SiteCacheService::class)->invalidateSite($site);
+
         return $this->success(['ok' => true]);
     }
 
@@ -360,6 +365,8 @@ class ProfessionalUploadController extends ApiController
         $this->mediaService->deleteVariants($image->id, $image->path);
 
         $image->delete();
+
+        app(SiteCacheService::class)->invalidateSite($site);
 
         return $this->success(['deleted' => true]);
     }

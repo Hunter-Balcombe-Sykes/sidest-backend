@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ImageGallery\ReorderGalleryImageRequest;
 use App\Models\Core\Site\SiteImage;
+use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -100,6 +101,8 @@ class ProfessionalGalleryController extends ApiController
             }
         });
 
+        app(SiteCacheService::class)->invalidateSite($site);
+
         return $this->success(['ok' => true]);
     }
 
@@ -114,6 +117,8 @@ class ProfessionalGalleryController extends ApiController
 
         $this->mediaService->deleteVariants($image->id, $image->path);
         $image->delete();
+
+        app(SiteCacheService::class)->invalidateSite($site);
 
         return $this->success(['deleted' => true]);
     }
