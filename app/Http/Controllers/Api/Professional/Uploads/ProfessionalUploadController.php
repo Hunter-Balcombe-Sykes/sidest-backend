@@ -65,26 +65,29 @@ class ProfessionalUploadController extends ApiController
         // --- Create SiteImage row (with advisory lock for race safety) ---
         $image = DB::transaction(function () use ($site, $pool, $maxImages, $request) {
             // PostgreSQL advisory lock (optional optimization; lockForUpdate below provides locking on all DBs)
+            // Lock at site scope so cross-pool uploads cannot race on sort_order.
             if (DB::getDriverName() === 'pgsql') {
-                DB::select('select pg_advisory_xact_lock(hashtext(?))', ["{$pool}:{$site->id}"]);
+                DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-images:{$site->id}"]);
             }
 
-            // Postgres does not allow FOR UPDATE with aggregate functions,
-            // so lock matching rows first, then derive count/sort in memory.
-            $activeImages = SiteImage::query()
+            // Postgres does not allow FOR UPDATE with aggregate functions.
+            // Lock all non-deleted images for this site, then derive counts/sort in memory.
+            // This matches legacy DB uniqueness (site_id + sort_order) while keeping pool limits.
+            $siteImages = SiteImage::query()
                 ->where('site_id', $site->id)
+                ->lockForUpdate()
+                ->get(['id', 'pool', 'sort_order', 'is_active']);
+
+            $activeCount = $siteImages
                 ->where('pool', $pool)
                 ->where('is_active', true)
-                ->lockForUpdate()
-                ->get(['id', 'sort_order']);
-
-            $activeCount = $activeImages->count();
+                ->count();
 
             if ($activeCount >= $maxImages) {
                 abort(422, ucfirst($pool) . " image limit reached (max {$maxImages}).");
             }
 
-            $maxSort = $activeImages->max('sort_order');
+            $maxSort = $siteImages->max('sort_order');
 
             $image = SiteImage::create([
                 'site_id'    => $site->id,
