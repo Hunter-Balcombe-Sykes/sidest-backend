@@ -1,57 +1,52 @@
 <?php
 
-// ------ TOBIAS ADDITIONS TO REVIEW --------
-
 namespace App\Http\Controllers\Api\Professional\Store;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
+use App\Models\Retail\ProfessionalSelection;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 class FeaturedProductsController extends ApiController
 {
     use ResolveCurrentProfessional;
-    use ResolveCurrentSite;
+
+    private const MAX_FEATURED = 6;
 
     /**
      * GET /store/featured-products
-     * Returns selected products with their commission rates and the default rate.
+     * Returns the professional's selected Shopify product IDs.
      */
     public function index(Request $request)
     {
         $professional = $this->currentProfessional($request);
-        $site = $this->currentSite($professional);
-        $settings = is_array($site->settings) ? $site->settings : [];
 
-        $defaultRate = (float) config('comet.store.default_commission_rate', 15);
-        $maxFeatured = (int) config('comet.store.max_featured_products', 10);
+        $selections = ProfessionalSelection::where('professional_id', $professional->id)
+            ->orderBy('sort_order')
+            ->get(['id', 'shopify_product_id', 'sort_order']);
 
         return $this->success([
-            'selected_products'       => $settings['selected_products'] ?? [],
-            'default_commission_rate' => $defaultRate,
-            'max_featured_products'   => $maxFeatured,
+            'selected_products'     => $selections,
+            'max_featured_products' => self::MAX_FEATURED,
         ]);
     }
 
     /**
      * PUT /store/featured-products
-     * Replaces the full list of selected products (max from config).
-     * Each entry can be a plain string (product GID) or an object { id, commission }.
+     * Replaces the full list of selected Shopify product IDs (max 6).
+     * Expects: { products: [ { shopify_product_id, sort_order? }, ... ] }
      */
     public function update(Request $request)
     {
         $professional = $this->currentProfessional($request);
-        $site = $this->currentSite($professional);
-
-        $maxFeatured = (int) config('comet.store.max_featured_products', 10);
 
         $validator = Validator::make($request->all(), [
-            'selected_products'              => ['required', 'array', 'max:' . $maxFeatured],
-            'selected_products.*.id'         => ['required', 'string', 'max:255'],
-            'selected_products.*.commission' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'products'                       => ['required', 'array', 'max:' . self::MAX_FEATURED],
+            'products.*.shopify_product_id'  => ['required', 'string', 'max:255'],
+            'products.*.sort_order'          => ['sometimes', 'integer', 'min:0'],
         ]);
 
         if ($validator->fails()) {
@@ -60,18 +55,26 @@ class FeaturedProductsController extends ApiController
 
         $validated = $validator->validated();
 
-        $existing = is_array($site->settings) ? $site->settings : [];
-        $existing['selected_products'] = array_values($validated['selected_products']);
+        DB::transaction(function () use ($professional, $validated) {
+            // Remove all current selections and replace
+            ProfessionalSelection::where('professional_id', $professional->id)->delete();
 
-        $site->settings = $existing;
-        $site->save();
+            foreach ($validated['products'] as $index => $product) {
+                ProfessionalSelection::create([
+                    'professional_id'  => $professional->id,
+                    'shopify_product_id' => $product['shopify_product_id'],
+                    'sort_order'       => $product['sort_order'] ?? $index,
+                ]);
+            }
+        });
+
+        $selections = ProfessionalSelection::where('professional_id', $professional->id)
+            ->orderBy('sort_order')
+            ->get(['id', 'shopify_product_id', 'sort_order']);
 
         return $this->success([
-            'selected_products'       => $existing['selected_products'],
-            'default_commission_rate' => (float) config('comet.store.default_commission_rate', 15),
-            'max_featured_products'   => $maxFeatured,
+            'selected_products'     => $selections,
+            'max_featured_products' => self::MAX_FEATURED,
         ]);
     }
 }
-
-// ------ END TOBIAS ADDITIONS --------

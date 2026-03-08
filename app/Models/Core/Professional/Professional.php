@@ -147,6 +147,12 @@ class Professional extends BaseModel
             ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA);
     }
 
+    public function productSelections(): HasMany
+    {
+        return $this->hasMany(\App\Models\Retail\ProfessionalSelection::class, 'professional_id')
+            ->orderBy('sort_order');
+    }
+
     public function integrationForProvider(string $provider): ?ProfessionalIntegration
     {
         $provider = mb_strtolower(trim($provider));
