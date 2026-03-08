@@ -138,6 +138,18 @@ class SiteCacheService
                 }
                 $site[$key][$i]['variants'] = $urlVariants;
             }
+
+            usort($site[$key], function ($a, $b) {
+                $aSort = is_array($a) ? (int) ($a['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
+                $bSort = is_array($b) ? (int) ($b['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
+                if ($aSort !== $bSort) {
+                    return $aSort <=> $bSort;
+                }
+
+                $aId = is_array($a) ? (string) ($a['id'] ?? '') : '';
+                $bId = is_array($b) ? (string) ($b['id'] ?? '') : '';
+                return $aId <=> $bId;
+            });
         }
 
         return $site;

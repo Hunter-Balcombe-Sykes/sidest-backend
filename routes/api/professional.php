@@ -115,6 +115,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
 
     // Image Management (pool-based: gallery / content)
     Route::get('/images', [ProfessionalUploadController::class, 'index']);
+    Route::post('/images/reorder', [ProfessionalUploadController::class, 'reorder']);
     Route::delete('/images/{image}', [ProfessionalUploadController::class, 'destroy'])
         ->whereUuid('image');
 

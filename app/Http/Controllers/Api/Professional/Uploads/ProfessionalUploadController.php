@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional\Uploads;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
+use App\Http\Requests\Api\Professional\Uploads\ReorderPoolImagesRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadImageRequest;
 use App\Jobs\ProcessImageVariantsJob;
 use App\Models\Core\Site\SiteImage;
@@ -258,6 +259,88 @@ class ProfessionalUploadController extends ApiController
                 'content' => config('comet.image_pools.content.max', 5),
             ],
         ]);
+    }
+
+    /**
+     * Reorder active images for a specific pool while preserving the relative
+     * order of all non-target images in the site.
+     *
+     * POST /api/images/reorder  { pool: gallery|content, ids: [uuid, ...] }
+     */
+    public function reorder(ReorderPoolImagesRequest $request): JsonResponse
+    {
+        $pro  = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        $pool = $request->validated('pool');
+        $ids = array_values(array_unique($request->validated('ids') ?? []));
+
+        DB::transaction(function () use ($site, $pool, $ids) {
+            if (DB::getDriverName() === 'pgsql') {
+                DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-images:{$site->id}"]);
+            }
+
+            $siteImages = SiteImage::query()
+                ->where('site_id', $site->id)
+                ->lockForUpdate()
+                ->orderBy('sort_order')
+                ->orderBy('created_at')
+                ->get(['id', 'pool', 'sort_order', 'is_active']);
+
+            $targetImages = $siteImages
+                ->where('is_active', true)
+                ->where('pool', $pool)
+                ->values();
+
+            if ($targetImages->isEmpty()) {
+                abort(422, 'No active images found in this pool.');
+            }
+
+            $targetIds = $targetImages->pluck('id')->all();
+            $targetSet = array_flip($targetIds);
+
+            foreach ($ids as $id) {
+                if (! isset($targetSet[$id])) {
+                    abort(403, 'One or more images do not belong to your site.');
+                }
+            }
+
+            $remainingTargetIds = array_values(array_diff($targetIds, $ids));
+            $reorderedTargetIds = array_merge($ids, $remainingTargetIds);
+
+            $finalIds = $siteImages->pluck('id')->all();
+            $targetPositions = [];
+
+            foreach ($siteImages as $index => $image) {
+                if ($image->is_active && $image->pool === $pool) {
+                    $targetPositions[] = $index;
+                }
+            }
+
+            foreach ($targetPositions as $index => $position) {
+                $finalIds[$position] = $reorderedTargetIds[$index];
+            }
+
+            // Two-phase update avoids temporary collisions on site-level sort_order uniqueness.
+            $offset = $siteImages->count() + 1000;
+
+            foreach ($finalIds as $index => $id) {
+                SiteImage::query()
+                    ->where('site_id', $site->id)
+                    ->where('id', $id)
+                    ->update(['sort_order' => $offset + $index]);
+            }
+
+            foreach ($finalIds as $index => $id) {
+                SiteImage::query()
+                    ->where('site_id', $site->id)
+                    ->where('id', $id)
+                    ->update(['sort_order' => $index]);
+            }
+        });
+
+        return $this->success(['ok' => true]);
     }
 
     /**
