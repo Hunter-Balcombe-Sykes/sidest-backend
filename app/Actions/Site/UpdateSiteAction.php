@@ -115,6 +115,8 @@ class UpdateSiteAction
         if (array_key_exists('settings', $data)) {
             $existing = is_array($site->settings) ? $site->settings : [];
             $incoming = is_array($data['settings']) ? $data['settings'] : [];
+            // Product selections are stored in retail.professional_selections, not site settings JSON.
+            unset($incoming['selected_products']);
             $data['settings'] = array_replace_recursive($existing, $incoming);
         }
 

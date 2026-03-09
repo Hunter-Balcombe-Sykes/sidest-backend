@@ -9,7 +9,7 @@ class LeadSubmission extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'lead_submissions';
+    protected $table = 'analytics.lead_submissions';
 
     public $incrementing = false;
     protected $keyType = 'string';

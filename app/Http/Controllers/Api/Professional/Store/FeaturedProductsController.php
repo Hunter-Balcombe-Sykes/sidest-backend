@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Retail\ProfessionalSelection;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -99,12 +100,15 @@ class FeaturedProductsController extends ApiController
         $validated = $validator->validated();
 
         if (! $this->hasSelectionsTable()) {
-            $selectedProducts = $this->saveLegacySelectedProducts($site, $validated['products'] ?? []);
-            return $this->success([
-                'selected_products' => $selectedProducts,
-                'default_commission_rate' => $defaultRate,
-                'max_featured_products' => $maxFeatured,
+            Log::error('Featured products update blocked: retail.professional_selections table is unavailable.', [
+                'professional_id' => (string) $professional->id,
+                'site_id' => (string) $site->id,
             ]);
+
+            return $this->error(
+                'Featured products table is unavailable. Run retail schema migrations and try again.',
+                503
+            );
         }
 
         try {
@@ -126,18 +130,31 @@ class FeaturedProductsController extends ApiController
                 }
             });
         } catch (Throwable $e) {
-            Log::warning('Featured products falling back to legacy site settings (update).', [
+            Log::warning('Featured products retail write failed (update).', [
                 'professional_id' => (string) $professional->id,
                 'site_id' => (string) $site->id,
                 'error' => $e->getMessage(),
             ]);
 
-            $selectedProducts = $this->saveLegacySelectedProducts($site, $validated['products'] ?? []);
-            return $this->success([
-                'selected_products' => $selectedProducts,
-                'default_commission_rate' => $defaultRate,
-                'max_featured_products' => $maxFeatured,
-            ]);
+            $status = 500;
+            $message = 'Failed to save featured products to retail.professional_selections.';
+
+            if ($e instanceof QueryException) {
+                $sqlState = (string) $e->getCode();
+                if ($sqlState === '23505') {
+                    $status = 422;
+                    $message = 'Duplicate featured products are not allowed.';
+                } elseif ($sqlState === '23514') {
+                    $status = 422;
+                    $message = 'Too many featured products selected.';
+                }
+            }
+
+            if (config('app.debug')) {
+                $message .= ' ' . $e->getMessage();
+            }
+
+            return $this->error($message, $status);
         }
 
         $columns = ['id', 'shopify_product_id', 'sort_order'];

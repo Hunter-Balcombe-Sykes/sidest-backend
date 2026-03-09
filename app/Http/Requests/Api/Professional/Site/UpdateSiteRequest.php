@@ -38,6 +38,7 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
             'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
             'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+            'settings.selected_products' => ['prohibited'],
 
             // Subdomain: must be unique, not reserved, DNS-safe
             'subdomain' => [
@@ -135,6 +136,7 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.primary_color.regex' => 'The primary color must be a valid hex color (e.g., #000000 or #000).',
             'settings.accent_color.regex' => 'The accent color must be a valid hex color (e.g., #FFD700).',
             'settings.background_color.regex' => 'The background color must be a valid hex color.',
+            'settings.selected_products.prohibited' => 'Use /api/store/featured-products for product selections.',
         ];
     }
 }
