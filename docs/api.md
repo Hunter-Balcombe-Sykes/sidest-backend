@@ -907,6 +907,22 @@ For frontends that cannot use subdomain DNS routing, the following endpoints acc
 
 **Common status codes:** Same as corresponding domain-scoped endpoints, plus 400 (missing header)
 
+#### `POST /api/public/analytics/pageviews`
+#### `POST /api/public/analytics/clicks`
+
+- Purpose: header-based variants of the analytics endpoints (record page views and link clicks)
+- Auth: None
+- Rate limit: analytics
+- Headers: `X-Site-Subdomain` (required if `site_id` is not in the request body): the site subdomain slug
+
+**Behavior:** Identical to the domain-scoped analytics endpoints above. The `PageviewRequest` and `ClickRequest` form requests automatically resolve the subdomain from the `X-Site-Subdomain` header when no route-level subdomain is present. You must provide either `site_id` in the body OR the `X-Site-Subdomain` header — otherwise validation returns 422.
+
+**Request body:** Same as domain-scoped versions (`POST /api/public/analytics/pageviews` and `POST /api/public/analytics/clicks` documented above).
+
+**Response:** Same as corresponding domain-scoped endpoints.
+
+**Common status codes:** Same as corresponding domain-scoped endpoints (201, 404, 403, 422, 429)
+
 ---
 
 #### Payment Method Notes
