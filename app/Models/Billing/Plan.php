@@ -6,7 +6,7 @@ use App\Models\BaseModel;
 
 class Plan extends BaseModel
 {
-    protected $table = 'plans';
+    protected $table = 'billing.plans';
     public $incrementing = false;
     protected $keyType = 'string';
 

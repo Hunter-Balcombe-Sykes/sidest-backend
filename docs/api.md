@@ -1496,7 +1496,7 @@ Note: The frontend does not need any storage credentials — all image URLs come
 - LOG_LEVEL Database
 - DB_CONNECTION=pgsql
 - DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD
-- DB_SEARCH_PATH (recommended: public,core,analytics)
+- DB_SEARCH_PATH (recommended: public,core,analytics,billing,retail)
 - DB_STATEMENT_TIMEOUT (ms), DB_LOCK_TIMEOUT (ms)
 
 ### Supabase JWT verification
