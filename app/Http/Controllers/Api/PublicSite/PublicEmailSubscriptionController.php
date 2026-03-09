@@ -239,7 +239,7 @@ class PublicEmailSubscriptionController extends ApiController
                 return ucfirst($candidateFirstName) . ' ' . ucfirst($remaining);
             }
 
-            return null;
+            return ucfirst($localPart);
         }
 
         $parts = preg_split('/[^a-z]+/', $localPart) ?: [];
@@ -253,7 +253,7 @@ class PublicEmailSubscriptionController extends ApiController
         }
 
         $first = $parts[0];
-        if (!in_array($first, self::COMMON_FIRST_NAMES, true)) {
+        if (in_array($first, self::NON_NAME_TOKENS, true)) {
             return null;
         }
 
