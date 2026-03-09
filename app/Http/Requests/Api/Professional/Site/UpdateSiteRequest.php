@@ -107,21 +107,7 @@ class UpdateSiteRequest extends BaseFormRequest
                     $validator->errors()->add('is_published', 'Cannot publish: professional must have a display name.');
                 }
 
-                $hasActiveBlock = $site->linkBlocks()->where('is_active', true)->exists();
-                if (!$hasActiveBlock) {
-                    $validator->errors()->add('is_published', 'Cannot publish: Site must have at least one active link block.');
-                }
 
-                $settings = is_array($site->settings) ? $site->settings : [];
-                $incoming = $this->input('settings');
-
-                if (is_array($incoming)) {
-                    $settings = array_replace_recursive($settings, $incoming);
-                }
-
-                if (empty($settings['hero_title'])) {
-                    $validator->errors()->add('is_published', 'Cannot publish: Site must have a hero title in settings.');
-                }
             }
         });
     }
