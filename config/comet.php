@@ -73,6 +73,11 @@ return [
 
     'image_max_upload_size' => (int) env('COMET_IMAGE_MAX_UPLOAD_KB', 10240), // 10 MB
 
+    'store' => [
+        'default_commission_rate' => (float) env('COMET_STORE_DEFAULT_COMMISSION', 15),
+        'max_featured_products'   => (int) env('COMET_STORE_MAX_FEATURED', 10),
+    ],
+
     'form_timing' => [
         'min_ms' => (int) env('FORM_TIMING_MIN_MS', 2500),      // 2.5s minimum fill time
         'max_ms' => (int) env('FORM_TIMING_MAX_MS', 43200000),  // 12h max (stale form)

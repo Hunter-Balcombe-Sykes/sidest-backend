@@ -21,11 +21,13 @@ class ProfessionalSelection extends BaseModel
         'professional_id',
         'shopify_product_id',
         'sort_order',
+        'commission_override',
     ];
 
     protected $casts = [
-        'sort_order'  => 'integer',
-        'created_at'  => 'datetime',
+        'sort_order'            => 'integer',
+        'commission_override'   => 'float',
+        'created_at'            => 'datetime',
     ];
 
     public function professional(): BelongsTo
