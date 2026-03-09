@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use App\Models\Core\Notifications\EmailSubscription;
+use App\Models\Core\Notifications\Notification;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
 
@@ -30,10 +31,12 @@ class BootstrapController extends ApiController
 
         try {
             $result = DB::transaction(function () use ($uid, $data) {
+            $createdProfessional = false;
 
             $professional = Professional::query()->where('auth_user_id', $uid)->first();
 
             if (!$professional) {
+                $createdProfessional = true;
                 $professional = new Professional([
                     'handle'          => $data['handle'],
                     'display_name'    => $data['display_name'],
@@ -104,6 +107,10 @@ class BootstrapController extends ApiController
 
             // Ensure the professional has a subscription – seed the free plan if none exists
             $this->ensureFreeSubscription($professional);
+
+            if ($createdProfessional) {
+                $this->createWelcomeNotification($professional);
+            }
 
                 return [
                     'professional' => $professional->fresh(),
@@ -278,6 +285,24 @@ class BootstrapController extends ApiController
 
         $sub->markSubscribed(['source' => 'bootstrap']);
         $sub->save();
+    }
+
+    private function createWelcomeNotification(Professional $professional): void
+    {
+        Notification::query()->firstOrCreate(
+            [
+                'professional_id' => $professional->id,
+                'type' => 'welcome_signup',
+                'title' => 'Welcome to Sight',
+            ],
+            [
+                'body' => 'Welcome to Sight. This is placeholder content for now.',
+                'cta_url' => null,
+                'severity' => 'info',
+                'starts_at' => now(),
+                'ends_at' => null,
+            ]
+        );
     }
 
     private function generateQrSlug(?string $handle): string
