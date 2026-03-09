@@ -553,17 +553,16 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 | services     | array   | no       | `[ { id, title, price_cents, ... } ]`                     | Only active services returned                             |
 
 ### Analytics Event Payloads
-| Name                  | Type     | Nullable | Example                 | Constraints / Notes                                                              |
-|-----------------------|----------|----------|-------------------------|----------------------------------------------------------------------------------|
-| occurred_at           | datetime | no       | `2026-01-12T05:12:00Z`  | Required by validation, but Stage 1-2 currently stores server time (now)         |
-| site_id               | uuid     | yes      | `b8e7...`               | Optional if called on the correct subdomain; the API resolves site from host too |
-| session_id            | string   | yes      | `sess_abc123`           | Max 255                                                                          |
-| visitor_id            | uuid     | yes      | `f2a1...`               | Optional stable client id if you have one                                        |
-| referrer              | string   | yes      | `https://instagram.com` | Max 2048; if missing, backend uses request Referer header                        |
-| utm_source            | string   | yes      | `instagram`             | Max 120                                                                          |
-| utm_medium            | string   | yes      | `social`                | Max 120                                                                          |
-| utm_campaign          | string   | yes      | `jan_promo`             | Max 120                                                                          |
-| block_id (click only) | uuid     | no       | `d5b0...`               | Must be an active link block belonging to the site                               |
+| Name                  | Type   | Nullable | Example                 | Constraints / Notes                                                                                                     |
+|-----------------------|--------|----------|-------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| site_id               | uuid   | yes      | `b8e7...`               | Required unless subdomain is resolved from route or `X-Site-Subdomain` header                                          |
+| session_id            | uuid   | yes      | `7f1e4d6b-...`          | Optional per-session ID                                                                                                 |
+| visitor_id            | uuid   | yes      | `f2a1...`               | Optional stable visitor ID                                                                                              |
+| referrer              | string | yes      | `https://instagram.com` | Max 2048; if missing, backend uses request `Referer` header                                                            |
+| utm_source            | string | yes      | `instagram`             | Max 255                                                                                                                 |
+| utm_medium            | string | yes      | `social`                | Max 255                                                                                                                 |
+| utm_campaign          | string | yes      | `jan_promo`             | Max 255                                                                                                                 |
+| block_id (click only) | uuid   | no       | `d5b0...`               | Must belong to the site, be active, and be trackable: `links/link` or `sections/{gallery,services,shop,booking}`     |
 
 ### Plans (core.plans)
 | Name            | Type     | Nullable | Example                | Constraints / Notes     |
@@ -590,6 +589,11 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 - Accept: application/json
 - Content-Type: application/json (for JSON bodies)
 - Authorization: Bearer <SUPABASE_ACCESS_TOKEN> (authenticated routes only)
+
+### Browser CORS
+
+- Frontend browser origins must be allowed by backend CORS config.
+- If requests fail in browser but work in Postman/curl, add your frontend origin to `config/cors.php` allowed origins/patterns.
 
 ### Standard error format
 
@@ -632,30 +636,135 @@ Common status codes
 ### Rate limits (per IP)
 
 - public-site: 60 requests per minute
-- analytics: 120 requests per minute leads: 10 requests per minute
+- analytics: 120 requests per minute
+- leads: 3 requests per minute per IP, plus 100 requests per minute per subdomain
 
 ## 6) Public Mini-Site API
 
-All routes below are unauthenticated and domain-scoped to the mini-site host:
-https://{subdomain}.{COMET_PUBLIC_DOMAIN}
+All routes below are unauthenticated.
+
+Frontend can connect in 2 modes:
+
+1. Domain-scoped mini-site host  
+`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/...`
+2. Header-based API host fallback (no subdomain DNS needed)  
+`https://api.{COMET_PUBLIC_DOMAIN}/api/public/...` with header `X-Site-Subdomain: {subdomain}`
+
+For analytics endpoints, provide either `site_id` in the JSON body OR `X-Site-Subdomain` header.
+
+Frontend quick-start (header-based API host):
+
+```ts
+const API_BASE = "https://api.<COMET_PUBLIC_DOMAIN>/api/public";
+const subdomain = "fadez";
+const visitorId = localStorage.getItem("comet_visitor_id") ?? crypto.randomUUID();
+localStorage.setItem("comet_visitor_id", visitorId);
+
+const siteRes = await fetch(`${API_BASE}/site-by-slug`, {
+  headers: { "X-Site-Subdomain": subdomain }
+});
+
+await fetch(`${API_BASE}/analytics/pageviews`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "X-Site-Subdomain": subdomain
+  },
+  body: JSON.stringify({
+    session_id: crypto.randomUUID(),
+    visitor_id: visitorId
+  })
+});
+```
 
 ### `GET /api/public/site`
 
 - Purpose: fetch the published mini-site payload for rendering
 - Auth: None
-- Rate limit: public-site Response (200): { "published": true, "site": { "id": "…", "subdomain": "…", "settings": { } }, "professional": { "id": "…", "handle": "…", "display_name": "…", "bio": null }, "theme": { "id": "…", "key": "…", "name": "…", "config": { } }, "blocks": [], "gallery": [ { "id": "…", "pool": "gallery", "alt_text": null, "sort_order": 0, "variants": { "thumb": "https://…", "small": "https://…", "medium": "https://…", "large": "https://…", "hero": "https://…" } } ], "services": [] } Common status codes: 200, 404 (site not found), 403 (site not published)
+- Rate limit: public-site
+
+**Response (200):**
+
+```json
+{
+  "published": true,
+  "site": { "id": "uuid", "subdomain": "fadez", "settings": {} },
+  "professional": { "id": "uuid", "handle": "fadez", "display_name": "Fadez Studio", "bio": null },
+  "theme": { "id": "uuid", "key": "modern", "name": "Modern", "config": {} },
+  "blocks": [],
+  "gallery": [],
+  "services": []
+}
+```
+
+**Common status codes:** 200, 403 (site not published), 404 (site not found), 429
 
 ### `POST /api/public/analytics/pageviews`
 
 - Purpose: record a page view
 - Auth: None
-- Rate limit: analytics Request body: { "occurred_at": "2026-01-12T05:12:00Z", "site_id": "optional uuid", "session_id": "optional string", "visitor_id": "optional uuid", "referrer": "optional string", "utm_source": "optional string", "utm_medium": "optional string", "utm_campaign": "optional string" } Response (201): { "message": "Pageview recorded", "visit_id": "uuid" } Common status codes: 201, 404, 403, 422, 429
+- Rate limit: analytics
+
+**Request body:**
+
+```json
+{
+  "site_id": "optional-uuid",
+  "session_id": "optional-uuid",
+  "visitor_id": "optional-uuid",
+  "referrer": "optional string",
+  "utm_source": "optional string",
+  "utm_medium": "optional string",
+  "utm_campaign": "optional string"
+}
+```
+
+**Response (201):**
+
+```json
+{
+  "message": "Pageview recorded",
+  "visit_id": "uuid"
+}
+```
+
+**Notes:** `occurred_at` is generated server-side.
+
+**Common status codes:** 201, 403, 404, 422, 429
 
 ### `POST /api/public/analytics/clicks`
 
-- Purpose: record a link click
+- Purpose: record a link click or supported section interaction
 - Auth: None
-- Rate limit: analytics Request body: { "occurred_at": "2026-01-12T05:12:00Z", "block_id": "uuid", "site_id": "optional uuid", "session_id": "optional string", "visitor_id": "optional uuid", "referrer": "optional string", "utm_source": "optional string", "utm_medium": "optional string", "utm_campaign": "optional string" } Response (201): { "message": "Click recorded", "click_id": "uuid" } Common status codes: 201, 404 (site or block), 403 (unpublished or inactive), 422, 429
+- Rate limit: analytics
+
+**Request body:**
+
+```json
+{
+  "block_id": "required-uuid",
+  "site_id": "optional-uuid",
+  "session_id": "optional-uuid",
+  "visitor_id": "optional-uuid",
+  "referrer": "optional string",
+  "utm_source": "optional string",
+  "utm_medium": "optional string",
+  "utm_campaign": "optional string"
+}
+```
+
+**Response (201):**
+
+```json
+{
+  "message": "Click recorded",
+  "click_id": "uuid"
+}
+```
+
+`message` is `"Section interaction recorded"` when the clicked block is a supported section block.
+
+**Common status codes:** 201, 403 (unpublished or inactive block), 404 (site or block), 422 (not trackable/validation), 429
 
 ### `POST /api/public/customers`
 
@@ -1560,9 +1669,8 @@ Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The imag
 
 ### Analytics timestamps
 
-- Public analytics requests require occurred_at for validation, but Stage 1-2 stores server time (now) in the database.
-
-Send the current time anyway.
+- Public analytics endpoints set `occurred_at` server-side (`now()`).
+- Frontend does not need to send `occurred_at`.
 
 ### Gallery limits and ordering
 

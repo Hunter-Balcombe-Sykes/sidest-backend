@@ -111,22 +111,31 @@ class AnalyticsController extends ApiController
             return $this->error('Block is not active', 403);
         }
 
-        // Create click record
-        $click = new LinkClick([
-            'occurred_at'  => now(),
-            'session_id'   => $data['session_id'] ?? null,
-            'visitor_id'   => $data['visitor_id'] ?? null,
-            'ip_hash'      => $this->hashIp($request->ip()),
-            'user_agent'   => $request->userAgent(),
-            'referrer'     => $data['referrer'] ?? $request->headers->get('referer'),
-            'utm_source'   => $data['utm_source'] ?? null,
-            'utm_medium'   => $data['utm_medium'] ?? null,
-            'utm_campaign' => $data['utm_campaign'] ?? null,
-        ]);
-        $click->professional_id = $site->professional_id;
-        $click->site_id = $site->id;
-        $click->block_id = $block->id;
-        $click->save();
+        $click = LinkClick::runForBlockForeignKey(
+            function (string $blockColumn) use ($request, $data, $site, $block) {
+                $click = new LinkClick([
+                    'occurred_at'  => now(),
+                    'session_id'   => $data['session_id'] ?? null,
+                    'visitor_id'   => $data['visitor_id'] ?? null,
+                    'ip_hash'      => $this->hashIp($request->ip()),
+                    'user_agent'   => $request->userAgent(),
+                    'referrer'     => $data['referrer'] ?? $request->headers->get('referer'),
+                    'utm_source'   => $data['utm_source'] ?? null,
+                    'utm_medium'   => $data['utm_medium'] ?? null,
+                    'utm_campaign' => $data['utm_campaign'] ?? null,
+                ]);
+                $click->professional_id = $site->professional_id;
+                $click->site_id = $site->id;
+                $click->setAttribute($blockColumn, $block->id);
+                $click->save();
+
+                return $click;
+            }
+        );
+
+        if (!$click instanceof LinkClick) {
+            return $this->error('Unable to record click due to schema mismatch', 500);
+        }
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);

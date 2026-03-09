@@ -54,7 +54,7 @@ class Block extends BaseModel
 
     public function clicks(): HasMany
     {
-        return $this->hasMany(LinkClick::class, 'block_id');
+        return $this->hasMany(LinkClick::class, LinkClick::resolveBlockForeignKeyColumn() ?? 'link_block_id');
     }
 
     public function scopeActive($query)

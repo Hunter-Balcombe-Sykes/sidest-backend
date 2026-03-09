@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Models\Analytics\LinkClick;
 use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -233,57 +234,64 @@ class ProfessionalAnalyticsController extends ApiController
                 ['label' => 'Other',                'visitors' => (int) ($referrersRaw->get('Other')?->visitors ?? 0)],
             ];
 
-            $clickBlockColumn = $this->resolveLinkClicksBlockColumn();
-            if ($clickBlockColumn !== null) {
-                try {
-                    // Top links (total clicks, not unique clickers)
-                    $topLinks = DB::table('analytics.link_clicks as lc')
-                        ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
-                        ->where('lc.professional_id', $professional->id)
-                        ->whereBetween('lc.occurred_at', [$from, $to])
-                        ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
-                        ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
-                        ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
-                        ->groupBy('b.id', 'b.title', 'b.url')
-                        ->orderByDesc('clicks')
-                        ->limit(10)
-                        ->get();
-                } catch (Throwable) {
-                    $topLinks = collect();
-                }
+            try {
+                $topLinks = LinkClick::runForBlockForeignKey(
+                    function (string $clickBlockColumn) use ($professional, $from, $to) {
+                        // Top links (total clicks, not unique clickers)
+                        return DB::table('analytics.link_clicks as lc')
+                            ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
+                            ->where('lc.professional_id', $professional->id)
+                            ->whereBetween('lc.occurred_at', [$from, $to])
+                            ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
+                            ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
+                            ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
+                            ->groupBy('b.id', 'b.title', 'b.url')
+                            ->orderByDesc('clicks')
+                            ->limit(10)
+                            ->get();
+                    },
+                    collect()
+                );
+            } catch (Throwable) {
+                $topLinks = collect();
+            }
 
-                try {
-                    // Top sections (total opens)
-                    $topSections = DB::table('analytics.link_clicks as lc')
-                        ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
-                        ->where('lc.professional_id', $professional->id)
-                        ->whereBetween('lc.occurred_at', [$from, $to])
-                        ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'sections'")
-                        ->whereRaw("LOWER(COALESCE(b.block_type, '')) IN ('gallery', 'services', 'shop', 'booking')")
-                        ->selectRaw("LOWER(COALESCE(b.block_type, '')) as section_key, COUNT(*) as clicks")
-                        ->groupBy('section_key')
-                        ->orderByDesc('clicks')
-                        ->get()
-                        ->map(function ($entry) {
-                            $sectionKey = (string) $entry->section_key;
-                            $title = match ($sectionKey) {
-                                'gallery' => 'Gallery of Work',
-                                'services' => 'Services & Pricing',
-                                'shop' => 'Shop',
-                                'booking' => 'Booking',
-                                default => ucfirst($sectionKey),
-                            };
+            try {
+                $topSections = LinkClick::runForBlockForeignKey(
+                    function (string $clickBlockColumn) use ($professional, $from, $to) {
+                        // Top sections (total opens)
+                        return DB::table('analytics.link_clicks as lc')
+                            ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
+                            ->where('lc.professional_id', $professional->id)
+                            ->whereBetween('lc.occurred_at', [$from, $to])
+                            ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'sections'")
+                            ->whereRaw("LOWER(COALESCE(b.block_type, '')) IN ('gallery', 'services', 'shop', 'booking')")
+                            ->selectRaw("LOWER(COALESCE(b.block_type, '')) as section_key, COUNT(*) as clicks")
+                            ->groupBy('section_key')
+                            ->orderByDesc('clicks')
+                            ->get()
+                            ->map(function ($entry) {
+                                $sectionKey = (string) $entry->section_key;
+                                $title = match ($sectionKey) {
+                                    'gallery' => 'Gallery of Work',
+                                    'services' => 'Services & Pricing',
+                                    'shop' => 'Shop',
+                                    'booking' => 'Booking',
+                                    default => ucfirst($sectionKey),
+                                };
 
-                            return [
-                                'key' => $sectionKey,
-                                'title' => $title,
-                                'clicks' => (int) ($entry->clicks ?? 0),
-                            ];
-                        })
-                        ->values();
-                } catch (Throwable) {
-                    $topSections = collect();
-                }
+                                return [
+                                    'key' => $sectionKey,
+                                    'title' => $title,
+                                    'clicks' => (int) ($entry->clicks ?? 0),
+                                ];
+                            })
+                            ->values();
+                    },
+                    collect()
+                );
+            } catch (Throwable) {
+                $topSections = collect();
             }
 
             $ctr = $totalVisits > 0 ? round(($totalClicks / $totalVisits) * 100, 2) : 0.0;
@@ -328,28 +336,5 @@ class ProfessionalAnalyticsController extends ApiController
         });
 
         return $this->success($data);
-    }
-
-    private function resolveLinkClicksBlockColumn(): ?string
-    {
-        try {
-            $columns = DB::table('information_schema.columns')
-                ->where('table_schema', 'analytics')
-                ->where('table_name', 'link_clicks')
-                ->whereIn('column_name', ['block_id', 'link_block_id'])
-                ->pluck('column_name')
-                ->all();
-        } catch (Throwable) {
-            return null;
-        }
-
-        if (in_array('block_id', $columns, true)) {
-            return 'block_id';
-        }
-        if (in_array('link_block_id', $columns, true)) {
-            return 'link_block_id';
-        }
-
-        return null;
     }
 }
