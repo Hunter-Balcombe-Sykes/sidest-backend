@@ -11,7 +11,7 @@ class SaleEvent extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'retail.sale_events';
+    protected $table = 'sale_events';
 
     public $incrementing = false;
     protected $keyType = 'string';
