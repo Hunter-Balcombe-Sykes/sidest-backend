@@ -11,6 +11,7 @@ use App\Models\Core\Professional\Customer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use App\Services\Public\PublicSiteResolver;
 
 class PublicEmailSubscriptionController extends ApiController
@@ -36,51 +37,40 @@ class PublicEmailSubscriptionController extends ApiController
         $listKey = $data['list_key'] ?? 'marketing';
 
         $email = strtolower(trim($data['email']));
-        $now   = now();
+        $subscription = EmailSubscription::query()
+            ->where('professional_id', $site->professional_id)
+            ->where('list_key', $listKey)
+            ->whereRaw('lower(email) = ?', [$email])
+            ->first();
 
-        // Only update full_name if provided (so blank submissions don’t wipe it)
-        $updateCols = [
-            'status',
-            'subscribed_at',
-            'unsubscribed_at',
-            'consent_source',
-            'consent_ip_hash',
-            'consent_user_agent',
-            'updated_at',
-        ];
-
-        if (!empty($data['full_name'])) {
-            $updateCols[] = 'full_name';
-        }
-
-        EmailSubscription::query()->upsert(
-            [[
+        if (!$subscription) {
+            $subscription = new EmailSubscription([
                 'professional_id' => $site->professional_id,
                 'list_key' => $listKey,
-
                 'email' => $email,
-                'email_lc' => $email, // <-- requires the migration adding email_lc
-
-                'full_name' => $data['full_name'] ?? null,
-
-                'status' => 'subscribed',
-                'subscribed_at' => $now,
-                'unsubscribed_at' => null,
-
-                // Set token on insert only (NOT in $updateCols)
                 'unsubscribe_token' => EmailSubscription::newUnsubscribeToken(),
+            ]);
+        } else {
+            $subscription->email = $email;
+            if (!$subscription->unsubscribe_token) {
+                $subscription->unsubscribe_token = EmailSubscription::newUnsubscribeToken();
+            }
+        }
 
-                'consent_source' => 'site_subscribe',
-                'consent_ip_hash' => $this->hashIp($request->ip()),
-                'consent_user_agent' => $request->userAgent(),
+        if (!empty($data['full_name'])) {
+            $subscription->full_name = $data['full_name'];
+        }
 
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]],
-            // Must match your UNIQUE index: (professional_id, list_key, email_lc)
-            ['professional_id', 'list_key', 'email_lc'],
-            $updateCols
-        );
+        if ($this->emailLcColumnExists()) {
+            $subscription->email_lc = $email;
+        }
+
+        $subscription->markSubscribed([
+            'source' => 'site_subscribe',
+            'ip_hash' => $this->hashIp($request->ip()),
+            'user_agent' => $request->userAgent(),
+        ]);
+        $subscription->save();
 
         try {
             $this->upsertMarketingCustomer(
@@ -178,5 +168,18 @@ class PublicEmailSubscriptionController extends ApiController
         $customer->full_name = $name !== '' ? $name : null;
         $customer->source = 'site';
         $customer->save();
+    }
+
+    private function emailLcColumnExists(): bool
+    {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $cached = Schema::hasColumn('email_subscriptions', 'email_lc')
+            || Schema::hasColumn('core.email_subscriptions', 'email_lc');
+
+        return $cached;
     }
 }
