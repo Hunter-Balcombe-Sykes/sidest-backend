@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Retail\ProfessionalSelection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -50,7 +51,13 @@ class FeaturedProductsController extends ApiController
             $selections = ProfessionalSelection::where('professional_id', $professional->id)
                 ->orderBy('sort_order')
                 ->get($columns);
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Featured products falling back to legacy site settings (index).', [
+                'professional_id' => (string) $professional->id,
+                'site_id' => (string) $site->id,
+                'error' => $e->getMessage(),
+            ]);
+
             return $this->success([
                 'selected_products' => $this->getLegacySelectedProducts($site),
                 'default_commission_rate' => $defaultRate,
@@ -118,7 +125,13 @@ class FeaturedProductsController extends ApiController
                     ProfessionalSelection::create($attributes);
                 }
             });
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Featured products falling back to legacy site settings (update).', [
+                'professional_id' => (string) $professional->id,
+                'site_id' => (string) $site->id,
+                'error' => $e->getMessage(),
+            ]);
+
             $selectedProducts = $this->saveLegacySelectedProducts($site, $validated['products'] ?? []);
             return $this->success([
                 'selected_products' => $selectedProducts,
@@ -152,7 +165,10 @@ class FeaturedProductsController extends ApiController
         try {
             $result = DB::selectOne("select to_regclass('retail.professional_selections') as table_name");
             $this->selectionsTableAvailable = isset($result->table_name) && $result->table_name !== null;
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Could not verify retail.professional_selections availability.', [
+                'error' => $e->getMessage(),
+            ]);
             $this->selectionsTableAvailable = false;
         }
 
@@ -171,7 +187,10 @@ class FeaturedProductsController extends ApiController
                 ->where('table_name', 'professional_selections')
                 ->where('column_name', 'commission_override')
                 ->exists();
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Could not verify commission_override column on retail.professional_selections.', [
+                'error' => $e->getMessage(),
+            ]);
             // Fail-safe: if metadata lookup is blocked, behave as if column is unavailable.
             $this->commissionOverrideSupported = false;
         }

@@ -11,7 +11,7 @@ class ProfessionalSelection extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'professional_selections';
+    protected $table = 'retail.professional_selections';
 
     public $incrementing = false;
     protected $keyType = 'string';
