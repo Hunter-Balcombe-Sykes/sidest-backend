@@ -66,14 +66,30 @@ class StaffAnalyticsController extends ApiController
             ->selectRaw('MAX(occurred_at) as last_visit_at')
             ->first();
 
-        // Totals (clicks)
-        $clicksAgg = DB::table('analytics.link_clicks')
-            ->where('professional_id', $professional->id)
-            ->whereBetween('occurred_at', [$from, $to])
-            ->selectRaw('COUNT(*) as total_clicks')
-            ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_clickers')
-            ->selectRaw('MAX(occurred_at) as last_click_at')
-            ->first();
+        // Defaults ensure visit analytics still works if click analytics queries fail.
+        $clicksAgg = (object) [
+            'total_clicks' => 0,
+            'unique_clickers' => 0,
+            'last_click_at' => null,
+        ];
+        $clicksByDay = collect();
+        $topLinks = collect();
+
+        try {
+            $clicksAgg = DB::table('analytics.link_clicks')
+                ->where('professional_id', $professional->id)
+                ->whereBetween('occurred_at', [$from, $to])
+                ->selectRaw('COUNT(*) as total_clicks')
+                ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_clickers')
+                ->selectRaw('MAX(occurred_at) as last_click_at')
+                ->first();
+        } catch (Throwable) {
+            $clicksAgg = (object) [
+                'total_clicks' => 0,
+                'unique_clickers' => 0,
+                'last_click_at' => null,
+            ];
+        }
 
         $totalVisits = (int) ($visitsAgg->total_visits ?? 0);
         $totalClicks = (int) ($clicksAgg->total_clicks ?? 0);
@@ -87,24 +103,35 @@ class StaffAnalyticsController extends ApiController
             ->orderBy('day')
             ->get();
 
-        $clicksByDay = DB::table('analytics.link_clicks')
-            ->where('professional_id', $professional->id)
-            ->whereBetween('occurred_at', [$from, $to])
-            ->selectRaw('DATE(occurred_at) as day, COUNT(*) as count')
-            ->groupByRaw('DATE(occurred_at)')
-            ->orderBy('day')
-            ->get();
+        try {
+            $clicksByDay = DB::table('analytics.link_clicks')
+                ->where('professional_id', $professional->id)
+                ->whereBetween('occurred_at', [$from, $to])
+                ->selectRaw('DATE(occurred_at) as day, COUNT(*) as count')
+                ->groupByRaw('DATE(occurred_at)')
+                ->orderBy('day')
+                ->get();
+        } catch (Throwable) {
+            $clicksByDay = collect();
+        }
 
-        // Top links
-        $topLinks = DB::table('analytics.link_clicks as lc')
-            ->join('core.blocks as b', 'b.id', '=', 'lc.block_id')
-            ->where('lc.professional_id', $professional->id)
-            ->whereBetween('lc.occurred_at', [$from, $to])
-            ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
-            ->groupBy('b.id', 'b.title', 'b.url')
-            ->orderByDesc('clicks')
-            ->limit(10)
-            ->get();
+        $clickBlockColumn = $this->resolveLinkClicksBlockColumn();
+        if ($clickBlockColumn !== null) {
+            try {
+                // Top links
+                $topLinks = DB::table('analytics.link_clicks as lc')
+                    ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
+                    ->where('lc.professional_id', $professional->id)
+                    ->whereBetween('lc.occurred_at', [$from, $to])
+                    ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
+                    ->groupBy('b.id', 'b.title', 'b.url')
+                    ->orderByDesc('clicks')
+                    ->limit(10)
+                    ->get();
+            } catch (Throwable) {
+                $topLinks = collect();
+            }
+        }
 
         $ctr = $totalVisits > 0 ? round(($totalClicks / $totalVisits) * 100, 2) : 0.0;
 
@@ -138,5 +165,28 @@ class StaffAnalyticsController extends ApiController
             ],
             'top_links' => $topLinks,
         ]);
+    }
+
+    private function resolveLinkClicksBlockColumn(): ?string
+    {
+        try {
+            $columns = DB::table('information_schema.columns')
+                ->where('table_schema', 'analytics')
+                ->where('table_name', 'link_clicks')
+                ->whereIn('column_name', ['block_id', 'link_block_id'])
+                ->pluck('column_name')
+                ->all();
+        } catch (Throwable) {
+            return null;
+        }
+
+        if (in_array('block_id', $columns, true)) {
+            return 'block_id';
+        }
+        if (in_array('link_block_id', $columns, true)) {
+            return 'link_block_id';
+        }
+
+        return null;
     }
 }
