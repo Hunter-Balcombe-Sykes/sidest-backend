@@ -26,7 +26,7 @@ class ProfessionalSelection extends BaseModel
 
     protected $casts = [
         'sort_order'            => 'integer',
-        'commission_override'   => 'float',
+        'commission_override'   => 'decimal:5,2',
         'created_at'            => 'datetime',
     ];
 
