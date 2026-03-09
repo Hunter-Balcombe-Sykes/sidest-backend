@@ -10,6 +10,7 @@ use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Professional\Customer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use App\Services\Public\PublicSiteResolver;
 
 class PublicEmailSubscriptionController extends ApiController
@@ -81,11 +82,20 @@ class PublicEmailSubscriptionController extends ApiController
             $updateCols
         );
 
-        $this->upsertMarketingCustomer(
-            (string) $site->professional_id,
-            $email,
-            $data['full_name'] ?? null,
-        );
+        try {
+            $this->upsertMarketingCustomer(
+                (string) $site->professional_id,
+                $email,
+                $data['full_name'] ?? null,
+            );
+        } catch (\Throwable $exception) {
+            // Do not block successful subscription if customer sync fails.
+            Log::warning('Public subscribe customer upsert failed', [
+                'professional_id' => (string) $site->professional_id,
+                'email' => $email,
+                'error' => $exception->getMessage(),
+            ]);
+        }
 
 
         return $this->success([
@@ -158,7 +168,6 @@ class PublicEmailSubscriptionController extends ApiController
                 $existing->source = 'site';
             }
 
-            $existing->marketing_opt_in_cached = true;
             $existing->save();
             return;
         }
@@ -168,7 +177,6 @@ class PublicEmailSubscriptionController extends ApiController
         $customer->email = $normalizedEmail;
         $customer->full_name = $name !== '' ? $name : null;
         $customer->source = 'site';
-        $customer->marketing_opt_in_cached = true;
         $customer->save();
     }
 }
