@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class FeaturedProductsController extends ApiController
 {
@@ -109,11 +110,16 @@ class FeaturedProductsController extends ApiController
             return $this->commissionOverrideSupported;
         }
 
-        $this->commissionOverrideSupported = DB::table('information_schema.columns')
-            ->where('table_schema', 'retail')
-            ->where('table_name', 'professional_selections')
-            ->where('column_name', 'commission_override')
-            ->exists();
+        try {
+            $this->commissionOverrideSupported = DB::table('information_schema.columns')
+                ->where('table_schema', 'retail')
+                ->where('table_name', 'professional_selections')
+                ->where('column_name', 'commission_override')
+                ->exists();
+        } catch (Throwable) {
+            // Fail-safe: if metadata lookup is blocked, behave as if column is unavailable.
+            $this->commissionOverrideSupported = false;
+        }
 
         return $this->commissionOverrideSupported;
     }
