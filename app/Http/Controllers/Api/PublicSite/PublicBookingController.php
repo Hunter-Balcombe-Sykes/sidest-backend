@@ -241,6 +241,10 @@ class PublicBookingController extends ApiController
                 'customer.note' => ['nullable', 'string', 'max:1000'],
             ])->validate();
 
+            // Non-blocking local CRM sync at checkout intent time.
+            // Mirrors store behavior so contacts are captured even if payment later fails.
+            $this->syncBookedCustomerContact($professional, $validated['customer'] ?? []);
+
             $location = $this->resolveLocation($professional, $validated['locationId'] ?? null);
             $service = $this->resolveBookableServiceVariation(
                 $professional,
@@ -300,8 +304,6 @@ class PublicBookingController extends ApiController
             $bookingVersion = (int) data_get($bookingResponse, 'booking.version', 0);
 
             if (! $requiresPayment) {
-                $this->syncBookedCustomerContact($professional, $validated['customer'] ?? []);
-
                 return $this->success([
                     'success' => true,
                     'booking' => [
@@ -343,8 +345,6 @@ class PublicBookingController extends ApiController
                     422
                 );
             }
-
-            $this->syncBookedCustomerContact($professional, $validated['customer'] ?? []);
 
             return $this->success([
                 'success' => true,
