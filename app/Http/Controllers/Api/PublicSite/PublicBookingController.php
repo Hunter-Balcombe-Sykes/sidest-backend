@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
+use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
@@ -12,6 +13,7 @@ use App\Services\Square\SquareApiClient;
 use App\Services\Square\SquareApiException;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -298,6 +300,8 @@ class PublicBookingController extends ApiController
             $bookingVersion = (int) data_get($bookingResponse, 'booking.version', 0);
 
             if (! $requiresPayment) {
+                $this->syncBookedCustomerContact($professional, $validated['customer'] ?? []);
+
                 return $this->success([
                     'success' => true,
                     'booking' => [
@@ -339,6 +343,8 @@ class PublicBookingController extends ApiController
                     422
                 );
             }
+
+            $this->syncBookedCustomerContact($professional, $validated['customer'] ?? []);
 
             return $this->success([
                 'success' => true,
@@ -592,6 +598,89 @@ class PublicBookingController extends ApiController
         }
 
         return 'Payment could not be completed. Please try another payment method.';
+    }
+
+    /**
+     * Upsert a local CRM contact after successful public booking checkout.
+     * Non-blocking: booking success should not fail if contact sync fails.
+     *
+     * @param array<string, mixed> $customerData
+     */
+    private function syncBookedCustomerContact(Professional $professional, array $customerData): void
+    {
+        try {
+            $email = strtolower(trim((string) ($customerData['email'] ?? '')));
+            if ($email === '') {
+                return;
+            }
+
+            $firstName = trim((string) ($customerData['firstName'] ?? ''));
+            $lastName = trim((string) ($customerData['lastName'] ?? ''));
+            $fullName = trim($firstName . ' ' . $lastName);
+            $phone = trim((string) ($customerData['phone'] ?? ''));
+            $phone = $phone !== '' ? $phone : null;
+
+            $existing = Customer::query()
+                ->withTrashed()
+                ->where('professional_id', $professional->id)
+                ->whereRaw('lower(email) = ?', [$email])
+                ->first();
+
+            if ($existing) {
+                if ($existing->trashed()) {
+                    $existing->restore();
+                }
+                if ($fullName !== '') {
+                    $existing->full_name = $fullName;
+                }
+                if (($existing->source ?? '') === '') {
+                    $existing->source = 'booking';
+                }
+
+                if ($phone !== null) {
+                    try {
+                        $existing->phone = $phone;
+                        $existing->save();
+                    } catch (QueryException $e) {
+                        if ($e->getCode() !== '23505') {
+                            throw $e;
+                        }
+                        // If phone collides with another contact, keep syncing by email without changing phone.
+                        $existing->phone = $existing->getOriginal('phone');
+                        $existing->save();
+                    }
+                } else {
+                    $existing->save();
+                }
+
+                return;
+            }
+
+            $attributes = [
+                'professional_id' => $professional->id,
+                'full_name' => $fullName !== '' ? $fullName : null,
+                'email' => $email,
+                'phone' => $phone,
+                'source' => 'booking',
+                'marketing_opt_in_cached' => false,
+            ];
+
+            try {
+                Customer::query()->create($attributes);
+            } catch (QueryException $e) {
+                if ($e->getCode() !== '23505') {
+                    throw $e;
+                }
+                // Retry without phone if professional-level phone uniqueness blocks insert.
+                $attributes['phone'] = null;
+                Customer::query()->create($attributes);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Public booking contact sync failed', [
+                'professional_id' => $professional->id,
+                'message' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function diagnosticCode(\Throwable $exception): string
