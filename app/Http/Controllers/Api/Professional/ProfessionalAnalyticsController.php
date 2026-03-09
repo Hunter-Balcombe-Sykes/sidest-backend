@@ -75,7 +75,7 @@ class ProfessionalAnalyticsController extends ApiController
             // All your existing query logic here
 
             // Totals (visits)
-            $visitsAgg = DB::table('site_visits')
+            $visitsAgg = DB::table('analytics.site_visits')
                 ->where('professional_id', $professional->id)
                 ->whereBetween('occurred_at', [$from, $to])
                 ->selectRaw('COUNT(*) as total_visits')
@@ -84,7 +84,7 @@ class ProfessionalAnalyticsController extends ApiController
                 ->first();
 
             // Totals (clicks)
-            $clicksAgg = DB::table('link_clicks')
+            $clicksAgg = DB::table('analytics.link_clicks')
                 ->where('professional_id', $professional->id)
                 ->whereBetween('occurred_at', [$from, $to])
                 ->selectRaw('COUNT(*) as total_clicks')
@@ -96,7 +96,7 @@ class ProfessionalAnalyticsController extends ApiController
             $totalClicks = (int) ($clicksAgg->total_clicks ?? 0);
 
             // Daily charts (unique visitors/clickers)
-            $visitsByDay = DB::table('site_visits')
+            $visitsByDay = DB::table('analytics.site_visits')
                 ->where('professional_id', $professional->id)
                 ->whereBetween('occurred_at', [$from, $to])
                 ->selectRaw("DATE(occurred_at) as day, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count")
@@ -104,7 +104,7 @@ class ProfessionalAnalyticsController extends ApiController
                 ->orderBy('day')
                 ->get();
 
-            $clicksByDay = DB::table('link_clicks')
+            $clicksByDay = DB::table('analytics.link_clicks')
                 ->where('professional_id', $professional->id)
                 ->whereBetween('occurred_at', [$from, $to])
                 ->selectRaw("DATE(occurred_at) as day, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count")
@@ -121,7 +121,7 @@ class ProfessionalAnalyticsController extends ApiController
                 END
             ";
 
-            $deviceBreakdownRaw = DB::table('site_visits')
+            $deviceBreakdownRaw = DB::table('analytics.site_visits')
                 ->where('professional_id', $professional->id)
                 ->whereBetween('occurred_at', [$from, $to])
                 ->selectRaw("$deviceCase as device, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as visitors")
@@ -135,7 +135,7 @@ class ProfessionalAnalyticsController extends ApiController
                 'other'   => (int) ($deviceBreakdownRaw->get('other')?->visitors ?? 0),
             ];
 
-            $visitsByDayByDevice = DB::table('site_visits')
+            $visitsByDayByDevice = DB::table('analytics.site_visits')
                 ->where('professional_id', $professional->id)
                 ->whereBetween('occurred_at', [$from, $to])
                 ->selectRaw("DATE(occurred_at) as day, $deviceCase as device, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count")
@@ -144,7 +144,7 @@ class ProfessionalAnalyticsController extends ApiController
                 ->get();
 
             // Countries (unique visitors)
-            $countriesRaw = DB::table('site_visits')
+            $countriesRaw = DB::table('analytics.site_visits')
                 ->where('professional_id', $professional->id)
                 ->whereBetween('occurred_at', [$from, $to])
                 ->selectRaw("COALESCE(country_code, 'UN') as country_code, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as visitors")
@@ -185,7 +185,7 @@ class ProfessionalAnalyticsController extends ApiController
                 END
             ";
 
-            $referrersRaw = DB::table('site_visits')
+            $referrersRaw = DB::table('analytics.site_visits')
                 ->where('professional_id', $professional->id)
                 ->whereBetween('occurred_at', [$from, $to])
                 ->selectRaw("$sourceCase as source, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as visitors")
@@ -213,8 +213,8 @@ class ProfessionalAnalyticsController extends ApiController
             ];
 
             // Top links (total clicks, not unique clickers)
-            $topLinks = DB::table('link_clicks as lc')
-                ->join('blocks as b', 'b.id', '=', 'lc.block_id')
+            $topLinks = DB::table('analytics.link_clicks as lc')
+                ->join('core.blocks as b', 'b.id', '=', 'lc.block_id')
                 ->where('lc.professional_id', $professional->id)
                 ->whereBetween('lc.occurred_at', [$from, $to])
                 ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
@@ -226,8 +226,8 @@ class ProfessionalAnalyticsController extends ApiController
                 ->get();
 
             // Top sections (total opens)
-            $topSections = DB::table('link_clicks as lc')
-                ->join('blocks as b', 'b.id', '=', 'lc.block_id')
+            $topSections = DB::table('analytics.link_clicks as lc')
+                ->join('core.blocks as b', 'b.id', '=', 'lc.block_id')
                 ->where('lc.professional_id', $professional->id)
                 ->whereBetween('lc.occurred_at', [$from, $to])
                 ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'sections'")

@@ -13,7 +13,7 @@ class LinkClick extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'link_clicks';
+    protected $table = 'analytics.link_clicks';
 
     public $incrementing = false;
     protected $keyType = 'string';
