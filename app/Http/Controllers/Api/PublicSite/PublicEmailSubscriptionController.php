@@ -19,6 +19,23 @@ class PublicEmailSubscriptionController extends ApiController
     use HashesClientData;
     use ResolvesSubdomainFromHost;
 
+    private const COMMON_FIRST_NAMES = [
+        'aaron', 'adam', 'alex', 'alice', 'amanda', 'amelia', 'amy', 'andrew', 'anna', 'anthony',
+        'ashley', 'ben', 'benjamin', 'blake', 'brad', 'brandon', 'brian', 'caitlin', 'cameron', 'charlotte',
+        'chloe', 'chris', 'christopher', 'claire', 'dan', 'daniel', 'david', 'dylan', 'edward', 'ella',
+        'emily', 'emma', 'ethan', 'eva', 'george', 'grace', 'hannah', 'harry', 'holly', 'isabella',
+        'isla', 'jack', 'jacob', 'jake', 'james', 'jasmine', 'jason', 'jess', 'jessica', 'jordan',
+        'josh', 'joshua', 'katie', 'lauren', 'liam', 'lily', 'luke', 'madison', 'matt', 'matthew',
+        'megan', 'mia', 'michael', 'nathan', 'nicholas', 'noah', 'olivia', 'oscar', 'patrick', 'paul',
+        'rachel', 'rebecca', 'ryan', 'sam', 'samantha', 'samuel', 'sarah', 'scott', 'sean', 'sophia',
+        'stephanie', 'steven', 'thomas', 'toby', 'tom', 'victoria', 'will', 'william', 'zach', 'zoe',
+    ];
+
+    private const NON_NAME_TOKENS = [
+        'admin', 'booking', 'bookings', 'contact', 'hello', 'help', 'info', 'mail', 'marketing',
+        'newsletter', 'noreply', 'reply', 'sales', 'shop', 'store', 'support', 'team', 'test',
+    ];
+
     public function subscribe(PublicEmailSubscribeRequest $request, PublicSiteResolver $resolver): JsonResponse
     {
         $data = $request->validated();
@@ -37,6 +54,10 @@ class PublicEmailSubscriptionController extends ApiController
         $listKey = $data['list_key'] ?? 'marketing';
 
         $email = strtolower(trim($data['email']));
+        $providedName = is_string($data['full_name'] ?? null) ? trim((string) $data['full_name']) : '';
+        $resolvedName = $providedName !== '' ? $providedName : $this->inferNameFromEmail($email);
+        $overwriteName = $providedName !== '';
+
         $subscription = EmailSubscription::query()
             ->where('professional_id', $site->professional_id)
             ->where('list_key', $listKey)
@@ -57,8 +78,11 @@ class PublicEmailSubscriptionController extends ApiController
             }
         }
 
-        if (!empty($data['full_name'])) {
-            $subscription->full_name = $data['full_name'];
+        if ($resolvedName) {
+            $existingName = is_string($subscription->full_name ?? null) ? trim((string) $subscription->full_name) : '';
+            if ($overwriteName || $existingName === '') {
+                $subscription->full_name = $resolvedName;
+            }
         }
 
         if ($this->emailLcColumnExists()) {
@@ -76,7 +100,8 @@ class PublicEmailSubscriptionController extends ApiController
             $this->upsertMarketingCustomer(
                 (string) $site->professional_id,
                 $email,
-                $data['full_name'] ?? null,
+                $resolvedName,
+                $overwriteName,
             );
         } catch (\Throwable $exception) {
             // Do not block successful subscription if customer sync fails.
@@ -130,7 +155,12 @@ class PublicEmailSubscriptionController extends ApiController
         return null;
     }
 
-    private function upsertMarketingCustomer(string $professionalId, string $email, ?string $fullName): void
+    private function upsertMarketingCustomer(
+        string $professionalId,
+        string $email,
+        ?string $fullName,
+        bool $overwriteName = false,
+    ): void
     {
         $normalizedEmail = strtolower(trim($email));
         if ($normalizedEmail === '') {
@@ -150,7 +180,8 @@ class PublicEmailSubscriptionController extends ApiController
                 $existing->restore();
             }
 
-            if ($name !== '') {
+            $existingName = is_string($existing->full_name ?? null) ? trim((string) $existing->full_name) : '';
+            if ($name !== '' && ($overwriteName || $existingName === '')) {
                 $existing->full_name = $name;
             }
 
@@ -168,6 +199,74 @@ class PublicEmailSubscriptionController extends ApiController
         $customer->full_name = $name !== '' ? $name : null;
         $customer->source = 'site';
         $customer->save();
+    }
+
+    private function inferNameFromEmail(string $email): ?string
+    {
+        $normalized = strtolower(trim($email));
+        if ($normalized === '' || !str_contains($normalized, '@')) {
+            return null;
+        }
+
+        [$localPart] = explode('@', $normalized, 2);
+        $localPart = preg_replace('/\+.*$/', '', $localPart) ?? $localPart;
+        $localPart = strtolower(trim($localPart));
+        if ($localPart === '') {
+            return null;
+        }
+
+        if (in_array($localPart, self::NON_NAME_TOKENS, true)) {
+            return null;
+        }
+
+        if (preg_match('/^[a-z]{2,24}$/', $localPart) === 1) {
+            if (in_array($localPart, self::COMMON_FIRST_NAMES, true)) {
+                return ucfirst($localPart);
+            }
+
+            foreach (self::COMMON_FIRST_NAMES as $candidateFirstName) {
+                if (!str_starts_with($localPart, $candidateFirstName)) {
+                    continue;
+                }
+                $remaining = substr($localPart, strlen($candidateFirstName));
+                if (strlen($remaining) < 2 || strlen($remaining) > 24) {
+                    continue;
+                }
+                if (in_array($remaining, self::NON_NAME_TOKENS, true)) {
+                    continue;
+                }
+
+                return ucfirst($candidateFirstName) . ' ' . ucfirst($remaining);
+            }
+
+            return null;
+        }
+
+        $parts = preg_split('/[^a-z]+/', $localPart) ?: [];
+        $parts = array_values(array_filter($parts, static function ($part): bool {
+            $length = strlen($part);
+            return $length >= 2 && $length <= 24;
+        }));
+
+        if (count($parts) === 0 || count($parts) > 3) {
+            return null;
+        }
+
+        $first = $parts[0];
+        if (!in_array($first, self::COMMON_FIRST_NAMES, true)) {
+            return null;
+        }
+
+        if (count($parts) === 1) {
+            return ucfirst($first);
+        }
+
+        $last = $parts[1];
+        if (in_array($last, self::NON_NAME_TOKENS, true)) {
+            return ucfirst($first);
+        }
+
+        return ucfirst($first) . ' ' . ucfirst($last);
     }
 
     private function emailLcColumnExists(): bool
