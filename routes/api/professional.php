@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSiteController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalThemeController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
+use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGoogleBusinessProfileController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
@@ -34,9 +35,11 @@ Route::middleware(['supabase.jwt', 'current.pro'])
 
     // View Site Details
     Route::get('/site', [ProfessionalSiteController::class, 'show']);
+    Route::get('/site/google-business-profile', [ProfessionalGoogleBusinessProfileController::class, 'show']);
 
     // Update Site Details
     Route::patch('/site', [ProfessionalSiteController::class, 'update']);
+    Route::put('/site/google-business-profile', [ProfessionalGoogleBusinessProfileController::class, 'upsert']);
     Route::patch('/site/visibility', [SiteVisibilityController::class, 'update']);
 
     // Service Details and Edit
