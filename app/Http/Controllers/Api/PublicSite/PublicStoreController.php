@@ -6,9 +6,9 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Models\Retail\ProfessionalSelection;
 use App\Services\Public\PublicSiteResolver;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -19,10 +19,12 @@ class PublicStoreController extends ApiController
 
     private ?bool $commissionOverrideSupported = null;
     private ?bool $selectionsTableAvailable = null;
+    private PublicSiteResolver $siteResolver;
 
-    public function __construct(
-        private readonly PublicSiteResolver $siteResolver
-    ) {}
+    public function __construct(PublicSiteResolver $siteResolver)
+    {
+        $this->siteResolver = $siteResolver;
+    }
 
     /**
      * GET /public/store/featured-products
