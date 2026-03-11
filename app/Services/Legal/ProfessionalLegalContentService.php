@@ -53,6 +53,11 @@ class ProfessionalLegalContentService
             'professional_id' => $professional->id,
         ]);
 
+        $seedManualFromGenerated = !$legal->exists || (
+            trim((string) $legal->generated_privacy_policy) === ''
+            && trim((string) $legal->generated_terms_and_conditions) === ''
+        );
+
         if (!$legal->exists) {
             $legal->active_privacy_source = ProfessionalLegalContent::SOURCE_TEMPLATED;
             $legal->active_terms_source = ProfessionalLegalContent::SOURCE_TEMPLATED;
@@ -60,6 +65,17 @@ class ProfessionalLegalContentService
 
         $legal->generated_privacy_policy = $generatedPrivacyPolicy;
         $legal->generated_terms_and_conditions = $generatedTermsAndConditions;
+
+        // Seed manual drafts from templated content on first initialization only.
+        if ($seedManualFromGenerated) {
+            if ($this->trimOrNull($legal->manual_privacy_policy) === null) {
+                $legal->manual_privacy_policy = $generatedPrivacyPolicy;
+            }
+            if ($this->trimOrNull($legal->manual_terms_and_conditions) === null) {
+                $legal->manual_terms_and_conditions = $generatedTermsAndConditions;
+            }
+        }
+
         $legal->template_variables = $variables;
         $legal->generated_at = now();
         $legal->save();
