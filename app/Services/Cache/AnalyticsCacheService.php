@@ -41,15 +41,28 @@ class AnalyticsCacheService
         );
 
         return Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
-            return LinkClick::where('professional_id', $professionalId)
-                ->whereBetween('occurred_at', [$startDate, $endDate])
-                ->selectRaw('
-                    COUNT(*) as total_clicks,
-                    COUNT(DISTINCT visitor_id) as unique_clickers,
-                    COUNT(DISTINCT link_block_id) as links_clicked
-                ')
-                ->first()
-                ->toArray();
+            return LinkClick::runForBlockForeignKey(
+                function (string $blockColumn) use ($professionalId, $startDate, $endDate) {
+                    return LinkClick::where('professional_id', $professionalId)
+                        ->whereBetween('occurred_at', [$startDate, $endDate])
+                        ->selectRaw("
+                            COUNT(*) as total_clicks,
+                            COUNT(DISTINCT visitor_id) as unique_clickers,
+                            COUNT(DISTINCT {$blockColumn}) as links_clicked
+                        ")
+                        ->first()
+                        ?->toArray() ?? [
+                            'total_clicks' => 0,
+                            'unique_clickers' => 0,
+                            'links_clicked' => 0,
+                        ];
+                },
+                [
+                    'total_clicks' => 0,
+                    'unique_clickers' => 0,
+                    'links_clicked' => 0,
+                ]
+            );
         });
     }
 

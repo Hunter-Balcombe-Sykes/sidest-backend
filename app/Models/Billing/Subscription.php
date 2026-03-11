@@ -10,8 +10,26 @@ class Subscription extends BaseModel
 {
     protected $table = 'subscriptions';
     public $incrementing = false;
+        protected $keyType = 'string';
+
+    protected $fillable = [
+        'id',
+        'professional_id',
+        'plan_id',
+        'provider',
+        'stripe_customer_id',
+        'stripe_subscription_id',
+        'status',
+        'current_period_start',
+        'current_period_end',
+        'cancel_at_period_end',
+        'trial_ends_at',
+        'ended_at',
+        'provider_payload',
+    ];
 
     protected $casts = [
+        'current_period_start' => 'datetime',
         'current_period_end' => 'datetime',
         'trial_ends_at' => 'datetime',
         'ended_at' => 'datetime',

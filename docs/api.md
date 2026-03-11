@@ -7,10 +7,11 @@ This document is the single source of truth for backend so the frontend can buil
 - Staff dashboard (staff-only browsing + admin editing tools)
 - Backend: Laravel API (this repo)
 - Auth: Supabase Auth (JWT access token)
-- Media: Supabase Storage (direct-from-frontend upload)
+- Media: Laravel Cloud Object Storage (S3-compatible / Cloudflare R2) with server-side WebP processing
 
 ## Contents
 
+- Recent Backend Changes (Commit Log Snapshot)
 - Environments and Base URLs
 - Authentication (Supabase JWT)
 - Roles and permissions
@@ -19,12 +20,38 @@ This document is the single source of truth for backend so the frontend can buil
 - Public Mini-Site API
 - Professional (Barber) Dashboard API
 - Staff API
-- Supabase Storage uploads (RLS behavior + frontend upload flow)
+- Image uploads & processing (server-side WebP via queue)
 - Test users and getting tokens
 - Insomnia collection
 - Frontend env var checklist
 - Backend env var checklist
 - Known implementation gotchas
+
+## 0) Recent Backend Changes (Commit Log Snapshot)
+
+Snapshot date: **March 11, 2026**.
+
+### Unreleased (working tree)
+
+- Add per-professional legal content storage with generated + manual variants and source toggles.
+- Add `GET /api/site/legal-content` and `PUT|PATCH /api/site/legal-content`.
+- Add public payload `legal` object with active document resolution.
+- Ensure legal defaults to templated content and never renders blank when manual content is empty.
+
+### Recent commits
+
+- `37b4749` (2026-03-11): image variant changes.
+- `580c222` (2026-03-10): allow `barbershop_info` section block type.
+- `a91d6b7` (2026-03-10): add per-user Google Business Profile endpoints.
+- `ddc1c76` (2026-03-10): sync booking contacts during checkout intent.
+- `63350c9` (2026-03-10): public lead subdomain fallback (header/query/body/host).
+- `438dcc7` (2026-03-10): fallback public customers route for path-based frontend.
+- `31d0910` (2026-03-10): sync site bookings into local contacts.
+- `626ee6c` (2026-03-09): infer subscriber names from email when full name is missing.
+- `260d29d` (2026-03-09): stabilize public subscribe write path (no conflict upsert dependency).
+- `6f94482` (2026-03-09): harden public subscribe and relax email validation.
+- `8a078f5` (2026-03-09): support public subscribe via slug/header and upsert marketing customers.
+- `df3fa60` (2026-03-09): create welcome notification on first signup bootstrap.
 
 ## 1) Environments and Base URLs
 
@@ -124,6 +151,8 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 ```
 
 **Common status codes:** 200 (existing user bootstrapped again), 201 (new professional created), 401 (invalid JWT), 422 (validation error)
+
+**Note:** Bootstrap automatically creates a free-tier subscription for new professionals. If a free plan (plan_key = `free`) exists in the plans table, the professional will be subscribed to it with status `active` and provider `internal`.
 
 ### Plans and Subscriptions
 
@@ -233,6 +262,8 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 }
 ```
 
+**Status logic:** If `trial_period_days` is provided and > 0, the subscription starts with status `trialing`. Otherwise it starts as `active`.
+
 **Common status codes: 201, 401, 422 (already has subscription)**
 
 #### `PATCH /api/me/subscription`
@@ -292,6 +323,12 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 - Auth: Required (Professional)
 - Rate limit: general
 
+**Validation rules:**
+- Subscription must exist (404 if not)
+- Subscription must be active (status in `trialing` or `active`, and `ended_at` is null) — returns 422 otherwise
+- Subscription must be scheduled for cancellation (`cancel_at_period_end` = true) — returns 422 otherwise
+- Current billing period must not have ended (`current_period_end` must be in the future) — returns 422 otherwise
+
 **Response (200):**
 
 ```json
@@ -305,7 +342,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 }
 ```
 
-**Common status codes: 200, 401, 404 (no subscription)**
+**Common status codes: 200, 401, 404 (no subscription), 422 (not active / not scheduled for cancellation / period ended)**
 
 ### Common status codes: 200, 201, 401, 422
 
@@ -321,7 +358,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 Comet reads/writes Postgres through Laravel using the configured database user.
 
 - Database table RLS does not gate Comet API calls if the DB user bypasses RLS (typical for server-side roles).
-- Supabase Storage DOES use RLS policies. Upload access is controlled by storage.objects policies.
+- Image uploads go through the Comet API (server-side), not through Supabase Storage. Supabase Storage is not used at all — all media is stored on Laravel Cloud Object Storage (Cloudflare R2).
 
 ## 4) Data Models
 
@@ -341,10 +378,6 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | last_name               | string   | no       | Hunter                                   | Max 80                                                     |
 | public_contact_number   | string   | yes      | +6140000000                              | Max 40, public-facing contact                              |
 | public_contact_email    | string   | yes      | bookings@example.com                     | Max 255, public-facing contact                             |
-| icon_bucket             | string   | yes      | public-assets                            | Supabase Storage bucket                                    |
-| icon_path               | string   | yes      | professionals/<proid>/icon.jpg           | Path within bucket                                         |
-| headshot_bucket         | string   | yes      | public-assets                            | Supabase Storage Bucket                                    |
-| headshot_path           | string   | yes      | professionals/<proid>/headshot.jpg       | Path wihtin bucket                                         |
 | location_street_address | string   | yes      | 1 Smith Street                           | Max 255                                                    |
 | location_city           | string   | yes      | Darwin                                   | Max 120                                                    |
 | location_state          | string   | yes      | NT                                       | Max 120                                                    |
@@ -376,10 +409,55 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | is_published    | boolean  | no       | false                     | if false, public site endpoint returns 404 or 403 depending on route                                              |
 | theme_id        | uuid     | yes      | 9f23                      | Must exist in themes table                                                                                        |
 | settings        | object   | yes      | {...}                     | Freeform JSON object merged on PATCH                                                                              |
-| banner_bucket   | string   | yes      | public-assets             | Supabase Storage Bucket                                                                                           |
-| banner_path     | string   | yes      | sites/<siteid>/banner.jpg | Path within bucket                                                                                                |
 | created_at      | datetime | yes      | 2026-01...                |                                                                                                                   |
 | updated_at      | datetime | yes      | 2026-01...                |                                                                                                                   |
+
+### SiteImage (core.site_images)
+
+All images (gallery showcase and content/branding) live in the `site_images` table, organised into **pools**. The frontend assigns purpose by choosing from the variants map (`optimized` or `maximized`) for each image.
+
+| Name       | Type     | Nullable | Example                                        | Constraints / Notes                                              |
+|------------|----------|----------|-------------------------------------------------|------------------------------------------------------------------|
+| id         | uuid     | no       | `f7a2...`                                       | Primary key                                                      |
+| site_id    | uuid     | no       | `b8e7...`                                       | FK → sites.id                                                    |
+| pool       | string   | no       | `gallery`                                       | `gallery` or `content`                                           |
+| path       | string   | no       | `images/<proId>/<imageId>/original_abc123.jpg`  | Path to original file on the media disk                          |
+| alt_text   | string   | yes      | `Fade haircut example`                          | Max 255                                                          |
+| sort_order | integer  | no       | `0`                                             | Non-negative; used for gallery ordering                          |
+| is_active  | boolean  | no       | `true`                                          | Soft visibility flag                                             |
+| created_at | datetime | yes      | `2026-03-02T10:00:00Z`                          |                                                                  |
+| updated_at | datetime | yes      | `2026-03-02T10:00:00Z`                          |                                                                  |
+| deleted_at | datetime | yes      | `null`                                          | Soft delete                                                      |
+
+**Pool limits** (configurable via env):
+- `gallery`: max 5 images (env `COMET_GALLERY_IMAGE_MAX`)
+- `content`: max 5 images (env `COMET_CONTENT_IMAGE_MAX`)
+
+### ImageVariant (core.image_variants)
+
+Each `SiteImage` gets a set of universal WebP variants generated server-side via a queue job. Content-hashed filenames enable aggressive CDN caching (`Cache-Control: public, max-age=31536000, immutable`).
+
+| Name         | Type     | Nullable | Example                                         | Constraints / Notes                               |
+|--------------|----------|----------|--------------------------------------------------|----------------------------------------------------|
+| id           | uuid     | no       | `c3d4...`                                        | Primary key                                        |
+| image_id     | uuid     | no       | `f7a2...`                                        | FK → site_images.id (cascade delete)               |
+| variant      | string   | no       | `optimized`                                      | One of: optimized, maximized                        |
+| disk         | string   | no       | `media`                                          | Storage disk name                                  |
+| path         | string   | no       | `images/<proId>/<imgId>/optimized_abc123def456.webp` | Content-hashed filename                        |
+| format       | string   | no       | `webp`                                           | Always WebP                                        |
+| width        | integer  | no       | `3024`                                           | Actual output width in pixels                      |
+| height       | integer  | no       | `4032`                                           | Actual output height in pixels                     |
+| file_size    | integer  | no       | `3200`                                           | Bytes                                              |
+| content_hash | string   | no       | `abc123def456ghij`                               | First 16 hex chars of SHA-256                      |
+| created_at   | datetime | yes      | `2026-03-02T10:00:05Z`                           |                                                    |
+| updated_at   | datetime | yes      | `2026-03-02T10:00:05Z`                           |                                                    |
+
+**Variant profiles:**
+
+| Variant   | Resolution policy   | Quality policy                                  | Typical use                             |
+|-----------|---------------------|--------------------------------------------------|-----------------------------------------|
+| optimized | Preserve original   | Adaptive quality, targets `COMET_IMAGE_TARGET_KB` (default 500KB) | Fast page loads / default display |
+| maximized | Preserve original   | Highest quality (`COMET_IMAGE_MAXIMIZED_QUALITY`, default 100)    | Zoom/full-detail display          |
 
 ### Customer
 | Name                      | Type     | Nullable | Example                | Constraints / Notes                                                         |
@@ -439,33 +517,38 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 ### Plan
 | Name             | Type     | Nullable | Example       | Constraints / Notes              |
 |------------------|----------|----------|---------------|----------------------------------|
-| id               | string   | no       | `plan_basic`  | Primary key; provider-managed    |
-| name             | string   | no       | `Basic`       | Max 255                          |
+| id               | uuid     | no       | `a1b2...`     | Primary key                      |
+| plan_key         | string   | no       | `free`        | Unique slug: free / pro / elite  |
+| name             | string   | no       | `Free`        | Max 255                          |
 | description      | string   | yes      | `For starters`| Max 2000                         |
-| price_cents      | integer  | no       | `999`         | Price in cents (USD)             |
-| currency_code    | string   | no       | `USD`         | 3-letter code                    |
+| stripe_price_id  | string   | no       | `price_...`   | Stripe price ID (unique)         |
+| price_cents      | integer  | no       | `0`           | Price in smallest currency unit  |
+| currency_code    | string   | no       | `AUD`         | ISO 4217, default AUD            |
 | billing_interval | string   | no       | `month`       | month or year                    |
-| entitlements     | object   | no       | See below     | JSON object with plan features   |
+| entitlements     | object   | yes      | See below     | JSON object with plan features   |
 | is_active        | boolean  | no       | `true`        |                                  |
 | sort_order       | integer  | no       | `0`           | Display order                    |
-| created_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                                  |
-| updated_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                                  |
+| created_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                        |
+| updated_at       | datetime | yes      | `2026-01-12T05:12:00Z` |                        |
 
 ### Subscription
 | Name                | Type     | Nullable | Example              | Constraints / Notes                                 |
 |---------------------|----------|----------|----------------------|-----------------------------------------------------|
 | id                  | uuid     | no       | `sub-123...`         | Primary key                                         |
 | professional_id     | uuid     | no       | `4db0...`            | Owner professional                                  |
-| plan_id             | string   | no       | `plan_basic`         | Foreign key to Plan                                 |
-| status              | string   | no       | `active`             | trialing, active, past_due, canceled, ended        |
-| current_period_start| datetime | no       | `2026-01-12T05:12:00Z` | Billing period start                               |
-| current_period_end  | datetime | no       | `2026-02-12T05:12:00Z` | Billing period end                                 |
-| trial_ends_at       | datetime | yes      | `2026-01-19T05:12:00Z` | When trial period ends (if any)                    |
-| cancel_at_period_end| boolean  | no       | `false`              | Will cancel at period end if true                  |
-| ended_at            | datetime | yes      | `2026-01-20T05:12:00Z` | When subscription ended                            |
-| provider_payload    | object   | no       | `{}`                 | External provider data (Stripe, etc)               |
-| created_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                     |
-| updated_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                     |
+| plan_id             | uuid     | no       | `a1b2...`            | Foreign key to Plan                                 |
+| provider            | string   | no       | `stripe`             | stripe (default) or internal (free plan seed)       |
+| stripe_customer_id  | string   | yes      | `cus_...`            | Stripe customer ID                                  |
+| stripe_subscription_id | string | yes     | `sub_...`            | Stripe subscription ID (unique)                     |
+| status              | string   | no       | `active`             | trialing, active, past_due, canceled, ended         |
+| current_period_start| datetime | yes      | `2026-01-12T05:12:00Z` | Billing period start                              |
+| current_period_end  | datetime | yes      | `2026-02-12T05:12:00Z` | Billing period end (null for free plans)           |
+| trial_ends_at       | datetime | yes      | `2026-01-19T05:12:00Z` | When trial period ends (if any)                   |
+| cancel_at_period_end| boolean  | no       | `false`              | Will cancel at period end if true                   |
+| ended_at            | datetime | yes      | `2026-01-20T05:12:00Z` | When subscription ended                           |
+| provider_payload    | object   | yes      | `{}`                 | External provider data (Stripe, etc)                |
+| created_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                   |
+| updated_at          | datetime | yes      | `2026-01-12T05:12:00Z` |                                                   |
 
 ### Link Block (core.blocks where block_group = links)
 | Name            | Type    | Nullable | Example                       | Constraints / Notes                                                                       |
@@ -483,28 +566,27 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | settings        | object  | yes      | `{ "open_in_new_tab": true }` | Allowed keys only: open_in_new_tab, rel_nofollow, rel_sponsored, rel_ugc, highlight, note |
 
 ### PublicSiteData (view of returned GET /api/public/site)
-| Name         | Type    | Nullable | Example                                                   | Constraints / Notes                            |
-|--------------|---------|----------|-----------------------------------------------------------|------------------------------------------------|
-| published    | boolean | no       | `true`                                                    | Derived from site is_published                 |
-| site         | object  | no       | `{ id, subdomain, settings, banner_bucket, banner_path }` |                                                |
-| professional | object  | no       | `{ id, handle, display_name, bio, ... }`                  | Includes public-facing image + location fields |
-| theme        | object  | yes      | `{ id, key, name, config }`                               | theme.config is an object                      |
-| blocks       | array   | no       | `[ LinkBlock \| SectionBlock ]`                           | Only active blocks are returned                |
-| gallery      | array   | no       | `[ { id, bucket, path, alt_text, sort_order } ]`          | Only active images returned                    |
-| services     | array   | no       | `[ { id, title, price_cents, ... } ]`                     | Only active services returned                  |
+| Name         | Type    | Nullable | Example                                                   | Constraints / Notes                                       |
+|--------------|---------|----------|-----------------------------------------------------------|-----------------------------------------------------------|
+| published    | boolean | no       | `true`                                                    | Derived from site is_published                            |
+| site         | object  | no       | `{ id, subdomain, settings, gallery, content_images }` | Includes gallery + content image pools with variant URLs  |
+| professional | object  | no       | `{ id, handle, display_name, bio, ... }`                  | Includes public-facing location fields                    |
+| theme        | object  | yes      | `{ id, key, name, config }`                               | theme.config is an object                                 |
+| blocks       | array   | no       | `[ LinkBlock \| SectionBlock ]`                           | Only active blocks are returned                           |
+| gallery      | array   | no       | `[ { id, pool, alt_text, sort_order, variants: {...} } ]` | Only active gallery-pool images; variants are URL maps    |
+| services     | array   | no       | `[ { id, title, price_cents, ... } ]`                     | Only active services returned                             |
 
 ### Analytics Event Payloads
-| Name                  | Type     | Nullable | Example                 | Constraints / Notes                                                              |
-|-----------------------|----------|----------|-------------------------|----------------------------------------------------------------------------------|
-| occurred_at           | datetime | no       | `2026-01-12T05:12:00Z`  | Required by validation, but Stage 1-2 currently stores server time (now)         |
-| site_id               | uuid     | yes      | `b8e7...`               | Optional if called on the correct subdomain; the API resolves site from host too |
-| session_id            | string   | yes      | `sess_abc123`           | Max 255                                                                          |
-| visitor_id            | uuid     | yes      | `f2a1...`               | Optional stable client id if you have one                                        |
-| referrer              | string   | yes      | `https://instagram.com` | Max 2048; if missing, backend uses request Referer header                        |
-| utm_source            | string   | yes      | `instagram`             | Max 120                                                                          |
-| utm_medium            | string   | yes      | `social`                | Max 120                                                                          |
-| utm_campaign          | string   | yes      | `jan_promo`             | Max 120                                                                          |
-| block_id (click only) | uuid     | no       | `d5b0...`               | Must be an active link block belonging to the site                               |
+| Name                  | Type   | Nullable | Example                 | Constraints / Notes                                                                                                     |
+|-----------------------|--------|----------|-------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| site_id               | uuid   | yes      | `b8e7...`               | Required unless subdomain is resolved from route or `X-Site-Subdomain` header                                          |
+| session_id            | uuid   | yes      | `7f1e4d6b-...`          | Optional per-session ID                                                                                                 |
+| visitor_id            | uuid   | yes      | `f2a1...`               | Optional stable visitor ID                                                                                              |
+| referrer              | string | yes      | `https://instagram.com` | Max 2048; if missing, backend uses request `Referer` header                                                            |
+| utm_source            | string | yes      | `instagram`             | Max 255                                                                                                                 |
+| utm_medium            | string | yes      | `social`                | Max 255                                                                                                                 |
+| utm_campaign          | string | yes      | `jan_promo`             | Max 255                                                                                                                 |
+| block_id (click only) | uuid   | no       | `d5b0...`               | Must belong to the site, be active, and be trackable: `links/link` or `sections/{gallery,services,shop,booking}`     |
 
 ### Plans (core.plans)
 | Name            | Type     | Nullable | Example                | Constraints / Notes     |
@@ -531,6 +613,11 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 - Accept: application/json
 - Content-Type: application/json (for JSON bodies)
 - Authorization: Bearer <SUPABASE_ACCESS_TOKEN> (authenticated routes only)
+
+### Browser CORS
+
+- Frontend browser origins must be allowed by backend CORS config.
+- If requests fail in browser but work in Postman/curl, add your frontend origin to `config/cors.php` allowed origins/patterns.
 
 ### Standard error format
 
@@ -573,42 +660,162 @@ Common status codes
 ### Rate limits (per IP)
 
 - public-site: 60 requests per minute
-- analytics: 120 requests per minute leads: 10 requests per minute
+- analytics: 120 requests per minute
+- leads: 3 requests per minute per IP, plus 100 requests per minute per subdomain
 
 ## 6) Public Mini-Site API
 
-All routes below are unauthenticated and domain-scoped to the mini-site host:
-https://{subdomain}.{COMET_PUBLIC_DOMAIN}
+All routes below are unauthenticated.
+
+Frontend can connect in 2 modes:
+
+1. Domain-scoped mini-site host  
+`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/...`
+2. Header-based API host fallback (no subdomain DNS needed)  
+`https://api.{COMET_PUBLIC_DOMAIN}/api/public/...` with header `X-Site-Subdomain: {subdomain}`
+
+For analytics endpoints, provide either `site_id` in the JSON body OR `X-Site-Subdomain` header.
+
+Frontend quick-start (header-based API host):
+
+```ts
+const API_BASE = "https://api.<COMET_PUBLIC_DOMAIN>/api/public";
+const subdomain = "fadez";
+const visitorId = localStorage.getItem("comet_visitor_id") ?? crypto.randomUUID();
+localStorage.setItem("comet_visitor_id", visitorId);
+
+const siteRes = await fetch(`${API_BASE}/site-by-slug`, {
+  headers: { "X-Site-Subdomain": subdomain }
+});
+
+await fetch(`${API_BASE}/analytics/pageviews`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "X-Site-Subdomain": subdomain
+  },
+  body: JSON.stringify({
+    session_id: crypto.randomUUID(),
+    visitor_id: visitorId
+  })
+});
+```
 
 ### `GET /api/public/site`
 
 - Purpose: fetch the published mini-site payload for rendering
 - Auth: None
-- Rate limit: public-site Response (200): { "published": true, "site": { "id": "…", "subdomain": "…", "settings": { }, "banner_bucket": null, "banner_path": null }, "professional": { "id": "…", "handle": "…", "display_name": "…", "bio": null, "icon_bucket": null, "icon_path": null }, "theme": { "id": "…", "key": "…", "name": "…", "config": { } }, "blocks": [], "gallery": [], "services": [] } Common status codes: 200, 404 (site not found), 403 (site not published)
+- Rate limit: public-site
+
+**Response (200):**
+
+```json
+{
+  "published": true,
+  "site": { "id": "uuid", "subdomain": "fadez", "settings": {}, "gallery": [], "content_images": [] },
+  "professional": { "id": "uuid", "handle": "fadez", "display_name": "Fadez Studio", "bio": null },
+  "theme": { "id": "uuid", "key": "modern", "name": "Modern", "config": {} },
+  "links": [],
+  "sections": [],
+  "blocks": [],
+  "services": [],
+  "legal": {
+    "privacy_policy": "## Privacy Policy\\n...",
+    "terms_and_conditions": "## Terms and Conditions\\n...",
+    "active_privacy_source": "templated",
+    "active_terms_source": "templated"
+  }
+}
+```
+
+**Common status codes:** 200, 403 (site not published), 404 (site not found), 429
 
 ### `POST /api/public/analytics/pageviews`
 
 - Purpose: record a page view
 - Auth: None
-- Rate limit: analytics Request body: { "occurred_at": "2026-01-12T05:12:00Z", "site_id": "optional uuid", "session_id": "optional string", "visitor_id": "optional uuid", "referrer": "optional string", "utm_source": "optional string", "utm_medium": "optional string", "utm_campaign": "optional string" } Response (201): { "message": "Pageview recorded", "visit_id": "uuid" } Common status codes: 201, 404, 403, 422, 429
+- Rate limit: analytics
+
+**Request body:**
+
+```json
+{
+  "site_id": "optional-uuid",
+  "session_id": "optional-uuid",
+  "visitor_id": "optional-uuid",
+  "referrer": "optional string",
+  "utm_source": "optional string",
+  "utm_medium": "optional string",
+  "utm_campaign": "optional string"
+}
+```
+
+**Response (201):**
+
+```json
+{
+  "message": "Pageview recorded",
+  "visit_id": "uuid"
+}
+```
+
+**Notes:** `occurred_at` is generated server-side.
+
+**Common status codes:** 201, 403, 404, 422, 429
 
 ### `POST /api/public/analytics/clicks`
 
-- Purpose: record a link click
+- Purpose: record a link click or supported section interaction
 - Auth: None
-- Rate limit: analytics Request body: { "occurred_at": "2026-01-12T05:12:00Z", "block_id": "uuid", "site_id": "optional uuid", "session_id": "optional string", "visitor_id": "optional uuid", "referrer": "optional string", "utm_source": "optional string", "utm_medium": "optional string", "utm_campaign": "optional string" } Response (201): { "message": "Click recorded", "click_id": "uuid" } Common status codes: 201, 404 (site or block), 403 (unpublished or inactive), 422, 429
+- Rate limit: analytics
+
+**Request body:**
+
+```json
+{
+  "block_id": "required-uuid",
+  "site_id": "optional-uuid",
+  "session_id": "optional-uuid",
+  "visitor_id": "optional-uuid",
+  "referrer": "optional string",
+  "utm_source": "optional string",
+  "utm_medium": "optional string",
+  "utm_campaign": "optional string"
+}
+```
+
+**Response (201):**
+
+```json
+{
+  "message": "Click recorded",
+  "click_id": "uuid"
+}
+```
+
+`message` is `"Section interaction recorded"` when the clicked block is a supported section block.
+
+**Common status codes:** 201, 403 (unpublished or inactive block), 404 (site or block), 422 (not trackable/validation), 429
 
 ### `POST /api/public/customers`
 
 - Purpose: submit a customer lead (name + contact details)
 - Auth: None
-- Rate limit: leads Request body: { "occurred_at": "2026-01-12T05:12:00Z", "full_name": "Sam Smith", "email": "sam@example.com", "phone": "+61411111111", "notes": "optional", "form_started_at_ms": 1700000000000 } Response (201): { "message": "Lead captured", "lead_id": "uuid" } Common status codes: 201, 404, 403, 422, 429
+- Rate limit: leads
+- Site resolution order: `X-Site-Subdomain` header -> `subdomain`/`slug` query -> `subdomain`/`slug` body -> host subdomain
+- Request body (example): `{ "full_name": "Sam Smith", "email": "sam@example.com", "phone": "+61411111111", "notes": "optional", "marketing_opt_in": true, "form_started_at_ms": 1700000000000 }`
+- Response (201): `{ "ok": true, "customer_id": "uuid" }`
+- Common status codes: 201, 400 (cannot determine site), 404, 403, 422, 429
 
 ### `POST /api/public/subscribe`
 
 - Purpose: subscribe an email address to a marketing list for the professional
 - Auth: None
-- Rate limit: public-site Request body: { "email": "sam@example.com", "full_name": "Sam Smith", "list_key": "marketing" } Response (200): { "ok": true, "subscribed": true, "list_key": "marketing" } Common status codes: 200, 404, 400 (cannot determine site), 422, 429
+- Rate limit: public-site
+- Site resolution order: `X-Site-Subdomain` header -> `subdomain`/`slug` query -> `subdomain`/`slug` body -> host subdomain
+- Request body: `{ "email": "sam@example.com", "full_name": "Sam Smith", "list_key": "marketing" }`
+- Response (200): `{ "ok": true, "subscribed": true, "list_key": "marketing" }`
+- Common status codes: 200, 404, 400 (cannot determine site), 422, 429
 
 ### `GET /api/public/marketing-preference`
 
@@ -848,6 +1055,22 @@ For frontends that cannot use subdomain DNS routing, the following endpoints acc
 
 **Common status codes:** Same as corresponding domain-scoped endpoints, plus 400 (missing header)
 
+#### `POST /api/public/analytics/pageviews`
+#### `POST /api/public/analytics/clicks`
+
+- Purpose: header-based variants of the analytics endpoints (record page views and link clicks)
+- Auth: None
+- Rate limit: analytics
+- Headers: `X-Site-Subdomain` (required if `site_id` is not in the request body): the site subdomain slug
+
+**Behavior:** Identical to the domain-scoped analytics endpoints above. The `PageviewRequest` and `ClickRequest` form requests automatically resolve the subdomain from the `X-Site-Subdomain` header when no route-level subdomain is present. You must provide either `site_id` in the body OR the `X-Site-Subdomain` header — otherwise validation returns 422.
+
+**Request body:** Same as domain-scoped versions (`POST /api/public/analytics/pageviews` and `POST /api/public/analytics/clicks` documented above).
+
+**Response:** Same as corresponding domain-scoped endpoints.
+
+**Common status codes:** Same as corresponding domain-scoped endpoints (201, 404, 403, 422, 429)
+
 ---
 
 #### Payment Method Notes
@@ -867,19 +1090,62 @@ All routes below require: Authorization header AND a professional profile (curre
 ### `GET /api/me`
 
 - Purpose: bootstrap dashboard UI with current professional, site, blocks, services, and customer count
-- Auth: Required Response (200): { "uid": "supabase-user-uuid", "professional": { "...": "..." }, "site": { "...": "..." }, "blocks": [], "services": [], "customers_count": 0 } Common status codes: 200, 401, 403
+- Auth: Required
+- Response (200): `{ "uid": "supabase-user-uuid", "professional": { ... }, "site": { ... }, "legal_content": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
+- Common status codes: 200, 401, 403
 
 ### `PATCH /api/me`
 
-- Purpose: update professional profile fields Request body (all fields optional; if provided they are validated): { "display_name": "Josh Barber", "bio": "Mobile barber", "public_contact_email": "bookings@example.com", "icon_bucket": "public-assets", "icon_path": "professionals/<proId>/icon.jpg" } Response (200): { professional: ... } Common status codes: 200, 401, 403, 422
+- Purpose: update professional profile fields
+- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "public_contact_email": "bookings@example.com" }`
+- Response (200): `{ "professional": { ... } }`
+- Common status codes: 200, 401, 403, 422
+- Images are managed via `POST /api/uploads` (pool=gallery or pool=content). No image fields are accepted on this endpoint.
 
 ### `GET /api/site`
 
-- Purpose: fetch site record for the logged-in professional Response (200): { site: ... }
+- Purpose: fetch site record for the logged-in professional
+- Response (200): `{ "site": { ... } }`
 
 ### `PATCH /api/site`
 
-- Purpose: update site settings, subdomain, theme_id, and banner image fields Request body: { "subdomain": "joshbarber", "theme_id": "uuid or null", "settings": { "primary_color": "#000000" }, "banner_bucket": "public-assets", "banner_path": "sites/<siteId>/banner.jpg" } Response (200): { site: ... } Common status codes: 200, 401, 403, 422
+- Purpose: update site settings, subdomain, and theme_id
+- Request body: `{ "subdomain": "joshbarber", "theme_id": "uuid or null", "settings": { "primary_color": "#000000" } }`
+- Response (200): `{ "site": { ... } }`
+- Common status codes: 200, 401, 403, 422
+- Banners are managed via `POST /api/uploads` (pool=content) and the frontend picks from `optimized` / `maximized`. No banner fields are accepted on this endpoint.
+
+### `GET /api/site/google-business-profile`
+
+- Purpose: fetch the professional's saved Google Business Profile details from site settings
+- Auth: Required
+- Response (200): `{ "google_business_profile": { "place_id": "...", "name": "...", "address": "...", "latitude": -37.8, "longitude": 144.9, "phone": "...", "website": "...", "hours": ["Mon: 9:00-17:00"] } }` or `null`
+- Common status codes: 200, 401, 403
+
+### `PUT /api/site/google-business-profile`
+
+- Purpose: upsert Google Business Profile details into site settings
+- Auth: Required
+- Request body: `{ "place_id": "ChIJ...", "name": "Fadez Studio", "address": "...", "latitude": -37.8, "longitude": 144.9, "phone": "+61...", "website": "https://...", "hours": ["Mon: 9:00-17:00"] }`
+- Response (200): `{ "google_business_profile": { ... } }`
+- Common status codes: 200, 401, 403, 422
+
+### `GET /api/site/legal-content`
+
+- Purpose: fetch generated/manual legal content and current active sources for the logged-in professional
+- Auth: Required
+- Response (200): `{ "legal_content": { "generated_privacy_policy": "...", "manual_privacy_policy": "...", "active_privacy_source": "templated", "active_privacy_policy": "...", "generated_terms_and_conditions": "...", "manual_terms_and_conditions": "...", "active_terms_source": "templated", "active_terms_and_conditions": "...", "template_variables": { ... }, "generated_at": "...", "updated_at": "..." } }`
+- Common status codes: 200, 401, 403
+
+### `PUT /api/site/legal-content`
+### `PATCH /api/site/legal-content`
+
+- Purpose: save manual legal text, toggle active sources, or regenerate templated documents
+- Auth: Required
+- Request body (all fields optional): `{ "manual_privacy_policy": "...", "manual_terms_and_conditions": "...", "active_privacy_source": "templated|manual", "active_terms_source": "templated|manual", "regenerate_templated": true }`
+- Behavior: if active source is `manual` but manual content is empty, source is forced back to `templated` (never blank output)
+- Response (200): `{ "legal_content": { ... } }`
+- Common status codes: 200, 401, 403, 422
 
 ### `PATCH /api/site/visibility`
 
@@ -971,7 +1237,7 @@ All routes below require: Authorization header AND a professional profile (curre
 - DELETE /api/links/{block}
 - POST /api/links/reorder Store/Update body: { "title": "Book now", "url": "https://booking.example.com", "icon_key": "calendar", "is_active": true, "settings": { "open_in_new_tab": true } } Common status codes: 200, 201, 401, 403, 404, 422 Sections (Section blocks)
 
-Allowed section block types are defined in config: gallery, services, education, social, booking, bio, work_history, promotional_text
+Allowed section block types are defined in config: `gallery`, `services`, `shop`, `booking`, `barbershop_info`
 
 - GET /api/sections
 - PUT /api/sections/{blockType}
@@ -1010,14 +1276,136 @@ Allowed section block types are defined in config: gallery, services, education,
 **Note:** `marketing_opt_in_cached` is a UX cache of the source-of-truth `EmailSubscription.status`. Defaults to `true` for new customers. When professionals update this field:
 - Setting to `true` enables marketing emails
 - Setting to `false` disables marketing emails
-- Cache auto-syncs when EmailSubscription status changes Themes
-- GET /api/themes
-- POST /api/themes/{theme}/select Select response: { site: ... } Uploads prepare
-- POST /api/uploads/prepare Request body: { "type": "icon", "content_type": "image/jpeg" } Response (200): { "bucket": "public-assets", "path": "professionals/<proId>/icon.jpg", "upsert": true } Gallery
-- GET /api/gallery
-- POST /api/gallery
-- POST /api/gallery/reorder
-- DELETE /api/gallery/{image} Store body: { "bucket": "public-assets", "path": "sites/<siteId>/gallery/<uuid>.jpg", "alt_text": "Optional" } Business rule: max 6 active gallery images (422 if exceeded).
+- Cache auto-syncs when EmailSubscription status changes
+
+### Themes
+
+- `GET /api/themes`
+- `POST /api/themes/{theme}/select`
+- Select response: `{ "site": { ... } }`
+
+### Store: Featured Products
+
+#### `GET /api/store/featured-products`
+
+- Purpose: get selected Shopify products for the logged-in professional
+- Auth: Required
+- Response (200): `{ "selected_products": [{ "id": "uuid", "shopify_product_id": "gid://shopify/Product/...", "sort_order": 0, "commission_override": null }], "default_commission_rate": 15, "max_featured_products": 10 }`
+- Notes:
+  - Reads from `retail.professional_selections` when available.
+  - If retail table is unavailable, read path falls back to legacy `site.settings.selected_products`.
+- Common status codes: 200, 401, 403
+
+#### `PUT /api/store/featured-products`
+
+- Purpose: replace the full featured-products list
+- Auth: Required
+- Request body:
+  - `products`: array (max configured limit, default 10)
+  - `products[].shopify_product_id`: required string
+  - `products[].sort_order`: optional integer >= 0
+  - `products[].commission_override`: optional nullable number (0-100)
+- Response (200): same shape as GET endpoint
+- Notes:
+  - Write path requires `retail.professional_selections`; if unavailable, returns 503.
+  - Duplicate product IDs are rejected.
+- Common status codes: 200, 401, 403, 422, 503
+
+### Image Uploads (server-side processing)
+
+Images are uploaded through the Comet API (not directly to storage). The server stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and generates two full-resolution WebP variants (`optimized`, `maximized`).
+
+**Queue modes:**
+- `QUEUE_CONNECTION=sync` (default for dev / early production): variants are generated **inline** during the upload request (~2-5 sec). The response contains completed variants immediately with `processing: false`. No queue worker needed.
+- `QUEUE_CONNECTION=database` or `redis` (recommended for scale): the upload returns instantly with `processing: true`, and a background queue job generates variants async. Frontend polls `GET /api/images` until `processing: false`.
+
+#### `POST /api/uploads`
+
+- Auth: Required (professional)
+- Content-Type: `multipart/form-data`
+- Request body:
+  - `pool` (required): `gallery` or `content`
+  - `image` (required): file upload (JPEG, PNG, or WebP; max 10 MB)
+  - `alt_text` (optional): string, max 255
+- Response (201) — sync mode (default):
+```json
+{
+  "id": "uuid",
+  "pool": "gallery",
+  "original_path": "images/<proId>/<imageId>/original_abc123.jpg",
+  "processing": false,
+  "variants": {
+    "optimized": "https://cdn.example.com/images/.../optimized_abc123.webp",
+    "maximized": "https://cdn.example.com/images/.../maximized_def456.webp"
+  }
+}
+```
+- Response (201) — async mode (`QUEUE_CONNECTION=database` or `redis`):
+```json
+{
+  "id": "uuid",
+  "pool": "gallery",
+  "original_path": "images/<proId>/<imageId>/original_abc123.jpg",
+  "processing": true
+}
+```
+- `processing: false` + `variants` when `QUEUE_CONNECTION=sync` (variants generated inline). `processing: true` (no `variants` key) when using a queue worker — poll `GET /api/images` until done.
+- Business rules:
+  - Max 5 gallery images per professional (configurable via `COMET_GALLERY_IMAGE_MAX`)
+  - Max 5 content images per professional (configurable via `COMET_CONTENT_IMAGE_MAX`)
+  - Race-safe: uses PostgreSQL advisory locks to enforce pool limits under concurrent uploads
+- Variants: 2 full-resolution WebP outputs
+  - `optimized`: adaptive quality targeting `COMET_IMAGE_TARGET_KB` (default 500KB)
+  - `maximized`: highest quality output for detail-heavy views
+- Common status codes: 201, 401, 403, 422 (pool limit exceeded or validation errors)
+
+#### `GET /api/images`
+
+- Auth: Required (professional)
+- Query params:
+  - `pool` (optional): `gallery` or `content` — filters by pool; omit for all images
+- Response (200):
+```json
+{
+  "images": [
+    {
+      "id": "uuid",
+      "pool": "gallery",
+      "alt_text": "Fade haircut",
+      "sort_order": 0,
+      "variants": {
+        "optimized": "https://cdn.example.com/images/.../optimized_abc123.webp",
+        "maximized": "https://cdn.example.com/images/.../maximized_def456.webp"
+      },
+      "processing": false,
+      "created_at": "2026-03-02T10:00:00Z",
+      "updated_at": "2026-03-02T10:00:05Z"
+    }
+  ],
+  "limits": {
+    "gallery": 5,
+    "content": 5
+  }
+}
+```
+- Note: `processing: true` means variants have not been generated yet (queue job still running). `variants` will be an empty object in that case.
+- Common status codes: 200, 401, 403
+
+#### `DELETE /api/images/{image}`
+
+- Auth: Required (professional)
+- Deletes the image, all its WebP variants from storage, and the original file
+- Response (200): `{ "deleted": true }`
+- Common status codes: 200, 401, 403, 404
+
+### Gallery (ordering & legacy routes)
+
+Gallery-pool images can also be accessed / managed via the legacy gallery routes:
+
+- `GET /api/gallery` — list gallery-pool images with variants (same format as GET /api/images?pool=gallery)
+- `POST /api/gallery` — **deprecated (410)**: use `POST /api/uploads` with `pool=gallery` instead
+- `POST /api/gallery/reorder` — reorder gallery images; body: `{ "ids": ["uuid1", "uuid2", ...] }`
+- `DELETE /api/gallery/{image}` — delete a gallery image and its variants
 
 ### Square Integration
 
@@ -1218,39 +1606,62 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - PUT /api/staff/professionals/{professional}/sections/{blockType}
 - POST /api/staff/professionals/{professional}/sections/reorder
 - DELETE /api/staff/professionals/{professional}/sections/{blockType}
+- GET /api/staff/professionals/{professional}/subscription
+- PATCH /api/staff/professionals/{professional}/subscription
+- POST /api/staff/professionals/{professional}/subscription/cancel
+- POST /api/staff/professionals/{professional}/subscription/resume
 - POST /api/staff/notifications Staff analytics summary endpoints Stage 1-2 staff analytics is:
 - GET /api/staff/professionals/{professional}/analytics It returns totals, daily charts, and top links for the selected professional.
 
 It requires a staff JWT (core.comet_staff).
 
-## 9) Supabase Storage uploads (RLS behavior + frontend upload flow)
+## 9) Image uploads & processing (server-side WebP)
 
-Uploads are direct-from-frontend to Supabase Storage. Comet provides the path rules via /api/uploads/prepare.
+Images are uploaded through the Comet API and processed entirely server-side. No direct-to-storage uploads from the frontend.
 
-### Supported upload types
+### Architecture
 
-### icon: professionals/<professional_id>/icon.<ext> (upsert true)
+1. Frontend sends `POST /api/uploads` with `pool` (gallery or content) and the image file as `multipart/form-data`.
+2. The server validates the file, stores the original on the **media disk** (Laravel Cloud Object Storage / Cloudflare R2), creates a `site_images` row.
+3. Variant generation runs either **inline** (`QUEUE_CONNECTION=sync` — no worker needed, ~2-5 sec response) or **async** via queue job (`QUEUE_CONNECTION=database`/`redis` — returns instantly, worker processes in background).
+4. When async: frontend polls `GET /api/images` — when `processing` flips to `false`, the `variants` map is populated with CDN URLs. When sync: variants are ready in the upload response.
 
--
-- headshot: professionals/<professional_id>/headshot.<ext> (upsert true)
-- banner: sites/<site_id>/banner.<ext> (upsert true)
-- gallery: sites/<site_id>/gallery/<uuid>.<ext> (upsert false, max 6 active images)
+### Queue modes
 
-### Allowed content types: image/jpeg, image/png, image/webp
+| Mode | Env var | Worker needed? | Upload response time | Frontend polling? |
+|------|---------|---------------|---------------------|------------------|
+| **Sync** (dev / early prod) | `QUEUE_CONNECTION=sync` | No | ~2-5 seconds | No — variants ready immediately |
+| **Async** (scaled prod) | `QUEUE_CONNECTION=database` or `redis` | Yes (1+ worker) | ~50-100ms | Yes — poll until `processing: false` |
+
+Switch between modes with zero code changes — just change the env var and optionally add a queue worker.
+
+### Image pools
+
+Each professional has two image pools:
+
+- **gallery** — portfolio / work showcase images (max configurable, default 5)
+- **content** — general-purpose branding images; frontend typically uses:
+  - `optimized` for normal display/performance
+  - `maximized` for zoom/full-detail or hero-style displays
+
+### Content-hashed filenames & CDN caching
+
+All variant filenames include a 16-char SHA-256 hash (for example, `optimized_abc123def456.webp`). The media disk is configured with `Cache-Control: public, max-age=31536000, immutable`, so CDN / browser caches are aggressive. When an image is re-processed, the hash (and therefore URL) changes, automatically busting the cache.
 
 ### Frontend upload flow
 
-1. Call POST /api/uploads/prepare with type and content_type.
-2. Use Supabase Storage client with the logged-in user session to upload to the returned bucket + path.
-3. If type is icon or headshot: PATCH /api/me to set icon_bucket/icon_path or headshot_bucket/headshot_path.
-4. If type is banner: PATCH /api/site to set banner_bucket/banner_path.
-5. If type is gallery: POST /api/gallery with bucket + path (+ optional alt_text) to create the DB row.
+1. `POST /api/uploads` with `pool=gallery` (or `content`), `image=<file>`, optional `alt_text`.
+2. If response has `processing: true` → poll `GET /api/images?pool=gallery` until `processing: false`. If `processing: false` → variants are already available in the response.
+3. Use the `variants` map to pick the right URL for each UI context (typically `variants.optimized`, or `variants.maximized` where detail quality matters).
+4. To delete: `DELETE /api/images/{image}`.
+5. To reorder gallery: `POST /api/gallery/reorder` with `{ "ids": [...] }`.
 
-### Storage RLS notes
+### Supported file types
 
-- Storage access is controlled by policies on storage.objects.
-- Paths are validated server-side when creating gallery DB rows.
-- If storage upload returns 403, the bucket policy does not allow that path for the current user.
+- JPEG (`image/jpeg`)
+- PNG (`image/png`)
+- WebP (`image/webp`)
+- Max upload size: 10 MB (configurable via `COMET_IMAGE_MAX_UPLOAD_KB`)
 
 ## 10) Test users and getting tokens
 
@@ -1288,8 +1699,9 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 - SUPABASE_ANON_KEY
 - API_BASE_URL (example: https://api.comet.app/api)
 - PUBLIC_DOMAIN (example: comet.app or localtest.me)
-- MEDIA_BUCKET (default: public-assets)
 - Optionally: STAFF_DASHBOARD_ENABLED flag if you ship staff tooling in the same frontend
+
+Note: The frontend does not need any storage credentials — all image URLs come from the API `variants` map.
 
 ## 13) Backend env var checklist
 
@@ -1299,7 +1711,7 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 - LOG_LEVEL Database
 - DB_CONNECTION=pgsql
 - DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD
-- DB_SEARCH_PATH (recommended: public,core,analytics)
+- DB_SEARCH_PATH (recommended: public,core,analytics,billing,retail)
 - DB_STATEMENT_TIMEOUT (ms), DB_LOCK_TIMEOUT (ms)
 
 ### Supabase JWT verification
@@ -1314,8 +1726,30 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 ### Comet app settings
 
 - COMET_PUBLIC_DOMAIN (used for domain-scoped public routes)
-- COMET_MEDIA_BUCKET (default: public-assets)
+- COMET_MEDIA_DISK (default: media — the Laravel filesystem disk name)
+- COMET_GALLERY_IMAGE_MAX (default: 5)
+- COMET_CONTENT_IMAGE_MAX (default: 5)
+- COMET_IMAGE_MAX_UPLOAD_KB (default: 10240 = 10 MB)
+- COMET_LEGAL_SITE_SCHEME (default: `https`)
+- COMET_LEGAL_DEFAULT_CONTACT_NAME (default: `Customer Support`)
+- COMET_LEGAL_DEFAULT_SUPPORT_EMAIL (default: `support@comet.app`)
+- COMET_LEGAL_DEFAULT_SUPPORT_PHONE (default: `N/A`)
 - SOFT_DELETE_RETENTION_DAYS (default: 30)
+
+### Media disk (Laravel Cloud Object Storage / Cloudflare R2)
+
+**On Laravel Cloud:** No manual env vars needed. Create a bucket in the Cloud dashboard, and set:
+- `COMET_MEDIA_DISK` = the disk name from `LARAVEL_CLOUD_DISK_CONFIG` (e.g., `public_dev`)
+
+Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The image system reads `COMET_MEDIA_DISK` to find the right disk.
+
+**Self-managed (standalone R2 / AWS S3):** Configure the `media` disk manually:
+- MEDIA_DISK_KEY (S3 access key)
+- MEDIA_DISK_SECRET (S3 secret key)
+- MEDIA_DISK_REGION (default: auto)
+- MEDIA_DISK_BUCKET (default: comet-media)
+- MEDIA_DISK_URL (public CDN base URL)
+- MEDIA_DISK_ENDPOINT (R2/custom S3 endpoint URL)
 
 ### Square integration
 
@@ -1330,10 +1764,10 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 - FRESHA_WEBHOOK_SIGNATURE_KEY (HMAC key for validating Fresha webhook signatures)
 - FRESHA_WEBHOOK_NOTIFICATION_URL (URL Fresha sends webhook events to)
 
-### Optional: cache, queues, mail (needed for staff broadcast emails)
+### Optional: cache, queues, mail
 
 - CACHE_STORE, REDIS_URL or REDIS_HOST/REDIS_PASSWORD
-- QUEUE_CONNECTION (redis recommended)
+- QUEUE_CONNECTION: `sync` (no worker needed — processes inline) | `database` | `redis` (worker required; recommended for scale)
 - MAIL_MAILER, MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_FROM_ADDRESS
 
 ## 14) Known implementation gotchas
@@ -1345,11 +1779,14 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 
 ### Analytics timestamps
 
-- Public analytics requests require occurred_at for validation, but Stage 1-2 stores server time (now) in the database.
-
-Send the current time anyway.
+- Public analytics endpoints set `occurred_at` server-side (`now()`).
+- Frontend does not need to send `occurred_at`.
 
 ### Gallery limits and ordering
 
-- Max 6 active gallery images. The prepare endpoint and the gallery store endpoint both enforce this.
-- Reorder endpoints accept an ids array; any omitted ids will be appended in existing order.
+- Gallery pool: max 5 active images (configurable via `COMET_GALLERY_IMAGE_MAX`). Content pool: max 5 (via `COMET_CONTENT_IMAGE_MAX`).
+- Pool limits are enforced server-side with PostgreSQL advisory locks for race safety.
+- `POST /api/uploads` validates the pool limit before creating a new image.
+- Reorder endpoint (`POST /api/gallery/reorder`) accepts an `ids` array; any omitted ids will be appended in existing order.
+- Variants are generated inline (sync mode) or asynchronously (queue mode). If async, poll `GET /api/images` until `processing: false`.
+- Content-hashed variant URLs are immutable for CDN caching; re-processing generates new URLs automatically.

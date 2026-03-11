@@ -3,6 +3,7 @@
 namespace App\Services\Fresha;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Professional\ServiceCategory;
 use Carbon\CarbonImmutable;
@@ -23,13 +24,14 @@ class FreshaServiceSyncService
      */
     public function syncFromFresha(Professional $professional, bool $fullSync = false, ?string $beginTimeOverride = null): array
     {
-        if (empty($professional->fresha_access_token) || empty($professional->fresha_business_id)) {
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_FRESHA);
+        if (! $integration || empty($integration->access_token) || empty($integration->external_account_id)) {
             return ['synced' => 0, 'deleted' => 0, 'latest_time' => null];
         }
 
         $beginTime = $beginTimeOverride;
-        if ($beginTime === null && ! $fullSync && $professional->fresha_catalog_latest_time) {
-            $beginTime = $professional->fresha_catalog_latest_time->toIso8601String();
+        if ($beginTime === null && ! $fullSync && $integration->catalog_latest_time) {
+            $beginTime = $integration->catalog_latest_time->toIso8601String();
         }
 
         try {
@@ -168,16 +170,16 @@ class FreshaServiceSyncService
                 }
             });
 
-            $professional->fresha_catalog_latest_time = $latestTime ? CarbonImmutable::parse($latestTime) : now();
-            $professional->fresha_last_catalog_sync_at = now();
-            $professional->fresha_last_catalog_sync_error = null;
-            $professional->save();
+            $integration->catalog_latest_time = $latestTime ? CarbonImmutable::parse($latestTime) : now();
+            $integration->last_catalog_sync_at = now();
+            $integration->last_catalog_sync_error = null;
+            $integration->save();
 
             return ['synced' => $syncedCount, 'deleted' => $deletedCount, 'latest_time' => $latestTime];
         } catch (\Throwable $e) {
-            $professional->fresha_last_catalog_sync_error = mb_substr($e->getMessage(), 0, 2000);
-            $professional->fresha_last_catalog_sync_at = now();
-            $professional->save();
+            $integration->last_catalog_sync_error = mb_substr($e->getMessage(), 0, 2000);
+            $integration->last_catalog_sync_at = now();
+            $integration->save();
             throw $e;
         }
     }
@@ -195,7 +197,8 @@ class FreshaServiceSyncService
         if (! $professional) {
             return;
         }
-        if (empty($professional->fresha_access_token) || empty($professional->fresha_business_id)) {
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_FRESHA);
+        if (! $integration || empty($integration->access_token) || empty($integration->external_account_id)) {
             return;
         }
 

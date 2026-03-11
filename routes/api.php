@@ -2,8 +2,12 @@
 
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
+use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
+use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
+use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
+use App\Http\Controllers\Api\PublicSite\PublicStoreController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
 use Illuminate\Support\Facades\Route;
@@ -49,5 +53,19 @@ Route::post('/public/booking/availability-by-slug', [PublicBookingController::cl
     ->middleware('throttle:public-site');
 Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
     ->middleware('throttle:public-site');
+Route::get('/public/store/featured-products-by-slug', [PublicStoreController::class, 'featuredProducts'])
+    ->middleware('throttle:public-site');
+
+// Header/site-id based fallback for path-based frontend routing.
+Route::post('/public/analytics/pageviews', [AnalyticsController::class, 'pageview'])
+    ->middleware('throttle:analytics');
+Route::post('/public/analytics/clicks', [AnalyticsController::class, 'click'])
+    ->middleware('throttle:analytics');
+
+Route::post('/public/subscribe', [PublicEmailSubscriptionController::class, 'subscribe'])
+    ->middleware('throttle:public-site');
+
+Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])
+    ->middleware(['lead.log', 'throttle:leads']);
 
 Route::get('/ready', [HealthController::class, 'check']);

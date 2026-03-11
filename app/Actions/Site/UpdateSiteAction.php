@@ -115,6 +115,8 @@ class UpdateSiteAction
         if (array_key_exists('settings', $data)) {
             $existing = is_array($site->settings) ? $site->settings : [];
             $incoming = is_array($data['settings']) ? $data['settings'] : [];
+            // Product selections are stored in retail.professional_selections, not site settings JSON.
+            unset($incoming['selected_products']);
             $data['settings'] = array_replace_recursive($existing, $incoming);
         }
 
@@ -130,24 +132,7 @@ class UpdateSiteAction
                     ]);
                 }
 
-                // Must have at least one active link block
-                $hasActiveBlock = $site->linkBlocks()->where('is_active', true)->exists();
-                if (!$hasActiveBlock) {
-                    throw ValidationException::withMessages([
-                        'is_published' => ['Cannot publish: Site must have at least one active link block.'],
-                    ]);
-                }
 
-                // Must have hero title in settings (use merged settings if provided)
-                $settings = array_key_exists('settings', $data)
-                    ? (is_array($data['settings']) ? $data['settings'] : [])
-                    : (is_array($site->settings) ? $site->settings : []);
-
-                if (empty($settings['hero_title'])) {
-                    throw ValidationException::withMessages([
-                        'is_published' => ['Cannot publish: Site must have a hero title in settings.'],
-                    ]);
-                }
             }
         }
 

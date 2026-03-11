@@ -7,8 +7,10 @@ use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
+use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Support\Facades\Log;
 
 class ProfessionalController extends ApiController
@@ -16,12 +18,13 @@ class ProfessionalController extends ApiController
 
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
-    public function show(ProfessionalShowRequest $request)
+    public function show(ProfessionalShowRequest $request, ProfessionalLegalContentService $legalService)
     {
         $uid = $request->attributes->get('supabase_uid');
         Log::info('/api/me start');
 
         $pro = $this->currentProfessional($request);
+        $squareIntegration = $pro->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
         Log::info('/api/me after currentProfessional', ['pro_id' => $pro->id]);
 
         $cache = app(ProfessionalCacheService::class);
@@ -56,10 +59,6 @@ class ProfessionalController extends ApiController
                 'qr_slug' => $pro->qr_slug,
                 'public_contact_number' => $pro->public_contact_number,
                 'public_contact_email' => $pro->public_contact_email,
-                'icon_bucket' => $pro->icon_bucket,
-                'icon_path' => $pro->icon_path,
-                'headshot_bucket' => $pro->headshot_bucket,
-                'headshot_path' => $pro->headshot_path,
                 'location_street_address' => $pro->location_street_address,
                 'location_city' => $pro->location_city,
                 'location_state' => $pro->location_state,
@@ -67,8 +66,10 @@ class ProfessionalController extends ApiController
                 'location_country' => $pro->location_country,
                 'created_at' => optional($pro->created_at)->toIso8601String(),
                 'updated_at' => optional($pro->updated_at)->toIso8601String(),
-                'square_connected' => !empty($pro->square_access_token) && !empty($pro->square_merchant_id),
-                'square_merchant_id' => $pro->square_merchant_id,
+                'square_connected' => $squareIntegration
+                    && ! empty($squareIntegration->access_token)
+                    && ! empty($squareIntegration->external_account_id),
+                'square_merchant_id' => $squareIntegration?->external_account_id,
             ],
             'site' => $pro->site ? [
                 'id' => $pro->site->id,
@@ -77,6 +78,8 @@ class ProfessionalController extends ApiController
                 'settings' => $pro->site->settings,
             ] : null,
         ];
+
+        $legal = $legalService->getOrCreate($pro, $pro->site);
 
         $services = $cache->getActiveServices($pro->id);
         $customersCount = $cache->getCustomerCount($pro->id);
@@ -87,6 +90,7 @@ class ProfessionalController extends ApiController
         return $this->success([
             'uid' => $uid,
             ...$payload,
+            'legal_content' => $legalService->toApiPayload($legal),
             'blocks' => $blocks,
             'services' => $services,
             'customers_count' => $customersCount,

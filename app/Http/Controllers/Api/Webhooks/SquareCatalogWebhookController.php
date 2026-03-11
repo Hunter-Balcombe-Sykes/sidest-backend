@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Api\ApiController;
 use App\Jobs\Square\SyncSquareCatalogDeltaJob;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Square\SquareServiceSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -47,15 +48,10 @@ class SquareCatalogWebhookController extends ApiController
         }
 
         if ($eventType === 'oauth.authorization.revoked') {
-            Professional::query()
-                ->where('square_merchant_id', $merchantId)
-                ->update([
-                    'square_access_token' => null,
-                    'square_refresh_token' => null,
-                    'square_merchant_id' => null,
-                    'square_expires_at' => null,
-                    'square_last_catalog_sync_error' => null,
-                ]);
+            ProfessionalIntegration::query()
+                ->where('provider', ProfessionalIntegration::PROVIDER_SQUARE)
+                ->where('external_account_id', $merchantId)
+                ->delete();
 
             return $this->success(['received' => true, 'revoked' => true]);
         }
@@ -74,9 +70,14 @@ class SquareCatalogWebhookController extends ApiController
                 'message' => $dispatchError->getMessage(),
             ]);
 
-            $professional = Professional::query()
-                ->where('square_merchant_id', $merchantId)
+            $integration = ProfessionalIntegration::query()
+                ->where('provider', ProfessionalIntegration::PROVIDER_SQUARE)
+                ->where('external_account_id', $merchantId)
                 ->first();
+
+            $professional = $integration
+                ? Professional::query()->find($integration->professional_id)
+                : null;
 
             if (! $professional) {
                 return $this->success([

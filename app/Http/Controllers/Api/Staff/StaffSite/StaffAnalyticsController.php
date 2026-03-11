@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Staff\StaffSite;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Models\Analytics\LinkClick;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -58,7 +59,7 @@ class StaffAnalyticsController extends ApiController
         }
 
         // Totals (visits)
-        $visitsAgg = DB::table('site_visits')
+        $visitsAgg = DB::table('analytics.site_visits')
             ->where('professional_id', $professional->id)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw('COUNT(*) as total_visits')
@@ -66,20 +67,36 @@ class StaffAnalyticsController extends ApiController
             ->selectRaw('MAX(occurred_at) as last_visit_at')
             ->first();
 
-        // Totals (clicks)
-        $clicksAgg = DB::table('link_clicks')
-            ->where('professional_id', $professional->id)
-            ->whereBetween('occurred_at', [$from, $to])
-            ->selectRaw('COUNT(*) as total_clicks')
-            ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_clickers')
-            ->selectRaw('MAX(occurred_at) as last_click_at')
-            ->first();
+        // Defaults ensure visit analytics still works if click analytics queries fail.
+        $clicksAgg = (object) [
+            'total_clicks' => 0,
+            'unique_clickers' => 0,
+            'last_click_at' => null,
+        ];
+        $clicksByDay = collect();
+        $topLinks = collect();
+
+        try {
+            $clicksAgg = DB::table('analytics.link_clicks')
+                ->where('professional_id', $professional->id)
+                ->whereBetween('occurred_at', [$from, $to])
+                ->selectRaw('COUNT(*) as total_clicks')
+                ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_clickers')
+                ->selectRaw('MAX(occurred_at) as last_click_at')
+                ->first();
+        } catch (Throwable) {
+            $clicksAgg = (object) [
+                'total_clicks' => 0,
+                'unique_clickers' => 0,
+                'last_click_at' => null,
+            ];
+        }
 
         $totalVisits = (int) ($visitsAgg->total_visits ?? 0);
         $totalClicks = (int) ($clicksAgg->total_clicks ?? 0);
 
         // Daily charts
-        $visitsByDay = DB::table('site_visits')
+        $visitsByDay = DB::table('analytics.site_visits')
             ->where('professional_id', $professional->id)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw('DATE(occurred_at) as day, COUNT(*) as count')
@@ -87,24 +104,39 @@ class StaffAnalyticsController extends ApiController
             ->orderBy('day')
             ->get();
 
-        $clicksByDay = DB::table('link_clicks')
-            ->where('professional_id', $professional->id)
-            ->whereBetween('occurred_at', [$from, $to])
-            ->selectRaw('DATE(occurred_at) as day, COUNT(*) as count')
-            ->groupByRaw('DATE(occurred_at)')
-            ->orderBy('day')
-            ->get();
+        try {
+            $clicksByDay = DB::table('analytics.link_clicks')
+                ->where('professional_id', $professional->id)
+                ->whereBetween('occurred_at', [$from, $to])
+                ->selectRaw('DATE(occurred_at) as day, COUNT(*) as count')
+                ->groupByRaw('DATE(occurred_at)')
+                ->orderBy('day')
+                ->get();
+        } catch (Throwable) {
+            $clicksByDay = collect();
+        }
 
-        // Top links
-        $topLinks = DB::table('link_clicks as lc')
-            ->join('blocks as b', 'b.id', '=', 'lc.block_id')
-            ->where('lc.professional_id', $professional->id)
-            ->whereBetween('lc.occurred_at', [$from, $to])
-            ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
-            ->groupBy('b.id', 'b.title', 'b.url')
-            ->orderByDesc('clicks')
-            ->limit(10)
-            ->get();
+        try {
+            $topLinks = LinkClick::runForBlockForeignKey(
+                function (string $clickBlockColumn) use ($professional, $from, $to) {
+                    // Top links
+                    return DB::table('analytics.link_clicks as lc')
+                        ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
+                        ->where('lc.professional_id', $professional->id)
+                        ->whereBetween('lc.occurred_at', [$from, $to])
+                        ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
+                        ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
+                        ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
+                        ->groupBy('b.id', 'b.title', 'b.url')
+                        ->orderByDesc('clicks')
+                        ->limit(10)
+                        ->get();
+                },
+                collect()
+            );
+        } catch (Throwable) {
+            $topLinks = collect();
+        }
 
         $ctr = $totalVisits > 0 ? round(($totalClicks / $totalVisits) * 100, 2) : 0.0;
 

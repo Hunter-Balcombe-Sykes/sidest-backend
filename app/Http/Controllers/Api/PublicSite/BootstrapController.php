@@ -12,12 +12,16 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use App\Models\Core\Notifications\EmailSubscription;
+use App\Models\Core\Notifications\Notification;
+use App\Models\Billing\Plan;
+use App\Models\Billing\Subscription;
+use App\Services\Legal\ProfessionalLegalContentService;
 
 
 
 class BootstrapController extends ApiController
 {
-    public function bootstrap(BootstrapRequest $request)
+    public function bootstrap(BootstrapRequest $request, ProfessionalLegalContentService $legalContentService)
     {
         $uid = $request->attributes->get('supabase_uid');
         if (!is_string($uid) || $uid === '') {
@@ -27,11 +31,13 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $result = DB::transaction(function () use ($uid, $data) {
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService) {
+            $createdProfessional = false;
 
             $professional = Professional::query()->where('auth_user_id', $uid)->first();
 
             if (!$professional) {
+                $createdProfessional = true;
                 $professional = new Professional([
                     'handle'          => $data['handle'],
                     'display_name'    => $data['display_name'],
@@ -98,6 +104,15 @@ class BootstrapController extends ApiController
                 $base = $this->subdomainBaseFromHandle($data['handle']);
 
                 $site = $this->createSiteWithRetry($professional->id, $base);
+            }
+
+            $legalContentService->refreshGenerated($professional, $site);
+
+            // Ensure the professional has a subscription – seed the free plan if none exists
+            $this->ensureFreeSubscription($professional);
+
+            if ($createdProfessional) {
+                $this->createWelcomeNotification($professional);
             }
 
                 return [
@@ -212,6 +227,39 @@ class BootstrapController extends ApiController
         }
     }
 
+    /**
+     * Seed the free plan subscription if the professional has none.
+     */
+    private function ensureFreeSubscription(Professional $professional): void
+    {
+        // Reload the relationship in case it was cached as null during this transaction
+        $professional->load('subscription');
+
+        // Already has a current (non-ended) subscription – nothing to do
+        if ($professional->subscription && $professional->subscription->ended_at === null) {
+            return;
+        }
+
+        $freePlan = Plan::where('plan_key', 'free')->where('is_active', true)->first();
+        if (!$freePlan) {
+            Log::warning('No active free plan found – skipping subscription seed', [
+                'professional_id' => $professional->id,
+            ]);
+            return;
+        }
+
+        Subscription::create([
+            'id' => Str::uuid()->toString(),
+            'professional_id' => $professional->id,
+            'plan_id' => $freePlan->id,
+            'provider' => 'internal',
+            'status' => 'active',
+            'current_period_start' => now(),
+            'current_period_end' => null,
+            'cancel_at_period_end' => false,
+        ]);
+    }
+
     private function ensureCometUpdatesSubscription(?string $email): void
     {
         $email = is_string($email) ? strtolower(trim($email)) : '';
@@ -240,6 +288,24 @@ class BootstrapController extends ApiController
 
         $sub->markSubscribed(['source' => 'bootstrap']);
         $sub->save();
+    }
+
+    private function createWelcomeNotification(Professional $professional): void
+    {
+        Notification::query()->firstOrCreate(
+            [
+                'professional_id' => $professional->id,
+                'type' => 'info',
+                'title' => 'Welcome to Sight',
+            ],
+            [
+                'body' => 'Welcome to Sight. This is placeholder content for now.',
+                'cta_url' => null,
+                'severity' => 'info',
+                'starts_at' => now(),
+                'ends_at' => null,
+            ]
+        );
     }
 
     private function generateQrSlug(?string $handle): string

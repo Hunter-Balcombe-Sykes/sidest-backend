@@ -27,11 +27,6 @@ class Site extends BaseModel
         'theme_id',
         'is_published',
         'settings',
-
-        // Site Images
-        'banner_bucket',
-        'banner_path',
-
     ];
 
     protected $casts = [

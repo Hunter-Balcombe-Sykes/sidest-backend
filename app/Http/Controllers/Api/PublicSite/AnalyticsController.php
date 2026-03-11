@@ -11,13 +11,19 @@ use App\Http\Requests\Api\PublicSite\Analytics\PageviewRequest;
 use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
 use App\Models\Core\Site\Block;
+use App\Services\Cache\AnalyticsCacheService;
 use Illuminate\Http\JsonResponse;
+use Throwable;
 
 class AnalyticsController extends ApiController
 {
     use DetectsClientInfo;
     use HashesClientData;
     use ResolvesSiteFromRequest;
+
+    public function __construct(
+        private AnalyticsCacheService $analyticsCache
+    ) {}
 
     public function pageview(PageviewRequest $request): JsonResponse
     {
@@ -54,6 +60,10 @@ class AnalyticsController extends ApiController
         $visit->site_id = $site->id;
         $visit->save();
 
+        try {
+            $this->analyticsCache->invalidateAnalytics($site->professional_id);
+        } catch (Throwable) {}
+
         return $this->success([
             'message' => 'Pageview recorded',
             'visit_id' => $visit->id,
@@ -76,41 +86,63 @@ class AnalyticsController extends ApiController
             return $this->error('Site not published', 403);
         }
 
-        // Verify link block exists and belongs to this site
-        $linkBlock = Block::where('id', $data['block_id'])
+        // Verify block exists and belongs to this site
+        $block = Block::where('id', $data['block_id'])
             ->where('site_id', $site->id)
-            ->where('block_group', 'links')
-            ->where('block_type', 'link')
             ->first();
 
-        if (!$linkBlock) {
-            return $this->error('Link block not found or does not belong to this site', 404);
+        if (!$block) {
+            return $this->error('Block not found or does not belong to this site', 404);
         }
 
-        // Check if link block is active
-        if (!$linkBlock->is_active) {
-            return $this->error('Link block is not active', 403);
+        $blockGroup = strtolower((string) $block->block_group);
+        $blockType = strtolower((string) $block->block_type);
+        $isTrackableLink = $blockGroup === 'links' && $blockType === 'link';
+        $isTrackableSection =
+            $blockGroup === 'sections'
+            && in_array($blockType, ['gallery', 'services', 'shop', 'booking'], true);
+
+        if (!$isTrackableLink && !$isTrackableSection) {
+            return $this->error('Block is not trackable for analytics', 422);
         }
 
-        // Create click record
-        $click = new LinkClick([
-            'occurred_at'  => now(),
-            'session_id'   => $data['session_id'] ?? null,
-            'visitor_id'   => $data['visitor_id'] ?? null,
-            'ip_hash'      => $this->hashIp($request->ip()),
-            'user_agent'   => $request->userAgent(),
-            'referrer'     => $data['referrer'] ?? $request->headers->get('referer'),
-            'utm_source'   => $data['utm_source'] ?? null,
-            'utm_medium'   => $data['utm_medium'] ?? null,
-            'utm_campaign' => $data['utm_campaign'] ?? null,
-        ]);
-        $click->professional_id = $site->professional_id;
-        $click->site_id = $site->id;
-        $click->block_id = $linkBlock->id;
-        $click->save();
+        // Check if block is active
+        if (!$block->is_active) {
+            return $this->error('Block is not active', 403);
+        }
+
+        $click = LinkClick::runForBlockForeignKey(
+            function (string $blockColumn) use ($request, $data, $site, $block) {
+                $click = new LinkClick([
+                    'occurred_at'  => now(),
+                    'session_id'   => $data['session_id'] ?? null,
+                    'visitor_id'   => $data['visitor_id'] ?? null,
+                    'ip_hash'      => $this->hashIp($request->ip()),
+                    'user_agent'   => $request->userAgent(),
+                    'referrer'     => $data['referrer'] ?? $request->headers->get('referer'),
+                    'utm_source'   => $data['utm_source'] ?? null,
+                    'utm_medium'   => $data['utm_medium'] ?? null,
+                    'utm_campaign' => $data['utm_campaign'] ?? null,
+                ]);
+                $click->professional_id = $site->professional_id;
+                $click->site_id = $site->id;
+                $click->setAttribute($blockColumn, $block->id);
+                $click->save();
+
+                return $click;
+            }
+        );
+
+        if (!$click instanceof LinkClick) {
+            return $this->error('Unable to record click due to schema mismatch', 500);
+        }
+
+        try {
+            $this->analyticsCache->invalidateAnalytics($site->professional_id);
+        } catch (Throwable) {}
 
         return $this->success([
-            'message' => 'Click recorded',
+            'message' => $isTrackableSection ? 'Section interaction recorded' : 'Click recorded',
             'click_id' => $click->id,
         ], 201);
     }

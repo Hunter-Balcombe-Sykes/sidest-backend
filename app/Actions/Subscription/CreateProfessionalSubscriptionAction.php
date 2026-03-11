@@ -24,15 +24,16 @@ class CreateProfessionalSubscriptionAction
 
         $planId = $data['plan_id'];
         $trialDays = $data['trial_period_days'] ?? null;
+        $hasTrialPeriod = $trialDays && $trialDays > 0;
 
         $subscription = Subscription::create([
-            'id' => Str::uuid(),
+            'id' => Str::uuid()->toString(),
             'professional_id' => $professional->id,
             'plan_id' => $planId,
-            'status' => 'trialing',
+            'status' => $hasTrialPeriod ? 'trialing' : 'active',
             'current_period_start' => now(),
             'current_period_end' => now()->addMonth(),
-            'trial_ends_at' => $trialDays ? now()->addDays($trialDays) : null,
+            'trial_ends_at' => $hasTrialPeriod ? now()->addDays($trialDays) : null,
             'cancel_at_period_end' => false,
             'provider_payload' => [],
         ]);

@@ -139,9 +139,26 @@ class StaffSubscriptionManagementController extends ApiController
             ]);
         }
 
+        if (!$subscription->isActive()) {
+            throw ValidationException::withMessages([
+                'subscription' => ['Subscription is no longer active and cannot be resumed.'],
+            ]);
+        }
+
+        if (!$subscription->cancel_at_period_end) {
+            throw ValidationException::withMessages([
+                'subscription' => ['Subscription is not scheduled for cancellation.'],
+            ]);
+        }
+
+        if ($subscription->current_period_end && $subscription->current_period_end->isPast()) {
+            throw ValidationException::withMessages([
+                'subscription' => ['Subscription period has already ended.'],
+            ]);
+        }
+
         $subscription->update([
             'cancel_at_period_end' => false,
-            'ended_at' => null,
         ]);
 
         return response()->json([

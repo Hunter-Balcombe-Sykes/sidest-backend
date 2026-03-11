@@ -10,8 +10,10 @@ class UpdateLinkBlockRequest extends BaseFormRequest
 
     protected function prepareForValidation(): void
     {
+        $routeId = $this->route('linkBlock') ?? $this->route('block');
+
         $this->merge([
-            'id' => $this->route('block'),
+            'id' => $routeId,
             'title' => is_string($this->title) ? trim($this->title) : $this->title,
             'url' => is_string($this->url) ? trim($this->url) : $this->url,
             'icon_key' => is_string($this->icon_key) ? trim($this->icon_key) : $this->icon_key,

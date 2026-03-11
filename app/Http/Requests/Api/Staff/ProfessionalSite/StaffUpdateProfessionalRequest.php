@@ -24,12 +24,6 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
             'country_code'  => ['sometimes', 'nullable', 'string', 'min:2', 'max:3'],
             'timezone'      => ['sometimes', 'nullable', 'string', 'max:64'],
 
-            // Images
-            'icon_bucket' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'icon_path' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'headshot_bucket' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'headshot_path' => ['sometimes', 'nullable', 'string', 'max:255'],
-
             // Location
             'location_street_address' => ['sometimes', 'nullable', 'string', 'max:255'],
             'location_city' => ['sometimes', 'nullable', 'string', 'max:255'],

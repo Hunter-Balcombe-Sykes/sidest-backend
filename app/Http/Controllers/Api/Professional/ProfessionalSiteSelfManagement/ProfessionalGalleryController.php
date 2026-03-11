@@ -6,8 +6,9 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ImageGallery\ReorderGalleryImageRequest;
-use App\Http\Requests\Api\Professional\ImageGallery\StoreGalleryImageRequest;
 use App\Models\Core\Site\SiteImage;
+use App\Services\Cache\SiteCacheService;
+use App\Services\Media\ImageVariantService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
@@ -16,72 +17,65 @@ class ProfessionalGalleryController extends ApiController
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
 
+    public function __construct(
+        private readonly ImageVariantService $mediaService,
+    ) {}
+
+    /**
+     * List gallery-pool images for the current site, eager-loading variants.
+     */
     public function index(): JsonResponse
     {
-        $pro = $this->currentProfessional(request());
+        $pro  = $this->currentProfessional(request());
         $site = $this->currentSite($pro);
+
         $images = SiteImage::query()
             ->where('site_id', $site->id)
+            ->where('pool', SiteImage::POOL_GALLERY)
             ->where('is_active', true)
+            ->with('variants')
             ->orderBy('sort_order')
             ->orderBy('created_at')
             ->get();
 
-        return $this->success(['images' => $images]);
+        $result = $images->map(fn (SiteImage $img) => [
+            'id'         => $img->id,
+            'pool'       => $img->pool,
+            'alt_text'   => $img->alt_text,
+            'sort_order' => $img->sort_order,
+            'variants'   => $img->variantUrls(),
+            'created_at' => $img->created_at,
+            'updated_at' => $img->updated_at,
+        ]);
+
+        return $this->success(['images' => $result]);
     }
 
-    public function store(StoreGalleryImageRequest $request): JsonResponse
+    /**
+     * Gallery uploads are now handled by POST /api/uploads with pool=gallery.
+     *
+     * @deprecated Use POST /api/uploads with pool=gallery instead.
+     */
+    public function store(): JsonResponse
     {
-
-        $pro = $this->currentProfessional(request());
-        $site = $this->currentSite($pro);
-        $data = $request->validated();
-
-        $image = DB::transaction(function () use ($site, $data) {
-            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["gallery:{$site->id}"]);
-            $activeCount = SiteImage::query()
-                ->where('site_id', $site->id)
-                ->where('is_active', true)
-                ->lockForUpdate()
-                ->count();
-
-            if ($activeCount >= 6){
-                abort(422, 'Gallery limit reached (max 6 images)');
-            }
-
-            $maxSort = SiteImage::query()
-                ->where('site_id', $site->id)
-                ->where('is_active', true)
-                ->max('sort_order');
-
-            $maxSort = is_null($maxSort) ? -1 : (int) $maxSort;
-
-            $image = new SiteImage([
-                'site_id' => $site->id,
-                'bucket' => $data['bucket'],
-                'path' => $data['path'],
-                'alt_text' => $data['alt_text'] ?? null,
-                'sort_order' => $maxSort + 1,
-                'is_active' => true,
-            ]);
-
-            $image->save();
-
-            return $image->fresh();
-        });
-        return $this->success(['image' => $image], 201);
+        return $this->error(
+            'Gallery image creation has moved to POST /api/uploads with pool=gallery. '
+            . 'Upload the image file directly instead of passing bucket/path.',
+            410,
+        );
     }
 
     public function reorder(ReorderGalleryImageRequest $request): JsonResponse
     {
-
-        $pro = $this->currentProfessional(request());
+        $pro  = $this->currentProfessional(request());
         $site = $this->currentSite($pro);
 
         $ids = array_values(array_unique($request->validated()['ids'] ?? []));
+
         DB::transaction(function () use ($site, $ids) {
             $allIds = SiteImage::query()
                 ->where('site_id', $site->id)
+                ->where('pool', SiteImage::POOL_GALLERY)
                 ->where('is_active', true)
                 ->lockForUpdate()
                 ->orderBy('sort_order')
@@ -94,9 +88,10 @@ class ProfessionalGalleryController extends ApiController
                 if (!isset($allSet[$id])) {
                     abort(403, 'One or more images do not belong to your site.');
                 }
-        }
+            }
+
             $remaining = array_values(array_diff($allIds, $ids));
-            $newOrder = array_merge($ids, $remaining);
+            $newOrder  = array_merge($ids, $remaining);
 
             foreach ($newOrder as $i => $id) {
                 SiteImage::query()
@@ -106,20 +101,25 @@ class ProfessionalGalleryController extends ApiController
             }
         });
 
-        return $this->success(['ok' => true]);
+        app(SiteCacheService::class)->invalidateSite($site);
 
+        return $this->success(['ok' => true]);
     }
 
-    // Soft Delete
+    /**
+     * Soft-delete the gallery image and clean up its variants from storage.
+     */
     public function destroy(SiteImage $image): JsonResponse
     {
-        $pro = $this->currentProfessional(request());
+        $pro  = $this->currentProfessional(request());
         $site = $this->currentSite($pro);
         abort_unless($image->site_id === $site->id, 404);
 
+        $this->mediaService->deleteVariants($image->id, $image->path);
         $image->delete();
+
+        app(SiteCacheService::class)->invalidateSite($site);
 
         return $this->success(['deleted' => true]);
     }
-
 }

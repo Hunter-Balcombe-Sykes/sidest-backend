@@ -5,6 +5,7 @@ namespace App\Services\Square;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 
 class SquareApiClient
 {
@@ -41,7 +42,7 @@ class SquareApiClient
             $cursor = is_string($data['cursor'] ?? null) ? $data['cursor'] : null;
 
             foreach ($objects as $object) {
-                if (! is_array($object)) {
+                if (!is_array($object)) {
                     continue;
                 }
 
@@ -177,7 +178,7 @@ class SquareApiClient
     public function upsertCatalogObject(Professional $professional, array $catalogObject): array
     {
         $response = $this->request($professional, 'POST', '/v2/catalog/object', [], [
-            'idempotency_key' => (string) \Illuminate\Support\Str::uuid(),
+            'idempotency_key' => (string) Str::uuid(),
             'object' => $catalogObject,
         ]);
 

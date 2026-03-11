@@ -9,8 +9,10 @@ class DestroyLinkBlockRequest extends BaseFormRequest
 
     protected function prepareForValidation(): void
     {
+        $routeId = $this->route('linkBlock') ?? $this->route('block');
+
         $this->merge([
-            'id' => $this->route('block'),
+            'id' => $routeId,
         ]);
     }
 

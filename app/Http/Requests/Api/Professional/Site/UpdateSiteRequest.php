@@ -17,23 +17,12 @@ class UpdateSiteRequest extends BaseFormRequest
                 'subdomain' => strtolower(trim($this->subdomain)),
             ]);
         }
-
-        // trim banner fields
-        foreach (['banner_bucket','banner_path'] as $k) {
-            if ($this->has($k) && is_string($this->input($k))) {
-                $v = trim($this->input($k));
-                $this->merge([$k => $v === '' ? null : $v]);
-            }
-        }
     }
 
     public function rules(): array
     {
         $professional = $this->attributes->get('professional');
         $currentSiteId = $professional?->site?->id;
-
-        $bucket = (string) config('comet.media_bucket', 'media');
-        $bannerPrefix = $currentSiteId ? "sites/{$currentSiteId}/banner." : 'sites/';
 
         return [
             // Settings: allowlist specific keys with validation
@@ -49,6 +38,7 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
             'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
             'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+            'settings.selected_products' => ['prohibited'],
 
             // Subdomain: must be unique, not reserved, DNS-safe
             'subdomain' => [
@@ -98,38 +88,12 @@ class UpdateSiteRequest extends BaseFormRequest
 
             // Publish
             'is_published' => ['sometimes', 'boolean'],
-
-            // Banner (STRICT)
-            'banner_bucket' => ['sometimes', 'nullable', 'string', 'max:255', Rule::in([$bucket])],
-            'banner_path'   => [
-                'sometimes','nullable','string','max:255',
-                function ($attribute, $value, $fail) use ($bannerPrefix, $currentSiteId) {
-                    if ($value === null) return;
-
-                    if (!$currentSiteId) {
-                        $fail('Site not found for banner upload.');
-                        return;
-                    }
-
-                    if (!is_string($value) || !str_starts_with($value, $bannerPrefix)) {
-                        $fail('Invalid banner_path: must match your prepared upload path.');
-                        return;
-                    }
-
-                    if (!preg_match('/\.(jpg|png|webp)$/i', $value)) {
-                        $fail('Invalid banner_path extension.');
-                    }
-                },
-            ],
         ];
     }
 
     public function withValidator($validator): void
     {
         $validator->after(function ($validator) {
-
-            $this->enforcePair($validator, 'banner_bucket', 'banner_path');
-
             if ($this->input('is_published') === true) {
                 $professional = $this->attributes->get('professional');
                 $site = $professional?->site;
@@ -143,48 +107,9 @@ class UpdateSiteRequest extends BaseFormRequest
                     $validator->errors()->add('is_published', 'Cannot publish: professional must have a display name.');
                 }
 
-                $hasActiveBlock = $site->linkBlocks()->where('is_active', true)->exists();
-                if (!$hasActiveBlock) {
-                    $validator->errors()->add('is_published', 'Cannot publish: Site must have at least one active link block.');
-                }
 
-                $settings = is_array($site->settings) ? $site->settings : [];
-                $incoming = $this->input('settings');
-
-                if (is_array($incoming)) {
-                    $settings = array_replace_recursive($settings, $incoming);
-                }
-
-                if (empty($settings['hero_title'])) {
-                    $validator->errors()->add('is_published', 'Cannot publish: Site must have a hero title in settings.');
-                }
             }
         });
-
-    }
-
-    private function enforcePair($validator, string $bucketKey, string $pathKey): void
-    {
-        $bucketProvided = $this->has($bucketKey);
-        $pathProvided   = $this->has($pathKey);
-
-        if ($bucketProvided xor $pathProvided) {
-            $validator->errors()->add($bucketKey, "Provide both {$bucketKey} and {$pathKey} together.");
-            $validator->errors()->add($pathKey, "Provide both {$bucketKey} and {$pathKey} together.");
-            return;
-        }
-
-        if (!$bucketProvided && !$pathProvided) {
-            return;
-        }
-
-        $bucketVal = $this->input($bucketKey);
-        $pathVal   = $this->input($pathKey);
-
-        if (($bucketVal === null) xor ($pathVal === null)) {
-            $validator->errors()->add($bucketKey, "To clear, set BOTH {$bucketKey} and {$pathKey} to null.");
-            $validator->errors()->add($pathKey, "To clear, set BOTH {$bucketKey} and {$pathKey} to null.");
-        }
     }
 
     public function messages(): array
@@ -197,6 +122,7 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.primary_color.regex' => 'The primary color must be a valid hex color (e.g., #000000 or #000).',
             'settings.accent_color.regex' => 'The accent color must be a valid hex color (e.g., #FFD700).',
             'settings.background_color.regex' => 'The background color must be a valid hex color.',
+            'settings.selected_products.prohibited' => 'Use /api/store/featured-products for product selections.',
         ];
     }
 }

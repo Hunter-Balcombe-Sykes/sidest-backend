@@ -13,10 +13,13 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSiteController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalThemeController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
+use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGoogleBusinessProfileController;
+use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLegalContentController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
 use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
+use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
@@ -33,9 +36,14 @@ Route::middleware(['supabase.jwt', 'current.pro'])
 
     // View Site Details
     Route::get('/site', [ProfessionalSiteController::class, 'show']);
+    Route::get('/site/google-business-profile', [ProfessionalGoogleBusinessProfileController::class, 'show']);
+    Route::get('/site/legal-content', [ProfessionalLegalContentController::class, 'show']);
 
     // Update Site Details
     Route::patch('/site', [ProfessionalSiteController::class, 'update']);
+    Route::put('/site/google-business-profile', [ProfessionalGoogleBusinessProfileController::class, 'upsert']);
+    Route::put('/site/legal-content', [ProfessionalLegalContentController::class, 'upsert']);
+    Route::patch('/site/legal-content', [ProfessionalLegalContentController::class, 'upsert']);
     Route::patch('/site/visibility', [SiteVisibilityController::class, 'update']);
 
     // Service Details and Edit
@@ -52,7 +60,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         ->whereUuid('service')
         ->withTrashed();
 
-    // NEW: Service Categories (CRUD + reorder)
+    // Service Categories (CRUD + reorder)
     Route::get('/service-categories', [ProfessionalServiceCategoryController::class, 'index']);
     Route::post('/service-categories', [ProfessionalServiceCategoryController::class, 'store']);
     Route::get('/service-categories/{category}', [ProfessionalServiceCategoryController::class, 'show'])
@@ -85,7 +93,6 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::get('/sections', [ProfessionalSectionBlockController::class, 'index']);
     Route::put('/sections/{blockType}', [ProfessionalSectionBlockController::class, 'upsert'])
         ->where('blockType', '[a-z0-9_-]+');
-    Route::post('/sections/reorder', [ProfessionalSectionBlockController::class, 'reorder']);
     Route::delete('/sections/{blockType}', [ProfessionalSectionBlockController::class, 'remove'])
     ->where('blockType', '[a-z0-9_-]+');
 
@@ -107,12 +114,18 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/themes/{theme}/select', [ProfessionalThemeController::class, 'select'])
         ->whereUuid('theme');
 
-    // Image Upload
-    Route::post('/uploads/prepare', [ProfessionalUploadController::class, 'prepare']);
+    // Image Upload (server-side processing → WebP variants via queue)
+    Route::post('/uploads', [ProfessionalUploadController::class, 'upload']);
 
-    // Image Gallery
+    // Image Management (pool-based: gallery / content)
+    Route::get('/images', [ProfessionalUploadController::class, 'index']);
+    Route::post('/images/reorder', [ProfessionalUploadController::class, 'reorder']);
+    Route::delete('/images/{image}', [ProfessionalUploadController::class, 'destroy'])
+        ->whereUuid('image');
+
+    // Image Gallery (gallery-pool ordering & legacy routes)
     Route::get('/gallery', [ProfessionalGalleryController::class, 'index']);
-    Route::post('/gallery', [ProfessionalGalleryController::class, 'store']);
+    Route::post('/gallery', [ProfessionalGalleryController::class, 'store']); // deprecated → 410
     Route::delete('/gallery/{image}', [ProfessionalGalleryController::class, 'destroy'])
         ->whereUuid('image');
     Route::post('/gallery/reorder', [ProfessionalGalleryController::class, 'reorder']);
@@ -143,6 +156,10 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/square/services/sync', [SquareIntegrationController::class, 'syncServicesNow']);
     Route::post('/square/services/{service}/push', [SquareIntegrationController::class, 'pushServiceNow'])
         ->whereUuid('service');
+
+    // Store: Featured Products
+    Route::get('/store/featured-products', [FeaturedProductsController::class, 'index']);
+    Route::put('/store/featured-products', [FeaturedProductsController::class, 'update']);
 
     // Fresha Integration
     Route::get('/fresha/status', [FreshaIntegrationController::class, 'status']);

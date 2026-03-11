@@ -5,6 +5,7 @@ namespace App\Observers\Core;
 use App\Jobs\Fresha\PushServiceToFreshaJob;
 use App\Jobs\Square\PushServiceToSquareJob;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Services\Cache\ProfessionalCacheService;
 use Illuminate\Support\Facades\Log;
@@ -112,7 +113,8 @@ class ServiceObserver
             return false;
         }
 
-        if (empty($professional->square_access_token) || empty($professional->square_merchant_id)) {
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+        if (! $integration || empty($integration->access_token) || empty($integration->external_account_id)) {
             return false;
         }
 
@@ -125,7 +127,8 @@ class ServiceObserver
             return false;
         }
 
-        if (empty($professional->fresha_access_token) || empty($professional->fresha_business_id)) {
+        $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_FRESHA);
+        if (! $integration || empty($integration->access_token) || empty($integration->external_account_id)) {
             return false;
         }
 

@@ -75,9 +75,6 @@ class StaffUpdateSiteRequest extends BaseFormRequest
 
             'is_published' => ['sometimes', 'boolean'],
 
-            'banner_bucket' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'banner_path'   => ['sometimes', 'nullable', 'string', 'max:255'],
-
             // Settings: allowlist specific keys with validation
             'settings.hero_title' => ['sometimes', 'string', 'max:100'],
             'settings.hero_subtitle' => ['sometimes', 'string', 'max:200'],
@@ -90,6 +87,7 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
             'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
             'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+            'settings.selected_products' => ['prohibited'],
 
             // If you plan staff-only overrides later, allow this now.
             // Your UpdateSiteAction can choose to honor it only for staff.
@@ -104,6 +102,7 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'subdomain.unique' => 'This subdomain is already taken.',
             'subdomain.min' => 'The subdomain must be at least 3 characters.',
             'subdomain.max' => 'The subdomain cannot exceed 63 characters.',
+            'settings.selected_products.prohibited' => 'Use /api/store/featured-products for product selections.',
         ];
     }
 }
