@@ -11,9 +11,10 @@ use Illuminate\Support\Facades\Storage;
  * Generates universal WebP image variants from an uploaded original and
  * persists them to the configured media disk (S3-compatible / R2).
  *
- * Every image (gallery or content) gets the same responsive variant set
- * (thumb → hero). The frontend picks the appropriate size for each use
- * case (icon, headshot, banner, etc.).
+ * Every image (gallery or content) gets the same configured variant set.
+ * Current default produces two full-resolution variants:
+ * - optimized (target-size adaptive quality)
+ * - maximized (highest quality)
  *
  * Requires the GD extension with WebP support (ships with PHP 8.2+).
  */
@@ -67,15 +68,30 @@ class ImageVariantService
 
         try {
             foreach ($definitions as $variantName => $def) {
-                $targetW = $def['width'];
-                $targetH = $def['height'];
-                $quality = $def['quality'] ?? 80;
-                $fit     = $def['fit'] ?? 'cover';
+                $quality    = max(1, min(100, (int) ($def['quality'] ?? 92)));
+                $minQuality = max(1, min($quality, (int) ($def['min_quality'] ?? 60)));
+                $targetKb   = max(0, (int) ($def['target_kb'] ?? 0));
+                $targetBytes = $targetKb > 0 ? ($targetKb * 1024) : null;
+                $fit        = (string) ($def['fit'] ?? 'inside');
 
-                // --- Resize ---
-                [$cropX, $cropY, $cropW, $cropH, $dstW, $dstH] = $this->calculateDimensions(
-                    $sourceWidth, $sourceHeight, $targetW, $targetH, $fit,
+                $preserveResolution = filter_var(
+                    $def['preserve_resolution'] ?? true,
+                    FILTER_VALIDATE_BOOLEAN,
+                    FILTER_NULL_ON_FAILURE,
                 );
+                $preserveResolution = $preserveResolution ?? true;
+
+                if ($preserveResolution) {
+                    [$cropX, $cropY, $cropW, $cropH, $dstW, $dstH] = [0, 0, $sourceWidth, $sourceHeight, $sourceWidth, $sourceHeight];
+                } else {
+                    $targetW = max(1, (int) ($def['width'] ?? $sourceWidth));
+                    $targetH = max(1, (int) ($def['height'] ?? $sourceHeight));
+
+                    // Backward-compatible path for capped variants.
+                    [$cropX, $cropY, $cropW, $cropH, $dstW, $dstH] = $this->calculateDimensions(
+                        $sourceWidth, $sourceHeight, $targetW, $targetH, $fit,
+                    );
+                }
 
                 $canvas = imagecreatetruecolor($dstW, $dstH);
                 imagealphablending($canvas, false);
@@ -89,39 +105,80 @@ class ImageVariantService
 
                 // --- Encode to WebP ---
                 $tmpFile = tempnam(sys_get_temp_dir(), 'comet_img_');
-                imagewebp($canvas, $tmpFile, $quality);
+                if (!is_string($tmpFile) || $tmpFile === '') {
+                    throw new \RuntimeException('Failed to create temp file for WebP encoding.');
+                }
 
-                $fileBytes = filesize($tmpFile);
-                $hash      = substr(hash_file('sha256', $tmpFile), 0, 16);
+                try {
+                    $encodedQuality = $quality;
+                    if ($targetBytes !== null) {
+                        $encodedQuality = $this->encodeWebpToTargetSize(
+                            image: $canvas,
+                            tmpFile: $tmpFile,
+                            maxQuality: $quality,
+                            minQuality: $minQuality,
+                            targetBytes: $targetBytes,
+                        );
+                    } else {
+                        $this->encodeWebp($canvas, $tmpFile, $quality);
+                    }
 
-                // Content-hashed filename: thumb_abc123def456.webp
-                $storagePath = "{$basePath}/{$variantName}_{$hash}.webp";
+                    $fileBytes = filesize($tmpFile);
+                    if ($fileBytes === false) {
+                        throw new \RuntimeException('Failed to determine encoded WebP file size.');
+                    }
 
-                // --- Upload to bucket ---
-                $disk->put($storagePath, file_get_contents($tmpFile), 'public');
-                @unlink($tmpFile);
+                    if ($targetBytes !== null && $fileBytes > $targetBytes) {
+                        Log::warning('Image variant exceeded target size at min quality.', [
+                            'image_id' => $imageId,
+                            'variant' => $variantName,
+                            'target_kb' => $targetKb,
+                            'actual_kb' => (int) round($fileBytes / 1024),
+                            'quality_used' => $encodedQuality,
+                        ]);
+                    }
 
-                // --- Upsert DB row ---
-                $variant = ImageVariant::updateOrCreate(
-                    [
-                        'image_id' => $imageId,
-                        'variant'  => $variantName,
-                    ],
-                    [
-                        'disk'         => $this->diskName(),
-                        'path'         => $storagePath,
-                        'format'       => 'webp',
-                        'width'        => $dstW,
-                        'height'       => $dstH,
-                        'file_size'    => $fileBytes,
-                        'content_hash' => $hash,
-                    ],
-                );
+                    $hash = hash_file('sha256', $tmpFile);
+                    if (!is_string($hash)) {
+                        throw new \RuntimeException('Failed to hash encoded WebP variant.');
+                    }
+                    $hash = substr($hash, 0, 16);
 
-                $created[$variantName] = $variant;
+                    // Content-hashed filename: optimized_abc123def456.webp
+                    $storagePath = "{$basePath}/{$variantName}_{$hash}.webp";
+
+                    // --- Upload to bucket ---
+                    $payload = file_get_contents($tmpFile);
+                    if ($payload === false) {
+                        throw new \RuntimeException('Failed to read encoded WebP for upload.');
+                    }
+                    $disk->put($storagePath, $payload, 'public');
+
+                    // --- Upsert DB row ---
+                    $variant = ImageVariant::updateOrCreate(
+                        [
+                            'image_id' => $imageId,
+                            'variant'  => $variantName,
+                        ],
+                        [
+                            'disk'         => $this->diskName(),
+                            'path'         => $storagePath,
+                            'format'       => (string) ($def['format'] ?? 'webp'),
+                            'width'        => $dstW,
+                            'height'       => $dstH,
+                            'file_size'    => $fileBytes,
+                            'content_hash' => $hash,
+                        ],
+                    );
+
+                    $created[$variantName] = $variant;
+                } finally {
+                    @unlink($tmpFile);
+                    imagedestroy($canvas);
+                }
             }
         } finally {
-            // GD resources are automatically freed in PHP 8.0+
+            imagedestroy($sourceImage);
         }
 
         \Illuminate\Support\Facades\Log::info('Image variant processing completed', [
@@ -240,7 +297,26 @@ class ImageVariantService
      */
     private function variantDefinitions(): array
     {
-        return (array) config('comet.image_variants', []);
+        $definitions = (array) config('comet.image_variants', []);
+
+        if ($definitions !== []) {
+            return $definitions;
+        }
+
+        return [
+            'optimized' => [
+                'format' => 'webp',
+                'preserve_resolution' => true,
+                'quality' => 92,
+                'min_quality' => 60,
+                'target_kb' => 500,
+            ],
+            'maximized' => [
+                'format' => 'webp',
+                'preserve_resolution' => true,
+                'quality' => 100,
+            ],
+        ];
     }
 
     /**
@@ -259,6 +335,65 @@ class ImageVariantService
             IMAGETYPE_WEBP => @imagecreatefromwebp($path),
             default        => false,
         };
+    }
+
+    /**
+     * Encode an image as WebP at the given quality and return file size.
+     */
+    private function encodeWebp(\GdImage $image, string $tmpFile, int $quality): int
+    {
+        if (@imagewebp($image, $tmpFile, $quality) === false) {
+            throw new \RuntimeException("Failed to encode WebP at quality {$quality}.");
+        }
+
+        clearstatcache(true, $tmpFile);
+        $size = filesize($tmpFile);
+        if ($size === false) {
+            throw new \RuntimeException('Failed to read encoded WebP size.');
+        }
+
+        return $size;
+    }
+
+    /**
+     * Binary-search the highest quality that stays under target bytes.
+     *
+     * Returns the quality used for the final file in $tmpFile.
+     */
+    private function encodeWebpToTargetSize(
+        \GdImage $image,
+        string $tmpFile,
+        int $maxQuality,
+        int $minQuality,
+        int $targetBytes,
+    ): int {
+        $lower = max(1, min(100, $minQuality));
+        $upper = max($lower, min(100, $maxQuality));
+
+        $bestQuality = null;
+
+        while ($lower <= $upper) {
+            $mid = intdiv($lower + $upper, 2);
+            $size = $this->encodeWebp($image, $tmpFile, $mid);
+
+            if ($size <= $targetBytes) {
+                $bestQuality = $mid;
+                $lower = $mid + 1;
+                continue;
+            }
+
+            $upper = $mid - 1;
+        }
+
+        if ($bestQuality !== null) {
+            $this->encodeWebp($image, $tmpFile, $bestQuality);
+            return $bestQuality;
+        }
+
+        // Could not satisfy target even at min quality.
+        $this->encodeWebp($image, $tmpFile, max(1, min(100, $minQuality)));
+
+        return max(1, min(100, $minQuality));
     }
 
     /**

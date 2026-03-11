@@ -29,7 +29,8 @@ class ProfessionalUploadController extends ApiController
      * Upload an image to a pool (gallery or content).
      *
      * Stores the original on the media disk and dispatches a queue job
-     * to generate WebP variants (thumb → hero). Returns immediately.
+     * to generate configured WebP variants (optimized + maximized).
+     * Returns immediately.
      *
      * POST /api/uploads  { pool: gallery|content, image: <file>, alt_text?: string }
      */

@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * Usage:
  *   $pro->imageVariants             // all variants
  *   $pro->iconVariants()            // only icon variants
- *   $pro->variantUrlsFor('icon')    // ['thumb' => '…', 'medium' => '…', …]
+ *   $pro->variantUrlsFor('icon')    // ['optimized' => '…', 'maximized' => '…']
  */
 trait HasImageVariants
 {

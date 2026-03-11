@@ -387,7 +387,7 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 
 ### SiteImage (core.site_images)
 
-All images (gallery showcase and content/branding) live in the `site_images` table, organised into **pools**. The frontend assigns purpose (icon, headshot, banner, etc.) by picking the appropriate variant size from any image in the relevant pool.
+All images (gallery showcase and content/branding) live in the `site_images` table, organised into **pools**. The frontend assigns purpose by choosing from the variants map (`optimized` or `maximized`) for each image.
 
 | Name       | Type     | Nullable | Example                                        | Constraints / Notes                                              |
 |------------|----------|----------|-------------------------------------------------|------------------------------------------------------------------|
@@ -414,26 +414,23 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 |--------------|----------|----------|--------------------------------------------------|----------------------------------------------------|
 | id           | uuid     | no       | `c3d4...`                                        | Primary key                                        |
 | image_id     | uuid     | no       | `f7a2...`                                        | FK → site_images.id (cascade delete)               |
-| variant      | string   | no       | `thumb`                                          | One of: thumb, small, medium, large, hero          |
+| variant      | string   | no       | `optimized`                                      | One of: optimized, maximized                        |
 | disk         | string   | no       | `media`                                          | Storage disk name                                  |
-| path         | string   | no       | `images/<proId>/<imgId>/thumb_abc123def456.webp` | Content-hashed filename                            |
+| path         | string   | no       | `images/<proId>/<imgId>/optimized_abc123def456.webp` | Content-hashed filename                        |
 | format       | string   | no       | `webp`                                           | Always WebP                                        |
-| width        | integer  | no       | `64`                                             | Actual output width in pixels                      |
-| height       | integer  | no       | `64`                                             | Actual output height in pixels                     |
+| width        | integer  | no       | `3024`                                           | Actual output width in pixels                      |
+| height       | integer  | no       | `4032`                                           | Actual output height in pixels                     |
 | file_size    | integer  | no       | `3200`                                           | Bytes                                              |
 | content_hash | string   | no       | `abc123def456ghij`                               | First 16 hex chars of SHA-256                      |
 | created_at   | datetime | yes      | `2026-03-02T10:00:05Z`                           |                                                    |
 | updated_at   | datetime | yes      | `2026-03-02T10:00:05Z`                           |                                                    |
 
-**Variant sizes:**
+**Variant profiles:**
 
-| Variant | Max Width | Max Height | Quality | Fit     | Typical use                     |
-|---------|-----------|------------|---------|---------|----------------------------------|
-| thumb   | 64px      | 64px       | 80      | cover   | Icons, tiny avatars              |
-| small   | 200px     | 200px      | 80      | cover   | Card thumbnails, small headshots |
-| medium  | 600px     | 600px      | 80      | inside  | Gallery previews, profile images |
-| large   | 1200px    | 1200px     | 85      | inside  | Full-size gallery views          |
-| hero    | 1920px    | 1080px     | 85      | cover   | Banners, hero sections           |
+| Variant   | Resolution policy   | Quality policy                                  | Typical use                             |
+|-----------|---------------------|--------------------------------------------------|-----------------------------------------|
+| optimized | Preserve original   | Adaptive quality, targets `COMET_IMAGE_TARGET_KB` (default 500KB) | Fast page loads / default display |
+| maximized | Preserve original   | Highest quality (`COMET_IMAGE_MAXIMIZED_QUALITY`, default 100)    | Zoom/full-detail display          |
 
 ### Customer
 | Name                      | Type     | Nullable | Example                | Constraints / Notes                                                         |
@@ -1065,7 +1062,7 @@ All routes below require: Authorization header AND a professional profile (curre
 ### `PATCH /api/site`
 
 - Purpose: update site settings, subdomain, and theme_id. Request body: { "subdomain": "joshbarber", "theme_id": "uuid or null", "settings": { "primary_color": "#000000" } } Response (200): { site: ... } Common status codes: 200, 401, 403, 422
-- Banners are managed via `POST /api/uploads` (pool=content) and the frontend picks the `hero` variant. No banner fields are accepted on this endpoint.
+- Banners are managed via `POST /api/uploads` (pool=content) and the frontend picks from `optimized` / `maximized`. No banner fields are accepted on this endpoint.
 
 ### `PATCH /api/site/visibility`
 
@@ -1202,7 +1199,7 @@ Allowed section block types are defined in config: gallery, services, education,
 
 ### Image Uploads (server-side processing)
 
-Images are uploaded through the Comet API (not directly to storage). The server stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and generates WebP variants at multiple sizes.
+Images are uploaded through the Comet API (not directly to storage). The server stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and generates two full-resolution WebP variants (`optimized`, `maximized`).
 
 **Queue modes:**
 - `QUEUE_CONNECTION=sync` (default for dev / early production): variants are generated **inline** during the upload request (~2-5 sec). The response contains completed variants immediately with `processing: false`. No queue worker needed.
@@ -1224,11 +1221,8 @@ Images are uploaded through the Comet API (not directly to storage). The server 
   "original_path": "images/<proId>/<imageId>/original_abc123.jpg",
   "processing": false,
   "variants": {
-    "thumb": "https://cdn.example.com/images/.../thumb_abc123.webp",
-    "small": "https://cdn.example.com/images/.../small_def456.webp",
-    "medium": "https://cdn.example.com/images/.../medium_ghi789.webp",
-    "large": "https://cdn.example.com/images/.../large_jkl012.webp",
-    "hero": "https://cdn.example.com/images/.../hero_mno345.webp"
+    "optimized": "https://cdn.example.com/images/.../optimized_abc123.webp",
+    "maximized": "https://cdn.example.com/images/.../maximized_def456.webp"
   }
 }
 ```
@@ -1246,7 +1240,9 @@ Images are uploaded through the Comet API (not directly to storage). The server 
   - Max 5 gallery images per professional (configurable via `COMET_GALLERY_IMAGE_MAX`)
   - Max 5 content images per professional (configurable via `COMET_CONTENT_IMAGE_MAX`)
   - Race-safe: uses PostgreSQL advisory locks to enforce pool limits under concurrent uploads
-- Variants: 5 WebP sizes (thumb 64px, small 200px, medium 600px, large 1200px, hero 1920px) with content-hashed filenames for CDN immutability
+- Variants: 2 full-resolution WebP outputs
+  - `optimized`: adaptive quality targeting `COMET_IMAGE_TARGET_KB` (default 500KB)
+  - `maximized`: highest quality output for detail-heavy views
 - Common status codes: 201, 401, 403, 422 (pool limit exceeded or validation errors)
 
 #### `GET /api/images`
@@ -1264,11 +1260,8 @@ Images are uploaded through the Comet API (not directly to storage). The server 
       "alt_text": "Fade haircut",
       "sort_order": 0,
       "variants": {
-        "thumb": "https://cdn.example.com/images/.../thumb_abc123.webp",
-        "small": "https://cdn.example.com/images/.../small_def456.webp",
-        "medium": "https://cdn.example.com/images/.../medium_ghi789.webp",
-        "large": "https://cdn.example.com/images/.../large_jkl012.webp",
-        "hero": "https://cdn.example.com/images/.../hero_mno345.webp"
+        "optimized": "https://cdn.example.com/images/.../optimized_abc123.webp",
+        "maximized": "https://cdn.example.com/images/.../maximized_def456.webp"
       },
       "processing": false,
       "created_at": "2026-03-02T10:00:00Z",
@@ -1533,20 +1526,19 @@ Switch between modes with zero code changes — just change the env var and opti
 Each professional has two image pools:
 
 - **gallery** — portfolio / work showcase images (max configurable, default 5)
-- **content** — general-purpose branding images; the frontend assigns purpose by picking the right variant size:
-  - Icon → use the `thumb` (64px) or `small` (200px) variant
-  - Headshot → use the `medium` (600px) variant
-  - Banner → use the `hero` (1920×1080) variant
+- **content** — general-purpose branding images; frontend typically uses:
+  - `optimized` for normal display/performance
+  - `maximized` for zoom/full-detail or hero-style displays
 
 ### Content-hashed filenames & CDN caching
 
-All variant filenames include a 16-char SHA-256 hash: `thumb_abc123def456.webp`. The media disk is configured with `Cache-Control: public, max-age=31536000, immutable`, so CDN / browser caches are aggressive. When an image is re-processed, the hash (and therefore URL) changes, automatically busting the cache.
+All variant filenames include a 16-char SHA-256 hash (for example, `optimized_abc123def456.webp`). The media disk is configured with `Cache-Control: public, max-age=31536000, immutable`, so CDN / browser caches are aggressive. When an image is re-processed, the hash (and therefore URL) changes, automatically busting the cache.
 
 ### Frontend upload flow
 
 1. `POST /api/uploads` with `pool=gallery` (or `content`), `image=<file>`, optional `alt_text`.
 2. If response has `processing: true` → poll `GET /api/images?pool=gallery` until `processing: false`. If `processing: false` → variants are already available in the response.
-3. Use the `variants` map to pick the right URL for each UI context (e.g., `variants.thumb` for icon, `variants.hero` for banner).
+3. Use the `variants` map to pick the right URL for each UI context (typically `variants.optimized`, or `variants.maximized` where detail quality matters).
 4. To delete: `DELETE /api/images/{image}`.
 5. To reorder gallery: `POST /api/gallery/reorder` with `{ "ids": [...] }`.
 

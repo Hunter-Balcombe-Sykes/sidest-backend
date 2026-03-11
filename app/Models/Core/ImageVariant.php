@@ -9,11 +9,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * A single processed WebP variant of a SiteImage (e.g. thumb_abc123.webp).
+ * A single processed WebP variant of a SiteImage
+ * (e.g. optimized_abc123.webp or maximized_def456.webp).
  *
  * @property string $id
  * @property string $image_id       FK → site_images.id
- * @property string $variant        thumb|small|medium|large|hero
+ * @property string $variant        configured variant key (e.g. optimized|maximized)
  * @property string $disk
  * @property string $path
  * @property string $format

@@ -53,22 +53,30 @@ return [
 
     /*
     |----------------------------------------------------------------------
-    | Image processing – universal variant definitions
+    | Image processing – dual full-resolution variants
     |----------------------------------------------------------------------
-    | Every uploaded image (gallery or content) gets the same set of
-    | responsive WebP variants. The frontend picks the right size for
-    | each use case (icon → thumb, banner → hero, etc.).
+    | Every upload generates two WebP variants:
+    | - optimized: adaptive quality target (~500KB by default)
+    | - maximized: highest quality full-resolution WebP
     |
-    | width / height = max dimension (aspect ratio preserved).
-    | quality = WebP quality (1-100).
-    | fit: cover = centre-crop to fill, inside = fit within bounds.
+    | preserve_resolution = keep original dimensions (no resize cap).
+    | quality             = preferred WebP quality ceiling (1-100).
+    | min_quality         = lowest allowed quality while targeting size.
+    | target_kb           = target max file size in kilobytes.
     */
     'image_variants' => [
-        'thumb'  => ['width' => 64,   'height' => 64,   'quality' => 80, 'format' => 'webp', 'fit' => 'cover'],
-        'small'  => ['width' => 200,  'height' => 200,  'quality' => 80, 'format' => 'webp', 'fit' => 'cover'],
-        'medium' => ['width' => 600,  'height' => 600,  'quality' => 80, 'format' => 'webp', 'fit' => 'inside'],
-        'large'  => ['width' => 1200, 'height' => 1200, 'quality' => 85, 'format' => 'webp', 'fit' => 'inside'],
-        'hero'   => ['width' => 1920, 'height' => 1080, 'quality' => 85, 'format' => 'webp', 'fit' => 'cover'],
+        'optimized' => [
+            'format' => 'webp',
+            'preserve_resolution' => true,
+            'quality' => (int) env('COMET_IMAGE_QUALITY', 92),
+            'min_quality' => (int) env('COMET_IMAGE_MIN_QUALITY', 60),
+            'target_kb' => (int) env('COMET_IMAGE_TARGET_KB', 500),
+        ],
+        'maximized' => [
+            'format' => 'webp',
+            'preserve_resolution' => true,
+            'quality' => (int) env('COMET_IMAGE_MAXIMIZED_QUALITY', 100),
+        ],
     ],
 
     'image_max_upload_size' => (int) env('COMET_IMAGE_MAX_UPLOAD_KB', 10240), // 10 MB
