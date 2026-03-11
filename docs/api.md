@@ -719,6 +719,14 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
   "sections": [],
   "blocks": [],
   "services": [],
+  "selected_products": [],
+  "default_commission_rate": 15,
+  "max_featured_products": 10,
+  "store": {
+    "selected_products": [],
+    "default_commission_rate": 15,
+    "max_featured_products": 10
+  },
   "legal": {
     "privacy_policy": "## Privacy Policy\\n...",
     "terms_and_conditions": "## Terms and Conditions\\n...",
@@ -729,6 +737,10 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 ```
 
 **Common status codes:** 200, 403 (site not published), 404 (site not found), 429
+
+**Notes:**
+- `blocks` is a combined, sort-ordered array of both `links` and `sections` and includes `block_group` on each item.
+- Featured-products data is embedded for theme rendering via both top-level keys (`selected_products`, rates) and a nested `store` object.
 
 ### `POST /api/public/analytics/pageviews`
 

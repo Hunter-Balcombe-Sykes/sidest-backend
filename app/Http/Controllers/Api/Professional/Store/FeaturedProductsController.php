@@ -6,11 +6,12 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Retail\ProfessionalSelection;
+use App\Services\Cache\SiteCacheService;
+use App\Services\Store\FeaturedProductsPayloadService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -20,8 +21,9 @@ class FeaturedProductsController extends ApiController
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
 
-    private ?bool $commissionOverrideSupported = null;
-    private ?bool $selectionsTableAvailable = null;
+    public function __construct(
+        private readonly FeaturedProductsPayloadService $featuredProductsPayloads
+    ) {}
 
     /**
      * GET /store/featured-products
@@ -31,46 +33,14 @@ class FeaturedProductsController extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $site = $this->currentSite($professional);
-        $defaultRate = (float) config('comet.store.default_commission_rate', 15);
-        $maxFeatured = (int) config('comet.store.max_featured_products', 10);
-        $supportsCommissionOverride = $this->supportsCommissionOverride() && $this->hasSelectionsTable();
 
-        if (! $this->hasSelectionsTable()) {
-            return $this->success([
-                'selected_products' => $this->getLegacySelectedProducts($site),
-                'default_commission_rate' => $defaultRate,
-                'max_featured_products' => $maxFeatured,
-            ]);
-        }
-
-        $columns = ['id', 'shopify_product_id', 'sort_order'];
-        if ($supportsCommissionOverride) {
-            $columns[] = 'commission_override';
-        }
-
-        try {
-            $selections = ProfessionalSelection::where('professional_id', $professional->id)
-                ->orderBy('sort_order')
-                ->get($columns);
-        } catch (Throwable $e) {
-            Log::warning('Featured products falling back to legacy site settings (index).', [
-                'professional_id' => (string) $professional->id,
-                'site_id' => (string) $site->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return $this->success([
-                'selected_products' => $this->getLegacySelectedProducts($site),
-                'default_commission_rate' => $defaultRate,
-                'max_featured_products' => $maxFeatured,
-            ]);
-        }
-
-        return $this->success([
-            'selected_products'       => $this->toSelectionResponse($selections, $supportsCommissionOverride),
-            'default_commission_rate' => $defaultRate,
-            'max_featured_products'   => $maxFeatured,
-        ]);
+        return $this->success(
+            $this->featuredProductsPayloads->build(
+                (string) $professional->id,
+                $site->settings,
+                'professional_store_index'
+            )
+        );
     }
 
     /**
@@ -83,8 +53,8 @@ class FeaturedProductsController extends ApiController
         $professional = $this->currentProfessional($request);
         $site = $this->currentSite($professional);
         $maxFeatured = (int) config('comet.store.max_featured_products', 10);
-        $defaultRate = (float) config('comet.store.default_commission_rate', 15);
-        $supportsCommissionOverride = $this->supportsCommissionOverride() && $this->hasSelectionsTable();
+        $supportsCommissionOverride = $this->featuredProductsPayloads->supportsCommissionOverride()
+            && $this->featuredProductsPayloads->hasSelectionsTable();
 
         $validator = Validator::make($request->all(), [
             'products'                            => ['required', 'array', 'max:' . $maxFeatured],
@@ -99,7 +69,7 @@ class FeaturedProductsController extends ApiController
 
         $validated = $validator->validated();
 
-        if (! $this->hasSelectionsTable()) {
+        if (! $this->featuredProductsPayloads->hasSelectionsTable()) {
             Log::error('Featured products update blocked: retail.professional_selections table is unavailable.', [
                 'professional_id' => (string) $professional->id,
                 'site_id' => (string) $site->id,
@@ -157,109 +127,22 @@ class FeaturedProductsController extends ApiController
             return $this->error($message, $status);
         }
 
-        $columns = ['id', 'shopify_product_id', 'sort_order'];
-        if ($supportsCommissionOverride) {
-            $columns[] = 'commission_override';
-        }
-
-        $selections = ProfessionalSelection::where('professional_id', $professional->id)
-            ->orderBy('sort_order')
-            ->get($columns);
-
-        return $this->success([
-            'selected_products'       => $this->toSelectionResponse($selections, $supportsCommissionOverride),
-            'default_commission_rate' => $defaultRate,
-            'max_featured_products'   => $maxFeatured,
-        ]);
-    }
-
-    private function hasSelectionsTable(): bool
-    {
-        if ($this->selectionsTableAvailable !== null) {
-            return $this->selectionsTableAvailable;
-        }
-
         try {
-            $result = DB::selectOne("select to_regclass('retail.professional_selections') as table_name");
-            $this->selectionsTableAvailable = isset($result->table_name) && $result->table_name !== null;
+            app(SiteCacheService::class)->invalidateSite($site);
         } catch (Throwable $e) {
-            Log::warning('Could not verify retail.professional_selections availability.', [
+            Log::warning('Site cache invalidation failed after featured products update.', [
+                'professional_id' => (string) $professional->id,
+                'site_id' => (string) $site->id,
                 'error' => $e->getMessage(),
             ]);
-            $this->selectionsTableAvailable = false;
         }
 
-        return $this->selectionsTableAvailable;
-    }
-
-    private function supportsCommissionOverride(): bool
-    {
-        if ($this->commissionOverrideSupported !== null) {
-            return $this->commissionOverrideSupported;
-        }
-
-        try {
-            $this->commissionOverrideSupported = DB::table('information_schema.columns')
-                ->where('table_schema', 'retail')
-                ->where('table_name', 'professional_selections')
-                ->where('column_name', 'commission_override')
-                ->exists();
-        } catch (Throwable $e) {
-            Log::warning('Could not verify commission_override column on retail.professional_selections.', [
-                'error' => $e->getMessage(),
-            ]);
-            // Fail-safe: if metadata lookup is blocked, behave as if column is unavailable.
-            $this->commissionOverrideSupported = false;
-        }
-
-        return $this->commissionOverrideSupported;
-    }
-
-    private function toSelectionResponse(Collection $rows, bool $supportsCommissionOverride): Collection
-    {
-        return $rows->map(function ($row) use ($supportsCommissionOverride) {
-            return [
-                'id' => $row->id,
-                'shopify_product_id' => $row->shopify_product_id,
-                'sort_order' => $row->sort_order,
-                'commission_override' => $supportsCommissionOverride ? $row->commission_override : null,
-            ];
-        })->values();
-    }
-
-    private function getLegacySelectedProducts($site): array
-    {
-        $settings = is_array($site->settings) ? $site->settings : [];
-        $selectedProducts = $settings['selected_products'] ?? [];
-        return is_array($selectedProducts) ? array_values($selectedProducts) : [];
-    }
-
-    private function saveLegacySelectedProducts($site, array $products): array
-    {
-        $normalized = [];
-        foreach (array_values($products) as $index => $product) {
-            if (!is_array($product)) {
-                continue;
-            }
-
-            $id = isset($product['shopify_product_id']) ? (string) $product['shopify_product_id'] : '';
-            if ($id === '') {
-                continue;
-            }
-
-            $normalized[] = [
-                'id' => $id,
-                'shopify_product_id' => $id,
-                'sort_order' => isset($product['sort_order']) ? (int) $product['sort_order'] : $index,
-                'commission_override' => isset($product['commission_override']) ? $product['commission_override'] : null,
-            ];
-        }
-
-        $settings = is_array($site->settings) ? $site->settings : [];
-        $settings['selected_products'] = $normalized;
-        $site->settings = $settings;
-        $site->save();
-
-        return $normalized;
+        return $this->success(
+            $this->featuredProductsPayloads->build(
+                (string) $professional->id,
+                $site->settings,
+                'professional_store_update'
+            )
+        );
     }
 }

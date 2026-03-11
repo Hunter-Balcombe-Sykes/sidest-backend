@@ -10,12 +10,17 @@ use App\Models\Core\Site\Site;
 use App\Models\Views\PublicSitePayload;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Services\Legal\ProfessionalLegalContentService;
+use App\Services\Store\FeaturedProductsPayloadService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class SiteCacheService
 {
     private const MISS_SENTINEL = '__MISS__';
+
+    public function __construct(
+        private readonly FeaturedProductsPayloadService $featuredProductsPayloads
+    ) {}
 
     /**
      * Get public site payload (MOST CRITICAL - 95% of traffic)
@@ -36,7 +41,13 @@ class SiteCacheService
             // Backward-compatible cache healing for payload shape changes.
             // Older cache entries may not include `services`.
             if (array_key_exists('services', $cached)) {
-                if (!array_key_exists('legal', $cached)) {
+                $cached = $this->ensureBlockCollections($cached);
+                $cached = $this->withStorePayload(
+                    $cached,
+                    (string) data_get($cached, 'professional.id', '')
+                );
+
+                if (! array_key_exists('legal', $cached)) {
                     $cached['legal'] = null;
                 }
 
@@ -45,6 +56,8 @@ class SiteCacheService
                 if (is_array($site)) {
                     $cached['site'] = $this->resolveImageVariantUrlsInSite($site, '');
                 }
+
+                Cache::put($key, $cached, now()->addMinutes(15));
                 return $cached;
             }
             Cache::forget($key);
@@ -76,21 +89,157 @@ class SiteCacheService
         }
 
         // Must match the controller response shape exactly.
+        $links = is_array($payload['links'] ?? null) ? array_values($payload['links']) : [];
+        $sections = is_array($payload['sections'] ?? null) ? array_values($payload['sections']) : [];
+        $existingBlocks = is_array($payload['blocks'] ?? null) ? array_values($payload['blocks']) : [];
+
         $data = [
             'published' => true,
             'site' => $site,
             'professional' => $payload['professional'] ?? null,
             'theme' => $payload['theme'] ?? null,
             'services' => $services,
-            'links' => $payload['links'] ?? ($payload['blocks'] ?? []),
-            'sections' => $payload['sections'] ?? [],
-            'blocks' => $payload['blocks'] ?? ($payload['links'] ?? []),
+            'links' => $links,
+            'sections' => $sections,
+            'blocks' => $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks),
             'legal' => $payload['legal'] ?? null,
         ];
+        $data = $this->withStorePayload($data, (string) ($row->professional_id ?? ''));
 
         Cache::put($key, $data, now()->addMinutes(15));
 
         return $data;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function ensureBlockCollections(array $payload): array
+    {
+        $links = is_array($payload['links'] ?? null) ? array_values($payload['links']) : [];
+        $sections = is_array($payload['sections'] ?? null) ? array_values($payload['sections']) : [];
+        $existingBlocks = is_array($payload['blocks'] ?? null) ? array_values($payload['blocks']) : [];
+
+        if ($links === [] && $existingBlocks !== []) {
+            $links = array_values(array_filter($existingBlocks, function ($block): bool {
+                return is_array($block)
+                    && strtolower((string) ($block['block_group'] ?? '')) === 'links';
+            }));
+        }
+
+        if ($sections === [] && $existingBlocks !== []) {
+            $sections = array_values(array_filter($existingBlocks, function ($block): bool {
+                return is_array($block)
+                    && strtolower((string) ($block['block_group'] ?? '')) === 'sections';
+            }));
+        }
+
+        $payload['links'] = $links;
+        $payload['sections'] = $sections;
+        $payload['blocks'] = $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks);
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<int, mixed>  $links
+     * @param  array<int, mixed>  $sections
+     * @param  array<int, mixed>  $existingBlocks
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildCombinedBlocksPayload(array $links, array $sections, array $existingBlocks = []): array
+    {
+        if ($links === [] && $sections === []) {
+            return array_values(array_filter($existingBlocks, fn ($block): bool => is_array($block)));
+        }
+
+        $normalizedLinks = array_map(function ($block): array {
+            $data = is_array($block) ? $block : [];
+            $data['block_group'] = 'links';
+            return $data;
+        }, $links);
+
+        $normalizedSections = array_map(function ($block): array {
+            $data = is_array($block) ? $block : [];
+            $data['block_group'] = 'sections';
+            return $data;
+        }, $sections);
+
+        $combined = array_merge($normalizedLinks, $normalizedSections);
+
+        usort($combined, function (array $a, array $b): int {
+            $aSort = (int) ($a['sort_order'] ?? PHP_INT_MAX);
+            $bSort = (int) ($b['sort_order'] ?? PHP_INT_MAX);
+            if ($aSort !== $bSort) {
+                return $aSort <=> $bSort;
+            }
+
+            $aId = (string) ($a['id'] ?? '');
+            $bId = (string) ($b['id'] ?? '');
+            return $aId <=> $bId;
+        });
+
+        return array_values($combined);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function withStorePayload(array $payload, string $professionalId): array
+    {
+        $siteSettings = [];
+        if (is_array($payload['site'] ?? null)) {
+            $siteSettingsRaw = $payload['site']['settings'] ?? [];
+            if (is_array($siteSettingsRaw)) {
+                $siteSettings = $siteSettingsRaw;
+            }
+        }
+
+        $store = null;
+        $existingStore = $payload['store'] ?? null;
+
+        if (
+            is_array($existingStore)
+            && is_array($existingStore['selected_products'] ?? null)
+            && array_key_exists('default_commission_rate', $existingStore)
+            && array_key_exists('max_featured_products', $existingStore)
+        ) {
+            $store = [
+                'selected_products' => array_values($existingStore['selected_products']),
+                'default_commission_rate' => (float) $existingStore['default_commission_rate'],
+                'max_featured_products' => (int) $existingStore['max_featured_products'],
+            ];
+        }
+
+        if (
+            $store === null
+            && is_array($payload['selected_products'] ?? null)
+            && array_key_exists('default_commission_rate', $payload)
+            && array_key_exists('max_featured_products', $payload)
+        ) {
+            $store = [
+                'selected_products' => array_values($payload['selected_products']),
+                'default_commission_rate' => (float) $payload['default_commission_rate'],
+                'max_featured_products' => (int) $payload['max_featured_products'],
+            ];
+        }
+
+        if ($store === null) {
+            $store = $this->featuredProductsPayloads->build(
+                $professionalId,
+                $siteSettings,
+                'public_site_payload'
+            );
+        }
+
+        $payload['store'] = $store;
+        $payload['selected_products'] = $store['selected_products'];
+        $payload['default_commission_rate'] = $store['default_commission_rate'];
+        $payload['max_featured_products'] = $store['max_featured_products'];
+
+        return $payload;
     }
 
     /**
