@@ -97,10 +97,20 @@ class AnalyticsController extends ApiController
 
         $blockGroup = strtolower((string) $block->block_group);
         $blockType = strtolower((string) $block->block_type);
+        $trackableSectionTypes = collect(config('comet.section_block_types', [
+            'gallery',
+            'services',
+            'shop',
+            'booking',
+        ]))
+            ->filter(fn ($type) => is_string($type) && trim($type) !== '')
+            ->map(fn (string $type) => strtolower(trim($type)))
+            ->values()
+            ->all();
         $isTrackableLink = $blockGroup === 'links' && $blockType === 'link';
         $isTrackableSection =
             $blockGroup === 'sections'
-            && in_array($blockType, ['gallery', 'services', 'shop', 'booking'], true);
+            && in_array($blockType, $trackableSectionTypes, true);
 
         if (!$isTrackableLink && !$isTrackableSection) {
             return $this->error('Block is not trackable for analytics', 422);

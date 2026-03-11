@@ -586,7 +586,7 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 | utm_source            | string | yes      | `instagram`             | Max 255                                                                                                                 |
 | utm_medium            | string | yes      | `social`                | Max 255                                                                                                                 |
 | utm_campaign          | string | yes      | `jan_promo`             | Max 255                                                                                                                 |
-| block_id (click only) | uuid   | no       | `d5b0...`               | Must belong to the site, be active, and be trackable: `links/link` or `sections/{gallery,services,shop,booking}`     |
+| block_id (click only) | uuid   | no       | `d5b0...`               | Must belong to the site, be active, and be trackable: `links/link` or `sections/{gallery,services,shop,booking,barbershop_info}` |
 
 ### Plans (core.plans)
 | Name            | Type     | Nullable | Example                | Constraints / Notes     |
