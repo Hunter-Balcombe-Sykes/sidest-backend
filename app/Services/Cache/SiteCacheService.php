@@ -3,12 +3,15 @@
 namespace App\Services\Cache;
 
 use App\Models\Core\ImageVariant;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Views\PublicSitePayload;
 use App\Models\Core\Site\SiteSubdomainAlias;
+use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class SiteCacheService
 {
@@ -33,6 +36,10 @@ class SiteCacheService
             // Backward-compatible cache healing for payload shape changes.
             // Older cache entries may not include `services`.
             if (array_key_exists('services', $cached)) {
+                if (!array_key_exists('legal', $cached)) {
+                    $cached['legal'] = null;
+                }
+
                 // Always resolve image variant paths to URLs (handles pre-URL-resolution cache entries)
                 $site = $cached['site'] ?? null;
                 if (is_array($site)) {
@@ -55,6 +62,10 @@ class SiteCacheService
         }
 
         $payload = $row->payload ?? [];
+        if (is_array($payload) && !$this->hasRenderableLegalContent($payload)) {
+            $payload = $this->backfillLegalContentPayload($row, $payload);
+        }
+
         $services = is_array($payload['services'] ?? null)
             ? $payload['services']
             : $this->buildServicesPayload((string) ($row->professional_id ?? ''));
@@ -74,6 +85,7 @@ class SiteCacheService
             'links' => $payload['links'] ?? ($payload['blocks'] ?? []),
             'sections' => $payload['sections'] ?? [],
             'blocks' => $payload['blocks'] ?? ($payload['links'] ?? []),
+            'legal' => $payload['legal'] ?? null,
         ];
 
         Cache::put($key, $data, now()->addMinutes(15));
@@ -187,6 +199,66 @@ class SiteCacheService
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * Backfill templated legal content for older professionals whose legal row has not been generated yet.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function backfillLegalContentPayload(PublicSitePayload $row, array $payload): array
+    {
+        $professionalId = (string) ($row->professional_id ?? '');
+        if ($professionalId === '') {
+            return $payload;
+        }
+
+        try {
+            $professional = Professional::query()
+                ->with('site')
+                ->find($professionalId);
+
+            if (!$professional || !$professional->site) {
+                return $payload;
+            }
+
+            app(ProfessionalLegalContentService::class)->refreshGenerated($professional, $professional->site);
+
+            $freshRow = PublicSitePayload::query()
+                ->where('site_id', $row->site_id)
+                ->first();
+
+            $freshPayload = $freshRow?->payload;
+            if (is_array($freshPayload) && $this->hasRenderableLegalContent($freshPayload)) {
+                return $freshPayload;
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Unable to backfill legal content for public payload.', [
+                'site_id' => $row->site_id,
+                'professional_id' => $professionalId,
+                'message' => $e->getMessage(),
+            ]);
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function hasRenderableLegalContent(array $payload): bool
+    {
+        $legal = $payload['legal'] ?? null;
+
+        if (!is_array($legal)) {
+            return false;
+        }
+
+        $privacy = trim((string) ($legal['privacy_policy'] ?? ''));
+        $terms = trim((string) ($legal['terms_and_conditions'] ?? ''));
+
+        return $privacy !== '' && $terms !== '';
     }
 
     /**

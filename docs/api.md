@@ -11,6 +11,7 @@ This document is the single source of truth for backend so the frontend can buil
 
 ## Contents
 
+- Recent Backend Changes (Commit Log Snapshot)
 - Environments and Base URLs
 - Authentication (Supabase JWT)
 - Roles and permissions
@@ -25,6 +26,32 @@ This document is the single source of truth for backend so the frontend can buil
 - Frontend env var checklist
 - Backend env var checklist
 - Known implementation gotchas
+
+## 0) Recent Backend Changes (Commit Log Snapshot)
+
+Snapshot date: **March 11, 2026**.
+
+### Unreleased (working tree)
+
+- Add per-professional legal content storage with generated + manual variants and source toggles.
+- Add `GET /api/site/legal-content` and `PUT|PATCH /api/site/legal-content`.
+- Add public payload `legal` object with active document resolution.
+- Ensure legal defaults to templated content and never renders blank when manual content is empty.
+
+### Recent commits
+
+- `37b4749` (2026-03-11): image variant changes.
+- `580c222` (2026-03-10): allow `barbershop_info` section block type.
+- `a91d6b7` (2026-03-10): add per-user Google Business Profile endpoints.
+- `ddc1c76` (2026-03-10): sync booking contacts during checkout intent.
+- `63350c9` (2026-03-10): public lead subdomain fallback (header/query/body/host).
+- `438dcc7` (2026-03-10): fallback public customers route for path-based frontend.
+- `31d0910` (2026-03-10): sync site bookings into local contacts.
+- `626ee6c` (2026-03-09): infer subscriber names from email when full name is missing.
+- `260d29d` (2026-03-09): stabilize public subscribe write path (no conflict upsert dependency).
+- `6f94482` (2026-03-09): harden public subscribe and relax email validation.
+- `8a078f5` (2026-03-09): support public subscribe via slug/header and upsert marketing customers.
+- `df3fa60` (2026-03-09): create welcome notification on first signup bootstrap.
 
 ## 1) Environments and Base URLs
 
@@ -685,12 +712,19 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 ```json
 {
   "published": true,
-  "site": { "id": "uuid", "subdomain": "fadez", "settings": {} },
+  "site": { "id": "uuid", "subdomain": "fadez", "settings": {}, "gallery": [], "content_images": [] },
   "professional": { "id": "uuid", "handle": "fadez", "display_name": "Fadez Studio", "bio": null },
   "theme": { "id": "uuid", "key": "modern", "name": "Modern", "config": {} },
+  "links": [],
+  "sections": [],
   "blocks": [],
-  "gallery": [],
-  "services": []
+  "services": [],
+  "legal": {
+    "privacy_policy": "## Privacy Policy\\n...",
+    "terms_and_conditions": "## Terms and Conditions\\n...",
+    "active_privacy_source": "templated",
+    "active_terms_source": "templated"
+  }
 }
 ```
 
@@ -767,13 +801,21 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 
 - Purpose: submit a customer lead (name + contact details)
 - Auth: None
-- Rate limit: leads Request body: { "occurred_at": "2026-01-12T05:12:00Z", "full_name": "Sam Smith", "email": "sam@example.com", "phone": "+61411111111", "notes": "optional", "form_started_at_ms": 1700000000000 } Response (201): { "message": "Lead captured", "lead_id": "uuid" } Common status codes: 201, 404, 403, 422, 429
+- Rate limit: leads
+- Site resolution order: `X-Site-Subdomain` header -> `subdomain`/`slug` query -> `subdomain`/`slug` body -> host subdomain
+- Request body (example): `{ "full_name": "Sam Smith", "email": "sam@example.com", "phone": "+61411111111", "notes": "optional", "marketing_opt_in": true, "form_started_at_ms": 1700000000000 }`
+- Response (201): `{ "ok": true, "customer_id": "uuid" }`
+- Common status codes: 201, 400 (cannot determine site), 404, 403, 422, 429
 
 ### `POST /api/public/subscribe`
 
 - Purpose: subscribe an email address to a marketing list for the professional
 - Auth: None
-- Rate limit: public-site Request body: { "email": "sam@example.com", "full_name": "Sam Smith", "list_key": "marketing" } Response (200): { "ok": true, "subscribed": true, "list_key": "marketing" } Common status codes: 200, 404, 400 (cannot determine site), 422, 429
+- Rate limit: public-site
+- Site resolution order: `X-Site-Subdomain` header -> `subdomain`/`slug` query -> `subdomain`/`slug` body -> host subdomain
+- Request body: `{ "email": "sam@example.com", "full_name": "Sam Smith", "list_key": "marketing" }`
+- Response (200): `{ "ok": true, "subscribed": true, "list_key": "marketing" }`
+- Common status codes: 200, 404, 400 (cannot determine site), 422, 429
 
 ### `GET /api/public/marketing-preference`
 
@@ -1048,21 +1090,62 @@ All routes below require: Authorization header AND a professional profile (curre
 ### `GET /api/me`
 
 - Purpose: bootstrap dashboard UI with current professional, site, blocks, services, and customer count
-- Auth: Required Response (200): { "uid": "supabase-user-uuid", "professional": { "...": "..." }, "site": { "...": "..." }, "blocks": [], "services": [], "customers_count": 0 } Common status codes: 200, 401, 403
+- Auth: Required
+- Response (200): `{ "uid": "supabase-user-uuid", "professional": { ... }, "site": { ... }, "legal_content": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
+- Common status codes: 200, 401, 403
 
 ### `PATCH /api/me`
 
-- Purpose: update professional profile fields Request body (all fields optional; if provided they are validated): { "display_name": "Josh Barber", "bio": "Mobile barber", "public_contact_email": "bookings@example.com" } Response (200): { professional: ... } Common status codes: 200, 401, 403, 422
+- Purpose: update professional profile fields
+- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "public_contact_email": "bookings@example.com" }`
+- Response (200): `{ "professional": { ... } }`
+- Common status codes: 200, 401, 403, 422
 - Images are managed via `POST /api/uploads` (pool=gallery or pool=content). No image fields are accepted on this endpoint.
 
 ### `GET /api/site`
 
-- Purpose: fetch site record for the logged-in professional Response (200): { site: ... }
+- Purpose: fetch site record for the logged-in professional
+- Response (200): `{ "site": { ... } }`
 
 ### `PATCH /api/site`
 
-- Purpose: update site settings, subdomain, and theme_id. Request body: { "subdomain": "joshbarber", "theme_id": "uuid or null", "settings": { "primary_color": "#000000" } } Response (200): { site: ... } Common status codes: 200, 401, 403, 422
+- Purpose: update site settings, subdomain, and theme_id
+- Request body: `{ "subdomain": "joshbarber", "theme_id": "uuid or null", "settings": { "primary_color": "#000000" } }`
+- Response (200): `{ "site": { ... } }`
+- Common status codes: 200, 401, 403, 422
 - Banners are managed via `POST /api/uploads` (pool=content) and the frontend picks from `optimized` / `maximized`. No banner fields are accepted on this endpoint.
+
+### `GET /api/site/google-business-profile`
+
+- Purpose: fetch the professional's saved Google Business Profile details from site settings
+- Auth: Required
+- Response (200): `{ "google_business_profile": { "place_id": "...", "name": "...", "address": "...", "latitude": -37.8, "longitude": 144.9, "phone": "...", "website": "...", "hours": ["Mon: 9:00-17:00"] } }` or `null`
+- Common status codes: 200, 401, 403
+
+### `PUT /api/site/google-business-profile`
+
+- Purpose: upsert Google Business Profile details into site settings
+- Auth: Required
+- Request body: `{ "place_id": "ChIJ...", "name": "Fadez Studio", "address": "...", "latitude": -37.8, "longitude": 144.9, "phone": "+61...", "website": "https://...", "hours": ["Mon: 9:00-17:00"] }`
+- Response (200): `{ "google_business_profile": { ... } }`
+- Common status codes: 200, 401, 403, 422
+
+### `GET /api/site/legal-content`
+
+- Purpose: fetch generated/manual legal content and current active sources for the logged-in professional
+- Auth: Required
+- Response (200): `{ "legal_content": { "generated_privacy_policy": "...", "manual_privacy_policy": "...", "active_privacy_source": "templated", "active_privacy_policy": "...", "generated_terms_and_conditions": "...", "manual_terms_and_conditions": "...", "active_terms_source": "templated", "active_terms_and_conditions": "...", "template_variables": { ... }, "generated_at": "...", "updated_at": "..." } }`
+- Common status codes: 200, 401, 403
+
+### `PUT /api/site/legal-content`
+### `PATCH /api/site/legal-content`
+
+- Purpose: save manual legal text, toggle active sources, or regenerate templated documents
+- Auth: Required
+- Request body (all fields optional): `{ "manual_privacy_policy": "...", "manual_terms_and_conditions": "...", "active_privacy_source": "templated|manual", "active_terms_source": "templated|manual", "regenerate_templated": true }`
+- Behavior: if active source is `manual` but manual content is empty, source is forced back to `templated` (never blank output)
+- Response (200): `{ "legal_content": { ... } }`
+- Common status codes: 200, 401, 403, 422
 
 ### `PATCH /api/site/visibility`
 
@@ -1154,7 +1237,7 @@ All routes below require: Authorization header AND a professional profile (curre
 - DELETE /api/links/{block}
 - POST /api/links/reorder Store/Update body: { "title": "Book now", "url": "https://booking.example.com", "icon_key": "calendar", "is_active": true, "settings": { "open_in_new_tab": true } } Common status codes: 200, 201, 401, 403, 404, 422 Sections (Section blocks)
 
-Allowed section block types are defined in config: gallery, services, education, social, booking, bio, work_history, promotional_text
+Allowed section block types are defined in config: `gallery`, `services`, `shop`, `booking`, `barbershop_info`
 
 - GET /api/sections
 - PUT /api/sections/{blockType}
@@ -1193,9 +1276,40 @@ Allowed section block types are defined in config: gallery, services, education,
 **Note:** `marketing_opt_in_cached` is a UX cache of the source-of-truth `EmailSubscription.status`. Defaults to `true` for new customers. When professionals update this field:
 - Setting to `true` enables marketing emails
 - Setting to `false` disables marketing emails
-- Cache auto-syncs when EmailSubscription status changes Themes
-- GET /api/themes
-- POST /api/themes/{theme}/select Select response: { site: ... }
+- Cache auto-syncs when EmailSubscription status changes
+
+### Themes
+
+- `GET /api/themes`
+- `POST /api/themes/{theme}/select`
+- Select response: `{ "site": { ... } }`
+
+### Store: Featured Products
+
+#### `GET /api/store/featured-products`
+
+- Purpose: get selected Shopify products for the logged-in professional
+- Auth: Required
+- Response (200): `{ "selected_products": [{ "id": "uuid", "shopify_product_id": "gid://shopify/Product/...", "sort_order": 0, "commission_override": null }], "default_commission_rate": 15, "max_featured_products": 10 }`
+- Notes:
+  - Reads from `retail.professional_selections` when available.
+  - If retail table is unavailable, read path falls back to legacy `site.settings.selected_products`.
+- Common status codes: 200, 401, 403
+
+#### `PUT /api/store/featured-products`
+
+- Purpose: replace the full featured-products list
+- Auth: Required
+- Request body:
+  - `products`: array (max configured limit, default 10)
+  - `products[].shopify_product_id`: required string
+  - `products[].sort_order`: optional integer >= 0
+  - `products[].commission_override`: optional nullable number (0-100)
+- Response (200): same shape as GET endpoint
+- Notes:
+  - Write path requires `retail.professional_selections`; if unavailable, returns 503.
+  - Duplicate product IDs are rejected.
+- Common status codes: 200, 401, 403, 422, 503
 
 ### Image Uploads (server-side processing)
 
@@ -1616,6 +1730,10 @@ Note: The frontend does not need any storage credentials — all image URLs come
 - COMET_GALLERY_IMAGE_MAX (default: 5)
 - COMET_CONTENT_IMAGE_MAX (default: 5)
 - COMET_IMAGE_MAX_UPLOAD_KB (default: 10240 = 10 MB)
+- COMET_LEGAL_SITE_SCHEME (default: `https`)
+- COMET_LEGAL_DEFAULT_CONTACT_NAME (default: `Customer Support`)
+- COMET_LEGAL_DEFAULT_SUPPORT_EMAIL (default: `support@comet.app`)
+- COMET_LEGAL_DEFAULT_SUPPORT_PHONE (default: `N/A`)
 - SOFT_DELETE_RETENTION_DAYS (default: 30)
 
 ### Media disk (Laravel Cloud Object Storage / Cloudflare R2)

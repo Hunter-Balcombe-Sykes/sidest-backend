@@ -5,6 +5,7 @@ namespace App\Observers\Core;
 use App\Jobs\Cache\WarmPublicSiteCacheJob;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\SiteCacheService;
+use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Support\Facades\Log;
 
 class SiteObserver
@@ -12,11 +13,25 @@ class SiteObserver
     public bool $afterCommit = true;
 
     public function __construct(
-        private readonly SiteCacheService $siteCache
+        private readonly SiteCacheService $siteCache,
+        private readonly ProfessionalLegalContentService $legalContentService
     ) {}
 
     public function saved(Site $site): void
     {
+        try {
+            $site->loadMissing('professional');
+            if ($site->professional) {
+                $this->legalContentService->refreshGenerated($site->professional, $site);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Legal template regeneration failed on site save', [
+                'site_id' => $site->id,
+                'subdomain' => $site->subdomain,
+                'message' => $e->getMessage(),
+            ]);
+        }
+
         try {
             $this->siteCache->invalidateSite($site);
         } catch (\Throwable $e) {

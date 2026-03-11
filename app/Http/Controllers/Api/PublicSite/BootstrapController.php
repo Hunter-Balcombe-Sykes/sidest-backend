@@ -15,12 +15,13 @@ use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
+use App\Services\Legal\ProfessionalLegalContentService;
 
 
 
 class BootstrapController extends ApiController
 {
-    public function bootstrap(BootstrapRequest $request)
+    public function bootstrap(BootstrapRequest $request, ProfessionalLegalContentService $legalContentService)
     {
         $uid = $request->attributes->get('supabase_uid');
         if (!is_string($uid) || $uid === '') {
@@ -30,7 +31,7 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $result = DB::transaction(function () use ($uid, $data) {
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService) {
             $createdProfessional = false;
 
             $professional = Professional::query()->where('auth_user_id', $uid)->first();
@@ -104,6 +105,8 @@ class BootstrapController extends ApiController
 
                 $site = $this->createSiteWithRetry($professional->id, $base);
             }
+
+            $legalContentService->refreshGenerated($professional, $site);
 
             // Ensure the professional has a subscription – seed the free plan if none exists
             $this->ensureFreeSubscription($professional);
