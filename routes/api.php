@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
+use App\Http\Controllers\Api\PublicSite\PublicStoreController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
 use Illuminate\Support\Facades\Route;
@@ -51,6 +52,8 @@ Route::get('/public/booking/services-by-slug', [PublicBookingController::class, 
 Route::post('/public/booking/availability-by-slug', [PublicBookingController::class, 'availability'])
     ->middleware('throttle:public-site');
 Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
+    ->middleware('throttle:public-site');
+Route::get('/public/store/featured-products-by-slug', [PublicStoreController::class, 'featuredProducts'])
     ->middleware('throttle:public-site');
 
 // Header/site-id based fallback for path-based frontend routing.
