@@ -225,7 +225,7 @@ class FeaturedProductsPayloadService
                 ->select('c.id', 'c.promoter_enterprise_id')
                 ->first();
         } catch (Throwable $e) {
-            Log::warning('Could not resolve active influencer promoter contract.', [
+            Log::warning('Could not resolve active ambassador promoter contract.', [
                 'professional_id' => $professionalId,
                 'error' => $e->getMessage(),
             ]);

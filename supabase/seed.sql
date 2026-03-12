@@ -1,4 +1,4 @@
--- Enterprise + influencer/promoter validation scenarios
+-- Enterprise + ambassador/promoter validation scenarios
 -- Safe to run repeatedly (idempotent via deterministic UUIDs and upserts).
 
 DO $$
@@ -85,10 +85,10 @@ BEGIN
         ('20000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', 'salon-employee', 'Salon Employee', 'active', 0, '+61400000002', 'salon.employee@example.com', 'Salon', 'Employee', 'salon-employee', 'salon-employee-seed', 'barber', '10000000-0000-0000-0000-000000000003'),
         -- 3) professional in multiple enterprises
         ('20000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000003', 'multi-enterprise-pro', 'Multi Enterprise Professional', 'active', 0, '+61400000003', 'multi.enterprise@example.com', 'Multi', 'Enterprise', 'multi-enterprise-pro', 'multi-enterprise-pro-seed', 'barber', '10000000-0000-0000-0000-000000000004'),
-        -- 4) influencer switching promoters
-        ('20000000-0000-0000-0000-000000000004', '30000000-0000-0000-0000-000000000004', 'switching-influencer', 'Switching Influencer', 'active', 0, '+61400000004', 'switching.influencer@example.com', 'Switching', 'Influencer', 'switching-influencer', 'switching-influencer-seed', 'influencer', '10000000-0000-0000-0000-000000000002'),
-        -- 5) influencer with exclusive promoter + selected products
-        ('20000000-0000-0000-0000-000000000005', '30000000-0000-0000-0000-000000000005', 'exclusive-influencer', 'Exclusive Influencer', 'active', 0, '+61400000005', 'exclusive.influencer@example.com', 'Exclusive', 'Influencer', 'exclusive-influencer', 'exclusive-influencer-seed', 'influencer', '10000000-0000-0000-0000-000000000001')
+        -- 4) ambassador switching promoters
+        ('20000000-0000-0000-0000-000000000004', '30000000-0000-0000-0000-000000000004', 'switching-ambassador', 'Switching Ambassador', 'active', 0, '+61400000004', 'switching.ambassador@example.com', 'Switching', 'Ambassador', 'switching-ambassador', 'switching-ambassador-seed', 'ambassador', '10000000-0000-0000-0000-000000000002'),
+        -- 5) ambassador with exclusive promoter + selected products
+        ('20000000-0000-0000-0000-000000000005', '30000000-0000-0000-0000-000000000005', 'exclusive-ambassador', 'Exclusive Ambassador', 'active', 0, '+61400000005', 'exclusive.ambassador@example.com', 'Exclusive', 'Ambassador', 'exclusive-ambassador', 'exclusive-ambassador-seed', 'ambassador', '10000000-0000-0000-0000-000000000001')
     ON CONFLICT (id) DO UPDATE
     SET
         auth_user_id = EXCLUDED.auth_user_id,
@@ -122,9 +122,9 @@ BEGIN
         ('40000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000003', 'employee', true, now() - interval '180 days', NULL, jsonb_build_object('seed_case', 'one_salon')),
         ('40000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000003', 'contractor', false, now() - interval '180 days', NULL, jsonb_build_object('seed_case', 'multi_enterprise_secondary')),
         ('40000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000004', 'chair_renter', true, now() - interval '180 days', NULL, jsonb_build_object('seed_case', 'multi_enterprise_primary')),
-        ('40000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', 'affiliate', false, now() - interval '180 days', now() - interval '60 days', jsonb_build_object('seed_case', 'influencer_switch_old_promoter')),
-        ('40000000-0000-0000-0000-000000000005', '20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', 'affiliate', true, now() - interval '60 days', NULL, jsonb_build_object('seed_case', 'influencer_switch_new_promoter')),
-        ('40000000-0000-0000-0000-000000000006', '20000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000001', 'affiliate', true, now() - interval '45 days', NULL, jsonb_build_object('seed_case', 'exclusive_influencer'))
+        ('40000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', 'affiliate', false, now() - interval '180 days', now() - interval '60 days', jsonb_build_object('seed_case', 'ambassador_switch_old_promoter')),
+        ('40000000-0000-0000-0000-000000000005', '20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', 'affiliate', true, now() - interval '60 days', NULL, jsonb_build_object('seed_case', 'ambassador_switch_new_promoter')),
+        ('40000000-0000-0000-0000-000000000006', '20000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000001', 'affiliate', true, now() - interval '45 days', NULL, jsonb_build_object('seed_case', 'exclusive_ambassador'))
     ON CONFLICT (id) DO UPDATE
     SET
         professional_id = EXCLUDED.professional_id,
@@ -136,7 +136,7 @@ BEGIN
         metadata = EXCLUDED.metadata;
 
     -- ============================================================
-    -- Influencer promoter contracts
+    -- Ambassador promoter contracts
     -- ============================================================
     INSERT INTO core.influencer_promoter_contracts (
         id,
@@ -150,12 +150,12 @@ BEGIN
         metadata
     )
     VALUES
-        -- switching influencer: old ended contract
-        ('50000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', 'ended', true, now() - interval '180 days', now() - interval '60 days', 'Initial promoter contract ended', jsonb_build_object('seed_case', 'influencer_switch_old')),
-        -- switching influencer: active exclusive contract with new promoter
-        ('50000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', 'active', true, now() - interval '60 days', NULL, 'Current active promoter', jsonb_build_object('seed_case', 'influencer_switch_new')),
-        -- exclusive influencer with selected products
-        ('50000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000001', 'active', true, now() - interval '45 days', NULL, 'Exclusive promoter contract', jsonb_build_object('seed_case', 'exclusive_influencer'))
+        -- switching ambassador: old ended contract
+        ('50000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', 'ended', true, now() - interval '180 days', now() - interval '60 days', 'Initial promoter contract ended', jsonb_build_object('seed_case', 'ambassador_switch_old')),
+        -- switching ambassador: active exclusive contract with new promoter
+        ('50000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', 'active', true, now() - interval '60 days', NULL, 'Current active promoter', jsonb_build_object('seed_case', 'ambassador_switch_new')),
+        -- exclusive ambassador with selected products
+        ('50000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000001', 'active', true, now() - interval '45 days', NULL, 'Exclusive promoter contract', jsonb_build_object('seed_case', 'exclusive_ambassador'))
     ON CONFLICT (id) DO UPDATE
     SET
         influencer_professional_id = EXCLUDED.influencer_professional_id,
@@ -253,7 +253,7 @@ BEGIN
         metadata = EXCLUDED.metadata;
 
     -- ============================================================
-    -- Featured selections for exclusive influencer scenario
+    -- Featured selections for exclusive ambassador scenario
     -- ============================================================
     DELETE FROM retail.professional_selections
     WHERE professional_id = '20000000-0000-0000-0000-000000000005';

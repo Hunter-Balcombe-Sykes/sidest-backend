@@ -1,5 +1,5 @@
 -- Expand professional_type options to support unified enterprise-first onboarding.
--- Allowed values become: barber, influencer, hairdresser, promoter, barbershop, salon.
+-- Allowed values become: barber, ambassador, hairdresser, promoter, barbershop, salon.
 
 DO $$
 BEGIN
@@ -34,6 +34,10 @@ BEGIN
     WHERE professional_type IN ('hairdresser', 'hairstylist');
 
     UPDATE core.professionals
+    SET professional_type = 'ambassador'
+    WHERE professional_type IN ('ambassador', 'influencer');
+
+    UPDATE core.professionals
     SET professional_type = 'salon'
     WHERE professional_type IN ('salon', 'hairsalon');
 
@@ -44,7 +48,7 @@ BEGIN
 
     UPDATE core.professionals
     SET professional_type = 'barber'
-    WHERE professional_type NOT IN ('barber', 'influencer', 'hairdresser', 'promoter', 'barbershop', 'salon');
+    WHERE professional_type NOT IN ('barber', 'ambassador', 'hairdresser', 'promoter', 'barbershop', 'salon');
 
     ALTER TABLE core.professionals
         ALTER COLUMN professional_type SET DEFAULT 'barber',
@@ -52,8 +56,8 @@ BEGIN
 
     ALTER TABLE core.professionals
         ADD CONSTRAINT professionals_professional_type_check
-        CHECK (professional_type IN ('barber', 'influencer', 'hairdresser', 'promoter', 'barbershop', 'salon'));
+        CHECK (professional_type IN ('barber', 'ambassador', 'hairdresser', 'promoter', 'barbershop', 'salon'));
 
     COMMENT ON COLUMN core.professionals.professional_type IS
-        'Professional business type/category (barber, influencer, hairdresser, promoter, barbershop, salon)';
+        'Professional business type/category (barber, ambassador, hairdresser, promoter, barbershop, salon)';
 END $$;

@@ -38,7 +38,7 @@ return [
     'professional_types' => [
         'barber' => 'Barber',
         'hairdresser' => 'Hairdresser',
-        'influencer' => 'Influencer',
+        'ambassador' => 'Ambassador',
         'promoter' => 'Promoter',
         'barbershop' => 'Barbershop',
         'salon' => 'Salon',

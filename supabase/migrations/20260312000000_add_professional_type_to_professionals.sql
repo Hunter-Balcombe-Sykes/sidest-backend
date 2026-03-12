@@ -39,8 +39,8 @@ BEGIN
     ) THEN
         ALTER TABLE core.professionals
             ADD CONSTRAINT professionals_professional_type_check
-            CHECK (professional_type IN ('barber', 'salon', 'influencer'));
+            CHECK (professional_type IN ('barber', 'salon', 'ambassador'));
     END IF;
 
-    COMMENT ON COLUMN core.professionals.professional_type IS 'Professional business type/category (barber, salon, influencer)';
+    COMMENT ON COLUMN core.professionals.professional_type IS 'Professional business type/category (barber, salon, ambassador)';
 END $$;

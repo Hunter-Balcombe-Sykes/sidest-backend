@@ -77,20 +77,20 @@ class FeaturedProductsController extends ApiController
         $activePromoterContract = null;
         $requestedEnterpriseId = trim((string) ($validated['enterprise_id'] ?? ''));
 
-        if ($professionalType === 'influencer') {
+        if (in_array($professionalType, ['ambassador', 'influencer'], true)) {
             $activePromoterContract = $this->featuredProductsPayloads->resolveActivePromoterContract((string) $professional->id);
 
             if (is_array($activePromoterContract) && isset($activePromoterContract['promoter_enterprise_id'])) {
                 $selectionEnterpriseId = trim((string) $activePromoterContract['promoter_enterprise_id']);
                 if ($selectionEnterpriseId === '' || ! Str::isUuid($selectionEnterpriseId)) {
                     return $this->error(
-                        'Active influencer promoter contract is missing a valid promoter enterprise link.',
+                        'Active ambassador promoter contract is missing a valid promoter enterprise link.',
                         422
                     );
                 }
             } elseif ($requestedEnterpriseId !== '') {
                 return $this->error(
-                    'Influencers need an active promoter contract only when linking selections to a promoter enterprise.',
+                    'Ambassadors need an active promoter contract only when linking selections to a promoter enterprise.',
                     422
                 );
             }

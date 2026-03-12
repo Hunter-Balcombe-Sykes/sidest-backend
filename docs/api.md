@@ -38,11 +38,11 @@ Snapshot date: **March 12, 2026**.
 - Add `GET /api/site/legal-content` and `PUT|PATCH /api/site/legal-content`.
 - Add public payload `legal` object with active document resolution.
 - Ensure legal defaults to templated content and never renders blank when manual content is empty.
-- Add enterprise architecture: enterprises, memberships, influencer-promoter contracts, and promoter commerce tables.
+- Add enterprise architecture: enterprises, memberships, ambassador-promoter contracts, and promoter commerce tables.
 - Add enterprise self-service routes: `GET|POST|PATCH|DELETE /api/enterprise/me`.
-- Expand professional types to: `barber`, `hairdresser`, `influencer`, `promoter`, `barbershop`, `salon`.
+- Expand professional types to: `barber`, `hairdresser`, `ambassador`, `promoter`, `barbershop`, `salon`.
 - Update bootstrap and profile update flows to auto-provision enterprise records for enterprise owner types (`promoter`, `barbershop`, `salon`).
-- Update featured products rules for enterprise linkage and influencer promoter-contract validation.
+- Update featured products rules for enterprise linkage and ambassador promoter-contract validation.
 
 ### Recent commits
 
@@ -133,7 +133,7 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 - `professional_type`:
   - required for first bootstrap of a new Supabase user
   - optional for subsequent bootstrap calls
-  - allowed values: `barber`, `hairdresser`, `influencer`, `promoter`, `barbershop`, `salon`
+  - allowed values: `barber`, `hairdresser`, `ambassador`, `promoter`, `barbershop`, `salon`
 - `handle` (optional): Unique username/slug (if omitted, auto-generated from display_name)
 
 **Response (200):**
@@ -165,7 +165,7 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 ```
 
 `enterprise` response behavior:
-- `null` for non-enterprise types (`barber`, `hairdresser`, `influencer`)
+- `null` for non-enterprise types (`barber`, `hairdresser`, `ambassador`)
 - object for enterprise-owner types (`promoter`, `barbershop`, `salon`)
 
 **Common status codes:** 200, 401 (invalid JWT), 422 (validation error)
@@ -390,7 +390,7 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | handle                  | string   | no       | joshbarber                               | unqiue (case-sensitive), 3-40 char, must start with letter |
 | display_name            | string   | no       | Josh Barber                              | Max 80                                                     |
 | bio                     | string   | yes      | Mobile Barber in Darwin                  | Max 2000, also mirrored from bio section when updated      |
-| professional_type       | string   | no       | barber                                   | One of: barber, hairdresser, influencer, promoter, barbershop, salon |
+| professional_type       | string   | no       | barber                                   | One of: barber, hairdresser, ambassador, promoter, barbershop, salon |
 | primary_enterprise_id   | uuid     | yes      | `10000000-...`                           | Optional pointer to primary enterprise (membership table is source of truth) |
 | primary_email           | email    | no       | josh@example.copm                        | Max 255                                                    |
 | phone                   | string   | no       | +6140000000                              | Max 40                                                     |
@@ -448,14 +448,14 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | starts_at               | datetime | no       | `...`          | Start timestamp |
 | ends_at                 | datetime | yes      | `null`         | Active when null |
 
-### Influencer Promoter Contract (core.influencer_promoter_contracts)
+### Ambassador Promoter Contract (core.influencer_promoter_contracts)
 | Name                        | Type     | Nullable | Example        | Constraints / Notes |
 |-----------------------------|----------|----------|----------------|---------------------|
 | id                          | uuid     | no       | `50000000-...` | Primary key |
-| influencer_professional_id  | uuid     | no       | `20000000-...` | Must reference `professional_type = influencer` |
+| influencer_professional_id  | uuid     | no       | `20000000-...` | Must reference `professional_type = ambassador` |
 | promoter_enterprise_id      | uuid     | no       | `10000000-...` | Must reference `enterprise_type = promoter` |
 | status                      | string   | no       | `active`       | `draft`, `active`, `paused`, `ended`, `terminated` |
-| exclusive                   | boolean  | no       | `true`         | At most one active exclusive contract per influencer |
+| exclusive                   | boolean  | no       | `true`         | At most one active exclusive contract per ambassador |
 | starts_at                   | datetime | no       | `...`          | Contract start |
 | ends_at                     | datetime | yes      | `null`         | Active when null and status is `active` |
 
@@ -1168,14 +1168,14 @@ All routes below require: Authorization header AND a professional profile (curre
   - `primary_enterprise_id`
   - `primary_enterprise` (object or null)
   - `enterprise_memberships` (array, each with `enterprise` object snapshot)
-  - `active_promoter_contract` (object or null; influencer-focused)
+  - `active_promoter_contract` (object or null; ambassador-focused)
 - Common status codes: 200, 401, 403
 
 ### `PATCH /api/me`
 
 - Purpose: update professional profile fields
 - Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "barber", "public_contact_email": "bookings@example.com" }`
-- `professional_type` allowed values: `barber`, `hairdresser`, `influencer`, `promoter`, `barbershop`, `salon`
+- `professional_type` allowed values: `barber`, `hairdresser`, `ambassador`, `promoter`, `barbershop`, `salon`
 - Behavior: switching to `promoter`, `barbershop`, or `salon` auto-provisions/updates an enterprise profile and owner membership
 - Response (200): `{ "professional": { ... } }`
 - Common status codes: 200, 401, 403, 422
@@ -1390,10 +1390,10 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
   - Write path requires `retail.professional_selections`; if unavailable, returns 503.
   - Duplicate product IDs are rejected.
   - If `enterprise_id` is set and enterprise-product catalog tables exist, selected products must belong to that enterprise and be active.
-  - Influencer-specific rule:
+  - Ambassador-specific rule:
     - No contract required when not linking to a promoter enterprise.
-    - If linking to a promoter enterprise, an active influencer-promoter contract is required.
-    - If influencer has an active contract and no `enterprise_id` is provided, the contract's promoter enterprise is used.
+    - If linking to a promoter enterprise, an active ambassador-promoter contract is required.
+    - If ambassador has an active contract and no `enterprise_id` is provided, the contract's promoter enterprise is used.
 - Common status codes: 200, 401, 403, 422, 503
 
 ### Image Uploads (server-side processing)
@@ -1701,7 +1701,7 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - GET /api/staff/me
 - GET /api/staff/sites/{subdomain}
 - GET /api/staff/professionals?q=...&status=...&professional_type=...&per_page=...&page=...
-  - `professional_type` filter supports: `barber`, `hairdresser`, `influencer`, `promoter`, `barbershop`, `salon`
+  - `professional_type` filter supports: `barber`, `hairdresser`, `ambassador`, `promoter`, `barbershop`, `salon`
 - GET /api/staff/professionals/{professional}
 - DELETE /api/staff/professionals/{professional} (soft delete)
 - POST /api/staff/professionals/{professional}/restore

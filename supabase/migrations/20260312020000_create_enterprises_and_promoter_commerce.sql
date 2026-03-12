@@ -1,4 +1,4 @@
--- Enterprise model for promoters / salons / barbershops + influencer contracting + promoter commerce linkage.
+-- Enterprise model for promoters / salons / barbershops + ambassador contracting + promoter commerce linkage.
 -- This migration is additive and backwards-compatible with the current professional-centric schema.
 
 BEGIN;
@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS core.influencer_promoter_contracts (
 
 ALTER TABLE core.influencer_promoter_contracts OWNER TO postgres;
 
-COMMENT ON TABLE core.influencer_promoter_contracts IS 'Contract history linking influencers to promoter enterprises.';
+COMMENT ON TABLE core.influencer_promoter_contracts IS 'Contract history linking ambassadors to promoter enterprises.';
 
 CREATE INDEX IF NOT EXISTS ipc_influencer_idx
     ON core.influencer_promoter_contracts (influencer_professional_id, starts_at DESC);
@@ -198,8 +198,8 @@ BEGIN
      WHERE p.id = NEW.influencer_professional_id
        AND p.deleted_at IS NULL;
 
-    IF influencer_type IS DISTINCT FROM 'influencer' THEN
-        RAISE EXCEPTION 'influencer_professional_id must reference a professional_type = influencer'
+    IF COALESCE(influencer_type, '') NOT IN ('ambassador', 'influencer') THEN
+        RAISE EXCEPTION 'influencer_professional_id must reference a professional_type = ambassador'
             USING ERRCODE = 'check_violation';
     END IF;
 
@@ -434,7 +434,7 @@ WHERE p.primary_enterprise_id IS NOT NULL
           AND m.ends_at IS NULL
   );
 
--- Keep membership coverage aligned with active influencer contracts.
+-- Keep membership coverage aligned with active ambassador contracts.
 INSERT INTO core.professional_enterprise_memberships (
     professional_id,
     enterprise_id,
@@ -650,7 +650,7 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    IF professional_type = 'influencer' THEN
+    IF professional_type IN ('ambassador', 'influencer') THEN
         SELECT EXISTS (
             SELECT 1
             FROM core.influencer_promoter_contracts c
@@ -711,7 +711,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS se_enterprise_recorded_idx
     ON retail.sale_events (enterprise_id, recorded_at DESC);
 
--- Backfill influencer selections to active promoter enterprise where possible.
+-- Backfill ambassador selections to active promoter enterprise where possible.
 UPDATE retail.professional_selections ps
 SET enterprise_id = contract.promoter_enterprise_id
 FROM core.professionals p
@@ -726,7 +726,7 @@ JOIN LATERAL (
     LIMIT 1
 ) contract ON true
 WHERE ps.professional_id = p.id
-  AND lower(COALESCE(p.professional_type, '')) = 'influencer'
+  AND lower(COALESCE(p.professional_type, '')) IN ('ambassador', 'influencer')
   AND ps.enterprise_id IS NULL;
 
 -- ============================================================

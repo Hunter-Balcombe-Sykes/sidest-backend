@@ -107,7 +107,8 @@ class UpdateProfessionalRequest extends BaseFormRequest
 
         return match ($compact) {
             'barber' => 'barber',
-            'influencer' => 'influencer',
+            'ambassador',
+            'influencer' => 'ambassador',
             'hairdresser',
             'hairstylist' => 'hairdresser',
             'promoter' => 'promoter',
