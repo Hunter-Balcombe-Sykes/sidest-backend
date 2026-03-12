@@ -6,6 +6,9 @@ use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
 use App\Models\BaseModel;
 use App\Models\Billing\Subscription;
+use App\Models\Core\Enterprise\Enterprise;
+use App\Models\Core\Enterprise\InfluencerPromoterContract;
+use App\Models\Core\Enterprise\ProfessionalEnterpriseMembership;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
@@ -13,6 +16,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -42,6 +46,7 @@ class Professional extends BaseModel
         'professional_type',
         'status',
         'onboarding_step',
+        'primary_enterprise_id',
         'qr_slug',
         'phone',
         'primary_email',
@@ -73,6 +78,35 @@ class Professional extends BaseModel
     public function site(): HasOne
     {
         return $this->hasOne(Site::class, 'professional_id');
+    }
+
+    public function primaryEnterprise(): BelongsTo
+    {
+        return $this->belongsTo(Enterprise::class, 'primary_enterprise_id');
+    }
+
+    public function enterpriseMemberships(): HasMany
+    {
+        return $this->hasMany(ProfessionalEnterpriseMembership::class, 'professional_id')
+            ->orderByDesc('starts_at');
+    }
+
+    public function influencerPromoterContracts(): HasMany
+    {
+        return $this->hasMany(InfluencerPromoterContract::class, 'influencer_professional_id')
+            ->orderByDesc('starts_at');
+    }
+
+    public function activeInfluencerPromoterContract(): HasOne
+    {
+        return $this->hasOne(InfluencerPromoterContract::class, 'influencer_professional_id')
+            ->where('status', 'active')
+            ->where('starts_at', '<=', now())
+            ->where(function ($query) {
+                $query->whereNull('ends_at')
+                    ->orWhere('ends_at', '>', now());
+            })
+            ->latest('starts_at');
     }
 
     public function legalContent(): HasOne

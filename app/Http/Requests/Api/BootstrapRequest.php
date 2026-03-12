@@ -14,12 +14,16 @@ class BootstrapRequest extends BaseFormRequest
     {
         $uid = $this->attributes->get('supabase_uid');
 
-        $ignoreId = null;
+        $existingProfessionalId = null;
         if (is_string($uid) && $uid !== '') {
-            $ignoreId = Professional::query()
+            $existingProfessionalId = Professional::query()
                 ->where('auth_user_id', $uid)
                 ->value('id');
         }
+
+        $professionalTypeRules = is_string($existingProfessionalId) && $existingProfessionalId !== ''
+            ? ['sometimes', 'required']
+            : ['required'];
 
         return [
             'handle' => ['sometimes','nullable','string','max:40'],
@@ -31,8 +35,7 @@ class BootstrapRequest extends BaseFormRequest
             'country_code' => ['nullable','string','max:5'],
             'timezone' => ['nullable','string','max:64'],
             'professional_type' => [
-                'sometimes',
-                'required',
+                ...$professionalTypeRules,
                 'string',
                 Rule::in(array_keys(config('comet.professional_types', []))),
             ],
@@ -41,7 +44,7 @@ class BootstrapRequest extends BaseFormRequest
                 'nullable',
                 'string',
                 'max:50',
-                Rule::unique('professionals', 'handle_lc')->ignore($ignoreId, 'id'),
+                Rule::unique('professionals', 'handle_lc')->ignore($existingProfessionalId, 'id'),
             ],
         ];
     }
@@ -60,13 +63,41 @@ class BootstrapRequest extends BaseFormRequest
             $handle = $this->generateHandleFromDisplayName($this->display_name ?? '');
         }
 
-        $this->merge([
+        $merge = [
             'handle' => $handle,
             'handle_lc' => is_string($handle) ? strtolower(trim($handle)) : null,
-            'professional_type' => is_string($this->professional_type ?? null) && trim((string) $this->professional_type) !== ''
-                ? strtolower(trim((string) $this->professional_type))
-                : ($this->professional_type ?? null),
-        ]);
+        ];
+
+        if ($this->exists('professional_type')) {
+            $merge['professional_type'] = $this->normalizeProfessionalTypeInput($this->professional_type);
+        }
+
+        $this->merge($merge);
+    }
+
+    private function normalizeProfessionalTypeInput(mixed $value): mixed
+    {
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        $normalized = mb_strtolower(trim($value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        $compact = preg_replace('/[^a-z]+/u', '', $normalized) ?? $normalized;
+
+        return match ($compact) {
+            'barber' => 'barber',
+            'influencer' => 'influencer',
+            'hairdresser',
+            'hairstylist' => 'hairdresser',
+            'promoter' => 'promoter',
+            'barbershop' => 'barbershop',
+            'salon' => 'salon',
+            default => $normalized,
+        };
     }
 
     private function generateHandleFromDisplayName(string $displayName): string

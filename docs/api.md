@@ -3,7 +3,7 @@
 This document is the single source of truth for backend so the frontend can build:
 
 - Public mini-site (read-only site payload + lead capture + email subscribe + analytics)
-- Barber dashboard (profile + site settings + links + sections + services + gallery + customers + analytics + notifications)
+- Professional dashboard (profile + site settings + links + sections + services + gallery + customers + analytics + notifications)
 - Staff dashboard (staff-only browsing + admin editing tools)
 - Backend: Laravel API (this repo)
 - Auth: Supabase Auth (JWT access token)
@@ -18,7 +18,8 @@ This document is the single source of truth for backend so the frontend can buil
 - Data Models
 - Conventions (headers, errors, pagination, rate limits)
 - Public Mini-Site API
-- Professional (Barber) Dashboard API
+- Professional Dashboard API
+- Enterprise API
 - Staff API
 - Image uploads & processing (server-side WebP via queue)
 - Test users and getting tokens
@@ -29,7 +30,7 @@ This document is the single source of truth for backend so the frontend can buil
 
 ## 0) Recent Backend Changes (Commit Log Snapshot)
 
-Snapshot date: **March 11, 2026**.
+Snapshot date: **March 12, 2026**.
 
 ### Unreleased (working tree)
 
@@ -37,6 +38,11 @@ Snapshot date: **March 11, 2026**.
 - Add `GET /api/site/legal-content` and `PUT|PATCH /api/site/legal-content`.
 - Add public payload `legal` object with active document resolution.
 - Ensure legal defaults to templated content and never renders blank when manual content is empty.
+- Add enterprise architecture: enterprises, memberships, influencer-promoter contracts, and promoter commerce tables.
+- Add enterprise self-service routes: `GET|POST|PATCH|DELETE /api/enterprise/me`.
+- Expand professional types to: `barber`, `hairdresser`, `influencer`, `promoter`, `barbershop`, `salon`.
+- Update bootstrap and profile update flows to auto-provision enterprise records for enterprise owner types (`promoter`, `barbershop`, `salon`).
+- Update featured products rules for enterprise linkage and influencer promoter-contract validation.
 
 ### Recent commits
 
@@ -89,7 +95,7 @@ A Supabase-authenticated user is not automatically a professional in Comet.
 
 **For a new user, call:**
 
-- POST /api/bootstrap This creates the core.professionals and core.sites rows tied to the Supabase user id (sub in the JWT).
+- POST /api/bootstrap This creates/updates `core.professionals` and `core.sites` tied to the Supabase user id (sub in JWT), and auto-provisions enterprise records for enterprise owner types.
 
 If you skip bootstrap, professional routes will return 403 with a message prompting bootstrap.
 
@@ -97,7 +103,8 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 
 ### Auth: Required (Supabase JWT)
 
-**Purpose:** Create a new professional account and associated site. Auto-generates a unique handle from display_name if not provided.
+**Purpose:** Create or refresh the authenticated user profile + site in one call.  
+If the selected `professional_type` is an enterprise-owner type (`promoter`, `barbershop`, or `salon`), an enterprise profile and owner membership are auto-provisioned in the same transaction.
 
 **Request body:**
 
@@ -123,10 +130,13 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 - `last_name` (optional): Last name
 - `country_code` (optional): 2-5 letter country code
 - `timezone` (optional): IANA timezone
-- `professional_type` (optional): One of `barber`, `salon`, `influencer` (defaults to `barber`)
+- `professional_type`:
+  - required for first bootstrap of a new Supabase user
+  - optional for subsequent bootstrap calls
+  - allowed values: `barber`, `hairdresser`, `influencer`, `promoter`, `barbershop`, `salon`
 - `handle` (optional): Unique username/slug (if omitted, auto-generated from display_name)
 
-**Response (201 or 200):**
+**Response (200):**
 
 ```json
 {
@@ -149,11 +159,16 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
         "professional_id": "uuid",
         "subdomain": "josh-barber",
         "is_published": false
-    }
+    },
+    "enterprise": null
 }
 ```
 
-**Common status codes:** 200 (existing user bootstrapped again), 201 (new professional created), 401 (invalid JWT), 422 (validation error)
+`enterprise` response behavior:
+- `null` for non-enterprise types (`barber`, `hairdresser`, `influencer`)
+- object for enterprise-owner types (`promoter`, `barbershop`, `salon`)
+
+**Common status codes:** 200, 401 (invalid JWT), 422 (validation error)
 
 **Note:** Bootstrap automatically creates a free-tier subscription for new professionals. If a free plan (plan_key = `free`) exists in the plans table, the professional will be subscribed to it with status `active` and provider `internal`.
 
@@ -375,7 +390,8 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | handle                  | string   | no       | joshbarber                               | unqiue (case-sensitive), 3-40 char, must start with letter |
 | display_name            | string   | no       | Josh Barber                              | Max 80                                                     |
 | bio                     | string   | yes      | Mobile Barber in Darwin                  | Max 2000, also mirrored from bio section when updated      |
-| professional_type       | string   | no       | barber                                   | One of: barber, salon, influencer                          |
+| professional_type       | string   | no       | barber                                   | One of: barber, hairdresser, influencer, promoter, barbershop, salon |
+| primary_enterprise_id   | uuid     | yes      | `10000000-...`                           | Optional pointer to primary enterprise (membership table is source of truth) |
 | primary_email           | email    | no       | josh@example.copm                        | Max 255                                                    |
 | phone                   | string   | no       | +6140000000                              | Max 40                                                     |
 | first_name              | string   | no       | Josh                                     | Max 80                                                     |
@@ -402,6 +418,46 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | fresha_token_expires_at | datetime | yes      | `2026-03-01T00:00:00Z`                   | When the Fresha access token expires                       |
 | fresha_partner_id       | string   | yes      | `partner_456`                            | Fresha partner identifier                                  |
 | fresha_last_synced_at   | datetime | yes      | `2026-02-20T12:00:00Z`                   | Last successful Fresha catalog sync                        |
+
+### Enterprise (core.enterprises)
+| Name                    | Type     | Nullable | Example                | Constraints / Notes |
+|-------------------------|----------|----------|------------------------|---------------------|
+| id                      | uuid     | no       | `10000000-...`         | Primary key |
+| auth_user_id            | uuid     | yes      | `30000000-...`         | Optional owner auth user id (unique among active enterprises) |
+| name                    | string   | no       | `Atlas Promotions`     | Max 255 |
+| handle                  | string   | yes      | `atlas-promotions`     | Unique among active enterprises |
+| enterprise_type         | string   | no       | `promoter`             | One of: `promoter`, `barbershop`, `salon` |
+| status                  | string   | no       | `active`               | One of: `active`, `inactive`, `suspended` |
+| subscription_tier       | string   | yes      | `enterprise`           | Enterprise plan key/label |
+| primary_email           | string   | yes      | `hello@example.com`    | Business contact |
+| phone                   | string   | yes      | `+61400000000`         | Business contact |
+| public_contact_email    | string   | yes      | `bookings@example.com` | Public-facing contact |
+| public_contact_number   | string   | yes      | `+61400000001`         | Public-facing contact |
+| location_*              | string   | yes      | `Melbourne`            | Address fields |
+| metadata                | jsonb    | no       | `{}`                   | Flexible metadata |
+| deleted_at              | datetime | yes      | `null`                 | Soft delete marker |
+
+### Professional Enterprise Membership (core.professional_enterprise_memberships)
+| Name                    | Type     | Nullable | Example        | Constraints / Notes |
+|-------------------------|----------|----------|----------------|---------------------|
+| id                      | uuid     | no       | `40000000-...` | Primary key |
+| professional_id         | uuid     | no       | `20000000-...` | FK to professional |
+| enterprise_id           | uuid     | no       | `10000000-...` | FK to enterprise |
+| relationship_type       | string   | no       | `owner`        | One of: `owner`, `employee`, `chair_renter`, `contractor`, `affiliate`, `member` |
+| is_primary              | boolean  | no       | `true`         | Only one active primary membership per professional |
+| starts_at               | datetime | no       | `...`          | Start timestamp |
+| ends_at                 | datetime | yes      | `null`         | Active when null |
+
+### Influencer Promoter Contract (core.influencer_promoter_contracts)
+| Name                        | Type     | Nullable | Example        | Constraints / Notes |
+|-----------------------------|----------|----------|----------------|---------------------|
+| id                          | uuid     | no       | `50000000-...` | Primary key |
+| influencer_professional_id  | uuid     | no       | `20000000-...` | Must reference `professional_type = influencer` |
+| promoter_enterprise_id      | uuid     | no       | `10000000-...` | Must reference `enterprise_type = promoter` |
+| status                      | string   | no       | `active`       | `draft`, `active`, `paused`, `ended`, `terminated` |
+| exclusive                   | boolean  | no       | `true`         | At most one active exclusive contract per influencer |
+| starts_at                   | datetime | no       | `...`          | Contract start |
+| ends_at                     | datetime | yes      | `null`         | Active when null and status is `active` |
 
 
 ### Site
@@ -1099,7 +1155,7 @@ For frontends that cannot use subdomain DNS routing, the following endpoints acc
 
 ---
 
-## 7) Professional (Barber) Dashboard API
+## 7) Professional Dashboard API
 
 All routes below require: Authorization header AND a professional profile (current.pro middleware).
 
@@ -1108,13 +1164,19 @@ All routes below require: Authorization header AND a professional profile (curre
 - Purpose: bootstrap dashboard UI with current professional, site, blocks, services, and customer count
 - Auth: Required
 - Response (200): `{ "uid": "supabase-user-uuid", "professional": { ..., "professional_type": "barber" }, "site": { ... }, "legal_content": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
+- Enterprise fields in `professional`:
+  - `primary_enterprise_id`
+  - `primary_enterprise` (object or null)
+  - `enterprise_memberships` (array, each with `enterprise` object snapshot)
+  - `active_promoter_contract` (object or null; influencer-focused)
 - Common status codes: 200, 401, 403
 
 ### `PATCH /api/me`
 
 - Purpose: update professional profile fields
 - Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "barber", "public_contact_email": "bookings@example.com" }`
-- `professional_type` allowed values: `barber`, `salon`, `influencer`
+- `professional_type` allowed values: `barber`, `hairdresser`, `influencer`, `promoter`, `barbershop`, `salon`
+- Behavior: switching to `promoter`, `barbershop`, or `salon` auto-provisions/updates an enterprise profile and owner membership
 - Response (200): `{ "professional": { ... } }`
 - Common status codes: 200, 401, 403, 422
 - Images are managed via `POST /api/uploads` (pool=gallery or pool=content). No image fields are accepted on this endpoint.
@@ -1322,10 +1384,16 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
   - `products[].shopify_product_id`: required string
   - `products[].sort_order`: optional integer >= 0
   - `products[].commission_override`: optional nullable number (0-100)
+  - `enterprise_id`: optional nullable uuid (link selections to a promoter enterprise context)
 - Response (200): same shape as GET endpoint
 - Notes:
   - Write path requires `retail.professional_selections`; if unavailable, returns 503.
   - Duplicate product IDs are rejected.
+  - If `enterprise_id` is set and enterprise-product catalog tables exist, selected products must belong to that enterprise and be active.
+  - Influencer-specific rule:
+    - No contract required when not linking to a promoter enterprise.
+    - If linking to a promoter enterprise, an active influencer-promoter contract is required.
+    - If influencer has an active contract and no `enterprise_id` is provided, the contract's promoter enterprise is used.
 - Common status codes: 200, 401, 403, 422, 503
 
 ### Image Uploads (server-side processing)
@@ -1573,7 +1641,58 @@ Fresha sends catalog change notifications to the Comet webhook endpoint. These r
 - GET /api/email-subscribers?list_key=marketing&status=subscribed&search=...
 - GET /api/email-subscribers/export?list_key=marketing&status=subscribed
 
-## 8) Staff API
+## 8) Enterprise API
+
+Enterprise routes are self-service endpoints for the authenticated user and require a Supabase JWT.
+
+### `GET /api/enterprise/me`
+
+- Purpose: fetch the current user's enterprise profile (if one exists)
+- Response (200): `{ "enterprise": { ... } }`
+- Common status codes: 200, 401, 404
+
+### `POST /api/enterprise/me`
+
+- Purpose: create an enterprise profile for the authenticated user
+- Request body:
+  - `name` (required)
+  - `handle` (optional, unique among active enterprises; auto-slugged from name if omitted)
+  - `enterprise_type` (required): `promoter`, `barbershop`, `salon`
+  - `subscription_tier` (optional)
+  - `primary_email`, `phone`, `public_contact_email`, `public_contact_number` (optional)
+  - `country_code`, `timezone` (optional)
+  - `location_street_address`, `location_city`, `location_state`, `location_postcode`, `location_country` (optional)
+- Behavior:
+  - Requires an existing professional profile (`/api/bootstrap` first).
+  - Creates owner membership in `core.professional_enterprise_memberships`.
+  - Sets `professional.primary_enterprise_id` if empty.
+- Common status codes: 201, 401, 409, 422
+
+### `PATCH /api/enterprise/me`
+
+- Purpose: update current enterprise profile fields
+- Notes:
+  - `enterprise_type` allowed values: `promoter`, `barbershop`, `salon`
+  - `status` allowed values: `active`, `inactive`, `suspended`
+- Response (200): `{ "enterprise": { ... } }`
+- Common status codes: 200, 401, 404, 422
+
+### `DELETE /api/enterprise/me`
+
+- Purpose: soft-delete/deactivate current enterprise profile
+- Behavior:
+  - Ends active memberships for that enterprise (`ends_at = now()`).
+  - Clears `primary_enterprise_id` for professionals pointing to this enterprise.
+  - Marks enterprise as `inactive` and sets `deleted_at`.
+- Response (200): `{ "deleted": true }`
+- Common status codes: 200, 401, 404
+
+### Enterprise + Bootstrap integration
+
+- If `POST /api/bootstrap` is called with `professional_type` = `promoter`, `barbershop`, or `salon`, the enterprise is auto-provisioned.
+- Because of this, many enterprise-owner users will not need to call `POST /api/enterprise/me` manually.
+
+## 9) Staff API
 
 Staff routes are for internal staff tooling. They require a staff JWT (user must exist in core.comet_staff).
 
@@ -1582,6 +1701,7 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - GET /api/staff/me
 - GET /api/staff/sites/{subdomain}
 - GET /api/staff/professionals?q=...&status=...&professional_type=...&per_page=...&page=...
+  - `professional_type` filter supports: `barber`, `hairdresser`, `influencer`, `promoter`, `barbershop`, `salon`
 - GET /api/staff/professionals/{professional}
 - DELETE /api/staff/professionals/{professional} (soft delete)
 - POST /api/staff/professionals/{professional}/restore
@@ -1632,7 +1752,7 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 
 It requires a staff JWT (core.comet_staff).
 
-## 9) Image uploads & processing (server-side WebP)
+## 10) Image uploads & processing (server-side WebP)
 
 Images are uploaded through the Comet API and processed entirely server-side. No direct-to-storage uploads from the frontend.
 
@@ -1680,7 +1800,7 @@ All variant filenames include a 16-char SHA-256 hash (for example, `optimized_ab
 - WebP (`image/webp`)
 - Max upload size: 10 MB (configurable via `COMET_IMAGE_MAX_UPLOAD_KB`)
 
-## 10) Test users and getting tokens
+## 11) Test users and getting tokens
 
 Tokens come from Supabase Auth. Comet does not issue tokens.
 
@@ -1701,7 +1821,7 @@ Tokens come from Supabase Auth. Comet does not issue tokens.
 Response includes access_token. Use that token as the Authorization Bearer token when calling Comet.
 This flow is included in the Insomnia collection as Login requests.
 
-## 11) Insomnia collection
+## 12) Insomnia collection
 
 Import the provided Insomnia export JSON.
 It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
@@ -1710,7 +1830,7 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 -
 - Set workspace environment variables first (api_base_url, public_api_base_url, supabase_url, supabase_anon_key, access_token, subdomain, ids).
 
-## 12) Frontend env var checklist
+## 13) Frontend env var checklist
 
 - SUPABASE_URL
 - SUPABASE_ANON_KEY
@@ -1720,7 +1840,7 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 
 Note: The frontend does not need any storage credentials — all image URLs come from the API `variants` map.
 
-## 13) Backend env var checklist
+## 14) Backend env var checklist
 
 ### Core Laravel
 
@@ -1787,7 +1907,7 @@ Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The imag
 - QUEUE_CONNECTION: `sync` (no worker needed — processes inline) | `database` | `redis` (worker required; recommended for scale)
 - MAIL_MAILER, MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_FROM_ADDRESS
 
-## 14) Known implementation gotchas
+## 15) Known implementation gotchas
 
 ### Domain-scoped public routes
 

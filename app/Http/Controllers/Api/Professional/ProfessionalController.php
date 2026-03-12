@@ -10,8 +10,11 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
+use App\Services\Enterprise\EnterpriseProvisioningService;
 use App\Services\Legal\ProfessionalLegalContentService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProfessionalController extends ApiController
 {
@@ -41,6 +44,73 @@ class ProfessionalController extends ApiController
         $customersCount = $cache->getCustomerCount($pro->id);
         Log::info('/api/me after customers', ['ms' => (microtime(true) - $t) * 1000]);
 
+        $primaryEnterprisePayload = null;
+        $enterpriseMembershipPayload = [];
+        $activePromoterContractPayload = null;
+
+        try {
+            $pro->loadMissing([
+                'primaryEnterprise',
+                'enterpriseMemberships.enterprise',
+                'activeInfluencerPromoterContract.promoterEnterprise',
+            ]);
+
+            if ($pro->primaryEnterprise) {
+                $primaryEnterprisePayload = [
+                    'id' => $pro->primaryEnterprise->id,
+                    'name' => $pro->primaryEnterprise->name,
+                    'handle' => $pro->primaryEnterprise->handle,
+                    'enterprise_type' => $pro->primaryEnterprise->enterprise_type,
+                    'status' => $pro->primaryEnterprise->status,
+                ];
+            }
+
+            $enterpriseMembershipPayload = $pro->enterpriseMemberships
+                ->map(function ($membership): array {
+                    return [
+                        'id' => $membership->id,
+                        'enterprise_id' => $membership->enterprise_id,
+                        'relationship_type' => $membership->relationship_type,
+                        'is_primary' => (bool) $membership->is_primary,
+                        'starts_at' => optional($membership->starts_at)->toIso8601String(),
+                        'ends_at' => optional($membership->ends_at)->toIso8601String(),
+                        'enterprise' => $membership->enterprise ? [
+                            'id' => $membership->enterprise->id,
+                            'name' => $membership->enterprise->name,
+                            'handle' => $membership->enterprise->handle,
+                            'enterprise_type' => $membership->enterprise->enterprise_type,
+                            'status' => $membership->enterprise->status,
+                        ] : null,
+                    ];
+                })
+                ->values()
+                ->all();
+
+            $activeContract = $pro->activeInfluencerPromoterContract;
+            if ($activeContract) {
+                $activePromoterContractPayload = [
+                    'id' => $activeContract->id,
+                    'promoter_enterprise_id' => $activeContract->promoter_enterprise_id,
+                    'status' => $activeContract->status,
+                    'exclusive' => (bool) $activeContract->exclusive,
+                    'starts_at' => optional($activeContract->starts_at)->toIso8601String(),
+                    'ends_at' => optional($activeContract->ends_at)->toIso8601String(),
+                    'promoter_enterprise' => $activeContract->promoterEnterprise ? [
+                        'id' => $activeContract->promoterEnterprise->id,
+                        'name' => $activeContract->promoterEnterprise->name,
+                        'handle' => $activeContract->promoterEnterprise->handle,
+                        'enterprise_type' => $activeContract->promoterEnterprise->enterprise_type,
+                        'status' => $activeContract->promoterEnterprise->status,
+                    ] : null,
+                ];
+            }
+        } catch (Throwable $e) {
+            Log::warning('/api/me could not load enterprise relationships.', [
+                'professional_id' => (string) $pro->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Use the already-loaded professional to build payload instead of querying again
         $payload = [
             'professional' => [
@@ -57,6 +127,10 @@ class ProfessionalController extends ApiController
                 'professional_type' => $pro->professional_type,
                 'status' => $pro->status,
                 'onboarding_step' => $pro->onboarding_step,
+                'primary_enterprise_id' => $pro->primary_enterprise_id,
+                'primary_enterprise' => $primaryEnterprisePayload,
+                'enterprise_memberships' => $enterpriseMembershipPayload,
+                'active_promoter_contract' => $activePromoterContractPayload,
                 'qr_slug' => $pro->qr_slug,
                 'public_contact_number' => $pro->public_contact_number,
                 'public_contact_email' => $pro->public_contact_email,
@@ -98,12 +172,21 @@ class ProfessionalController extends ApiController
         ]);
     }
 
-    public function update(UpdateProfessionalRequest $request)
+    public function update(
+        UpdateProfessionalRequest $request,
+        EnterpriseProvisioningService $enterpriseProvisioningService
+    )
     {
         $professional = $this->currentProfessional($request);
 
-        $professional->fill($request->validated());
-        $professional->save();
+        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService): void {
+            $professional->fill($request->validated());
+            $professional->save();
+
+            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
+                $enterpriseProvisioningService->ensureForProfessional($professional);
+            }
+        });
 
         // return the updated pro (fresh)
         return $this->success([

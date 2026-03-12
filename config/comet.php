@@ -37,8 +37,11 @@ return [
 
     'professional_types' => [
         'barber' => 'Barber',
-        'salon' => 'Salon',
+        'hairdresser' => 'Hairdresser',
         'influencer' => 'Influencer',
+        'promoter' => 'Promoter',
+        'barbershop' => 'Barbershop',
+        'salon' => 'Salon',
     ],
 
     'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),

@@ -3,6 +3,7 @@
 namespace App\Models\Retail;
 
 use App\Models\BaseModel;
+use App\Models\Core\Enterprise\Enterprise;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -19,6 +20,7 @@ class ProfessionalSelection extends BaseModel
 
     protected $fillable = [
         'professional_id',
+        'enterprise_id',
         'shopify_product_id',
         'sort_order',
         'commission_override',
@@ -33,5 +35,10 @@ class ProfessionalSelection extends BaseModel
     public function professional(): BelongsTo
     {
         return $this->belongsTo(Professional::class);
+    }
+
+    public function enterprise(): BelongsTo
+    {
+        return $this->belongsTo(Enterprise::class, 'enterprise_id');
     }
 }

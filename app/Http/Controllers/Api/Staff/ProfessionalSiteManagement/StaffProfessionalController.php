@@ -8,9 +8,11 @@ use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateProfessionalRequest;
 use App\Models\Core\Professional\Professional;
+use App\Services\Enterprise\EnterpriseProvisioningService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class StaffProfessionalController extends ApiController
 {
@@ -24,7 +26,7 @@ class StaffProfessionalController extends ApiController
     public function index(Request $request): JsonResponse
     {
         $status = $request->query('status'); // optional: active|suspended
-        $professionalType = $request->query('professional_type'); // optional: barber|salon|influencer
+        $professionalType = $request->query('professional_type'); // optional: barber|hairdresser|influencer|promoter|barbershop|salon
         $perPage = $this->normalizePerPage($request, 25, 100);
         $searchLike = $this->prepareSearchLike($request, 'q');
 
@@ -155,10 +157,20 @@ class StaffProfessionalController extends ApiController
         ]);
     }
 
-    public function update(StaffUpdateProfessionalRequest $request, Professional $professional)
+    public function update(
+        StaffUpdateProfessionalRequest $request,
+        Professional $professional,
+        EnterpriseProvisioningService $enterpriseProvisioningService
+    )
     {
-        $professional->fill($request->validated());
-        $professional->save();
+        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService): void {
+            $professional->fill($request->validated());
+            $professional->save();
+
+            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
+                $enterpriseProvisioningService->ensureForProfessional($professional);
+            }
+        });
 
         return $this->success([
             'professional' => $professional->fresh(),

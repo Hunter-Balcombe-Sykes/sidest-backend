@@ -68,9 +68,7 @@ class UpdateProfessionalRequest extends BaseFormRequest
 
         if ($this->has('professional_type')) {
             $professionalType = $this->input('professional_type');
-            $merge['professional_type'] = is_string($professionalType)
-                ? (trim($professionalType) === '' ? null : mb_strtolower(trim($professionalType)))
-                : $professionalType;
+            $merge['professional_type'] = $this->normalizeProfessionalTypeInput($professionalType);
         }
 
         if ($merge) {
@@ -92,5 +90,30 @@ class UpdateProfessionalRequest extends BaseFormRequest
         }
 
         return mb_strtolower($value);
+    }
+
+    private function normalizeProfessionalTypeInput(mixed $value): mixed
+    {
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        $normalized = mb_strtolower(trim($value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        $compact = preg_replace('/[^a-z]+/u', '', $normalized) ?? $normalized;
+
+        return match ($compact) {
+            'barber' => 'barber',
+            'influencer' => 'influencer',
+            'hairdresser',
+            'hairstylist' => 'hairdresser',
+            'promoter' => 'promoter',
+            'barbershop' => 'barbershop',
+            'salon' => 'salon',
+            default => $normalized,
+        };
     }
 }

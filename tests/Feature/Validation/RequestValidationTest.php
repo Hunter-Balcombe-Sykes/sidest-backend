@@ -13,8 +13,11 @@ it('rejects missing bootstrap fields', function () {
     $validator = Validator::make([], (new BootstrapRequest())->rules());
 
     expect($validator->fails())->toBeTrue();
-    expect($validator->errors()->has('handle'))->toBeTrue();
+    expect($validator->errors()->has('display_name'))->toBeTrue();
     expect($validator->errors()->has('primary_email'))->toBeTrue();
+    expect($validator->errors()->has('phone'))->toBeTrue();
+    expect($validator->errors()->has('first_name'))->toBeTrue();
+    expect($validator->errors()->has('professional_type'))->toBeTrue();
 });
 
 it('rejects invalid public customer lead payload', function () {

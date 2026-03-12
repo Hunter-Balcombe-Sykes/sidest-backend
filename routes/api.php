@@ -29,6 +29,7 @@ Route::middleware(['supabase.jwt'])->post('/bootstrap', [BootstrapController::cl
 
 // Split route files (keeps api.php tidy)
 require __DIR__ . '/api/professional.php';
+require __DIR__ . '/api/enterprise.php';
 require __DIR__ . '/api/staff.php';
 require __DIR__ . '/api/publicSite.php';
 

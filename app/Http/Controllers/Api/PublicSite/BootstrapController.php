@@ -15,13 +15,18 @@ use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
+use App\Services\Enterprise\EnterpriseProvisioningService;
 use App\Services\Legal\ProfessionalLegalContentService;
 
 
 
 class BootstrapController extends ApiController
 {
-    public function bootstrap(BootstrapRequest $request, ProfessionalLegalContentService $legalContentService)
+    public function bootstrap(
+        BootstrapRequest $request,
+        ProfessionalLegalContentService $legalContentService,
+        EnterpriseProvisioningService $enterpriseProvisioningService
+    )
     {
         $uid = $request->attributes->get('supabase_uid');
         if (!is_string($uid) || $uid === '') {
@@ -31,8 +36,9 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService) {
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService) {
             $createdProfessional = false;
+            $provisionedEnterprise = null;
 
             $professional = Professional::query()->where('auth_user_id', $uid)->first();
 
@@ -96,6 +102,10 @@ class BootstrapController extends ApiController
             }
             $professional->save();
 
+            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
+                $provisionedEnterprise = $enterpriseProvisioningService->ensureForProfessional($professional);
+            }
+
             // Add to Comet updates list once (global list). Do NOT overwrite if they already unsubscribed.
             $this->ensureCometUpdatesSubscription($professional->primary_email);
 
@@ -120,6 +130,7 @@ class BootstrapController extends ApiController
                 return [
                     'professional' => $professional->fresh(),
                     'site' => $site->fresh(),
+                    'enterprise' => $provisionedEnterprise?->fresh(),
                 ];
             });
         } catch (\Exception $e) {
