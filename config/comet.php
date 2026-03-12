@@ -35,6 +35,12 @@ return [
 
     'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'barbershop_info'],
 
+    'professional_types' => [
+        'barber' => 'Barber',
+        'salon' => 'Salon',
+        'influencer' => 'Influencer',
+    ],
+
     'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),
 
     'media_disk' => env('COMET_MEDIA_DISK', 'media'),

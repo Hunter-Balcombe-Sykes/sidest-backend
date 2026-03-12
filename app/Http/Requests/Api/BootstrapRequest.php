@@ -30,6 +30,12 @@ class BootstrapRequest extends BaseFormRequest
             'last_name' => ['nullable','string','max:80'],
             'country_code' => ['nullable','string','max:5'],
             'timezone' => ['nullable','string','max:64'],
+            'professional_type' => [
+                'sometimes',
+                'required',
+                'string',
+                Rule::in(array_keys(config('comet.professional_types', []))),
+            ],
             'handle_lc' => [
                 'sometimes',
                 'nullable',
@@ -44,7 +50,7 @@ class BootstrapRequest extends BaseFormRequest
     {
         $this->trimStrings([
                 'handle', 'display_name', 'phone', 'first_name',
-                'last_name', 'country_code', 'timezone'
+                'last_name', 'country_code', 'timezone', 'professional_type'
             ]);
         $this->sanitizeEmails(['primary_email']);
 
@@ -57,6 +63,9 @@ class BootstrapRequest extends BaseFormRequest
         $this->merge([
             'handle' => $handle,
             'handle_lc' => is_string($handle) ? strtolower(trim($handle)) : null,
+            'professional_type' => is_string($this->professional_type ?? null) && trim((string) $this->professional_type) !== ''
+                ? strtolower(trim((string) $this->professional_type))
+                : ($this->professional_type ?? null),
         ]);
     }
 

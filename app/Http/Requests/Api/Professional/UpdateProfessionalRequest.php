@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api\Professional;
 
 use App\Http\Requests\BaseFormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateProfessionalRequest extends BaseFormRequest
 {
@@ -24,6 +25,12 @@ class UpdateProfessionalRequest extends BaseFormRequest
 
             'country_code'  => ['sometimes', 'nullable', 'string', 'min:2', 'max:3'],
             'timezone'      => ['sometimes', 'nullable', 'string', 'max:64'],
+            'professional_type' => [
+                'sometimes',
+                'required',
+                'string',
+                Rule::in(array_keys(config('comet.professional_types', []))),
+            ],
 
             // Location
             'location_street_address' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -57,6 +64,13 @@ class UpdateProfessionalRequest extends BaseFormRequest
 
         if ($this->has('public_contact_email')) {
             $merge['public_contact_email'] = $this->lowerOrNull($this->input('public_contact_email'));
+        }
+
+        if ($this->has('professional_type')) {
+            $professionalType = $this->input('professional_type');
+            $merge['professional_type'] = is_string($professionalType)
+                ? (trim($professionalType) === '' ? null : mb_strtolower(trim($professionalType)))
+                : $professionalType;
         }
 
         if ($merge) {

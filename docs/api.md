@@ -110,6 +110,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 "last_name": "Barber",
 "country_code": "AU",
 "timezone": "Australia/Sydney",
+"professional_type": "barber",
 "handle": "joshbarber"
 }
 ```
@@ -122,6 +123,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 - `last_name` (optional): Last name
 - `country_code` (optional): 2-5 letter country code
 - `timezone` (optional): IANA timezone
+- `professional_type` (optional): One of `barber`, `salon`, `influencer` (defaults to `barber`)
 - `handle` (optional): Unique username/slug (if omitted, auto-generated from display_name)
 
 **Response (201 or 200):**
@@ -138,6 +140,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
         "last_name": "Barber",
         "country_code": "AU",
         "timezone": "Australia/Sydney",
+        "professional_type": "barber",
         "status": "active",
         "onboarding_step": 0
     },
@@ -372,6 +375,7 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | handle                  | string   | no       | joshbarber                               | unqiue (case-sensitive), 3-40 char, must start with letter |
 | display_name            | string   | no       | Josh Barber                              | Max 80                                                     |
 | bio                     | string   | yes      | Mobile Barber in Darwin                  | Max 2000, also mirrored from bio section when updated      |
+| professional_type       | string   | no       | barber                                   | One of: barber, salon, influencer                          |
 | primary_email           | email    | no       | josh@example.copm                        | Max 255                                                    |
 | phone                   | string   | no       | +6140000000                              | Max 40                                                     |
 | first_name              | string   | no       | Josh                                     | Max 80                                                     |
@@ -570,7 +574,7 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 |--------------|---------|----------|-----------------------------------------------------------|-----------------------------------------------------------|
 | published    | boolean | no       | `true`                                                    | Derived from site is_published                            |
 | site         | object  | no       | `{ id, subdomain, settings, gallery, content_images }` | Includes gallery + content image pools with variant URLs  |
-| professional | object  | no       | `{ id, handle, display_name, bio, ... }`                  | Includes public-facing location fields                    |
+| professional | object  | no       | `{ id, handle, display_name, professional_type, bio, ... }` | Includes public-facing location fields + professional_type |
 | theme        | object  | yes      | `{ id, key, name, config }`                               | theme.config is an object                                 |
 | blocks       | array   | no       | `[ LinkBlock \| SectionBlock ]`                           | Only active blocks are returned                           |
 | gallery      | array   | no       | `[ { id, pool, alt_text, sort_order, variants: {...} } ]` | Only active gallery-pool images; variants are URL maps    |
@@ -586,7 +590,7 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 | utm_source            | string | yes      | `instagram`             | Max 255                                                                                                                 |
 | utm_medium            | string | yes      | `social`                | Max 255                                                                                                                 |
 | utm_campaign          | string | yes      | `jan_promo`             | Max 255                                                                                                                 |
-| block_id (click only) | uuid   | no       | `d5b0...`               | Must belong to the site, be active, and be trackable: `links/link` or `sections/{gallery,services,shop,booking}`     |
+| block_id (click only) | uuid   | no       | `d5b0...`               | Must belong to the site, be active, and be trackable: `links/link` or `sections/{gallery,services,shop,booking,barbershop_info}` |
 
 ### Plans (core.plans)
 | Name            | Type     | Nullable | Example                | Constraints / Notes     |
@@ -713,12 +717,20 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 {
   "published": true,
   "site": { "id": "uuid", "subdomain": "fadez", "settings": {}, "gallery": [], "content_images": [] },
-  "professional": { "id": "uuid", "handle": "fadez", "display_name": "Fadez Studio", "bio": null },
+  "professional": { "id": "uuid", "handle": "fadez", "display_name": "Fadez Studio", "professional_type": "barber", "bio": null },
   "theme": { "id": "uuid", "key": "modern", "name": "Modern", "config": {} },
   "links": [],
   "sections": [],
   "blocks": [],
   "services": [],
+  "selected_products": [],
+  "default_commission_rate": 15,
+  "max_featured_products": 10,
+  "store": {
+    "selected_products": [],
+    "default_commission_rate": 15,
+    "max_featured_products": 10
+  },
   "legal": {
     "privacy_policy": "## Privacy Policy\\n...",
     "terms_and_conditions": "## Terms and Conditions\\n...",
@@ -729,6 +741,10 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 ```
 
 **Common status codes:** 200, 403 (site not published), 404 (site not found), 429
+
+**Notes:**
+- `blocks` is a combined, sort-ordered array of both `links` and `sections` and includes `block_group` on each item.
+- Featured-products data is embedded for theme rendering via both top-level keys (`selected_products`, rates) and a nested `store` object.
 
 ### `POST /api/public/analytics/pageviews`
 
@@ -1091,13 +1107,14 @@ All routes below require: Authorization header AND a professional profile (curre
 
 - Purpose: bootstrap dashboard UI with current professional, site, blocks, services, and customer count
 - Auth: Required
-- Response (200): `{ "uid": "supabase-user-uuid", "professional": { ... }, "site": { ... }, "legal_content": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
+- Response (200): `{ "uid": "supabase-user-uuid", "professional": { ..., "professional_type": "barber" }, "site": { ... }, "legal_content": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
 - Common status codes: 200, 401, 403
 
 ### `PATCH /api/me`
 
 - Purpose: update professional profile fields
-- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "public_contact_email": "bookings@example.com" }`
+- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "barber", "public_contact_email": "bookings@example.com" }`
+- `professional_type` allowed values: `barber`, `salon`, `influencer`
 - Response (200): `{ "professional": { ... } }`
 - Common status codes: 200, 401, 403, 422
 - Images are managed via `POST /api/uploads` (pool=gallery or pool=content). No image fields are accepted on this endpoint.
@@ -1564,7 +1581,7 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 
 - GET /api/staff/me
 - GET /api/staff/sites/{subdomain}
-- GET /api/staff/professionals?q=...&status=...&per_page=...&page=...
+- GET /api/staff/professionals?q=...&status=...&professional_type=...&per_page=...&page=...
 - GET /api/staff/professionals/{professional}
 - DELETE /api/staff/professionals/{professional} (soft delete)
 - POST /api/staff/professionals/{professional}/restore
