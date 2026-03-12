@@ -39,6 +39,7 @@ class Professional extends BaseModel
         'bio',
         'country_code',
         'timezone',
+        'professional_type',
         'status',
         'onboarding_step',
         'qr_slug',

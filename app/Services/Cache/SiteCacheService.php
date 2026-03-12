@@ -42,6 +42,10 @@ class SiteCacheService
             // Older cache entries may not include `services`.
             if (array_key_exists('services', $cached)) {
                 $cached = $this->ensureBlockCollections($cached);
+                $cached = $this->ensureProfessionalType(
+                    $cached,
+                    (string) data_get($cached, 'professional.id', '')
+                );
                 $cached = $this->withStorePayload(
                     $cached,
                     (string) data_get($cached, 'professional.id', '')
@@ -104,6 +108,7 @@ class SiteCacheService
             'blocks' => $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks),
             'legal' => $payload['legal'] ?? null,
         ];
+        $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
         $data = $this->withStorePayload($data, (string) ($row->professional_id ?? ''));
 
         Cache::put($key, $data, now()->addMinutes(15));
@@ -138,6 +143,43 @@ class SiteCacheService
         $payload['links'] = $links;
         $payload['sections'] = $sections;
         $payload['blocks'] = $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks);
+
+        return $payload;
+    }
+
+    /**
+     * Ensure professional payload includes professional_type.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function ensureProfessionalType(array $payload, string $professionalId): array
+    {
+        $professional = $payload['professional'] ?? null;
+        if (! is_array($professional)) {
+            return $payload;
+        }
+
+        $existing = $professional['professional_type'] ?? null;
+        if (is_string($existing) && trim($existing) !== '') {
+            return $payload;
+        }
+
+        if ($professionalId === '') {
+            $professionalId = (string) ($professional['id'] ?? '');
+        }
+
+        $resolved = null;
+        if ($professionalId !== '') {
+            $resolved = Professional::query()
+                ->where('id', $professionalId)
+                ->value('professional_type');
+        }
+
+        $professional['professional_type'] = is_string($resolved) && trim($resolved) !== ''
+            ? $resolved
+            : 'barber';
+        $payload['professional'] = $professional;
 
         return $payload;
     }

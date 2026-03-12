@@ -113,6 +113,7 @@ class ProfessionalCacheService
                 'bio' => $pro->bio,
                 'country_code' => $pro->country_code,
                 'timezone' => $pro->timezone,
+                'professional_type' => $pro->professional_type,
                 'status' => $pro->status,
                 'onboarding_step' => $pro->onboarding_step,
                 'qr_slug' => $pro->qr_slug,

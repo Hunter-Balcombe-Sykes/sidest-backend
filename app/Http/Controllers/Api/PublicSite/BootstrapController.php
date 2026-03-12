@@ -44,6 +44,7 @@ class BootstrapController extends ApiController
                     'bio'             => null,
                     'country_code'    => $data['country_code'] ?? null,
                     'timezone'        => $data['timezone'] ?? null,
+                    'professional_type' => $data['professional_type'] ?? 'barber',
                     'status'          => 'active',
                     'onboarding_step' => 0,
                     'qr_slug'         => $this->generateQrSlug($data['handle'] ?? null),
@@ -73,6 +74,7 @@ class BootstrapController extends ApiController
                     'last_name'     => $data['last_name'] ?? $professional->last_name,
                     'country_code'  => $data['country_code'] ?? $professional->country_code,
                     'timezone'      => $data['timezone'] ?? $professional->timezone,
+                    'professional_type' => $data['professional_type'] ?? $professional->professional_type,
                     'handle_lc' => $data['handle_lc'],
                 ];
 
