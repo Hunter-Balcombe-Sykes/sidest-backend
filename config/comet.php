@@ -36,10 +36,13 @@ return [
     'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
 
     'professional_types' => [
+        'professional' => 'Professional',
+        'influencer' => 'Influencer',
         'barber' => 'Barber',
         'hairdresser' => 'Hairdresser',
         'ambassador' => 'Ambassador',
         'promoter' => 'Promoter',
+        'brand' => 'Brand',
         'barbershop' => 'Barbershop',
         'salon' => 'Salon',
     ],
