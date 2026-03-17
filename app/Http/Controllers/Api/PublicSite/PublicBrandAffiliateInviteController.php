@@ -20,7 +20,7 @@ class PublicBrandAffiliateInviteController extends ApiController
             'invite' => [
                 'id' => $invite->id,
                 'token' => $invite->token,
-                'status' => $inviteService->resolveStatus($invite),
+                'status' => $invite->status,
                 'invite_type' => $invite->invite_type,
                 'email' => $invite->email,
                 'phone' => $invite->phone,
@@ -31,7 +31,6 @@ class PublicBrandAffiliateInviteController extends ApiController
                 'brand_display_name' => $invite->brandProfessional?->display_name ?? $invite->brandProfessional?->handle,
                 'brand_handle' => $invite->brandProfessional?->handle,
                 'accepted_at' => optional($invite->accepted_at)->toIso8601String(),
-                'expires_at' => optional($invite->expires_at)->toIso8601String(),
             ],
         ]);
     }
