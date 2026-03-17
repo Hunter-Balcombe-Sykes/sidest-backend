@@ -136,29 +136,56 @@ class SiteCacheService
 
         $existingRadius = $brandPartner['border_radius'] ?? $brandPartner['borderRadius'] ?? null;
         $existingFontUrl = $brandPartner['font_file_url'] ?? $brandPartner['fontFileUrl'] ?? null;
+        $existingUsername = $brandPartner['username'] ?? $brandPartner['handle'] ?? null;
+        $existingFirstName = $brandPartner['first_name'] ?? $brandPartner['firstName'] ?? null;
+        $existingLastName = $brandPartner['last_name'] ?? $brandPartner['lastName'] ?? null;
+        $existingLogoLetterSpacing = $brandPartner['logo_letter_spacing'] ?? $brandPartner['logoLetterSpacing'] ?? null;
+        $existingLogoFontSize = $brandPartner['logo_font_size'] ?? $brandPartner['logoFontSize'] ?? null;
         $hasRadius = is_string($existingRadius) && trim($existingRadius) !== '';
         $hasFontUrl = is_string($existingFontUrl) && trim($existingFontUrl) !== '';
+        $hasUsername = is_string($existingUsername) && trim($existingUsername) !== '';
+        $hasFirstName = is_string($existingFirstName) && trim($existingFirstName) !== '';
+        $hasLastName = is_string($existingLastName) && trim($existingLastName) !== '';
+        $hasLogoLetterSpacing = is_string($existingLogoLetterSpacing) && trim($existingLogoLetterSpacing) !== '';
+        $hasLogoFontSize = is_string($existingLogoFontSize) && trim($existingLogoFontSize) !== '';
 
-        if ($hasRadius && $hasFontUrl) {
+        if ($hasRadius && $hasFontUrl && $hasUsername && $hasFirstName && $hasLastName && $hasLogoLetterSpacing && $hasLogoFontSize) {
             return $site;
         }
 
-        $partnerSettings = Site::query()
+        $partnerSite = Site::query()
             ->where('professional_id', $professionalId)
-            ->value('settings');
+            ->first(['settings']);
 
-        if (! is_array($partnerSettings)) {
+        if (! $partnerSite) {
             return $site;
         }
+
+        $partnerSettings = is_array($partnerSite->settings ?? null) ? $partnerSite->settings : null;
+        $partnerUsername = (string) (
+            Professional::query()
+                ->whereKey($professionalId)
+                ->value('handle') ?? ''
+        );
+        $partnerUsername = trim($partnerUsername);
+        $partnerNames = Professional::query()
+            ->whereKey($professionalId)
+            ->first(['first_name', 'last_name']);
+        $partnerFirstName = is_string($partnerNames?->first_name ?? null) ? trim((string) $partnerNames->first_name) : '';
+        $partnerLastName = is_string($partnerNames?->last_name ?? null) ? trim((string) $partnerNames->last_name) : '';
 
         $design = is_array($partnerSettings['design'] ?? null) ? $partnerSettings['design'] : [];
         $borderRadius = $design['border_radius'] ?? $design['borderRadius'] ?? null;
         $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
         $fontFileUrl = $typography['font_file_url'] ?? $typography['fontFileUrl'] ?? null;
+        $logoLetterSpacing = $typography['logo_letter_spacing'] ?? $typography['logoLetterSpacing'] ?? null;
+        $logoFontSize = $typography['logo_font_size'] ?? $typography['logoFontSize'] ?? null;
 
         if (
             (! is_string($borderRadius) || trim($borderRadius) === '')
             && (! is_string($fontFileUrl) || trim($fontFileUrl) === '')
+            && (! is_string($logoLetterSpacing) || trim($logoLetterSpacing) === '')
+            && (! is_string($logoFontSize) || trim($logoFontSize) === '')
         ) {
             return $site;
         }
@@ -168,6 +195,21 @@ class SiteCacheService
         }
         if (is_string($fontFileUrl) && trim($fontFileUrl) !== '') {
             $brandPartner['font_file_url'] = $fontFileUrl;
+        }
+        if ($partnerUsername !== '') {
+            $brandPartner['username'] = $partnerUsername;
+        }
+        if ($partnerFirstName !== '') {
+            $brandPartner['first_name'] = $partnerFirstName;
+        }
+        if ($partnerLastName !== '') {
+            $brandPartner['last_name'] = $partnerLastName;
+        }
+        if (is_string($logoLetterSpacing) && trim($logoLetterSpacing) !== '') {
+            $brandPartner['logo_letter_spacing'] = $logoLetterSpacing;
+        }
+        if (is_string($logoFontSize) && trim($logoFontSize) !== '') {
+            $brandPartner['logo_font_size'] = $logoFontSize;
         }
         $settings['brand_partner'] = $brandPartner;
         $site['settings'] = $settings;
