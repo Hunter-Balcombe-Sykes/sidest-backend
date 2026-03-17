@@ -135,7 +135,11 @@ class SiteCacheService
         }
 
         $existingRadius = $brandPartner['border_radius'] ?? $brandPartner['borderRadius'] ?? null;
-        if (is_string($existingRadius) && trim($existingRadius) !== '') {
+        $existingFontUrl = $brandPartner['font_file_url'] ?? $brandPartner['fontFileUrl'] ?? null;
+        $hasRadius = is_string($existingRadius) && trim($existingRadius) !== '';
+        $hasFontUrl = is_string($existingFontUrl) && trim($existingFontUrl) !== '';
+
+        if ($hasRadius && $hasFontUrl) {
             return $site;
         }
 
@@ -149,11 +153,22 @@ class SiteCacheService
 
         $design = is_array($partnerSettings['design'] ?? null) ? $partnerSettings['design'] : [];
         $borderRadius = $design['border_radius'] ?? $design['borderRadius'] ?? null;
-        if (! is_string($borderRadius) || trim($borderRadius) === '') {
+        $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
+        $fontFileUrl = $typography['font_file_url'] ?? $typography['fontFileUrl'] ?? null;
+
+        if (
+            (! is_string($borderRadius) || trim($borderRadius) === '')
+            && (! is_string($fontFileUrl) || trim($fontFileUrl) === '')
+        ) {
             return $site;
         }
 
-        $brandPartner['border_radius'] = $borderRadius;
+        if (is_string($borderRadius) && trim($borderRadius) !== '') {
+            $brandPartner['border_radius'] = $borderRadius;
+        }
+        if (is_string($fontFileUrl) && trim($fontFileUrl) !== '') {
+            $brandPartner['font_file_url'] = $fontFileUrl;
+        }
         $settings['brand_partner'] = $brandPartner;
         $site['settings'] = $settings;
 
