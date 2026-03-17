@@ -127,6 +127,23 @@ class BootstrapController extends ApiController
                 }
 
                 $brandAffiliateInviteService->claimInvite($invite, $professional);
+            } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
+                $brandPartnerProfessional = Professional::query()
+                    ->whereKey((string) $data['brand_partner_professional_id'])
+                    ->where('professional_type', 'brand')
+                    ->first();
+
+                if (! $brandPartnerProfessional) {
+                    throw new RuntimeException('Brand partner not found.');
+                }
+
+                $siteSettings = is_array($site->settings ?? null) ? $site->settings : [];
+                $siteSettings['brand_partner'] = [
+                    ...(is_array($siteSettings['brand_partner'] ?? null) ? $siteSettings['brand_partner'] : []),
+                    'professional_id' => $brandPartnerProfessional->id,
+                ];
+                $site->settings = $siteSettings;
+                $site->save();
             }
 
             $legalContentService->refreshGenerated($professional, $site);

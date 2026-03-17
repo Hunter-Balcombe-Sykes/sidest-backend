@@ -63,7 +63,11 @@ class BrandAffiliateInviteController extends ApiController
             'message' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $invite = $inviteService->createInvite($professional, $data);
+        try {
+            $invite = $inviteService->createInvite($professional, $data);
+        } catch (RuntimeException $exception) {
+            return $this->error($exception->getMessage(), 422);
+        }
 
         return $this->success([
             'invite' => [
@@ -79,6 +83,27 @@ class BrandAffiliateInviteController extends ApiController
                 'created_at' => optional($invite->created_at)->toIso8601String(),
             ],
         ], 201);
+    }
+
+    public function availability(Request $request, BrandAffiliateInviteService $inviteService): JsonResponse
+    {
+        $professional = $this->currentProfessional($request);
+
+        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
+            return $this->error('Only brand accounts can check affiliate invite availability.', 403);
+        }
+
+        $data = $request->validate([
+            'email' => ['sometimes', 'nullable', 'email', 'max:255'],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:40'],
+        ]);
+
+        return $this->success(
+            $inviteService->checkRecipientAvailability(
+                $data['email'] ?? null,
+                $data['phone'] ?? null,
+            )
+        );
     }
 
     public function claim(Request $request, string $token, BrandAffiliateInviteService $inviteService): JsonResponse

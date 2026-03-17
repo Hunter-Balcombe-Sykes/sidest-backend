@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Site\Site;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -57,37 +56,40 @@ class BrandAffiliateController extends ApiController
             ->values()
             ->all();
 
-        $pendingInvites = BrandAffiliateInvite::query()
-            ->where('brand_professional_id', $professional->id)
-            ->where('status', 'pending')
-            ->where(function ($query): void {
-                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
-            ->orderByDesc('created_at')
-            ->get()
-            ->map(function (BrandAffiliateInvite $invite): array {
-                $name = trim(implode(' ', array_filter([
-                    $invite->first_name,
-                    $invite->last_name,
-                ])));
+        return $this->success([
+            'affiliates' => $affiliates,
+        ]);
+    }
 
-                return [
-                    'id' => 'invite-' . $invite->id,
-                    'full_name' => $name !== '' ? $name : ($invite->email ?: ($invite->phone ?: 'Pending invite')),
-                    'display_name' => null,
-                    'handle' => null,
-                    'professional_type' => 'pending',
-                    'email' => $invite->email,
-                    'phone' => $invite->phone,
-                    'connected_at' => 'Pending',
-                    'sort_timestamp' => optional($invite->created_at)->toIso8601String(),
-                ];
+    public function disconnect(Request $request, string $affiliateId): JsonResponse
+    {
+        $professional = $this->currentProfessional($request);
+
+        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
+            return $this->error('Only brand accounts can disconnect affiliates.', 403);
+        }
+
+        $site = Site::query()
+            ->where('professional_id', $affiliateId)
+            ->where(function ($query) use ($professional): void {
+                $query
+                    ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$professional->id])
+                    ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$professional->id]);
             })
-            ->values()
-            ->all();
+            ->first();
+
+        if (! $site) {
+            return $this->error('Affiliate not found for this brand.', 404);
+        }
+
+        $settings = is_array($site->settings ?? null) ? $site->settings : [];
+        unset($settings['brand_partner'], $settings['brandPartner']);
+        $site->settings = $settings;
+        $site->save();
 
         return $this->success([
-            'affiliates' => [...$pendingInvites, ...$affiliates],
+            'affiliate_id' => $affiliateId,
+            'disconnected' => true,
         ]);
     }
 }

@@ -10,8 +10,66 @@ use RuntimeException;
 
 class BrandAffiliateInviteService
 {
+    public function checkRecipientAvailability(?string $email, ?string $phone): array
+    {
+        $normalizedEmail = $this->normalizeEmail($email);
+        $normalizedPhone = $this->normalizeStoredPhone($phone);
+
+        $emailExistsAsUser = false;
+        $emailExistsAsInvite = false;
+        if ($normalizedEmail !== null) {
+            $emailExistsAsUser = Professional::withTrashed()
+                ->where(function ($query) use ($normalizedEmail) {
+                    $query->whereRaw('LOWER(primary_email) = ?', [$normalizedEmail])
+                        ->orWhereRaw('LOWER(public_contact_email) = ?', [$normalizedEmail]);
+                })
+                ->exists();
+
+            $emailExistsAsInvite = BrandAffiliateInvite::query()
+                ->where('status', 'pending')
+                ->where('email_lc', $normalizedEmail)
+                ->exists();
+        }
+
+        $phoneExistsAsUser = false;
+        $phoneExistsAsInvite = false;
+        if ($normalizedPhone !== null) {
+            $phoneExistsAsUser = Professional::withTrashed()
+                ->where(function ($query) use ($normalizedPhone) {
+                    $query->where('phone', $normalizedPhone)
+                        ->orWhere('public_contact_number', $normalizedPhone);
+                })
+                ->exists();
+
+            $phoneExistsAsInvite = BrandAffiliateInvite::query()
+                ->where('status', 'pending')
+                ->where('phone', $normalizedPhone)
+                ->exists();
+        }
+
+        return [
+            'email' => [
+                'available' => !($emailExistsAsUser || $emailExistsAsInvite),
+                'exists' => $emailExistsAsUser || $emailExistsAsInvite,
+                'existing_user' => $emailExistsAsUser,
+                'existing_invitation' => $emailExistsAsInvite,
+            ],
+            'phone' => [
+                'available' => !($phoneExistsAsUser || $phoneExistsAsInvite),
+                'exists' => $phoneExistsAsUser || $phoneExistsAsInvite,
+                'existing_user' => $phoneExistsAsUser,
+                'existing_invitation' => $phoneExistsAsInvite,
+            ],
+        ];
+    }
+
     public function createInvite(Professional $brand, array $attributes): BrandAffiliateInvite
     {
+        $this->assertRecipientAvailability(
+            $attributes['email'] ?? null,
+            $attributes['phone'] ?? null,
+        );
+
         $invite = new BrandAffiliateInvite([
             'brand_professional_id' => $brand->id,
             'token' => $this->generateUniqueToken(),
@@ -140,6 +198,19 @@ class BrandAffiliateInviteService
         throw new RuntimeException('Unable to generate a unique invite token.');
     }
 
+    private function assertRecipientAvailability(?string $email, ?string $phone): void
+    {
+        $availability = $this->checkRecipientAvailability($email, $phone);
+
+        if (($availability['email']['available'] ?? true) === false) {
+            throw new RuntimeException('Email already belongs to an existing user or invitation.');
+        }
+
+        if (($availability['phone']['available'] ?? true) === false) {
+            throw new RuntimeException('Mobile already belongs to an existing user or invitation.');
+        }
+    }
+
     private function assertInviteMatchesProfessional(BrandAffiliateInvite $invite, Professional $professional): void
     {
         $inviteEmail = mb_strtolower(trim((string) ($invite->email ?? '')));
@@ -163,5 +234,25 @@ class BrandAffiliateInviteService
         }
 
         return preg_replace('/\D+/u', '', $stringValue) ?? '';
+    }
+
+    private function normalizeEmail(?string $value): ?string
+    {
+        $stringValue = is_string($value) ? trim($value) : '';
+        if ($stringValue === '') {
+            return null;
+        }
+
+        return mb_strtolower($stringValue);
+    }
+
+    private function normalizeStoredPhone(?string $value): ?string
+    {
+        $stringValue = is_string($value) ? trim($value) : '';
+        if ($stringValue === '') {
+            return null;
+        }
+
+        return preg_replace('/[^\d+]/u', '', $stringValue) ?: null;
     }
 }
