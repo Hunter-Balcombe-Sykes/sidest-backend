@@ -128,4 +128,28 @@ class BrandAffiliateInviteController extends ApiController
             ],
         ]);
     }
+
+    public function destroy(Request $request, string $inviteId): JsonResponse
+    {
+        $professional = $this->currentProfessional($request);
+
+        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
+            return $this->error('Only brand accounts can delete affiliate invites.', 403);
+        }
+
+        $invite = $professional->brandAffiliateInvites()
+            ->whereKey($inviteId)
+            ->first();
+
+        if (! $invite) {
+            return $this->error('Invite not found.', 404);
+        }
+
+        $invite->delete();
+
+        return $this->success([
+            'invite_id' => $inviteId,
+            'deleted' => true,
+        ]);
+    }
 }

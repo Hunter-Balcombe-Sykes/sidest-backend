@@ -40,6 +40,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect']);
     Route::get('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'index']);
     Route::post('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'store']);
+    Route::delete('/brand-affiliate-invites/{invite}', [BrandAffiliateInviteController::class, 'destroy']);
     Route::post('/brand-affiliate-invites/{token}/claim', [BrandAffiliateInviteController::class, 'claim']);
     Route::post('/brand-affiliate-invites/{token}/decline', [BrandAffiliateInviteController::class, 'decline']);
     Route::get('/brand-partners', [BrandPartnerController::class, 'index']);
