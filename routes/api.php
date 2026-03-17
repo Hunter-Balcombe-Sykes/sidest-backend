@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
+use App\Http\Controllers\Api\PublicSite\PublicBrandAffiliateInviteController;
 use App\Http\Controllers\Api\PublicSite\PublicSignupAvailabilityController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
@@ -68,6 +69,8 @@ Route::post('/public/subscribe', [PublicEmailSubscriptionController::class, 'sub
     ->middleware('throttle:public-site');
 
 Route::post('/public/signup/availability', [PublicSignupAvailabilityController::class, 'check'])
+    ->middleware('throttle:public-site');
+Route::get('/public/brand-affiliate-invites/{token}', [PublicBrandAffiliateInviteController::class, 'show'])
     ->middleware('throttle:public-site');
 
 Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])

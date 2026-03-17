@@ -15,6 +15,7 @@ use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
+use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Enterprise\EnterpriseProvisioningService;
 use App\Services\Legal\ProfessionalLegalContentService;
 
@@ -25,7 +26,8 @@ class BootstrapController extends ApiController
     public function bootstrap(
         BootstrapRequest $request,
         ProfessionalLegalContentService $legalContentService,
-        EnterpriseProvisioningService $enterpriseProvisioningService
+        EnterpriseProvisioningService $enterpriseProvisioningService,
+        BrandAffiliateInviteService $brandAffiliateInviteService
     )
     {
         $uid = $request->attributes->get('supabase_uid');
@@ -36,7 +38,7 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService) {
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService) {
             $createdProfessional = false;
             $provisionedEnterprise = null;
 
@@ -116,6 +118,15 @@ class BootstrapController extends ApiController
                 $base = $this->subdomainBaseFromHandle($data['handle']);
 
                 $site = $this->createSiteWithRetry($professional->id, $base);
+            }
+
+            if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
+                $invite = $brandAffiliateInviteService->findByToken((string) $data['invite_token']);
+                if (! $invite) {
+                    throw new RuntimeException('Invite not found.');
+                }
+
+                $brandAffiliateInviteService->claimInvite($invite, $professional);
             }
 
             $legalContentService->refreshGenerated($professional, $site);

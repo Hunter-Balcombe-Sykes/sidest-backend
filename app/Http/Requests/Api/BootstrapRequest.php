@@ -34,6 +34,7 @@ class BootstrapRequest extends BaseFormRequest
             'last_name' => ['nullable','string','max:80'],
             'country_code' => ['nullable','string','max:5'],
             'timezone' => ['nullable','string','max:64'],
+            'invite_token' => ['sometimes', 'nullable', 'string', 'max:80'],
             'professional_type' => [
                 ...$professionalTypeRules,
                 'string',
@@ -53,7 +54,7 @@ class BootstrapRequest extends BaseFormRequest
     {
         $this->trimStrings([
                 'handle', 'display_name', 'phone', 'first_name',
-                'last_name', 'country_code', 'timezone', 'professional_type'
+                'last_name', 'country_code', 'timezone', 'professional_type', 'invite_token'
             ]);
         $this->sanitizeEmails(['primary_email']);
 
@@ -70,6 +71,10 @@ class BootstrapRequest extends BaseFormRequest
 
         if ($this->exists('professional_type')) {
             $merge['professional_type'] = $this->normalizeProfessionalTypeInput($this->professional_type);
+        }
+
+        if ($this->exists('invite_token')) {
+            $merge['invite_token'] = is_string($this->invite_token) ? trim($this->invite_token) : null;
         }
 
         $this->merge($merge);
