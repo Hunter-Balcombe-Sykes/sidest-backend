@@ -139,17 +139,34 @@ class SiteCacheService
         $existingUsername = $brandPartner['username'] ?? $brandPartner['handle'] ?? null;
         $existingFirstName = $brandPartner['first_name'] ?? $brandPartner['firstName'] ?? null;
         $existingLastName = $brandPartner['last_name'] ?? $brandPartner['lastName'] ?? null;
+        $existingBorderColor = $brandPartner['border_color'] ?? $brandPartner['borderColor'] ?? null;
         $existingLogoLetterSpacing = $brandPartner['logo_letter_spacing'] ?? $brandPartner['logoLetterSpacing'] ?? null;
         $existingLogoFontSize = $brandPartner['logo_font_size'] ?? $brandPartner['logoFontSize'] ?? null;
+        $existingBorderWidth = $brandPartner['border_width'] ?? $brandPartner['borderWidth'] ?? null;
+        $existingGeneralSpacingPadding = $brandPartner['general_spacing_padding'] ?? $brandPartner['generalSpacingPadding'] ?? null;
         $hasRadius = is_string($existingRadius) && trim($existingRadius) !== '';
         $hasFontUrl = is_string($existingFontUrl) && trim($existingFontUrl) !== '';
         $hasUsername = is_string($existingUsername) && trim($existingUsername) !== '';
         $hasFirstName = is_string($existingFirstName) && trim($existingFirstName) !== '';
         $hasLastName = is_string($existingLastName) && trim($existingLastName) !== '';
+        $hasBorderColor = is_string($existingBorderColor) && trim($existingBorderColor) !== '';
         $hasLogoLetterSpacing = is_string($existingLogoLetterSpacing) && trim($existingLogoLetterSpacing) !== '';
         $hasLogoFontSize = is_string($existingLogoFontSize) && trim($existingLogoFontSize) !== '';
+        $hasBorderWidth = is_string($existingBorderWidth) && trim($existingBorderWidth) !== '';
+        $hasGeneralSpacingPadding = is_string($existingGeneralSpacingPadding) && trim($existingGeneralSpacingPadding) !== '';
 
-        if ($hasRadius && $hasFontUrl && $hasUsername && $hasFirstName && $hasLastName && $hasLogoLetterSpacing && $hasLogoFontSize) {
+        if (
+            $hasRadius
+            && $hasFontUrl
+            && $hasUsername
+            && $hasFirstName
+            && $hasLastName
+            && $hasBorderColor
+            && $hasLogoLetterSpacing
+            && $hasLogoFontSize
+            && $hasBorderWidth
+            && $hasGeneralSpacingPadding
+        ) {
             return $site;
         }
 
@@ -175,23 +192,35 @@ class SiteCacheService
         $partnerLastName = is_string($partnerNames?->last_name ?? null) ? trim((string) $partnerNames->last_name) : '';
 
         $design = is_array($partnerSettings['design'] ?? null) ? $partnerSettings['design'] : [];
+        $borderColor = $design['border_color'] ?? $design['borderColor'] ?? null;
         $borderRadius = $design['border_radius'] ?? $design['borderRadius'] ?? null;
+        $borderWidth = $design['border_width'] ?? $design['borderWidth'] ?? null;
+        $generalSpacingPadding = $design['general_spacing_padding'] ?? $design['generalSpacingPadding'] ?? null;
         $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
         $fontFileUrl = $typography['font_file_url'] ?? $typography['fontFileUrl'] ?? null;
         $logoLetterSpacing = $typography['logo_letter_spacing'] ?? $typography['logoLetterSpacing'] ?? null;
         $logoFontSize = $typography['logo_font_size'] ?? $typography['logoFontSize'] ?? null;
 
         if (
+            (! is_string($borderColor) || trim($borderColor) === '')
             (! is_string($borderRadius) || trim($borderRadius) === '')
             && (! is_string($fontFileUrl) || trim($fontFileUrl) === '')
+            && (! is_string($borderWidth) || trim($borderWidth) === '')
+            && (! is_string($generalSpacingPadding) || trim($generalSpacingPadding) === '')
             && (! is_string($logoLetterSpacing) || trim($logoLetterSpacing) === '')
             && (! is_string($logoFontSize) || trim($logoFontSize) === '')
         ) {
             return $site;
         }
 
+        if (is_string($borderColor) && trim($borderColor) !== '') {
+            $brandPartner['border_color'] = $borderColor;
+        }
         if (is_string($borderRadius) && trim($borderRadius) !== '') {
             $brandPartner['border_radius'] = $borderRadius;
+        }
+        if (is_string($borderWidth) && trim($borderWidth) !== '') {
+            $brandPartner['border_width'] = $borderWidth;
         }
         if (is_string($fontFileUrl) && trim($fontFileUrl) !== '') {
             $brandPartner['font_file_url'] = $fontFileUrl;
@@ -204,6 +233,9 @@ class SiteCacheService
         }
         if ($partnerLastName !== '') {
             $brandPartner['last_name'] = $partnerLastName;
+        }
+        if (is_string($generalSpacingPadding) && trim($generalSpacingPadding) !== '') {
+            $brandPartner['general_spacing_padding'] = $generalSpacingPadding;
         }
         if (is_string($logoLetterSpacing) && trim($logoLetterSpacing) !== '') {
             $brandPartner['logo_letter_spacing'] = $logoLetterSpacing;
