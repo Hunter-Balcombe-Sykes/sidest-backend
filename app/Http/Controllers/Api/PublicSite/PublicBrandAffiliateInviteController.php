@@ -20,7 +20,7 @@ class PublicBrandAffiliateInviteController extends ApiController
             'invite' => [
                 'id' => $invite->id,
                 'token' => $invite->token,
-                'status' => $invite->status,
+                'status' => $inviteService->resolveStatus($invite),
                 'invite_type' => $invite->invite_type,
                 'email' => $invite->email,
                 'phone' => $invite->phone,

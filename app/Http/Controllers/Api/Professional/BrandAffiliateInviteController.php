@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Professional\BrandAffiliateInviteService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use RuntimeException;
 
 class BrandAffiliateInviteController extends ApiController
@@ -24,10 +25,10 @@ class BrandAffiliateInviteController extends ApiController
         $invites = $professional->brandAffiliateInvites()
             ->orderByDesc('created_at')
             ->get()
-            ->map(function ($invite): array {
+            ->map(function ($invite) use ($inviteService): array {
                 return [
                     'id' => $invite->id,
-                    'status' => $invite->status,
+                    'status' => $inviteService->resolveStatus($invite),
                     'invite_type' => $invite->invite_type,
                     'email' => $invite->email,
                     'phone' => $invite->phone,
@@ -37,6 +38,7 @@ class BrandAffiliateInviteController extends ApiController
                     'token' => $invite->token,
                     'created_at' => optional($invite->created_at)->toIso8601String(),
                     'accepted_at' => optional($invite->accepted_at)->toIso8601String(),
+                    'expires_at' => optional($invite->expires_at)->toIso8601String(),
                 ];
             })
             ->values()
@@ -61,6 +63,7 @@ class BrandAffiliateInviteController extends ApiController
             'first_name' => ['nullable', 'string', 'max:80'],
             'last_name' => ['nullable', 'string', 'max:80'],
             'message' => ['nullable', 'string', 'max:500'],
+            'expiration' => ['required', 'string', Rule::in(['24_hours', '7_days', '30_days', 'none'])],
         ]);
 
         $invite = $inviteService->createInvite($professional, $data);
@@ -77,6 +80,7 @@ class BrandAffiliateInviteController extends ApiController
                 'last_name' => $invite->last_name,
                 'message' => $invite->message,
                 'created_at' => optional($invite->created_at)->toIso8601String(),
+                'expires_at' => optional($invite->expires_at)->toIso8601String(),
             ],
         ], 201);
     }

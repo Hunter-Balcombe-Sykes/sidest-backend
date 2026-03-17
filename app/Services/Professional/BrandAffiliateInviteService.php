@@ -5,6 +5,7 @@ namespace App\Services\Professional;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -23,6 +24,7 @@ class BrandAffiliateInviteService
             'first_name' => $attributes['first_name'] ?? null,
             'last_name' => $attributes['last_name'] ?? null,
             'message' => $attributes['message'] ?? null,
+            'expires_at' => $this->resolveExpirationDate($attributes['expiration'] ?? null),
         ]);
 
         $invite->save();
@@ -81,6 +83,15 @@ class BrandAffiliateInviteService
         $invite->save();
 
         return $invite->fresh(['brandProfessional', 'claimedProfessional']);
+    }
+
+    public function resolveStatus(BrandAffiliateInvite $invite): string
+    {
+        if ($invite->status === 'pending' && $invite->expires_at && $invite->expires_at->isPast()) {
+            return 'expired';
+        }
+
+        return (string) $invite->status;
     }
 
     public function declineInvite(BrandAffiliateInvite $invite, Professional $professional): BrandAffiliateInvite
@@ -164,5 +175,18 @@ class BrandAffiliateInviteService
         }
 
         return preg_replace('/\D+/u', '', $stringValue) ?? '';
+    }
+
+    private function resolveExpirationDate(mixed $value): ?Carbon
+    {
+        $expiration = is_string($value) ? trim($value) : '';
+
+        return match ($expiration) {
+            '24_hours' => now()->addDay(),
+            '7_days' => now()->addDays(7),
+            '30_days' => now()->addDays(30),
+            'none' => null,
+            default => null,
+        };
     }
 }
