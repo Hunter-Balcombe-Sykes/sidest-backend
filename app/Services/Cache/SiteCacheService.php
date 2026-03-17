@@ -203,7 +203,7 @@ class SiteCacheService
 
         if (
             (! is_string($borderColor) || trim($borderColor) === '')
-            (! is_string($borderRadius) || trim($borderRadius) === '')
+            && (! is_string($borderRadius) || trim($borderRadius) === '')
             && (! is_string($fontFileUrl) || trim($fontFileUrl) === '')
             && (! is_string($borderWidth) || trim($borderWidth) === '')
             && (! is_string($generalSpacingPadding) || trim($generalSpacingPadding) === '')
