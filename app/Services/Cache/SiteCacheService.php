@@ -527,6 +527,24 @@ class SiteCacheService
             $keys[] = CacheKeyGenerator::publicSitePayload(strtoLower($aliasSubdomain));
         }
 
+        $professionalId = (string) ($site->professional_id ?? '');
+        if ($professionalId !== '') {
+            $connectedSubdomains = Site::query()
+                ->where(function ($query) use ($professionalId) {
+                    $query
+                        ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$professionalId])
+                        ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$professionalId]);
+                })
+                ->pluck('subdomain')
+                ->filter(fn ($subdomain): bool => is_string($subdomain) && trim($subdomain) !== '')
+                ->map(fn ($subdomain): string => strtolower((string) $subdomain))
+                ->all();
+
+            foreach ($connectedSubdomains as $connectedSubdomain) {
+                $keys[] = CacheKeyGenerator::publicSitePayload($connectedSubdomain);
+            }
+        }
+
         Cache::deleteMultiple(array_values(array_unique($keys)));
     }
 
