@@ -2,6 +2,7 @@
 
 namespace App\Services\Professional;
 
+use App\Models\Core\Notifications\Notification;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
@@ -49,7 +50,7 @@ class BrandAffiliateInviteService
 
         return [
             'email' => [
-                'available' => !($emailExistsAsUser || $emailExistsAsInvite),
+                'available' => !$emailExistsAsInvite,
                 'exists' => $emailExistsAsUser || $emailExistsAsInvite,
                 'existing_user' => $emailExistsAsUser,
                 'existing_invitation' => $emailExistsAsInvite,
@@ -84,6 +85,7 @@ class BrandAffiliateInviteService
         ]);
 
         $invite->save();
+        $this->notifyExistingEmailRecipients($brand, $invite);
 
         return $invite->fresh(['brandProfessional']);
     }
@@ -203,7 +205,7 @@ class BrandAffiliateInviteService
         $availability = $this->checkRecipientAvailability($email, $phone);
 
         if (($availability['email']['available'] ?? true) === false) {
-            throw new RuntimeException('Email already belongs to an existing user or invitation.');
+            throw new RuntimeException('Email already belongs to an existing invitation.');
         }
 
         if (($availability['phone']['available'] ?? true) === false) {
@@ -254,5 +256,39 @@ class BrandAffiliateInviteService
         }
 
         return preg_replace('/[^\d+]/u', '', $stringValue) ?: null;
+    }
+
+    private function notifyExistingEmailRecipients(Professional $brand, BrandAffiliateInvite $invite): void
+    {
+        if (!is_string($invite->email) || trim($invite->email) === '') {
+            return;
+        }
+
+        $normalizedEmail = $this->normalizeEmail($invite->email);
+        if ($normalizedEmail === null) {
+            return;
+        }
+
+        $brandName = trim((string) ($brand->display_name ?: $brand->handle ?: 'this brand'));
+
+        Professional::query()
+            ->where('status', 'active')
+            ->where(function ($query) use ($normalizedEmail) {
+                $query->whereRaw('LOWER(primary_email) = ?', [$normalizedEmail])
+                    ->orWhereRaw('LOWER(public_contact_email) = ?', [$normalizedEmail]);
+            })
+            ->get()
+            ->each(function (Professional $professional) use ($brandName): void {
+                Notification::query()->create([
+                    'professional_id' => $professional->id,
+                    'type' => 'To do',
+                    'title' => "You have a new invite to become a brand partner of {$brandName}",
+                    'body' => "You have a new invite to become a brand partner of {$brandName}",
+                    'cta_url' => null,
+                    'severity' => Notification::severityForFrontendType('To do'),
+                    'starts_at' => now(),
+                    'ends_at' => null,
+                ]);
+            });
     }
 }

@@ -19,12 +19,15 @@ class StaffNotificationController extends ApiController
             'title' => ['required', 'string', 'max:255'],
             'body' => ['required', 'string', 'max:5000'],
             'cta_url' => ['nullable', 'string', 'max:2048'],
-            'severity' => ['required', 'string', 'in:info,warning,critical'],
+            'severity' => ['nullable', 'string', 'in:info,warning,critical'],
             'starts_at' => ['nullable', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'send_email' => ['nullable', 'boolean'],
             'email_list_key' => ['nullable', 'string', 'max:50'],
         ]);
+
+        $data['type'] = Notification::normalizeFrontendType($data['type'] ?? null, $data['severity'] ?? null);
+        $data['severity'] = Notification::severityForFrontendType($data['type']);
 
         if (empty($data['ends_at'])) {
             $map = config('comet.notification_retention_days', []);

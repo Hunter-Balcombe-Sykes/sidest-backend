@@ -55,6 +55,16 @@ class NotificationController extends ApiController
                 'r.dismissed_at',
             ]);
 
+        $rows = $rows->map(function ($row) {
+            $row->type = Notification::normalizeFrontendType(
+                is_string($row->type ?? null) ? $row->type : null,
+                is_string($row->severity ?? null) ? $row->severity : null,
+            );
+            $row->severity = Notification::severityForFrontendType($row->type);
+
+            return $row;
+        });
+
         $hasMore = $rows->count() > $limit;
         if ($hasMore) {
             $rows = $rows->take($limit);

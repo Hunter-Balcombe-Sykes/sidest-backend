@@ -336,7 +336,7 @@ class BootstrapController extends ApiController
         Notification::query()->firstOrCreate(
             [
                 'professional_id' => $professional->id,
-                'type' => 'info',
+                'type' => 'Info',
                 'title' => 'Welcome to Sight',
             ],
             [

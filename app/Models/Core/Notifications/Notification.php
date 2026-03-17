@@ -13,6 +13,14 @@ class Notification extends BaseModel
 {
     use HasUuids;
 
+    public const FRONTEND_TYPES = [
+        'Success',
+        'Critical',
+        'Warning',
+        'To do',
+        'Info',
+    ];
+
     protected $table = 'notifications';
 
     public $incrementing = false;
@@ -61,5 +69,54 @@ class Notification extends BaseModel
             ->where(function (Builder $q) use ($now): void {
                 $q->whereNull('ends_at')->orWhere('ends_at', '>=', $now);
             });
+    }
+
+    public static function normalizeFrontendType(?string $value, ?string $severity = null): string
+    {
+        $normalized = mb_strtolower(trim((string) ($value ?? '')));
+
+        if ($normalized === 'success') {
+            return 'Success';
+        }
+
+        if ($normalized === 'critical' || $normalized === 'error') {
+            return 'Critical';
+        }
+
+        if ($normalized === 'warning' || $normalized === 'warn') {
+            return 'Warning';
+        }
+
+        if ($normalized === 'to do' || $normalized === 'todo' || $normalized === 'task') {
+            return 'To do';
+        }
+
+        if ($normalized === 'info' || $normalized === '') {
+            return 'Info';
+        }
+
+        $severityNormalized = mb_strtolower(trim((string) ($severity ?? '')));
+        if ($severityNormalized === 'critical') {
+            return 'Critical';
+        }
+        if ($severityNormalized === 'warning') {
+            return 'Warning';
+        }
+        if ($severityNormalized === 'info') {
+            return 'Info';
+        }
+
+        return 'Info';
+    }
+
+    public static function severityForFrontendType(?string $value): string
+    {
+        return match (self::normalizeFrontendType($value)) {
+            'Critical' => 'critical',
+            'Warning' => 'warning',
+            'To do' => 'warning',
+            'Success', 'Info' => 'info',
+            default => 'info',
+        };
     }
 }
