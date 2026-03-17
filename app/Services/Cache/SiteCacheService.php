@@ -59,6 +59,7 @@ class SiteCacheService
                 $site = $cached['site'] ?? null;
                 if (is_array($site)) {
                     $cached['site'] = $this->resolveImageVariantUrlsInSite($site, '');
+                    $cached['site'] = $this->enrichSiteWithBrandPartnerRadius($cached['site']);
                 }
 
                 Cache::put($key, $cached, now()->addMinutes(15));
@@ -90,6 +91,7 @@ class SiteCacheService
         $site = $payload['site'] ?? null;
         if (is_array($site)) {
             $site = $this->resolveImageVariantUrlsInSite($site, (string) ($row->site_id ?? ''));
+            $site = $this->enrichSiteWithBrandPartnerRadius($site);
         }
 
         // Must match the controller response shape exactly.
@@ -114,6 +116,48 @@ class SiteCacheService
         Cache::put($key, $data, now()->addMinutes(15));
 
         return $data;
+    }
+
+    /**
+     * @param  array<string, mixed>  $site
+     * @return array<string, mixed>
+     */
+    public function enrichSiteWithBrandPartnerRadius(array $site): array
+    {
+        $settings = is_array($site['settings'] ?? null) ? $site['settings'] : [];
+        $brandPartner = is_array($settings['brand_partner'] ?? null)
+            ? $settings['brand_partner']
+            : (is_array($settings['brandPartner'] ?? null) ? $settings['brandPartner'] : []);
+
+        $professionalId = $brandPartner['professional_id'] ?? $brandPartner['professionalId'] ?? null;
+        if (! is_string($professionalId) || trim($professionalId) === '') {
+            return $site;
+        }
+
+        $existingRadius = $brandPartner['border_radius'] ?? $brandPartner['borderRadius'] ?? null;
+        if (is_string($existingRadius) && trim($existingRadius) !== '') {
+            return $site;
+        }
+
+        $partnerSettings = Site::query()
+            ->where('professional_id', $professionalId)
+            ->value('settings');
+
+        if (! is_array($partnerSettings)) {
+            return $site;
+        }
+
+        $design = is_array($partnerSettings['design'] ?? null) ? $partnerSettings['design'] : [];
+        $borderRadius = $design['border_radius'] ?? $design['borderRadius'] ?? null;
+        if (! is_string($borderRadius) || trim($borderRadius) === '') {
+            return $site;
+        }
+
+        $brandPartner['border_radius'] = $borderRadius;
+        $settings['brand_partner'] = $brandPartner;
+        $site['settings'] = $settings;
+
+        return $site;
     }
 
     /**
