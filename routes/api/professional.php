@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Professional\Notifications\NotificationController;
 use App\Http\Controllers\Api\Professional\PlanController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
+use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
 use App\Http\Controllers\Api\Professional\ProfessionalController;
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
@@ -34,6 +35,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     // Show & Edit Details
     Route::get('/me', [ProfessionalController::class, 'show']);
     Route::patch('/me', [ProfessionalController::class, 'update']);
+    Route::get('/brand-affiliates', [BrandAffiliateController::class, 'index']);
     Route::get('/brand-partners', [BrandPartnerController::class, 'index']);
 
     // View Site Details
