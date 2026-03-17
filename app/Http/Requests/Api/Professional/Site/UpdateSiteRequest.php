@@ -65,6 +65,14 @@ class UpdateSiteRequest extends BaseFormRequest
                     $query->where('professional_type', 'brand');
                 }),
             ],
+            'settings.additional_brand_partners' => ['sometimes', 'array', 'max:3'],
+            'settings.additional_brand_partners.*.professional_id' => [
+                'required',
+                'uuid',
+                Rule::exists('professionals', 'id')->where(function ($query) {
+                    $query->where('professional_type', 'brand');
+                }),
+            ],
             'settings.show_branding' => ['sometimes', 'boolean'],
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
             'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],

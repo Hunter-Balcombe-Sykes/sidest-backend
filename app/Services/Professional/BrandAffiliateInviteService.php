@@ -128,10 +128,33 @@ class BrandAffiliateInviteService
         }
 
         $settings = is_array($site->settings ?? null) ? $site->settings : [];
-        $settings['brand_partner'] = [
-            ...(is_array($settings['brand_partner'] ?? null) ? $settings['brand_partner'] : []),
-            'professional_id' => $invite->brand_professional_id,
-        ];
+        $brandProfessionalId = $invite->brand_professional_id;
+
+        // Check if this brand is already connected as primary or additional
+        $currentPrimaryId = $settings['brand_partner']['professional_id'] ?? null;
+        $additionalPartners = is_array($settings['additional_brand_partners'] ?? null)
+            ? $settings['additional_brand_partners']
+            : [];
+        $additionalIds = array_column($additionalPartners, 'professional_id');
+
+        if ($currentPrimaryId === $brandProfessionalId || in_array($brandProfessionalId, $additionalIds, true)) {
+            throw new RuntimeException('You are already connected to this brand partner.');
+        }
+
+        // If no primary partner, assign as primary
+        if (empty($currentPrimaryId)) {
+            $settings['brand_partner'] = [
+                ...(is_array($settings['brand_partner'] ?? null) ? $settings['brand_partner'] : []),
+                'professional_id' => $brandProfessionalId,
+            ];
+        } elseif (count($additionalPartners) < 3) {
+            // Assign to next available additional slot
+            $additionalPartners[] = ['professional_id' => $brandProfessionalId];
+            $settings['additional_brand_partners'] = $additionalPartners;
+        } else {
+            throw new RuntimeException('All brand partner slots are full. Please remove an existing brand partner before accepting this invite.');
+        }
+
         $site->settings = $settings;
         $site->save();
 
@@ -238,7 +261,8 @@ class BrandAffiliateInviteService
             ->where(function (Builder $query) use ($brand): void {
                 $query
                     ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$brand->id])
-                    ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$brand->id]);
+                    ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$brand->id])
+                    ->orWhereRaw("settings->'additional_brand_partners' @> ?", [json_encode([['professional_id' => $brand->id]])]);
             })
             ->exists();
     }
