@@ -165,6 +165,12 @@ class Professional extends BaseModel
         return $this->hasMany(EmailSubscription::class, 'professional_id');
     }
 
+    public function brandAffiliateInvites(): HasMany
+    {
+        return $this->hasMany(BrandAffiliateInvite::class, 'brand_professional_id')
+            ->orderByDesc('created_at');
+    }
+
     public function subscription(): HasOne
     {
         return $this->hasOne(Subscription::class, 'professional_id');

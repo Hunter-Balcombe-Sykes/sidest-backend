@@ -83,6 +83,40 @@ class BrandAffiliateInviteService
         return $invite->fresh(['brandProfessional', 'claimedProfessional']);
     }
 
+    public function declineInvite(BrandAffiliateInvite $invite, Professional $professional): BrandAffiliateInvite
+    {
+        if (mb_strtolower(trim((string) $professional->professional_type)) === 'brand') {
+            throw new RuntimeException('Brand accounts cannot decline affiliate invites.');
+        }
+
+        if ($invite->status === 'accepted') {
+            if ($invite->claimed_professional_id === $professional->id) {
+                throw new RuntimeException('This invite has already been accepted.');
+            }
+
+            throw new RuntimeException('This invite has already been used.');
+        }
+
+        if ($invite->status === 'declined') {
+            return $invite;
+        }
+
+        if ($invite->status !== 'pending') {
+            throw new RuntimeException('This invite is no longer available.');
+        }
+
+        if ($invite->expires_at && $invite->expires_at->isPast()) {
+            throw new RuntimeException('This invite has expired.');
+        }
+
+        $this->assertInviteMatchesProfessional($invite, $professional);
+
+        $invite->status = 'declined';
+        $invite->save();
+
+        return $invite->fresh(['brandProfessional', 'claimedProfessional']);
+    }
+
     private function determineInviteType(array $attributes): string
     {
         $hasPersonalisation =

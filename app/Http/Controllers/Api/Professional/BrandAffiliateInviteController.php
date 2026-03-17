@@ -13,6 +13,40 @@ class BrandAffiliateInviteController extends ApiController
 {
     use ResolveCurrentProfessional;
 
+    public function index(Request $request): JsonResponse
+    {
+        $professional = $this->currentProfessional($request);
+
+        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
+            return $this->error('Only brand accounts can view affiliate invites.', 403);
+        }
+
+        $invites = $professional->brandAffiliateInvites()
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(function ($invite): array {
+                return [
+                    'id' => $invite->id,
+                    'status' => $invite->status,
+                    'invite_type' => $invite->invite_type,
+                    'email' => $invite->email,
+                    'phone' => $invite->phone,
+                    'first_name' => $invite->first_name,
+                    'last_name' => $invite->last_name,
+                    'message' => $invite->message,
+                    'token' => $invite->token,
+                    'created_at' => optional($invite->created_at)->toIso8601String(),
+                    'accepted_at' => optional($invite->accepted_at)->toIso8601String(),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return $this->success([
+            'invites' => $invites,
+        ]);
+    }
+
     public function store(Request $request, BrandAffiliateInviteService $inviteService): JsonResponse
     {
         $professional = $this->currentProfessional($request);
@@ -68,6 +102,29 @@ class BrandAffiliateInviteController extends ApiController
                 'status' => $claimedInvite->status,
                 'claimed_professional_id' => $claimedInvite->claimed_professional_id,
                 'accepted_at' => optional($claimedInvite->accepted_at)->toIso8601String(),
+            ],
+        ]);
+    }
+
+    public function decline(Request $request, string $token, BrandAffiliateInviteService $inviteService): JsonResponse
+    {
+        $professional = $this->currentProfessional($request);
+        $invite = $inviteService->findByToken($token);
+
+        if (! $invite) {
+            return $this->error('Invite not found.', 404);
+        }
+
+        try {
+            $declinedInvite = $inviteService->declineInvite($invite, $professional);
+        } catch (RuntimeException $exception) {
+            return $this->error($exception->getMessage(), 422);
+        }
+
+        return $this->success([
+            'invite' => [
+                'id' => $declinedInvite->id,
+                'status' => $declinedInvite->status,
             ],
         ]);
     }
