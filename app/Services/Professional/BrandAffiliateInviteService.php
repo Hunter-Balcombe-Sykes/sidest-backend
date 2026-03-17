@@ -15,7 +15,6 @@ class BrandAffiliateInviteService
     public function checkRecipientAvailability(Professional $brand, ?string $email, ?string $phone): array
     {
         $normalizedEmail = $this->normalizeEmail($email);
-        $normalizedPhone = $this->normalizeStoredPhone($phone);
 
         $emailExistsAsUser = false;
         $emailAlreadyConnectedToBrand = false;
@@ -38,27 +37,6 @@ class BrandAffiliateInviteService
                 ->exists();
         }
 
-        $phoneExistsAsUser = false;
-        $phoneAlreadyConnectedToBrand = false;
-        $phoneExistsAsInvite = false;
-        if ($normalizedPhone !== null) {
-            $matchingPhoneProfessionalIds = Professional::withTrashed()
-                ->where(function ($query) use ($normalizedPhone) {
-                    $query->where('phone', $normalizedPhone)
-                        ->orWhere('public_contact_number', $normalizedPhone);
-                })
-                ->pluck('id');
-
-            $phoneExistsAsUser = $matchingPhoneProfessionalIds->isNotEmpty();
-            $phoneAlreadyConnectedToBrand = $phoneExistsAsUser
-                && $this->brandHasConnectedProfessionals($brand, $matchingPhoneProfessionalIds->all());
-
-            $phoneExistsAsInvite = BrandAffiliateInvite::query()
-                ->where('status', 'pending')
-                ->where('phone', $normalizedPhone)
-                ->exists();
-        }
-
         return [
             'email' => [
                 'available' => !($emailExistsAsInvite || $emailAlreadyConnectedToBrand),
@@ -68,11 +46,11 @@ class BrandAffiliateInviteService
                 'existing_invitation' => $emailExistsAsInvite,
             ],
             'phone' => [
-                'available' => !($phoneExistsAsInvite || $phoneAlreadyConnectedToBrand),
-                'exists' => $phoneExistsAsUser || $phoneExistsAsInvite || $phoneAlreadyConnectedToBrand,
-                'existing_user' => $phoneExistsAsUser,
-                'already_connected_to_brand' => $phoneAlreadyConnectedToBrand,
-                'existing_invitation' => $phoneExistsAsInvite,
+                'available' => true,
+                'exists' => false,
+                'existing_user' => false,
+                'already_connected_to_brand' => false,
+                'existing_invitation' => false,
             ],
         ];
     }
@@ -82,7 +60,7 @@ class BrandAffiliateInviteService
         $this->assertRecipientAvailability(
             $brand,
             $attributes['email'] ?? null,
-            $attributes['phone'] ?? null,
+            null,
         );
 
         $invite = new BrandAffiliateInvite([
@@ -92,7 +70,7 @@ class BrandAffiliateInviteService
             'invite_type' => $this->determineInviteType($attributes),
             'email' => $attributes['email'] ?? null,
             'email_lc' => isset($attributes['email']) ? mb_strtolower(trim((string) $attributes['email'])) : null,
-            'phone' => $attributes['phone'] ?? null,
+            'phone' => null,
             'first_name' => $attributes['first_name'] ?? null,
             'last_name' => $attributes['last_name'] ?? null,
             'message' => $attributes['message'] ?? null,
@@ -194,7 +172,6 @@ class BrandAffiliateInviteService
     {
         $hasPersonalisation =
             filled($attributes['email'] ?? null) ||
-            filled($attributes['phone'] ?? null) ||
             filled($attributes['first_name'] ?? null) ||
             filled($attributes['last_name'] ?? null);
 
@@ -216,14 +193,10 @@ class BrandAffiliateInviteService
 
     private function assertRecipientAvailability(Professional $brand, ?string $email, ?string $phone): void
     {
-        $availability = $this->checkRecipientAvailability($brand, $email, $phone);
+        $availability = $this->checkRecipientAvailability($brand, $email, null);
 
         if (($availability['email']['available'] ?? true) === false) {
             throw new RuntimeException('Email already has a pending invitation or is already connected to this brand.');
-        }
-
-        if (($availability['phone']['available'] ?? true) === false) {
-            throw new RuntimeException('Mobile already has a pending invitation or is already connected to this brand.');
         }
     }
 
@@ -234,22 +207,6 @@ class BrandAffiliateInviteService
         if ($inviteEmail !== '' && $professionalEmail !== '' && $inviteEmail !== $professionalEmail) {
             throw new RuntimeException('This invite was issued for a different email address.');
         }
-
-        $invitePhone = $this->normalizePhone($invite->phone);
-        $professionalPhone = $this->normalizePhone($professional->phone ?? $professional->public_contact_number);
-        if ($invitePhone !== '' && $professionalPhone !== '' && $invitePhone !== $professionalPhone) {
-            throw new RuntimeException('This invite was issued for a different phone number.');
-        }
-    }
-
-    private function normalizePhone(mixed $value): string
-    {
-        $stringValue = is_string($value) ? trim($value) : '';
-        if ($stringValue === '') {
-            return '';
-        }
-
-        return preg_replace('/\D+/u', '', $stringValue) ?? '';
     }
 
     private function normalizeEmail(?string $value): ?string
@@ -260,16 +217,6 @@ class BrandAffiliateInviteService
         }
 
         return mb_strtolower($stringValue);
-    }
-
-    private function normalizeStoredPhone(?string $value): ?string
-    {
-        $stringValue = is_string($value) ? trim($value) : '';
-        if ($stringValue === '') {
-            return null;
-        }
-
-        return preg_replace('/[^\d+]/u', '', $stringValue) ?: null;
     }
 
     private function brandHasConnectedProfessionals(Professional $brand, array $professionalIds): bool

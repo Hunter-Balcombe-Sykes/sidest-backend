@@ -32,7 +32,6 @@ class PublicBrandAffiliateInviteController extends ApiController
                 'status' => $invite->status,
                 'invite_type' => $invite->invite_type,
                 'email' => $invite->email,
-                'phone' => $invite->phone,
                 'first_name' => $invite->first_name,
                 'last_name' => $invite->last_name,
                 'message' => $invite->message,

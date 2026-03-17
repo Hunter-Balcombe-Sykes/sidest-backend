@@ -30,7 +30,6 @@ class BrandAffiliateInviteController extends ApiController
                     'status' => $invite->status,
                     'invite_type' => $invite->invite_type,
                     'email' => $invite->email,
-                    'phone' => $invite->phone,
                     'first_name' => $invite->first_name,
                     'last_name' => $invite->last_name,
                     'message' => $invite->message,
@@ -57,7 +56,6 @@ class BrandAffiliateInviteController extends ApiController
 
         $data = $request->validate([
             'email' => ['nullable', 'email', 'max:255'],
-            'phone' => ['nullable', 'string', 'max:40'],
             'first_name' => ['nullable', 'string', 'max:80'],
             'last_name' => ['nullable', 'string', 'max:80'],
             'message' => ['nullable', 'string', 'max:500'],
@@ -76,7 +74,6 @@ class BrandAffiliateInviteController extends ApiController
                 'status' => $invite->status,
                 'invite_type' => $invite->invite_type,
                 'email' => $invite->email,
-                'phone' => $invite->phone,
                 'first_name' => $invite->first_name,
                 'last_name' => $invite->last_name,
                 'message' => $invite->message,
@@ -95,14 +92,13 @@ class BrandAffiliateInviteController extends ApiController
 
         $data = $request->validate([
             'email' => ['sometimes', 'nullable', 'email', 'max:255'],
-            'phone' => ['sometimes', 'nullable', 'string', 'max:40'],
         ]);
 
         return $this->success(
             $inviteService->checkRecipientAvailability(
                 $professional,
                 $data['email'] ?? null,
-                $data['phone'] ?? null,
+                null,
             )
         );
     }
