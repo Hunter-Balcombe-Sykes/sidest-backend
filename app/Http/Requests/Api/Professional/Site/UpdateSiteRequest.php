@@ -52,6 +52,10 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.design.media.brand_logo_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'settings.design.media.brand_logo_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
             'settings.design.media.brand_logo_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+            'settings.design.media.placeholder_sitepage_images' => ['sometimes', 'array', 'max:5'],
+            'settings.design.media.placeholder_sitepage_images.*.name' => ['required_with:settings.design.media.placeholder_sitepage_images', 'string', 'max:255'],
+            'settings.design.media.placeholder_sitepage_images.*.path' => ['required_with:settings.design.media.placeholder_sitepage_images', 'string', 'max:2048'],
+            'settings.design.media.placeholder_sitepage_images.*.url' => ['required_with:settings.design.media.placeholder_sitepage_images', 'url', 'max:2048'],
             'settings.brand_partner' => ['sometimes', 'array'],
             'settings.brand_partner.professional_id' => [
                 'sometimes',

@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\Uploads\ReorderPoolImagesRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadBrandFontRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadBrandLogoRequest;
+use App\Http\Requests\Api\Professional\Uploads\UploadBrandPlaceholderImageRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadImageRequest;
 use App\Jobs\ProcessImageVariantsJob;
 use App\Models\Core\Site\SiteImage;
@@ -281,6 +282,44 @@ class ProfessionalUploadController extends ApiController
         $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'brand-logo');
         $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
         $path = "images/{$pro->id}/design/logo/{$safeBaseName}_{$hash}.{$extension}";
+        $mediaDisk = $this->mediaService->resolvedDiskName();
+
+        Storage::disk($mediaDisk)->put(
+            $path,
+            file_get_contents($file->getRealPath()),
+            'public',
+        );
+
+        return $this->success([
+            'path' => $path,
+            'url' => Storage::disk($mediaDisk)->url($path),
+            'name' => $file->getClientOriginalName(),
+            'disk' => $mediaDisk,
+            'site_id' => $site->id,
+        ], 201);
+    }
+
+    /**
+     * Upload a brand-only placeholder sitepage image for design media settings.
+     *
+     * POST /api/uploads/brand-placeholder-image  { image: <image> }
+     */
+    public function uploadBrandPlaceholderImage(UploadBrandPlaceholderImageRequest $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return $this->error('Placeholder image uploads are only available for brand accounts.', 403);
+        }
+
+        $file = $request->file('image');
+        $extension = strtolower((string) $file->getClientOriginalExtension());
+        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
+        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'placeholder-image');
+        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
+        $path = "images/{$pro->id}/design/placeholders/{$safeBaseName}_{$hash}.{$extension}";
         $mediaDisk = $this->mediaService->resolvedDiskName();
 
         Storage::disk($mediaDisk)->put(

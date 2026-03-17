@@ -120,6 +120,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/uploads', [ProfessionalUploadController::class, 'upload']);
     Route::post('/uploads/brand-font', [ProfessionalUploadController::class, 'uploadBrandFont']);
     Route::post('/uploads/brand-logo', [ProfessionalUploadController::class, 'uploadBrandLogo']);
+    Route::post('/uploads/brand-placeholder-image', [ProfessionalUploadController::class, 'uploadBrandPlaceholderImage']);
 
     // Image Management (pool-based: gallery / content)
     Route::get('/images', [ProfessionalUploadController::class, 'index']);
