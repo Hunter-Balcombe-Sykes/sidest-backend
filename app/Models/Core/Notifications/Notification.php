@@ -17,6 +17,7 @@ class Notification extends BaseModel
         'Success',
         'Critical',
         'Warning',
+        'Invitation',
         'To do',
         'Info',
     ];
@@ -32,6 +33,9 @@ class Notification extends BaseModel
         'title',
         'body',
         'cta_url',
+        'primary_action_label',
+        'secondary_action_label',
+        'secondary_action_url',
         'severity',
         'starts_at',
         'ends_at',
@@ -87,6 +91,10 @@ class Notification extends BaseModel
             return 'Warning';
         }
 
+        if ($normalized === 'invitation' || $normalized === 'invite') {
+            return 'Invitation';
+        }
+
         if ($normalized === 'to do' || $normalized === 'todo' || $normalized === 'task') {
             return 'To do';
         }
@@ -114,6 +122,7 @@ class Notification extends BaseModel
         return match (self::normalizeFrontendType($value)) {
             'Critical' => 'critical',
             'Warning' => 'warning',
+            'Invitation' => 'warning',
             'To do' => 'warning',
             'Success', 'Info' => 'info',
             default => 'info',

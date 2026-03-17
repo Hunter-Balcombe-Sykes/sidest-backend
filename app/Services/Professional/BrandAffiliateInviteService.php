@@ -308,14 +308,17 @@ class BrandAffiliateInviteService
                     ->orWhereRaw('LOWER(public_contact_email) = ?', [$normalizedEmail]);
             })
             ->get()
-            ->each(function (Professional $professional) use ($brandName): void {
+            ->each(function (Professional $professional) use ($invite, $brandName): void {
                 Notification::query()->create([
                     'professional_id' => $professional->id,
-                    'type' => 'To do',
+                    'type' => 'Invitation',
                     'title' => 'New brand partner invitation!',
                     'body' => "You have a new invite to become a brand partner of {$brandName}",
-                    'cta_url' => null,
-                    'severity' => Notification::severityForFrontendType('To do'),
+                    'cta_url' => "/brand-affiliate-invites/{$invite->token}/claim",
+                    'primary_action_label' => 'Accept Invitation',
+                    'secondary_action_label' => 'Decline Invitation',
+                    'secondary_action_url' => "/brand-affiliate-invites/{$invite->token}/decline",
+                    'severity' => Notification::severityForFrontendType('Invitation'),
                     'starts_at' => now(),
                     'ends_at' => null,
                 ]);
