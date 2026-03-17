@@ -6,25 +6,31 @@ use App\Models\Core\Notifications\Notification;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
 use RuntimeException;
 
 class BrandAffiliateInviteService
 {
-    public function checkRecipientAvailability(?string $email, ?string $phone): array
+    public function checkRecipientAvailability(Professional $brand, ?string $email, ?string $phone): array
     {
         $normalizedEmail = $this->normalizeEmail($email);
         $normalizedPhone = $this->normalizeStoredPhone($phone);
 
         $emailExistsAsUser = false;
+        $emailAlreadyConnectedToBrand = false;
         $emailExistsAsInvite = false;
         if ($normalizedEmail !== null) {
-            $emailExistsAsUser = Professional::withTrashed()
+            $matchingEmailProfessionalIds = Professional::withTrashed()
                 ->where(function ($query) use ($normalizedEmail) {
                     $query->whereRaw('LOWER(primary_email) = ?', [$normalizedEmail])
                         ->orWhereRaw('LOWER(public_contact_email) = ?', [$normalizedEmail]);
                 })
-                ->exists();
+                ->pluck('id');
+
+            $emailExistsAsUser = $matchingEmailProfessionalIds->isNotEmpty();
+            $emailAlreadyConnectedToBrand = $emailExistsAsUser
+                && $this->brandHasConnectedProfessionals($brand, $matchingEmailProfessionalIds->all());
 
             $emailExistsAsInvite = BrandAffiliateInvite::query()
                 ->where('status', 'pending')
@@ -33,14 +39,19 @@ class BrandAffiliateInviteService
         }
 
         $phoneExistsAsUser = false;
+        $phoneAlreadyConnectedToBrand = false;
         $phoneExistsAsInvite = false;
         if ($normalizedPhone !== null) {
-            $phoneExistsAsUser = Professional::withTrashed()
+            $matchingPhoneProfessionalIds = Professional::withTrashed()
                 ->where(function ($query) use ($normalizedPhone) {
                     $query->where('phone', $normalizedPhone)
                         ->orWhere('public_contact_number', $normalizedPhone);
                 })
-                ->exists();
+                ->pluck('id');
+
+            $phoneExistsAsUser = $matchingPhoneProfessionalIds->isNotEmpty();
+            $phoneAlreadyConnectedToBrand = $phoneExistsAsUser
+                && $this->brandHasConnectedProfessionals($brand, $matchingPhoneProfessionalIds->all());
 
             $phoneExistsAsInvite = BrandAffiliateInvite::query()
                 ->where('status', 'pending')
@@ -50,15 +61,17 @@ class BrandAffiliateInviteService
 
         return [
             'email' => [
-                'available' => !$emailExistsAsInvite,
-                'exists' => $emailExistsAsUser || $emailExistsAsInvite,
+                'available' => !($emailExistsAsInvite || $emailAlreadyConnectedToBrand),
+                'exists' => $emailExistsAsUser || $emailExistsAsInvite || $emailAlreadyConnectedToBrand,
                 'existing_user' => $emailExistsAsUser,
+                'already_connected_to_brand' => $emailAlreadyConnectedToBrand,
                 'existing_invitation' => $emailExistsAsInvite,
             ],
             'phone' => [
-                'available' => !($phoneExistsAsUser || $phoneExistsAsInvite),
-                'exists' => $phoneExistsAsUser || $phoneExistsAsInvite,
+                'available' => !($phoneExistsAsInvite || $phoneAlreadyConnectedToBrand),
+                'exists' => $phoneExistsAsUser || $phoneExistsAsInvite || $phoneAlreadyConnectedToBrand,
                 'existing_user' => $phoneExistsAsUser,
+                'already_connected_to_brand' => $phoneAlreadyConnectedToBrand,
                 'existing_invitation' => $phoneExistsAsInvite,
             ],
         ];
@@ -67,6 +80,7 @@ class BrandAffiliateInviteService
     public function createInvite(Professional $brand, array $attributes): BrandAffiliateInvite
     {
         $this->assertRecipientAvailability(
+            $brand,
             $attributes['email'] ?? null,
             $attributes['phone'] ?? null,
         );
@@ -200,16 +214,16 @@ class BrandAffiliateInviteService
         throw new RuntimeException('Unable to generate a unique invite token.');
     }
 
-    private function assertRecipientAvailability(?string $email, ?string $phone): void
+    private function assertRecipientAvailability(Professional $brand, ?string $email, ?string $phone): void
     {
-        $availability = $this->checkRecipientAvailability($email, $phone);
+        $availability = $this->checkRecipientAvailability($brand, $email, $phone);
 
         if (($availability['email']['available'] ?? true) === false) {
-            throw new RuntimeException('Email already belongs to an existing invitation.');
+            throw new RuntimeException('Email already has a pending invitation or is already connected to this brand.');
         }
 
         if (($availability['phone']['available'] ?? true) === false) {
-            throw new RuntimeException('Mobile already belongs to an existing user or invitation.');
+            throw new RuntimeException('Mobile already has a pending invitation or is already connected to this brand.');
         }
     }
 
@@ -258,6 +272,22 @@ class BrandAffiliateInviteService
         return preg_replace('/[^\d+]/u', '', $stringValue) ?: null;
     }
 
+    private function brandHasConnectedProfessionals(Professional $brand, array $professionalIds): bool
+    {
+        if ($professionalIds === []) {
+            return false;
+        }
+
+        return Site::query()
+            ->whereIn('professional_id', $professionalIds)
+            ->where(function (Builder $query) use ($brand): void {
+                $query
+                    ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$brand->id])
+                    ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$brand->id]);
+            })
+            ->exists();
+    }
+
     private function notifyExistingEmailRecipients(Professional $brand, BrandAffiliateInvite $invite): void
     {
         if (!is_string($invite->email) || trim($invite->email) === '') {
@@ -282,7 +312,7 @@ class BrandAffiliateInviteService
                 Notification::query()->create([
                     'professional_id' => $professional->id,
                     'type' => 'To do',
-                    'title' => "You have a new invite to become a brand partner of {$brandName}",
+                    'title' => 'New brand partner invitation!',
                     'body' => "You have a new invite to become a brand partner of {$brandName}",
                     'cta_url' => null,
                     'severity' => Notification::severityForFrontendType('To do'),

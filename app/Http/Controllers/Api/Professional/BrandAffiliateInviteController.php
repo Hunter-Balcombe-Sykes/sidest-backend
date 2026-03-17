@@ -100,6 +100,7 @@ class BrandAffiliateInviteController extends ApiController
 
         return $this->success(
             $inviteService->checkRecipientAvailability(
+                $professional,
                 $data['email'] ?? null,
                 $data['phone'] ?? null,
             )
