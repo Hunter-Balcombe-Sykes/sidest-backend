@@ -95,6 +95,10 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.design.typography.font_file_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'settings.design.typography.font_file_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
             'settings.design.typography.font_file_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+            'settings.design.media' => ['sometimes', 'array'],
+            'settings.design.media.brand_logo_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'settings.design.media.brand_logo_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
+            'settings.design.media.brand_logo_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'settings.brand_partner' => ['sometimes', 'array'],
             'settings.brand_partner.professional_id' => [
                 'sometimes',
