@@ -118,6 +118,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
 
     // Image Upload (server-side processing → WebP variants via queue)
     Route::post('/uploads', [ProfessionalUploadController::class, 'upload']);
+    Route::post('/uploads/brand-font', [ProfessionalUploadController::class, 'uploadBrandFont']);
 
     // Image Management (pool-based: gallery / content)
     Route::get('/images', [ProfessionalUploadController::class, 'index']);

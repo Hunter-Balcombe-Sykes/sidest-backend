@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\Uploads\ReorderPoolImagesRequest;
+use App\Http\Requests\Api\Professional\Uploads\UploadBrandFontRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadImageRequest;
 use App\Jobs\ProcessImageVariantsJob;
 use App\Models\Core\Site\SiteImage;
@@ -14,6 +15,8 @@ use App\Services\Media\ImageVariantService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Throwable;
 
 class ProfessionalUploadController extends ApiController
@@ -216,6 +219,44 @@ class ProfessionalUploadController extends ApiController
         app(SiteCacheService::class)->invalidateSite($site);
 
         return $this->success($payload, 201);
+    }
+
+    /**
+     * Upload a brand-only typography file for design settings.
+     *
+     * POST /api/uploads/brand-font  { font: <file.woff2> }
+     */
+    public function uploadBrandFont(UploadBrandFontRequest $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return $this->error('Brand font uploads are only available for brand accounts.', 403);
+        }
+
+        $file = $request->file('font');
+        $extension = strtolower((string) $file->getClientOriginalExtension());
+        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
+        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'brand-font');
+        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
+        $path = "fonts/{$pro->id}/design/{$safeBaseName}_{$hash}.{$extension}";
+        $mediaDisk = $this->mediaService->resolvedDiskName();
+
+        Storage::disk($mediaDisk)->put(
+            $path,
+            file_get_contents($file->getRealPath()),
+            'public',
+        );
+
+        return $this->success([
+            'path' => $path,
+            'url' => Storage::disk($mediaDisk)->url($path),
+            'name' => $file->getClientOriginalName(),
+            'disk' => $mediaDisk,
+            'site_id' => $site->id,
+        ], 201);
     }
 
     /**

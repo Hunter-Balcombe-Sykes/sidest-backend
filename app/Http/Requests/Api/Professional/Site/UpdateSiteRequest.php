@@ -42,6 +42,10 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.design.border_radius' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.border_width' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.general_spacing_padding' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'settings.design.typography' => ['sometimes', 'array'],
+            'settings.design.typography.font_file_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'settings.design.typography.font_file_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
+            'settings.design.typography.font_file_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'settings.brand_partner' => ['sometimes', 'array'],
             'settings.brand_partner.professional_id' => [
                 'sometimes',
