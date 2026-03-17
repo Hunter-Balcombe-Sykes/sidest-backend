@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
+use App\Http\Controllers\Api\PublicSite\PublicSignupAvailabilityController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\PublicSite\PublicStoreController;
@@ -64,6 +65,9 @@ Route::post('/public/analytics/clicks', [AnalyticsController::class, 'click'])
     ->middleware('throttle:analytics');
 
 Route::post('/public/subscribe', [PublicEmailSubscriptionController::class, 'subscribe'])
+    ->middleware('throttle:public-site');
+
+Route::post('/public/signup/availability', [PublicSignupAvailabilityController::class, 'check'])
     ->middleware('throttle:public-site');
 
 Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])
