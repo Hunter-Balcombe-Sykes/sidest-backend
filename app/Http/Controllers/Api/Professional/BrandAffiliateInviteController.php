@@ -25,9 +25,13 @@ class BrandAffiliateInviteController extends ApiController
             ->orderByDesc('created_at')
             ->get()
             ->map(function ($invite): array {
+                $effectiveStatus = $invite->status === 'pending' && $invite->expires_at && $invite->expires_at->isPast()
+                    ? 'expired'
+                    : $invite->status;
+
                 return [
                     'id' => $invite->id,
-                    'status' => $invite->status,
+                    'status' => $effectiveStatus,
                     'invite_type' => $invite->invite_type,
                     'email' => $invite->email,
                     'first_name' => $invite->first_name,
@@ -56,9 +60,11 @@ class BrandAffiliateInviteController extends ApiController
 
         $data = $request->validate([
             'email' => ['nullable', 'email', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:30'],
             'first_name' => ['nullable', 'string', 'max:80'],
             'last_name' => ['nullable', 'string', 'max:80'],
             'message' => ['nullable', 'string', 'max:500'],
+            'expiration' => ['nullable', 'string', 'in:24h,7d,30d,none'],
         ]);
 
         try {

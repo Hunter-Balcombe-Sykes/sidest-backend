@@ -63,6 +63,13 @@ class BrandAffiliateInviteService
             null,
         );
 
+        $expiresAt = match($attributes['expiration'] ?? null) {
+            '24h' => now()->addHours(24),
+            '7d' => now()->addDays(7),
+            '30d' => now()->addDays(30),
+            default => null,
+        };
+
         $invite = new BrandAffiliateInvite([
             'brand_professional_id' => $brand->id,
             'token' => $this->generateUniqueToken(),
@@ -70,10 +77,11 @@ class BrandAffiliateInviteService
             'invite_type' => $this->determineInviteType($attributes),
             'email' => $attributes['email'] ?? null,
             'email_lc' => isset($attributes['email']) ? mb_strtolower(trim((string) $attributes['email'])) : null,
-            'phone' => null,
+            'phone' => $attributes['phone'] ?? null,
             'first_name' => $attributes['first_name'] ?? null,
             'last_name' => $attributes['last_name'] ?? null,
             'message' => $attributes['message'] ?? null,
+            'expires_at' => $expiresAt,
         ]);
 
         $invite->save();

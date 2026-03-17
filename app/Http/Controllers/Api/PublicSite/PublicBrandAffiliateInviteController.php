@@ -25,11 +25,15 @@ class PublicBrandAffiliateInviteController extends ApiController
         $brandMedia = is_array($brandDesign['media'] ?? null) ? $brandDesign['media'] : [];
         $brandLogoUrl = $brandMedia['brand_logo_url'] ?? null;
 
+        $effectiveStatus = $invite->status === 'pending' && $invite->expires_at && $invite->expires_at->isPast()
+            ? 'expired'
+            : $invite->status;
+
         return $this->success([
             'invite' => [
                 'id' => $invite->id,
                 'token' => $invite->token,
-                'status' => $invite->status,
+                'status' => $effectiveStatus,
                 'invite_type' => $invite->invite_type,
                 'email' => $invite->email,
                 'first_name' => $invite->first_name,
