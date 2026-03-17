@@ -91,6 +91,15 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.design.border_radius' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.border_width' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.general_spacing_padding' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'settings.brand_partner' => ['sometimes', 'array'],
+            'settings.brand_partner.professional_id' => [
+                'sometimes',
+                'nullable',
+                'uuid',
+                Rule::exists('professionals', 'id')->where(function ($query) {
+                    $query->where('professional_type', 'brand');
+                }),
+            ],
             'settings.show_branding' => ['sometimes', 'boolean'],
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
             'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
