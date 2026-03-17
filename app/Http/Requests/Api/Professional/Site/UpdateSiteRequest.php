@@ -46,6 +46,8 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.design.typography.font_file_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'settings.design.typography.font_file_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
             'settings.design.typography.font_file_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+            'settings.design.typography.logo_letter_spacing' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'settings.design.typography.logo_font_size' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.media' => ['sometimes', 'array'],
             'settings.design.media.brand_logo_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'settings.design.media.brand_logo_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
