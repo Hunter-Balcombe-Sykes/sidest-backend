@@ -10,7 +10,9 @@ use App\Http\Requests\Api\Professional\Uploads\UploadBrandFontRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadBrandLogoRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadBrandPlaceholderImageRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadImageRequest;
+use App\Jobs\DeleteMediaArtifactsJob;
 use App\Jobs\ProcessImageVariantsJob;
+use App\Jobs\ProcessVideoVariantsJob;
 use App\Models\Core\Site\SiteImage;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
@@ -31,56 +33,54 @@ class ProfessionalUploadController extends ApiController
     ) {}
 
     /**
-     * Upload an image to a pool (gallery or content).
+     * Upload an image or video to a pool (gallery or content).
      *
-     * Stores the original on the media disk and dispatches a queue job
-     * to generate configured WebP variants (optimized + maximized).
-     * Returns immediately.
+     * Accepts exactly one of: `image` (JPEG/PNG/WebP) or `video` (MP4/MOV/WebM).
+     * Returns immediately; processing runs async on the appropriate queue.
      *
-     * POST /api/uploads  { pool: gallery|content, image: <file>, alt_text?: string }
+     * POST /api/uploads
+     *   { pool: gallery|content, image?: <file>, video?: <file>, alt_text?: string }
      */
     public function upload(UploadImageRequest $request): JsonResponse
     {
-        $pro  = $this->currentProfessional($request);
+        $pro = $this->currentProfessional($request);
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        $pool = $request->validated('pool');
-        $file = $request->file('image');
+        $pool       = $request->validated('pool');
+        $isVideo    = $request->hasFile('video');
+        $file       = $isVideo ? $request->file('video') : $request->file('image');
+        $mediaType  = $isVideo ? SiteImage::MEDIA_TYPE_VIDEO : SiteImage::MEDIA_TYPE_IMAGE;
 
-        Log::info('Image upload started', [
-            'pro_id' => $pro->id,
-            'site_id' => $site->id,
-            'pool' => $pool,
+        Log::info('Media upload started', [
+            'pro_id'       => $pro->id,
+            'site_id'      => $site->id,
+            'pool'         => $pool,
+            'media_type'   => $mediaType,
             'file_size_kb' => $file->getSize() / 1024,
         ]);
 
-        $maxImages = (int) config("comet.image_pools.{$pool}.max", 5);
+        // Pool limit is shared across media types (images + videos count toward the same cap).
+        $maxItems = (int) config("comet.image_pools.{$pool}.max", 5);
 
-        // --- Pool limit check (fast, non-locking) ---
         $activeCount = SiteImage::query()
             ->where('site_id', $site->id)
             ->where('pool', $pool)
             ->where('is_active', true)
             ->count();
 
-        if ($activeCount >= $maxImages) {
+        if ($activeCount >= $maxItems) {
             return $this->error(
-                ucfirst($pool) . " image limit reached (max {$maxImages}).", 422
+                ucfirst($pool) . " media limit reached (max {$maxItems}).", 422
             );
         }
 
         // --- Create SiteImage row (with advisory lock for race safety) ---
-        $image = DB::transaction(function () use ($site, $pool, $maxImages, $request) {
-            // PostgreSQL advisory lock (optional optimization; lockForUpdate below provides locking on all DBs)
-            // Lock at site scope so cross-pool uploads cannot race on sort_order.
+        $media = DB::transaction(function () use ($site, $pool, $maxItems, $request, $mediaType, $file) {
             if (DB::getDriverName() === 'pgsql') {
                 DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-images:{$site->id}"]);
             }
 
-            // Postgres does not allow FOR UPDATE with aggregate functions.
-            // Lock all non-deleted images for this site, then derive counts/sort in memory.
-            // This matches legacy DB uniqueness (site_id + sort_order) while keeping pool limits.
             $siteImages = SiteImage::query()
                 ->where('site_id', $site->id)
                 ->lockForUpdate()
@@ -91,271 +91,120 @@ class ProfessionalUploadController extends ApiController
                 ->where('is_active', true)
                 ->count();
 
-            if ($activeCount >= $maxImages) {
-                abort(422, ucfirst($pool) . " image limit reached (max {$maxImages}).");
+            if ($activeCount >= $maxItems) {
+                abort(422, ucfirst($pool) . " media limit reached (max {$maxItems}).");
             }
 
             $maxSort = $siteImages->max('sort_order');
 
-            $image = SiteImage::create([
-                'site_id'    => $site->id,
-                'pool'       => $pool,
-                'path'       => '', // populated after original is stored
-                'alt_text'   => $request->validated('alt_text'),
-                'sort_order' => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
-                'is_active'  => true,
+            $media = SiteImage::create([
+                'site_id'             => $site->id,
+                'pool'                => $pool,
+                'path'                => '',
+                'alt_text'            => $request->validated('alt_text'),
+                'sort_order'          => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
+                'is_active'           => true,
+                'media_type'          => $mediaType,
+                'processing_state'    => SiteImage::PROCESSING_STATE_PENDING,
+                'original_mime'       => $file->getMimeType(),
+                'original_size_bytes' => $file->getSize(),
             ]);
-            
-            Log::info('SiteImage row created', ['image_id' => $image->id]);
-            
-            return $image;
+
+            Log::info('SiteImage row created', ['media_id' => $media->id, 'media_type' => $mediaType]);
+
+            return $media;
         });
 
         // --- Store original on media disk ---
-        $basePath = "images/{$pro->id}/{$image->id}";
-        
+        $basePath = $isVideo
+            ? "videos/{$pro->id}/{$media->id}"
+            : "images/{$pro->id}/{$media->id}";
+
         try {
             $mediaDisk = $this->mediaService->resolvedDiskName();
-            $disk = config("filesystems.disks.{$mediaDisk}", []);
 
-            Log::info('Storing original image to media disk', [
-                'image_id' => $image->id,
-                'base_path' => $basePath,
+            Log::info('Storing original to media disk', [
+                'media_id'   => $media->id,
+                'base_path'  => $basePath,
                 'media_disk' => $mediaDisk,
-                'disk_driver' => is_array($disk) ? ($disk['driver'] ?? null) : null,
-                'disk_bucket' => is_array($disk) ? ($disk['bucket'] ?? null) : null,
-                'disk_endpoint' => is_array($disk) ? ($disk['endpoint'] ?? null) : null,
-                'disk_url' => is_array($disk) ? ($disk['url'] ?? null) : null,
-            ]);
-            $originalPath = $this->mediaService->storeOriginal($file, $basePath);
-            Log::info('Original image stored successfully', ['image_id' => $image->id, 'path' => $originalPath]);
-        } catch (\Exception $e) {
-            Log::error('Failed to store original image', [
-                'image_id' => $image->id,
-                'error' => $e->getMessage(),
-                'exception' => get_class($e),
-                'media_disk' => $this->mediaService->resolvedDiskName(),
-            ]);
-            // Clean up orphaned image row
-            $image->delete();
-            return $this->error('Failed to store image: ' . $e->getMessage(), 500);
-        }
-
-        $image->update(['path' => $originalPath]);
-
-        // --- Variant generation ---
-        // In local/testing, process inline so uploads work without a queue worker.
-        $queueConnection = (string) config('queue.default', 'sync');
-        $processInline = in_array(app()->environment(), ['local', 'testing'], true)
-            || $queueConnection === 'sync';
-
-        if ($processInline) {
-            Log::info('Processing image variants inline', [
-                'image_id' => $image->id,
-                'queue_connection' => $queueConnection,
             ]);
 
-            try {
-                ProcessImageVariantsJob::dispatchSync(
-                    originalPath: $originalPath,
-                    imageId: $image->id,
-                    basePath: $basePath,
-                );
-            } catch (Throwable $syncError) {
-                Log::error('Inline variant processing failed.', [
-                    'image_id' => $image->id,
-                    'error' => $syncError->getMessage(),
-                ]);
-                // Keep upload successful; image can be re-processed later.
-            }
-        } else {
-            Log::info('Dispatching ProcessImageVariantsJob', [
-                'image_id' => $image->id,
-                'queue_connection' => $queueConnection,
-            ]);
-            try {
-                ProcessImageVariantsJob::dispatch(
-                    originalPath: $originalPath,
-                    imageId: $image->id,
-                    basePath: $basePath,
-                );
-            } catch (Throwable $e) {
-                Log::error('Queue dispatch failed; processing image variants synchronously.', [
-                    'image_id' => $image->id,
-                    'error' => $e->getMessage(),
-                ]);
-
-                try {
-                    ProcessImageVariantsJob::dispatchSync(
-                        originalPath: $originalPath,
-                        imageId: $image->id,
-                        basePath: $basePath,
-                    );
-                } catch (Throwable $syncError) {
-                    Log::error('Synchronous variant processing failed after queue dispatch failure.', [
-                        'image_id' => $image->id,
-                        'error' => $syncError->getMessage(),
-                    ]);
-                    // Keep upload successful; image can be re-processed later.
+            if ($isVideo) {
+                // Stream large video files to avoid loading full content into memory.
+                $ext    = $file->getClientOriginalExtension() ?: 'mp4';
+                $hash   = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
+                $path   = "{$basePath}/original_{$hash}.{$ext}";
+                $stream = fopen($file->getRealPath(), 'rb');
+                Storage::disk($mediaDisk)->put($path, $stream, 'public');
+                if (is_resource($stream)) {
+                    fclose($stream);
                 }
+                $originalPath = $path;
+            } else {
+                $originalPath = $this->mediaService->storeOriginal($file, $basePath);
             }
+
+            Log::info('Original stored successfully', ['media_id' => $media->id, 'path' => $originalPath]);
+        } catch (\Exception $e) {
+            Log::error('Failed to store original', [
+                'media_id' => $media->id,
+                'error'    => $e->getMessage(),
+            ]);
+            $media->delete();
+            return $this->error('Failed to store file: ' . $e->getMessage(), 500);
         }
 
-        // After dispatch (sync = already done, async = still processing)
-        $image->loadCount('variants');
-        $processing = $image->variants_count === 0;
+        $media->update(['path' => $originalPath]);
 
-        $payload = [
-            'id'            => $image->id,
-            'pool'          => $pool,
-            'original_path' => $originalPath,
-            'processing'    => $processing,
-        ];
-
-        // When processing is already complete, include variant URLs
-        if (! $processing) {
-            $image->load('variants');
-            $payload['variants'] = $image->variantUrls();
+        // --- Dispatch processing job ---
+        if ($isVideo) {
+            $this->dispatchVideoJob($media->id, $originalPath, $basePath);
+        } else {
+            $this->dispatchImageJob($media->id, $originalPath, $basePath);
         }
 
         app(SiteCacheService::class)->invalidateSite($site);
+
+        // Refresh model state (sync mode may have updated processing_state to 'ready').
+        // Eager-load the appropriate relation so buildMediaPayload avoids a lazy-load hit.
+        $media->refresh();
+        if ($media->media_type === SiteImage::MEDIA_TYPE_IMAGE) {
+            $media->load('variants');
+        } elseif ($media->media_type === SiteImage::MEDIA_TYPE_VIDEO) {
+            $media->load('mediaVariants');
+        }
+        $payload = $this->buildMediaPayload($media, includeVariants: true);
 
         return $this->success($payload, 201);
     }
 
     /**
-     * Upload a brand-only typography file for design settings.
+     * List media for the authenticated professional.
      *
-     * POST /api/uploads/brand-font  { font: <file.woff2> }
-     */
-    public function uploadBrandFont(UploadBrandFontRequest $request): JsonResponse
-    {
-        $pro = $this->currentProfessional($request);
-        $pro->loadMissing('site');
-        $site = $this->currentSite($pro);
-
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return $this->error('Brand font uploads are only available for brand accounts.', 403);
-        }
-
-        $file = $request->file('font');
-        $extension = strtolower((string) $file->getClientOriginalExtension());
-        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
-        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'brand-font');
-        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
-        $path = "fonts/{$pro->id}/design/{$safeBaseName}_{$hash}.{$extension}";
-        $mediaDisk = $this->mediaService->resolvedDiskName();
-
-        Storage::disk($mediaDisk)->put(
-            $path,
-            file_get_contents($file->getRealPath()),
-            'public',
-        );
-
-        return $this->success([
-            'path' => $path,
-            'url' => Storage::disk($mediaDisk)->url($path),
-            'name' => $file->getClientOriginalName(),
-            'disk' => $mediaDisk,
-            'site_id' => $site->id,
-        ], 201);
-    }
-
-    /**
-     * Upload a brand-only logo image for design media settings.
-     *
-     * POST /api/uploads/brand-logo  { logo: <image> }
-     */
-    public function uploadBrandLogo(UploadBrandLogoRequest $request): JsonResponse
-    {
-        $pro = $this->currentProfessional($request);
-        $pro->loadMissing('site');
-        $site = $this->currentSite($pro);
-
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return $this->error('Brand logo uploads are only available for brand accounts.', 403);
-        }
-
-        $file = $request->file('logo');
-        $extension = strtolower((string) $file->getClientOriginalExtension());
-        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
-        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'brand-logo');
-        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
-        $path = "images/{$pro->id}/design/logo/{$safeBaseName}_{$hash}.{$extension}";
-        $mediaDisk = $this->mediaService->resolvedDiskName();
-
-        Storage::disk($mediaDisk)->put(
-            $path,
-            file_get_contents($file->getRealPath()),
-            'public',
-        );
-
-        return $this->success([
-            'path' => $path,
-            'url' => Storage::disk($mediaDisk)->url($path),
-            'name' => $file->getClientOriginalName(),
-            'disk' => $mediaDisk,
-            'site_id' => $site->id,
-        ], 201);
-    }
-
-    /**
-     * Upload a brand-only placeholder sitepage image for design media settings.
-     *
-     * POST /api/uploads/brand-placeholder-image  { image: <image> }
-     */
-    public function uploadBrandPlaceholderImage(UploadBrandPlaceholderImageRequest $request): JsonResponse
-    {
-        $pro = $this->currentProfessional($request);
-        $pro->loadMissing('site');
-        $site = $this->currentSite($pro);
-
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return $this->error('Placeholder image uploads are only available for brand accounts.', 403);
-        }
-
-        $file = $request->file('image');
-        $extension = strtolower((string) $file->getClientOriginalExtension());
-        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
-        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'placeholder-image');
-        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
-        $path = "images/{$pro->id}/design/placeholders/{$safeBaseName}_{$hash}.{$extension}";
-        $mediaDisk = $this->mediaService->resolvedDiskName();
-
-        Storage::disk($mediaDisk)->put(
-            $path,
-            file_get_contents($file->getRealPath()),
-            'public',
-        );
-
-        return $this->success([
-            'path' => $path,
-            'url' => Storage::disk($mediaDisk)->url($path),
-            'name' => $file->getClientOriginalName(),
-            'disk' => $mediaDisk,
-            'site_id' => $site->id,
-        ], 201);
-    }
-
-    /**
-     * List all images for the authenticated professional, grouped by pool,
-     * with their processed variant URLs.
-     *
-     * GET /api/images?pool=gallery|content  (pool is optional)
+     * GET /api/images
+     *   ?pool=gallery|content          optional pool filter
+     *   ?media_type=image|video|all    default: image (backward-compatible)
+     *   ?ids[]=uuid,...                optional: return only specific media items (for polling)
      */
     public function index(): JsonResponse
     {
-        $pro  = $this->currentProfessional(request());
+        $pro = $this->currentProfessional(request());
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
+
+        $rawMediaType = strtolower(trim((string) request()->input('media_type', 'image')));
+        $mediaTypeFilter = in_array($rawMediaType, ['image', 'video', 'all'], true) ? $rawMediaType : 'image';
 
         $query = SiteImage::query()
             ->where('site_id', $site->id)
             ->where('is_active', true)
-            ->with('variants')
             ->orderBy('pool')
             ->orderBy('sort_order')
             ->orderBy('created_at');
+
+        if ($mediaTypeFilter !== 'all') {
+            $query->where('media_type', $mediaTypeFilter);
+        }
 
         if (request()->has('pool')) {
             $pool = strtolower(trim(request()->input('pool')));
@@ -364,19 +213,27 @@ class ProfessionalUploadController extends ApiController
             }
         }
 
-        $images = $query->get()->map(fn (SiteImage $img) => [
-            'id'         => $img->id,
-            'pool'       => $img->pool,
-            'alt_text'   => $img->alt_text,
-            'sort_order' => $img->sort_order,
-            'variants'   => $img->variantUrls(),
-            'processing' => $img->variants->isEmpty(),
-            'created_at' => $img->created_at,
-            'updated_at' => $img->updated_at,
-        ]);
+        // Efficient polling: return only the requested IDs.
+        if (request()->has('ids')) {
+            $ids = array_filter((array) request()->input('ids'), fn ($id) => is_string($id) && Str::isUuid($id));
+            if (! empty($ids)) {
+                $query->whereIn('id', array_values($ids));
+            }
+        }
+
+        // Eager-load the appropriate variants based on media type filter.
+        if ($mediaTypeFilter === 'image') {
+            $query->with('variants');
+        } elseif ($mediaTypeFilter === 'video') {
+            $query->with('mediaVariants');
+        } else {
+            $query->with(['variants', 'mediaVariants']);
+        }
+
+        $items = $query->get()->map(fn (SiteImage $item) => $this->buildMediaPayload($item, includeVariants: true));
 
         return $this->success([
-            'images' => $images,
+            'images' => $items,
             'limits' => [
                 'gallery' => config('comet.image_pools.gallery.max', 5),
                 'content' => config('comet.image_pools.content.max', 5),
@@ -385,21 +242,24 @@ class ProfessionalUploadController extends ApiController
     }
 
     /**
-     * Reorder active images for a specific pool while preserving the relative
-     * order of all non-target images in the site.
+     * Reorder active media for a specific pool.
      *
-     * POST /api/images/reorder  { pool: gallery|content, ids: [uuid, ...] }
+     * POST /api/images/reorder
+     *   { pool: gallery|content, media_type?: image|video, ids: [uuid, ...] }
+     *
+     * Scope is pool + media_type (defaults to image for backward compatibility).
      */
     public function reorder(ReorderPoolImagesRequest $request): JsonResponse
     {
-        $pro  = $this->currentProfessional($request);
+        $pro = $this->currentProfessional($request);
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        $pool = $request->validated('pool');
-        $ids = array_values(array_unique($request->validated('ids') ?? []));
+        $pool      = $request->validated('pool');
+        $mediaType = $request->validated('media_type') ?? SiteImage::MEDIA_TYPE_IMAGE;
+        $ids       = array_values(array_unique($request->validated('ids') ?? []));
 
-        DB::transaction(function () use ($site, $pool, $ids) {
+        DB::transaction(function () use ($site, $pool, $mediaType, $ids) {
             if (DB::getDriverName() === 'pgsql') {
                 DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-images:{$site->id}"]);
             }
@@ -409,15 +269,16 @@ class ProfessionalUploadController extends ApiController
                 ->lockForUpdate()
                 ->orderBy('sort_order')
                 ->orderBy('created_at')
-                ->get(['id', 'pool', 'sort_order', 'is_active']);
+                ->get(['id', 'pool', 'media_type', 'sort_order', 'is_active']);
 
             $targetImages = $siteImages
                 ->where('is_active', true)
                 ->where('pool', $pool)
+                ->where('media_type', $mediaType)
                 ->values();
 
             if ($targetImages->isEmpty()) {
-                abort(422, 'No active images found in this pool.');
+                abort(422, 'No active media found in this pool.');
             }
 
             $targetIds = $targetImages->pluck('id')->all();
@@ -425,18 +286,18 @@ class ProfessionalUploadController extends ApiController
 
             foreach ($ids as $id) {
                 if (! isset($targetSet[$id])) {
-                    abort(403, 'One or more images do not belong to your site.');
+                    abort(403, 'One or more items do not belong to your site.');
                 }
             }
 
             $remainingTargetIds = array_values(array_diff($targetIds, $ids));
             $reorderedTargetIds = array_merge($ids, $remainingTargetIds);
 
-            $finalIds = $siteImages->pluck('id')->all();
+            $finalIds        = $siteImages->pluck('id')->all();
             $targetPositions = [];
 
             foreach ($siteImages as $index => $image) {
-                if ($image->is_active && $image->pool === $pool) {
+                if ($image->is_active && $image->pool === $pool && $image->media_type === $mediaType) {
                     $targetPositions[] = $index;
                 }
             }
@@ -445,7 +306,6 @@ class ProfessionalUploadController extends ApiController
                 $finalIds[$position] = $reorderedTargetIds[$index];
             }
 
-            // Two-phase update avoids temporary collisions on site-level sort_order uniqueness.
             $offset = $siteImages->count() + 1000;
 
             foreach ($finalIds as $index => $id) {
@@ -469,25 +329,296 @@ class ProfessionalUploadController extends ApiController
     }
 
     /**
-     * Delete an image and all its variants from storage.
+     * Delete a media item and all its artifacts.
+     *
+     * Images are cleaned up synchronously (small number of files).
+     * Videos are cleaned up asynchronously via DeleteMediaArtifactsJob (many HLS segments).
      *
      * DELETE /api/images/{image}
      */
     public function destroy(SiteImage $image): JsonResponse
     {
-        $pro  = $this->currentProfessional(request());
+        $pro = $this->currentProfessional(request());
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
         abort_unless($image->site_id === $site->id, 404);
 
-        // Delete variant files + original + DB rows
-        $this->mediaService->deleteVariants($image->id, $image->path);
+        if ($image->media_type === SiteImage::MEDIA_TYPE_VIDEO) {
+            // Dispatch async cleanup – video has many HLS segment files.
+            DeleteMediaArtifactsJob::dispatch($image->id, $image->path, $image->pool);
+        } else {
+            // Synchronous cleanup for images (only 2–3 variant files).
+            $this->mediaService->deleteVariants($image->id, $image->path);
+        }
 
         $image->delete();
 
         app(SiteCacheService::class)->invalidateSite($site);
 
         return $this->success(['deleted' => true]);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Brand-only upload endpoints (unchanged)                            */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * POST /api/uploads/brand-font  { font: <file.woff2> }
+     */
+    public function uploadBrandFont(UploadBrandFontRequest $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return $this->error('Brand font uploads are only available for brand accounts.', 403);
+        }
+
+        $file = $request->file('font');
+        $extension = strtolower((string) $file->getClientOriginalExtension());
+        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
+        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'brand-font');
+        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
+        $path = "fonts/{$pro->id}/design/{$safeBaseName}_{$hash}.{$extension}";
+        $mediaDisk = $this->mediaService->resolvedDiskName();
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk($mediaDisk);
+
+        $disk->put($path, file_get_contents($file->getRealPath()), 'public');
+
+        return $this->success([
+            'path' => $path,
+            'url' => $disk->url($path),
+            'name' => $file->getClientOriginalName(),
+            'disk' => $mediaDisk,
+            'site_id' => $site->id,
+        ], 201);
+    }
+
+    /**
+     * POST /api/uploads/brand-logo  { logo: <image> }
+     */
+    public function uploadBrandLogo(UploadBrandLogoRequest $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return $this->error('Brand logo uploads are only available for brand accounts.', 403);
+        }
+
+        $file = $request->file('logo');
+        $extension = strtolower((string) $file->getClientOriginalExtension());
+        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
+        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'brand-logo');
+        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
+        $path = "images/{$pro->id}/design/logo/{$safeBaseName}_{$hash}.{$extension}";
+        $mediaDisk = $this->mediaService->resolvedDiskName();
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk($mediaDisk);
+
+        $disk->put($path, file_get_contents($file->getRealPath()), 'public');
+
+        return $this->success([
+            'path' => $path,
+            'url' => $disk->url($path),
+            'name' => $file->getClientOriginalName(),
+            'disk' => $mediaDisk,
+            'site_id' => $site->id,
+        ], 201);
+    }
+
+    /**
+     * POST /api/uploads/brand-placeholder-image  { image: <image> }
+     */
+    public function uploadBrandPlaceholderImage(UploadBrandPlaceholderImageRequest $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return $this->error('Placeholder image uploads are only available for brand accounts.', 403);
+        }
+
+        $file = $request->file('image');
+        $extension = strtolower((string) $file->getClientOriginalExtension());
+        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
+        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'placeholder-image');
+        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
+        $path = "images/{$pro->id}/design/placeholders/{$safeBaseName}_{$hash}.{$extension}";
+        $mediaDisk = $this->mediaService->resolvedDiskName();
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk($mediaDisk);
+
+        $disk->put($path, file_get_contents($file->getRealPath()), 'public');
+
+        return $this->success([
+            'path' => $path,
+            'url' => $disk->url($path),
+            'name' => $file->getClientOriginalName(),
+            'disk' => $mediaDisk,
+            'site_id' => $site->id,
+        ], 201);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Private helpers                                                    */
+    /* ------------------------------------------------------------------ */
+
+    private function dispatchImageJob(string $imageId, string $originalPath, string $basePath): void
+    {
+        $queueConnection  = (string) config('queue.default', 'sync');
+        $processInline    = in_array(app()->environment(), ['local', 'testing'], true)
+            || $queueConnection === 'sync';
+
+        if ($processInline) {
+            try {
+                ProcessImageVariantsJob::dispatchSync(
+                    originalPath: $originalPath,
+                    imageId: $imageId,
+                    basePath: $basePath,
+                );
+            } catch (Throwable $e) {
+                Log::error('Inline image variant processing failed.', [
+                    'image_id' => $imageId, 'error' => $e->getMessage(),
+                ]);
+            }
+            return;
+        }
+
+        try {
+            ProcessImageVariantsJob::dispatch(
+                originalPath: $originalPath,
+                imageId: $imageId,
+                basePath: $basePath,
+            );
+        } catch (Throwable $e) {
+            Log::error('Queue dispatch failed for image; trying synchronous fallback.', [
+                'image_id' => $imageId, 'error' => $e->getMessage(),
+            ]);
+            try {
+                ProcessImageVariantsJob::dispatchSync(
+                    originalPath: $originalPath,
+                    imageId: $imageId,
+                    basePath: $basePath,
+                );
+            } catch (Throwable $syncError) {
+                Log::error('Synchronous image variant processing also failed.', [
+                    'image_id' => $imageId, 'error' => $syncError->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function dispatchVideoJob(string $mediaId, string $originalPath, string $basePath): void
+    {
+        $queueDefault = (string) config('queue.default', 'sync');
+        $processInline   = in_array(app()->environment(), ['local', 'testing'], true)
+            || $queueDefault === 'sync';
+
+        if ($processInline) {
+            try {
+                ProcessVideoVariantsJob::dispatchSync(
+                    mediaId: $mediaId,
+                    originalPath: $originalPath,
+                    basePath: $basePath,
+                );
+            } catch (Throwable $e) {
+                Log::error('Inline video variant processing failed.', [
+                    'media_id' => $mediaId, 'error' => $e->getMessage(),
+                ]);
+            }
+            return;
+        }
+
+        try {
+            // Connection and queue are already set in the job constructor.
+            // Do not override via PendingDispatch to avoid redundant/conflicting config reads.
+            ProcessVideoVariantsJob::dispatch(
+                mediaId: $mediaId,
+                originalPath: $originalPath,
+                basePath: $basePath,
+            );
+        } catch (Throwable $e) {
+            Log::error('Video queue dispatch failed.', [
+                'media_id' => $mediaId, 'error' => $e->getMessage(),
+            ]);
+            // Do NOT fall back to sync for video – transcoding on an HTTP worker
+            // would time out and kill the process. Leave as pending for retry.
+        }
+    }
+
+    /**
+     * Build a media item payload array suitable for API responses.
+     *
+     * @param  bool  $includeVariants  Whether to include resolved variant/stream maps.
+     * @return array<string, mixed>
+     */
+    private function buildMediaPayload(SiteImage $media, bool $includeVariants = false): array
+    {
+        $isVideo     = $media->media_type === SiteImage::MEDIA_TYPE_VIDEO;
+        $isReady     = $media->processing_state === SiteImage::PROCESSING_STATE_READY;
+        $isProcessing = $media->processing_state === SiteImage::PROCESSING_STATE_PENDING
+            || $media->processing_state === SiteImage::PROCESSING_STATE_PROCESSING;
+
+        $payload = [
+            'id'               => $media->id,
+            'pool'             => $media->pool,
+            'alt_text'         => $media->alt_text,
+            'sort_order'       => $media->sort_order,
+            'media_type'       => $media->media_type,
+            'processing_state' => $media->processing_state,
+            'processing'       => $isProcessing, // backward-compat boolean
+            'processing_error' => $media->processing_error,
+            'created_at'       => $media->created_at,
+            'updated_at'       => $media->updated_at,
+        ];
+
+        if ($isVideo) {
+            $payload['duration_ms'] = $media->duration_ms;
+            $payload['poster']      = null;
+        }
+
+        if (! $includeVariants) {
+            return $payload;
+        }
+
+        if ($isVideo) {
+            if ($isReady) {
+                $mvList   = $media->relationLoaded('mediaVariants')
+                    ? $media->mediaVariants
+                    : $media->mediaVariants()->get();
+
+                $variants = [];
+                $streams  = [];
+                $poster   = null;
+
+                foreach ($mvList as $mv) {
+                    if ($mv->artifact_type === 'mp4') {
+                        $variants[$mv->variant_key] = $mv->url;
+                    } elseif ($mv->artifact_type === 'hls_playlist') {
+                        $streams[$mv->variant_key] = $mv->url;
+                    } elseif ($mv->artifact_type === 'poster') {
+                        $poster = $mv->url;
+                    }
+                }
+
+                $payload['variants'] = $variants;
+                $payload['streams']  = $streams;
+                $payload['poster']   = $poster;
+            } else {
+                $payload['variants'] = [];
+                $payload['streams']  = [];
+                $payload['poster']   = null;
+            }
+        } else {
+            $payload['variants'] = $isReady ? $media->variantUrls() : [];
+        }
+
+        return $payload;
     }
 }

@@ -4,6 +4,7 @@ namespace App\Models\Core\Site;
 
 use App\Models\BaseModel;
 use App\Models\Core\ImageVariant;
+use App\Models\Core\MediaVariant;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -21,9 +22,19 @@ class SiteImage extends BaseModel
     public const POOL_GALLERY = 'gallery';
     public const POOL_CONTENT = 'content';
 
+    public const MEDIA_TYPE_IMAGE = 'image';
+    public const MEDIA_TYPE_VIDEO = 'video';
+
+    public const PROCESSING_STATE_PENDING    = 'pending';
+    public const PROCESSING_STATE_PROCESSING = 'processing';
+    public const PROCESSING_STATE_READY      = 'ready';
+    public const PROCESSING_STATE_FAILED     = 'failed';
+
     protected $attributes = [
-        'is_active' => true,
-        'pool'      => self::POOL_GALLERY,
+        'is_active'        => true,
+        'pool'             => self::POOL_GALLERY,
+        'media_type'       => self::MEDIA_TYPE_IMAGE,
+        'processing_state' => self::PROCESSING_STATE_PENDING,
     ];
 
     protected $fillable = [
@@ -33,13 +44,22 @@ class SiteImage extends BaseModel
         'alt_text',
         'sort_order',
         'is_active',
+        'media_type',
+        'processing_state',
+        'processing_error',
+        'original_mime',
+        'original_size_bytes',
+        'duration_ms',
+        'poster_path',
     ];
 
     protected $casts = [
-        'sort_order' => 'integer',
-        'is_active'  => 'boolean',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
+        'sort_order'          => 'integer',
+        'is_active'           => 'boolean',
+        'original_size_bytes' => 'integer',
+        'duration_ms'         => 'integer',
+        'created_at'          => 'datetime',
+        'updated_at'          => 'datetime',
     ];
 
     /* ------------------------------------------------------------------ */
@@ -54,6 +74,11 @@ class SiteImage extends BaseModel
     public function variants(): HasMany
     {
         return $this->hasMany(ImageVariant::class, 'image_id');
+    }
+
+    public function mediaVariants(): HasMany
+    {
+        return $this->hasMany(MediaVariant::class, 'media_id');
     }
 
     /* ------------------------------------------------------------------ */

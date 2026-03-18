@@ -3,13 +3,15 @@
 namespace App\Http\Requests\Api\Professional\Uploads;
 
 use App\Http\Requests\BaseFormRequest;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Validation\Rule;
 
 class UploadImageRequest extends BaseFormRequest
 {
     public function rules(): array
     {
-        $maxKb = (int) config('comet.image_max_upload_size', 10240);
+        $imageMaxKb = (int) config('comet.image_max_upload_size', 10240);
+        $videoMaxKb = (int) config('comet.video_max_upload_size', 512000);
 
         return [
             'pool' => [
@@ -17,15 +19,47 @@ class UploadImageRequest extends BaseFormRequest
                 'string',
                 Rule::in(['gallery', 'content']),
             ],
+            // Either `image` or `video` must be provided (not both). The after-validator
+            // enforces the one-of constraint; individual rules run only when the field exists.
             'image' => [
-                'required',
+                'sometimes',
+                'nullable',
                 'file',
                 'image',
                 'mimes:jpeg,png,webp',
-                "max:{$maxKb}",
+                "max:{$imageMaxKb}",
+            ],
+            'video' => [
+                'sometimes',
+                'nullable',
+                'file',
+                'mimes:mp4,mov,webm,avi',
+                "max:{$videoMaxKb}",
             ],
             'alt_text' => ['sometimes', 'nullable', 'string', 'max:255'],
         ];
+    }
+
+    protected function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $v) {
+            $hasImage = $this->hasFile('image');
+            $hasVideo = $this->hasFile('video');
+
+            if ($hasImage && $hasVideo) {
+                $v->errors()->add('image', 'Provide either an image or a video, not both.');
+                return;
+            }
+
+            if (! $hasImage && ! $hasVideo) {
+                $v->errors()->add('image', 'An image or video file is required.');
+                return;
+            }
+
+            if ($hasVideo && ! config('comet.video_uploads_enabled', false)) {
+                $v->errors()->add('video', 'Video uploads are not currently enabled.');
+            }
+        });
     }
 
     protected function prepareForValidation(): void
@@ -37,13 +71,16 @@ class UploadImageRequest extends BaseFormRequest
 
     public function messages(): array
     {
-        $maxMb = round(((int) config('comet.image_max_upload_size', 10240)) / 1024, 1);
+        $imageMaxMb = round(((int) config('comet.image_max_upload_size', 10240)) / 1024, 1);
+        $videoMaxMb = round(((int) config('comet.video_max_upload_size', 512000)) / 1024, 0);
 
         return [
-            'pool.in'     => 'Pool must be "gallery" or "content".',
-            'image.max'   => "Image must be smaller than {$maxMb} MB.",
-            'image.mimes' => 'Image must be JPEG, PNG, or WebP.',
-            'image.image' => 'The file must be a valid image.',
+            'pool.in'      => 'Pool must be "gallery" or "content".',
+            'image.max'    => "Image must be smaller than {$imageMaxMb} MB.",
+            'image.mimes'  => 'Image must be JPEG, PNG, or WebP.',
+            'image.image'  => 'The file must be a valid image.',
+            'video.max'    => "Video must be smaller than {$videoMaxMb} MB.",
+            'video.mimes'  => 'Video must be MP4, MOV, WebM, or AVI.',
         ];
     }
 }

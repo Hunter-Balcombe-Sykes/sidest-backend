@@ -93,6 +93,52 @@ return [
 
     'image_max_upload_size' => (int) env('COMET_IMAGE_MAX_UPLOAD_KB', 10240), // 10 MB
 
+    /*
+    |----------------------------------------------------------------------
+    | Video uploads – feature flag + processing config
+    |----------------------------------------------------------------------
+    | Set COMET_VIDEO_UPLOADS_ENABLED=true only after dedicated video
+    | workers are running on the "videos" queue.
+    |
+    | video_max_upload_size  = max video file size accepted (KB)
+    | video_max_duration_seconds = max video length (seconds)
+    | ffmpeg_binary / ffprobe_binary = absolute paths or commands on $PATH
+    |
+    | video_queue.connection = Laravel queue connection name for video jobs
+    | video_queue.name       = queue name to dispatch video jobs onto
+    | video_queue.timeout    = worker --timeout (seconds); must exceed
+    |                          worst-case transcode time for your machine
+    |
+    | video_variants define the two MP4 output tiers.  HLS streams are
+    | packaged from these MP4 files (no extra re-encode).
+    */
+    'video_uploads_enabled' => (bool) env('COMET_VIDEO_UPLOADS_ENABLED', false),
+
+    'video_max_upload_size'      => (int) env('COMET_VIDEO_MAX_UPLOAD_KB', 512000), // 500 MB
+    'video_max_duration_seconds' => (int) env('COMET_VIDEO_MAX_DURATION_SECONDS', 300), // 5 min
+
+    'ffmpeg_binary'  => env('COMET_FFMPEG_BINARY', 'ffmpeg'),
+    'ffprobe_binary' => env('COMET_FFPROBE_BINARY', 'ffprobe'),
+
+    'video_queue' => [
+        'connection' => env('COMET_VIDEO_QUEUE_CONNECTION', 'redis_video'),
+        'name'       => env('COMET_VIDEO_QUEUE_NAME', 'videos'),
+        'timeout'    => (int) env('COMET_VIDEO_QUEUE_TIMEOUT', 3600),
+    ],
+
+    'video_variants' => [
+        'optimized' => [
+            'resolution'       => env('COMET_VIDEO_OPTIMIZED_RESOLUTION', '1280x720'),
+            'video_bitrate_kbps' => (int) env('COMET_VIDEO_OPTIMIZED_BITRATE', 2000),
+            'audio_bitrate_kbps' => (int) env('COMET_VIDEO_OPTIMIZED_AUDIO_BITRATE', 128),
+        ],
+        'maximized' => [
+            'resolution'       => env('COMET_VIDEO_MAXIMIZED_RESOLUTION', '1920x1080'),
+            'video_bitrate_kbps' => (int) env('COMET_VIDEO_MAXIMIZED_BITRATE', 5000),
+            'audio_bitrate_kbps' => (int) env('COMET_VIDEO_MAXIMIZED_AUDIO_BITRATE', 192),
+        ],
+    ],
+
     'store' => [
         'default_commission_rate' => (float) env('COMET_STORE_DEFAULT_COMMISSION', 15),
         'max_featured_products'   => (int) env('COMET_STORE_MAX_FEATURED', 10),

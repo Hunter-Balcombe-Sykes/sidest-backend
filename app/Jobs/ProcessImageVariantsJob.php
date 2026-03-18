@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Core\Site\SiteImage;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -14,9 +15,10 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Generates all WebP variants for a freshly uploaded image.
  *
- * Dispatched immediately after the original file is stored on the media
- * disk, so the upload endpoint returns quickly while heavy GD processing
- * runs async on the "images" queue.
+ * State transitions:
+ *   pending → processing (job starts)
+ *   processing → ready   (all variants created)
+ *   processing → failed  (unrecoverable error after all retries)
  */
 class ProcessImageVariantsJob implements ShouldQueue
 {
@@ -41,33 +43,34 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     public function handle(ImageVariantService $service): void
     {
-        Log::info('ProcessImageVariantsJob: starting variant processing', [
-            'image_id' => $this->imageId,
+        Log::info('ProcessImageVariantsJob: starting', [
+            'image_id'      => $this->imageId,
             'original_path' => $this->originalPath,
         ]);
 
-        $diskName = $service->resolvedDiskName();
-        $disk = Storage::disk($diskName);
+        SiteImage::query()
+            ->where('id', $this->imageId)
+            ->update(['processing_state' => SiteImage::PROCESSING_STATE_PROCESSING]);
 
-        if (!$disk->exists($this->originalPath)) {
-            Log::error('ProcessImageVariantsJob: original file not found on disk.', [
-                'path' => $this->originalPath,
-                'image_id' => $this->imageId,
-                'disk' => $diskName,
-            ]);
+        $diskName = $service->resolvedDiskName();
+        $disk     = Storage::disk($diskName);
+
+        if (! $disk->exists($this->originalPath)) {
+            $this->markFailed('Original file not found on media disk.');
             $this->fail(new \Exception('Original file not found on media disk.'));
             return;
         }
 
+        $localTmp = null;
+
         try {
-            // Download to a local temp file so GD can read it.
             $localTmp = tempnam(sys_get_temp_dir(), 'comet_orig_');
-            if (!$localTmp) {
+            if (! $localTmp) {
                 throw new \RuntimeException('Failed to create temporary file.');
             }
 
             $content = $disk->get($this->originalPath);
-            if (!file_put_contents($localTmp, $content)) {
+            if (! file_put_contents($localTmp, $content)) {
                 throw new \RuntimeException('Failed to write original to temp file.');
             }
 
@@ -77,20 +80,41 @@ class ProcessImageVariantsJob implements ShouldQueue
                 basePath: $this->basePath,
             );
 
-            Log::info('ProcessImageVariantsJob: variants generated successfully.', [
-                'image_id' => $this->imageId,
-            ]);
+            SiteImage::query()
+                ->where('id', $this->imageId)
+                ->update([
+                    'processing_state' => SiteImage::PROCESSING_STATE_READY,
+                    'processing_error' => null,
+                ]);
+
+            Log::info('ProcessImageVariantsJob: completed.', ['image_id' => $this->imageId]);
         } catch (\Throwable $e) {
             Log::error('ProcessImageVariantsJob: variant generation failed.', [
-                'image_id' => $this->imageId,
-                'error' => $e->getMessage(),
+                'image_id'  => $this->imageId,
+                'error'     => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
+
+            // Only mark failed on final attempt; earlier retries leave state as 'processing'.
+            if ($this->attempts() >= $this->tries) {
+                $this->markFailed($e->getMessage());
+            }
+
             $this->fail($e);
         } finally {
             if (isset($localTmp) && file_exists($localTmp)) {
                 @unlink($localTmp);
             }
         }
+    }
+
+    private function markFailed(string $reason): void
+    {
+        SiteImage::query()
+            ->where('id', $this->imageId)
+            ->update([
+                'processing_state' => SiteImage::PROCESSING_STATE_FAILED,
+                'processing_error' => $reason,
+            ]);
     }
 }
