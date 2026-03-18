@@ -225,6 +225,7 @@ class VideoVariantService
             // --- 8. Update SiteImage ---
             SiteImage::query()
                 ->where('id', $mediaId)
+                ->whereNull('deleted_at')
                 ->update([
                     'processing_state' => SiteImage::PROCESSING_STATE_READY,
                     'processing_error' => null,
@@ -258,23 +259,37 @@ class VideoVariantService
      */
     public function deleteVariants(string $mediaId, string $basePath): void
     {
-        $disk = $this->disk();
+        $disk       = $this->disk();
+        $basePrefix = $this->normalizeVideoCleanupBasePath($basePath);
 
-        // Delete all files under the video prefix.
+        // Delete all files under the normalized video prefix.
         try {
-            $files = $disk->allFiles($basePath);
-            foreach ($files as $file) {
-                $disk->delete($file);
-            }
+            $files = $disk->allFiles($basePrefix);
         } catch (\Throwable $e) {
-            Log::warning('VideoVariantService: error deleting files from disk.', [
-                'media_id'  => $mediaId,
-                'base_path' => $basePath,
-                'error'     => $e->getMessage(),
-            ]);
+            throw new \RuntimeException(
+                "Failed to list video artifacts for cleanup at [{$basePrefix}].",
+                0,
+                $e
+            );
         }
 
-        // Delete all MediaVariant rows (ON DELETE CASCADE handles this too, but belt-and-suspenders).
+        foreach ($files as $file) {
+            try {
+                $deleted = $disk->delete($file);
+            } catch (\Throwable $e) {
+                throw new \RuntimeException(
+                    "Failed to delete video artifact [{$file}].",
+                    0,
+                    $e
+                );
+            }
+
+            if ($deleted === false) {
+                throw new \RuntimeException("Failed to delete video artifact [{$file}].");
+            }
+        }
+
+        // Delete DB rows only after storage cleanup succeeds.
         MediaVariant::where('media_id', $mediaId)->delete();
     }
 
@@ -460,6 +475,30 @@ class VideoVariantService
         }
 
         @rmdir($dir);
+    }
+
+    /**
+     * Legacy jobs may pass the original file path instead of the media directory.
+     * Normalize to the directory prefix expected by allFiles().
+     */
+    private function normalizeVideoCleanupBasePath(string $basePath): string
+    {
+        $normalized = trim($basePath);
+        if ($normalized === '') {
+            throw new \RuntimeException('Video cleanup base path cannot be empty.');
+        }
+
+        $leaf = basename($normalized);
+        if (str_contains($leaf, '.')) {
+            $normalized = dirname($normalized);
+        }
+
+        $normalized = trim($normalized, '/');
+        if ($normalized === '' || $normalized === '.') {
+            throw new \RuntimeException('Video cleanup base path resolved to an invalid directory.');
+        }
+
+        return $normalized;
     }
 
     private function diskName(): string

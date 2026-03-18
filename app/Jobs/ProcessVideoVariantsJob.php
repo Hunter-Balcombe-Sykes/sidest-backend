@@ -11,6 +11,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * Transcodes a video upload into MP4 + HLS variants and a poster image.
@@ -55,16 +56,36 @@ class ProcessVideoVariantsJob implements ShouldQueue
             'original_path' => $this->originalPath,
         ]);
 
+        $siteImage = SiteImage::withTrashed()->find($this->mediaId);
+
+        if (! $siteImage) {
+            Log::warning('ProcessVideoVariantsJob: SiteImage row no longer exists, skipping.', [
+                'media_id' => $this->mediaId,
+            ]);
+            return;
+        }
+
+        if ($siteImage->trashed()) {
+            Log::info('ProcessVideoVariantsJob: SiteImage row is soft-deleted, skipping.', [
+                'media_id' => $this->mediaId,
+            ]);
+            return;
+        }
+
         SiteImage::query()
             ->where('id', $this->mediaId)
-            ->update(['processing_state' => SiteImage::PROCESSING_STATE_PROCESSING]);
+            ->whereNull('deleted_at')
+            ->update([
+                'processing_state' => SiteImage::PROCESSING_STATE_PROCESSING,
+                'processing_error' => null,
+            ]);
 
         $diskName = $service->resolvedDiskName();
         $disk     = Storage::disk($diskName);
 
         if (! $disk->exists($this->originalPath)) {
             $this->markFailed('Original video file not found on media disk.');
-            $this->fail(new \Exception('Original video file not found on media disk.'));
+            $this->fail(new \RuntimeException('Original video file not found on media disk.'));
             return;
         }
 
@@ -97,18 +118,14 @@ class ProcessVideoVariantsJob implements ShouldQueue
             );
 
             Log::info('ProcessVideoVariantsJob: completed.', ['media_id' => $this->mediaId]);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::error('ProcessVideoVariantsJob: processing failed.', [
                 'media_id'  => $this->mediaId,
                 'error'     => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
 
-            if ($this->attempts() >= $this->tries) {
-                $this->markFailed($e->getMessage());
-            }
-
-            $this->fail($e);
+            throw $e;
         } finally {
             if (isset($localTmp) && file_exists($localTmp)) {
                 @unlink($localTmp);
@@ -116,13 +133,28 @@ class ProcessVideoVariantsJob implements ShouldQueue
         }
     }
 
+    public function failed(Throwable $e): void
+    {
+        $this->markFailed($e->getMessage());
+    }
+
     private function markFailed(string $reason): void
     {
-        SiteImage::query()
+        $updated = SiteImage::query()
             ->where('id', $this->mediaId)
+            ->whereNull('deleted_at')
             ->update([
                 'processing_state' => SiteImage::PROCESSING_STATE_FAILED,
                 'processing_error' => $reason,
             ]);
+
+        if ($updated === 0) {
+            $siteImage = SiteImage::withTrashed()->where('id', $this->mediaId)->first();
+            Log::info('ProcessVideoVariantsJob: failed-state update skipped.', [
+                'media_id'         => $this->mediaId,
+                'row_exists'       => $siteImage !== null,
+                'is_soft_deleted'  => $siteImage?->trashed() ?? false,
+            ]);
+        }
     }
 }

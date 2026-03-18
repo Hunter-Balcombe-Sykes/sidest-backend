@@ -158,7 +158,39 @@ class ProfessionalUploadController extends ApiController
 
         // --- Dispatch processing job ---
         if ($isVideo) {
-            $this->dispatchVideoJob($media->id, $originalPath, $basePath);
+            try {
+                $this->dispatchVideoJob($media->id, $originalPath, $basePath);
+            } catch (Throwable $e) {
+                Log::error('Video upload dispatch failed; rolling back media item.', [
+                    'site_id'   => $site->id,
+                    'media_id'  => $media->id,
+                    'pool'      => $pool,
+                    'error'     => $e->getMessage(),
+                    'exception' => get_class($e),
+                ]);
+
+                $mediaDisk = $this->mediaService->resolvedDiskName();
+                try {
+                    Storage::disk($mediaDisk)->delete($originalPath);
+                } catch (Throwable $cleanupError) {
+                    Log::warning('Failed to cleanup original video after dispatch failure.', [
+                        'site_id'   => $site->id,
+                        'media_id'  => $media->id,
+                        'pool'      => $pool,
+                        'path'      => $originalPath,
+                        'media_disk' => $mediaDisk,
+                        'error'     => $cleanupError->getMessage(),
+                    ]);
+                }
+
+                $media->delete();
+                app(SiteCacheService::class)->invalidateSite($site);
+
+                return $this->error(
+                    'Video processing is temporarily unavailable. Please try again.',
+                    503
+                );
+            }
         } else {
             $this->dispatchImageJob($media->id, $originalPath, $basePath);
         }
@@ -346,7 +378,11 @@ class ProfessionalUploadController extends ApiController
 
         if ($image->media_type === SiteImage::MEDIA_TYPE_VIDEO) {
             // Dispatch async cleanup – video has many HLS segment files.
-            DeleteMediaArtifactsJob::dispatch($image->id, $image->path, $image->pool);
+            $basePath = is_string($image->path) && trim($image->path) !== ''
+                ? dirname($image->path)
+                : "videos/{$pro->id}/{$image->id}";
+
+            DeleteMediaArtifactsJob::dispatch($image->id, $basePath, $image->pool);
         } else {
             // Synchronous cleanup for images (only 2–3 variant files).
             $this->mediaService->deleteVariants($image->id, $image->path);
@@ -521,35 +557,21 @@ class ProfessionalUploadController extends ApiController
             || $queueDefault === 'sync';
 
         if ($processInline) {
-            try {
-                ProcessVideoVariantsJob::dispatchSync(
-                    mediaId: $mediaId,
-                    originalPath: $originalPath,
-                    basePath: $basePath,
-                );
-            } catch (Throwable $e) {
-                Log::error('Inline video variant processing failed.', [
-                    'media_id' => $mediaId, 'error' => $e->getMessage(),
-                ]);
-            }
-            return;
-        }
-
-        try {
-            // Connection and queue are already set in the job constructor.
-            // Do not override via PendingDispatch to avoid redundant/conflicting config reads.
-            ProcessVideoVariantsJob::dispatch(
+            ProcessVideoVariantsJob::dispatchSync(
                 mediaId: $mediaId,
                 originalPath: $originalPath,
                 basePath: $basePath,
             );
-        } catch (Throwable $e) {
-            Log::error('Video queue dispatch failed.', [
-                'media_id' => $mediaId, 'error' => $e->getMessage(),
-            ]);
-            // Do NOT fall back to sync for video – transcoding on an HTTP worker
-            // would time out and kill the process. Leave as pending for retry.
+            return;
         }
+
+        // Connection and queue are already set in the job constructor.
+        // Do not override via PendingDispatch to avoid redundant/conflicting config reads.
+        ProcessVideoVariantsJob::dispatch(
+            mediaId: $mediaId,
+            originalPath: $originalPath,
+            basePath: $basePath,
+        );
     }
 
     /**

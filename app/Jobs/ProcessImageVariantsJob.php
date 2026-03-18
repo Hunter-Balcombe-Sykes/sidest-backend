@@ -11,6 +11,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * Generates all WebP variants for a freshly uploaded image.
@@ -48,16 +49,36 @@ class ProcessImageVariantsJob implements ShouldQueue
             'original_path' => $this->originalPath,
         ]);
 
+        $siteImage = SiteImage::withTrashed()->find($this->imageId);
+
+        if (! $siteImage) {
+            Log::warning('ProcessImageVariantsJob: SiteImage row no longer exists, skipping.', [
+                'image_id' => $this->imageId,
+            ]);
+            return;
+        }
+
+        if ($siteImage->trashed()) {
+            Log::info('ProcessImageVariantsJob: SiteImage row is soft-deleted, skipping.', [
+                'image_id' => $this->imageId,
+            ]);
+            return;
+        }
+
         SiteImage::query()
             ->where('id', $this->imageId)
-            ->update(['processing_state' => SiteImage::PROCESSING_STATE_PROCESSING]);
+            ->whereNull('deleted_at')
+            ->update([
+                'processing_state' => SiteImage::PROCESSING_STATE_PROCESSING,
+                'processing_error' => null,
+            ]);
 
         $diskName = $service->resolvedDiskName();
         $disk     = Storage::disk($diskName);
 
         if (! $disk->exists($this->originalPath)) {
             $this->markFailed('Original file not found on media disk.');
-            $this->fail(new \Exception('Original file not found on media disk.'));
+            $this->fail(new \RuntimeException('Original file not found on media disk.'));
             return;
         }
 
@@ -82,25 +103,21 @@ class ProcessImageVariantsJob implements ShouldQueue
 
             SiteImage::query()
                 ->where('id', $this->imageId)
+                ->whereNull('deleted_at')
                 ->update([
                     'processing_state' => SiteImage::PROCESSING_STATE_READY,
                     'processing_error' => null,
                 ]);
 
             Log::info('ProcessImageVariantsJob: completed.', ['image_id' => $this->imageId]);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::error('ProcessImageVariantsJob: variant generation failed.', [
                 'image_id'  => $this->imageId,
                 'error'     => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
 
-            // Only mark failed on final attempt; earlier retries leave state as 'processing'.
-            if ($this->attempts() >= $this->tries) {
-                $this->markFailed($e->getMessage());
-            }
-
-            $this->fail($e);
+            throw $e;
         } finally {
             if (isset($localTmp) && file_exists($localTmp)) {
                 @unlink($localTmp);
@@ -108,13 +125,28 @@ class ProcessImageVariantsJob implements ShouldQueue
         }
     }
 
+    public function failed(Throwable $e): void
+    {
+        $this->markFailed($e->getMessage());
+    }
+
     private function markFailed(string $reason): void
     {
-        SiteImage::query()
+        $updated = SiteImage::query()
             ->where('id', $this->imageId)
+            ->whereNull('deleted_at')
             ->update([
                 'processing_state' => SiteImage::PROCESSING_STATE_FAILED,
                 'processing_error' => $reason,
             ]);
+
+        if ($updated === 0) {
+            $siteImage = SiteImage::withTrashed()->where('id', $this->imageId)->first();
+            Log::info('ProcessImageVariantsJob: failed-state update skipped.', [
+                'image_id'         => $this->imageId,
+                'row_exists'       => $siteImage !== null,
+                'is_soft_deleted'  => $siteImage?->trashed() ?? false,
+            ]);
+        }
     }
 }

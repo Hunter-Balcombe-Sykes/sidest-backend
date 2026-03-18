@@ -174,11 +174,11 @@ class ImageVariantService
                     $created[$variantName] = $variant;
                 } finally {
                     @unlink($tmpFile);
-                    imagedestroy($canvas);
+                    unset($canvas);
                 }
             }
         } finally {
-            imagedestroy($sourceImage);
+            unset($sourceImage);
         }
 
         \Illuminate\Support\Facades\Log::info('Image variant processing completed', [

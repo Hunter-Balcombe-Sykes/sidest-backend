@@ -9,6 +9,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Asynchronously deletes all artifacts for a deleted video media item.
@@ -60,8 +61,22 @@ class DeleteMediaArtifactsJob implements ShouldQueue
                 'media_id'  => $this->mediaId,
                 'error'     => $e->getMessage(),
                 'exception' => get_class($e),
+                'attempt'   => $this->attempts(),
+                'max_tries' => $this->tries,
             ]);
-            $this->fail($e);
+
+            throw $e;
         }
+    }
+
+    public function failed(Throwable $e): void
+    {
+        Log::error('DeleteMediaArtifactsJob: cleanup exhausted retries.', [
+            'media_id'  => $this->mediaId,
+            'base_path' => $this->basePath,
+            'pool'      => $this->pool,
+            'error'     => $e->getMessage(),
+            'exception' => get_class($e),
+        ]);
     }
 }
