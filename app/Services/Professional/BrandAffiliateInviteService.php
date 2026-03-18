@@ -4,14 +4,20 @@ namespace App\Services\Professional;
 
 use App\Models\Core\Notifications\Notification;
 use App\Models\Core\Professional\BrandAffiliateInvite;
+use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 class BrandAffiliateInviteService
 {
+    public function __construct(
+        private readonly BrandPartnerLinkService $brandPartnerLinks
+    ) {}
+
     public function checkRecipientAvailability(Professional $brand, ?string $email, ?string $phone): array
     {
         $normalizedEmail = $this->normalizeEmail($email);
@@ -20,6 +26,8 @@ class BrandAffiliateInviteService
         $emailAlreadyConnectedToBrand = false;
         $emailExistsAsInvite = false;
         if ($normalizedEmail !== null) {
+            $this->expirePendingInvitesByEmail($normalizedEmail);
+
             $matchingEmailProfessionalIds = Professional::withTrashed()
                 ->where(function ($query) use ($normalizedEmail) {
                     $query->whereRaw('LOWER(primary_email) = ?', [$normalizedEmail])
@@ -34,6 +42,11 @@ class BrandAffiliateInviteService
             $emailExistsAsInvite = BrandAffiliateInvite::query()
                 ->where('status', 'pending')
                 ->where('email_lc', $normalizedEmail)
+                ->where(function ($query): void {
+                    $query
+                        ->whereNull('expires_at')
+                        ->orWhere('expires_at', '>', now());
+                })
                 ->exists();
         }
 
@@ -57,11 +70,7 @@ class BrandAffiliateInviteService
 
     public function createInvite(Professional $brand, array $attributes): BrandAffiliateInvite
     {
-        $this->assertRecipientAvailability(
-            $brand,
-            $attributes['email'] ?? null,
-            null,
-        );
+        $this->assertRecipientAvailability($brand, $attributes['email'] ?? null);
 
         $expiresAt = match($attributes['expiration'] ?? null) {
             '24h' => now()->addHours(24),
@@ -84,7 +93,16 @@ class BrandAffiliateInviteService
             'expires_at' => $expiresAt,
         ]);
 
-        $invite->save();
+        try {
+            $invite->save();
+        } catch (QueryException $exception) {
+            if ((string) $exception->getCode() === '23505') {
+                throw new RuntimeException('Email already has a pending invitation or is already connected to this brand.');
+            }
+
+            throw $exception;
+        }
+
         $this->notifyExistingEmailRecipients($brand, $invite);
 
         return $invite->fresh(['brandProfessional']);
@@ -92,111 +110,118 @@ class BrandAffiliateInviteService
 
     public function findByToken(string $token): ?BrandAffiliateInvite
     {
-        return BrandAffiliateInvite::query()
+        $invite = BrandAffiliateInvite::query()
             ->with(['brandProfessional'])
             ->where('token', trim($token))
             ->first();
+
+        if (! $invite) {
+            return null;
+        }
+
+        return $this->expireInviteIfNeeded($invite)->fresh(['brandProfessional', 'claimedProfessional']);
     }
 
     public function claimInvite(BrandAffiliateInvite $invite, Professional $professional): BrandAffiliateInvite
     {
-        if (mb_strtolower(trim((string) $professional->professional_type)) === 'brand') {
-            throw new RuntimeException('Brand accounts cannot claim affiliate invites.');
-        }
-
-        if ($invite->status === 'accepted') {
-            if ($invite->claimed_professional_id === $professional->id) {
-                return $invite;
+        return DB::transaction(function () use ($invite, $professional): BrandAffiliateInvite {
+            if (mb_strtolower(trim((string) $professional->professional_type)) === 'brand') {
+                throw new RuntimeException('Brand accounts cannot claim affiliate invites.');
             }
 
-            throw new RuntimeException('This invite has already been used.');
-        }
+            $lockedInvite = BrandAffiliateInvite::query()
+                ->whereKey($invite->id)
+                ->lockForUpdate()
+                ->first();
 
-        if ($invite->status !== 'pending') {
-            throw new RuntimeException('This invite is no longer available.');
-        }
+            if (! $lockedInvite) {
+                throw new RuntimeException('Invite not found.');
+            }
 
-        if ($invite->expires_at && $invite->expires_at->isPast()) {
-            throw new RuntimeException('This invite has expired.');
-        }
+            $lockedInvite = $this->expireInviteIfNeeded($lockedInvite);
 
-        $this->assertInviteMatchesProfessional($invite, $professional);
+            if ($lockedInvite->status === 'accepted') {
+                if ($lockedInvite->claimed_professional_id === $professional->id) {
+                    return $lockedInvite->fresh(['brandProfessional', 'claimedProfessional']);
+                }
 
-        $site = Site::query()->where('professional_id', $professional->id)->first();
-        if (! $site) {
-            throw new RuntimeException('Your site could not be found. Please complete account setup first.');
-        }
+                throw new RuntimeException('This invite has already been used.');
+            }
 
-        $settings = is_array($site->settings ?? null) ? $site->settings : [];
-        $brandProfessionalId = $invite->brand_professional_id;
+            if ($lockedInvite->status !== 'pending') {
+                throw new RuntimeException('This invite is no longer available.');
+            }
 
-        // Check if this brand is already connected as primary or additional
-        $currentPrimaryId = $settings['brand_partner']['professional_id'] ?? null;
-        $additionalPartners = is_array($settings['additional_brand_partners'] ?? null)
-            ? $settings['additional_brand_partners']
-            : [];
-        $additionalIds = array_column($additionalPartners, 'professional_id');
+            if ($lockedInvite->expires_at && $lockedInvite->expires_at->isPast()) {
+                throw new RuntimeException('This invite has expired.');
+            }
 
-        if ($currentPrimaryId === $brandProfessionalId || in_array($brandProfessionalId, $additionalIds, true)) {
-            throw new RuntimeException('You are already connected to this brand partner.');
-        }
+            $this->assertInviteMatchesProfessional($lockedInvite, $professional);
 
-        // If no primary partner, assign as primary
-        if (empty($currentPrimaryId)) {
-            $settings['brand_partner'] = [
-                ...(is_array($settings['brand_partner'] ?? null) ? $settings['brand_partner'] : []),
-                'professional_id' => $brandProfessionalId,
-            ];
-        } elseif (count($additionalPartners) < 3) {
-            // Assign to next available additional slot
-            $additionalPartners[] = ['professional_id' => $brandProfessionalId];
-            $settings['additional_brand_partners'] = $additionalPartners;
-        } else {
-            throw new RuntimeException('All brand partner slots are full. Please remove an existing brand partner before accepting this invite.');
-        }
+            $site = Site::query()
+                ->where('professional_id', $professional->id)
+                ->first();
+            if (! $site) {
+                throw new RuntimeException('Your site could not be found. Please complete account setup first.');
+            }
 
-        $site->settings = $settings;
-        $site->save();
+            $brandProfessionalId = (string) $lockedInvite->brand_professional_id;
+            $this->brandPartnerLinks->connectBrandToAffiliate((string) $professional->id, $brandProfessionalId);
 
-        $invite->status = 'accepted';
-        $invite->claimed_professional_id = $professional->id;
-        $invite->accepted_at = now();
-        $invite->save();
+            $lockedInvite->status = 'accepted';
+            $lockedInvite->claimed_professional_id = $professional->id;
+            $lockedInvite->accepted_at = now();
+            $lockedInvite->save();
 
-        return $invite->fresh(['brandProfessional', 'claimedProfessional']);
+            return $lockedInvite->fresh(['brandProfessional', 'claimedProfessional']);
+        });
     }
+
     public function declineInvite(BrandAffiliateInvite $invite, Professional $professional): BrandAffiliateInvite
     {
-        if (mb_strtolower(trim((string) $professional->professional_type)) === 'brand') {
-            throw new RuntimeException('Brand accounts cannot decline affiliate invites.');
-        }
-
-        if ($invite->status === 'accepted') {
-            if ($invite->claimed_professional_id === $professional->id) {
-                throw new RuntimeException('This invite has already been accepted.');
+        return DB::transaction(function () use ($invite, $professional): BrandAffiliateInvite {
+            if (mb_strtolower(trim((string) $professional->professional_type)) === 'brand') {
+                throw new RuntimeException('Brand accounts cannot decline affiliate invites.');
             }
 
-            throw new RuntimeException('This invite has already been used.');
-        }
+            $lockedInvite = BrandAffiliateInvite::query()
+                ->whereKey($invite->id)
+                ->lockForUpdate()
+                ->first();
 
-        if ($invite->status === 'declined') {
-            return $invite;
-        }
+            if (! $lockedInvite) {
+                throw new RuntimeException('Invite not found.');
+            }
 
-        if ($invite->status !== 'pending') {
-            throw new RuntimeException('This invite is no longer available.');
-        }
+            $lockedInvite = $this->expireInviteIfNeeded($lockedInvite);
 
-        if ($invite->expires_at && $invite->expires_at->isPast()) {
-            throw new RuntimeException('This invite has expired.');
-        }
+            if ($lockedInvite->status === 'accepted') {
+                if ($lockedInvite->claimed_professional_id === $professional->id) {
+                    throw new RuntimeException('This invite has already been accepted.');
+                }
 
-        $this->assertInviteMatchesProfessional($invite, $professional);
+                throw new RuntimeException('This invite has already been used.');
+            }
 
-        $invite->status = 'declined';
-        $invite->save();
+            if ($lockedInvite->status === 'declined') {
+                return $lockedInvite->fresh(['brandProfessional', 'claimedProfessional']);
+            }
 
-        return $invite->fresh(['brandProfessional', 'claimedProfessional']);
+            if ($lockedInvite->status !== 'pending') {
+                throw new RuntimeException('This invite is no longer available.');
+            }
+
+            if ($lockedInvite->expires_at && $lockedInvite->expires_at->isPast()) {
+                throw new RuntimeException('This invite has expired.');
+            }
+
+            $this->assertInviteMatchesProfessional($lockedInvite, $professional);
+
+            $lockedInvite->status = 'declined';
+            $lockedInvite->save();
+
+            return $lockedInvite->fresh(['brandProfessional', 'claimedProfessional']);
+        });
     }
 
     private function determineInviteType(array $attributes): string
@@ -222,7 +247,7 @@ class BrandAffiliateInviteService
         throw new RuntimeException('Unable to generate a unique invite token.');
     }
 
-    private function assertRecipientAvailability(Professional $brand, ?string $email, ?string $phone): void
+    private function assertRecipientAvailability(Professional $brand, ?string $email): void
     {
         $availability = $this->checkRecipientAvailability($brand, $email, null);
 
@@ -234,8 +259,16 @@ class BrandAffiliateInviteService
     private function assertInviteMatchesProfessional(BrandAffiliateInvite $invite, Professional $professional): void
     {
         $inviteEmail = mb_strtolower(trim((string) ($invite->email ?? '')));
-        $professionalEmail = mb_strtolower(trim((string) ($professional->primary_email ?? '')));
-        if ($inviteEmail !== '' && $professionalEmail !== '' && $inviteEmail !== $professionalEmail) {
+        if ($inviteEmail === '') {
+            return;
+        }
+
+        $primaryEmail = $this->normalizeEmail((string) ($professional->primary_email ?? ''));
+        $publicEmail = $this->normalizeEmail((string) ($professional->public_contact_email ?? ''));
+        $matchesPrimary = is_string($primaryEmail) && $primaryEmail !== '' && $inviteEmail === $primaryEmail;
+        $matchesPublic = is_string($publicEmail) && $publicEmail !== '' && $inviteEmail === $publicEmail;
+
+        if (! $matchesPrimary && ! $matchesPublic) {
             throw new RuntimeException('This invite was issued for a different email address.');
         }
     }
@@ -256,20 +289,15 @@ class BrandAffiliateInviteService
             return false;
         }
 
-        return Site::query()
-            ->whereIn('professional_id', $professionalIds)
-            ->where(function (Builder $query) use ($brand): void {
-                $query
-                    ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$brand->id])
-                    ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$brand->id])
-                    ->orWhereRaw("settings->'additional_brand_partners' @> ?", [json_encode([['professional_id' => $brand->id]])]);
-            })
+        return BrandPartnerLink::query()
+            ->whereIn('affiliate_professional_id', $professionalIds)
+            ->where('brand_professional_id', $brand->id)
             ->exists();
     }
 
     private function notifyExistingEmailRecipients(Professional $brand, BrandAffiliateInvite $invite): void
     {
-        if (!is_string($invite->email) || trim($invite->email) === '') {
+        if (! is_string($invite->email) || trim($invite->email) === '') {
             return;
         }
 
@@ -302,5 +330,34 @@ class BrandAffiliateInviteService
                     'ends_at' => null,
                 ]);
             });
+    }
+
+    private function expirePendingInvitesByEmail(string $normalizedEmail): void
+    {
+        BrandAffiliateInvite::query()
+            ->where('status', 'pending')
+            ->where('email_lc', $normalizedEmail)
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '<=', now())
+            ->update([
+                'status' => 'expired',
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function expireInviteIfNeeded(BrandAffiliateInvite $invite): BrandAffiliateInvite
+    {
+        if ($invite->status !== 'pending') {
+            return $invite;
+        }
+
+        if (! $invite->expires_at || ! $invite->expires_at->isPast()) {
+            return $invite;
+        }
+
+        $invite->status = 'expired';
+        $invite->save();
+
+        return $invite;
     }
 }

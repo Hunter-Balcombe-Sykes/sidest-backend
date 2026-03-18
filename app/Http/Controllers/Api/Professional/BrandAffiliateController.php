@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Site\Site;
+use App\Services\Professional\BrandPartnerLinkService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -22,31 +24,41 @@ class BrandAffiliateController extends ApiController
 
         $brandId = $professional->id;
 
-        $affiliates = Site::query()
+        $links = BrandPartnerLink::query()
+            ->where('brand_professional_id', $brandId)
+            ->orderByDesc('updated_at')
+            ->get(['affiliate_professional_id', 'slot', 'updated_at']);
+
+        $affiliateIds = $links
+            ->pluck('affiliate_professional_id')
+            ->unique()
+            ->values()
+            ->all();
+
+        $sitesByProfessionalId = Site::query()
             ->with(['professional'])
-            ->where(function ($query) use ($brandId): void {
-                $query
-                    ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$brandId])
-                    ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$brandId])
-                    ->orWhereRaw("settings->'additional_brand_partners' @> ?", [json_encode([['professional_id' => $brandId]])]);
-            })
+            ->whereIn('professional_id', $affiliateIds)
             ->whereHas('professional', function ($query): void {
                 $query
                     ->where('status', 'active')
                     ->where('professional_type', '!=', 'brand');
             })
-            ->orderByDesc('updated_at')
             ->get()
-            ->map(function (Site $site) use ($brandId): array {
+            ->keyBy('professional_id');
+
+        $affiliates = $links
+            ->map(function (BrandPartnerLink $link) use ($sitesByProfessionalId): ?array {
+                /** @var Site|null $site */
+                $site = $sitesByProfessionalId->get($link->affiliate_professional_id);
+                if (! $site) {
+                    return null;
+                }
+
                 $connectedProfessional = $site->professional;
                 $name = trim(implode(' ', array_filter([
                     $connectedProfessional?->first_name,
                     $connectedProfessional?->last_name,
                 ])));
-
-                // Determine if this brand is primary or additional for this affiliate
-                $settings = is_array($site->settings ?? null) ? $site->settings : [];
-                $isPrimary = ($settings['brand_partner']['professional_id'] ?? null) === $brandId;
 
                 return [
                     'id' => $connectedProfessional?->id,
@@ -56,11 +68,11 @@ class BrandAffiliateController extends ApiController
                     'professional_type' => $connectedProfessional?->professional_type,
                     'email' => $connectedProfessional?->primary_email ?? $connectedProfessional?->public_contact_email,
                     'phone' => $connectedProfessional?->phone ?? $connectedProfessional?->public_contact_number,
-                    'connected_at' => optional($site->updated_at)->toIso8601String(),
-                    'is_primary' => $isPrimary,
+                    'connected_at' => optional($link->updated_at)->toIso8601String(),
+                    'is_primary' => (int) $link->slot === BrandPartnerLinkService::PRIMARY_SLOT,
                 ];
             })
-            ->filter(fn (array $affiliate): bool => filled($affiliate['id']))
+            ->filter(fn (?array $affiliate): bool => is_array($affiliate) && filled($affiliate['id']))
             ->values()
             ->all();
 
@@ -69,7 +81,11 @@ class BrandAffiliateController extends ApiController
         ]);
     }
 
-    public function disconnect(Request $request, string $affiliateId): JsonResponse
+    public function disconnect(
+        Request $request,
+        string $affiliateId,
+        BrandPartnerLinkService $brandPartnerLinks
+    ): JsonResponse
     {
         $professional = $this->currentProfessional($request);
 
@@ -77,50 +93,11 @@ class BrandAffiliateController extends ApiController
             return $this->error('Only brand accounts can disconnect affiliates.', 403);
         }
 
-        $brandId = $professional->id;
-
-        $site = Site::query()
-            ->where('professional_id', $affiliateId)
-            ->where(function ($query) use ($brandId): void {
-                $query
-                    ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$brandId])
-                    ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$brandId])
-                    ->orWhereRaw("settings->'additional_brand_partners' @> ?", [json_encode([['professional_id' => $brandId]])]);
-            })
-            ->first();
-
-        if (! $site) {
+        $brandId = (string) $professional->id;
+        $disconnected = $brandPartnerLinks->disconnectBrandFromAffiliate((string) $affiliateId, $brandId);
+        if (! $disconnected) {
             return $this->error('Affiliate not found for this brand.', 404);
         }
-
-        $settings = is_array($site->settings ?? null) ? $site->settings : [];
-        $currentPrimaryId = $settings['brand_partner']['professional_id'] ?? null;
-
-        if ($currentPrimaryId === $brandId) {
-            // Remove from primary
-            unset($settings['brand_partner'], $settings['brandPartner']);
-
-            // Promote first additional to primary
-            $additionalPartners = is_array($settings['additional_brand_partners'] ?? null)
-                ? $settings['additional_brand_partners']
-                : [];
-            if (count($additionalPartners) > 0) {
-                $newPrimary = array_shift($additionalPartners);
-                $settings['brand_partner'] = ['professional_id' => $newPrimary['professional_id']];
-                $settings['additional_brand_partners'] = array_values($additionalPartners);
-            }
-        } else {
-            // Remove from additional partners
-            $additionalPartners = is_array($settings['additional_brand_partners'] ?? null)
-                ? $settings['additional_brand_partners']
-                : [];
-            $settings['additional_brand_partners'] = array_values(
-                array_filter($additionalPartners, fn ($p) => ($p['professional_id'] ?? null) !== $brandId)
-            );
-        }
-
-        $site->settings = $settings;
-        $site->save();
 
         return $this->success([
             'affiliate_id' => $affiliateId,

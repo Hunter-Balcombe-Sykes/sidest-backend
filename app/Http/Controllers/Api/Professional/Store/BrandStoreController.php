@@ -17,6 +17,8 @@ class BrandStoreController extends ApiController
 {
     use ResolveCurrentProfessional;
 
+    private const DEFAULT_COMMISSION_RATE = 15.0;
+
     /**
      * GET /store/brand-settings
      * Returns the brand's default commission rate and all per-product settings.
@@ -24,9 +26,14 @@ class BrandStoreController extends ApiController
     public function index(Request $request)
     {
         $professional = $this->currentProfessional($request);
+        if (! $this->isBrandProfessionalType($professional->professional_type)) {
+            return $this->error('Only brand accounts can manage brand store settings.', 403);
+        }
 
         $storeSettings = BrandStoreSettings::where('professional_id', $professional->id)->first();
-        $defaultCommission = $storeSettings ? (float) $storeSettings->default_commission_rate : 15.0;
+        $defaultCommission = $storeSettings
+            ? (float) $storeSettings->default_commission_rate
+            : self::DEFAULT_COMMISSION_RATE;
 
         $products = BrandProductSetting::where('professional_id', $professional->id)
             ->orderBy('sort_order')
@@ -57,6 +64,9 @@ class BrandStoreController extends ApiController
     public function updateSettings(Request $request)
     {
         $professional = $this->currentProfessional($request);
+        if (! $this->isBrandProfessionalType($professional->professional_type)) {
+            return $this->error('Only brand accounts can manage brand store settings.', 403);
+        }
 
         $validator = Validator::make($request->all(), [
             'default_commission_rate' => ['required', 'numeric', 'min:0', 'max:100'],
@@ -93,6 +103,9 @@ class BrandStoreController extends ApiController
     public function updateProductSettings(Request $request)
     {
         $professional = $this->currentProfessional($request);
+        if (! $this->isBrandProfessionalType($professional->professional_type)) {
+            return $this->error('Only brand accounts can manage brand store settings.', 403);
+        }
 
         $validator = Validator::make($request->all(), [
             'products'                        => ['required', 'array'],
@@ -113,7 +126,9 @@ class BrandStoreController extends ApiController
 
         // Load default commission for override floor validation
         $storeSettings = BrandStoreSettings::where('professional_id', $professional->id)->first();
-        $defaultCommission = $storeSettings ? (float) $storeSettings->default_commission_rate : 0.0;
+        $defaultCommission = $storeSettings
+            ? (float) $storeSettings->default_commission_rate
+            : self::DEFAULT_COMMISSION_RATE;
 
         foreach ($validated['products'] as $product) {
             if (isset($product['commission_override']) && $product['commission_override'] !== null) {
@@ -169,5 +184,10 @@ class BrandStoreController extends ApiController
         }
 
         return $this->index($request);
+    }
+
+    private function isBrandProfessionalType(mixed $value): bool
+    {
+        return mb_strtolower(trim((string) $value)) === 'brand';
     }
 }

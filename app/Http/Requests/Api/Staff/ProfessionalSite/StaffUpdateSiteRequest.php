@@ -105,15 +105,9 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.design.media.placeholder_sitepage_images.*.name' => ['required_with:settings.design.media.placeholder_sitepage_images', 'string', 'max:255'],
             'settings.design.media.placeholder_sitepage_images.*.path' => ['required_with:settings.design.media.placeholder_sitepage_images', 'string', 'max:2048'],
             'settings.design.media.placeholder_sitepage_images.*.url' => ['required_with:settings.design.media.placeholder_sitepage_images', 'url', 'max:2048'],
-            'settings.brand_partner' => ['sometimes', 'array'],
-            'settings.brand_partner.professional_id' => [
-                'sometimes',
-                'nullable',
-                'uuid',
-                Rule::exists('professionals', 'id')->where(function ($query) {
-                    $query->where('professional_type', 'brand');
-                }),
-            ],
+            'settings.brand_partner' => ['prohibited'],
+            'settings.brandPartner' => ['prohibited'],
+            'settings.additional_brand_partners' => ['prohibited'],
             'settings.show_branding' => ['sometimes', 'boolean'],
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
             'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
@@ -133,6 +127,9 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'subdomain.unique' => 'This subdomain is already taken.',
             'subdomain.min' => 'The subdomain must be at least 3 characters.',
             'subdomain.max' => 'The subdomain cannot exceed 63 characters.',
+            'settings.brand_partner.prohibited' => 'Use brand partner endpoints to manage brand relationships.',
+            'settings.brandPartner.prohibited' => 'Use brand partner endpoints to manage brand relationships.',
+            'settings.additional_brand_partners.prohibited' => 'Use brand partner endpoints to manage brand relationships.',
             'settings.selected_products.prohibited' => 'Use /api/store/featured-products for product selections.',
         ];
     }

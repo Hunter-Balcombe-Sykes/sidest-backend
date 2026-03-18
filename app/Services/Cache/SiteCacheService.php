@@ -3,6 +3,7 @@
 namespace App\Services\Cache;
 
 use App\Models\Core\ImageVariant;
+use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
@@ -17,6 +18,9 @@ use Illuminate\Support\Facades\Log;
 class SiteCacheService
 {
     private const MISS_SENTINEL = '__MISS__';
+
+    /** @var array<string, array<string, string|null>|null> */
+    private array $brandPartnerEnrichmentCache = [];
 
     public function __construct(
         private readonly FeaturedProductsPayloadService $featuredProductsPayloads
@@ -134,119 +138,115 @@ class SiteCacheService
             return $site;
         }
 
-        $existingRadius = $brandPartner['border_radius'] ?? $brandPartner['borderRadius'] ?? null;
-        $existingFontUrl = $brandPartner['font_file_url'] ?? $brandPartner['fontFileUrl'] ?? null;
-        $existingUsername = $brandPartner['username'] ?? $brandPartner['handle'] ?? null;
-        $existingFirstName = $brandPartner['first_name'] ?? $brandPartner['firstName'] ?? null;
-        $existingLastName = $brandPartner['last_name'] ?? $brandPartner['lastName'] ?? null;
-        $existingBorderColor = $brandPartner['border_color'] ?? $brandPartner['borderColor'] ?? null;
-        $existingLogoLetterSpacing = $brandPartner['logo_letter_spacing'] ?? $brandPartner['logoLetterSpacing'] ?? null;
-        $existingLogoFontSize = $brandPartner['logo_font_size'] ?? $brandPartner['logoFontSize'] ?? null;
-        $existingBorderWidth = $brandPartner['border_width'] ?? $brandPartner['borderWidth'] ?? null;
-        $existingGeneralSpacingPadding = $brandPartner['general_spacing_padding'] ?? $brandPartner['generalSpacingPadding'] ?? null;
-        $hasRadius = is_string($existingRadius) && trim($existingRadius) !== '';
-        $hasFontUrl = is_string($existingFontUrl) && trim($existingFontUrl) !== '';
-        $hasUsername = is_string($existingUsername) && trim($existingUsername) !== '';
-        $hasFirstName = is_string($existingFirstName) && trim($existingFirstName) !== '';
-        $hasLastName = is_string($existingLastName) && trim($existingLastName) !== '';
-        $hasBorderColor = is_string($existingBorderColor) && trim($existingBorderColor) !== '';
-        $hasLogoLetterSpacing = is_string($existingLogoLetterSpacing) && trim($existingLogoLetterSpacing) !== '';
-        $hasLogoFontSize = is_string($existingLogoFontSize) && trim($existingLogoFontSize) !== '';
-        $hasBorderWidth = is_string($existingBorderWidth) && trim($existingBorderWidth) !== '';
-        $hasGeneralSpacingPadding = is_string($existingGeneralSpacingPadding) && trim($existingGeneralSpacingPadding) !== '';
-
-        if (
-            $hasRadius
-            && $hasFontUrl
-            && $hasUsername
-            && $hasFirstName
-            && $hasLastName
-            && $hasBorderColor
-            && $hasLogoLetterSpacing
-            && $hasLogoFontSize
-            && $hasBorderWidth
-            && $hasGeneralSpacingPadding
-        ) {
+        $enrichment = $this->resolveBrandPartnerEnrichmentData(trim($professionalId));
+        if (! is_array($enrichment)) {
             return $site;
+        }
+
+        if ($this->isMissingBrandPartnerField($brandPartner, 'border_radius', 'borderRadius') && $this->isFilledString($enrichment['border_radius'] ?? null)) {
+            $brandPartner['border_radius'] = $enrichment['border_radius'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'font_file_url', 'fontFileUrl') && $this->isFilledString($enrichment['font_file_url'] ?? null)) {
+            $brandPartner['font_file_url'] = $enrichment['font_file_url'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'username', 'handle') && $this->isFilledString($enrichment['username'] ?? null)) {
+            $brandPartner['username'] = $enrichment['username'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'first_name', 'firstName') && $this->isFilledString($enrichment['first_name'] ?? null)) {
+            $brandPartner['first_name'] = $enrichment['first_name'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'last_name', 'lastName') && $this->isFilledString($enrichment['last_name'] ?? null)) {
+            $brandPartner['last_name'] = $enrichment['last_name'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'border_color', 'borderColor') && $this->isFilledString($enrichment['border_color'] ?? null)) {
+            $brandPartner['border_color'] = $enrichment['border_color'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'logo_letter_spacing', 'logoLetterSpacing') && $this->isFilledString($enrichment['logo_letter_spacing'] ?? null)) {
+            $brandPartner['logo_letter_spacing'] = $enrichment['logo_letter_spacing'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'logo_font_size', 'logoFontSize') && $this->isFilledString($enrichment['logo_font_size'] ?? null)) {
+            $brandPartner['logo_font_size'] = $enrichment['logo_font_size'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'border_width', 'borderWidth') && $this->isFilledString($enrichment['border_width'] ?? null)) {
+            $brandPartner['border_width'] = $enrichment['border_width'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'general_spacing_padding', 'generalSpacingPadding') && $this->isFilledString($enrichment['general_spacing_padding'] ?? null)) {
+            $brandPartner['general_spacing_padding'] = $enrichment['general_spacing_padding'];
+        }
+
+        $settings['brand_partner'] = $brandPartner;
+        $site['settings'] = $settings;
+
+        return $site;
+    }
+
+    /**
+     * @return array<string, string|null>|null
+     */
+    private function resolveBrandPartnerEnrichmentData(string $professionalId): ?array
+    {
+        if (array_key_exists($professionalId, $this->brandPartnerEnrichmentCache)) {
+            return $this->brandPartnerEnrichmentCache[$professionalId];
         }
 
         $partnerSite = Site::query()
             ->where('professional_id', $professionalId)
             ->first(['settings']);
 
-        if (! $partnerSite) {
-            return $site;
-        }
-
-        $partnerSettings = is_array($partnerSite->settings ?? null) ? $partnerSite->settings : null;
-        $partnerUsername = (string) (
-            Professional::query()
-                ->whereKey($professionalId)
-                ->value('handle') ?? ''
-        );
-        $partnerUsername = trim($partnerUsername);
-        $partnerNames = Professional::query()
+        $partnerProfessional = Professional::query()
             ->whereKey($professionalId)
-            ->first(['first_name', 'last_name']);
-        $partnerFirstName = is_string($partnerNames?->first_name ?? null) ? trim((string) $partnerNames->first_name) : '';
-        $partnerLastName = is_string($partnerNames?->last_name ?? null) ? trim((string) $partnerNames->last_name) : '';
+            ->first(['handle', 'first_name', 'last_name']);
 
+        if (! $partnerSite && ! $partnerProfessional) {
+            $this->brandPartnerEnrichmentCache[$professionalId] = null;
+            return null;
+        }
+
+        $partnerSettings = is_array($partnerSite?->settings ?? null) ? $partnerSite->settings : [];
         $design = is_array($partnerSettings['design'] ?? null) ? $partnerSettings['design'] : [];
-        $borderColor = $design['border_color'] ?? $design['borderColor'] ?? null;
-        $borderRadius = $design['border_radius'] ?? $design['borderRadius'] ?? null;
-        $borderWidth = $design['border_width'] ?? $design['borderWidth'] ?? null;
-        $generalSpacingPadding = $design['general_spacing_padding'] ?? $design['generalSpacingPadding'] ?? null;
         $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
-        $fontFileUrl = $typography['font_file_url'] ?? $typography['fontFileUrl'] ?? null;
-        $logoLetterSpacing = $typography['logo_letter_spacing'] ?? $typography['logoLetterSpacing'] ?? null;
-        $logoFontSize = $typography['logo_font_size'] ?? $typography['logoFontSize'] ?? null;
 
-        if (
-            (! is_string($borderColor) || trim($borderColor) === '')
-            && (! is_string($borderRadius) || trim($borderRadius) === '')
-            && (! is_string($fontFileUrl) || trim($fontFileUrl) === '')
-            && (! is_string($borderWidth) || trim($borderWidth) === '')
-            && (! is_string($generalSpacingPadding) || trim($generalSpacingPadding) === '')
-            && (! is_string($logoLetterSpacing) || trim($logoLetterSpacing) === '')
-            && (! is_string($logoFontSize) || trim($logoFontSize) === '')
-        ) {
-            return $site;
+        $resolved = [
+            'username' => $this->normalizeString($partnerProfessional?->handle ?? null),
+            'first_name' => $this->normalizeString($partnerProfessional?->first_name ?? null),
+            'last_name' => $this->normalizeString($partnerProfessional?->last_name ?? null),
+            'border_color' => $this->normalizeString($design['border_color'] ?? $design['borderColor'] ?? null),
+            'border_radius' => $this->normalizeString($design['border_radius'] ?? $design['borderRadius'] ?? null),
+            'border_width' => $this->normalizeString($design['border_width'] ?? $design['borderWidth'] ?? null),
+            'general_spacing_padding' => $this->normalizeString($design['general_spacing_padding'] ?? $design['generalSpacingPadding'] ?? null),
+            'font_file_url' => $this->normalizeString($typography['font_file_url'] ?? $typography['fontFileUrl'] ?? null),
+            'logo_letter_spacing' => $this->normalizeString($typography['logo_letter_spacing'] ?? $typography['logoLetterSpacing'] ?? null),
+            'logo_font_size' => $this->normalizeString($typography['logo_font_size'] ?? $typography['logoFontSize'] ?? null),
+        ];
+
+        $this->brandPartnerEnrichmentCache[$professionalId] = $resolved;
+
+        return $resolved;
+    }
+
+    /**
+     * @param  array<string, mixed>  $brandPartner
+     */
+    private function isMissingBrandPartnerField(array $brandPartner, string $snakeKey, string $camelKey): bool
+    {
+        return ! $this->isFilledString($brandPartner[$snakeKey] ?? null)
+            && ! $this->isFilledString($brandPartner[$camelKey] ?? null);
+    }
+
+    private function isFilledString(mixed $value): bool
+    {
+        return is_string($value) && trim($value) !== '';
+    }
+
+    private function normalizeString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
         }
 
-        if (is_string($borderColor) && trim($borderColor) !== '') {
-            $brandPartner['border_color'] = $borderColor;
-        }
-        if (is_string($borderRadius) && trim($borderRadius) !== '') {
-            $brandPartner['border_radius'] = $borderRadius;
-        }
-        if (is_string($borderWidth) && trim($borderWidth) !== '') {
-            $brandPartner['border_width'] = $borderWidth;
-        }
-        if (is_string($fontFileUrl) && trim($fontFileUrl) !== '') {
-            $brandPartner['font_file_url'] = $fontFileUrl;
-        }
-        if ($partnerUsername !== '') {
-            $brandPartner['username'] = $partnerUsername;
-        }
-        if ($partnerFirstName !== '') {
-            $brandPartner['first_name'] = $partnerFirstName;
-        }
-        if ($partnerLastName !== '') {
-            $brandPartner['last_name'] = $partnerLastName;
-        }
-        if (is_string($generalSpacingPadding) && trim($generalSpacingPadding) !== '') {
-            $brandPartner['general_spacing_padding'] = $generalSpacingPadding;
-        }
-        if (is_string($logoLetterSpacing) && trim($logoLetterSpacing) !== '') {
-            $brandPartner['logo_letter_spacing'] = $logoLetterSpacing;
-        }
-        if (is_string($logoFontSize) && trim($logoFontSize) !== '') {
-            $brandPartner['logo_font_size'] = $logoFontSize;
-        }
-        $settings['brand_partner'] = $brandPartner;
-        $site['settings'] = $settings;
+        $trimmed = trim($value);
 
-        return $site;
+        return $trimmed === '' ? null : $trimmed;
     }
 
     /**
@@ -618,16 +618,32 @@ class SiteCacheService
 
         $professionalId = (string) ($site->professional_id ?? '');
         if ($professionalId !== '') {
+            $connectedProfessionalIds = BrandPartnerLink::query()
+                ->where('brand_professional_id', $professionalId)
+                ->pluck('affiliate_professional_id')
+                ->all();
+
             $connectedSubdomains = Site::query()
-                ->where(function ($query) use ($professionalId) {
-                    $query
-                        ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$professionalId])
-                        ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$professionalId]);
-                })
+                ->whereIn('professional_id', $connectedProfessionalIds)
                 ->pluck('subdomain')
                 ->filter(fn ($subdomain): bool => is_string($subdomain) && trim($subdomain) !== '')
                 ->map(fn ($subdomain): string => strtolower((string) $subdomain))
                 ->all();
+
+            // Transitional fallback for environments where relational backfill has not run yet.
+            if ($connectedSubdomains === []) {
+                $connectedSubdomains = Site::query()
+                    ->where(function ($query) use ($professionalId) {
+                        $query
+                            ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$professionalId])
+                            ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$professionalId])
+                            ->orWhereRaw("settings->'additional_brand_partners' @> ?", [json_encode([['professional_id' => $professionalId]])]);
+                    })
+                    ->pluck('subdomain')
+                    ->filter(fn ($subdomain): bool => is_string($subdomain) && trim($subdomain) !== '')
+                    ->map(fn ($subdomain): string => strtolower((string) $subdomain))
+                    ->all();
+            }
 
             foreach ($connectedSubdomains as $connectedSubdomain) {
                 $keys[] = CacheKeyGenerator::publicSitePayload($connectedSubdomain);

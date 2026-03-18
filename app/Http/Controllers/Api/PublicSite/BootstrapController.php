@@ -16,6 +16,7 @@ use App\Models\Core\Notifications\Notification;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
 use App\Services\Professional\BrandAffiliateInviteService;
+use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Enterprise\EnterpriseProvisioningService;
 use App\Services\Legal\ProfessionalLegalContentService;
 
@@ -27,7 +28,8 @@ class BootstrapController extends ApiController
         BootstrapRequest $request,
         ProfessionalLegalContentService $legalContentService,
         EnterpriseProvisioningService $enterpriseProvisioningService,
-        BrandAffiliateInviteService $brandAffiliateInviteService
+        BrandAffiliateInviteService $brandAffiliateInviteService,
+        BrandPartnerLinkService $brandPartnerLinks
     )
     {
         $uid = $request->attributes->get('supabase_uid');
@@ -38,7 +40,7 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService) {
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks) {
             $createdProfessional = false;
             $provisionedEnterprise = null;
 
@@ -120,31 +122,32 @@ class BootstrapController extends ApiController
                 $site = $this->createSiteWithRetry($professional->id, $base);
             }
 
-            if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
-                $invite = $brandAffiliateInviteService->findByToken((string) $data['invite_token']);
-                if (! $invite) {
+                if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
+                    $invite = $brandAffiliateInviteService->findByToken((string) $data['invite_token']);
+                    if (! $invite) {
                     throw new RuntimeException('Invite not found.');
                 }
 
                 $brandAffiliateInviteService->claimInvite($invite, $professional);
-            } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
-                $brandPartnerProfessional = Professional::query()
-                    ->whereKey((string) $data['brand_partner_professional_id'])
+                } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
+                    $brandPartnerProfessional = Professional::query()
+                        ->whereKey((string) $data['brand_partner_professional_id'])
                     ->where('professional_type', 'brand')
                     ->first();
 
-                if (! $brandPartnerProfessional) {
-                    throw new RuntimeException('Brand partner not found.');
-                }
+                    if (! $brandPartnerProfessional) {
+                        throw new RuntimeException('Brand partner not found.');
+                    }
 
-                $siteSettings = is_array($site->settings ?? null) ? $site->settings : [];
-                $siteSettings['brand_partner'] = [
-                    ...(is_array($siteSettings['brand_partner'] ?? null) ? $siteSettings['brand_partner'] : []),
-                    'professional_id' => $brandPartnerProfessional->id,
-                ];
-                $site->settings = $siteSettings;
-                $site->save();
-            }
+                    $affiliateId = (string) $professional->id;
+                    $brandId = (string) $brandPartnerProfessional->id;
+
+                    if (! $brandPartnerLinks->isConnected($affiliateId, $brandId)) {
+                        $brandPartnerLinks->connectBrandToAffiliate($affiliateId, $brandId);
+                    }
+
+                    $brandPartnerLinks->promoteBrandToPrimary($affiliateId, $brandId);
+                }
 
             $legalContentService->refreshGenerated($professional, $site);
 

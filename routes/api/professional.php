@@ -38,11 +38,13 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::get('/me', [ProfessionalController::class, 'show']);
     Route::patch('/me', [ProfessionalController::class, 'update']);
     Route::get('/brand-affiliates', [BrandAffiliateController::class, 'index']);
-    Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect']);
+    Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect'])
+        ->whereUuid('affiliate');
     Route::get('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'index']);
     Route::post('/brand-affiliate-invites/availability', [BrandAffiliateInviteController::class, 'availability']);
     Route::post('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'store']);
-    Route::delete('/brand-affiliate-invites/{invite}', [BrandAffiliateInviteController::class, 'destroy']);
+    Route::delete('/brand-affiliate-invites/{invite}', [BrandAffiliateInviteController::class, 'destroy'])
+        ->whereUuid('invite');
     Route::post('/brand-affiliate-invites/{token}/claim', [BrandAffiliateInviteController::class, 'claim']);
     Route::post('/brand-affiliate-invites/{token}/decline', [BrandAffiliateInviteController::class, 'decline']);
     Route::get('/brand-partners', [BrandPartnerController::class, 'index']);
