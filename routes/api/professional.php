@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
 use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
+use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
@@ -179,6 +180,11 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     // Store: Featured Products
     Route::get('/store/featured-products', [FeaturedProductsController::class, 'index']);
     Route::put('/store/featured-products', [FeaturedProductsController::class, 'update']);
+
+    // Store: Brand Settings & Per-Product Settings
+    Route::get('/store/brand-settings', [BrandStoreController::class, 'index']);
+    Route::patch('/store/brand-settings', [BrandStoreController::class, 'updateSettings']);
+    Route::put('/store/brand-product-settings', [BrandStoreController::class, 'updateProductSettings']);
 
     // Fresha Integration
     Route::get('/fresha/status', [FreshaIntegrationController::class, 'status']);
