@@ -22,14 +22,18 @@ class BrandProductSetting extends Model
         'shopify_product_id',
         'commission_override',
         'discount_rate',
+        'custom_price',
         'is_featured',
+        'is_available',
         'sort_order',
     ];
 
     protected $casts = [
         'commission_override' => 'decimal:2',
         'discount_rate'       => 'decimal:2',
+        'custom_price'        => 'decimal:2',
         'is_featured'         => 'boolean',
+        'is_available'        => 'boolean',
         'sort_order'          => 'integer',
     ];
 }

@@ -35,7 +35,9 @@ class BrandStoreController extends ApiController
                 'shopify_product_id' => (string) $p->shopify_product_id,
                 'commission_override' => $p->commission_override !== null ? (float) $p->commission_override : null,
                 'discount_rate'       => $p->discount_rate !== null ? (float) $p->discount_rate : null,
+                'custom_price'        => $p->custom_price !== null ? (float) $p->custom_price : null,
                 'is_featured'         => (bool) $p->is_featured,
+                'is_available'        => isset($p->is_available) ? (bool) $p->is_available : true,
                 'sort_order'          => (int) $p->sort_order,
             ])
             ->values()
@@ -77,11 +79,16 @@ class BrandStoreController extends ApiController
     /**
      * PUT /store/brand-product-settings
      * Full replace of all per-product settings for this brand.
-     * Accepts: { products: [{ shopify_product_id, commission_override?, discount_rate?, is_featured?, sort_order? }] }
+     *
+     * Accepts: { products: [{
+     *   shopify_product_id, commission_override?, discount_rate?,
+     *   custom_price?, is_featured?, is_available?, sort_order?
+     * }] }
      *
      * Rules:
      *  - commission_override must be >= brand default_commission_rate (if set)
      *  - max 10 products may have is_featured = true
+     *  - custom_price must be >= 0 (if set)
      */
     public function updateProductSettings(Request $request)
     {
@@ -92,7 +99,9 @@ class BrandStoreController extends ApiController
             'products.*.shopify_product_id'   => ['required', 'string', 'max:255'],
             'products.*.commission_override'  => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'products.*.discount_rate'        => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'products.*.custom_price'         => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'products.*.is_featured'          => ['sometimes', 'boolean'],
+            'products.*.is_available'         => ['sometimes', 'boolean'],
             'products.*.sort_order'           => ['sometimes', 'integer', 'min:0'],
         ]);
 
@@ -132,14 +141,22 @@ class BrandStoreController extends ApiController
                 BrandProductSetting::where('professional_id', $professional->id)->delete();
 
                 foreach ($validated['products'] as $index => $product) {
-                    BrandProductSetting::create([
+                    $row = [
                         'professional_id'    => (string) $professional->id,
                         'shopify_product_id' => (string) $product['shopify_product_id'],
                         'commission_override' => $product['commission_override'] ?? null,
                         'discount_rate'       => $product['discount_rate'] ?? null,
+                        'custom_price'        => $product['custom_price'] ?? null,
                         'is_featured'         => (bool) ($product['is_featured'] ?? false),
                         'sort_order'          => $product['sort_order'] ?? $index,
-                    ]);
+                    ];
+
+                    // Only set is_available if the column exists (guard for pre-migration environments)
+                    if (array_key_exists('is_available', $product)) {
+                        $row['is_available'] = (bool) $product['is_available'];
+                    }
+
+                    BrandProductSetting::create($row);
                 }
             });
         } catch (Throwable $e) {
