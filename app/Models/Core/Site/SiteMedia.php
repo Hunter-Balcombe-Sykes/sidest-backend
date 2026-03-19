@@ -3,18 +3,17 @@
 namespace App\Models\Core\Site;
 
 use App\Models\BaseModel;
-use App\Models\Core\ImageVariant;
 use App\Models\Core\MediaVariant;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class SiteImage extends BaseModel
+class SiteMedia extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'site_images';
+    protected $table = 'site_media';
 
     public $incrementing = false;
     protected $keyType = 'string';
@@ -71,11 +70,6 @@ class SiteImage extends BaseModel
         return $this->belongsTo(Site::class, 'site_id');
     }
 
-    public function variants(): HasMany
-    {
-        return $this->hasMany(ImageVariant::class, 'image_id');
-    }
-
     public function mediaVariants(): HasMany
     {
         return $this->hasMany(MediaVariant::class, 'media_id');
@@ -86,14 +80,16 @@ class SiteImage extends BaseModel
     /* ------------------------------------------------------------------ */
 
     /**
-     * Return [variant_name => public_url] map for this image.
+     * Return [variant_key => public_url] map for image media items.
+     * Filters to artifact_type='webp' from the already-loaded mediaVariants relation.
      *
      * @return array<string, string>
      */
     public function variantUrls(): array
     {
-        return $this->variants
-            ->mapWithKeys(fn (ImageVariant $v) => [$v->variant => $v->url])
+        return $this->mediaVariants
+            ->filter(fn (MediaVariant $v) => $v->artifact_type === 'webp')
+            ->mapWithKeys(fn (MediaVariant $v) => [$v->variant_key => $v->url])
             ->all();
     }
 }

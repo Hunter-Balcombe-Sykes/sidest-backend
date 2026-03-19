@@ -5,7 +5,7 @@
 use App\Jobs\DeleteMediaArtifactsJob;
 use App\Jobs\ProcessImageVariantsJob;
 use App\Jobs\ProcessVideoVariantsJob;
-use App\Models\Core\Site\SiteImage;
+use App\Models\Core\Site\SiteMedia;
 use App\Services\Media\ImageVariantService;
 use App\Services\Media\VideoVariantService;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -30,7 +30,7 @@ beforeEach(function () {
 });
 
 it('rethrows image processing exceptions and marks failed in failed handler', function () {
-    $imageId = seedSiteImageRow(SiteImage::MEDIA_TYPE_IMAGE);
+    $imageId = seedSiteImageRow(SiteMedia::MEDIA_TYPE_IMAGE);
     $originalPath = "images/test/{$imageId}/original.jpg";
 
     Storage::disk('local')->put($originalPath, 'image-bytes');
@@ -43,18 +43,18 @@ it('rethrows image processing exceptions and marks failed in failed handler', fu
 
     expect(fn () => $job->handle($service))->toThrow(RuntimeException::class, 'image boom');
 
-    $row = SiteImage::query()->findOrFail($imageId);
-    expect($row->processing_state)->toBe(SiteImage::PROCESSING_STATE_PROCESSING);
+    $row = SiteMedia::query()->findOrFail($imageId);
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_PROCESSING);
 
     $job->failed(new RuntimeException('image boom'));
     $row->refresh();
 
-    expect($row->processing_state)->toBe(SiteImage::PROCESSING_STATE_FAILED);
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_FAILED);
     expect((string) $row->processing_error)->toContain('image boom');
 });
 
 it('fast-fails image processing when original file is missing', function () {
-    $imageId = seedSiteImageRow(SiteImage::MEDIA_TYPE_IMAGE);
+    $imageId = seedSiteImageRow(SiteMedia::MEDIA_TYPE_IMAGE);
     $originalPath = "images/test/{$imageId}/missing.jpg";
 
     $service = Mockery::mock(ImageVariantService::class);
@@ -67,13 +67,13 @@ it('fast-fails image processing when original file is missing', function () {
 
     $job->assertFailed();
 
-    $row = SiteImage::query()->findOrFail($imageId);
-    expect($row->processing_state)->toBe(SiteImage::PROCESSING_STATE_FAILED);
+    $row = SiteMedia::query()->findOrFail($imageId);
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_FAILED);
     expect((string) $row->processing_error)->toContain('Original file not found');
 });
 
 it('rethrows video processing exceptions and marks failed in failed handler', function () {
-    $mediaId = seedSiteImageRow(SiteImage::MEDIA_TYPE_VIDEO);
+    $mediaId = seedSiteImageRow(SiteMedia::MEDIA_TYPE_VIDEO);
     $originalPath = "videos/test/{$mediaId}/original.mp4";
 
     Storage::disk('local')->put($originalPath, 'video-bytes');
@@ -86,18 +86,18 @@ it('rethrows video processing exceptions and marks failed in failed handler', fu
 
     expect(fn () => $job->handle($service))->toThrow(RuntimeException::class, 'video boom');
 
-    $row = SiteImage::query()->findOrFail($mediaId);
-    expect($row->processing_state)->toBe(SiteImage::PROCESSING_STATE_PROCESSING);
+    $row = SiteMedia::query()->findOrFail($mediaId);
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_PROCESSING);
 
     $job->failed(new RuntimeException('video boom'));
     $row->refresh();
 
-    expect($row->processing_state)->toBe(SiteImage::PROCESSING_STATE_FAILED);
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_FAILED);
     expect((string) $row->processing_error)->toContain('video boom');
 });
 
 it('fast-fails video processing when original file is missing', function () {
-    $mediaId = seedSiteImageRow(SiteImage::MEDIA_TYPE_VIDEO);
+    $mediaId = seedSiteImageRow(SiteMedia::MEDIA_TYPE_VIDEO);
     $originalPath = "videos/test/{$mediaId}/missing.mp4";
 
     $service = Mockery::mock(VideoVariantService::class);
@@ -110,13 +110,13 @@ it('fast-fails video processing when original file is missing', function () {
 
     $job->assertFailed();
 
-    $row = SiteImage::query()->findOrFail($mediaId);
-    expect($row->processing_state)->toBe(SiteImage::PROCESSING_STATE_FAILED);
+    $row = SiteMedia::query()->findOrFail($mediaId);
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_FAILED);
     expect((string) $row->processing_error)->toContain('Original video file not found');
 });
 
 it('keeps video media ready when the processing job completes successfully', function () {
-    $mediaId = seedSiteImageRow(SiteImage::MEDIA_TYPE_VIDEO);
+    $mediaId = seedSiteImageRow(SiteMedia::MEDIA_TYPE_VIDEO);
     $originalPath = "videos/test/{$mediaId}/original.mp4";
 
     Storage::disk('local')->put($originalPath, 'video-bytes');
@@ -124,10 +124,10 @@ it('keeps video media ready when the processing job completes successfully', fun
     $service = Mockery::mock(VideoVariantService::class);
     $service->shouldReceive('resolvedDiskName')->once()->andReturn('local');
     $service->shouldReceive('processVariants')->once()->andReturnUsing(function () use ($mediaId) {
-        SiteImage::query()
+        SiteMedia::query()
             ->where('id', $mediaId)
             ->update([
-                'processing_state' => SiteImage::PROCESSING_STATE_READY,
+                'processing_state' => SiteMedia::PROCESSING_STATE_READY,
                 'processing_error' => null,
             ]);
     });
@@ -135,8 +135,8 @@ it('keeps video media ready when the processing job completes successfully', fun
     $job = new ProcessVideoVariantsJob($mediaId, $originalPath, "videos/test/{$mediaId}");
     $job->handle($service);
 
-    $row = SiteImage::query()->findOrFail($mediaId);
-    expect($row->processing_state)->toBe(SiteImage::PROCESSING_STATE_READY);
+    $row = SiteMedia::query()->findOrFail($mediaId);
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_READY);
 });
 
 it('rethrows delete cleanup failures so the queue can retry', function () {
@@ -214,7 +214,7 @@ function bootstrapMediaJobsSchema(): void
 
     $db = DB::connection('pgsql');
 
-    $db->statement('CREATE TABLE IF NOT EXISTS site_images (
+    $db->statement('CREATE TABLE IF NOT EXISTS site_media (
         id TEXT PRIMARY KEY,
         site_id TEXT NULL,
         pool TEXT NOT NULL,
@@ -257,7 +257,7 @@ function seedSiteImageRow(string $mediaType): string
 {
     $id = (string) Str::uuid();
 
-    DB::connection('pgsql')->table('site_images')->insert([
+    DB::connection('pgsql')->table('site_media')->insert([
         'id' => $id,
         'site_id' => (string) Str::uuid(),
         'pool' => 'gallery',
@@ -265,7 +265,7 @@ function seedSiteImageRow(string $mediaType): string
         'sort_order' => 0,
         'is_active' => true,
         'media_type' => $mediaType,
-        'processing_state' => SiteImage::PROCESSING_STATE_PENDING,
+        'processing_state' => SiteMedia::PROCESSING_STATE_PENDING,
         'created_at' => now()->toDateTimeString(),
         'updated_at' => now()->toDateTimeString(),
     ]);

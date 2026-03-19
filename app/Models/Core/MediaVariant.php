@@ -3,15 +3,19 @@
 namespace App\Models\Core;
 
 use App\Models\BaseModel;
-use App\Models\Core\Site\SiteImage;
+use App\Models\Core\Site\SiteMedia;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * A single video artifact row in core.media_variants.
+ * A single processed variant or artifact row in core.media_variants.
  *
- * Each row represents one logical output for a video SiteImage:
+ * Images (artifact_type='webp'):
+ *   - variant_key='optimized'  + artifact_type='webp'         → optimised WebP
+ *   - variant_key='maximized'  + artifact_type='webp'         → full-quality WebP
+ *
+ * Videos:
  *   - variant_key='optimized'  + artifact_type='mp4'          → 720p MP4
  *   - variant_key='maximized'  + artifact_type='mp4'          → 1080p MP4
  *   - variant_key='optimized'  + artifact_type='hls_playlist' → 720p HLS playlist
@@ -20,7 +24,7 @@ use Illuminate\Support\Facades\Storage;
  *   - variant_key='poster'     + artifact_type='poster'       → poster JPEG
  *
  * @property string      $id
- * @property string      $media_id          FK → site_images.id
+ * @property string      $media_id          FK → site_media.id
  * @property string      $variant_key       Logical tier: optimized|maximized|adaptive|poster
  * @property string      $artifact_type     Physical format: mp4|hls_playlist|poster
  * @property string      $disk
@@ -55,6 +59,7 @@ class MediaVariant extends BaseModel
         'file_size_bytes',
         'duration_ms',
         'metadata',
+        'content_hash',
     ];
 
     protected $casts = [
@@ -72,7 +77,7 @@ class MediaVariant extends BaseModel
 
     public function media(): BelongsTo
     {
-        return $this->belongsTo(SiteImage::class, 'media_id');
+        return $this->belongsTo(SiteMedia::class, 'media_id');
     }
 
     /* ------------------------------------------------------------------ */

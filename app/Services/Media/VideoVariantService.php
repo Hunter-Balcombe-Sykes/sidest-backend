@@ -3,7 +3,7 @@
 namespace App\Services\Media;
 
 use App\Models\Core\MediaVariant;
-use App\Models\Core\Site\SiteImage;
+use App\Models\Core\Site\SiteMedia;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\Storage;
  *   6. FFmpeg   – extract poster JPEG at 1s mark
  *   7. Upload   – stream all artifacts to media disk
  *   8. DB upsert – persist one MediaVariant row per logical artifact
- *   9. SiteImage update – set processing_state, duration_ms, poster_path
+ *   9. SiteMedia update – set processing_state, duration_ms, poster_path
  *
  * Storage layout under the media disk:
  *   videos/{proId}/{mediaId}/
@@ -222,12 +222,12 @@ class VideoVariantService
                 ]
             );
 
-            // --- 8. Update SiteImage ---
-            SiteImage::query()
+            // --- 8. Update SiteMedia ---
+            SiteMedia::query()
                 ->where('id', $mediaId)
                 ->whereNull('deleted_at')
                 ->update([
-                    'processing_state' => SiteImage::PROCESSING_STATE_READY,
+                    'processing_state' => SiteMedia::PROCESSING_STATE_READY,
                     'processing_error' => null,
                     'duration_ms'      => $durationMs,
                     'poster_path'      => $posterRemotePath,

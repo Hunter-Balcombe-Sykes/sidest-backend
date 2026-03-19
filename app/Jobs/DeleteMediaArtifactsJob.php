@@ -16,7 +16,7 @@ use Throwable;
  *
  * Videos generate many HLS segment files (.ts) that are impractical to
  * delete synchronously during a DELETE request.  The controller soft-deletes
- * the SiteImage row immediately (keeping the HTTP response fast), then
+ * the SiteMedia row immediately (keeping the HTTP response fast), then
  * dispatches this job to clean up all storage artifacts and DB rows.
  *
  * Dispatched onto the "videos" queue to avoid blocking image workers.
@@ -30,7 +30,7 @@ class DeleteMediaArtifactsJob implements ShouldQueue
     public int $backoff = 30;
 
     /**
-     * @param  string  $mediaId   UUID of the (now soft-deleted) SiteImage row.
+     * @param  string  $mediaId   UUID of the (now soft-deleted) SiteMedia row.
      * @param  string  $basePath  Storage prefix for all video artifacts (videos/{proId}/{mediaId}).
      * @param  string  $pool      Pool name (for logging context only).
      */

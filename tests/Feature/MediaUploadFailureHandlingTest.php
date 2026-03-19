@@ -7,7 +7,7 @@ use App\Http\Requests\Api\Professional\Uploads\UploadImageRequest;
 use App\Jobs\DeleteMediaArtifactsJob;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
-use App\Models\Core\Site\SiteImage;
+use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Contracts\Validation\Validator;
@@ -42,15 +42,15 @@ it('dispatches video cleanup with directory base path when deleting media', func
 
     $mediaId = (string) Str::uuid();
 
-    DB::connection('pgsql')->table('site_images')->insert([
+    DB::connection('pgsql')->table('site_media')->insert([
         'id' => $mediaId,
         'site_id' => $professional->site->id,
         'pool' => 'gallery',
         'path' => "videos/{$professional->id}/{$mediaId}/original_abc123.mp4",
         'sort_order' => 0,
         'is_active' => true,
-        'media_type' => SiteImage::MEDIA_TYPE_VIDEO,
-        'processing_state' => SiteImage::PROCESSING_STATE_READY,
+        'media_type' => SiteMedia::MEDIA_TYPE_VIDEO,
+        'processing_state' => SiteMedia::PROCESSING_STATE_READY,
         'created_at' => now()->toDateTimeString(),
         'updated_at' => now()->toDateTimeString(),
     ]);
@@ -61,7 +61,7 @@ it('dispatches video cleanup with directory base path when deleting media', func
 
     $mediaService = Mockery::mock(ImageVariantService::class);
     $controller = new ProfessionalUploadController($mediaService);
-    $siteImage = SiteImage::query()->findOrFail($mediaId);
+    $siteImage = SiteMedia::query()->findOrFail($mediaId);
 
     $response = $controller->destroy($siteImage);
 
@@ -73,7 +73,7 @@ it('dispatches video cleanup with directory base path when deleting media', func
             && $job->pool === 'gallery';
     });
 
-    $deleted = SiteImage::withTrashed()->findOrFail($mediaId);
+    $deleted = SiteMedia::withTrashed()->findOrFail($mediaId);
     expect($deleted->trashed())->toBeTrue();
 });
 
@@ -117,10 +117,10 @@ it('returns 503 and soft-deletes media when video dispatch fails', function () {
     expect($response->getData(true)['message'] ?? null)
         ->toBe('Video processing is temporarily unavailable. Please try again.');
 
-    $media = SiteImage::withTrashed()->latest('created_at')->first();
+    $media = SiteMedia::withTrashed()->latest('created_at')->first();
     expect($media)->not->toBeNull();
     expect($media->trashed())->toBeTrue();
-    expect(SiteImage::query()->count())->toBe(0);
+    expect(SiteMedia::query()->count())->toBe(0);
     expect(Storage::disk('local')->exists($media->path))->toBeFalse();
 });
 
@@ -157,7 +157,7 @@ function bootstrapMediaUploadFailureSchema(): void
         updated_at TEXT NULL
     )');
 
-    $db->statement('CREATE TABLE IF NOT EXISTS site_images (
+    $db->statement('CREATE TABLE IF NOT EXISTS site_media (
         id TEXT PRIMARY KEY,
         site_id TEXT NOT NULL,
         pool TEXT NOT NULL,

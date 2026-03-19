@@ -2,7 +2,6 @@
 
 namespace App\Services\Cache;
 
-use App\Models\Core\ImageVariant;
 use App\Models\Core\MediaVariant;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
@@ -428,120 +427,94 @@ class SiteCacheService
      */
     private function resolveImageVariantUrlsInSite(array $site, string $siteId): array
     {
-        // --- Images: gallery + content_images ---
-        $imageIds = [];
+        // --- Collect all media IDs (images + videos) in one pass ---
+        $allMediaIds = [];
+        foreach (['gallery', 'content_images', 'gallery_videos', 'content_videos'] as $key) {
+            foreach ($site[$key] ?? [] as $item) {
+                if (is_array($item) && ! empty($item['id'])) {
+                    $allMediaIds[] = $item['id'];
+                }
+            }
+        }
+
+        // Single query: one DB round-trip for all variant rows across all media types.
+        // Index as: media_id → artifact_type → variant_key → URL
+        $mvByMedia = [];
+        if ($allMediaIds !== []) {
+            $allVariants = MediaVariant::query()
+                ->whereIn('media_id', array_unique($allMediaIds))
+                ->get();
+
+            foreach ($allVariants as $mv) {
+                $mvByMedia[$mv->media_id][$mv->artifact_type][$mv->variant_key] = $mv->url;
+            }
+        }
+
+        // --- Images: resolve variant URLs ---
         foreach (['gallery', 'content_images'] as $key) {
             $items = $site[$key] ?? [];
             if (! is_array($items)) {
                 continue;
             }
-            foreach ($items as $item) {
-                if (is_array($item) && ! empty($item['id'])) {
-                    $imageIds[] = $item['id'];
-                }
-            }
-        }
-
-        if ($imageIds !== []) {
-            $variants = ImageVariant::query()
-                ->whereIn('image_id', array_unique($imageIds))
-                ->get();
-
-            $urlByImageAndVariant = [];
-            foreach ($variants as $v) {
-                $urlByImageAndVariant[$v->image_id][$v->variant] = $v->url;
-            }
-
-            foreach (['gallery', 'content_images'] as $key) {
-                $items = $site[$key] ?? [];
-                if (! is_array($items)) {
+            foreach ($items as $i => $item) {
+                if (! is_array($item) || empty($item['id'])) {
                     continue;
                 }
-                foreach ($items as $i => $item) {
-                    if (! is_array($item) || empty($item['id'])) {
-                        continue;
-                    }
-                    $imageId      = $item['id'];
-                    $pathVariants = $item['variants'] ?? [];
-                    if (! is_array($pathVariants)) {
-                        continue;
-                    }
-                    $urlVariants = [];
-                    foreach ($pathVariants as $variantName => $path) {
-                        $url = $urlByImageAndVariant[$imageId][$variantName] ?? null;
-                        if ($url !== null) {
-                            $urlVariants[$variantName] = $url;
-                        }
-                    }
-                    $site[$key][$i]['variants'] = $urlVariants;
+                $mediaId      = $item['id'];
+                $pathVariants = $item['variants'] ?? [];
+                if (! is_array($pathVariants)) {
+                    continue;
                 }
-
-                usort($site[$key], function ($a, $b) {
-                    $aSort = is_array($a) ? (int) ($a['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
-                    $bSort = is_array($b) ? (int) ($b['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
-                    if ($aSort !== $bSort) {
-                        return $aSort <=> $bSort;
+                $urlVariants = [];
+                foreach ($pathVariants as $variantKey => $path) {
+                    $url = $mvByMedia[$mediaId]['webp'][$variantKey] ?? null;
+                    if ($url !== null) {
+                        $urlVariants[$variantKey] = $url;
                     }
-                    $aId = is_array($a) ? (string) ($a['id'] ?? '') : '';
-                    $bId = is_array($b) ? (string) ($b['id'] ?? '') : '';
-                    return $aId <=> $bId;
-                });
+                }
+                $site[$key][$i]['variants'] = $urlVariants;
             }
+
+            usort($site[$key], function ($a, $b) {
+                $aSort = is_array($a) ? (int) ($a['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
+                $bSort = is_array($b) ? (int) ($b['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
+                if ($aSort !== $bSort) {
+                    return $aSort <=> $bSort;
+                }
+                $aId = is_array($a) ? (string) ($a['id'] ?? '') : '';
+                $bId = is_array($b) ? (string) ($b['id'] ?? '') : '';
+                return $aId <=> $bId;
+            });
         }
 
-        // --- Videos: gallery_videos + content_videos ---
-        $videoIds = [];
+        // --- Videos: resolve variant/stream/poster URLs ---
         foreach (['gallery_videos', 'content_videos'] as $key) {
             $items = $site[$key] ?? [];
             if (! is_array($items)) {
                 continue;
             }
-            foreach ($items as $item) {
-                if (is_array($item) && ! empty($item['id'])) {
-                    $videoIds[] = $item['id'];
-                }
-            }
-        }
-
-        if ($videoIds !== []) {
-            $mediaVariants = MediaVariant::query()
-                ->whereIn('media_id', array_unique($videoIds))
-                ->get();
-
-            // Index by media_id → artifact_type → variant_key → URL
-            $mvByMedia = [];
-            foreach ($mediaVariants as $mv) {
-                $mvByMedia[$mv->media_id][$mv->artifact_type][$mv->variant_key] = $mv->url;
-            }
-
-            foreach (['gallery_videos', 'content_videos'] as $key) {
-                $items = $site[$key] ?? [];
-                if (! is_array($items)) {
+            foreach ($items as $i => $item) {
+                if (! is_array($item) || empty($item['id'])) {
                     continue;
                 }
-                foreach ($items as $i => $item) {
-                    if (! is_array($item) || empty($item['id'])) {
-                        continue;
-                    }
-                    $mediaId   = $item['id'];
-                    $byType    = $mvByMedia[$mediaId] ?? [];
+                $mediaId = $item['id'];
+                $byType  = $mvByMedia[$mediaId] ?? [];
 
-                    $site[$key][$i]['variants'] = $byType['mp4'] ?? [];
-                    $site[$key][$i]['streams']  = $byType['hls_playlist'] ?? [];
-                    $site[$key][$i]['poster']   = ($byType['poster']['poster'] ?? null);
-                }
-
-                usort($site[$key], function ($a, $b) {
-                    $aSort = is_array($a) ? (int) ($a['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
-                    $bSort = is_array($b) ? (int) ($b['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
-                    if ($aSort !== $bSort) {
-                        return $aSort <=> $bSort;
-                    }
-                    $aId = is_array($a) ? (string) ($a['id'] ?? '') : '';
-                    $bId = is_array($b) ? (string) ($b['id'] ?? '') : '';
-                    return $aId <=> $bId;
-                });
+                $site[$key][$i]['variants'] = $byType['mp4'] ?? [];
+                $site[$key][$i]['streams']  = $byType['hls_playlist'] ?? [];
+                $site[$key][$i]['poster']   = ($byType['poster']['poster'] ?? null);
             }
+
+            usort($site[$key], function ($a, $b) {
+                $aSort = is_array($a) ? (int) ($a['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
+                $bSort = is_array($b) ? (int) ($b['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
+                if ($aSort !== $bSort) {
+                    return $aSort <=> $bSort;
+                }
+                $aId = is_array($a) ? (string) ($a['id'] ?? '') : '';
+                $bId = is_array($b) ? (string) ($b['id'] ?? '') : '';
+                return $aId <=> $bId;
+            });
         }
 
         // Ensure video keys always exist even when there are no videos (backward-compat).

@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Models\Core\Site\SiteImage;
+use App\Models\Core\Site\SiteMedia;
 use App\Services\Media\VideoVariantService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -36,7 +36,7 @@ class ProcessVideoVariantsJob implements ShouldQueue
     public int $backoff = 60;
 
     /**
-     * @param  string  $mediaId       UUID of the SiteImage row.
+     * @param  string  $mediaId       UUID of the SiteMedia row.
      * @param  string  $originalPath  Storage path of the uploaded original.
      * @param  string  $basePath      Directory prefix under media disk (videos/{proId}/{mediaId}).
      */
@@ -56,27 +56,27 @@ class ProcessVideoVariantsJob implements ShouldQueue
             'original_path' => $this->originalPath,
         ]);
 
-        $siteImage = SiteImage::withTrashed()->find($this->mediaId);
+        $siteMedia = SiteMedia::withTrashed()->find($this->mediaId);
 
-        if (! $siteImage) {
-            Log::warning('ProcessVideoVariantsJob: SiteImage row no longer exists, skipping.', [
+        if (! $siteMedia) {
+            Log::warning('ProcessVideoVariantsJob: SiteMedia row no longer exists, skipping.', [
                 'media_id' => $this->mediaId,
             ]);
             return;
         }
 
-        if ($siteImage->trashed()) {
-            Log::info('ProcessVideoVariantsJob: SiteImage row is soft-deleted, skipping.', [
+        if ($siteMedia->trashed()) {
+            Log::info('ProcessVideoVariantsJob: SiteMedia row is soft-deleted, skipping.', [
                 'media_id' => $this->mediaId,
             ]);
             return;
         }
 
-        SiteImage::query()
+        SiteMedia::query()
             ->where('id', $this->mediaId)
             ->whereNull('deleted_at')
             ->update([
-                'processing_state' => SiteImage::PROCESSING_STATE_PROCESSING,
+                'processing_state' => SiteMedia::PROCESSING_STATE_PROCESSING,
                 'processing_error' => null,
             ]);
 
@@ -140,20 +140,20 @@ class ProcessVideoVariantsJob implements ShouldQueue
 
     private function markFailed(string $reason): void
     {
-        $updated = SiteImage::query()
+        $updated = SiteMedia::query()
             ->where('id', $this->mediaId)
             ->whereNull('deleted_at')
             ->update([
-                'processing_state' => SiteImage::PROCESSING_STATE_FAILED,
+                'processing_state' => SiteMedia::PROCESSING_STATE_FAILED,
                 'processing_error' => $reason,
             ]);
 
         if ($updated === 0) {
-            $siteImage = SiteImage::withTrashed()->where('id', $this->mediaId)->first();
+            $siteMedia = SiteMedia::withTrashed()->where('id', $this->mediaId)->first();
             Log::info('ProcessVideoVariantsJob: failed-state update skipped.', [
                 'media_id'         => $this->mediaId,
-                'row_exists'       => $siteImage !== null,
-                'is_soft_deleted'  => $siteImage?->trashed() ?? false,
+                'row_exists'       => $siteMedia !== null,
+                'is_soft_deleted'  => $siteMedia?->trashed() ?? false,
             ]);
         }
     }

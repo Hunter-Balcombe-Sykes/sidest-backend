@@ -13,7 +13,7 @@ use App\Http\Requests\Api\Professional\Uploads\UploadImageRequest;
 use App\Jobs\DeleteMediaArtifactsJob;
 use App\Jobs\ProcessImageVariantsJob;
 use App\Jobs\ProcessVideoVariantsJob;
-use App\Models\Core\Site\SiteImage;
+use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Http\JsonResponse;
@@ -50,7 +50,7 @@ class ProfessionalUploadController extends ApiController
         $pool       = $request->validated('pool');
         $isVideo    = $request->hasFile('video');
         $file       = $isVideo ? $request->file('video') : $request->file('image');
-        $mediaType  = $isVideo ? SiteImage::MEDIA_TYPE_VIDEO : SiteImage::MEDIA_TYPE_IMAGE;
+        $mediaType  = $isVideo ? SiteMedia::MEDIA_TYPE_VIDEO : SiteMedia::MEDIA_TYPE_IMAGE;
 
         Log::info('Media upload started', [
             'pro_id'       => $pro->id,
@@ -63,7 +63,7 @@ class ProfessionalUploadController extends ApiController
         // Pool limit is shared across media types (images + videos count toward the same cap).
         $maxItems = (int) config("comet.image_pools.{$pool}.max", 5);
 
-        $activeCount = SiteImage::query()
+        $activeCount = SiteMedia::query()
             ->where('site_id', $site->id)
             ->where('pool', $pool)
             ->where('is_active', true)
@@ -75,13 +75,13 @@ class ProfessionalUploadController extends ApiController
             );
         }
 
-        // --- Create SiteImage row (with advisory lock for race safety) ---
+        // --- Create SiteMedia row (with advisory lock for race safety) ---
         $media = DB::transaction(function () use ($site, $pool, $maxItems, $request, $mediaType, $file) {
             if (DB::getDriverName() === 'pgsql') {
                 DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-images:{$site->id}"]);
             }
 
-            $siteImages = SiteImage::query()
+            $siteImages = SiteMedia::query()
                 ->where('site_id', $site->id)
                 ->lockForUpdate()
                 ->get(['id', 'pool', 'sort_order', 'is_active']);
@@ -97,7 +97,7 @@ class ProfessionalUploadController extends ApiController
 
             $maxSort = $siteImages->max('sort_order');
 
-            $media = SiteImage::create([
+            $media = SiteMedia::create([
                 'site_id'             => $site->id,
                 'pool'                => $pool,
                 'path'                => '',
@@ -105,12 +105,12 @@ class ProfessionalUploadController extends ApiController
                 'sort_order'          => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
                 'is_active'           => true,
                 'media_type'          => $mediaType,
-                'processing_state'    => SiteImage::PROCESSING_STATE_PENDING,
+                'processing_state'    => SiteMedia::PROCESSING_STATE_PENDING,
                 'original_mime'       => $file->getMimeType(),
                 'original_size_bytes' => $file->getSize(),
             ]);
 
-            Log::info('SiteImage row created', ['media_id' => $media->id, 'media_type' => $mediaType]);
+            Log::info('SiteMedia row created', ['media_id' => $media->id, 'media_type' => $mediaType]);
 
             return $media;
         });
@@ -198,13 +198,8 @@ class ProfessionalUploadController extends ApiController
         app(SiteCacheService::class)->invalidateSite($site);
 
         // Refresh model state (sync mode may have updated processing_state to 'ready').
-        // Eager-load the appropriate relation so buildMediaPayload avoids a lazy-load hit.
         $media->refresh();
-        if ($media->media_type === SiteImage::MEDIA_TYPE_IMAGE) {
-            $media->load('variants');
-        } elseif ($media->media_type === SiteImage::MEDIA_TYPE_VIDEO) {
-            $media->load('mediaVariants');
-        }
+        $media->load('mediaVariants');
         $payload = $this->buildMediaPayload($media, includeVariants: true);
 
         return $this->success($payload, 201);
@@ -227,7 +222,7 @@ class ProfessionalUploadController extends ApiController
         $rawMediaType = strtolower(trim((string) request()->input('media_type', 'image')));
         $mediaTypeFilter = in_array($rawMediaType, ['image', 'video', 'all'], true) ? $rawMediaType : 'image';
 
-        $query = SiteImage::query()
+        $query = SiteMedia::query()
             ->where('site_id', $site->id)
             ->where('is_active', true)
             ->orderBy('pool')
@@ -253,16 +248,9 @@ class ProfessionalUploadController extends ApiController
             }
         }
 
-        // Eager-load the appropriate variants based on media type filter.
-        if ($mediaTypeFilter === 'image') {
-            $query->with('variants');
-        } elseif ($mediaTypeFilter === 'video') {
-            $query->with('mediaVariants');
-        } else {
-            $query->with(['variants', 'mediaVariants']);
-        }
+        $query->with('mediaVariants');
 
-        $items = $query->get()->map(fn (SiteImage $item) => $this->buildMediaPayload($item, includeVariants: true));
+        $items = $query->get()->map(fn (SiteMedia $item) => $this->buildMediaPayload($item, includeVariants: true));
 
         return $this->success([
             'images' => $items,
@@ -288,7 +276,7 @@ class ProfessionalUploadController extends ApiController
         $site = $this->currentSite($pro);
 
         $pool      = $request->validated('pool');
-        $mediaType = $request->validated('media_type') ?? SiteImage::MEDIA_TYPE_IMAGE;
+        $mediaType = $request->validated('media_type') ?? SiteMedia::MEDIA_TYPE_IMAGE;
         $ids       = array_values(array_unique($request->validated('ids') ?? []));
 
         DB::transaction(function () use ($site, $pool, $mediaType, $ids) {
@@ -296,7 +284,7 @@ class ProfessionalUploadController extends ApiController
                 DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-images:{$site->id}"]);
             }
 
-            $siteImages = SiteImage::query()
+            $siteImages = SiteMedia::query()
                 ->where('site_id', $site->id)
                 ->lockForUpdate()
                 ->orderBy('sort_order')
@@ -341,14 +329,14 @@ class ProfessionalUploadController extends ApiController
             $offset = $siteImages->count() + 1000;
 
             foreach ($finalIds as $index => $id) {
-                SiteImage::query()
+                SiteMedia::query()
                     ->where('site_id', $site->id)
                     ->where('id', $id)
                     ->update(['sort_order' => $offset + $index]);
             }
 
             foreach ($finalIds as $index => $id) {
-                SiteImage::query()
+                SiteMedia::query()
                     ->where('site_id', $site->id)
                     ->where('id', $id)
                     ->update(['sort_order' => $index]);
@@ -368,7 +356,7 @@ class ProfessionalUploadController extends ApiController
      *
      * DELETE /api/images/{image}
      */
-    public function destroy(SiteImage $image): JsonResponse
+    public function destroy(SiteMedia $image): JsonResponse
     {
         $pro = $this->currentProfessional(request());
         $pro->loadMissing('site');
@@ -376,7 +364,7 @@ class ProfessionalUploadController extends ApiController
 
         abort_unless($image->site_id === $site->id, 404);
 
-        if ($image->media_type === SiteImage::MEDIA_TYPE_VIDEO) {
+        if ($image->media_type === SiteMedia::MEDIA_TYPE_VIDEO) {
             // Dispatch async cleanup – video has many HLS segment files.
             $basePath = is_string($image->path) && trim($image->path) !== ''
                 ? dirname($image->path)
@@ -580,12 +568,12 @@ class ProfessionalUploadController extends ApiController
      * @param  bool  $includeVariants  Whether to include resolved variant/stream maps.
      * @return array<string, mixed>
      */
-    private function buildMediaPayload(SiteImage $media, bool $includeVariants = false): array
+    private function buildMediaPayload(SiteMedia $media, bool $includeVariants = false): array
     {
-        $isVideo     = $media->media_type === SiteImage::MEDIA_TYPE_VIDEO;
-        $isReady     = $media->processing_state === SiteImage::PROCESSING_STATE_READY;
-        $isProcessing = $media->processing_state === SiteImage::PROCESSING_STATE_PENDING
-            || $media->processing_state === SiteImage::PROCESSING_STATE_PROCESSING;
+        $isVideo     = $media->media_type === SiteMedia::MEDIA_TYPE_VIDEO;
+        $isReady     = $media->processing_state === SiteMedia::PROCESSING_STATE_READY;
+        $isProcessing = $media->processing_state === SiteMedia::PROCESSING_STATE_PENDING
+            || $media->processing_state === SiteMedia::PROCESSING_STATE_PROCESSING;
 
         $payload = [
             'id'               => $media->id,

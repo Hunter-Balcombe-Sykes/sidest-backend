@@ -82,9 +82,9 @@ class Site extends BaseModel
         return $query->where('is_published', true);
     }
 
-    public function siteImages(): HasMany
+    public function siteMedia(): HasMany
     {
-        return $this->hasMany(SiteImage::class, 'site_id');
+        return $this->hasMany(SiteMedia::class, 'site_id');
     }
 
     public function getPublishedAttribute(): bool

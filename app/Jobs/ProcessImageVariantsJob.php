@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Models\Core\Site\SiteImage;
+use App\Models\Core\Site\SiteMedia;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -31,7 +31,7 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     /**
      * @param  string  $originalPath  Path of the original on the media disk.
-     * @param  string  $imageId       UUID of the SiteImage row.
+     * @param  string  $imageId       UUID of the SiteMedia row.
      * @param  string  $basePath      Directory prefix for variant storage.
      */
     public function __construct(
@@ -49,27 +49,27 @@ class ProcessImageVariantsJob implements ShouldQueue
             'original_path' => $this->originalPath,
         ]);
 
-        $siteImage = SiteImage::withTrashed()->find($this->imageId);
+        $siteMedia = SiteMedia::withTrashed()->find($this->imageId);
 
-        if (! $siteImage) {
-            Log::warning('ProcessImageVariantsJob: SiteImage row no longer exists, skipping.', [
+        if (! $siteMedia) {
+            Log::warning('ProcessImageVariantsJob: SiteMedia row no longer exists, skipping.', [
                 'image_id' => $this->imageId,
             ]);
             return;
         }
 
-        if ($siteImage->trashed()) {
-            Log::info('ProcessImageVariantsJob: SiteImage row is soft-deleted, skipping.', [
+        if ($siteMedia->trashed()) {
+            Log::info('ProcessImageVariantsJob: SiteMedia row is soft-deleted, skipping.', [
                 'image_id' => $this->imageId,
             ]);
             return;
         }
 
-        SiteImage::query()
+        SiteMedia::query()
             ->where('id', $this->imageId)
             ->whereNull('deleted_at')
             ->update([
-                'processing_state' => SiteImage::PROCESSING_STATE_PROCESSING,
+                'processing_state' => SiteMedia::PROCESSING_STATE_PROCESSING,
                 'processing_error' => null,
             ]);
 
@@ -101,11 +101,11 @@ class ProcessImageVariantsJob implements ShouldQueue
                 basePath: $this->basePath,
             );
 
-            SiteImage::query()
+            SiteMedia::query()
                 ->where('id', $this->imageId)
                 ->whereNull('deleted_at')
                 ->update([
-                    'processing_state' => SiteImage::PROCESSING_STATE_READY,
+                    'processing_state' => SiteMedia::PROCESSING_STATE_READY,
                     'processing_error' => null,
                 ]);
 
@@ -132,20 +132,20 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     private function markFailed(string $reason): void
     {
-        $updated = SiteImage::query()
+        $updated = SiteMedia::query()
             ->where('id', $this->imageId)
             ->whereNull('deleted_at')
             ->update([
-                'processing_state' => SiteImage::PROCESSING_STATE_FAILED,
+                'processing_state' => SiteMedia::PROCESSING_STATE_FAILED,
                 'processing_error' => $reason,
             ]);
 
         if ($updated === 0) {
-            $siteImage = SiteImage::withTrashed()->where('id', $this->imageId)->first();
+            $siteMedia = SiteMedia::withTrashed()->where('id', $this->imageId)->first();
             Log::info('ProcessImageVariantsJob: failed-state update skipped.', [
                 'image_id'         => $this->imageId,
-                'row_exists'       => $siteImage !== null,
-                'is_soft_deleted'  => $siteImage?->trashed() ?? false,
+                'row_exists'       => $siteMedia !== null,
+                'is_soft_deleted'  => $siteMedia?->trashed() ?? false,
             ]);
         }
     }
