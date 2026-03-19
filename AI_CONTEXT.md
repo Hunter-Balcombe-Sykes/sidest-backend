@@ -1,4 +1,4 @@
-# AI_CONTEXT.md — Comet Platform
+# AI_CONTEXT.md — OneLink Platform
 
 > **Source of truth for AI tools working on this codebase.**
 > Read this before making changes. Update after meaningful progress.
@@ -7,7 +7,7 @@
 
 ## Project Overview
 
-**Comet** is a multi-tenant SaaS affiliate platform that gives influencers and beauty/barbering professionals a branded one-page personal website, connected to a specific brand partner. It replaces link-in-bio tools (like Linktree), adds an affiliate e-commerce shop, booking integrations, and detailed analytics — all within the brand's theme and identity.
+**OneLink** is a multi-tenant SaaS affiliate platform that gives influencers and beauty/barbering professionals a branded one-page personal website, connected to a specific brand partner. It replaces link-in-bio tools (like Linktree), adds an affiliate e-commerce shop, booking integrations, and detailed analytics — all within the brand's theme and identity.
 
 **What problem it solves:**
 Brands want influencers and professionals to sell their products without managing separate storefronts. Professionals/influencers want a polished all-in-one presence without design effort. Comet sits in the middle, handling the site, commerce, analytics, and commission distribution automatically.
@@ -33,9 +33,11 @@ Brands want influencers and professionals to sell their products without managin
 - Each affiliate gets their own subdomain site (e.g., `john.comet.app`) auto-themed in the brand's colours and branding.
 - The affiliate can add their own media, links, and bio — but cannot change the brand's theme/palette.
 - Customers visit the site, browse products, and purchase. The brand fulfils the order.
-- Revenue splits automatically: **brand gets their cut → Comet takes a platform fee → affiliate earns commission**.
+- When a customer purchases, Comet records the order and pushes it to the brand's Shopify store via a Shopify app. **The brand fulfils the order entirely.** Comet never ships product.
+- Commission is distributed automatically via **Stripe Connect** — the affiliate receives their commission, Comet's fee comes from the brand's monthly subscription (~$200/mo), not from per-transaction cuts.
 - Commission rates and product prices can be adjusted per affiliate by the brand (e.g., run a sale only on an influencer's site, or boost commission on slow-moving stock).
-- Service professionals (barbers, hairdressers) can also take bookings via Square or Fresha through the same site.
+- **An affiliate can be connected to multiple brands.** One primary brand may be designated in future.
+- Service professionals (barbers, hairdressers) can also take bookings via **Square or Fresha** through the same site. No in-house booking system is planned.
 - Brands and affiliates both see analytics: page views, link clicks, products sold, revenue earned.
 
 ### How the System Works
@@ -70,6 +72,10 @@ Analytics recorded for both brand and affiliate dashboards
 ---
 
 ## Codebase Summary
+
+**Repositories:**
+- **Backend (this repo):** `https://github.com/Hunter-Balcombe-Sykes/Comet-Backend` — branch `develop`
+- **Frontend:** `https://github.com/hunterbalcombesykes/Commet-web` — branch `main`, deployed on Vercel
 
 **Stack:** Laravel 12 · PHP 8.2+ · PostgreSQL (Supabase) · Redis · Cloudflare R2 · Supabase Auth (JWT)
 
@@ -287,19 +293,16 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 ### Suggested Implementation Order
 1. Order recording model + API endpoint (retail schema)
 2. Commission calculation service (brand rate → Comet fee → affiliate payout)
-3. Stripe Connect for affiliate payouts [NEEDS INPUT: confirm payment provider strategy]
+3. Stripe Connect for automatic affiliate payouts
 4. Brand analytics endpoints (aggregate affiliate performance)
 5. Video upload enablement (infrastructure task)
 6. Enterprise self-service CRUD
 7. Shopify catalogue sync service
 
 ### Open Questions
-- [NEEDS INPUT: Who fulfils orders? Does Comet record orders, or does it redirect to brand's Shopify/WooCommerce?]
-- [NEEDS INPUT: Commission distribution mechanism — Stripe Connect, manual payout, or other?]
-- [NEEDS INPUT: Does the platform fee come from brand or affiliate or both?]
-- [NEEDS INPUT: Can an influencer be affiliated with multiple brands simultaneously?]
-- [NEEDS INPUT: Is there an in-house booking system planned, or is it always Square/Fresha?]
-- [TBD: Public-facing site frontend — is it a separate repo or served from this repo?]
+- [TBD: Exact Shopify app architecture — webhook-driven order push vs. polling?]
+- [TBD: Multi-brand affiliation UX — how does the affiliate's site handle products from multiple brands simultaneously?]
+- [TBD: Stripe Connect account setup flow — does the professional onboard via Stripe Express during signup?]
 
 ---
 
@@ -362,6 +365,11 @@ When another AI reads this file, it should:
 | Pre-2026 | Professional follows brand theme (no free-range customisation) | Brand identity consistency is the core value proposition for brands |
 | Pre-2026 | Commission and price overrides are set by brand, not affiliate | Brands control pricing strategy for their affiliate channel |
 | 2026-03-19 | Created AI_CONTEXT.md as shared AI source of truth | Multiple AI tools working on codebase need a shared orientation document |
+| 2026-03-19 | Order fulfilment is handled entirely by brand via Shopify app | Comet records the order and pushes it to the brand's Shopify store; Comet never ships product |
+| 2026-03-19 | Commission distribution via Stripe Connect (automatic) | Automated payouts to affiliates; Comet takes platform fee from the brand's monthly subscription (~$200/mo), not from the transaction |
+| 2026-03-19 | Platform fee model: brand pays monthly subscription (~$200/mo) | Simpler billing — brand pays for access, not per-transaction fees on affiliate side |
+| 2026-03-19 | Affiliates can connect to multiple brands | One affiliate can represent multiple brands; one "primary" brand may be designated in future but not yet decided |
+| 2026-03-19 | No in-house booking system — Square and Fresha integrations only | Reduces scope; may revisit native booking in future |
 
 ---
 
@@ -369,7 +377,7 @@ When another AI reads this file, it should:
 
 ### What Another AI Should Know Before Continuing
 
-1. **This is a Laravel 12 API only.** There is no Blade frontend. The frontend (likely a separate repo) communicates via JSON API.
+1. **This is a Laravel 12 API only.** There is no Blade frontend. The frontend is a separate repo (`https://github.com/hunterbalcombesykes/Commet-web`, branch `main`, deployed on Vercel) and communicates via JSON API.
 2. **Database is Supabase PostgreSQL.** Use `supabase/migrations/` for all schema changes. Eloquent models map to tables in non-public schemas — check the model's `$table` and `$connection` properties.
 3. **Auth flow is JWT-first.** Every professional API request must pass `Authorization: Bearer <supabase_jwt>`. The `supabase.jwt` middleware validates against JWKS.
 4. **Media is async.** After upload, variants are queued. Don't expect variants to exist immediately after upload.
