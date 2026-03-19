@@ -4,14 +4,10 @@ namespace App\Http\Controllers\Api\Professional\Store;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-use App\Models\Retail\BrandProductSetting;
 use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
-use Throwable;
 
 class BrandStoreController extends ApiController
 {
@@ -21,7 +17,7 @@ class BrandStoreController extends ApiController
 
     /**
      * GET /store/brand-settings
-     * Returns the brand's default commission rate and all per-product settings.
+     * Returns the brand's default commission rate.
      */
     public function index(Request $request)
     {
@@ -35,24 +31,8 @@ class BrandStoreController extends ApiController
             ? (float) $storeSettings->default_commission_rate
             : self::DEFAULT_COMMISSION_RATE;
 
-        $products = BrandProductSetting::where('professional_id', $professional->id)
-            ->orderBy('sort_order')
-            ->get()
-            ->map(fn ($p) => [
-                'shopify_product_id' => (string) $p->shopify_product_id,
-                'commission_override' => $p->commission_override !== null ? (float) $p->commission_override : null,
-                'discount_rate'       => $p->discount_rate !== null ? (float) $p->discount_rate : null,
-                'custom_price'        => $p->custom_price !== null ? (float) $p->custom_price : null,
-                'is_featured'         => (bool) $p->is_featured,
-                'is_available'        => isset($p->is_available) ? (bool) $p->is_available : true,
-                'sort_order'          => (int) $p->sort_order,
-            ])
-            ->values()
-            ->all();
-
         return $this->success([
             'default_commission_rate' => $defaultCommission,
-            'products'                => $products,
         ]);
     }
 
@@ -84,106 +64,6 @@ class BrandStoreController extends ApiController
         );
 
         return $this->success(['default_commission_rate' => $rate]);
-    }
-
-    /**
-     * PUT /store/brand-product-settings
-     * Full replace of all per-product settings for this brand.
-     *
-     * Accepts: { products: [{
-     *   shopify_product_id, commission_override?, discount_rate?,
-     *   custom_price?, is_featured?, is_available?, sort_order?
-     * }] }
-     *
-     * Rules:
-     *  - commission_override must be >= brand default_commission_rate (if set)
-     *  - max 10 products may have is_featured = true
-     *  - custom_price must be >= 0 (if set)
-     */
-    public function updateProductSettings(Request $request)
-    {
-        $professional = $this->currentProfessional($request);
-        if (! $this->isBrandProfessionalType($professional->professional_type)) {
-            return $this->error('Only brand accounts can manage brand store settings.', 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'products'                        => ['required', 'array'],
-            'products.*.shopify_product_id'   => ['required', 'string', 'max:255'],
-            'products.*.commission_override'  => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
-            'products.*.discount_rate'        => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
-            'products.*.custom_price'         => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'products.*.is_featured'          => ['sometimes', 'boolean'],
-            'products.*.is_available'         => ['sometimes', 'boolean'],
-            'products.*.sort_order'           => ['sometimes', 'integer', 'min:0'],
-        ]);
-
-        if ($validator->fails()) {
-            throw new ValidationException($validator);
-        }
-
-        $validated = $validator->validated();
-
-        // Load default commission for override floor validation
-        $storeSettings = BrandStoreSettings::where('professional_id', $professional->id)->first();
-        $defaultCommission = $storeSettings
-            ? (float) $storeSettings->default_commission_rate
-            : self::DEFAULT_COMMISSION_RATE;
-
-        foreach ($validated['products'] as $product) {
-            if (isset($product['commission_override']) && $product['commission_override'] !== null) {
-                $override = (float) $product['commission_override'];
-                if ($override < $defaultCommission) {
-                    return $this->error(
-                        "Commission override ({$override}%) cannot be below the brand default commission rate ({$defaultCommission}%).",
-                        422
-                    );
-                }
-            }
-        }
-
-        // Validate max 10 featured
-        $featuredCount = collect($validated['products'])
-            ->filter(fn ($p) => ! empty($p['is_featured']))
-            ->count();
-
-        if ($featuredCount > 10) {
-            return $this->error('A maximum of 10 products can be marked as featured.', 422);
-        }
-
-        try {
-            DB::transaction(function () use ($professional, $validated) {
-                BrandProductSetting::where('professional_id', $professional->id)->delete();
-
-                foreach ($validated['products'] as $index => $product) {
-                    $row = [
-                        'professional_id'    => (string) $professional->id,
-                        'shopify_product_id' => (string) $product['shopify_product_id'],
-                        'commission_override' => $product['commission_override'] ?? null,
-                        'discount_rate'       => $product['discount_rate'] ?? null,
-                        'custom_price'        => $product['custom_price'] ?? null,
-                        'is_featured'         => (bool) ($product['is_featured'] ?? false),
-                        'sort_order'          => $product['sort_order'] ?? $index,
-                    ];
-
-                    // Only set is_available if the column exists (guard for pre-migration environments)
-                    if (array_key_exists('is_available', $product)) {
-                        $row['is_available'] = (bool) $product['is_available'];
-                    }
-
-                    BrandProductSetting::create($row);
-                }
-            });
-        } catch (Throwable $e) {
-            Log::warning('Brand product settings update failed.', [
-                'professional_id' => (string) $professional->id,
-                'error'           => $e->getMessage(),
-            ]);
-
-            return $this->error('Failed to save product settings.', 500);
-        }
-
-        return $this->index($request);
     }
 
     private function isBrandProfessionalType(mixed $value): bool

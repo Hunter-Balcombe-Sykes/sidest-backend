@@ -8,8 +8,8 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
-use App\Models\Views\PublicSitePayload;
 use App\Models\Core\Site\SiteSubdomainAlias;
+use App\Models\Views\PublicSitePayload;
 use App\Services\Branding\BrandFontResolver;
 use App\Services\Legal\ProfessionalLegalContentService;
 use App\Services\Store\FeaturedProductsPayloadService;
@@ -72,6 +72,7 @@ class SiteCacheService
                 }
 
                 Cache::put($key, $cached, now()->addMinutes(15));
+
                 return $cached;
             }
             Cache::forget($key);
@@ -85,11 +86,12 @@ class SiteCacheService
         if (! $row) {
             // Negative-cache briefly to reduce a DB load from bot scans.
             Cache::put($key, self::MISS_SENTINEL, now()->addSeconds(30));
+
             return null;
         }
 
         $payload = $row->payload ?? [];
-        if (is_array($payload) && !$this->hasRenderableLegalContent($payload)) {
+        if (is_array($payload) && ! $this->hasRenderableLegalContent($payload)) {
             $payload = $this->backfillLegalContentPayload($row, $payload);
         }
 
@@ -226,6 +228,7 @@ class SiteCacheService
 
         if (! $partnerSite && ! $partnerProfessional) {
             $this->brandPartnerEnrichmentCache[$professionalId] = null;
+
             return null;
         }
 
@@ -360,12 +363,14 @@ class SiteCacheService
         $normalizedLinks = array_map(function ($block): array {
             $data = is_array($block) ? $block : [];
             $data['block_group'] = 'links';
+
             return $data;
         }, $links);
 
         $normalizedSections = array_map(function ($block): array {
             $data = is_array($block) ? $block : [];
             $data['block_group'] = 'sections';
+
             return $data;
         }, $sections);
 
@@ -380,6 +385,7 @@ class SiteCacheService
 
             $aId = (string) ($a['id'] ?? '');
             $bId = (string) ($b['id'] ?? '');
+
             return $aId <=> $bId;
         });
 
@@ -392,14 +398,6 @@ class SiteCacheService
      */
     private function withStorePayload(array $payload, string $professionalId): array
     {
-        $siteSettings = [];
-        if (is_array($payload['site'] ?? null)) {
-            $siteSettingsRaw = $payload['site']['settings'] ?? [];
-            if (is_array($siteSettingsRaw)) {
-                $siteSettings = $siteSettingsRaw;
-            }
-        }
-
         $store = null;
         $existingStore = $payload['store'] ?? null;
 
@@ -431,9 +429,8 @@ class SiteCacheService
 
         if ($store === null) {
             $store = $this->featuredProductsPayloads->build(
-                $professionalId,
-                $siteSettings,
-                'public_site_payload'
+                professionalId: $professionalId,
+                logContext: 'public_site_payload'
             );
         }
 
@@ -488,7 +485,7 @@ class SiteCacheService
                 if (! is_array($item) || empty($item['id'])) {
                     continue;
                 }
-                $mediaId      = $item['id'];
+                $mediaId = $item['id'];
                 $pathVariants = $item['variants'] ?? [];
                 if (! is_array($pathVariants)) {
                     continue;
@@ -511,6 +508,7 @@ class SiteCacheService
                 }
                 $aId = is_array($a) ? (string) ($a['id'] ?? '') : '';
                 $bId = is_array($b) ? (string) ($b['id'] ?? '') : '';
+
                 return $aId <=> $bId;
             });
         }
@@ -526,11 +524,11 @@ class SiteCacheService
                     continue;
                 }
                 $mediaId = $item['id'];
-                $byType  = $mvByMedia[$mediaId] ?? [];
+                $byType = $mvByMedia[$mediaId] ?? [];
 
                 $site[$key][$i]['variants'] = $byType['mp4'] ?? [];
-                $site[$key][$i]['streams']  = $byType['hls_playlist'] ?? [];
-                $site[$key][$i]['poster']   = ($byType['poster']['poster'] ?? null);
+                $site[$key][$i]['streams'] = $byType['hls_playlist'] ?? [];
+                $site[$key][$i]['poster'] = ($byType['poster']['poster'] ?? null);
             }
 
             usort($site[$key], function ($a, $b) {
@@ -541,13 +539,14 @@ class SiteCacheService
                 }
                 $aId = is_array($a) ? (string) ($a['id'] ?? '') : '';
                 $bId = is_array($b) ? (string) ($b['id'] ?? '') : '';
+
                 return $aId <=> $bId;
             });
         }
 
         // Ensure video keys always exist even when there are no videos (backward-compat).
-        $site['gallery_videos']  = $site['gallery_videos']  ?? [];
-        $site['content_videos']  = $site['content_videos']  ?? [];
+        $site['gallery_videos'] = $site['gallery_videos'] ?? [];
+        $site['content_videos'] = $site['content_videos'] ?? [];
 
         return $site;
     }
@@ -604,7 +603,7 @@ class SiteCacheService
                 ->with('site')
                 ->find($professionalId);
 
-            if (!$professional || !$professional->site) {
+            if (! $professional || ! $professional->site) {
                 return $payload;
             }
 
@@ -636,7 +635,7 @@ class SiteCacheService
     {
         $legal = $payload['legal'] ?? null;
 
-        if (!is_array($legal)) {
+        if (! is_array($legal)) {
             return false;
         }
 
@@ -679,7 +678,7 @@ class SiteCacheService
             ->all();
 
         foreach ($aliasSubdomains as $aliasSubdomain) {
-            $keys[] = CacheKeyGenerator::publicSitePayload(strtoLower($aliasSubdomain));
+            $keys[] = CacheKeyGenerator::publicSitePayload(strtolower($aliasSubdomain));
         }
 
         if ($professionalId !== '') {
@@ -694,21 +693,6 @@ class SiteCacheService
                 ->filter(fn ($subdomain): bool => is_string($subdomain) && trim($subdomain) !== '')
                 ->map(fn ($subdomain): string => strtolower((string) $subdomain))
                 ->all();
-
-            // Transitional fallback for environments where relational backfill has not run yet.
-            if ($connectedSubdomains === []) {
-                $connectedSubdomains = Site::query()
-                    ->where(function ($query) use ($professionalId) {
-                        $query
-                            ->whereRaw("(settings->'brand_partner'->>'professional_id') = ?", [$professionalId])
-                            ->orWhereRaw("(settings->'brandPartner'->>'professionalId') = ?", [$professionalId])
-                            ->orWhereRaw("settings->'additional_brand_partners' @> ?", [json_encode([['professional_id' => $professionalId]])]);
-                    })
-                    ->pluck('subdomain')
-                    ->filter(fn ($subdomain): bool => is_string($subdomain) && trim($subdomain) !== '')
-                    ->map(fn ($subdomain): string => strtolower((string) $subdomain))
-                    ->all();
-            }
 
             foreach ($connectedSubdomains as $connectedSubdomain) {
                 $keys[] = CacheKeyGenerator::publicSitePayload($connectedSubdomain);

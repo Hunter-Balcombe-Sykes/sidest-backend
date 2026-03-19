@@ -19,14 +19,7 @@ it('includes featured products and combined blocks in the public payload', funct
         'site' => [
             'id' => $siteId,
             'subdomain' => 'fadez',
-            'settings' => [
-                'selected_products' => [
-                    [
-                        'shopify_product_id' => 'gid://shopify/Product/111',
-                        'sort_order' => 0,
-                    ],
-                ],
-            ],
+            'settings' => [],
             'is_published' => true,
             'gallery' => [],
             'content_images' => [],
@@ -59,6 +52,16 @@ it('includes featured products and combined blocks in the public payload', funct
             ],
         ],
         'services' => [],
+        'store' => [
+            'selected_products' => [
+                [
+                    'shopify_product_id' => 'gid://shopify/Product/111',
+                    'sort_order' => 0,
+                ],
+            ],
+            'default_commission_rate' => (float) config('comet.store.default_commission_rate', 15),
+            'max_featured_products' => (int) config('comet.store.max_featured_products', 10),
+        ],
         'legal' => [
             'privacy_policy' => 'Privacy policy',
             'terms_and_conditions' => 'Terms and conditions',

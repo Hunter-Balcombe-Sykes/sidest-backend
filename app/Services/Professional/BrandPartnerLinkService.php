@@ -3,7 +3,7 @@
 namespace App\Services\Professional;
 
 use App\Models\Core\Professional\BrandPartnerLink;
-use App\Models\Core\Site\Site;
+use App\Models\Retail\BrandProductAffiliateOverride;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -70,8 +70,6 @@ class BrandPartnerLinkService
                 'slot' => $slot,
             ]);
 
-            $this->syncLegacySiteSettingsForAffiliate($affiliateProfessionalId);
-
             return $link;
         });
     }
@@ -92,6 +90,10 @@ class BrandPartnerLinkService
             }
 
             $target->delete();
+            BrandProductAffiliateOverride::query()
+                ->where('affiliate_professional_id', $affiliateProfessionalId)
+                ->where('brand_professional_id', $brandProfessionalId)
+                ->delete();
 
             $remaining = BrandPartnerLink::query()
                 ->where('affiliate_professional_id', $affiliateProfessionalId)
@@ -109,7 +111,6 @@ class BrandPartnerLinkService
             }
 
             $this->normalizeAdditionalSlots($affiliateProfessionalId);
-            $this->syncLegacySiteSettingsForAffiliate($affiliateProfessionalId);
 
             return true;
         });
@@ -143,51 +144,9 @@ class BrandPartnerLinkService
             }
 
             $this->normalizeAdditionalSlots($affiliateProfessionalId);
-            $this->syncLegacySiteSettingsForAffiliate($affiliateProfessionalId);
 
             return true;
         });
-    }
-
-    public function syncLegacySiteSettingsForAffiliate(string $affiliateProfessionalId): void
-    {
-        $site = Site::query()
-            ->where('professional_id', $affiliateProfessionalId)
-            ->lockForUpdate()
-            ->first();
-
-        if (! $site) {
-            return;
-        }
-
-        $links = BrandPartnerLink::query()
-            ->where('affiliate_professional_id', $affiliateProfessionalId)
-            ->orderBy('slot')
-            ->get();
-
-        $settings = is_array($site->settings ?? null) ? $site->settings : [];
-        $primary = $links->first(fn (BrandPartnerLink $link): bool => (int) $link->slot === self::PRIMARY_SLOT);
-        $additional = $links
-            ->filter(fn (BrandPartnerLink $link): bool => (int) $link->slot > self::PRIMARY_SLOT)
-            ->sortBy('slot')
-            ->values();
-
-        if ($primary) {
-            $existingPrimary = is_array($settings['brand_partner'] ?? null) ? $settings['brand_partner'] : [];
-            $settings['brand_partner'] = [
-                ...$existingPrimary,
-                'professional_id' => $primary->brand_professional_id,
-            ];
-        } else {
-            unset($settings['brand_partner'], $settings['brandPartner']);
-        }
-
-        $settings['additional_brand_partners'] = $additional
-            ->map(fn (BrandPartnerLink $link): array => ['professional_id' => $link->brand_professional_id])
-            ->all();
-
-        $site->settings = $settings;
-        $site->save();
     }
 
     private function determineNextSlot(Collection $links): ?int

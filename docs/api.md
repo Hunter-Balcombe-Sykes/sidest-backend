@@ -31,7 +31,7 @@ This document is the single source of truth for backend so the frontend can buil
 
 ## 0) Recent Backend Changes (Commit Log Snapshot)
 
-Snapshot date: **March 18, 2026**.
+Snapshot date: **March 20, 2026**.
 
 ### Unreleased (working tree)
 
@@ -53,6 +53,14 @@ Snapshot date: **March 18, 2026**.
 - Add brand-affiliate invite hardening: transactional claim/decline, expired invite handling, and consistent email matching.
 - Add brand role-gates for brand store endpoints and paginate `GET /api/brand-partners`.
 - Add brand partner + invite endpoints documentation and frontend contract notes.
+- Add brand-approved affiliate commerce schema: `retail.brand_products`, `retail.brand_product_affiliate_overrides`, `core.enterprise_brand_links`, and `distributor` enterprise type support.
+- Hard-cutover `PUT /api/store/featured-products` to `selected_products[{brand_product_id, sort_order}]`; legacy Shopify-id payload is rejected.
+- Add `GET /api/store/available-products` for affiliate-visible products across connected brands (featured-first ordering).
+- Add manager catalog endpoints: `GET /api/store/brand-products`, `PATCH /api/store/brand-products/{brandProductId}`, `PATCH /api/store/brand-products/bulk`.
+- Add affiliate deny override endpoints: `GET|PUT|DELETE /api/store/affiliate-overrides...`.
+- Enforce storefront validity via joins: connected brand link + approved + available + sync-active + no deny override.
+- Add selection cleanup flows: de-approval/unavailability/disconnect/deny now remove invalid selections and create notifications.
+- Add pricing outputs for store payloads: effective commission and discounted price with ceil-to-nearest-5-cents rounding.
 
 ### Recent commits
 
@@ -440,7 +448,7 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | auth_user_id            | uuid     | yes      | `30000000-...`         | Optional owner auth user id (unique among active enterprises) |
 | name                    | string   | no       | `Atlas Promotions`     | Max 255 |
 | handle                  | string   | yes      | `atlas-promotions`     | Unique among active enterprises |
-| enterprise_type         | string   | no       | `promoter`             | One of: `promoter`, `barbershop`, `salon` |
+| enterprise_type         | string   | no       | `promoter`             | One of: `promoter`, `barbershop`, `salon`, `distributor` |
 | status                  | string   | no       | `active`               | One of: `active`, `inactive`, `suspended` |
 | subscription_tier       | string   | yes      | `enterprise`           | Enterprise plan key/label |
 | primary_email           | string   | yes      | `hello@example.com`    | Business contact |
@@ -1439,45 +1447,117 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 - `POST /api/themes/{theme}/select`
 - Select response: `{ "site": { ... } }`
 
-### Store: Featured Products
+### Store: Affiliate Product Selection
 
 #### `GET /api/store/featured-products`
 
-- Purpose: get selected Shopify products for the logged-in professional
+- Purpose: get selected, strictly-valid storefront products for the logged-in professional
 - Auth: Required
-- Response (200): `{ "selected_products": [{ "id": "uuid", "shopify_product_id": "gid://shopify/Product/...", "sort_order": 0, "commission_override": null }], "default_commission_rate": 15, "max_featured_products": 10 }`
+- Response (200): `{ "selected_products": [{ "id": "uuid", "brand_product_id": "uuid", "brand_professional_id": "uuid", "shopify_product_id": "gid://shopify/Product/...", "sort_order": 0, "commission_override": null, "effective_commission_rate": 15, "discount_rate": 10, "base_price_cents": 3495, "discounted_price_cents": 3150 }], "default_commission_rate": 15, "max_featured_products": 10 }`
+- Validity checks:
+  - product must be sync-active
+  - brand setting must be approved + available
+  - affiliate must still be connected to the brand
+  - no deny override for that affiliate/product
 - Notes:
-  - Reads from `retail.professional_selections` when available.
-  - If retail table is unavailable, read path falls back to legacy `site.settings.selected_products`.
+  - Reads from `retail.professional_selections` + joined retail/core tables.
 - Common status codes: 200, 401, 403
 
 #### `PUT /api/store/featured-products`
 
-- Purpose: replace the full featured-products list
+- Purpose: replace the full selected product list (global max 10)
 - Auth: Required
-- Request body:
-  - `products`: array (max configured limit, default 10)
-  - `products[].shopify_product_id`: required string
-  - `products[].sort_order`: optional integer >= 0
-  - `products[].commission_override`: optional nullable number (0-100)
-  - `enterprise_id`: optional nullable uuid (link selections to a promoter enterprise context)
+- Hard cutover request body:
+  - `selected_products`: required array (max 10)
+  - `selected_products[].brand_product_id`: required uuid
+  - `selected_products[].sort_order`: optional integer >= 0
 - Response (200): same shape as GET endpoint
 - Notes:
-  - Write path requires `retail.professional_selections`; if unavailable, returns 503.
-  - Duplicate product IDs are rejected.
-  - If `enterprise_id` is set and enterprise-product catalog tables exist, selected products must belong to that enterprise and be active.
-  - Ambassador-specific rule:
-    - No contract required when not linking to a promoter enterprise.
-    - If linking to a promoter enterprise, an active ambassador-promoter contract is required.
-    - If ambassador has an active contract and no `enterprise_id` is provided, the contract's promoter enterprise is used.
+  - Legacy payload (`products[].shopify_product_id`) is rejected with 422.
+  - DB triggers enforce connected brand link + approval + availability + sync-active + deny-override restrictions.
+  - Duplicate `brand_product_id` values are rejected.
 - Common status codes: 200, 401, 403, 422, 503
 
-### Store: Brand Settings (brand accounts only)
+#### `GET /api/store/available-products`
+
+- Purpose: list affiliate-visible products across connected brands
+- Auth: Required
+- Query params:
+  - `brand_professional_id` (optional uuid): limit to one connected brand
+- Ordering:
+  - `is_featured DESC`
+  - `sort_order ASC`
+  - `title ASC`
+- Response (200): `{ "available_products": [...], "max_featured_products": 10 }`
+- Common status codes: 200, 401, 403, 422
+
+### Store: Brand/Distributor Catalog Management
+
+#### `GET /api/store/brand-products`
+- Purpose: full synced catalog + settings state for managed brands
+- Auth: Required (brand account, or professional in an active `distributor` enterprise linked via `core.enterprise_brand_links`)
+- Query params:
+  - `brand_professional_id` (optional uuid): limit to one managed brand
+- Response includes each product's synced fields and settings fields (`is_approved`, `is_available`, `is_featured`, `commission_override`, `discount_rate`, `custom_price`, effective pricing/commission outputs).
+- Common status codes: 200, 401, 403, 422
+
+#### `PATCH /api/store/brand-products/{brandProductId}`
+- Purpose: update one brand product's settings
+- Auth: Required manager access for that brand
+- Allowed fields:
+  - `is_approved`, `is_available`, `is_featured`, `sort_order`
+  - `commission_override`, `discount_rate`, `custom_price`
+- Notes:
+  - If a product becomes unapproved/unavailable, affected affiliate selections are removed and users are notified.
+- Common status codes: 200, 401, 403, 404, 422
+
+#### `PATCH /api/store/brand-products/bulk`
+- Purpose: bulk update settings for one brand, one/many/all products
+- Auth: Required manager access for that brand
+- Request body:
+  - `brand_professional_id`: required uuid
+  - `brand_product_ids`: optional uuid[] (omit to target all products for brand)
+  - one or more mutable fields from the single-product PATCH endpoint
+- Notes:
+  - Executes in a transaction with row locking.
+  - If products become unapproved/unavailable, affected selections are removed + notifications are created.
+- Common status codes: 200, 401, 403, 422
+
+### Store: Affiliate Deny Overrides (Restrict-Only)
+
+#### `GET /api/store/affiliate-overrides`
+- Purpose: list deny overrides for a managed brand
+- Auth: Required manager access for `brand_professional_id`
+- Query params:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (optional uuid)
+- Common status codes: 200, 401, 403, 422
+
+#### `PUT /api/store/affiliate-overrides/deny`
+- Purpose: set deny overrides for one affiliate across one/many brand products
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (required uuid[], min 1)
+- Notes:
+  - Creating deny overrides also removes matching current selections for that affiliate and sends notifications.
+- Common status codes: 200, 401, 403, 422
+
+#### `DELETE /api/store/affiliate-overrides/deny`
+- Purpose: remove deny overrides for one affiliate/brand pair (all or subset)
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (optional uuid[])
+- Common status codes: 200, 401, 403, 422
+
+### Store: Brand Settings
 
 #### `GET /api/store/brand-settings`
-- Purpose: read brand default commission + per-product settings for brand catalog
+- Purpose: read brand default commission
 - Auth: Required (brand professional type only)
-- Response (200): `{ "default_commission_rate": 15, "products": [{ "shopify_product_id": "...", "commission_override": null, "discount_rate": null, "custom_price": null, "is_featured": false, "is_available": true, "sort_order": 0 }] }`
 - Common status codes: 200, 401, 403
 
 #### `PATCH /api/store/brand-settings`
@@ -1486,21 +1566,6 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 - Request body: `{ "default_commission_rate": 15 }`
 - Response (200): `{ "default_commission_rate": 15 }`
 - Common status codes: 200, 401, 403, 422
-
-#### `PUT /api/store/brand-product-settings`
-- Purpose: replace all per-product brand settings for the logged-in brand
-- Auth: Required (brand professional type only)
-- Request body:
-  - `products` (required array)
-  - `products[].shopify_product_id` (required string)
-  - `products[].commission_override` (optional nullable number; must be >= default commission rate)
-  - `products[].discount_rate` (optional nullable number 0-100)
-  - `products[].custom_price` (optional nullable number >= 0)
-  - `products[].is_featured` (optional boolean; max 10 true items)
-  - `products[].is_available` (optional boolean)
-  - `products[].sort_order` (optional integer >= 0)
-- Response (200): same shape as `GET /api/store/brand-settings`
-- Common status codes: 200, 401, 403, 422, 500
 
 ### Media Uploads (images and videos, server-side processing)
 
@@ -1812,7 +1877,7 @@ Enterprise routes are self-service endpoints for the authenticated user and requ
 - Request body:
   - `name` (required)
   - `handle` (optional, unique among active enterprises; auto-slugged from name if omitted)
-  - `enterprise_type` (required): `promoter`, `barbershop`, `salon`
+  - `enterprise_type` (required): `promoter`, `barbershop`, `salon`, `distributor`
   - `subscription_tier` (optional)
   - `primary_email`, `phone`, `public_contact_email`, `public_contact_number` (optional)
   - `country_code`, `timezone` (optional)
@@ -1827,7 +1892,7 @@ Enterprise routes are self-service endpoints for the authenticated user and requ
 
 - Purpose: update current enterprise profile fields
 - Notes:
-  - `enterprise_type` allowed values: `promoter`, `barbershop`, `salon`
+  - `enterprise_type` allowed values: `promoter`, `barbershop`, `salon`, `distributor`
   - `status` allowed values: `active`, `inactive`, `suspended`
 - Response (200): `{ "enterprise": { ... } }`
 - Common status codes: 200, 401, 404, 422

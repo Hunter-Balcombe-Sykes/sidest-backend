@@ -5,16 +5,17 @@ namespace App\Http\Controllers\Api\Professional\Store;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
+use App\Models\Retail\BrandProduct;
 use App\Models\Retail\ProfessionalSelection;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Professional\ConfirmationPreferenceService;
+use App\Services\Store\BrandProductCatalogService;
 use App\Services\Store\FeaturedProductsPayloadService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -24,31 +25,60 @@ class FeaturedProductsController extends ApiController
     use ResolveCurrentSite;
 
     public function __construct(
-        private readonly FeaturedProductsPayloadService $featuredProductsPayloads
+        private readonly FeaturedProductsPayloadService $featuredProductsPayloads,
+        private readonly BrandProductCatalogService $catalog
     ) {}
 
     /**
      * GET /store/featured-products
-     * Returns the professional's selected Shopify product IDs with commission overrides.
+     * Returns the professional's selected and validated storefront products.
      */
     public function index(Request $request)
     {
         $professional = $this->currentProfessional($request);
-        $site = $this->currentSite($professional);
+        $this->currentSite($professional);
 
         return $this->success(
             $this->featuredProductsPayloads->build(
                 (string) $professional->id,
-                $site->settings,
                 'professional_store_index'
             )
         );
     }
 
     /**
+     * GET /store/available-products
+     * Returns affiliate-visible products across connected brands.
+     */
+    public function availableProducts(Request $request)
+    {
+        $professional = $this->currentProfessional($request);
+
+        $validator = Validator::make($request->query(), [
+            'brand_professional_id' => ['sometimes', 'uuid'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        $brandProfessionalId = trim((string) ($validator->validated()['brand_professional_id'] ?? ''));
+
+        $products = $this->catalog->affiliateVisibleProducts(
+            (string) $professional->id,
+            $brandProfessionalId !== '' ? $brandProfessionalId : null
+        );
+
+        return $this->success([
+            'available_products' => $products,
+            'max_featured_products' => (int) config('comet.store.max_featured_products', 10),
+        ]);
+    }
+
+    /**
      * PUT /store/featured-products
-     * Replaces the full list of selected Shopify product IDs with optional commission overrides (max 10).
-     * Expects: { products: [ { shopify_product_id, sort_order?, commission_override? }, ... ], enterprise_id? }
+     * Hard cutover payload:
+     * Expects: { selected_products: [ { brand_product_id, sort_order? }, ... ] }
      */
     public function update(Request $request)
     {
@@ -56,17 +86,18 @@ class FeaturedProductsController extends ApiController
         $site = $this->currentSite($professional);
         $professionalId = (string) $professional->id;
         $maxFeatured = (int) config('comet.store.max_featured_products', 10);
-        $supportsCommissionOverride = $this->featuredProductsPayloads->supportsCommissionOverride()
-            && $this->featuredProductsPayloads->hasSelectionsTable();
-        $supportsSelectionEnterprise = $this->featuredProductsPayloads->supportsSelectionEnterpriseLink()
-            && $this->featuredProductsPayloads->hasSelectionsTable();
+
+        if ($request->has('products')) {
+            return $this->error(
+                'Legacy featured-products payload is no longer supported. Use selected_products[{brand_product_id, sort_order}].',
+                422
+            );
+        }
 
         $validator = Validator::make($request->all(), [
-            'products'                            => ['required', 'array', 'max:' . $maxFeatured],
-            'products.*.shopify_product_id'       => ['required', 'string', 'max:255'],
-            'products.*.sort_order'               => ['sometimes', 'integer', 'min:0'],
-            'products.*.commission_override'      => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
-            'enterprise_id'                       => ['sometimes', 'nullable', 'uuid'],
+            'selected_products' => ['required', 'array', 'max:'.$maxFeatured],
+            'selected_products.*.brand_product_id' => ['required', 'uuid'],
+            'selected_products.*.sort_order' => ['sometimes', 'integer', 'min:0'],
         ]);
 
         if ($validator->fails()) {
@@ -74,33 +105,6 @@ class FeaturedProductsController extends ApiController
         }
 
         $validated = $validator->validated();
-        $professionalType = strtolower(trim((string) ($professional->professional_type ?? '')));
-        $selectionEnterpriseId = null;
-        $activePromoterContract = null;
-        $requestedEnterpriseId = trim((string) ($validated['enterprise_id'] ?? ''));
-
-        if (in_array($professionalType, ['ambassador', 'influencer'], true)) {
-            $activePromoterContract = $this->featuredProductsPayloads->resolveActivePromoterContract((string) $professional->id);
-
-            if (is_array($activePromoterContract) && isset($activePromoterContract['promoter_enterprise_id'])) {
-                $selectionEnterpriseId = trim((string) $activePromoterContract['promoter_enterprise_id']);
-                if ($selectionEnterpriseId === '' || ! Str::isUuid($selectionEnterpriseId)) {
-                    return $this->error(
-                        'Active ambassador promoter contract is missing a valid promoter enterprise link.',
-                        422
-                    );
-                }
-            } elseif ($requestedEnterpriseId !== '') {
-                return $this->error(
-                    'Ambassadors need an active promoter contract only when linking selections to a promoter enterprise.',
-                    422
-                );
-            }
-        }
-
-        if ($selectionEnterpriseId === null && $requestedEnterpriseId !== '') {
-            $selectionEnterpriseId = $requestedEnterpriseId;
-        }
 
         if (! $this->featuredProductsPayloads->hasSelectionsTable()) {
             Log::error('Featured products update blocked: retail.professional_selections table is unavailable.', [
@@ -114,71 +118,51 @@ class FeaturedProductsController extends ApiController
             );
         }
 
-        if ($selectionEnterpriseId !== null && ! $supportsSelectionEnterprise) {
-            Log::error('Featured products update blocked: enterprise linkage is unavailable on retail.professional_selections.', [
-                'professional_id' => (string) $professional->id,
-                'site_id' => (string) $site->id,
-                'enterprise_id' => $selectionEnterpriseId,
-            ]);
-
-            return $this->error(
-                'Featured products enterprise linkage is unavailable. Run the latest enterprise migrations and try again.',
-                503
-            );
-        }
-
-        $productIds = [];
-        foreach ($validated['products'] as $product) {
-            $productIds[] = (string) ($product['shopify_product_id'] ?? '');
-        }
-
-        if (
-            is_string($selectionEnterpriseId)
-            && $selectionEnterpriseId !== ''
-            && $this->featuredProductsPayloads->hasEnterpriseProductsTable()
-            && ! $this->featuredProductsPayloads->productsBelongToEnterprise($selectionEnterpriseId, $productIds)
-        ) {
-            return $this->error(
-                'One or more selected products do not belong to the linked promoter enterprise or are inactive.',
-                422
-            );
-        }
-
         $existingProductIds = ProfessionalSelection::query()
             ->where('professional_id', $professionalId)
-            ->pluck('shopify_product_id')
+            ->pluck('brand_product_id')
             ->map(fn ($value): string => strtolower(trim((string) $value)))
             ->filter(fn (string $value): bool => $value !== '')
             ->unique()
             ->values()
             ->all();
 
-        $incomingProductIds = collect($validated['products'])
-            ->map(fn ($product): string => strtolower(trim((string) ($product['shopify_product_id'] ?? ''))))
+        $incomingProductIds = collect($validated['selected_products'])
+            ->map(fn ($product): string => strtolower(trim((string) ($product['brand_product_id'] ?? ''))))
             ->filter(fn (string $value): bool => $value !== '')
             ->unique()
             ->values()
             ->all();
 
+        if (count($incomingProductIds) !== count($validated['selected_products'])) {
+            return $this->error('Duplicate brand products are not allowed.', 422);
+        }
+
+        $brandProducts = BrandProduct::query()
+            ->whereIn('id', $incomingProductIds)
+            ->get(['id', 'brand_professional_id'])
+            ->keyBy(static fn (BrandProduct $product): string => strtolower((string) $product->id));
+
+        if ($brandProducts->count() !== count($incomingProductIds)) {
+            return $this->error('One or more selected products were not found.', 422);
+        }
+
         $unselectedProductDetected = count(array_diff($existingProductIds, $incomingProductIds)) > 0;
 
         try {
-            DB::transaction(function () use ($professional, $validated, $supportsCommissionOverride, $supportsSelectionEnterprise, $selectionEnterpriseId) {
-                // Remove all current selections and replace
+            DB::transaction(function () use ($professional, $validated, $brandProducts) {
                 ProfessionalSelection::where('professional_id', $professional->id)->delete();
 
-                foreach ($validated['products'] as $index => $product) {
+                foreach ($validated['selected_products'] as $index => $product) {
+                    $brandProductId = strtolower(trim((string) $product['brand_product_id']));
+                    $brandProduct = $brandProducts->get($brandProductId);
+
                     $attributes = [
-                        'professional_id'      => $professional->id,
-                        'shopify_product_id'   => $product['shopify_product_id'],
-                        'sort_order'           => $product['sort_order'] ?? $index,
+                        'professional_id' => $professional->id,
+                        'brand_product_id' => $brandProductId,
+                        'brand_professional_id' => (string) $brandProduct->brand_professional_id,
+                        'sort_order' => $product['sort_order'] ?? $index,
                     ];
-                    if ($supportsCommissionOverride) {
-                        $attributes['commission_override'] = $product['commission_override'] ?? null;
-                    }
-                    if ($supportsSelectionEnterprise && $selectionEnterpriseId !== null) {
-                        $attributes['enterprise_id'] = $selectionEnterpriseId;
-                    }
 
                     ProfessionalSelection::create($attributes);
                 }
@@ -187,8 +171,6 @@ class FeaturedProductsController extends ApiController
             Log::warning('Featured products retail write failed (update).', [
                 'professional_id' => (string) $professional->id,
                 'site_id' => (string) $site->id,
-                'enterprise_id' => $selectionEnterpriseId,
-                'promoter_contract_id' => is_array($activePromoterContract) ? ($activePromoterContract['id'] ?? null) : null,
                 'error' => $e->getMessage(),
             ]);
 
@@ -206,16 +188,23 @@ class FeaturedProductsController extends ApiController
 
                     if (str_contains($dbMessage, 'maximum of')) {
                         $message = 'Too many featured products selected.';
-                    } elseif (str_contains($dbMessage, 'promoter enterprise')) {
-                        $message = 'Professional must have an active promoter enterprise link for these selections.';
+                    } elseif (str_contains($dbMessage, 'not approved/available')) {
+                        $message = 'One or more selected products are not approved and available.';
+                    } elseif (str_contains($dbMessage, 'not connected to selected brand')) {
+                        $message = 'You can only select products from connected brands.';
+                    } elseif (str_contains($dbMessage, 'denied for this affiliate')) {
+                        $message = 'One or more selected products are restricted for your account.';
                     } else {
-                        $message = 'Featured products failed enterprise contract/membership validation.';
+                        $message = 'Featured products failed catalog validation.';
                     }
+                } elseif ($sqlState === '23503') {
+                    $status = 422;
+                    $message = 'One or more selected products no longer exist.';
                 }
             }
 
             if (config('app.debug')) {
-                $message .= ' ' . $e->getMessage();
+                $message .= ' '.$e->getMessage();
             }
 
             return $this->error($message, $status);
@@ -241,7 +230,6 @@ class FeaturedProductsController extends ApiController
         return $this->success(
             $this->featuredProductsPayloads->build(
                 $professionalId,
-                $site->settings,
                 'professional_store_update'
             )
         );

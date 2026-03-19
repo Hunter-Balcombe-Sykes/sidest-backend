@@ -4,6 +4,7 @@ namespace App\Models\Retail;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class BrandProductSetting extends Model
 {
@@ -19,10 +20,12 @@ class BrandProductSetting extends Model
 
     protected $fillable = [
         'professional_id',
+        'brand_product_id',
         'shopify_product_id',
         'commission_override',
         'discount_rate',
         'custom_price',
+        'is_approved',
         'is_featured',
         'is_available',
         'sort_order',
@@ -30,10 +33,16 @@ class BrandProductSetting extends Model
 
     protected $casts = [
         'commission_override' => 'decimal:2',
-        'discount_rate'       => 'decimal:2',
-        'custom_price'        => 'decimal:2',
-        'is_featured'         => 'boolean',
-        'is_available'        => 'boolean',
-        'sort_order'          => 'integer',
+        'discount_rate' => 'decimal:2',
+        'custom_price' => 'decimal:2',
+        'is_approved' => 'boolean',
+        'is_featured' => 'boolean',
+        'is_available' => 'boolean',
+        'sort_order' => 'integer',
     ];
+
+    public function brandProduct(): BelongsTo
+    {
+        return $this->belongsTo(BrandProduct::class, 'brand_product_id');
+    }
 }

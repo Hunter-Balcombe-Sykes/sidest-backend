@@ -7,6 +7,7 @@ use App\Models\Retail\EnterpriseBrand;
 use App\Models\Retail\EnterpriseProduct;
 use App\Models\Retail\EnterpriseShopifyAccount;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -17,6 +18,7 @@ class Enterprise extends BaseModel
     protected $table = 'enterprises';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -70,5 +72,22 @@ class Enterprise extends BaseModel
     public function products(): HasMany
     {
         return $this->hasMany(EnterpriseProduct::class, 'enterprise_id');
+    }
+
+    public function brandLinks(): HasMany
+    {
+        return $this->hasMany(EnterpriseBrandLink::class, 'enterprise_id');
+    }
+
+    public function managedBrands(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            \App\Models\Core\Professional\Professional::class,
+            'enterprise_brand_links',
+            'enterprise_id',
+            'brand_professional_id'
+        )
+            ->withPivot(['id', 'role', 'status', 'created_at', 'updated_at'])
+            ->wherePivot('status', 'active');
     }
 }

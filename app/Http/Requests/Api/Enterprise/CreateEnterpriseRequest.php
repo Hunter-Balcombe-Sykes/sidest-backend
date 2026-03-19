@@ -3,8 +3,8 @@
 namespace App\Http\Requests\Api\Enterprise;
 
 use App\Http\Requests\BaseFormRequest;
-use Illuminate\Validation\Rule;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class CreateEnterpriseRequest extends BaseFormRequest
 {
@@ -21,7 +21,7 @@ class CreateEnterpriseRequest extends BaseFormRequest
                     $query->whereNull('deleted_at');
                 }),
             ],
-            'enterprise_type' => ['required', 'string', Rule::in(['promoter', 'salon', 'barbershop'])],
+            'enterprise_type' => ['required', 'string', Rule::in(['promoter', 'salon', 'barbershop', 'distributor'])],
             'subscription_tier' => ['sometimes', 'nullable', 'string', 'max:100'],
 
             'primary_email' => ['sometimes', 'nullable', 'email', 'max:255'],

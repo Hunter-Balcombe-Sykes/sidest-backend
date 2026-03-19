@@ -37,7 +37,6 @@ class PublicStoreController extends ApiController
         return $this->success(
             $this->featuredProductsPayloads->build(
                 (string) $site->professional_id,
-                $site->settings,
                 'public_store'
             )
         );

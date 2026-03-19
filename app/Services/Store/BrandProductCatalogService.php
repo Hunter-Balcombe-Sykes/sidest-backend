@@ -1,0 +1,356 @@
+<?php
+
+namespace App\Services\Store;
+
+use App\Models\Core\Professional\BrandPartnerLink;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+
+class BrandProductCatalogService
+{
+    public function __construct(
+        private readonly BrandPricingService $pricing,
+        private readonly BrandProductSettingsService $settingsRows
+    ) {}
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function affiliateVisibleProducts(string $affiliateProfessionalId, ?string $brandProfessionalId = null): array
+    {
+        $affiliateProfessionalId = trim($affiliateProfessionalId);
+        $brandProfessionalId = $brandProfessionalId !== null ? trim($brandProfessionalId) : null;
+
+        if ($affiliateProfessionalId === '') {
+            return [];
+        }
+
+        $connectedBrandIds = BrandPartnerLink::query()
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->pluck('brand_professional_id')
+            ->map(static fn ($id): string => trim((string) $id))
+            ->filter(static fn (string $id): bool => $id !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($connectedBrandIds === []) {
+            return [];
+        }
+
+        if ($brandProfessionalId !== null && $brandProfessionalId !== '') {
+            if (! in_array($brandProfessionalId, $connectedBrandIds, true)) {
+                return [];
+            }
+
+            $connectedBrandIds = [$brandProfessionalId];
+        }
+
+        $this->settingsRows->ensureSettingsRowsForBrands($connectedBrandIds);
+
+        $rows = DB::table('retail.brand_products as bp')
+            ->join('core.brand_partner_links as l', function ($join) use ($affiliateProfessionalId): void {
+                $join->on('l.brand_professional_id', '=', 'bp.brand_professional_id')
+                    ->where('l.affiliate_professional_id', '=', $affiliateProfessionalId);
+            })
+            ->join('retail.brand_product_settings as bps', function ($join): void {
+                $join->on('bps.brand_product_id', '=', 'bp.id')
+                    ->on('bps.professional_id', '=', 'bp.brand_professional_id');
+            })
+            ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
+            ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
+            ->leftJoin('retail.brand_product_affiliate_overrides as o', function ($join) use ($affiliateProfessionalId): void {
+                $join->on('o.brand_product_id', '=', 'bp.id')
+                    ->where('o.affiliate_professional_id', '=', $affiliateProfessionalId)
+                    ->where('o.override_type', '=', 'deny');
+            })
+            ->whereIn('bp.brand_professional_id', $connectedBrandIds)
+            ->where('bp.is_sync_active', true)
+            ->where('bps.is_approved', true)
+            ->whereRaw('COALESCE(bps.is_available, true) = true')
+            ->whereNull('o.id')
+            ->orderByDesc('bps.is_featured')
+            ->orderBy('bps.sort_order')
+            ->orderBy('bp.title')
+            ->select([
+                'bp.id as brand_product_id',
+                'bp.brand_professional_id',
+                'bp.shopify_product_id',
+                'bp.title',
+                'bp.handle',
+                'bp.product_url',
+                'bp.image_url',
+                'bp.price_cents',
+                'bp.currency_code',
+                'bp.shopify_status',
+                'bp.is_sync_active',
+                'bp.last_synced_at',
+                'bp.enterprise_id',
+                'bp.metadata',
+                'bps.commission_override',
+                'bps.discount_rate',
+                'bps.custom_price',
+                'bps.is_featured',
+                'bps.is_available',
+                'bps.is_approved',
+                'bps.sort_order',
+                'bss.default_commission_rate',
+                'p.display_name as brand_display_name',
+                'p.handle as brand_handle',
+            ])
+            ->get();
+
+        return $this->mapCatalogRows($rows);
+    }
+
+    /**
+     * Full synced catalog for one or more managed brands.
+     *
+     * @param  array<int, string>  $brandProfessionalIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function managedCatalog(array $brandProfessionalIds): array
+    {
+        $brandProfessionalIds = array_values(array_unique(array_filter(array_map(
+            static fn ($id): string => trim((string) $id),
+            $brandProfessionalIds
+        ), static fn (string $id): bool => $id !== '')));
+
+        if ($brandProfessionalIds === []) {
+            return [];
+        }
+
+        $this->settingsRows->ensureSettingsRowsForBrands($brandProfessionalIds);
+
+        $rows = DB::table('retail.brand_products as bp')
+            ->leftJoin('retail.brand_product_settings as bps', function ($join): void {
+                $join->on('bps.brand_product_id', '=', 'bp.id')
+                    ->on('bps.professional_id', '=', 'bp.brand_professional_id');
+            })
+            ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
+            ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
+            ->whereIn('bp.brand_professional_id', $brandProfessionalIds)
+            ->orderBy('bp.brand_professional_id')
+            ->orderByDesc(DB::raw('COALESCE(bps.is_featured, false)'))
+            ->orderBy(DB::raw('COALESCE(bps.sort_order, 0)'))
+            ->orderBy('bp.title')
+            ->select([
+                'bp.id as brand_product_id',
+                'bp.brand_professional_id',
+                'bp.shopify_product_id',
+                'bp.title',
+                'bp.handle',
+                'bp.product_url',
+                'bp.image_url',
+                'bp.price_cents',
+                'bp.currency_code',
+                'bp.shopify_status',
+                'bp.is_sync_active',
+                'bp.last_synced_at',
+                'bp.enterprise_id',
+                'bp.metadata',
+                'bps.commission_override',
+                'bps.discount_rate',
+                'bps.custom_price',
+                'bps.is_featured',
+                'bps.is_available',
+                'bps.is_approved',
+                'bps.sort_order',
+                'bss.default_commission_rate',
+                'p.display_name as brand_display_name',
+                'p.handle as brand_handle',
+            ])
+            ->get();
+
+        return $this->mapCatalogRows($rows);
+    }
+
+    /**
+     * Selected storefront products after strict validity checks.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function selectedProductsForProfessional(string $professionalId): array
+    {
+        $professionalId = trim($professionalId);
+        if ($professionalId === '') {
+            return [];
+        }
+
+        $rows = DB::table('retail.professional_selections as ps')
+            ->join('retail.brand_products as bp', 'bp.id', '=', 'ps.brand_product_id')
+            ->join('retail.brand_product_settings as bps', function ($join): void {
+                $join->on('bps.brand_product_id', '=', 'bp.id')
+                    ->on('bps.professional_id', '=', 'bp.brand_professional_id');
+            })
+            ->join('core.brand_partner_links as l', function ($join) use ($professionalId): void {
+                $join->on('l.brand_professional_id', '=', 'bp.brand_professional_id')
+                    ->where('l.affiliate_professional_id', '=', $professionalId);
+            })
+            ->leftJoin('retail.brand_product_affiliate_overrides as o', function ($join) use ($professionalId): void {
+                $join->on('o.brand_product_id', '=', 'bp.id')
+                    ->where('o.affiliate_professional_id', '=', $professionalId)
+                    ->where('o.override_type', '=', 'deny');
+            })
+            ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
+            ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
+            ->where('ps.professional_id', $professionalId)
+            ->where('bp.is_sync_active', true)
+            ->where('bps.is_approved', true)
+            ->whereRaw('COALESCE(bps.is_available, true) = true')
+            ->whereNull('o.id')
+            ->orderBy('ps.sort_order')
+            ->select([
+                'ps.id as selection_id',
+                'ps.sort_order as selection_sort_order',
+                'bp.id as brand_product_id',
+                'bp.brand_professional_id',
+                'bp.shopify_product_id',
+                'bp.title',
+                'bp.handle',
+                'bp.product_url',
+                'bp.image_url',
+                'bp.price_cents',
+                'bp.currency_code',
+                'bp.shopify_status',
+                'bp.is_sync_active',
+                'bp.last_synced_at',
+                'bp.enterprise_id',
+                'bp.metadata',
+                'bps.commission_override',
+                'bps.discount_rate',
+                'bps.custom_price',
+                'bps.is_featured',
+                'bps.is_available',
+                'bps.is_approved',
+                'bps.sort_order',
+                'bss.default_commission_rate',
+                'p.display_name as brand_display_name',
+                'p.handle as brand_handle',
+            ])
+            ->get();
+
+        return $this->mapCatalogRows($rows, true);
+    }
+
+    /**
+     * @param  Collection<int, mixed>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function mapCatalogRows(Collection $rows, bool $selectedRows = false): array
+    {
+        $defaultSystemCommission = $this->pricing->defaultCommissionRate();
+
+        return $rows
+            ->map(function ($row) use ($defaultSystemCommission, $selectedRows): array {
+                $commissionOverride = $this->toNullableFloat($row->commission_override ?? null);
+                $discountRate = $this->toNullableFloat($row->discount_rate ?? null);
+                $customPrice = $this->toNullableFloat($row->custom_price ?? null);
+                $defaultCommissionRate = $this->toNullableFloat($row->default_commission_rate ?? null)
+                    ?? $defaultSystemCommission;
+
+                $basePriceCents = $this->pricing->resolveBasePriceCents(
+                    $this->toNullableInt($row->price_cents ?? null),
+                    $customPrice
+                );
+                $discountedPriceCents = $this->pricing->discountedPriceCents($basePriceCents, $discountRate);
+                $effectiveCommissionRate = $this->pricing->effectiveCommissionRate(
+                    $commissionOverride,
+                    $defaultCommissionRate
+                );
+
+                $payload = [
+                    'brand_product_id' => (string) ($row->brand_product_id ?? ''),
+                    'brand_professional_id' => (string) ($row->brand_professional_id ?? ''),
+                    'shopify_product_id' => (string) ($row->shopify_product_id ?? ''),
+                    'title' => (string) ($row->title ?? ''),
+                    'handle' => (string) ($row->handle ?? ''),
+                    'product_url' => (string) ($row->product_url ?? ''),
+                    'image_url' => (string) ($row->image_url ?? ''),
+                    'currency_code' => strtoupper(trim((string) ($row->currency_code ?? 'AUD'))),
+                    'shopify_status' => (string) ($row->shopify_status ?? 'unknown'),
+                    'is_sync_active' => (bool) ($row->is_sync_active ?? false),
+                    'last_synced_at' => isset($row->last_synced_at) && $row->last_synced_at !== null
+                        ? (string) $row->last_synced_at
+                        : null,
+                    'enterprise_id' => isset($row->enterprise_id) && $row->enterprise_id !== null
+                        ? (string) $row->enterprise_id
+                        : null,
+                    'metadata' => $this->normalizeMetadata($row->metadata ?? null),
+                    'brand_display_name' => $this->nullableString($row->brand_display_name ?? null),
+                    'brand_handle' => $this->nullableString($row->brand_handle ?? null),
+                    'is_featured' => (bool) ($row->is_featured ?? false),
+                    'sort_order' => (int) ($selectedRows ? ($row->selection_sort_order ?? 0) : ($row->sort_order ?? 0)),
+                    'is_approved' => (bool) ($row->is_approved ?? false),
+                    'is_available' => (bool) ($row->is_available ?? true),
+                    'default_commission_rate' => $defaultCommissionRate,
+                    'commission_override' => $commissionOverride,
+                    'effective_commission_rate' => $effectiveCommissionRate,
+                    'discount_rate' => $discountRate,
+                    'custom_price' => $customPrice,
+                    'base_price_cents' => $basePriceCents,
+                    'discounted_price_cents' => $discountedPriceCents,
+                ];
+
+                if ($selectedRows) {
+                    $payload['id'] = (string) ($row->selection_id ?? '');
+                }
+
+                return $payload;
+            })
+            ->values()
+            ->all();
+    }
+
+    private function toNullableFloat(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (! is_numeric((string) $value)) {
+            return null;
+        }
+
+        return (float) $value;
+    }
+
+    private function toNullableInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (! is_numeric((string) $value)) {
+            return null;
+        }
+
+        return (int) $value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalizeMetadata(mixed $metadata): array
+    {
+        if (is_array($metadata)) {
+            return $metadata;
+        }
+
+        if (is_string($metadata) && $metadata !== '') {
+            $decoded = json_decode($metadata, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return [];
+    }
+
+    private function nullableString(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' ? null : $value;
+    }
+}

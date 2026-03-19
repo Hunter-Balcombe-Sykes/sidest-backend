@@ -20,7 +20,7 @@ Brands want influencers and professionals to sell their products without managin
 5. Give brands and professionals actionable analytics (views, clicks, sales, earnings)
 6. Enable brands to promote specific products via commission adjustments and price overrides
 
-**Current status:** Active development. Core professional features (sites, services, media, integrations) are production-ready. Brand affiliate commerce layer is in progress. Video uploads and enterprise self-service are in progress.
+**Current status:** Active development. Core professional features (sites, services, media, integrations) are production-ready. The brand-approved affiliate commerce foundation is implemented (brand-scoped catalog, approval controls, deny overrides, strict selections, manager APIs). Video uploads remain feature-flagged off, and checkout/payout flows are still in progress.
 
 ---
 
@@ -62,7 +62,7 @@ Analytics recorded for both brand and affiliate dashboards
 
 ### Key Assumptions
 
-- One professional can be affiliated with one brand at a time (primary brand, can have others).
+- Multi-brand affiliation is enabled; product selection cap is global (10) per professional across all connected brands.
 - Brands control the theme, colours, logo, and product catalogue.
 - Professionals control their own media pool, links, bio, and service listings.
 - Booking integrations (Square, Fresha) are per-professional, not per-brand.
@@ -95,7 +95,7 @@ Analytics recorded for both brand and affiliate dashboards
 │   │   │   ├── Professional/  — Authenticated professional endpoints
 │   │   │   ├── PublicSite/    — Unauthenticated mini-site endpoints
 │   │   │   ├── Staff/         — Internal staff/admin endpoints
-│   │   │   ├── Enterprise/    — Enterprise management (stub/in progress)
+│   │   │   ├── Enterprise/    — Enterprise self-service management endpoints
 │   │   │   └── Webhooks/      — Square, Fresha webhook receivers
 │   │   ├── Middleware/        — JWT auth, role guards, plan gates
 │   │   ├── Requests/          — Form request validation classes
@@ -109,7 +109,7 @@ Analytics recorded for both brand and affiliate dashboards
 │   ├── api/professional.php   — 40+ professional routes
 │   ├── api/publicSite.php     — Public mini-site routes (subdomain-scoped)
 │   ├── api/staff.php          — Staff/admin routes
-│   ├── api/enterprise.php     — Enterprise routes (stub)
+│   ├── api/enterprise.php     — Enterprise self-service routes
 │   └── web.php                — QR code redirect only
 ├── supabase/migrations/       — All DB migrations (SQL, NOT Laravel migrations)
 ├── database/
@@ -138,8 +138,12 @@ Analytics recorded for both brand and affiliate dashboards
 | `BrandPartnerLink` | `core.brand_partner_links` | Brand ↔ affiliate relationship with slot numbering |
 | `BrandAffiliateInvite` | `core.brand_affiliate_invites` | Token-based invite (expiring) for affiliate onboarding |
 | `ProfessionalIntegration` | `core.professional_integrations` | Encrypted OAuth tokens for Square/Fresha |
+| `BrandProduct` | `retail.brand_products` | Full Shopify-synced product catalog per brand |
+| `BrandProductSetting` | `retail.brand_product_settings` | Global brand approval/availability/featured/commission/discount settings per brand product |
+| `BrandProductAffiliateOverride` | `retail.brand_product_affiliate_overrides` | Restrict-only per-affiliate deny overrides on brand products |
 | `BrandStoreSettings` | `retail.brand_store_settings` | Commission rate config per brand |
 | `ProfessionalSelection` | `retail.professional_selections` | Featured product list per professional |
+| `EnterpriseBrandLink` | `core.enterprise_brand_links` | Links distributor enterprises to managed brand professional accounts |
 | `Plan` | `billing.plans` | Subscription tiers with entitlements |
 | `Subscription` | `billing.subscriptions` | Professional's current plan status |
 | `SiteVisit` | `analytics.site_visits` | Page view events with UTM, device, geo |
@@ -158,6 +162,11 @@ Analytics recorded for both brand and affiliate dashboards
 | `FreshaApiClient` / `FreshaServiceSyncService` | Fresha OAuth + service sync |
 | `BrandAffiliateInviteService` | Invite token generation, claiming, expiry |
 | `BrandPartnerLinkService` | Connect/disconnect brand-affiliate relationships |
+| `BrandAccessService` | Resolves brand-management scope for brand users and distributor-linked managers |
+| `BrandProductCatalogService` | Builds affiliate-visible, manager-catalog, and storefront-selected product payloads |
+| `BrandProductSettingsService` | Ensures synced `brand_products` always have settings rows |
+| `BrandPricingService` | Effective commission + discount price calculation (ceil to nearest 5 cents) |
+| `SelectionCleanupService` | Removes invalid selections, notifies affected professionals, invalidates site cache |
 | `EnterpriseProvisioningService` | Auto-provision enterprise for owner-type professionals |
 | `FeaturedProductsPayloadService` | Format product list for public API response |
 | `ProfessionalLegalContentService` | Auto-generate T&Cs and privacy policy |
@@ -199,7 +208,7 @@ Analytics recorded for both brand and affiliate dashboards
 3. Analytics events (`POST /api/public/analytics/*`) recorded asynchronously.
 
 #### Product Purchase Flow
-[TBD: E-commerce checkout integration. Schema and featured products API exist. Payment processor and order recording not yet fully explored.]
+[TBD: E-commerce checkout integration. Brand-approved catalog and storefront selection constraints are implemented; order recording, payment processing, and payout distribution are not yet implemented.]
 
 #### Booking Flow
 1. Customer calls `POST /api/public/booking/availability` → proxied to Square/Fresha.
@@ -229,7 +238,7 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 | `core` | Main domain (professionals, sites, services, customers, blocks, media, integrations, brand links) |
 | `analytics` | Event tracking (site_visits, link_clicks, lead_submissions) |
 | `billing` | Plans, subscriptions |
-| `retail` | Brand store settings, product settings, professional selections |
+| `retail` | Brand catalog/settings (`brand_products`, `brand_product_settings`, overrides), store settings, selections, commerce tables |
 
 `DB_SEARCH_PATH=public,core,analytics,billing,retail` — queries can reference tables without schema prefix.
 
@@ -256,9 +265,22 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 - Fresha OAuth integration + service sync
 - Brand partner link management (connect/disconnect affiliates)
 - Brand affiliate invite system (token, expiry, claim flow)
-- Brand store settings (commission rates)
-- Per-product overrides (`is_available`, `custom_price`) on `BrandProductSettings`
-- Featured products selection per professional
+- Brand-approved affiliate commerce foundation:
+  - `brand_products` full catalog + `brand_product_settings` (default unapproved)
+  - global approval + availability rules
+  - restrict-only affiliate deny overrides
+  - enterprise brand-management links (`distributor` enterprise type)
+  - strict selection validation by `brand_product_id`
+  - global 10-product cap per professional across brands
+  - featured cap 10 per brand
+- Store API cutover and catalog controls:
+  - `PUT /api/store/featured-products` hard-cutover payload (`selected_products[{brand_product_id,...}]`)
+  - `GET /api/store/available-products` affiliate-visible catalog
+  - `GET/PATCH /api/store/brand-products` + bulk patch
+  - affiliate override management endpoints
+  - legacy product-settings write flow removed (`PUT /api/store/brand-product-settings`)
+  - featured-products reads no longer fall back to `site.settings.selected_products`
+- Selection auto-cleanup + notification on de-approval/unavailability/deny/disconnect
 - Subscription and plan management (Stripe-backed)
 - Site analytics (page views, link clicks, leads)
 - Legal content (auto-generated T&Cs + privacy, manual override)
@@ -270,9 +292,8 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 
 ### Partially Implemented / In Progress
 - **Video uploads** — Code exists (`ProcessVideoVariantsJob`, FFmpeg), feature-flagged off (`COMET_VIDEO_UPLOADS_ENABLED=false`). Needs video workers running before enabling.
-- **Enterprise features** — Provisioning service and schema exist. Self-service routes are stubs.
-- **B2B retail / affiliate commerce** — Schema and featured product API exist. Order recording, payment processing, and commission distribution flow are [TBD].
-- **Shopify integration** — Schema prepared, integration code not yet present.
+- **B2B retail checkout + payouts** — Catalog controls and selection APIs are implemented, but order recording, payment processing, and commission payout distribution are still [TBD].
+- **Shopify integration runtime** — Schema + sync target tables exist, but live Shopify product ingest/sync jobs are not yet implemented end-to-end.
 
 ### Known Issues / Notes
 - Laravel database migrations are intentionally disabled (guarded in composer). All schema changes go through `supabase/migrations/`.
@@ -285,23 +306,20 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 
 ### Highest Priority
 1. **Affiliate commerce order flow** — Define how a product purchase on the affiliate's site is recorded, how commission is calculated and distributed, and what the brand sees.
-2. **Enable video uploads** — Ensure `redis_video` queue worker is running, then set feature flag.
-3. **Enterprise self-service routes** — Implement enterprise CRUD for owner-type professionals.
-4. **Shopify integration** — Connect brand product catalogue via Shopify API (schema ready).
-5. **Analytics dashboard for brands** — Brands need to see aggregate performance across all their affiliates.
+2. **Shopify integration runtime** — Implement product ingest/sync into `retail.brand_products` + settings bootstrap in production flows.
+3. **Payout orchestration** — Finalize Stripe Connect commission payout flow from recorded orders.
+4. **Analytics dashboard for brands** — Brands need aggregate performance across all affiliates/brands.
+5. **Enable video uploads** — Ensure `redis_video` queue worker is running, then set feature flag.
 
 ### Suggested Implementation Order
 1. Order recording model + API endpoint (retail schema)
-2. Commission calculation service (brand rate → Comet fee → affiliate payout)
-3. Stripe Connect for automatic affiliate payouts
+2. Shopify catalog sync service + webhook handling
+3. Commission attribution + payout orchestration (Stripe Connect)
 4. Brand analytics endpoints (aggregate affiliate performance)
 5. Video upload enablement (infrastructure task)
-6. Enterprise self-service CRUD
-7. Shopify catalogue sync service
 
 ### Open Questions
 - [TBD: Exact Shopify app architecture — webhook-driven order push vs. polling?]
-- [TBD: Multi-brand affiliation UX — how does the affiliate's site handle products from multiple brands simultaneously?]
 - [TBD: Stripe Connect account setup flow — does the professional onboard via Stripe Express during signup?]
 
 ---
@@ -370,6 +388,11 @@ When another AI reads this file, it should:
 | 2026-03-19 | Platform fee model: brand pays monthly subscription (~$200/mo) | Simpler billing — brand pays for access, not per-transaction fees on affiliate side |
 | 2026-03-19 | Affiliates can connect to multiple brands | One affiliate can represent multiple brands; one "primary" brand may be designated in future but not yet decided |
 | 2026-03-19 | No in-house booking system — Square and Fresha integrations only | Reduces scope; may revisit native booking in future |
+| 2026-03-20 | Featured selection contract is hard-cutover to `brand_product_id` payload | Prevents cross-brand Shopify ID ambiguity and enforces strict brand-scoped selection validation |
+| 2026-03-20 | Approval model is global allowlist + per-affiliate restrict-only deny overrides | Keeps governance centralized at brand level while allowing affiliate-specific safety controls |
+| 2026-03-20 | Product selection cap is global 10 per professional across brands; featured cap is 10 per brand | Maintains consistent storefront limits while supporting multi-brand catalogs |
+| 2026-03-20 | Distributor enterprises can manage linked brands via `core.enterprise_brand_links` | Enables parent/distributor operating model without transferring brand ownership |
+| 2026-03-20 | Removed legacy brand product-settings flow and site-settings product fallback | Prevents legacy writes from deleting modern catalog settings and keeps read/write paths strictly brand-product scoped |
 
 ---
 
@@ -381,7 +404,7 @@ When another AI reads this file, it should:
 2. **Database is Supabase PostgreSQL.** Use `supabase/migrations/` for all schema changes. Eloquent models map to tables in non-public schemas — check the model's `$table` and `$connection` properties.
 3. **Auth flow is JWT-first.** Every professional API request must pass `Authorization: Bearer <supabase_jwt>`. The `supabase.jwt` middleware validates against JWKS.
 4. **Media is async.** After upload, variants are queued. Don't expect variants to exist immediately after upload.
-5. **The retail/commerce layer is incomplete.** Schema and featured products API exist, but order recording, commission distribution, and payment splitting are not yet implemented.
+5. **The retail/commerce layer is partially complete.** Brand-scoped catalog/approval/selection governance is implemented; order recording, commission distribution, and payment splitting are not yet implemented.
 6. **Video uploads are disabled by default.** Set `COMET_VIDEO_UPLOADS_ENABLED=true` and ensure the `redis_video` queue worker is running before testing video flows.
 
 ### Fragile Parts
@@ -391,9 +414,8 @@ When another AI reads this file, it should:
 - `BrandPartnerLink` slot numbering — slot assignment logic must remain consistent or brand affiliate ordering breaks.
 - `supabase/migrations/` — migrations run against a live Supabase project. Always test in a staging environment first. Irreversible migrations must include a rollback plan.
 
-### Unfinished Work In Progress (as of 2026-03-19)
+### Unfinished Work In Progress (as of 2026-03-20)
 - Video upload workers and enabling the feature flag
-- Enterprise self-service API routes
 - Affiliate commerce order flow (models, API, commission logic)
 - Shopify brand catalogue integration
 - Brand-facing aggregate analytics across affiliates

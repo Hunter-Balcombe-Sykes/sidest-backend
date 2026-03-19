@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Site\Site;
 use App\Services\Professional\BrandPartnerLinkService;
+use App\Services\Store\SelectionCleanupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -84,9 +85,9 @@ class BrandAffiliateController extends ApiController
     public function disconnect(
         Request $request,
         string $affiliateId,
-        BrandPartnerLinkService $brandPartnerLinks
-    ): JsonResponse
-    {
+        BrandPartnerLinkService $brandPartnerLinks,
+        SelectionCleanupService $selectionCleanup
+    ): JsonResponse {
         $professional = $this->currentProfessional($request);
 
         if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
@@ -98,6 +99,13 @@ class BrandAffiliateController extends ApiController
         if (! $disconnected) {
             return $this->error('Affiliate not found for this brand.', 404);
         }
+
+        $selectionCleanup->removeSelectionsForAffiliateBrand(
+            (string) $affiliateId,
+            $brandId,
+            'Brand connection removed',
+            '{count} selected product(s) were removed because this brand connection ended.'
+        );
 
         return $this->success([
             'affiliate_id' => $affiliateId,
