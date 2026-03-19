@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
+use App\Http\Controllers\Api\Professional\ConfirmationPreferenceController;
 use App\Http\Controllers\Api\Professional\ProfessionalController;
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
@@ -127,6 +128,10 @@ Route::middleware(['supabase.jwt', 'current.pro'])
     Route::post('/customers/{customer}/restore', [ProfessionalCustomerController::class, 'restore'])
         ->whereUuid('customer')
         ->withTrashed();
+
+    // UI Confirmation Preferences ("don't ask again" toggles)
+    Route::get('/confirmation-preferences', [ConfirmationPreferenceController::class, 'show']);
+    Route::patch('/confirmation-preferences', [ConfirmationPreferenceController::class, 'update']);
 
     // Theme Selection
     Route::get('/themes', [ProfessionalThemeController::class, 'index']);

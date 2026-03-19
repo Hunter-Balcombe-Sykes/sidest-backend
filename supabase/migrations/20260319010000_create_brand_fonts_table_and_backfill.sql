@@ -28,7 +28,7 @@ ALTER TABLE core.brand_fonts OWNER TO postgres;
 
 COMMENT ON TABLE core.brand_fonts IS 'Brand-managed fonts used for themed affiliate/professional sites. Active pointer per brand+slot with version history.';
 COMMENT ON COLUMN core.brand_fonts.slot IS 'Font slot key. v1 supports only primary.';
-COMMENT ON COLUMN core.brand_fonts.file_hash IS 'SHA-256 hash of font file contents (or deterministic fallback for backfilled rows).';
+COMMENT ON COLUMN core.brand_fonts.file_hash IS 'File hash metadata (SHA-256 for uploads; deterministic fallback for backfilled rows).';
 
 CREATE UNIQUE INDEX IF NOT EXISTS brand_fonts_active_brand_slot_uq
     ON core.brand_fonts (brand_professional_id, slot)
@@ -78,7 +78,7 @@ WITH legacy_candidates AS (
         COALESCE(c.legacy_file_path, c.legacy_file_url) AS file_path,
         c.legacy_file_url AS file_url,
         'woff2'::text AS format,
-        encode(digest(c.legacy_file_url || '|' || coalesce(c.legacy_file_path, ''), 'sha256'), 'hex') AS file_hash,
+        md5(c.legacy_file_url || '|' || coalesce(c.legacy_file_path, '')) AS file_hash,
         0::bigint AS size_bytes
     FROM legacy_candidates c
     WHERE c.legacy_file_url IS NOT NULL

@@ -18,7 +18,9 @@ use App\Models\Core\Site\SiteMedia;
 use App\Services\Branding\BrandFontResolver;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
+use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -358,9 +360,9 @@ class ProfessionalUploadController extends ApiController
      *
      * DELETE /api/images/{image}
      */
-    public function destroy(SiteMedia $image): JsonResponse
+    public function destroy(Request $request, SiteMedia $image): JsonResponse
     {
-        $pro = $this->currentProfessional(request());
+        $pro = $this->currentProfessional($request);
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
@@ -379,6 +381,13 @@ class ProfessionalUploadController extends ApiController
         }
 
         $image->delete();
+
+        if ($this->shouldRememberConfirmationPreference($request)) {
+            app(ConfirmationPreferenceService::class)->enableForProfessional(
+                (string) $pro->id,
+                ConfirmationPreferenceService::ACTION_DELETE_MEDIA
+            );
+        }
 
         app(SiteCacheService::class)->invalidateSite($site);
 
@@ -596,6 +605,13 @@ class ProfessionalUploadController extends ApiController
                 ]);
             }
         }
+    }
+
+    private function shouldRememberConfirmationPreference(Request $request): bool
+    {
+        return $request->boolean('remember_confirmation_preference')
+            || $request->boolean('always_allow_confirmation')
+            || $request->boolean('dont_ask_again');
     }
 
     private function dispatchVideoJob(string $mediaId, string $originalPath, string $basePath): void

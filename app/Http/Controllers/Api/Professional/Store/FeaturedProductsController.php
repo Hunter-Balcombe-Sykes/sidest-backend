@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Retail\ProfessionalSelection;
 use App\Services\Cache\SiteCacheService;
+use App\Services\Professional\ConfirmationPreferenceService;
 use App\Services\Store\FeaturedProductsPayloadService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -53,6 +54,7 @@ class FeaturedProductsController extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $site = $this->currentSite($professional);
+        $professionalId = (string) $professional->id;
         $maxFeatured = (int) config('comet.store.max_featured_products', 10);
         $supportsCommissionOverride = $this->featuredProductsPayloads->supportsCommissionOverride()
             && $this->featuredProductsPayloads->hasSelectionsTable();
@@ -142,6 +144,24 @@ class FeaturedProductsController extends ApiController
             );
         }
 
+        $existingProductIds = ProfessionalSelection::query()
+            ->where('professional_id', $professionalId)
+            ->pluck('shopify_product_id')
+            ->map(fn ($value): string => strtolower(trim((string) $value)))
+            ->filter(fn (string $value): bool => $value !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        $incomingProductIds = collect($validated['products'])
+            ->map(fn ($product): string => strtolower(trim((string) ($product['shopify_product_id'] ?? ''))))
+            ->filter(fn (string $value): bool => $value !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        $unselectedProductDetected = count(array_diff($existingProductIds, $incomingProductIds)) > 0;
+
         try {
             DB::transaction(function () use ($professional, $validated, $supportsCommissionOverride, $supportsSelectionEnterprise, $selectionEnterpriseId) {
                 // Remove all current selections and replace
@@ -201,6 +221,13 @@ class FeaturedProductsController extends ApiController
             return $this->error($message, $status);
         }
 
+        if ($unselectedProductDetected && $this->shouldRememberConfirmationPreference($request)) {
+            app(ConfirmationPreferenceService::class)->enableForProfessional(
+                $professionalId,
+                ConfirmationPreferenceService::ACTION_UNSELECT_PRODUCT
+            );
+        }
+
         try {
             app(SiteCacheService::class)->invalidateSite($site);
         } catch (Throwable $e) {
@@ -213,10 +240,17 @@ class FeaturedProductsController extends ApiController
 
         return $this->success(
             $this->featuredProductsPayloads->build(
-                (string) $professional->id,
+                $professionalId,
                 $site->settings,
                 'professional_store_update'
             )
         );
+    }
+
+    private function shouldRememberConfirmationPreference(Request $request): bool
+    {
+        return $request->boolean('remember_confirmation_preference')
+            || $request->boolean('always_allow_confirmation')
+            || $request->boolean('dont_ask_again');
     }
 }
