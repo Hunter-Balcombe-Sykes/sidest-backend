@@ -111,6 +111,15 @@ class ProfessionalController extends ApiController
             ]);
         }
 
+        $siteSettings = [];
+        if ($pro->site) {
+            $siteSettings = is_array($pro->site->settings) ? $pro->site->settings : [];
+            $siteSettings = app(SiteCacheService::class)->hydrateTypographySettings(
+                $siteSettings,
+                (string) $pro->id
+            );
+        }
+
         // Use the already-loaded professional to build payload instead of querying again
         $payload = [
             'professional' => [
@@ -150,7 +159,7 @@ class ProfessionalController extends ApiController
                 'id' => $pro->site->id,
                 'subdomain' => $pro->site->subdomain,
                 'is_published' => (bool) $pro->site->is_published,
-                'settings' => $pro->site->settings,
+                'settings' => $siteSettings,
             ] : null,
         ];
 

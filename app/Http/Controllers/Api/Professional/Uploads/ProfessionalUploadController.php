@@ -13,7 +13,9 @@ use App\Http\Requests\Api\Professional\Uploads\UploadImageRequest;
 use App\Jobs\DeleteMediaArtifactsJob;
 use App\Jobs\ProcessImageVariantsJob;
 use App\Jobs\ProcessVideoVariantsJob;
+use App\Models\Core\Site\BrandFont;
 use App\Models\Core\Site\SiteMedia;
+use App\Services\Branding\BrandFontResolver;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Http\JsonResponse;
@@ -384,7 +386,7 @@ class ProfessionalUploadController extends ApiController
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Brand-only upload endpoints (unchanged)                            */
+    /*  Brand-only upload endpoints                                        */
     /* ------------------------------------------------------------------ */
 
     /**
@@ -404,17 +406,75 @@ class ProfessionalUploadController extends ApiController
         $extension = strtolower((string) $file->getClientOriginalExtension());
         $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
         $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'brand-font');
-        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
-        $path = "fonts/{$pro->id}/design/{$safeBaseName}_{$hash}.{$extension}";
+        $realPath = $file->getRealPath();
+        if (! is_string($realPath) || $realPath === '') {
+            return $this->error('Unable to access uploaded font file.', 422);
+        }
+
+        $computedHash = hash_file('sha256', $realPath);
+        if (! is_string($computedHash) || $computedHash === '') {
+            return $this->error('Unable to hash uploaded font file.', 422);
+        }
+        $fullHash = $computedHash;
+        $shortHash = substr($fullHash, 0, 16);
+        $path = "fonts/{$pro->id}/design/{$safeBaseName}_{$shortHash}.{$extension}";
         $mediaDisk = $this->mediaService->resolvedDiskName();
         /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
         $disk = Storage::disk($mediaDisk);
+        $url = $disk->url($path);
 
-        $disk->put($path, file_get_contents($file->getRealPath()), 'public');
+        $contents = file_get_contents($realPath);
+        if (! is_string($contents)) {
+            return $this->error('Unable to read uploaded font file.', 422);
+        }
+
+        $disk->put($path, $contents, 'public');
+
+        try {
+            $font = DB::transaction(function () use ($pro, $path, $url, $file, $fullHash): BrandFont {
+                BrandFont::query()
+                    ->where('brand_professional_id', (string) $pro->id)
+                    ->where('slot', BrandFont::SLOT_PRIMARY)
+                    ->where('is_active', true)
+                    ->whereNull('deleted_at')
+                    ->update([
+                        'is_active' => false,
+                        'updated_at' => now(),
+                    ]);
+
+                return BrandFont::query()->create([
+                    'brand_professional_id' => (string) $pro->id,
+                    'slot' => BrandFont::SLOT_PRIMARY,
+                    'file_name' => $file->getClientOriginalName(),
+                    'file_path' => $path,
+                    'file_url' => $url,
+                    'format' => BrandFont::FORMAT_WOFF2,
+                    'file_hash' => $fullHash,
+                    'size_bytes' => (int) ($file->getSize() ?? 0),
+                    'is_active' => true,
+                ]);
+            });
+        } catch (Throwable $e) {
+            try {
+                $disk->delete($path);
+            } catch (Throwable $cleanupError) {
+                Log::warning('Failed to cleanup uploaded brand font after DB failure.', [
+                    'professional_id' => (string) $pro->id,
+                    'path' => $path,
+                    'error' => $cleanupError->getMessage(),
+                ]);
+            }
+
+            throw $e;
+        }
+
+        app(BrandFontResolver::class)->forget((string) $pro->id);
+        app(SiteCacheService::class)->invalidateSite($site);
 
         return $this->success([
+            'font_id' => $font->id,
             'path' => $path,
-            'url' => $disk->url($path),
+            'url' => $url,
             'name' => $file->getClientOriginalName(),
             'disk' => $mediaDisk,
             'site_id' => $site->id,

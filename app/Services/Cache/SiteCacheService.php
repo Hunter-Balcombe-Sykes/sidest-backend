@@ -10,6 +10,7 @@ use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Views\PublicSitePayload;
 use App\Models\Core\Site\SiteSubdomainAlias;
+use App\Services\Branding\BrandFontResolver;
 use App\Services\Legal\ProfessionalLegalContentService;
 use App\Services\Store\FeaturedProductsPayloadService;
 use Illuminate\Support\Facades\Cache;
@@ -23,7 +24,8 @@ class SiteCacheService
     private array $brandPartnerEnrichmentCache = [];
 
     public function __construct(
-        private readonly FeaturedProductsPayloadService $featuredProductsPayloads
+        private readonly FeaturedProductsPayloadService $featuredProductsPayloads,
+        private readonly BrandFontResolver $brandFonts
     ) {}
 
     /**
@@ -62,7 +64,10 @@ class SiteCacheService
                 // Always resolve image variant paths to URLs (handles pre-URL-resolution cache entries)
                 $site = $cached['site'] ?? null;
                 if (is_array($site)) {
-                    $cached['site'] = $this->resolveImageVariantUrlsInSite($site, '');
+                    $professionalId = (string) data_get($cached, 'professional.id', '');
+                    $site = $this->hydrateSiteWithBrandTypography($site, $professionalId);
+                    $site = $this->resolveImageVariantUrlsInSite($site, '');
+                    $cached['site'] = $site;
                     $cached['site'] = $this->enrichSiteWithBrandPartnerRadius($cached['site']);
                 }
 
@@ -94,6 +99,7 @@ class SiteCacheService
 
         $site = $payload['site'] ?? null;
         if (is_array($site)) {
+            $site = $this->hydrateSiteWithBrandTypography($site, (string) ($row->professional_id ?? ''));
             $site = $this->resolveImageVariantUrlsInSite($site, (string) ($row->site_id ?? ''));
             $site = $this->enrichSiteWithBrandPartnerRadius($site);
         }
@@ -120,6 +126,27 @@ class SiteCacheService
         Cache::put($key, $data, now()->addMinutes(15));
 
         return $data;
+    }
+
+    /**
+     * @param  array<string, mixed>  $site
+     * @return array<string, mixed>
+     */
+    public function hydrateSiteWithBrandTypography(array $site, string $brandProfessionalId): array
+    {
+        $settings = is_array($site['settings'] ?? null) ? $site['settings'] : [];
+        $site['settings'] = $this->hydrateTypographySettings($settings, $brandProfessionalId);
+
+        return $site;
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     * @return array<string, mixed>
+     */
+    public function hydrateTypographySettings(array $settings, string $brandProfessionalId): array
+    {
+        return $this->brandFonts->hydrateTypographySettings($settings, $brandProfessionalId);
     }
 
     /**
@@ -205,6 +232,7 @@ class SiteCacheService
         $partnerSettings = is_array($partnerSite?->settings ?? null) ? $partnerSite->settings : [];
         $design = is_array($partnerSettings['design'] ?? null) ? $partnerSettings['design'] : [];
         $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
+        $fontFileUrl = $this->brandFonts->activeFontUrl($professionalId);
 
         $resolved = [
             'username' => $this->normalizeString($partnerProfessional?->handle ?? null),
@@ -214,7 +242,7 @@ class SiteCacheService
             'border_radius' => $this->normalizeString($design['border_radius'] ?? $design['borderRadius'] ?? null),
             'border_width' => $this->normalizeString($design['border_width'] ?? $design['borderWidth'] ?? null),
             'general_spacing_padding' => $this->normalizeString($design['general_spacing_padding'] ?? $design['generalSpacingPadding'] ?? null),
-            'font_file_url' => $this->normalizeString($typography['font_file_url'] ?? $typography['fontFileUrl'] ?? null),
+            'font_file_url' => $this->normalizeString($fontFileUrl),
             'logo_letter_spacing' => $this->normalizeString($typography['logo_letter_spacing'] ?? $typography['logoLetterSpacing'] ?? null),
             'logo_font_size' => $this->normalizeString($typography['logo_font_size'] ?? $typography['logoFontSize'] ?? null),
         ];
@@ -623,6 +651,11 @@ class SiteCacheService
      */
     public function invalidateSite(Site $site): void
     {
+        $professionalId = (string) ($site->professional_id ?? '');
+        if ($professionalId !== '') {
+            $this->brandFonts->forget($professionalId);
+        }
+
         $keys = [
             CacheKeyGenerator::publicSitePayload($site->subdomain),
             CacheKeyGenerator::siteBlocks($site->id, 'links'),
@@ -649,7 +682,6 @@ class SiteCacheService
             $keys[] = CacheKeyGenerator::publicSitePayload(strtoLower($aliasSubdomain));
         }
 
-        $professionalId = (string) ($site->professional_id ?? '');
         if ($professionalId !== '') {
             $connectedProfessionalIds = BrandPartnerLink::query()
                 ->where('brand_professional_id', $professionalId)

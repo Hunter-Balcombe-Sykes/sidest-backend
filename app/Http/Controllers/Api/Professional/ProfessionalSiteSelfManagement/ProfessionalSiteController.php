@@ -22,6 +22,7 @@ class ProfessionalSiteController extends ApiController
         $professional = $this->currentProfessional($request);
         $site = $this->currentSite($professional);
         $siteArray = $site->toArray();
+        $siteArray = $this->siteCache->hydrateSiteWithBrandTypography($siteArray, (string) $professional->id);
         $siteArray = $this->siteCache->enrichSiteWithBrandPartnerRadius($siteArray);
         return $this->success(['site' => $siteArray]);
     }
@@ -30,13 +31,21 @@ class ProfessionalSiteController extends ApiController
         $professional = $this->currentProfessional($request);
         $data = $request->validated();
         $site = $action->execute($professional, $data);
-        return $this->success(['site' => $site]);
+        $siteArray = $site->toArray();
+        $siteArray = $this->siteCache->hydrateSiteWithBrandTypography($siteArray, (string) $professional->id);
+        $siteArray = $this->siteCache->enrichSiteWithBrandPartnerRadius($siteArray);
+
+        return $this->success(['site' => $siteArray]);
     }
 
     public function visibility(UpdateSiteRequest $request, UpdateSiteAction $action){
         $professional = $this->currentProfessional($request);
         $data = $request->validated();
         $site = $action->execute($professional, $data);
-        return $this->success(['site' => $site]);
+        $siteArray = $site->toArray();
+        $siteArray = $this->siteCache->hydrateSiteWithBrandTypography($siteArray, (string) $professional->id);
+        $siteArray = $this->siteCache->enrichSiteWithBrandPartnerRadius($siteArray);
+
+        return $this->success(['site' => $siteArray]);
     }
 }

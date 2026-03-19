@@ -5,10 +5,15 @@ namespace App\Http\Controllers\Api\Staff\StaffSite;
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Professional\Professional;
 use App\Models\Views\AllSiteData;
+use App\Services\Cache\SiteCacheService;
 use Illuminate\Http\JsonResponse;
 
 class StaffSiteController extends ApiController
 {
+    public function __construct(
+        private readonly SiteCacheService $siteCache
+    ) {}
+
     public function show(string $subdomain): JsonResponse
     {
         $row = AllSiteData::query()
@@ -19,6 +24,12 @@ class StaffSiteController extends ApiController
             return $this->error('Site not found.', 404);
         }
 
+        $siteSettings = is_array($row->site_settings) ? $row->site_settings : [];
+        $siteSettings = $this->siteCache->hydrateTypographySettings(
+            $siteSettings,
+            (string) $row->professional_id
+        );
+
         // Staff can see unpublished too, so we return published flag either way
         return $this->success([
             'is_published' => (bool) $row->is_published,
@@ -26,7 +37,7 @@ class StaffSiteController extends ApiController
             'site' => [
                 'id'        => $row->site_id,
                 'subdomain' => $row->subdomain,
-                'settings'  => $row->site_settings,
+                'settings'  => $siteSettings,
             ],
 
             'professional' => [
@@ -63,13 +74,19 @@ class StaffSiteController extends ApiController
             return $this->error('Site not found for professional.', 404);
         }
 
+        $siteSettings = is_array($row->site_settings) ? $row->site_settings : [];
+        $siteSettings = $this->siteCache->hydrateTypographySettings(
+            $siteSettings,
+            (string) $row->professional_id
+        );
+
         return $this->success([
             'is_published' => (bool) $row->is_published,
 
             'site' => [
                 'id'        => $row->site_id,
                 'subdomain' => $row->subdomain,
-                'settings'  => $row->site_settings,
+                'settings'  => $siteSettings,
             ],
 
             'professional' => [

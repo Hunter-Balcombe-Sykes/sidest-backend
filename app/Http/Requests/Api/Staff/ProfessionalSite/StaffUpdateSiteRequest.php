@@ -92,9 +92,9 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.design.border_width' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.general_spacing_padding' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.typography' => ['sometimes', 'array'],
-            'settings.design.typography.font_file_name' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'settings.design.typography.font_file_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
-            'settings.design.typography.font_file_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+            'settings.design.typography.font_file_name' => ['prohibited'],
+            'settings.design.typography.font_file_path' => ['prohibited'],
+            'settings.design.typography.font_file_url' => ['prohibited'],
             'settings.design.typography.logo_letter_spacing' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.typography.logo_font_size' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.media' => ['sometimes', 'array'],
@@ -131,6 +131,9 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.brandPartner.prohibited' => 'Use brand partner endpoints to manage brand relationships.',
             'settings.additional_brand_partners.prohibited' => 'Use brand partner endpoints to manage brand relationships.',
             'settings.selected_products.prohibited' => 'Use /api/store/featured-products for product selections.',
+            'settings.design.typography.font_file_name.prohibited' => 'Use /api/uploads/brand-font to manage brand font files.',
+            'settings.design.typography.font_file_path.prohibited' => 'Use /api/uploads/brand-font to manage brand font files.',
+            'settings.design.typography.font_file_url.prohibited' => 'Use /api/uploads/brand-font to manage brand font files.',
         ];
     }
 }
