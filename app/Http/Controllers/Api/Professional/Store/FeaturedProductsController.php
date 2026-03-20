@@ -70,7 +70,7 @@ class FeaturedProductsController extends ApiController
         );
         $products = array_values(array_filter(
             $products,
-            static fn (array $product): bool => (bool) ($product['is_available'] ?? false) && (bool) ($product['is_approved'] ?? false)
+            static fn (array $product): bool => (bool) ($product['is_available'] ?? false)
         ));
 
         return $this->success([
@@ -192,8 +192,8 @@ class FeaturedProductsController extends ApiController
 
                     if (str_contains($dbMessage, 'maximum of')) {
                         $message = 'Too many default product selections selected.';
-                    } elseif (str_contains($dbMessage, 'not approved/available')) {
-                        $message = 'One or more selected products are not approved and available.';
+                    } elseif (str_contains($dbMessage, 'not approved/available') || str_contains($dbMessage, 'not available')) {
+                        $message = 'One or more selected products are unavailable.';
                     } elseif (str_contains($dbMessage, 'not connected to selected brand')) {
                         $message = 'You can only select products from connected brands.';
                     } elseif (str_contains($dbMessage, 'denied for this affiliate')) {

@@ -109,7 +109,6 @@ class BrandProductsController extends ApiController
                         'professional_id' => (string) $brandProduct->brand_professional_id,
                         'brand_product_id' => (string) $brandProduct->id,
                         'shopify_product_id' => (string) $brandProduct->shopify_product_id,
-                        'is_approved' => false,
                         'is_featured' => false,
                         'is_available' => true,
                         'sort_order' => 0,
@@ -119,14 +118,13 @@ class BrandProductsController extends ApiController
                 $settings->fill($patch);
                 $settings->save();
 
-                $isApproved = (bool) $settings->is_approved;
                 $isAvailable = (bool) $settings->is_available;
 
-                if (! $isApproved || ! $isAvailable) {
+                if (! $isAvailable) {
                     $cleanupCount = $this->selectionCleanup->removeSelectionsForBrandProducts(
                         [(string) $brandProduct->id],
                         'Product selections removed',
-                        '{count} selected product(s) were removed because the brand changed product approval or availability.'
+                        '{count} selected product(s) were removed because the brand changed product availability.'
                     );
                 }
             });
@@ -235,7 +233,6 @@ class BrandProductsController extends ApiController
                             'professional_id' => (string) $product->brand_professional_id,
                             'brand_product_id' => (string) $product->id,
                             'shopify_product_id' => (string) $product->shopify_product_id,
-                            'is_approved' => false,
                             'is_featured' => false,
                             'is_available' => true,
                             'sort_order' => 0,
@@ -247,7 +244,7 @@ class BrandProductsController extends ApiController
 
                     $updatedIds[] = (string) $product->id;
 
-                    if (! (bool) $settings->is_approved || ! (bool) $settings->is_available) {
+                    if (! (bool) $settings->is_available) {
                         $cleanupIds[] = (string) $product->id;
                     }
                 }
@@ -257,7 +254,7 @@ class BrandProductsController extends ApiController
                     $cleanupCount = $this->selectionCleanup->removeSelectionsForBrandProducts(
                         $cleanupIds,
                         'Product selections removed',
-                        '{count} selected product(s) were removed because the brand changed product approval or availability.'
+                        '{count} selected product(s) were removed because the brand changed product availability.'
                     );
                 }
             });
@@ -283,7 +280,6 @@ class BrandProductsController extends ApiController
     private function settingsPatchRules(): array
     {
         return [
-            'is_approved' => ['sometimes', 'boolean'],
             'is_available' => ['sometimes', 'boolean'],
             'is_featured' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
@@ -300,7 +296,6 @@ class BrandProductsController extends ApiController
     private function extractPatchAttributes(array $validated): array
     {
         $allowed = [
-            'is_approved',
             'is_available',
             'is_featured',
             'sort_order',

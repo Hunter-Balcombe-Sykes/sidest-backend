@@ -88,7 +88,6 @@ class BrandProductCatalogService
             })
             ->whereIn('bp.brand_professional_id', $connectedBrandIds)
             ->where('bp.is_sync_active', true)
-            ->where('bps.is_approved', true)
             ->whereRaw('COALESCE(bps.is_available, true) = true')
             ->whereNull('o.id')
             ->orderByDesc('bps.is_featured')
@@ -121,7 +120,6 @@ class BrandProductCatalogService
                 'bps.custom_price',
                 'bps.is_featured',
                 'bps.is_available',
-                'bps.is_approved',
                 'bps.sort_order',
                 'bss.default_commission_rate',
                 'p.display_name as brand_display_name',
@@ -212,7 +210,6 @@ class BrandProductCatalogService
                 'bps.custom_price',
                 'bps.is_featured',
                 'bps.is_available',
-                'bps.is_approved',
                 'bps.sort_order',
                 'bss.default_commission_rate',
                 'p.display_name as brand_display_name',
@@ -279,7 +276,6 @@ class BrandProductCatalogService
             ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
             ->where('ps.professional_id', $professionalId)
             ->where('bp.is_sync_active', true)
-            ->where('bps.is_approved', true)
             ->whereRaw('COALESCE(bps.is_available, true) = true')
             ->whereNull('o.id')
             ->orderBy('ps.sort_order')
@@ -312,7 +308,6 @@ class BrandProductCatalogService
                 'bps.custom_price',
                 'bps.is_featured',
                 'bps.is_available',
-                'bps.is_approved',
                 'bps.sort_order',
                 'bss.default_commission_rate',
                 'p.display_name as brand_display_name',
@@ -345,7 +340,6 @@ class BrandProductCatalogService
                 $query->whereNull('bp.id')
                     ->orWhereNull('l.id')
                     ->orWhereRaw('COALESCE(bp.is_sync_active, false) = false')
-                    ->orWhereRaw('COALESCE(bps.is_approved, false) = false')
                     ->orWhereRaw('COALESCE(bps.is_available, true) = false')
                     ->orWhereNotNull('o.id');
             })
@@ -433,7 +427,6 @@ class BrandProductCatalogService
                     'brand_handle' => $this->nullableString($row->brand_handle ?? null),
                     'is_featured' => (bool) ($row->is_featured ?? false),
                     'sort_order' => (int) ($selectedRows ? ($row->selection_sort_order ?? 0) : ($row->sort_order ?? 0)),
-                    'is_approved' => (bool) ($row->is_approved ?? false),
                     'is_available' => (bool) ($row->is_available ?? true),
                     'default_commission_rate' => $defaultCommissionRate,
                     'commission_override' => $commissionOverride,

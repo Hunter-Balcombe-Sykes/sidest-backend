@@ -1474,7 +1474,7 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 - Response (200): same shape as GET endpoint
 - Notes:
   - Legacy payload (`products[].shopify_product_id`) is rejected with 422.
-  - DB triggers enforce connected brand link + approval + availability + sync-active + deny-override restrictions.
+  - DB triggers enforce connected brand link + availability + sync-active + deny-override restrictions.
   - Duplicate `brand_product_id` values are rejected.
 - Common status codes: 200, 401, 403, 422, 503
 
@@ -1498,17 +1498,17 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 - Auth: Required (brand account, or professional in an active `distributor` enterprise linked via `core.enterprise_brand_links`)
 - Query params:
   - `brand_professional_id` (optional uuid): limit to one managed brand
-- Response includes each product's synced fields and settings fields (`is_approved`, `is_available`, `is_featured`, `commission_override`, `discount_rate`, `custom_price`, effective pricing/commission outputs).
+- Response includes each product's synced fields and settings fields (`is_available`, `is_featured`, `commission_override`, `discount_rate`, `custom_price`, effective pricing/commission outputs).
 - Common status codes: 200, 401, 403, 422
 
 #### `PATCH /api/store/brand-products/{brandProductId}`
 - Purpose: update one brand product's settings
 - Auth: Required manager access for that brand
 - Allowed fields:
-  - `is_approved`, `is_available`, `is_featured`, `sort_order`
+  - `is_available`, `is_featured`, `sort_order`
   - `commission_override`, `discount_rate`, `custom_price`
 - Notes:
-  - If a product becomes unapproved/unavailable, affected affiliate selections are removed and users are notified.
+  - If a product becomes unavailable, affected affiliate selections are removed and users are notified.
 - Common status codes: 200, 401, 403, 404, 422
 
 #### `PATCH /api/store/brand-products/bulk`
@@ -1520,7 +1520,7 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
   - one or more mutable fields from the single-product PATCH endpoint
 - Notes:
   - Executes in a transaction with row locking.
-  - If products become unapproved/unavailable, affected selections are removed + notifications are created.
+  - If products become unavailable, affected selections are removed + notifications are created.
 - Common status codes: 200, 401, 403, 422
 
 ### Store: Affiliate Deny Overrides (Restrict-Only)

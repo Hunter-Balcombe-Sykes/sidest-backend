@@ -44,7 +44,6 @@ class BrandProductSettingsService
                     'professional_id' => (string) $row->brand_professional_id,
                     'brand_product_id' => (string) $row->brand_product_id,
                     'shopify_product_id' => (string) $row->shopify_product_id,
-                    'is_approved' => false,
                     'is_featured' => false,
                     'is_available' => true,
                     'sort_order' => 0,
