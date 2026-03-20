@@ -47,6 +47,13 @@ class BrandProductCatalogService
         }
 
         $this->settingsRows->ensureSettingsRowsForBrands($connectedBrandIds);
+        $brandEnterpriseFallback = DB::table('core.enterprise_brand_links as ebl')
+            ->selectRaw('DISTINCT ON (ebl.brand_professional_id) ebl.brand_professional_id, ebl.enterprise_id')
+            ->where('ebl.status', 'active')
+            ->orderBy('ebl.brand_professional_id')
+            ->orderByDesc('ebl.updated_at')
+            ->orderByDesc('ebl.created_at')
+            ->orderByDesc('ebl.id');
 
         $rows = DB::table('retail.brand_products as bp')
             ->join('core.brand_partner_links as l', function ($join) use ($affiliateProfessionalId): void {
@@ -57,9 +64,20 @@ class BrandProductCatalogService
                 $join->on('bps.brand_product_id', '=', 'bp.id')
                     ->on('bps.professional_id', '=', 'bp.brand_professional_id');
             })
+            ->leftJoinSub($brandEnterpriseFallback, 'bfe', function ($join): void {
+                $join->on('bfe.brand_professional_id', '=', 'bp.brand_professional_id');
+            })
             ->leftJoin('retail.enterprise_products as ep', function ($join): void {
-                $join->on('ep.enterprise_id', '=', 'bp.enterprise_id')
-                    ->on('ep.shopify_product_id', '=', 'bp.shopify_product_id');
+                $join->whereRaw('ep.enterprise_id = COALESCE(bp.enterprise_id, bfe.enterprise_id)')
+                    ->whereRaw("
+                        (
+                            ep.shopify_product_id = bp.shopify_product_id
+                            OR (
+                                regexp_replace(bp.shopify_product_id, '[^0-9]', '', 'g') <> ''
+                                AND regexp_replace(ep.shopify_product_id, '[^0-9]', '', 'g') = regexp_replace(bp.shopify_product_id, '[^0-9]', '', 'g')
+                            )
+                        )
+                    ");
             })
             ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
             ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
@@ -132,11 +150,29 @@ class BrandProductCatalogService
         }
 
         $this->settingsRows->ensureSettingsRowsForBrands($brandProfessionalIds);
+        $brandEnterpriseFallback = DB::table('core.enterprise_brand_links as ebl')
+            ->selectRaw('DISTINCT ON (ebl.brand_professional_id) ebl.brand_professional_id, ebl.enterprise_id')
+            ->where('ebl.status', 'active')
+            ->orderBy('ebl.brand_professional_id')
+            ->orderByDesc('ebl.updated_at')
+            ->orderByDesc('ebl.created_at')
+            ->orderByDesc('ebl.id');
 
         $rows = DB::table('retail.brand_products as bp')
+            ->leftJoinSub($brandEnterpriseFallback, 'bfe', function ($join): void {
+                $join->on('bfe.brand_professional_id', '=', 'bp.brand_professional_id');
+            })
             ->leftJoin('retail.enterprise_products as ep', function ($join): void {
-                $join->on('ep.enterprise_id', '=', 'bp.enterprise_id')
-                    ->on('ep.shopify_product_id', '=', 'bp.shopify_product_id');
+                $join->whereRaw('ep.enterprise_id = COALESCE(bp.enterprise_id, bfe.enterprise_id)')
+                    ->whereRaw("
+                        (
+                            ep.shopify_product_id = bp.shopify_product_id
+                            OR (
+                                regexp_replace(bp.shopify_product_id, '[^0-9]', '', 'g') <> ''
+                                AND regexp_replace(ep.shopify_product_id, '[^0-9]', '', 'g') = regexp_replace(bp.shopify_product_id, '[^0-9]', '', 'g')
+                            )
+                        )
+                    ");
             })
             ->leftJoin('retail.brand_product_settings as bps', function ($join): void {
                 $join->on('bps.brand_product_id', '=', 'bp.id')
@@ -198,12 +234,30 @@ class BrandProductCatalogService
         if ($professionalId === '') {
             return [];
         }
+        $brandEnterpriseFallback = DB::table('core.enterprise_brand_links as ebl')
+            ->selectRaw('DISTINCT ON (ebl.brand_professional_id) ebl.brand_professional_id, ebl.enterprise_id')
+            ->where('ebl.status', 'active')
+            ->orderBy('ebl.brand_professional_id')
+            ->orderByDesc('ebl.updated_at')
+            ->orderByDesc('ebl.created_at')
+            ->orderByDesc('ebl.id');
 
         $rows = DB::table('retail.professional_selections as ps')
             ->join('retail.brand_products as bp', 'bp.id', '=', 'ps.brand_product_id')
+            ->leftJoinSub($brandEnterpriseFallback, 'bfe', function ($join): void {
+                $join->on('bfe.brand_professional_id', '=', 'bp.brand_professional_id');
+            })
             ->leftJoin('retail.enterprise_products as ep', function ($join): void {
-                $join->on('ep.enterprise_id', '=', 'bp.enterprise_id')
-                    ->on('ep.shopify_product_id', '=', 'bp.shopify_product_id');
+                $join->whereRaw('ep.enterprise_id = COALESCE(bp.enterprise_id, bfe.enterprise_id)')
+                    ->whereRaw("
+                        (
+                            ep.shopify_product_id = bp.shopify_product_id
+                            OR (
+                                regexp_replace(bp.shopify_product_id, '[^0-9]', '', 'g') <> ''
+                                AND regexp_replace(ep.shopify_product_id, '[^0-9]', '', 'g') = regexp_replace(bp.shopify_product_id, '[^0-9]', '', 'g')
+                            )
+                        )
+                    ");
             })
             ->join('retail.brand_product_settings as bps', function ($join): void {
                 $join->on('bps.brand_product_id', '=', 'bp.id')
