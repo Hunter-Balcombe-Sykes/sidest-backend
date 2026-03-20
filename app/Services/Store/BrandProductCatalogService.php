@@ -57,6 +57,10 @@ class BrandProductCatalogService
                 $join->on('bps.brand_product_id', '=', 'bp.id')
                     ->on('bps.professional_id', '=', 'bp.brand_professional_id');
             })
+            ->leftJoin('retail.enterprise_products as ep', function ($join): void {
+                $join->on('ep.enterprise_id', '=', 'bp.enterprise_id')
+                    ->on('ep.shopify_product_id', '=', 'bp.shopify_product_id');
+            })
             ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
             ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
             ->leftJoin('retail.brand_product_affiliate_overrides as o', function ($join) use ($affiliateProfessionalId): void {
@@ -87,6 +91,13 @@ class BrandProductCatalogService
                 'bp.last_synced_at',
                 'bp.enterprise_id',
                 'bp.metadata',
+                'ep.title as enterprise_product_title',
+                'ep.handle as enterprise_product_handle',
+                'ep.product_url as enterprise_product_url',
+                'ep.image_url as enterprise_product_image_url',
+                'ep.price_cents as enterprise_product_price_cents',
+                'ep.currency_code as enterprise_product_currency_code',
+                'ep.metadata as enterprise_product_metadata',
                 'bps.commission_override',
                 'bps.discount_rate',
                 'bps.custom_price',
@@ -123,6 +134,10 @@ class BrandProductCatalogService
         $this->settingsRows->ensureSettingsRowsForBrands($brandProfessionalIds);
 
         $rows = DB::table('retail.brand_products as bp')
+            ->leftJoin('retail.enterprise_products as ep', function ($join): void {
+                $join->on('ep.enterprise_id', '=', 'bp.enterprise_id')
+                    ->on('ep.shopify_product_id', '=', 'bp.shopify_product_id');
+            })
             ->leftJoin('retail.brand_product_settings as bps', function ($join): void {
                 $join->on('bps.brand_product_id', '=', 'bp.id')
                     ->on('bps.professional_id', '=', 'bp.brand_professional_id');
@@ -149,6 +164,13 @@ class BrandProductCatalogService
                 'bp.last_synced_at',
                 'bp.enterprise_id',
                 'bp.metadata',
+                'ep.title as enterprise_product_title',
+                'ep.handle as enterprise_product_handle',
+                'ep.product_url as enterprise_product_url',
+                'ep.image_url as enterprise_product_image_url',
+                'ep.price_cents as enterprise_product_price_cents',
+                'ep.currency_code as enterprise_product_currency_code',
+                'ep.metadata as enterprise_product_metadata',
                 'bps.commission_override',
                 'bps.discount_rate',
                 'bps.custom_price',
@@ -179,6 +201,10 @@ class BrandProductCatalogService
 
         $rows = DB::table('retail.professional_selections as ps')
             ->join('retail.brand_products as bp', 'bp.id', '=', 'ps.brand_product_id')
+            ->leftJoin('retail.enterprise_products as ep', function ($join): void {
+                $join->on('ep.enterprise_id', '=', 'bp.enterprise_id')
+                    ->on('ep.shopify_product_id', '=', 'bp.shopify_product_id');
+            })
             ->join('retail.brand_product_settings as bps', function ($join): void {
                 $join->on('bps.brand_product_id', '=', 'bp.id')
                     ->on('bps.professional_id', '=', 'bp.brand_professional_id');
@@ -217,6 +243,13 @@ class BrandProductCatalogService
                 'bp.last_synced_at',
                 'bp.enterprise_id',
                 'bp.metadata',
+                'ep.title as enterprise_product_title',
+                'ep.handle as enterprise_product_handle',
+                'ep.product_url as enterprise_product_url',
+                'ep.image_url as enterprise_product_image_url',
+                'ep.price_cents as enterprise_product_price_cents',
+                'ep.currency_code as enterprise_product_currency_code',
+                'ep.metadata as enterprise_product_metadata',
                 'bps.commission_override',
                 'bps.discount_rate',
                 'bps.custom_price',
@@ -248,9 +281,31 @@ class BrandProductCatalogService
                 $customPrice = $this->toNullableFloat($row->custom_price ?? null);
                 $defaultCommissionRate = $this->toNullableFloat($row->default_commission_rate ?? null)
                     ?? $defaultSystemCommission;
+                $shopifyProductId = (string) ($row->shopify_product_id ?? '');
+                $catalogTitle = $this->nullableString($row->title ?? null);
+                $enterpriseTitle = $this->nullableString($row->enterprise_product_title ?? null);
+                $title = $this->resolveProductTitle($catalogTitle, $enterpriseTitle, $shopifyProductId);
+                $handle = $this->nullableString($row->handle ?? null)
+                    ?? $this->nullableString($row->enterprise_product_handle ?? null)
+                    ?? '';
+                $productUrl = $this->nullableString($row->product_url ?? null)
+                    ?? $this->nullableString($row->enterprise_product_url ?? null)
+                    ?? '';
+                $imageUrl = $this->nullableString($row->image_url ?? null)
+                    ?? $this->nullableString($row->enterprise_product_image_url ?? null)
+                    ?? '';
+                $catalogPriceCents = $this->toNullableInt($row->price_cents ?? null)
+                    ?? $this->toNullableInt($row->enterprise_product_price_cents ?? null);
+                $currencyCode = strtoupper(trim((string) (($this->nullableString($row->currency_code ?? null))
+                    ?? ($this->nullableString($row->enterprise_product_currency_code ?? null))
+                    ?? 'AUD')));
+                $metadata = $this->mergeMetadata(
+                    $this->normalizeMetadata($row->metadata ?? null),
+                    $this->normalizeMetadata($row->enterprise_product_metadata ?? null)
+                );
 
                 $basePriceCents = $this->pricing->resolveBasePriceCents(
-                    $this->toNullableInt($row->price_cents ?? null),
+                    $catalogPriceCents,
                     $customPrice
                 );
                 $discountedPriceCents = $this->pricing->discountedPriceCents($basePriceCents, $discountRate);
@@ -262,12 +317,12 @@ class BrandProductCatalogService
                 $payload = [
                     'brand_product_id' => (string) ($row->brand_product_id ?? ''),
                     'brand_professional_id' => (string) ($row->brand_professional_id ?? ''),
-                    'shopify_product_id' => (string) ($row->shopify_product_id ?? ''),
-                    'title' => (string) ($row->title ?? ''),
-                    'handle' => (string) ($row->handle ?? ''),
-                    'product_url' => (string) ($row->product_url ?? ''),
-                    'image_url' => (string) ($row->image_url ?? ''),
-                    'currency_code' => strtoupper(trim((string) ($row->currency_code ?? 'AUD'))),
+                    'shopify_product_id' => $shopifyProductId,
+                    'title' => $title,
+                    'handle' => $handle,
+                    'product_url' => $productUrl,
+                    'image_url' => $imageUrl,
+                    'currency_code' => $currencyCode,
                     'shopify_status' => (string) ($row->shopify_status ?? 'unknown'),
                     'is_sync_active' => (bool) ($row->is_sync_active ?? false),
                     'last_synced_at' => isset($row->last_synced_at) && $row->last_synced_at !== null
@@ -276,7 +331,7 @@ class BrandProductCatalogService
                     'enterprise_id' => isset($row->enterprise_id) && $row->enterprise_id !== null
                         ? (string) $row->enterprise_id
                         : null,
-                    'metadata' => $this->normalizeMetadata($row->metadata ?? null),
+                    'metadata' => $metadata,
                     'brand_display_name' => $this->nullableString($row->brand_display_name ?? null),
                     'brand_handle' => $this->nullableString($row->brand_handle ?? null),
                     'is_featured' => (bool) ($row->is_featured ?? false),
@@ -300,6 +355,70 @@ class BrandProductCatalogService
             })
             ->values()
             ->all();
+    }
+
+    private function resolveProductTitle(?string $catalogTitle, ?string $enterpriseTitle, string $shopifyProductId): string
+    {
+        if ($enterpriseTitle !== null) {
+            if ($catalogTitle === null || $this->isPlaceholderCatalogTitle($catalogTitle, $shopifyProductId)) {
+                return $enterpriseTitle;
+            }
+        }
+
+        if ($catalogTitle !== null) {
+            return $catalogTitle;
+        }
+
+        if ($enterpriseTitle !== null) {
+            return $enterpriseTitle;
+        }
+
+        $suffix = $this->extractNumericShopifyProductId($shopifyProductId) ?? $shopifyProductId;
+        $suffix = trim($suffix);
+
+        return $suffix === '' ? 'Shopify Product' : 'Shopify Product '.$suffix;
+    }
+
+    private function isPlaceholderCatalogTitle(string $title, string $shopifyProductId): bool
+    {
+        $normalized = mb_strtolower(trim($title));
+        if ($normalized === '' || ! str_starts_with($normalized, 'shopify product')) {
+            return false;
+        }
+
+        $digits = $this->extractNumericShopifyProductId($shopifyProductId);
+        if ($digits === null) {
+            return true;
+        }
+
+        return str_contains($normalized, $digits) || preg_match('/^shopify product\s+\d+$/', $normalized) === 1;
+    }
+
+    private function extractNumericShopifyProductId(string $shopifyProductId): ?string
+    {
+        if (preg_match('/(\d+)(?!.*\d)/', $shopifyProductId, $matches) === 1) {
+            return $matches[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $catalogMetadata
+     * @param  array<string, mixed>  $enterpriseMetadata
+     * @return array<string, mixed>
+     */
+    private function mergeMetadata(array $catalogMetadata, array $enterpriseMetadata): array
+    {
+        if ($catalogMetadata === []) {
+            return $enterpriseMetadata;
+        }
+
+        if ($enterpriseMetadata === []) {
+            return $catalogMetadata;
+        }
+
+        return array_replace_recursive($enterpriseMetadata, $catalogMetadata);
     }
 
     private function toNullableFloat(mixed $value): ?float
