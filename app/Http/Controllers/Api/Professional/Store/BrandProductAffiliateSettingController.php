@@ -1,0 +1,249 @@
+<?php
+
+namespace App\Http\Controllers\Api\Professional\Store;
+
+use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Models\Retail\BrandProduct;
+use App\Models\Retail\BrandProductAffiliateSetting;
+use App\Services\Store\BrandAccessService;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+
+class BrandProductAffiliateSettingController extends ApiController
+{
+    use ResolveCurrentProfessional;
+
+    public function __construct(
+        private readonly BrandAccessService $brandAccess,
+    ) {}
+
+    /**
+     * GET /store/affiliate-product-settings
+     */
+    public function index(Request $request)
+    {
+        $professional = $this->currentProfessional($request);
+
+        $validator = Validator::make($request->query(), [
+            'brand_professional_id' => ['required', 'uuid'],
+            'affiliate_professional_id' => ['sometimes', 'uuid'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:200'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        $validated = $validator->validated();
+        $brandProfessionalId = trim((string) $validated['brand_professional_id']);
+        $affiliateProfessionalId = trim((string) ($validated['affiliate_professional_id'] ?? ''));
+        $page = (int) ($validated['page'] ?? 1);
+        $perPage = (int) ($validated['per_page'] ?? 100);
+
+        if (! $this->brandAccess->canManageBrand($professional, $brandProfessionalId)) {
+            return $this->error('You are not permitted to manage settings for this brand.', 403);
+        }
+
+        $query = BrandProductAffiliateSetting::query()
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->orderBy('affiliate_professional_id')
+            ->orderBy('brand_product_id');
+
+        if ($affiliateProfessionalId !== '') {
+            $query->where('affiliate_professional_id', $affiliateProfessionalId);
+        }
+
+        $settings = $query->paginate(
+            $perPage,
+            [
+                'id',
+                'brand_professional_id',
+                'affiliate_professional_id',
+                'brand_product_id',
+                'commission_override',
+                'discount_rate',
+                'custom_price',
+                'created_at',
+                'updated_at',
+            ],
+            'page',
+            $page
+        );
+
+        return $this->paginated($settings, 'settings');
+    }
+
+    /**
+     * PUT /store/affiliate-product-settings
+     *
+     * Upserts per-affiliate pricing overrides for one or more products.
+     *
+     * Body:
+     * {
+     *   "brand_professional_id": "uuid",
+     *   "affiliate_professional_id": "uuid",
+     *   "settings": [
+     *     {
+     *       "brand_product_id": "uuid",
+     *       "commission_override": 18.0,   // nullable
+     *       "discount_rate": 5.0,          // nullable
+     *       "custom_price": null           // nullable
+     *     }
+     *   ]
+     * }
+     */
+    public function upsert(Request $request)
+    {
+        $professional = $this->currentProfessional($request);
+
+        $validator = Validator::make($request->all(), [
+            'brand_professional_id' => ['required', 'uuid'],
+            'affiliate_professional_id' => ['required', 'uuid'],
+            'settings' => ['required', 'array', 'min:1'],
+            'settings.*.brand_product_id' => ['required', 'uuid'],
+            'settings.*.commission_override' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'settings.*.discount_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'settings.*.custom_price' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        $validated = $validator->validated();
+        $brandProfessionalId = trim((string) $validated['brand_professional_id']);
+        $affiliateProfessionalId = trim((string) $validated['affiliate_professional_id']);
+        $settings = array_map(
+            static function (array $setting): array {
+                $setting['brand_product_id'] = strtolower(trim((string) $setting['brand_product_id']));
+
+                return $setting;
+            },
+            $validated['settings']
+        );
+
+        if (! $this->brandAccess->canManageBrand($professional, $brandProfessionalId)) {
+            return $this->error('You are not permitted to manage settings for this brand.', 403);
+        }
+
+        $brandProductIds = array_values(array_unique(array_map(
+            static fn (array $s): string => trim((string) $s['brand_product_id']),
+            $settings
+        )));
+
+        if (count($brandProductIds) !== count($settings)) {
+            return $this->error('Duplicate brand_product_id values are not allowed in settings.', 422);
+        }
+
+        $matchingProductCount = BrandProduct::query()
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->whereIn('id', $brandProductIds)
+            ->count();
+
+        if ($matchingProductCount !== count($brandProductIds)) {
+            return $this->error('One or more brand_product_ids do not belong to this brand.', 422);
+        }
+
+        $now = now();
+        $payload = [];
+        foreach ($settings as $setting) {
+            $payload[] = [
+                'id' => (string) Str::uuid(),
+                'brand_professional_id' => $brandProfessionalId,
+                'affiliate_professional_id' => $affiliateProfessionalId,
+                'brand_product_id' => $setting['brand_product_id'],
+                'commission_override' => isset($setting['commission_override']) && $setting['commission_override'] !== '' && $setting['commission_override'] !== null
+                    ? (float) $setting['commission_override']
+                    : null,
+                'discount_rate' => isset($setting['discount_rate']) && $setting['discount_rate'] !== '' && $setting['discount_rate'] !== null
+                    ? (float) $setting['discount_rate']
+                    : null,
+                'custom_price' => isset($setting['custom_price']) && $setting['custom_price'] !== '' && $setting['custom_price'] !== null
+                    ? (float) $setting['custom_price']
+                    : null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        try {
+            DB::transaction(function () use ($payload): void {
+                DB::table('retail.brand_product_affiliate_settings')->upsert(
+                    $payload,
+                    ['affiliate_professional_id', 'brand_product_id'],
+                    ['brand_professional_id', 'commission_override', 'discount_rate', 'custom_price', 'updated_at']
+                );
+            });
+        } catch (QueryException $e) {
+            return $this->error('Failed to save affiliate product settings. Ensure the affiliate is connected to this brand.', 422);
+        }
+
+        return $this->success([
+            'brand_professional_id' => $brandProfessionalId,
+            'affiliate_professional_id' => $affiliateProfessionalId,
+            'updated_brand_product_ids' => $brandProductIds,
+        ]);
+    }
+
+    /**
+     * DELETE /store/affiliate-product-settings
+     */
+    public function remove(Request $request)
+    {
+        $professional = $this->currentProfessional($request);
+
+        $validator = Validator::make($request->all(), [
+            'brand_professional_id' => ['required', 'uuid'],
+            'affiliate_professional_id' => ['required', 'uuid'],
+            'brand_product_ids' => ['sometimes', 'array'],
+            'brand_product_ids.*' => ['uuid'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        $validated = $validator->validated();
+        $brandProfessionalId = trim((string) $validated['brand_professional_id']);
+        $affiliateProfessionalId = trim((string) $validated['affiliate_professional_id']);
+        $brandProductIds = $this->normalizeIds($validated['brand_product_ids'] ?? []);
+
+        if (! $this->brandAccess->canManageBrand($professional, $brandProfessionalId)) {
+            return $this->error('You are not permitted to manage settings for this brand.', 403);
+        }
+
+        $query = BrandProductAffiliateSetting::query()
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->where('affiliate_professional_id', $affiliateProfessionalId);
+
+        if ($brandProductIds !== []) {
+            $query->whereIn('brand_product_id', $brandProductIds);
+        }
+
+        $deleted = $query->delete();
+
+        return $this->success([
+            'brand_professional_id' => $brandProfessionalId,
+            'affiliate_professional_id' => $affiliateProfessionalId,
+            'removed_count' => $deleted,
+        ]);
+    }
+
+    /**
+     * @param  array<int, mixed>  $ids
+     * @return array<int, string>
+     */
+    private function normalizeIds(array $ids): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            static fn ($id): string => trim((string) $id),
+            $ids
+        ), static fn (string $id): bool => $id !== '')));
+    }
+}

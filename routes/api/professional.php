@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalThemeController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateOverrideController;
+use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateSettingController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
@@ -201,10 +202,17 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         Route::patch('/store/brand-products/{brandProductId}', [BrandProductsController::class, 'update'])
             ->whereUuid('brandProductId');
 
-        // Store: Affiliate deny overrides
+        // Store: Affiliate product access overrides (deny / allow)
         Route::get('/store/affiliate-overrides', [BrandProductAffiliateOverrideController::class, 'index']);
         Route::put('/store/affiliate-overrides/deny', [BrandProductAffiliateOverrideController::class, 'upsertDeny']);
         Route::delete('/store/affiliate-overrides/deny', [BrandProductAffiliateOverrideController::class, 'removeDeny']);
+        Route::put('/store/affiliate-overrides/allow', [BrandProductAffiliateOverrideController::class, 'upsertAllow']);
+        Route::delete('/store/affiliate-overrides/allow', [BrandProductAffiliateOverrideController::class, 'removeAllow']);
+
+        // Store: Per-affiliate product pricing settings
+        Route::get('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'index']);
+        Route::put('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'upsert']);
+        Route::delete('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'remove']);
 
         // Fresha Integration
         Route::get('/fresha/status', [FreshaIntegrationController::class, 'status']);

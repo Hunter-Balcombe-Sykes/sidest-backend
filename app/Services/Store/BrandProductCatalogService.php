@@ -86,6 +86,10 @@ class BrandProductCatalogService
                     ->where('o.affiliate_professional_id', '=', $affiliateProfessionalId)
                     ->where('o.override_type', '=', 'deny');
             })
+            ->leftJoin('retail.brand_product_affiliate_settings as bpas', function ($join) use ($affiliateProfessionalId): void {
+                $join->on('bpas.brand_product_id', '=', 'bp.id')
+                    ->where('bpas.affiliate_professional_id', '=', $affiliateProfessionalId);
+            })
             ->whereIn('bp.brand_professional_id', $connectedBrandIds)
             ->where('bp.is_sync_active', true)
             ->whereRaw('COALESCE(bps.is_available, true) = true')
@@ -124,6 +128,9 @@ class BrandProductCatalogService
                 'bss.default_commission_rate',
                 'p.display_name as brand_display_name',
                 'p.handle as brand_handle',
+                'bpas.commission_override as affiliate_commission_override',
+                'bpas.discount_rate as affiliate_discount_rate',
+                'bpas.custom_price as affiliate_custom_price',
             ])
             ->get();
 
@@ -274,6 +281,10 @@ class BrandProductCatalogService
             })
             ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
             ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
+            ->leftJoin('retail.brand_product_affiliate_settings as bpas', function ($join) use ($professionalId): void {
+                $join->on('bpas.brand_product_id', '=', 'bp.id')
+                    ->where('bpas.affiliate_professional_id', '=', $professionalId);
+            })
             ->where('ps.professional_id', $professionalId)
             ->where('bp.is_sync_active', true)
             ->whereRaw('COALESCE(bps.is_available, true) = true')
@@ -312,6 +323,9 @@ class BrandProductCatalogService
                 'bss.default_commission_rate',
                 'p.display_name as brand_display_name',
                 'p.handle as brand_handle',
+                'bpas.commission_override as affiliate_commission_override',
+                'bpas.discount_rate as affiliate_discount_rate',
+                'bpas.custom_price as affiliate_custom_price',
             ])
             ->get();
 
@@ -370,6 +384,11 @@ class BrandProductCatalogService
                 $commissionOverride = $this->toNullableFloat($row->commission_override ?? null);
                 $discountRate = $this->toNullableFloat($row->discount_rate ?? null);
                 $customPrice = $this->toNullableFloat($row->custom_price ?? null);
+                $affiliateCommissionOverride = $this->toNullableFloat($row->affiliate_commission_override ?? null);
+                $affiliateDiscountRate = $this->toNullableFloat($row->affiliate_discount_rate ?? null);
+                $affiliateCustomPrice = $this->toNullableFloat($row->affiliate_custom_price ?? null);
+                $effectiveDiscountRate = $affiliateDiscountRate ?? $discountRate;
+                $effectiveCustomPrice = $affiliateCustomPrice ?? $customPrice;
                 $defaultCommissionRate = $this->toNullableFloat($row->default_commission_rate ?? null)
                     ?? $defaultSystemCommission;
                 $shopifyProductId = (string) ($row->shopify_product_id ?? '');
@@ -397,10 +416,11 @@ class BrandProductCatalogService
 
                 $basePriceCents = $this->pricing->resolveBasePriceCents(
                     $catalogPriceCents,
-                    $customPrice
+                    $effectiveCustomPrice
                 );
-                $discountedPriceCents = $this->pricing->discountedPriceCents($basePriceCents, $discountRate);
+                $discountedPriceCents = $this->pricing->discountedPriceCents($basePriceCents, $effectiveDiscountRate);
                 $effectiveCommissionRate = $this->pricing->effectiveCommissionRate(
+                    $affiliateCommissionOverride,
                     $commissionOverride,
                     $defaultCommissionRate
                 );
@@ -430,9 +450,12 @@ class BrandProductCatalogService
                     'is_available' => (bool) ($row->is_available ?? true),
                     'default_commission_rate' => $defaultCommissionRate,
                     'commission_override' => $commissionOverride,
+                    'affiliate_commission_override' => $affiliateCommissionOverride,
                     'effective_commission_rate' => $effectiveCommissionRate,
                     'discount_rate' => $discountRate,
+                    'affiliate_discount_rate' => $affiliateDiscountRate,
                     'custom_price' => $customPrice,
+                    'affiliate_custom_price' => $affiliateCustomPrice,
                     'base_price_cents' => $basePriceCents,
                     'discounted_price_cents' => $discountedPriceCents,
                 ];

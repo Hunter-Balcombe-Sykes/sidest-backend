@@ -4,6 +4,7 @@ namespace App\Services\Professional;
 
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Retail\BrandProductAffiliateOverride;
+use App\Models\Retail\BrandProductAffiliateSetting;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -91,6 +92,10 @@ class BrandPartnerLinkService
 
             $target->delete();
             BrandProductAffiliateOverride::query()
+                ->where('affiliate_professional_id', $affiliateProfessionalId)
+                ->where('brand_professional_id', $brandProfessionalId)
+                ->delete();
+            BrandProductAffiliateSetting::query()
                 ->where('affiliate_professional_id', $affiliateProfessionalId)
                 ->where('brand_professional_id', $brandProfessionalId)
                 ->delete();

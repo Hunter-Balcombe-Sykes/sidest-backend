@@ -34,6 +34,9 @@ class BrandProductAffiliateOverrideController extends ApiController
         $validator = Validator::make($request->query(), [
             'brand_professional_id' => ['required', 'uuid'],
             'affiliate_professional_id' => ['sometimes', 'uuid'],
+            'override_type' => ['sometimes', 'string', 'in:deny,allow'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:200'],
         ]);
 
         if ($validator->fails()) {
@@ -43,6 +46,9 @@ class BrandProductAffiliateOverrideController extends ApiController
         $validated = $validator->validated();
         $brandProfessionalId = trim((string) $validated['brand_professional_id']);
         $affiliateProfessionalId = trim((string) ($validated['affiliate_professional_id'] ?? ''));
+        $overrideType = trim((string) ($validated['override_type'] ?? ''));
+        $page = (int) ($validated['page'] ?? 1);
+        $perPage = (int) ($validated['per_page'] ?? 100);
 
         if (! $this->brandAccess->canManageBrand($professional, $brandProfessionalId)) {
             return $this->error('You are not permitted to manage overrides for this brand.', 403);
@@ -50,27 +56,34 @@ class BrandProductAffiliateOverrideController extends ApiController
 
         $query = BrandProductAffiliateOverride::query()
             ->where('brand_professional_id', $brandProfessionalId)
-            ->where('override_type', 'deny')
             ->orderBy('affiliate_professional_id')
+            ->orderBy('override_type')
             ->orderBy('brand_product_id');
 
         if ($affiliateProfessionalId !== '') {
             $query->where('affiliate_professional_id', $affiliateProfessionalId);
         }
 
-        $overrides = $query->get([
-            'id',
-            'brand_professional_id',
-            'affiliate_professional_id',
-            'brand_product_id',
-            'override_type',
-            'created_at',
-            'updated_at',
-        ]);
+        if ($overrideType !== '') {
+            $query->where('override_type', $overrideType);
+        }
 
-        return $this->success([
-            'overrides' => $overrides,
-        ]);
+        $overrides = $query->paginate(
+            $perPage,
+            [
+                'id',
+                'brand_professional_id',
+                'affiliate_professional_id',
+                'brand_product_id',
+                'override_type',
+                'created_at',
+                'updated_at',
+            ],
+            'page',
+            $page
+        );
+
+        return $this->paginated($overrides, 'overrides');
     }
 
     /**
@@ -181,6 +194,120 @@ class BrandProductAffiliateOverrideController extends ApiController
             ->where('brand_professional_id', $brandProfessionalId)
             ->where('affiliate_professional_id', $affiliateProfessionalId)
             ->where('override_type', 'deny');
+
+        if ($brandProductIds !== []) {
+            $query->whereIn('brand_product_id', $brandProductIds);
+        }
+
+        $deleted = $query->delete();
+
+        return $this->success([
+            'brand_professional_id' => $brandProfessionalId,
+            'affiliate_professional_id' => $affiliateProfessionalId,
+            'removed_count' => $deleted,
+        ]);
+    }
+
+    /**
+     * PUT /store/affiliate-overrides/allow
+     */
+    public function upsertAllow(Request $request)
+    {
+        $professional = $this->currentProfessional($request);
+
+        $validator = Validator::make($request->all(), [
+            'brand_professional_id' => ['required', 'uuid'],
+            'affiliate_professional_id' => ['required', 'uuid'],
+            'brand_product_ids' => ['required', 'array', 'min:1'],
+            'brand_product_ids.*' => ['uuid'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        $validated = $validator->validated();
+        $brandProfessionalId = trim((string) $validated['brand_professional_id']);
+        $affiliateProfessionalId = trim((string) $validated['affiliate_professional_id']);
+        $brandProductIds = $this->normalizeIds($validated['brand_product_ids'] ?? []);
+
+        if (! $this->brandAccess->canManageBrand($professional, $brandProfessionalId)) {
+            return $this->error('You are not permitted to manage overrides for this brand.', 403);
+        }
+
+        $matchingProductCount = BrandProduct::query()
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->whereIn('id', $brandProductIds)
+            ->count();
+
+        if ($matchingProductCount !== count($brandProductIds)) {
+            return $this->error('One or more brand_product_ids do not belong to this brand.', 422);
+        }
+
+        $now = now();
+        $payload = [];
+        foreach ($brandProductIds as $brandProductId) {
+            $payload[] = [
+                'id' => (string) Str::uuid(),
+                'brand_professional_id' => $brandProfessionalId,
+                'affiliate_professional_id' => $affiliateProfessionalId,
+                'brand_product_id' => $brandProductId,
+                'override_type' => 'allow',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        try {
+            DB::transaction(function () use ($payload): void {
+                DB::table('retail.brand_product_affiliate_overrides')->upsert(
+                    $payload,
+                    ['affiliate_professional_id', 'brand_product_id'],
+                    ['brand_professional_id', 'override_type', 'updated_at']
+                );
+            });
+        } catch (QueryException $e) {
+            return $this->error('Failed to save allow overrides. Ensure affiliate and product links are valid.', 422);
+        }
+
+        return $this->success([
+            'brand_professional_id' => $brandProfessionalId,
+            'affiliate_professional_id' => $affiliateProfessionalId,
+            'allowed_brand_product_ids' => $brandProductIds,
+        ]);
+    }
+
+    /**
+     * DELETE /store/affiliate-overrides/allow
+     */
+    public function removeAllow(Request $request)
+    {
+        $professional = $this->currentProfessional($request);
+
+        $validator = Validator::make($request->all(), [
+            'brand_professional_id' => ['required', 'uuid'],
+            'affiliate_professional_id' => ['required', 'uuid'],
+            'brand_product_ids' => ['sometimes', 'array'],
+            'brand_product_ids.*' => ['uuid'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        $validated = $validator->validated();
+        $brandProfessionalId = trim((string) $validated['brand_professional_id']);
+        $affiliateProfessionalId = trim((string) $validated['affiliate_professional_id']);
+        $brandProductIds = $this->normalizeIds($validated['brand_product_ids'] ?? []);
+
+        if (! $this->brandAccess->canManageBrand($professional, $brandProfessionalId)) {
+            return $this->error('You are not permitted to manage overrides for this brand.', 403);
+        }
+
+        $query = BrandProductAffiliateOverride::query()
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('override_type', 'allow');
 
         if ($brandProductIds !== []) {
             $query->whereIn('brand_product_id', $brandProductIds);
