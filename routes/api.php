@@ -58,6 +58,8 @@ Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class,
     ->middleware('throttle:public-site');
 Route::get('/public/store/featured-products-by-slug', [PublicStoreController::class, 'featuredProducts'])
     ->middleware('throttle:public-site');
+Route::post('/public/store/order-analytics-by-slug', [PublicStoreController::class, 'recordOrderAnalytics'])
+    ->middleware('throttle:public-site');
 
 // Header/site-id based fallback for path-based frontend routing.
 Route::post('/public/analytics/pageviews', [AnalyticsController::class, 'pageview'])

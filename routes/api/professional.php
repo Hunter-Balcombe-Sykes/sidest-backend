@@ -25,6 +25,7 @@ use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateOverrideCon
 use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
+use App\Http\Controllers\Api\Professional\Store\StoreAnalyticsController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
@@ -189,6 +190,8 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         Route::get('/store/featured-products', [FeaturedProductsController::class, 'index']);
         Route::get('/store/available-products', [FeaturedProductsController::class, 'availableProducts']);
         Route::put('/store/featured-products', [FeaturedProductsController::class, 'update']);
+        Route::get('/store/analytics', [StoreAnalyticsController::class, 'index']);
+        Route::get('/store/brand-analytics', [StoreAnalyticsController::class, 'brandIndex']);
 
         // Store: Brand Settings & Per-Product Settings
         Route::get('/store/brand-settings', [BrandStoreController::class, 'index']);
