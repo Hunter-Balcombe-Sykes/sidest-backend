@@ -234,6 +234,9 @@ class BrandProductCatalogService
         if ($professionalId === '') {
             return [];
         }
+
+        $this->pruneInvalidSelectionsForProfessional($professionalId);
+
         $brandEnterpriseFallback = DB::table('core.enterprise_brand_links as ebl')
             ->selectRaw('DISTINCT ON (ebl.brand_professional_id) ebl.brand_professional_id, ebl.enterprise_id')
             ->where('ebl.status', 'active')
@@ -318,6 +321,46 @@ class BrandProductCatalogService
             ->get();
 
         return $this->mapCatalogRows($rows, true);
+    }
+
+    private function pruneInvalidSelectionsForProfessional(string $professionalId): void
+    {
+        $invalidSelectionIds = DB::table('retail.professional_selections as ps')
+            ->leftJoin('retail.brand_products as bp', 'bp.id', '=', 'ps.brand_product_id')
+            ->leftJoin('retail.brand_product_settings as bps', function ($join): void {
+                $join->on('bps.brand_product_id', '=', 'bp.id')
+                    ->on('bps.professional_id', '=', 'bp.brand_professional_id');
+            })
+            ->leftJoin('core.brand_partner_links as l', function ($join) use ($professionalId): void {
+                $join->on('l.brand_professional_id', '=', 'bp.brand_professional_id')
+                    ->where('l.affiliate_professional_id', '=', $professionalId);
+            })
+            ->leftJoin('retail.brand_product_affiliate_overrides as o', function ($join) use ($professionalId): void {
+                $join->on('o.brand_product_id', '=', 'bp.id')
+                    ->where('o.affiliate_professional_id', '=', $professionalId)
+                    ->where('o.override_type', '=', 'deny');
+            })
+            ->where('ps.professional_id', $professionalId)
+            ->where(function ($query): void {
+                $query->whereNull('bp.id')
+                    ->orWhereNull('l.id')
+                    ->orWhereRaw('COALESCE(bp.is_sync_active, false) = false')
+                    ->orWhereRaw('COALESCE(bps.is_approved, false) = false')
+                    ->orWhereRaw('COALESCE(bps.is_available, true) = false')
+                    ->orWhereNotNull('o.id');
+            })
+            ->pluck('ps.id')
+            ->filter(static fn ($id): bool => is_string($id) && trim($id) !== '')
+            ->values()
+            ->all();
+
+        if ($invalidSelectionIds === []) {
+            return;
+        }
+
+        DB::table('retail.professional_selections')
+            ->whereIn('id', $invalidSelectionIds)
+            ->delete();
     }
 
     /**
