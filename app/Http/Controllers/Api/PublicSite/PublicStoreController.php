@@ -21,6 +21,7 @@ class PublicStoreController extends ApiController
     /**
      * GET /public/store/featured-products
      * GET /public/store/featured-products-by-slug (header-based fallback)
+     * Returns default product selections payload for the resolved site.
      */
     public function featuredProducts(Request $request): JsonResponse
     {

@@ -17,7 +17,13 @@ class FeaturedProductsPayloadService
     /**
      * Build the canonical featured-products payload shape used by public and professional APIs.
      *
-     * @return array{selected_products: array<int, array<string, mixed>>, default_commission_rate: float, max_featured_products: int}
+     * @return array{
+     *   selected_products: array<int, array<string, mixed>>,
+     *   default_product_selections: array<int, array<string, mixed>>,
+     *   default_commission_rate: float,
+     *   max_featured_products: int,
+     *   max_default_product_selections: int
+     * }
      */
     public function build(string $professionalId, string $logContext = 'featured_products'): array
     {
@@ -26,8 +32,10 @@ class FeaturedProductsPayloadService
 
         $payload = [
             'selected_products' => [],
+            'default_product_selections' => [],
             'default_commission_rate' => $defaultRate,
             'max_featured_products' => $maxFeatured,
+            'max_default_product_selections' => $maxFeatured,
         ];
 
         if ($professionalId === '' || ! $this->hasSelectionsTable()) {
@@ -48,8 +56,10 @@ class FeaturedProductsPayloadService
 
         return [
             'selected_products' => array_slice(array_values($selectedProducts), 0, $maxFeatured),
+            'default_product_selections' => array_slice(array_values($selectedProducts), 0, $maxFeatured),
             'default_commission_rate' => $defaultRate,
             'max_featured_products' => $maxFeatured,
+            'max_default_product_selections' => $maxFeatured,
         ];
     }
 

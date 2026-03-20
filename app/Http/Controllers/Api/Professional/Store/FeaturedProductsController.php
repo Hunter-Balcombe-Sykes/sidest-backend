@@ -31,7 +31,7 @@ class FeaturedProductsController extends ApiController
 
     /**
      * GET /store/featured-products
-     * Returns the professional's selected and validated storefront products.
+     * Returns the professional's default product selections (selected and validated storefront products).
      */
     public function index(Request $request)
     {
@@ -89,7 +89,7 @@ class FeaturedProductsController extends ApiController
 
         if ($request->has('products')) {
             return $this->error(
-                'Legacy featured-products payload is no longer supported. Use selected_products[{brand_product_id, sort_order}].',
+                'Legacy featured-products payload is no longer supported. Use selected_products[{brand_product_id, sort_order}] (default product selections).',
                 422
             );
         }
@@ -113,7 +113,7 @@ class FeaturedProductsController extends ApiController
             ]);
 
             return $this->error(
-                'Featured products table is unavailable. Run retail schema migrations and try again.',
+                'Default product selections table is unavailable. Run retail schema migrations and try again.',
                 503
             );
         }
@@ -175,19 +175,19 @@ class FeaturedProductsController extends ApiController
             ]);
 
             $status = 500;
-            $message = 'Failed to save featured products to retail.professional_selections.';
+            $message = 'Failed to save default product selections to retail.professional_selections.';
 
             if ($e instanceof QueryException) {
                 $sqlState = (string) $e->getCode();
                 if ($sqlState === '23505') {
                     $status = 422;
-                    $message = 'Duplicate featured products are not allowed.';
+                    $message = 'Duplicate default product selections are not allowed.';
                 } elseif ($sqlState === '23514') {
                     $status = 422;
                     $dbMessage = strtolower($e->getMessage());
 
                     if (str_contains($dbMessage, 'maximum of')) {
-                        $message = 'Too many featured products selected.';
+                        $message = 'Too many default product selections selected.';
                     } elseif (str_contains($dbMessage, 'not approved/available')) {
                         $message = 'One or more selected products are not approved and available.';
                     } elseif (str_contains($dbMessage, 'not connected to selected brand')) {
@@ -195,7 +195,7 @@ class FeaturedProductsController extends ApiController
                     } elseif (str_contains($dbMessage, 'denied for this affiliate')) {
                         $message = 'One or more selected products are restricted for your account.';
                     } else {
-                        $message = 'Featured products failed catalog validation.';
+                        $message = 'Default product selections failed catalog validation.';
                     }
                 } elseif ($sqlState === '23503') {
                     $status = 422;
