@@ -68,6 +68,10 @@ class FeaturedProductsController extends ApiController
             (string) $professional->id,
             $brandProfessionalId !== '' ? $brandProfessionalId : null
         );
+        $products = array_values(array_filter(
+            $products,
+            static fn (array $product): bool => (bool) ($product['is_available'] ?? false) && (bool) ($product['is_approved'] ?? false)
+        ));
 
         return $this->success([
             'available_products' => $products,
