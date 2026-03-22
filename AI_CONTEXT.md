@@ -10,7 +10,7 @@
 **OneLink** is a multi-tenant SaaS affiliate platform that gives influencers and beauty/barbering professionals a branded one-page personal website, connected to a specific brand partner. It replaces link-in-bio tools (like Linktree), adds an affiliate e-commerce shop, booking integrations, and detailed analytics — all within the brand's theme and identity.
 
 **What problem it solves:**
-Brands want influencers and professionals to sell their products without managing separate storefronts. Professionals/influencers want a polished all-in-one presence without design effort. Comet sits in the middle, handling the site, commerce, analytics, and commission distribution automatically.
+Brands want influencers and professionals to sell their products without managing separate storefronts. Professionals/influencers want a polished all-in-one presence without design effort. Comet sits in the middle, handling the site, commerce, analytics, and commission accounting workflows.
 
 **Main goals:**
 1. Give each professional/influencer a published one-page site on a subdomain
@@ -20,7 +20,7 @@ Brands want influencers and professionals to sell their products without managin
 5. Give brands and professionals actionable analytics (views, clicks, sales, earnings)
 6. Enable brands to promote specific products via commission adjustments and price overrides
 
-**Current status:** Active development. Core professional features (sites, services, media, integrations) are production-ready. The affiliate commerce foundation is implemented (brand-scoped catalog, availability controls, deny/allow overrides, per-affiliate pricing settings, strict selections, manager APIs). Video uploads remain feature-flagged off, and checkout/payout flows are still in progress.
+**Current status:** Active development. Core professional features (sites, services, media, integrations) are production-ready. The affiliate commerce foundation is implemented (brand-scoped catalog, availability controls, deny/allow overrides, per-affiliate pricing settings, strict selections, manager APIs), plus Shopify-canonical order ingestion, attribution, commission ledgering, and brand/self analytics APIs. Unified brand RBAC now resolves access from direct brand ownership, enterprise links, and `retail.brand_team_memberships`. Video uploads remain feature-flagged off. Export/schedule analytics runtime and payout transfer execution are still in progress.
 
 ---
 
@@ -33,8 +33,8 @@ Brands want influencers and professionals to sell their products without managin
 - Each affiliate gets their own subdomain site (e.g., `john.comet.app`) auto-themed in the brand's colours and branding.
 - The affiliate can add their own media, links, and bio — but cannot change the brand's theme/palette.
 - Customers visit the site, browse products, and purchase. The brand fulfils the order.
-- When a customer purchases, Comet records the order and pushes it to the brand's Shopify store via a Shopify app. **The brand fulfils the order entirely.** Comet never ships product.
-- Commission is distributed automatically via **Stripe Connect** — the affiliate receives their commission, Comet's fee comes from the brand's monthly subscription (~$200/mo), not from per-transaction cuts.
+- Comet mints a deterministic checkout-session token, the token is written into Shopify order metadata, and confirmed Shopify order webhooks become the canonical analytics source.
+- Commission entries are posted to an append-only ledger (accrual/reversal/payout states). Automated payout transfer execution is not yet enabled.
 - Commission rates and product prices can be adjusted per affiliate by the brand (e.g., run a sale only on an influencer's site, or boost commission on slow-moving stock).
 - **An affiliate can be connected to multiple brands.** One primary brand may be designated in future.
 - Service professionals (barbers, hairdressers) can also take bookings via **Square or Fresha** through the same site. No in-house booking system is planned.
@@ -53,11 +53,11 @@ Affiliate customises content (media, links, bio) within brand theme
     ↓
 Customer visits subdomain → sees brand-themed site
     ↓
-Customer buys product → order recorded → brand fulfils
+Customer buys product → checkout-session token attached to Shopify order
     ↓
-Commission distributed (brand → Comet → affiliate)
+Shopify webhook ingested → canonical order + ledger normalized
     ↓
-Analytics recorded for both brand and affiliate dashboards
+Daily aggregates rebuilt for brand and affiliate dashboards
 ```
 
 ### Key Assumptions
@@ -96,7 +96,7 @@ Analytics recorded for both brand and affiliate dashboards
 │   │   │   ├── PublicSite/    — Unauthenticated mini-site endpoints
 │   │   │   ├── Staff/         — Internal staff/admin endpoints
 │   │   │   ├── Enterprise/    — Enterprise self-service management endpoints
-│   │   │   └── Webhooks/      — Square, Fresha webhook receivers
+│   │   │   └── Webhooks/      — Square, Fresha, Shopify webhook receivers
 │   │   ├── Middleware/        — JWT auth, role guards, plan gates
 │   │   ├── Requests/          — Form request validation classes
 │   │   └── Controllers/Concerns/ — Shared traits (ResolveCurrentProfessional, ResolveCurrentSite)
@@ -137,14 +137,22 @@ Analytics recorded for both brand and affiliate dashboards
 | `MediaVariant` | `core.media_variants` | Processed media artifacts (WebP, MP4, HLS) |
 | `BrandPartnerLink` | `core.brand_partner_links` | Brand ↔ affiliate relationship with slot numbering |
 | `BrandAffiliateInvite` | `core.brand_affiliate_invites` | Token-based invite (expiring) for affiliate onboarding |
-| `ProfessionalIntegration` | `core.professional_integrations` | Encrypted OAuth tokens for Square/Fresha |
+| `ProfessionalIntegration` | `core.professional_integrations` | Encrypted OAuth/provider metadata for Square/Fresha/Shopify |
 | `BrandProduct` | `retail.brand_products` | Full Shopify-synced product catalog per brand |
 | `BrandProductSetting` | `retail.brand_product_settings` | Global brand availability/featured/commission/discount settings per brand product |
 | `BrandProductAffiliateOverride` | `retail.brand_product_affiliate_overrides` | Per-affiliate access overrides (`deny` blocks; `allow` can bypass availability, with deny precedence) |
 | `BrandProductAffiliateSetting` | `retail.brand_product_affiliate_settings` | Per-affiliate commission/discount/custom-price overrides on brand products |
 | `BrandStoreSettings` | `retail.brand_store_settings` | Commission rate config per brand |
 | `ProfessionalSelection` | `retail.professional_selections` | Featured product list per professional |
+| `CheckoutSession` | `retail.checkout_sessions` | Tokenized checkout attribution context for deterministic order ownership |
+| `OrderEventInbox` | `retail.order_event_inbox` | Idempotent Shopify/fallback event inbox with processing status |
+| `RetailOrder` | `retail.orders` | Canonical normalized order header used for analytics |
+| `OrderItem` | `retail.order_items` | Canonical normalized order line items |
+| `OrderAttribution` | `retail.order_attributions` | Immutable attribution model/reason lineage per order |
+| `CommissionLedgerEntry` | `retail.commission_ledger_entries` | Append-only commission accrual/reversal/payout accounting |
+| `PayoutRun` | `retail.payout_runs` | Payout run audit records (status/period/totals) |
 | `EnterpriseBrandLink` | `core.enterprise_brand_links` | Links distributor enterprises to managed brand professional accounts |
+| `BrandTeamMembership` | `retail.brand_team_memberships` | Brand-scoped role assignments (`owner`, `finance`, `marketing`, `analyst`, `read_only`) |
 | `Plan` | `billing.plans` | Subscription tiers with entitlements |
 | `Subscription` | `billing.subscriptions` | Professional's current plan status |
 | `SiteVisit` | `analytics.site_visits` | Page view events with UTM, device, geo |
@@ -163,11 +171,13 @@ Analytics recorded for both brand and affiliate dashboards
 | `FreshaApiClient` / `FreshaServiceSyncService` | Fresha OAuth + service sync |
 | `BrandAffiliateInviteService` | Invite token generation, claiming, expiry |
 | `BrandPartnerLinkService` | Connect/disconnect brand-affiliate relationships |
-| `BrandAccessService` | Resolves brand-management scope for brand users and distributor-linked managers |
+| `BrandAccessService` | Capability-based brand RBAC resolver across direct brand ownership, enterprise links, and brand-team memberships |
 | `BrandProductCatalogService` | Builds affiliate-visible, manager-catalog, and storefront-selected product payloads |
 | `BrandProductSettingsService` | Ensures synced `brand_products` always have settings rows |
 | `BrandPricingService` | Effective commission + discount price calculation (ceil to nearest 5 cents) |
 | `SelectionCleanupService` | Removes invalid selections, notifies affected professionals, invalidates site cache |
+| `ShopifyOrderProcessingService` | Validates session token, normalizes Shopify events, writes canonical orders/items/ledger |
+| `OrderAnalyticsAggregateService` | Deterministic rebuild of brand/self daily analytics tables from canonical data |
 | `EnterpriseProvisioningService` | Auto-provision enterprise for owner-type professionals |
 | `FeaturedProductsPayloadService` | Format product list for public API response |
 | `ProfessionalLegalContentService` | Auto-generate T&Cs and privacy policy |
@@ -209,7 +219,13 @@ Analytics recorded for both brand and affiliate dashboards
 3. Analytics events (`POST /api/public/analytics/*`) recorded asynchronously.
 
 #### Product Purchase Flow
-[TBD: E-commerce checkout integration. Catalog visibility, access overrides, and storefront selection constraints are implemented; order recording, payment processing, and payout distribution are not yet implemented.]
+1. Public storefront requests `POST /api/public/store/checkout-session` (or `.../checkout-session-by-slug`) and receives `comet_session` token.
+2. Frontend/server writes `comet_session` into Shopify order metadata (note attributes).
+3. Shopify sends `POST /api/webhooks/shopify/orders` (or fallback endpoint) to Comet.
+4. Event is deduplicated in `retail.order_event_inbox`, resolved to brand integration, and processed async.
+5. Processor validates token + brand consistency, writes canonical `retail.orders` / `retail.order_items` / `retail.order_attributions`.
+6. Commission accrual/reversal entries are appended in `retail.commission_ledger_entries`.
+7. Aggregate rebuild jobs update daily brand/self analytics tables for dashboard APIs.
 
 #### Booking Flow
 1. Customer calls `POST /api/public/booking/availability` → proxied to Square/Fresha.
@@ -282,6 +298,19 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
   - per-affiliate product pricing endpoints (`GET|PUT|DELETE /api/store/affiliate-product-settings`)
   - legacy product-settings write flow removed (`PUT /api/store/brand-product-settings`)
   - featured-products reads no longer fall back to `site.settings.selected_products`
+- Shopify-canonical order analytics pipeline:
+  - public checkout-session attribution endpoint (`POST /api/public/store/checkout-session`)
+  - Shopify orders webhook ingestion (`POST /api/webhooks/shopify/orders`)
+  - secure fallback ingestion path (`POST /api/webhooks/shopify/orders/fallback`)
+  - canonical order normalization (`retail.orders`, `retail.order_items`, `retail.order_attributions`)
+  - append-only commission ledger accrual/reversal handling
+  - deterministic daily aggregate rebuild jobs (brand + professional)
+- Professional analytics cutover:
+  - legacy `GET /api/store/analytics` and `GET /api/store/brand-analytics` now return 410
+  - new brand endpoints `/api/store/brand-analytics/*`
+  - new self endpoints `/api/store/my-analytics/*`
+- Shopify integration management endpoints for brand accounts:
+  - `/api/shopify/status`, `/api/shopify/connect`, `/api/shopify/disconnect`, `/api/shopify/token`, `/api/shopify/webhooks/register`
 - Selection auto-cleanup + notification on unavailability/deny/disconnect
 - Subscription and plan management (Stripe-backed)
 - Site analytics (page views, link clicks, leads)
@@ -294,8 +323,10 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 
 ### Partially Implemented / In Progress
 - **Video uploads** — Code exists (`ProcessVideoVariantsJob`, FFmpeg), feature-flagged off (`COMET_VIDEO_UPLOADS_ENABLED=false`). Needs video workers running before enabling.
-- **B2B retail checkout + payouts** — Catalog controls and selection APIs are implemented, but order recording, payment processing, and commission payout distribution are still [TBD].
-- **Shopify integration runtime** — Schema + sync target tables exist, but live Shopify product ingest/sync jobs are not yet implemented end-to-end.
+- **Frontend checkout-session bridge** — Public checkout clients must call checkout-session and write `comet_session` into Shopify order metadata in all flows.
+- **Shopify product ingest runtime** — Catalog ingest/sync into `retail.brand_products` is still not fully automated end-to-end.
+- **Analytics export/report runtime** — `retail.report_exports` and `retail.report_schedules` tables exist, but export/schedule API + generation jobs are pending.
+- **Payout execution orchestration** — payout status/history analytics exists, but automated transfer execution is not implemented.
 
 ### Known Issues / Notes
 - Laravel database migrations are intentionally disabled (guarded in composer). All schema changes go through `supabase/migrations/`.
@@ -307,22 +338,22 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 ## Next Tasks
 
 ### Highest Priority
-1. **Affiliate commerce order flow** — Define how a product purchase on the affiliate's site is recorded, how commission is calculated and distributed, and what the brand sees.
-2. **Shopify integration runtime** — Implement product ingest/sync into `retail.brand_products` + settings bootstrap in production flows.
-3. **Payout orchestration** — Finalize Stripe Connect commission payout flow from recorded orders.
-4. **Analytics dashboard for brands** — Brands need aggregate performance across all affiliates/brands.
+1. **Frontend checkout token wiring** — Ensure every storefront order path calls checkout-session and persists `comet_session` on Shopify orders.
+2. **Shopify product ingest runtime** — Implement/finish production ingest + sync bootstrap for brand product catalog rows.
+3. **Analytics exports and schedules** — Implement export endpoints/jobs and report schedule execution.
+4. **Payout execution orchestration** — Finalize transfer automation on top of ledger + payout runs.
 5. **Enable video uploads** — Ensure `redis_video` queue worker is running, then set feature flag.
 
 ### Suggested Implementation Order
-1. Order recording model + API endpoint (retail schema)
-2. Shopify catalog sync service + webhook handling
-3. Commission attribution + payout orchestration (Stripe Connect)
-4. Brand analytics endpoints (aggregate affiliate performance)
+1. Frontend checkout-session + token write integration
+2. Shopify catalog sync service/runtime bootstrap
+3. Export/schedule API + async generation jobs
+4. Payout transfer orchestration over ledger balances
 5. Video upload enablement (infrastructure task)
 
 ### Open Questions
-- [TBD: Exact Shopify app architecture — webhook-driven order push vs. polling?]
-- [TBD: Stripe Connect account setup flow — does the professional onboard via Stripe Express during signup?]
+- [TBD: Should fallback webhook ingestion be enabled in production permanently or restricted to break-glass use only?]
+- [TBD: Final payout rail and account onboarding flow (Stripe Connect vs alternative).]
 
 ---
 
@@ -396,6 +427,9 @@ When another AI reads this file, it should:
 | 2026-03-20 | Product selection cap is global 10 per professional across brands; featured cap is 10 per brand | Maintains consistent storefront limits while supporting multi-brand catalogs |
 | 2026-03-20 | Distributor enterprises can manage linked brands via `core.enterprise_brand_links` | Enables parent/distributor operating model without transferring brand ownership |
 | 2026-03-20 | Removed legacy brand product-settings flow and site-settings product fallback | Prevents legacy writes from deleting modern catalog settings and keeps read/write paths strictly brand-product scoped |
+| 2026-03-22 | Shopify confirmed order events are canonical for store analytics | Prevents client-side tampering and supports lifecycle-accurate refunds/cancellations for financial metrics |
+| 2026-03-22 | Legacy store analytics endpoints now return 410 with migration targets | Forces cutover to deterministic V2 brand/self analytics contracts |
+| 2026-03-22 | Added signed fallback Shopify order ingestion endpoint (`/api/webhooks/shopify/orders/fallback`) | Provides controlled recovery path while still fetching canonical order data from Shopify |
 
 ---
 
@@ -407,7 +441,7 @@ When another AI reads this file, it should:
 2. **Database is Supabase PostgreSQL.** Use `supabase/migrations/` for all schema changes. Eloquent models map to tables in non-public schemas — check the model's `$table` and `$connection` properties.
 3. **Auth flow is JWT-first.** Every professional API request must pass `Authorization: Bearer <supabase_jwt>`. The `supabase.jwt` middleware validates against JWKS.
 4. **Media is async.** After upload, variants are queued. Don't expect variants to exist immediately after upload.
-5. **The retail/commerce layer is partially complete.** Brand-scoped catalog/availability/selection governance is implemented; order recording, commission distribution, and payment splitting are not yet implemented.
+5. **The retail/commerce layer is mid-flight.** Brand-scoped catalog/availability/selection governance is implemented, and Shopify-canonical order recording + attribution + analytics ingestion are in place. Export runtime and payout transfer execution are still pending.
 6. **Video uploads are disabled by default.** Set `COMET_VIDEO_UPLOADS_ENABLED=true` and ensure the `redis_video` queue worker is running before testing video flows.
 
 ### Fragile Parts
@@ -417,9 +451,9 @@ When another AI reads this file, it should:
 - `BrandPartnerLink` slot numbering — slot assignment logic must remain consistent or brand affiliate ordering breaks.
 - `supabase/migrations/` — migrations run against a live Supabase project. Always test in a staging environment first. Irreversible migrations must include a rollback plan.
 
-### Unfinished Work In Progress (as of 2026-03-20)
+### Unfinished Work In Progress (as of 2026-03-22)
 - Video upload workers and enabling the feature flag
-- Affiliate commerce order flow (models, API, commission logic)
-- Shopify brand catalogue integration
-- Brand-facing aggregate analytics across affiliates
-- [NEEDS INPUT: Stripe Connect or payout mechanism for commissions]
+- Frontend checkout-session token wiring across all checkout paths
+- Shopify brand catalogue ingest/sync runtime completion
+- Analytics exports/report schedule APIs + generation jobs
+- [NEEDS INPUT: payout rail/account model for commission transfer execution]

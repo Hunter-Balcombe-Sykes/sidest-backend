@@ -25,7 +25,11 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
-        $brandIds = $this->resolveBrandScope($professional, $filters['brand_professional_id']);
+        $brandIds = $this->resolveBrandScope(
+            $professional,
+            $filters['brand_professional_id'],
+            BrandAccessService::CAPABILITY_ANALYTICS_NON_FINANCIAL_READ
+        );
 
         $base = DB::table('analytics.brand_metrics_daily as d')
             ->whereIn('d.brand_professional_id', $brandIds)
@@ -77,7 +81,11 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
-        $brandIds = $this->resolveBrandScope($professional, $filters['brand_professional_id']);
+        $brandIds = $this->resolveBrandScope(
+            $professional,
+            $filters['brand_professional_id'],
+            BrandAccessService::CAPABILITY_ANALYTICS_NON_FINANCIAL_READ
+        );
 
         $query = DB::table('analytics.brand_influencer_daily as d')
             ->leftJoin('core.professionals as p', 'p.id', '=', 'd.affiliate_professional_id')
@@ -138,7 +146,11 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
-        $brandIds = $this->resolveBrandScope($professional, $filters['brand_professional_id']);
+        $brandIds = $this->resolveBrandScope(
+            $professional,
+            $filters['brand_professional_id'],
+            BrandAccessService::CAPABILITY_ANALYTICS_NON_FINANCIAL_READ
+        );
 
         $professionalId = trim($professionalId);
 
@@ -229,7 +241,11 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
-        $brandIds = $this->resolveBrandScope($professional, $filters['brand_professional_id']);
+        $brandIds = $this->resolveBrandScope(
+            $professional,
+            $filters['brand_professional_id'],
+            BrandAccessService::CAPABILITY_ANALYTICS_NON_FINANCIAL_READ
+        );
 
         $query = DB::table('analytics.brand_product_daily as d')
             ->leftJoin('retail.brand_products as bp', 'bp.id', '=', 'd.brand_product_id')
@@ -294,7 +310,11 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
-        $brandIds = $this->resolveBrandScope($professional, $filters['brand_professional_id']);
+        $brandIds = $this->resolveBrandScope(
+            $professional,
+            $filters['brand_professional_id'],
+            BrandAccessService::CAPABILITY_ANALYTICS_NON_FINANCIAL_READ
+        );
 
         $brandProductId = trim($brandProductId);
 
@@ -384,7 +404,11 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
-        $brandIds = $this->resolveBrandScope($professional, $filters['brand_professional_id']);
+        $brandIds = $this->resolveBrandScope(
+            $professional,
+            $filters['brand_professional_id'],
+            BrandAccessService::CAPABILITY_ANALYTICS_FINANCIAL_READ
+        );
 
         $query = DB::table('analytics.brand_commission_daily as d')
             ->leftJoin('core.professionals as p', 'p.id', '=', 'd.affiliate_professional_id')
@@ -448,7 +472,11 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
-        $brandIds = $this->resolveBrandScope($professional, $filters['brand_professional_id']);
+        $brandIds = $this->resolveBrandScope(
+            $professional,
+            $filters['brand_professional_id'],
+            BrandAccessService::CAPABILITY_ANALYTICS_FINANCIAL_READ
+        );
 
         $query = DB::table('analytics.brand_payout_daily as d')
             ->whereIn('d.brand_professional_id', $brandIds)
@@ -494,7 +522,11 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
-        $brandIds = $this->resolveBrandScope($professional, $filters['brand_professional_id']);
+        $brandIds = $this->resolveBrandScope(
+            $professional,
+            $filters['brand_professional_id'],
+            BrandAccessService::CAPABILITY_ANALYTICS_NON_FINANCIAL_READ
+        );
 
         $bucketExpr = $this->bucketExpression($filters['group_by'], 'd.day');
 
@@ -951,9 +983,9 @@ class StoreAnalyticsV2Controller extends ApiController
     /**
      * @return array<int, string>
      */
-    private function resolveBrandScope(object $professional, ?string $requestedBrandId): array
+    private function resolveBrandScope(object $professional, ?string $requestedBrandId, string $capability): array
     {
-        $managedBrandIds = $this->brandAccess->managedBrandIds($professional);
+        $managedBrandIds = $this->brandAccess->brandIdsForCapability($professional, $capability);
 
         if ($managedBrandIds === []) {
             abort(403, 'You are not permitted to view brand analytics.');

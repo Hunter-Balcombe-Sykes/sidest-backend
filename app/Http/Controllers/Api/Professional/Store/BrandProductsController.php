@@ -35,7 +35,10 @@ class BrandProductsController extends ApiController
     public function index(Request $request)
     {
         $professional = $this->currentProfessional($request);
-        $managedBrandIds = $this->brandAccess->managedBrandIds($professional);
+        $managedBrandIds = $this->brandAccess->brandIdsForCapability(
+            $professional,
+            BrandAccessService::CAPABILITY_STORE_MANAGE
+        );
 
         if ($managedBrandIds === []) {
             return $this->error('You are not permitted to manage any brand catalogs.', 403);

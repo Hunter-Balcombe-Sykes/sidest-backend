@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSiteController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalThemeController;
+use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateOverrideController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateSettingController;
@@ -187,6 +188,13 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         Route::post('/square/services/sync', [SquareIntegrationController::class, 'syncServicesNow']);
         Route::post('/square/services/{service}/push', [SquareIntegrationController::class, 'pushServiceNow'])
             ->whereUuid('service');
+
+        // Shopify Integration
+        Route::get('/shopify/status', [ShopifyIntegrationController::class, 'status']);
+        Route::post('/shopify/connect', [ShopifyIntegrationController::class, 'connect']);
+        Route::post('/shopify/disconnect', [ShopifyIntegrationController::class, 'disconnect']);
+        Route::get('/shopify/token', [ShopifyIntegrationController::class, 'token']);
+        Route::post('/shopify/webhooks/register', [ShopifyIntegrationController::class, 'registerWebhooks']);
 
         // Store: Featured Products
         Route::get('/store/featured-products', [FeaturedProductsController::class, 'index']);

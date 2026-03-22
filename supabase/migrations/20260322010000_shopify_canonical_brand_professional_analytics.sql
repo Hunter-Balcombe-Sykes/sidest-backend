@@ -627,9 +627,11 @@ CREATE INDEX IF NOT EXISTS professional_product_daily_brand_day_idx
 -- ============================================================
 -- 10) Shopify provider lookups in core.professional_integrations
 -- ============================================================
-CREATE INDEX IF NOT EXISTS professional_integrations_shopify_shop_domain_idx
+CREATE UNIQUE INDEX IF NOT EXISTS professional_integrations_shopify_shop_domain_uq
     ON core.professional_integrations (provider, lower((provider_metadata->>'shop_domain')))
-    WHERE provider = 'shopify';
+    WHERE
+        provider = 'shopify'
+        AND NULLIF(btrim(provider_metadata->>'shop_domain'), '') IS NOT NULL;
 
 -- ============================================================
 -- 11) Grants for runtime role

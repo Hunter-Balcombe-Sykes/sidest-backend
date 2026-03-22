@@ -1120,6 +1120,48 @@ The following booking endpoints are domain-scoped and accessed via the mini-site
 
 ---
 
+### Public Store API
+
+#### Domain-Scoped Store Endpoints
+
+The following store endpoints are domain-scoped and accessed via the mini-site subdomain:
+`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/store/...`
+
+#### `GET /api/public/store/featured-products`
+
+- Purpose: fetch publicly visible featured product payload for the resolved site
+- Auth: None
+- Rate limit: public-site
+- Response (200): selected product payload including pricing/commission context
+- Common status codes: 200, 404, 429
+
+#### `POST /api/public/store/checkout-session`
+
+- Purpose: mint deterministic checkout attribution token for Shopify order attribution
+- Auth: None
+- Rate limit: public-site
+- Site resolution order: `X-Site-Subdomain` header -> `subdomain`/`slug` query -> `subdomain`/`slug` body -> host subdomain
+- Request body (optional fields):
+  - `currency_code` (string, 3 chars)
+  - `line_items` (array, max 100)
+    - `brand_product_id` (uuid, optional)
+    - `shopify_product_id` (string, optional)
+    - `quantity` (int >= 1, optional)
+    - `unit_price_cents` (int >= 0, optional)
+    - `line_total_cents` (int >= 0, optional)
+  - `context` (object, optional)
+- Response (201):
+  - `{ "token": "comet_session_...", "expires_at": "...", "affiliate_professional_id": "...", "brand_professional_id": "...", "site_id": "...", "currency_code": "AUD" }`
+- Common status codes:
+  - 201
+  - 400 (site identifier missing)
+  - 404 (site not found)
+  - 409 (`MULTIPLE_BRANDS_NOT_SUPPORTED`)
+  - 422 (`NO_CONNECTED_BRAND` or validation failure)
+  - 429
+
+---
+
 #### Header-Based Slug Routing
 
 For frontends that cannot use subdomain DNS routing, the following endpoints accept the subdomain via the `X-Site-Subdomain` header and are accessed on the API host:
@@ -1140,8 +1182,10 @@ For frontends that cannot use subdomain DNS routing, the following endpoints acc
 #### `GET /api/public/booking/services-by-slug`
 #### `POST /api/public/booking/availability-by-slug`
 #### `POST /api/public/booking/checkout-by-slug`
+#### `GET /api/public/store/featured-products-by-slug`
+#### `POST /api/public/store/checkout-session-by-slug`
 
-- Purpose: header-based variants of the booking endpoints
+- Purpose: header-based variants of the booking/store endpoints
 - Auth: None
 - Rate limit: public-site
 - Headers: `X-Site-Subdomain` (required): the site subdomain slug
@@ -1635,15 +1679,79 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 
 #### `GET /api/store/brand-settings`
 - Purpose: read brand default commission
-- Auth: Required (brand professional type only)
+- Auth: Required (professional with `store.manage` capability for target brand)
+- Query params:
+  - `brand_professional_id` (optional uuid)
+- Behavior:
+  - direct brand users default to their own brand when `brand_professional_id` is omitted
+  - non-direct users (enterprise/team) must provide `brand_professional_id`
 - Common status codes: 200, 401, 403
 
 #### `PATCH /api/store/brand-settings`
-- Purpose: set default commission rate for the logged-in brand
-- Auth: Required (brand professional type only)
-- Request body: `{ "default_commission_rate": 15 }`
-- Response (200): `{ "default_commission_rate": 15 }`
+- Purpose: set default commission rate/favourites for a managed brand
+- Auth: Required (professional with `store.manage` capability for target brand)
+- Request body: `{ "brand_professional_id": "uuid?", "default_commission_rate": 15, "favourite_brand_product_ids": ["uuid"] }`
+- Response (200): `{ "brand_professional_id": "uuid", "default_commission_rate": 15, "favourite_brand_product_ids": [] }`
 - Common status codes: 200, 401, 403, 422
+
+### Store Analytics (Shopify-Canonical)
+
+Analytics is sourced from canonical Shopify order events normalized into `retail.orders` and daily aggregates in the `analytics` schema.
+
+#### Legacy Cutover Endpoints
+
+#### `GET /api/store/analytics`
+#### `GET /api/store/brand-analytics`
+
+- Purpose: legacy compatibility during cutover
+- Behavior: both endpoints return `410 Gone` with migration targets
+- Common status codes: 410, 401
+
+#### Brand Analytics Endpoints
+
+- `GET /api/store/brand-analytics/overview`
+- `GET /api/store/brand-analytics/influencers`
+- `GET /api/store/brand-analytics/influencers/{professionalId}`
+- `GET /api/store/brand-analytics/products`
+- `GET /api/store/brand-analytics/products/{brandProductId}`
+- `GET /api/store/brand-analytics/commissions`
+- `GET /api/store/brand-analytics/payouts`
+- `GET /api/store/brand-analytics/timeseries`
+
+Scope and access:
+- Auth: Required (professional)
+- Scope: restricted to brand IDs the caller can access for the required capability (`BrandAccessService` RBAC scope)
+- Non-financial endpoints (`overview`, `influencers`, `influencers/{professionalId}`, `products`, `products/{brandProductId}`, `timeseries`) require `analytics.non_financial.read`
+- Financial endpoints (`commissions`, `payouts`) require `analytics.financial.read`
+- `brand_professional_id` outside scope is rejected with 403
+
+#### My Analytics Endpoints (Self-Scoped)
+
+- `GET /api/store/my-analytics/overview`
+- `GET /api/store/my-analytics/products`
+- `GET /api/store/my-analytics/products/{brandProductId}`
+- `GET /api/store/my-analytics/commissions`
+- `GET /api/store/my-analytics/payouts`
+- `GET /api/store/my-analytics/timeseries`
+
+Scope and access:
+- Auth: Required (professional)
+- Scope: always fixed to authenticated professional as affiliate/influencer
+- No `professional_id` override accepted
+
+#### Common Query Parameters
+
+Validated query params (endpoint-relevant subsets apply):
+- `from`, `to` (`Y-m-d`)
+- `group_by` (`day|week|month`)
+- `brand_professional_id` (brand endpoints only)
+- `product_ids[]`, `categories[]`, `collections[]`
+- `regions[]`, `lifecycle_status[]`, `financial_status[]`, `payout_status[]`
+- `sort_by`, `sort_dir` (`asc|desc`), `page`, `per_page` (max 100)
+
+Rollups:
+- Weekly/monthly results are query-time rollups from daily tables
+- Week buckets use Monday start (`date_trunc('week', day::timestamp)::date`)
 
 ### Media Uploads (images and videos, server-side processing)
 
@@ -1790,6 +1898,71 @@ Gallery-pool images can also be accessed / managed via the legacy gallery routes
 - `POST /api/gallery/reorder` — reorder gallery images; body: `{ "ids": ["uuid1", "uuid2", ...] }`
 - `DELETE /api/gallery/{image}` — delete a gallery image and its variants
 
+### Shopify Integration
+
+Shopify integration is brand-scoped and used for canonical order attribution/analytics ingestion.
+
+#### `GET /api/shopify/status`
+
+- Purpose: get Shopify connection status for a managed brand
+- Auth: Required (professional)
+- Query params:
+  - `brand_professional_id` (optional uuid)
+- Response (200):
+  - `{ "eligible": true, "connected": true, "brand_professional_id": "uuid", "shop_domain": "example.myshopify.com", "shop_id": "12345", "expires_at": "...", "webhook_registration_state": "queued|pending_manual_setup|...", "webhook_registration_last_attempt_at": "...", "webhook_orders_topic": "orders/paid" }`
+- Notes:
+  - direct brand users default to their own brand when `brand_professional_id` is omitted
+  - non-direct users must supply a brand they are authorized to manage for Shopify
+  - when a non-direct caller omits `brand_professional_id`, response remains `eligible=false`
+- Common status codes: 200, 401
+
+#### `POST /api/shopify/connect`
+
+- Purpose: connect/update Shopify credentials + metadata for a managed brand
+- Auth: Required (`shopify.manage` capability for target brand)
+- Request body:
+  - `brand_professional_id` (optional uuid for direct brand users; required for non-direct users)
+  - `shop_domain` (required string)
+  - `access_token` (required string)
+  - `refresh_token` (optional string)
+  - `expires_at` (optional date)
+  - `shop_id` (optional string)
+  - `scopes[]` (optional string array)
+  - `webhook_orders_topic` (optional string; default from config)
+- Behavior:
+  - normalizes and persists `provider_metadata.shop_domain`
+  - rejects if the same `shop_domain` is already connected to another brand (409)
+  - queues `RegisterShopifyOrderWebhooksJob`
+- Response (200): `{ "connected": true, "brand_professional_id": "uuid", "shop_domain": "...", "shop_id": "...", "expires_at": "...", "webhook_registration_queued": true }`
+- Common status codes: 200, 401, 403, 409, 422
+
+#### `POST /api/shopify/disconnect`
+
+- Purpose: remove Shopify integration row for managed brand
+- Auth: Required (`shopify.manage` capability for target brand)
+- Request body:
+  - `brand_professional_id` (optional uuid for direct brand users; required for non-direct users)
+- Response (200): `{ "connected": false, "brand_professional_id": "uuid" }`
+- Common status codes: 200, 401, 403
+
+#### `GET /api/shopify/token`
+
+- Purpose: fetch decrypted Shopify access token for connected managed brand
+- Auth: Required (`shopify.manage` capability for target brand)
+- Query params:
+  - `brand_professional_id` (optional uuid for direct brand users; required for non-direct users)
+- Response (200): `{ "brand_professional_id": "uuid", "access_token": "...", "expires_at": "...", "shop_domain": "...", "shop_id": "..." }`
+- Common status codes: 200, 401, 403, 404
+
+#### `POST /api/shopify/webhooks/register`
+
+- Purpose: queue webhook registration/refresh job for connected Shopify integration of a managed brand
+- Auth: Required (`shopify.manage` capability for target brand)
+- Request body:
+  - `brand_professional_id` (optional uuid for direct brand users; required for non-direct users)
+- Response (200): `{ "queued": true, "integration_id": "uuid", "brand_professional_id": "uuid" }`
+- Common status codes: 200, 401, 403, 404
+
 ### Square Integration
 
 Square integration manages online booking appointments and service synchronization.
@@ -1889,6 +2062,44 @@ Unlike Square (which exposes a full platform API for bookings, payments, and cat
 - Auth: Required (professional), must own the service
 - Response (200): { "pushed": true, "service_id": "...", "fresha_service_id": "...", "fresha_variation_id": "...", "fresha_last_synced_at": "...", "fresha_sync_error": null }
 - Common status codes: 200, 401, 403, 404 (not connected/service not found), 422
+
+---
+
+### Shopify Webhooks
+
+Shopify order ingestion endpoints have **no auth middleware**. Signature validation is handled at controller level.
+
+#### `POST /api/webhooks/shopify/orders`
+
+- Purpose: receive native Shopify order webhook events
+- Auth: Shopify HMAC via `X-Shopify-Hmac-Sha256` header (`SHOPIFY_WEBHOOK_SECRET`)
+- Required headers:
+  - `X-Shopify-Webhook-Id`
+  - `X-Shopify-Shop-Domain`
+  - `X-Shopify-Topic` (recommended)
+- Behavior:
+  - deduplicates by `(source, external_event_id)` in `retail.order_event_inbox`
+  - resolves brand integration by `provider='shopify'` + `provider_metadata.shop_domain`
+  - queues `ProcessShopifyOrderEventJob` when resolvable
+  - unresolved/ambiguous brand mapping is persisted as rejected inbox event
+- Response (200): `{ "received": true, "queued": true|false, "status": "pending|rejected", "inbox_id": "uuid", ... }`
+- Common status codes: 200, 400 (missing required header), 401 (invalid signature)
+
+#### `POST /api/webhooks/shopify/orders/fallback`
+
+- Purpose: fallback ingestion path when caller only has `shop_domain + order_id` (or cached payload)
+- Auth: Comet fallback HMAC via `X-Comet-Fallback-Signature` (`SHOPIFY_FALLBACK_SECRET`)
+- Request body:
+  - `shop_domain` (required)
+  - `order_id` (required; numeric id or gid containing numeric id)
+  - `event_id` (optional; default `fallback_order_{order_id}`)
+  - `topic` (optional; default `orders/fallback`)
+  - `payload` (optional full Shopify order object)
+- Behavior:
+  - if `payload` omitted, server fetches canonical order payload from Shopify Admin REST using the connected integration token
+  - ingests through same inbox/normalizer path as native webhooks
+- Response (200): same shape as native webhook ingestion
+- Common status codes: 200, 401 (invalid fallback signature), 422 (invalid input or upstream order fetch failure)
 
 ---
 
