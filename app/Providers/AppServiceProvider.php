@@ -74,6 +74,20 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Shopify webhook endpoints (keyed by shop domain, fallback to IP)
+        RateLimiter::for('shopify-webhooks', function (Request $request) {
+            $key = strtolower(trim((string) $request->header('x-shopify-shop-domain', '')));
+            if ($key === '') {
+                $key = $request->ip();
+            }
+
+            return Limit::perMinute(120)
+                ->by($key)
+                ->response(function () {
+                    return response()->json(['message' => 'Too many webhook requests.'], 429);
+                });
+        });
+
         // API rate limit for authenticated users
         RateLimiter::for('api', function (Request $request) {
             $uid = $request->attributes->get('supabase_uid') ?? $request->ip();

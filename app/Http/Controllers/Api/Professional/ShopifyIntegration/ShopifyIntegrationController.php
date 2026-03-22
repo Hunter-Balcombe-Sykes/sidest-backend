@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Professional\ShopifyIntegration;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Shopify\RegisterShopifyOrderWebhooksJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -16,7 +17,7 @@ use Illuminate\Validation\ValidationException;
 
 class ShopifyIntegrationController extends ApiController
 {
-    use ResolveCurrentProfessional;
+    use NormalizesShopDomain, ResolveCurrentProfessional;
 
     public function __construct(
         private readonly BrandAccessService $brandAccess,
@@ -28,24 +29,6 @@ class ShopifyIntegrationController extends ApiController
             ->where('professional_id', $brandProfessionalId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->first();
-    }
-
-    private function normalizeShopDomain(string $value): string
-    {
-        $value = mb_strtolower(trim($value));
-        if ($value === '') {
-            return '';
-        }
-
-        if (str_contains($value, '://')) {
-            $host = (string) parse_url($value, PHP_URL_HOST);
-            $value = mb_strtolower(trim($host));
-        }
-
-        $value = preg_replace('/:\d+$/', '', $value) ?? $value;
-        $value = trim($value, " \t\n\r\0\x0B./");
-
-        return $value;
     }
 
     /**

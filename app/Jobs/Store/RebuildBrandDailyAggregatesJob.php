@@ -15,6 +15,10 @@ class RebuildBrandDailyAggregatesJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $tries = 2;
+
+    public int $timeout = 300;
+
     public function __construct(
         public string $brandProfessionalId,
         public string $anchorDay,

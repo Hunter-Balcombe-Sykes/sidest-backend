@@ -1048,8 +1048,7 @@ class StoreAnalyticsV2Controller extends ApiController
      */
     private function paginate(Builder $query, int $page, int $perPage): array
     {
-        $countQuery = DB::query()->fromSub(clone $query, 'q');
-        $total = (int) $countQuery->count();
+        $total = (int) DB::query()->fromSub((clone $query)->reorder(), 'q')->count();
 
         $rows = (clone $query)
             ->forPage($page, $perPage)

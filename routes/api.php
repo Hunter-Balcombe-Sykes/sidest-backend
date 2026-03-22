@@ -28,8 +28,10 @@ Route::post('/webhooks/fresha', FreshaCatalogWebhookController::class);
 Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
 
 // Shopify webhooks (no auth middleware)
-Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class);
-Route::post('/webhooks/shopify/orders/fallback', [ShopifyOrderWebhookController::class, 'fallback']);
+Route::middleware('throttle:shopify-webhooks')->group(function () {
+    Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class);
+    Route::post('/webhooks/shopify/orders/fallback', [ShopifyOrderWebhookController::class, 'fallback']);
+});
 
 // bootstrap uses ONLY JWT middleware
 Route::middleware(['supabase.jwt'])->post('/bootstrap', [BootstrapController::class, 'bootstrap']);

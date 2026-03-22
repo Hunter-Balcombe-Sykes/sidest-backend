@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Jobs\Shopify\ProcessShopifyOrderEventJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Retail\OrderEventInbox;
@@ -15,6 +16,8 @@ use Illuminate\Validation\ValidationException;
 
 class ShopifyOrderWebhookController extends ApiController
 {
+    use NormalizesShopDomain;
+
     public function __invoke(Request $request): JsonResponse
     {
         $rawBody = $request->getContent() ?: '';
@@ -307,24 +310,6 @@ class ShopifyOrderWebhookController extends ApiController
         }
 
         return $matches[1];
-    }
-
-    private function normalizeShopDomain(string $value): string
-    {
-        $value = mb_strtolower(trim($value));
-        if ($value === '') {
-            return '';
-        }
-
-        if (str_contains($value, '://')) {
-            $value = mb_strtolower(trim((string) parse_url($value, PHP_URL_HOST)));
-        }
-
-        $value = trim($value);
-        $value = preg_replace('/:\d+$/', '', $value) ?? $value;
-        $value = trim($value, '/.');
-
-        return $value;
     }
 
     private function isValidSignature(string $rawBody, string $signature): bool
