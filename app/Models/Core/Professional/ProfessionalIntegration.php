@@ -12,6 +12,7 @@ class ProfessionalIntegration extends BaseModel
 
     public const PROVIDER_SQUARE = 'square';
     public const PROVIDER_FRESHA = 'fresha';
+    public const PROVIDER_SHOPIFY = 'shopify';
 
     protected $table = 'professional_integrations';
 

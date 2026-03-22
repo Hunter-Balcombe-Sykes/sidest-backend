@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\PublicSite\PublicStoreController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
 
@@ -25,6 +26,9 @@ Route::post('/webhooks/square/catalog', SquareCatalogWebhookController::class);
 // Fresha webhooks (no auth middleware)
 Route::post('/webhooks/fresha', FreshaCatalogWebhookController::class);
 Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
+
+// Shopify webhooks (no auth middleware)
+Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class);
 
 // bootstrap uses ONLY JWT middleware
 Route::middleware(['supabase.jwt'])->post('/bootstrap', [BootstrapController::class, 'bootstrap']);
@@ -58,7 +62,7 @@ Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class,
     ->middleware('throttle:public-site');
 Route::get('/public/store/featured-products-by-slug', [PublicStoreController::class, 'featuredProducts'])
     ->middleware('throttle:public-site');
-Route::post('/public/store/order-analytics-by-slug', [PublicStoreController::class, 'recordOrderAnalytics'])
+Route::post('/public/store/checkout-session-by-slug', [PublicStoreController::class, 'createCheckoutSession'])
     ->middleware('throttle:public-site');
 
 // Header/site-id based fallback for path-based frontend routing.

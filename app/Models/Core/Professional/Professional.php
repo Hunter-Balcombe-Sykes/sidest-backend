@@ -193,6 +193,12 @@ class Professional extends BaseModel
             ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA);
     }
 
+    public function shopifyIntegration(): HasOne
+    {
+        return $this->hasOne(ProfessionalIntegration::class, 'professional_id')
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY);
+    }
+
     public function productSelections(): HasMany
     {
         return $this->hasMany(\App\Models\Retail\ProfessionalSelection::class, 'professional_id')

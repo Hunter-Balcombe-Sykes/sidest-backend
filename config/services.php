@@ -51,4 +51,12 @@ return [
         'webhook_notification_url' => env('FRESHA_WEBHOOK_NOTIFICATION_URL'),
     ],
 
+    'shopify' => [
+        'api_key' => env('SHOPIFY_API_KEY'),
+        'api_secret' => env('SHOPIFY_API_SECRET'),
+        'app_scopes' => env('SHOPIFY_APP_SCOPES', ''),
+        'webhook_secret' => env('SHOPIFY_WEBHOOK_SECRET'),
+        'webhook_orders_topic' => env('SHOPIFY_WEBHOOK_ORDERS_TOPIC', 'orders/paid'),
+    ],
+
 ];

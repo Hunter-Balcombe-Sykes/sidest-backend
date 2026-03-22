@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
 use App\Http\Controllers\Api\Professional\Store\StoreAnalyticsController;
+use App\Http\Controllers\Api\Professional\Store\StoreAnalyticsV2Controller;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
@@ -193,6 +194,24 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         Route::put('/store/featured-products', [FeaturedProductsController::class, 'update']);
         Route::get('/store/analytics', [StoreAnalyticsController::class, 'index']);
         Route::get('/store/brand-analytics', [StoreAnalyticsController::class, 'brandIndex']);
+        Route::get('/store/brand-analytics/overview', [StoreAnalyticsV2Controller::class, 'brandOverview']);
+        Route::get('/store/brand-analytics/influencers', [StoreAnalyticsV2Controller::class, 'brandInfluencers']);
+        Route::get('/store/brand-analytics/influencers/{professionalId}', [StoreAnalyticsV2Controller::class, 'brandInfluencerDetail'])
+            ->whereUuid('professionalId');
+        Route::get('/store/brand-analytics/products', [StoreAnalyticsV2Controller::class, 'brandProducts']);
+        Route::get('/store/brand-analytics/products/{brandProductId}', [StoreAnalyticsV2Controller::class, 'brandProductDetail'])
+            ->whereUuid('brandProductId');
+        Route::get('/store/brand-analytics/commissions', [StoreAnalyticsV2Controller::class, 'brandCommissions']);
+        Route::get('/store/brand-analytics/payouts', [StoreAnalyticsV2Controller::class, 'brandPayouts']);
+        Route::get('/store/brand-analytics/timeseries', [StoreAnalyticsV2Controller::class, 'brandTimeseries']);
+
+        Route::get('/store/my-analytics/overview', [StoreAnalyticsV2Controller::class, 'myOverview']);
+        Route::get('/store/my-analytics/products', [StoreAnalyticsV2Controller::class, 'myProducts']);
+        Route::get('/store/my-analytics/products/{brandProductId}', [StoreAnalyticsV2Controller::class, 'myProductDetail'])
+            ->whereUuid('brandProductId');
+        Route::get('/store/my-analytics/commissions', [StoreAnalyticsV2Controller::class, 'myCommissions']);
+        Route::get('/store/my-analytics/payouts', [StoreAnalyticsV2Controller::class, 'myPayouts']);
+        Route::get('/store/my-analytics/timeseries', [StoreAnalyticsV2Controller::class, 'myTimeseries']);
 
         // Store: Brand Settings & Per-Product Settings
         Route::get('/store/brand-settings', [BrandStoreController::class, 'index']);

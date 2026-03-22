@@ -35,7 +35,7 @@ Route::group([
 
     Route::get('/store/featured-products', [PublicStoreController::class, 'featuredProducts'])
         ->middleware('throttle:public-site');
-    Route::post('/store/order-analytics', [PublicStoreController::class, 'recordOrderAnalytics'])
+    Route::post('/store/checkout-session', [PublicStoreController::class, 'createCheckoutSession'])
         ->middleware('throttle:public-site');
 
     // Page View Analytics
