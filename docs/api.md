@@ -57,10 +57,12 @@ Snapshot date: **March 20, 2026**.
 - Hard-cutover `PUT /api/store/featured-products` to `selected_products[{brand_product_id, sort_order}]`; legacy Shopify-id payload is rejected.
 - Add `GET /api/store/available-products` for affiliate-visible products across connected brands (featured-first ordering).
 - Add manager catalog endpoints: `GET /api/store/brand-products`, `PATCH /api/store/brand-products/{brandProductId}`, `PATCH /api/store/brand-products/bulk`.
-- Add affiliate deny override endpoints: `GET|PUT|DELETE /api/store/affiliate-overrides...`.
-- Enforce storefront validity via joins: connected brand link + approved + available + sync-active + no deny override.
-- Add selection cleanup flows: de-approval/unavailability/disconnect/deny now remove invalid selections and create notifications.
-- Add pricing outputs for store payloads: effective commission and discounted price with ceil-to-nearest-5-cents rounding.
+- Expand affiliate override endpoints to deny/allow access control (`GET /api/store/affiliate-overrides`, `PUT|DELETE /api/store/affiliate-overrides/{deny|allow}`).
+- Add per-affiliate product pricing endpoints: `GET|PUT|DELETE /api/store/affiliate-product-settings`.
+- Enforce storefront validity via joins: connected brand link + availability + sync-active + deny override restriction.
+- Activate `allow` override behavior to bypass brand-level availability for a specific affiliate while `deny` keeps unconditional precedence.
+- Add selection cleanup flows: unavailability/disconnect/deny now remove invalid selections and create notifications.
+- Add pricing outputs for store payloads: effective commission and discounted price with ceil-to-nearest-5-cents rounding, including affiliate-level override fields.
 
 ### Recent commits
 
@@ -1453,10 +1455,10 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 
 - Purpose: get selected, strictly-valid storefront products for the logged-in professional
 - Auth: Required
-- Response (200): `{ "selected_products": [{ "id": "uuid", "brand_product_id": "uuid", "brand_professional_id": "uuid", "shopify_product_id": "gid://shopify/Product/...", "sort_order": 0, "commission_override": null, "effective_commission_rate": 15, "discount_rate": 10, "base_price_cents": 3495, "discounted_price_cents": 3150 }], "default_commission_rate": 15, "max_featured_products": 10 }`
+- Response (200): `{ "selected_products": [{ "id": "uuid", "brand_product_id": "uuid", "brand_professional_id": "uuid", "shopify_product_id": "gid://shopify/Product/...", "sort_order": 0, "commission_override": null, "affiliate_commission_override": 20, "effective_commission_rate": 20, "discount_rate": 10, "affiliate_discount_rate": 5, "custom_price": null, "affiliate_custom_price": 32.95, "base_price_cents": 3295, "discounted_price_cents": 3130 }], "default_commission_rate": 15, "max_featured_products": 10 }`
 - Validity checks:
   - product must be sync-active
-  - brand setting must be approved + available
+  - brand setting must be available, unless an affiliate `allow` override exists
   - affiliate must still be connected to the brand
   - no deny override for that affiliate/product
 - Notes:
@@ -1474,7 +1476,7 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 - Response (200): same shape as GET endpoint
 - Notes:
   - Legacy payload (`products[].shopify_product_id`) is rejected with 422.
-  - DB triggers enforce connected brand link + availability + sync-active + deny-override restrictions.
+  - DB triggers enforce connected brand link + sync-active + deny-override restrictions; `allow` overrides can bypass brand availability.
   - Duplicate `brand_product_id` values are rejected.
 - Common status codes: 200, 401, 403, 422, 503
 
@@ -1489,6 +1491,10 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
   - `sort_order ASC`
   - `title ASC`
 - Response (200): `{ "available_products": [...], "max_featured_products": 10 }`
+- Product payload includes both brand-level and affiliate-level pricing fields:
+  - `commission_override`, `affiliate_commission_override`, `effective_commission_rate`
+  - `discount_rate`, `affiliate_discount_rate`
+  - `custom_price`, `affiliate_custom_price`
 - Common status codes: 200, 401, 403, 422
 
 ### Store: Brand/Distributor Catalog Management
@@ -1523,14 +1529,19 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
   - If products become unavailable, affected selections are removed + notifications are created.
 - Common status codes: 200, 401, 403, 422
 
-### Store: Affiliate Deny Overrides (Restrict-Only)
+### Store: Affiliate Access Overrides (Deny/Allow)
 
 #### `GET /api/store/affiliate-overrides`
-- Purpose: list deny overrides for a managed brand
+- Purpose: list affiliate access overrides for a managed brand
 - Auth: Required manager access for `brand_professional_id`
 - Query params:
   - `brand_professional_id` (required uuid)
   - `affiliate_professional_id` (optional uuid)
+  - `override_type` (optional enum: `deny` | `allow`)
+  - `page` (optional integer, default 1)
+  - `per_page` (optional integer, default 100, max 200)
+- Response (200): paginated
+  - `{ "overrides": [...], "meta": { "current_page": 1, "per_page": 100, "total": 42, "last_page": 1, ... } }`
 - Common status codes: 200, 401, 403, 422
 
 #### `PUT /api/store/affiliate-overrides/deny`
@@ -1546,6 +1557,73 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 
 #### `DELETE /api/store/affiliate-overrides/deny`
 - Purpose: remove deny overrides for one affiliate/brand pair (all or subset)
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (optional uuid[])
+- Common status codes: 200, 401, 403, 422
+
+#### `PUT /api/store/affiliate-overrides/allow`
+- Purpose: set allow overrides for one affiliate across one/many brand products
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (required uuid[], min 1)
+- Notes:
+  - `allow` overrides bypass brand-level product availability for that affiliate.
+  - `deny` still takes precedence when present.
+- Common status codes: 200, 401, 403, 422
+
+#### `DELETE /api/store/affiliate-overrides/allow`
+- Purpose: remove allow overrides for one affiliate/brand pair (all or subset)
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (optional uuid[])
+- Common status codes: 200, 401, 403, 422
+
+### Store: Per-Affiliate Product Pricing Settings
+
+#### `GET /api/store/affiliate-product-settings`
+- Purpose: list per-affiliate product pricing settings for a managed brand
+- Auth: Required manager access for `brand_professional_id`
+- Query params:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (optional uuid)
+  - `page` (optional integer, default 1)
+  - `per_page` (optional integer, default 100, max 200)
+- Response (200): paginated
+  - `{ "settings": [...], "meta": { "current_page": 1, "per_page": 100, "total": 42, "last_page": 1, ... } }`
+- `settings[]` fields:
+  - `brand_product_id`
+  - `commission_override` (nullable, 0-100)
+  - `discount_rate` (nullable, 0-100)
+  - `custom_price` (nullable, >= 0)
+- Common status codes: 200, 401, 403, 422
+
+#### `PUT /api/store/affiliate-product-settings`
+- Purpose: batch upsert per-affiliate product pricing settings
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `settings` (required array, min 1)
+  - `settings[].brand_product_id` (required uuid)
+  - `settings[].commission_override` (nullable number, min 0, max 100)
+  - `settings[].discount_rate` (nullable number, min 0, max 100)
+  - `settings[].custom_price` (nullable number, min 0)
+- Notes:
+  - Duplicate `settings[].brand_product_id` values are rejected with 422.
+  - Effective storefront precedence is:
+    - commission: affiliate override → product override → brand default → system default
+    - discount/custom price: affiliate override → product-level value
+- Common status codes: 200, 401, 403, 422
+
+#### `DELETE /api/store/affiliate-product-settings`
+- Purpose: remove per-affiliate product pricing settings (all or subset)
 - Auth: Required manager access for the brand
 - Request body:
   - `brand_professional_id` (required uuid)

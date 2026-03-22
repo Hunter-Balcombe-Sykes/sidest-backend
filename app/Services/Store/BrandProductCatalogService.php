@@ -86,13 +86,21 @@ class BrandProductCatalogService
                     ->where('o.affiliate_professional_id', '=', $affiliateProfessionalId)
                     ->where('o.override_type', '=', 'deny');
             })
+            ->leftJoin('retail.brand_product_affiliate_overrides as oa', function ($join) use ($affiliateProfessionalId): void {
+                $join->on('oa.brand_product_id', '=', 'bp.id')
+                    ->where('oa.affiliate_professional_id', '=', $affiliateProfessionalId)
+                    ->where('oa.override_type', '=', 'allow');
+            })
             ->leftJoin('retail.brand_product_affiliate_settings as bpas', function ($join) use ($affiliateProfessionalId): void {
                 $join->on('bpas.brand_product_id', '=', 'bp.id')
                     ->where('bpas.affiliate_professional_id', '=', $affiliateProfessionalId);
             })
             ->whereIn('bp.brand_professional_id', $connectedBrandIds)
             ->where('bp.is_sync_active', true)
-            ->whereRaw('COALESCE(bps.is_available, true) = true')
+            ->where(function ($query): void {
+                $query->whereRaw('COALESCE(bps.is_available, true) = true')
+                    ->orWhereNotNull('oa.id');
+            })
             ->whereNull('o.id')
             ->orderByDesc('bps.is_featured')
             ->orderBy('bps.sort_order')
@@ -279,6 +287,11 @@ class BrandProductCatalogService
                     ->where('o.affiliate_professional_id', '=', $professionalId)
                     ->where('o.override_type', '=', 'deny');
             })
+            ->leftJoin('retail.brand_product_affiliate_overrides as oa', function ($join) use ($professionalId): void {
+                $join->on('oa.brand_product_id', '=', 'bp.id')
+                    ->where('oa.affiliate_professional_id', '=', $professionalId)
+                    ->where('oa.override_type', '=', 'allow');
+            })
             ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
             ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
             ->leftJoin('retail.brand_product_affiliate_settings as bpas', function ($join) use ($professionalId): void {
@@ -287,7 +300,10 @@ class BrandProductCatalogService
             })
             ->where('ps.professional_id', $professionalId)
             ->where('bp.is_sync_active', true)
-            ->whereRaw('COALESCE(bps.is_available, true) = true')
+            ->where(function ($query): void {
+                $query->whereRaw('COALESCE(bps.is_available, true) = true')
+                    ->orWhereNotNull('oa.id');
+            })
             ->whereNull('o.id')
             ->orderBy('ps.sort_order')
             ->select([
@@ -349,12 +365,21 @@ class BrandProductCatalogService
                     ->where('o.affiliate_professional_id', '=', $professionalId)
                     ->where('o.override_type', '=', 'deny');
             })
+            ->leftJoin('retail.brand_product_affiliate_overrides as oa', function ($join) use ($professionalId): void {
+                $join->on('oa.brand_product_id', '=', 'bp.id')
+                    ->where('oa.affiliate_professional_id', '=', $professionalId)
+                    ->where('oa.override_type', '=', 'allow');
+            })
             ->where('ps.professional_id', $professionalId)
             ->where(function ($query): void {
                 $query->whereNull('bp.id')
                     ->orWhereNull('l.id')
                     ->orWhereRaw('COALESCE(bp.is_sync_active, false) = false')
-                    ->orWhereRaw('COALESCE(bps.is_available, true) = false')
+                    ->orWhere(function ($availabilityQuery): void {
+                        $availabilityQuery
+                            ->whereRaw('COALESCE(bps.is_available, true) = false')
+                            ->whereNull('oa.id');
+                    })
                     ->orWhereNotNull('o.id');
             })
             ->pluck('ps.id')

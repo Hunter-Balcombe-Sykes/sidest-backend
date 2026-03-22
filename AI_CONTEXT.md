@@ -20,7 +20,7 @@ Brands want influencers and professionals to sell their products without managin
 5. Give brands and professionals actionable analytics (views, clicks, sales, earnings)
 6. Enable brands to promote specific products via commission adjustments and price overrides
 
-**Current status:** Active development. Core professional features (sites, services, media, integrations) are production-ready. The brand-approved affiliate commerce foundation is implemented (brand-scoped catalog, approval controls, deny overrides, strict selections, manager APIs). Video uploads remain feature-flagged off, and checkout/payout flows are still in progress.
+**Current status:** Active development. Core professional features (sites, services, media, integrations) are production-ready. The affiliate commerce foundation is implemented (brand-scoped catalog, availability controls, deny/allow overrides, per-affiliate pricing settings, strict selections, manager APIs). Video uploads remain feature-flagged off, and checkout/payout flows are still in progress.
 
 ---
 
@@ -139,8 +139,9 @@ Analytics recorded for both brand and affiliate dashboards
 | `BrandAffiliateInvite` | `core.brand_affiliate_invites` | Token-based invite (expiring) for affiliate onboarding |
 | `ProfessionalIntegration` | `core.professional_integrations` | Encrypted OAuth tokens for Square/Fresha |
 | `BrandProduct` | `retail.brand_products` | Full Shopify-synced product catalog per brand |
-| `BrandProductSetting` | `retail.brand_product_settings` | Global brand approval/availability/featured/commission/discount settings per brand product |
-| `BrandProductAffiliateOverride` | `retail.brand_product_affiliate_overrides` | Restrict-only per-affiliate deny overrides on brand products |
+| `BrandProductSetting` | `retail.brand_product_settings` | Global brand availability/featured/commission/discount settings per brand product |
+| `BrandProductAffiliateOverride` | `retail.brand_product_affiliate_overrides` | Per-affiliate access overrides (`deny` blocks; `allow` can bypass availability, with deny precedence) |
+| `BrandProductAffiliateSetting` | `retail.brand_product_affiliate_settings` | Per-affiliate commission/discount/custom-price overrides on brand products |
 | `BrandStoreSettings` | `retail.brand_store_settings` | Commission rate config per brand |
 | `ProfessionalSelection` | `retail.professional_selections` | Featured product list per professional |
 | `EnterpriseBrandLink` | `core.enterprise_brand_links` | Links distributor enterprises to managed brand professional accounts |
@@ -208,7 +209,7 @@ Analytics recorded for both brand and affiliate dashboards
 3. Analytics events (`POST /api/public/analytics/*`) recorded asynchronously.
 
 #### Product Purchase Flow
-[TBD: E-commerce checkout integration. Brand-approved catalog and storefront selection constraints are implemented; order recording, payment processing, and payout distribution are not yet implemented.]
+[TBD: E-commerce checkout integration. Catalog visibility, access overrides, and storefront selection constraints are implemented; order recording, payment processing, and payout distribution are not yet implemented.]
 
 #### Booking Flow
 1. Customer calls `POST /api/public/booking/availability` → proxied to Square/Fresha.
@@ -238,7 +239,7 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 | `core` | Main domain (professionals, sites, services, customers, blocks, media, integrations, brand links) |
 | `analytics` | Event tracking (site_visits, link_clicks, lead_submissions) |
 | `billing` | Plans, subscriptions |
-| `retail` | Brand catalog/settings (`brand_products`, `brand_product_settings`, overrides), store settings, selections, commerce tables |
+| `retail` | Brand catalog/settings (`brand_products`, `brand_product_settings`, affiliate settings/overrides), store settings, selections, commerce tables |
 
 `DB_SEARCH_PATH=public,core,analytics,billing,retail` — queries can reference tables without schema prefix.
 
@@ -265,10 +266,10 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 - Fresha OAuth integration + service sync
 - Brand partner link management (connect/disconnect affiliates)
 - Brand affiliate invite system (token, expiry, claim flow)
-- Brand-approved affiliate commerce foundation:
-  - `brand_products` full catalog + `brand_product_settings` (default unapproved)
-  - global approval + availability rules
-  - restrict-only affiliate deny overrides
+- Brand affiliate commerce foundation:
+  - `brand_products` full catalog + `brand_product_settings`
+  - global availability rules with per-affiliate deny/allow access overrides
+  - per-affiliate commission/discount/custom price overrides
   - enterprise brand-management links (`distributor` enterprise type)
   - strict selection validation by `brand_product_id`
   - global 10-product cap per professional across brands
@@ -277,10 +278,11 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
   - `PUT /api/store/featured-products` hard-cutover payload (`selected_products[{brand_product_id,...}]`)
   - `GET /api/store/available-products` affiliate-visible catalog
   - `GET/PATCH /api/store/brand-products` + bulk patch
-  - affiliate override management endpoints
+  - affiliate override management endpoints (`deny` + `allow`)
+  - per-affiliate product pricing endpoints (`GET|PUT|DELETE /api/store/affiliate-product-settings`)
   - legacy product-settings write flow removed (`PUT /api/store/brand-product-settings`)
   - featured-products reads no longer fall back to `site.settings.selected_products`
-- Selection auto-cleanup + notification on de-approval/unavailability/deny/disconnect
+- Selection auto-cleanup + notification on unavailability/deny/disconnect
 - Subscription and plan management (Stripe-backed)
 - Site analytics (page views, link clicks, leads)
 - Legal content (auto-generated T&Cs + privacy, manual override)
@@ -389,7 +391,8 @@ When another AI reads this file, it should:
 | 2026-03-19 | Affiliates can connect to multiple brands | One affiliate can represent multiple brands; one "primary" brand may be designated in future but not yet decided |
 | 2026-03-19 | No in-house booking system — Square and Fresha integrations only | Reduces scope; may revisit native booking in future |
 | 2026-03-20 | Featured selection contract is hard-cutover to `brand_product_id` payload | Prevents cross-brand Shopify ID ambiguity and enforces strict brand-scoped selection validation |
-| 2026-03-20 | Approval model is global allowlist + per-affiliate restrict-only deny overrides | Keeps governance centralized at brand level while allowing affiliate-specific safety controls |
+| 2026-03-20 | Availability model is global + per-affiliate deny/allow access overrides (deny precedence) | Keeps governance centralized at brand level while allowing affiliate-specific exceptions |
+| 2026-03-22 | Added `retail.brand_product_affiliate_settings` and API support for per-affiliate commission/discount/custom price | Brands can run affiliate-specific pricing and commission strategies without changing global brand product settings |
 | 2026-03-20 | Product selection cap is global 10 per professional across brands; featured cap is 10 per brand | Maintains consistent storefront limits while supporting multi-brand catalogs |
 | 2026-03-20 | Distributor enterprises can manage linked brands via `core.enterprise_brand_links` | Enables parent/distributor operating model without transferring brand ownership |
 | 2026-03-20 | Removed legacy brand product-settings flow and site-settings product fallback | Prevents legacy writes from deleting modern catalog settings and keeps read/write paths strictly brand-product scoped |
@@ -404,7 +407,7 @@ When another AI reads this file, it should:
 2. **Database is Supabase PostgreSQL.** Use `supabase/migrations/` for all schema changes. Eloquent models map to tables in non-public schemas — check the model's `$table` and `$connection` properties.
 3. **Auth flow is JWT-first.** Every professional API request must pass `Authorization: Bearer <supabase_jwt>`. The `supabase.jwt` middleware validates against JWKS.
 4. **Media is async.** After upload, variants are queued. Don't expect variants to exist immediately after upload.
-5. **The retail/commerce layer is partially complete.** Brand-scoped catalog/approval/selection governance is implemented; order recording, commission distribution, and payment splitting are not yet implemented.
+5. **The retail/commerce layer is partially complete.** Brand-scoped catalog/availability/selection governance is implemented; order recording, commission distribution, and payment splitting are not yet implemented.
 6. **Video uploads are disabled by default.** Set `COMET_VIDEO_UPLOADS_ENABLED=true` and ensure the `redis_video` queue worker is running before testing video flows.
 
 ### Fragile Parts
