@@ -10,9 +10,11 @@ use App\Services\Store\BrandAccessService;
 use App\Services\Store\BrandProductCatalogService;
 use App\Services\Store\BrandProductSettingsService;
 use App\Services\Store\SelectionCleanupService;
+use App\Services\Store\ShopifyCatalogSyncService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -25,7 +27,8 @@ class BrandProductsController extends ApiController
         private readonly BrandAccessService $brandAccess,
         private readonly BrandProductCatalogService $catalog,
         private readonly BrandProductSettingsService $settingsRows,
-        private readonly SelectionCleanupService $selectionCleanup
+        private readonly SelectionCleanupService $selectionCleanup,
+        private readonly ShopifyCatalogSyncService $shopifyCatalogSync,
     ) {}
 
     /**
@@ -59,6 +62,18 @@ class BrandProductsController extends ApiController
         }
 
         $targetBrandIds = $requestedBrandId !== '' ? [$requestedBrandId] : $managedBrandIds;
+
+        foreach ($targetBrandIds as $targetBrandId) {
+            try {
+                $this->shopifyCatalogSync->syncForBrand((string) $targetBrandId);
+            } catch (Throwable $e) {
+                Log::warning('Shopify catalog sync failed during brand-products index.', [
+                    'brand_professional_id' => (string) $targetBrandId,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+        }
+
         $products = $this->catalog->managedCatalog($targetBrandIds);
 
         return $this->success([

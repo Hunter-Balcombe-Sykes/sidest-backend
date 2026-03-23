@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Shopify\RegisterShopifyOrderWebhooksJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Store\BrandAccessService;
+use App\Services\Store\ShopifyCatalogSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -21,6 +22,7 @@ class ShopifyIntegrationController extends ApiController
 
     public function __construct(
         private readonly BrandAccessService $brandAccess,
+        private readonly ShopifyCatalogSyncService $shopifyCatalogSync,
     ) {}
 
     private function currentShopifyIntegrationForBrand(string $brandProfessionalId): ?ProfessionalIntegration
@@ -223,6 +225,25 @@ class ShopifyIntegrationController extends ApiController
             ]);
         }
 
+        $catalogSync = [
+            'synced' => 0,
+            'marked_deleted' => 0,
+            'inserted_settings_rows' => 0,
+            'skipped' => true,
+            'reason' => 'not_attempted',
+        ];
+        try {
+            $catalogSync = $this->shopifyCatalogSync->syncForBrand($targetBrandId);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to sync Shopify catalog during connect.', [
+                'actor_professional_id' => (string) $actorProfessional->id,
+                'brand_professional_id' => $targetBrandId,
+                'integration_id' => (string) $integration->id,
+                'shop_domain' => $shopDomain,
+                'message' => $e->getMessage(),
+            ]);
+        }
+
         return $this->success([
             'connected' => true,
             'brand_professional_id' => $targetBrandId,
@@ -230,6 +251,7 @@ class ShopifyIntegrationController extends ApiController
             'shop_id' => Arr::get($metadata, 'shop_id'),
             'expires_at' => $integration->expires_at?->toIso8601String(),
             'webhook_registration_queued' => $webhookRegistrationQueued,
+            'catalog_sync' => $catalogSync,
         ]);
     }
 
