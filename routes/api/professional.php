@@ -56,6 +56,8 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         Route::post('/brand-affiliate-invites/{token}/claim', [BrandAffiliateInviteController::class, 'claim']);
         Route::post('/brand-affiliate-invites/{token}/decline', [BrandAffiliateInviteController::class, 'decline']);
         Route::get('/brand-partners', [BrandPartnerController::class, 'index']);
+        Route::post('/brand-partners/{brandProfessionalId}/connect', [BrandPartnerController::class, 'connect'])
+            ->whereUuid('brandProfessionalId');
         Route::post('/brand-partners/{brandProfessionalId}/promote', [BrandPartnerController::class, 'promote'])
             ->whereUuid('brandProfessionalId');
         Route::delete('/brand-partners/{brandProfessionalId}', [BrandPartnerController::class, 'disconnect'])

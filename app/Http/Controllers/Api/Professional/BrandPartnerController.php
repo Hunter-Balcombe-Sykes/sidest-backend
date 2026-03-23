@@ -12,12 +12,52 @@ use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Store\SelectionCleanupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 class BrandPartnerController extends ApiController
 {
     use NormalizesPerPage;
     use ResolveCurrentProfessional;
     use ReturnsPaginatedResponse;
+
+    public function connect(
+        Request $request,
+        string $brandProfessionalId,
+        BrandPartnerLinkService $brandPartnerLinks
+    ): JsonResponse {
+        $professional = $this->currentProfessional($request);
+
+        if (mb_strtolower(trim((string) $professional->professional_type)) === 'brand') {
+            return $this->error('Brand accounts cannot manage brand partner connections.', 403);
+        }
+
+        $site = Site::query()->where('professional_id', $professional->id)->first();
+        if (! $site) {
+            return $this->error('Site not found.', 404);
+        }
+
+        $brand = Professional::query()
+            ->whereKey($brandProfessionalId)
+            ->where('professional_type', 'brand')
+            ->where('status', 'active')
+            ->first();
+
+        if (! $brand) {
+            return $this->error('Brand partner not found.', 404);
+        }
+
+        try {
+            $link = $brandPartnerLinks->connectBrandToAffiliate((string) $professional->id, (string) $brandProfessionalId);
+        } catch (RuntimeException $exception) {
+            return $this->error($exception->getMessage(), 422);
+        }
+
+        return $this->success([
+            'connected' => true,
+            'brand_professional_id' => $brandProfessionalId,
+            'slot' => (int) $link->slot,
+        ]);
+    }
 
     public function index(Request $request): JsonResponse
     {
