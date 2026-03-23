@@ -97,7 +97,7 @@ class BrandProductCatalogService
             })
             ->whereIn('bp.brand_professional_id', $connectedBrandIds)
             ->where('bp.is_sync_active', true)
-            ->whereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) <> 'draft'")
+            ->whereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) IN ('active', 'archived')")
             ->where(function ($query): void {
                 $query->whereRaw('COALESCE(bps.is_available, true) = true')
                     ->orWhereNotNull('oa.id');
@@ -195,7 +195,8 @@ class BrandProductCatalogService
             ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
             ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
             ->whereIn('bp.brand_professional_id', $brandProfessionalIds)
-            ->whereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) <> 'draft'")
+            ->where('bp.is_sync_active', true)
+            ->whereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) IN ('active', 'archived')")
             ->orderBy('bp.brand_professional_id')
             ->orderByDesc(DB::raw('COALESCE(bps.is_featured, false)'))
             ->orderBy(DB::raw('COALESCE(bps.sort_order, 0)'))
@@ -302,7 +303,7 @@ class BrandProductCatalogService
             })
             ->where('ps.professional_id', $professionalId)
             ->where('bp.is_sync_active', true)
-            ->whereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) <> 'draft'")
+            ->whereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) IN ('active', 'archived')")
             ->where(function ($query): void {
                 $query->whereRaw('COALESCE(bps.is_available, true) = true')
                     ->orWhereNotNull('oa.id');
@@ -378,7 +379,7 @@ class BrandProductCatalogService
                 $query->whereNull('bp.id')
                     ->orWhereNull('l.id')
                     ->orWhereRaw('COALESCE(bp.is_sync_active, false) = false')
-                    ->orWhereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) = 'draft'")
+                    ->orWhereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) NOT IN ('active', 'archived')")
                     ->orWhere(function ($availabilityQuery): void {
                         $availabilityQuery
                             ->whereRaw('COALESCE(bps.is_available, true) = false')
