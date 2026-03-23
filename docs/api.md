@@ -1324,13 +1324,43 @@ All routes below require: Authorization header AND a professional profile (curre
 - Purpose: check invite availability by email before creating an invite
 - Request body: `{ "email": "affiliate@example.com" }`
 - Response (200): availability object for `email` and `phone` channels
+  - `email.will_refresh` is `true` when this email already has a non-accepted invite for this brand and resend will refresh it in place.
+  - `email.available` is only `false` when the email is already connected to this brand.
 - Common status codes: 200, 401, 403, 422
 
 #### `POST /api/brand-affiliate-invites` (brand-only)
 - Purpose: create a brand-affiliate invite
 - Request body: `{ "email": "affiliate@example.com", "phone": null, "first_name": "Sam", "last_name": "Smith", "message": "Join us", "expiration": "24h|7d|30d|none" }`
-- Response (201): `{ "invite": { "id": "uuid", "token": "...", "status": "pending", ... } }`
-- Common status codes: 201, 401, 403, 422
+  - If `expiration` is omitted, default is `30d`.
+  - Resend behavior: same brand + same email refreshes existing non-accepted invite (`pending|expired|declined`) with the same token.
+- Response:
+  - `201` when created, `200` when refreshed.
+  - `{ "invite": { "id": "uuid", "token": "...", "status": "pending", ... }, "action": "created|refreshed" }`
+- Common status codes: 200, 201, 401, 403, 422
+
+#### `POST /api/brand-affiliate-invites/bulk` (brand-only)
+- Purpose: create/refresh many invites in one request
+- Request body:
+  - `{ "invites": [{ "email": "affiliate@example.com", "phone": null, "first_name": "Sam", "last_name": "Smith", "message": "Join us", "expiration": "24h|7d|30d|none" }] }`
+  - Max 500 rows per request.
+  - Duplicate emails in one request use last-row-wins; earlier duplicates are skipped.
+- Response (200):
+  - `{ "summary": { "total_rows": 3, "created_count": 1, "refreshed_count": 1, "skipped_count": 1, "error_count": 0 }, "results": [...] }`
+  - Partial success: valid rows are processed even when other rows fail.
+- Common status codes: 200, 401, 403, 422
+
+#### `POST /api/brand-affiliate-invites/import-csv` (brand-only)
+- Purpose: CSV import for invite create/refresh
+- Content-Type: `multipart/form-data`
+- Form fields:
+  - `file` (required CSV upload)
+- Notes:
+  - Synchronous processing, max 500 data rows.
+  - Flexible header matching (case/spacing/underscore-insensitive aliases).
+  - Unknown columns are ignored.
+  - Partial success with row-level error reporting.
+- Response shape matches `POST /api/brand-affiliate-invites/bulk`.
+- Common status codes: 200, 401, 403, 422
 
 #### `DELETE /api/brand-affiliate-invites/{invite}` (brand-only)
 - Purpose: delete an invite created by the logged-in brand

@@ -12,6 +12,7 @@
 --   retail.report_exports          — Shopify has data exports
 --   retail.report_schedules        — Shopify has scheduled reports
 --   retail.orders.financials_snapshot — redundant with the order's own columns
+--   retail.sale_events             — pre-Shopify commission tracking, superseded by orders + commission_ledger_entries
 
 BEGIN;
 
@@ -29,6 +30,7 @@ ALTER TABLE IF EXISTS retail.commission_ledger_entries
 DROP TABLE IF EXISTS retail.payout_runs;
 DROP TABLE IF EXISTS retail.report_exports;
 DROP TABLE IF EXISTS retail.report_schedules;
+DROP TABLE IF EXISTS retail.sale_events;
 
 ALTER TABLE retail.orders DROP COLUMN IF EXISTS financials_snapshot;
 

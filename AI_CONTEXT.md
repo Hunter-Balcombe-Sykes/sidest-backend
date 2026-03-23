@@ -304,7 +304,6 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
   - append-only commission ledger accrual/reversal handling
   - deterministic daily aggregate rebuild jobs (brand + professional)
 - Professional analytics cutover:
-  - legacy `GET /api/store/analytics` and `GET /api/store/brand-analytics` now return 410
   - new brand endpoints `/api/store/brand-analytics/*`
   - new self endpoints `/api/store/my-analytics/*`
 - Shopify integration management endpoints for brand accounts:
@@ -419,7 +418,6 @@ When another AI reads this file, it should:
 | 2026-03-20 | Distributor enterprises can manage linked brands via `core.enterprise_brand_links` | Enables parent/distributor operating model without transferring brand ownership |
 | 2026-03-20 | Removed legacy brand product-settings flow and site-settings product fallback | Prevents legacy writes from deleting modern catalog settings and keeps read/write paths strictly brand-product scoped |
 | 2026-03-22 | Shopify confirmed order events are canonical for store analytics | Prevents client-side tampering and supports lifecycle-accurate refunds/cancellations for financial metrics |
-| 2026-03-22 | Legacy store analytics endpoints now return 410 with migration targets | Forces cutover to deterministic V2 brand/self analytics contracts |
 | 2026-03-22 | Added signed fallback Shopify order ingestion endpoint (`/api/webhooks/shopify/orders/fallback`) | Provides controlled recovery path while still fetching canonical order data from Shopify |
 
 ---

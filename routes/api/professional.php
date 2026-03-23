@@ -27,7 +27,6 @@ use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateSettingCont
 use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
-use App\Http\Controllers\Api\Professional\Store\StoreAnalyticsController;
 use App\Http\Controllers\Api\Professional\Store\StoreAnalyticsV2Controller;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
@@ -50,6 +49,8 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         Route::get('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'index']);
         Route::post('/brand-affiliate-invites/availability', [BrandAffiliateInviteController::class, 'availability']);
         Route::post('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'store']);
+        Route::post('/brand-affiliate-invites/bulk', [BrandAffiliateInviteController::class, 'bulk']);
+        Route::post('/brand-affiliate-invites/import-csv', [BrandAffiliateInviteController::class, 'importCsv']);
         Route::delete('/brand-affiliate-invites/{invite}', [BrandAffiliateInviteController::class, 'destroy'])
             ->whereUuid('invite');
         Route::post('/brand-affiliate-invites/{token}/claim', [BrandAffiliateInviteController::class, 'claim']);
@@ -200,9 +201,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         Route::get('/store/featured-products', [FeaturedProductsController::class, 'index']);
         Route::get('/store/available-products', [FeaturedProductsController::class, 'availableProducts']);
         Route::put('/store/featured-products', [FeaturedProductsController::class, 'update']);
-        Route::get('/store/analytics', [StoreAnalyticsController::class, 'index']);
-        Route::get('/store/brand-analytics', [StoreAnalyticsController::class, 'brandIndex']);
-        Route::get('/store/brand-analytics/overview', [StoreAnalyticsV2Controller::class, 'brandOverview']);
+Route::get('/store/brand-analytics/overview', [StoreAnalyticsV2Controller::class, 'brandOverview']);
         Route::get('/store/brand-analytics/influencers', [StoreAnalyticsV2Controller::class, 'brandInfluencers']);
         Route::get('/store/brand-analytics/influencers/{professionalId}', [StoreAnalyticsV2Controller::class, 'brandInfluencerDetail'])
             ->whereUuid('professionalId');

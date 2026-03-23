@@ -7,11 +7,14 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Professional\BrandAffiliateInviteService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use RuntimeException;
 
 class BrandAffiliateInviteController extends ApiController
 {
     use ResolveCurrentProfessional;
+
+    private const BULK_MAX_ROWS = 500;
 
     public function index(Request $request): JsonResponse
     {
@@ -68,10 +71,13 @@ class BrandAffiliateInviteController extends ApiController
         ]);
 
         try {
-            $invite = $inviteService->createInvite($professional, $data);
+            $result = $inviteService->createOrRefreshInvite($professional, $data);
         } catch (RuntimeException $exception) {
             return $this->error($exception->getMessage(), 422);
         }
+
+        $invite = $result['invite'];
+        $action = (string) ($result['action'] ?? 'created');
 
         return $this->success([
             'invite' => [
@@ -84,8 +90,10 @@ class BrandAffiliateInviteController extends ApiController
                 'last_name' => $invite->last_name,
                 'message' => $invite->message,
                 'created_at' => optional($invite->created_at)->toIso8601String(),
+                'accepted_at' => optional($invite->accepted_at)->toIso8601String(),
             ],
-        ], 201);
+            'action' => $action,
+        ], $action === 'refreshed' ? 200 : 201);
     }
 
     public function availability(Request $request, BrandAffiliateInviteService $inviteService): JsonResponse
@@ -107,6 +115,49 @@ class BrandAffiliateInviteController extends ApiController
                 null,
             )
         );
+    }
+
+    public function bulk(Request $request, BrandAffiliateInviteService $inviteService): JsonResponse
+    {
+        $professional = $this->currentProfessional($request);
+
+        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
+            return $this->error('Only brand accounts can generate affiliate invites.', 403);
+        }
+
+        $data = $request->validate([
+            'invites' => ['required', 'array', 'min:1', 'max:'.self::BULK_MAX_ROWS],
+        ]);
+
+        try {
+            $result = $inviteService->processBulkInvites($professional, $data['invites']);
+        } catch (RuntimeException $exception) {
+            return $this->error($exception->getMessage(), 422);
+        }
+
+        return $this->success($result);
+    }
+
+    public function importCsv(Request $request, BrandAffiliateInviteService $inviteService): JsonResponse
+    {
+        $professional = $this->currentProfessional($request);
+
+        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
+            return $this->error('Only brand accounts can generate affiliate invites.', 403);
+        }
+
+        $data = $request->validate([
+            'file' => ['required', 'file', 'max:10240'],
+        ]);
+
+        try {
+            $rows = $this->parseCsvRows($data['file']);
+            $result = $inviteService->processBulkInvites($professional, $rows);
+        } catch (RuntimeException $exception) {
+            return $this->error($exception->getMessage(), 422);
+        }
+
+        return $this->success($result);
     }
 
     public function claim(Request $request, string $token, BrandAffiliateInviteService $inviteService): JsonResponse
@@ -179,5 +230,122 @@ class BrandAffiliateInviteController extends ApiController
             'invite_id' => $inviteId,
             'deleted' => true,
         ]);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function parseCsvRows(UploadedFile $file): array
+    {
+        $path = $file->getRealPath();
+        if (! is_string($path) || $path === '') {
+            throw new RuntimeException('Unable to read the uploaded CSV file.');
+        }
+
+        $handle = fopen($path, 'rb');
+        if (! is_resource($handle)) {
+            throw new RuntimeException('Unable to open the uploaded CSV file.');
+        }
+
+        try {
+            $header = fgetcsv($handle);
+            if (! is_array($header)) {
+                throw new RuntimeException('CSV file is empty.');
+            }
+
+            if (isset($header[0])) {
+                $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $header[0]) ?? (string) $header[0];
+            }
+
+            $columnMap = $this->resolveCsvColumnMap($header);
+            if (! isset($columnMap['email'])) {
+                throw new RuntimeException('CSV must include an email column.');
+            }
+
+            $rows = [];
+            $lineNumber = 1;
+
+            while (($csvRow = fgetcsv($handle)) !== false) {
+                $lineNumber++;
+
+                if (! is_array($csvRow) || $this->csvRowIsEmpty($csvRow)) {
+                    continue;
+                }
+
+                $row = ['_row_number' => $lineNumber];
+                foreach ($columnMap as $field => $index) {
+                    $row[$field] = isset($csvRow[$index]) ? trim((string) $csvRow[$index]) : null;
+                }
+
+                $rows[] = $row;
+
+                if (count($rows) > self::BULK_MAX_ROWS) {
+                    throw new RuntimeException('CSV row limit exceeded. Maximum 500 rows are allowed per import.');
+                }
+            }
+        } finally {
+            fclose($handle);
+        }
+
+        if ($rows === []) {
+            throw new RuntimeException('CSV does not contain any invite rows.');
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param  array<int, mixed>  $header
+     * @return array<string, int>
+     */
+    private function resolveCsvColumnMap(array $header): array
+    {
+        $aliasMap = [
+            'email' => ['email', 'email_address', 'e_mail', 'mail'],
+            'phone' => ['phone', 'phone_number', 'mobile', 'mobile_number', 'contact_number'],
+            'first_name' => ['first_name', 'first', 'firstname', 'given_name', 'givenname'],
+            'last_name' => ['last_name', 'last', 'lastname', 'surname', 'family_name', 'familyname'],
+            'message' => ['message', 'note', 'notes', 'invite_message'],
+            'expiration' => ['expiration', 'expiry', 'expires', 'expires_in', 'expire_in', 'expire_after', 'expires_after'],
+        ];
+
+        $recognized = [];
+        foreach ($header as $index => $value) {
+            $normalized = $this->normalizeCsvHeader((string) $value);
+            if ($normalized === '') {
+                continue;
+            }
+
+            foreach ($aliasMap as $field => $aliases) {
+                if (in_array($normalized, $aliases, true) && ! array_key_exists($field, $recognized)) {
+                    $recognized[$field] = (int) $index;
+                    break;
+                }
+            }
+        }
+
+        return $recognized;
+    }
+
+    private function normalizeCsvHeader(string $value): string
+    {
+        $normalized = mb_strtolower(trim($value));
+        $normalized = preg_replace('/[^a-z0-9]+/u', '_', $normalized) ?? $normalized;
+
+        return trim($normalized, '_');
+    }
+
+    /**
+     * @param  array<int, mixed>  $csvRow
+     */
+    private function csvRowIsEmpty(array $csvRow): bool
+    {
+        foreach ($csvRow as $value) {
+            if (trim((string) $value) !== '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

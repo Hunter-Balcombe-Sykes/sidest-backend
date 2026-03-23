@@ -7,13 +7,19 @@ use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
-use Illuminate\Support\Str;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 class BrandAffiliateInviteService
 {
+    private const BULK_MAX_ROWS = 500;
+
+    private const NON_ACCEPTED_STATUSES = ['pending', 'expired', 'declined'];
+
     public function __construct(
         private readonly BrandPartnerLinkService $brandPartnerLinks
     ) {}
@@ -25,8 +31,10 @@ class BrandAffiliateInviteService
         $emailExistsAsUser = false;
         $emailAlreadyConnectedToBrand = false;
         $emailExistsAsInvite = false;
+        $willRefresh = false;
+
         if ($normalizedEmail !== null) {
-            $this->expirePendingInvitesByEmail($normalizedEmail);
+            $this->expirePendingInvitesByBrandEmail((string) $brand->id, $normalizedEmail);
 
             $matchingEmailProfessionalIds = Professional::withTrashed()
                 ->where(function ($query) use ($normalizedEmail) {
@@ -40,23 +48,22 @@ class BrandAffiliateInviteService
                 && $this->brandHasConnectedProfessionals($brand, $matchingEmailProfessionalIds->all());
 
             $emailExistsAsInvite = BrandAffiliateInvite::query()
-                ->where('status', 'pending')
+                ->where('brand_professional_id', $brand->id)
                 ->where('email_lc', $normalizedEmail)
-                ->where(function ($query): void {
-                    $query
-                        ->whereNull('expires_at')
-                        ->orWhere('expires_at', '>', now());
-                })
+                ->whereIn('status', self::NON_ACCEPTED_STATUSES)
                 ->exists();
+
+            $willRefresh = $emailExistsAsInvite && ! $emailAlreadyConnectedToBrand;
         }
 
         return [
             'email' => [
-                'available' => !($emailExistsAsInvite || $emailAlreadyConnectedToBrand),
+                'available' => ! $emailAlreadyConnectedToBrand,
                 'exists' => $emailExistsAsUser || $emailExistsAsInvite || $emailAlreadyConnectedToBrand,
                 'existing_user' => $emailExistsAsUser,
                 'already_connected_to_brand' => $emailAlreadyConnectedToBrand,
                 'existing_invitation' => $emailExistsAsInvite,
+                'will_refresh' => $willRefresh,
             ],
             'phone' => [
                 'available' => true,
@@ -64,48 +71,138 @@ class BrandAffiliateInviteService
                 'existing_user' => false,
                 'already_connected_to_brand' => false,
                 'existing_invitation' => false,
+                'will_refresh' => false,
             ],
         ];
     }
 
     public function createInvite(Professional $brand, array $attributes): BrandAffiliateInvite
     {
-        $this->assertRecipientAvailability($brand, $attributes['email'] ?? null);
+        $result = $this->createOrRefreshInvite($brand, $attributes);
 
-        $expiresAt = match($attributes['expiration'] ?? null) {
-            '24h' => now()->addHours(24),
-            '7d' => now()->addDays(7),
-            '30d' => now()->addDays(30),
-            default => null,
-        };
+        return $result['invite'];
+    }
 
-        $invite = new BrandAffiliateInvite([
-            'brand_professional_id' => $brand->id,
-            'token' => $this->generateUniqueToken(),
-            'status' => 'pending',
-            'invite_type' => $this->determineInviteType($attributes),
-            'email' => $attributes['email'] ?? null,
-            'email_lc' => isset($attributes['email']) ? mb_strtolower(trim((string) $attributes['email'])) : null,
-            'phone' => $attributes['phone'] ?? null,
-            'first_name' => $attributes['first_name'] ?? null,
-            'last_name' => $attributes['last_name'] ?? null,
-            'message' => $attributes['message'] ?? null,
-            'expires_at' => $expiresAt,
-        ]);
+    /**
+     * @return array{invite: BrandAffiliateInvite, action: string}
+     */
+    public function createOrRefreshInvite(Professional $brand, array $attributes): array
+    {
+        $result = $this->upsertInvite($brand, $attributes);
+        $this->notifyExistingEmailRecipientsBatch($brand, collect([$result['invite']]));
 
-        try {
-            $invite->save();
-        } catch (QueryException $exception) {
-            if ((string) $exception->getCode() === '23505') {
-                throw new RuntimeException('Email already has a pending invitation or is already connected to this brand.');
-            }
+        return $result;
+    }
 
-            throw $exception;
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array{summary: array<string, int>, results: array<int, array<string, mixed>>}
+     */
+    public function processBulkInvites(Professional $brand, array $rows): array
+    {
+        $rows = array_values($rows);
+        if ($rows === []) {
+            throw new RuntimeException('No invite rows were provided.');
         }
 
-        $this->notifyExistingEmailRecipients($brand, $invite);
+        if (count($rows) > self::BULK_MAX_ROWS) {
+            throw new RuntimeException('Bulk invite row limit exceeded. Maximum 500 rows are allowed per request.');
+        }
 
-        return $invite->fresh(['brandProfessional']);
+        $lastRowByEmail = [];
+        foreach ($rows as $index => $rawRow) {
+            $attributes = $this->extractBulkInviteAttributes($rawRow);
+            $normalizedEmail = $this->normalizeEmail($attributes['email'] ?? null);
+            if ($normalizedEmail !== null) {
+                $lastRowByEmail[$normalizedEmail] = $index;
+            }
+        }
+
+        $results = [];
+        $created = 0;
+        $refreshed = 0;
+        $skipped = 0;
+        $errors = 0;
+        $notifyInvites = [];
+
+        foreach ($rows as $index => $rawRow) {
+            $rowNumber = $this->extractBulkRowNumber($rawRow, $index + 1);
+            $attributes = $this->extractBulkInviteAttributes($rawRow);
+            $normalizedEmail = $this->normalizeEmail($attributes['email'] ?? null);
+
+            if ($normalizedEmail !== null && ($lastRowByEmail[$normalizedEmail] ?? $index) !== $index) {
+                $skipped++;
+                $results[] = [
+                    'row' => $rowNumber,
+                    'email' => $attributes['email'] ?? null,
+                    'status' => 'skipped',
+                    'error_code' => 'skipped_duplicate_superseded',
+                    'error_message' => 'Superseded by a later row for the same email.',
+                ];
+                continue;
+            }
+
+            $validator = Validator::make($attributes, $this->bulkInviteRules());
+            if ($validator->fails()) {
+                $errors++;
+                $results[] = [
+                    'row' => $rowNumber,
+                    'email' => $attributes['email'] ?? null,
+                    'status' => 'error',
+                    'error_code' => 'validation_failed',
+                    'error_message' => (string) $validator->errors()->first(),
+                ];
+                continue;
+            }
+
+            try {
+                $outcome = $this->upsertInvite($brand, $validator->validated());
+                /** @var BrandAffiliateInvite $invite */
+                $invite = $outcome['invite'];
+                $action = (string) ($outcome['action'] ?? 'created');
+
+                if ($action === 'refreshed') {
+                    $refreshed++;
+                } else {
+                    $created++;
+                }
+
+                $results[] = [
+                    'row' => $rowNumber,
+                    'email' => $invite->email,
+                    'status' => $action,
+                    'invite_id' => (string) $invite->id,
+                    'token' => (string) $invite->token,
+                ];
+
+                $notifyInvites[] = $invite;
+            } catch (RuntimeException $exception) {
+                $errors++;
+                $results[] = [
+                    'row' => $rowNumber,
+                    'email' => $attributes['email'] ?? null,
+                    'status' => 'error',
+                    'error_code' => $this->rowErrorCodeForException($exception),
+                    'error_message' => $exception->getMessage(),
+                ];
+            }
+        }
+
+        $this->notifyExistingEmailRecipientsBatch(
+            $brand,
+            collect($notifyInvites)->filter(fn ($invite) => $invite instanceof BrandAffiliateInvite)->unique('id')->values()
+        );
+
+        return [
+            'summary' => [
+                'total_rows' => count($rows),
+                'created_count' => $created,
+                'refreshed_count' => $refreshed,
+                'skipped_count' => $skipped,
+                'error_count' => $errors,
+            ],
+            'results' => $results,
+        ];
     }
 
     public function findByToken(string $token): ?BrandAffiliateInvite
@@ -224,12 +321,138 @@ class BrandAffiliateInviteService
         });
     }
 
-    private function determineInviteType(array $attributes): string
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @return array{invite: BrandAffiliateInvite, action: string}
+     */
+    private function upsertInvite(Professional $brand, array $attributes): array
+    {
+        $attributes = $this->normalizeInviteAttributes($attributes);
+        $normalizedEmail = $this->normalizeEmail($attributes['email'] ?? null);
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            try {
+                return DB::transaction(function () use ($brand, $attributes, $normalizedEmail): array {
+                    $brandId = (string) $brand->id;
+
+                    if ($normalizedEmail !== null) {
+                        $this->expirePendingInvitesByBrandEmail($brandId, $normalizedEmail);
+                        $this->assertEmailNotConnectedToBrand($brand, $normalizedEmail);
+
+                        $refreshCandidate = BrandAffiliateInvite::query()
+                            ->where('brand_professional_id', $brandId)
+                            ->where('email_lc', $normalizedEmail)
+                            ->whereIn('status', self::NON_ACCEPTED_STATUSES)
+                            ->orderByDesc('created_at')
+                            ->orderByDesc('id')
+                            ->lockForUpdate()
+                            ->first();
+
+                        if ($refreshCandidate) {
+                            $refreshedInvite = $this->refreshInviteRecord($refreshCandidate, $attributes, $normalizedEmail);
+
+                            return [
+                                'invite' => $refreshedInvite->fresh(['brandProfessional', 'claimedProfessional']),
+                                'action' => 'refreshed',
+                            ];
+                        }
+                    }
+
+                    $invite = new BrandAffiliateInvite([
+                        'brand_professional_id' => $brandId,
+                        'token' => $this->generateUniqueToken(),
+                        'status' => 'pending',
+                        'invite_type' => $this->determineInviteType(
+                            $attributes['email'] ?? null,
+                            $attributes['first_name'] ?? null,
+                            $attributes['last_name'] ?? null,
+                        ),
+                        'email' => $attributes['email'] ?? null,
+                        'email_lc' => $normalizedEmail,
+                        'phone' => $attributes['phone'] ?? null,
+                        'first_name' => $attributes['first_name'] ?? null,
+                        'last_name' => $attributes['last_name'] ?? null,
+                        'message' => $attributes['message'] ?? null,
+                        'expires_at' => $this->resolveExpiresAt($attributes),
+                    ]);
+
+                    $invite->save();
+
+                    return [
+                        'invite' => $invite->fresh(['brandProfessional', 'claimedProfessional']),
+                        'action' => 'created',
+                    ];
+                });
+            } catch (QueryException $exception) {
+                if ((string) $exception->getCode() !== '23505') {
+                    throw $exception;
+                }
+
+                // Retry on token/pending uniqueness races.
+                if ($attempt === 2) {
+                    throw new RuntimeException('Unable to create or refresh invite right now. Please try again.');
+                }
+            }
+        }
+
+        throw new RuntimeException('Unable to create or refresh invite right now. Please try again.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function refreshInviteRecord(BrandAffiliateInvite $invite, array $attributes, string $normalizedEmail): BrandAffiliateInvite
+    {
+        $invite->status = 'pending';
+        $invite->claimed_professional_id = null;
+        $invite->accepted_at = null;
+        $invite->expires_at = $this->resolveExpiresAt($attributes);
+        $invite->email = $attributes['email'] ?? $invite->email;
+        $invite->email_lc = $normalizedEmail;
+
+        foreach (['phone', 'first_name', 'last_name', 'message'] as $field) {
+            if ($this->hasNonEmptyAttribute($attributes, $field)) {
+                $invite->{$field} = trim((string) $attributes[$field]);
+            }
+        }
+
+        $invite->invite_type = $this->determineInviteType(
+            $invite->email,
+            $invite->first_name,
+            $invite->last_name,
+        );
+
+        $invite->save();
+
+        return $invite;
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function resolveExpiresAt(array $attributes): ?\DateTimeInterface
+    {
+        $raw = array_key_exists('expiration', $attributes)
+            ? mb_strtolower(trim((string) ($attributes['expiration'] ?? '')))
+            : '';
+
+        $expiration = $raw === '' ? '30d' : $raw;
+
+        return match ($expiration) {
+            '24h' => now()->addHours(24),
+            '7d' => now()->addDays(7),
+            '30d' => now()->addDays(30),
+            'none' => null,
+            default => throw new RuntimeException('Invalid expiration value.'),
+        };
+    }
+
+    private function determineInviteType(?string $email, ?string $firstName, ?string $lastName): string
     {
         $hasPersonalisation =
-            filled($attributes['email'] ?? null) ||
-            filled($attributes['first_name'] ?? null) ||
-            filled($attributes['last_name'] ?? null);
+            filled($email) ||
+            filled($firstName) ||
+            filled($lastName);
 
         return $hasPersonalisation ? 'personalised' : 'generic';
     }
@@ -245,15 +468,6 @@ class BrandAffiliateInviteService
         }
 
         throw new RuntimeException('Unable to generate a unique invite token.');
-    }
-
-    private function assertRecipientAvailability(Professional $brand, ?string $email): void
-    {
-        $availability = $this->checkRecipientAvailability($brand, $email, null);
-
-        if (($availability['email']['available'] ?? true) === false) {
-            throw new RuntimeException('Email already has a pending invitation or is already connected to this brand.');
-        }
     }
 
     private function assertInviteMatchesProfessional(BrandAffiliateInvite $invite, Professional $professional): void
@@ -283,6 +497,9 @@ class BrandAffiliateInviteService
         return mb_strtolower($stringValue);
     }
 
+    /**
+     * @param  array<int, string>  $professionalIds
+     */
     private function brandHasConnectedProfessionals(Professional $brand, array $professionalIds): bool
     {
         if ($professionalIds === []) {
@@ -295,46 +512,104 @@ class BrandAffiliateInviteService
             ->exists();
     }
 
-    private function notifyExistingEmailRecipients(Professional $brand, BrandAffiliateInvite $invite): void
+    private function assertEmailNotConnectedToBrand(Professional $brand, string $normalizedEmail): void
     {
-        if (! is_string($invite->email) || trim($invite->email) === '') {
-            return;
-        }
-
-        $normalizedEmail = $this->normalizeEmail($invite->email);
-        if ($normalizedEmail === null) {
-            return;
-        }
-
-        $brandName = trim((string) ($brand->display_name ?: $brand->handle ?: 'this brand'));
-
-        Professional::query()
-            ->where('status', 'active')
+        $matchingProfessionalIds = Professional::withTrashed()
             ->where(function ($query) use ($normalizedEmail) {
                 $query->whereRaw('LOWER(primary_email) = ?', [$normalizedEmail])
                     ->orWhereRaw('LOWER(public_contact_email) = ?', [$normalizedEmail]);
             })
-            ->get()
-            ->each(function (Professional $professional) use ($invite, $brandName): void {
-                Notification::query()->create([
-                    'professional_id' => $professional->id,
-                    'type' => 'Invitation',
-                    'title' => 'New brand partner invitation!',
-                    'body' => "You have a new invite to become a brand partner of {$brandName}",
-                    'cta_url' => "/brand-affiliate-invites/{$invite->token}/claim",
-                    'primary_action_label' => 'Accept Invitation',
-                    'secondary_action_label' => 'Decline Invitation',
-                    'secondary_action_url' => "/brand-affiliate-invites/{$invite->token}/decline",
-                    'severity' => Notification::severityForFrontendType('Invitation'),
-                    'starts_at' => now(),
-                    'ends_at' => null,
-                ]);
-            });
+            ->pluck('id')
+            ->all();
+
+        if ($this->brandHasConnectedProfessionals($brand, $matchingProfessionalIds)) {
+            throw new RuntimeException('Email is already connected to this brand.');
+        }
     }
 
-    private function expirePendingInvitesByEmail(string $normalizedEmail): void
+    /**
+     * @param  Collection<int, BrandAffiliateInvite>  $invites
+     */
+    private function notifyExistingEmailRecipientsBatch(Professional $brand, Collection $invites): void
+    {
+        $invitesByEmail = [];
+
+        foreach ($invites as $invite) {
+            if (! $invite instanceof BrandAffiliateInvite) {
+                continue;
+            }
+
+            $normalizedEmail = $this->normalizeEmail((string) ($invite->email ?? ''));
+            if ($normalizedEmail === null) {
+                continue;
+            }
+
+            $invitesByEmail[$normalizedEmail] = $invite;
+        }
+
+        if ($invitesByEmail === []) {
+            return;
+        }
+
+        $emails = array_keys($invitesByEmail);
+
+        $professionals = Professional::query()
+            ->where('status', 'active')
+            ->where(function ($query) use ($emails) {
+                $query->whereIn(DB::raw('LOWER(primary_email)'), $emails)
+                    ->orWhereIn(DB::raw('LOWER(public_contact_email)'), $emails);
+            })
+            ->get(['id', 'primary_email', 'public_contact_email']);
+
+        if ($professionals->isEmpty()) {
+            return;
+        }
+
+        $brandName = trim((string) ($brand->display_name ?: $brand->handle ?: 'this brand'));
+        $now = now();
+        $notifications = [];
+
+        foreach ($professionals as $professional) {
+            $primaryEmail = $this->normalizeEmail((string) ($professional->primary_email ?? ''));
+            $publicEmail = $this->normalizeEmail((string) ($professional->public_contact_email ?? ''));
+
+            $matchingInvite = null;
+            if ($primaryEmail !== null && isset($invitesByEmail[$primaryEmail])) {
+                $matchingInvite = $invitesByEmail[$primaryEmail];
+            } elseif ($publicEmail !== null && isset($invitesByEmail[$publicEmail])) {
+                $matchingInvite = $invitesByEmail[$publicEmail];
+            }
+
+            if (! $matchingInvite instanceof BrandAffiliateInvite) {
+                continue;
+            }
+
+            $notifications[] = [
+                'professional_id' => $professional->id,
+                'type' => 'Invitation',
+                'title' => 'New brand partner invitation!',
+                'body' => "You have a new invite to become a brand partner of {$brandName}",
+                'cta_url' => "/brand-affiliate-invites/{$matchingInvite->token}/claim",
+                'primary_action_label' => 'Accept Invitation',
+                'secondary_action_label' => 'Decline Invitation',
+                'secondary_action_url' => "/brand-affiliate-invites/{$matchingInvite->token}/decline",
+                'severity' => Notification::severityForFrontendType('Invitation'),
+                'starts_at' => $now,
+                'ends_at' => null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        if ($notifications !== []) {
+            DB::table('notifications')->insert($notifications);
+        }
+    }
+
+    private function expirePendingInvitesByBrandEmail(string $brandProfessionalId, string $normalizedEmail): void
     {
         BrandAffiliateInvite::query()
+            ->where('brand_professional_id', $brandProfessionalId)
             ->where('status', 'pending')
             ->where('email_lc', $normalizedEmail)
             ->whereNotNull('expires_at')
@@ -359,5 +634,128 @@ class BrandAffiliateInviteService
         $invite->save();
 
         return $invite;
+    }
+
+    /**
+     * @param  mixed  $rawRow
+     * @return array<string, mixed>
+     */
+    private function extractBulkInviteAttributes(mixed $rawRow): array
+    {
+        $row = is_array($rawRow) ? $rawRow : [];
+
+        if (isset($row['attributes']) && is_array($row['attributes'])) {
+            $attributeRow = $row['attributes'];
+            if (array_key_exists('_row_number', $row) && ! array_key_exists('_row_number', $attributeRow)) {
+                $attributeRow['_row_number'] = $row['_row_number'];
+            }
+            if (array_key_exists('row', $row) && ! array_key_exists('_row_number', $attributeRow)) {
+                $attributeRow['_row_number'] = $row['row'];
+            }
+
+            $row = $attributeRow;
+        }
+
+        $attributes = [];
+        foreach (['email', 'phone', 'first_name', 'last_name', 'message', 'expiration'] as $key) {
+            if (array_key_exists($key, $row)) {
+                $attributes[$key] = $row[$key];
+            }
+        }
+
+        if (array_key_exists('_row_number', $row)) {
+            $attributes['_row_number'] = $row['_row_number'];
+        }
+
+        return $this->normalizeInviteAttributes($attributes);
+    }
+
+    /**
+     * @param  mixed  $rawRow
+     */
+    private function extractBulkRowNumber(mixed $rawRow, int $fallback): int
+    {
+        $row = is_array($rawRow) ? $rawRow : [];
+        $candidate = $row['_row_number'] ?? $row['row'] ?? null;
+
+        if (! is_numeric($candidate)) {
+            return $fallback;
+        }
+
+        return max(1, (int) $candidate);
+    }
+
+    /**
+     * @return array<string, array<int, string>>
+     */
+    private function bulkInviteRules(): array
+    {
+        return [
+            'email' => ['required', 'email', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:30'],
+            'first_name' => ['nullable', 'string', 'max:80'],
+            'last_name' => ['nullable', 'string', 'max:80'],
+            'message' => ['nullable', 'string', 'max:500'],
+            'expiration' => ['nullable', 'string', 'in:24h,7d,30d,none'],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function normalizeInviteAttributes(array $attributes): array
+    {
+        $normalized = [];
+
+        foreach (['email', 'phone', 'first_name', 'last_name', 'message', 'expiration'] as $field) {
+            if (! array_key_exists($field, $attributes)) {
+                continue;
+            }
+
+            $value = $attributes[$field];
+            if (is_string($value)) {
+                $value = trim($value);
+            }
+
+            if ($value === '') {
+                $value = null;
+            }
+
+            $normalized[$field] = $value;
+        }
+
+        if (array_key_exists('_row_number', $attributes)) {
+            $normalized['_row_number'] = $attributes['_row_number'];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function hasNonEmptyAttribute(array $attributes, string $field): bool
+    {
+        if (! array_key_exists($field, $attributes)) {
+            return false;
+        }
+
+        return trim((string) $attributes[$field]) !== '';
+    }
+
+    private function rowErrorCodeForException(RuntimeException $exception): string
+    {
+        $message = mb_strtolower(trim($exception->getMessage()));
+
+        if (str_contains($message, 'already connected')) {
+            return 'already_connected_to_brand';
+        }
+
+        if (str_contains($message, 'expiration')) {
+            return 'invalid_expiration';
+        }
+
+        return 'invite_failed';
     }
 }
