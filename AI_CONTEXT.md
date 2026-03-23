@@ -148,9 +148,7 @@ Daily aggregates rebuilt for brand and affiliate dashboards
 | `OrderEventInbox` | `retail.order_event_inbox` | Idempotent Shopify/fallback event inbox with processing status |
 | `RetailOrder` | `retail.orders` | Canonical normalized order header used for analytics |
 | `OrderItem` | `retail.order_items` | Canonical normalized order line items |
-| `OrderAttribution` | `retail.order_attributions` | Immutable attribution model/reason lineage per order |
 | `CommissionLedgerEntry` | `retail.commission_ledger_entries` | Append-only commission accrual/reversal/payout accounting |
-| `PayoutRun` | `retail.payout_runs` | Payout run audit records (status/period/totals) |
 | `EnterpriseBrandLink` | `core.enterprise_brand_links` | Links distributor enterprises to managed brand professional accounts |
 | `BrandTeamMembership` | `retail.brand_team_memberships` | Brand-scoped role assignments (`owner`, `finance`, `marketing`, `analyst`, `read_only`) |
 | `Plan` | `billing.plans` | Subscription tiers with entitlements |
@@ -223,7 +221,7 @@ Daily aggregates rebuilt for brand and affiliate dashboards
 2. Frontend/server writes `comet_session` into Shopify order metadata (note attributes).
 3. Shopify sends `POST /api/webhooks/shopify/orders` (or fallback endpoint) to Comet.
 4. Event is deduplicated in `retail.order_event_inbox`, resolved to brand integration, and processed async.
-5. Processor validates token + brand consistency, writes canonical `retail.orders` / `retail.order_items` / `retail.order_attributions`.
+5. Processor validates token + brand consistency, writes canonical `retail.orders` / `retail.order_items`. Attribution is implicit via `affiliate_professional_id` set from the checkout session — no separate attribution table.
 6. Commission accrual/reversal entries are appended in `retail.commission_ledger_entries`.
 7. Aggregate rebuild jobs update daily brand/self analytics tables for dashboard APIs.
 
@@ -302,7 +300,7 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
   - public checkout-session attribution endpoint (`POST /api/public/store/checkout-session`)
   - Shopify orders webhook ingestion (`POST /api/webhooks/shopify/orders`)
   - secure fallback ingestion path (`POST /api/webhooks/shopify/orders/fallback`)
-  - canonical order normalization (`retail.orders`, `retail.order_items`, `retail.order_attributions`)
+  - canonical order normalization (`retail.orders`, `retail.order_items`)
   - append-only commission ledger accrual/reversal handling
   - deterministic daily aggregate rebuild jobs (brand + professional)
 - Professional analytics cutover:
@@ -325,8 +323,6 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 - **Video uploads** — Code exists (`ProcessVideoVariantsJob`, FFmpeg), feature-flagged off (`COMET_VIDEO_UPLOADS_ENABLED=false`). Needs video workers running before enabling.
 - **Frontend checkout-session bridge** — Public checkout clients must call checkout-session and write `comet_session` into Shopify order metadata in all flows.
 - **Shopify product ingest runtime** — Catalog ingest/sync into `retail.brand_products` is still not fully automated end-to-end.
-- **Analytics export/report runtime** — `retail.report_exports` and `retail.report_schedules` tables exist, but export/schedule API + generation jobs are pending.
-- **Payout execution orchestration** — payout status/history analytics exists, but automated transfer execution is not implemented.
 
 ### Known Issues / Notes
 - Laravel database migrations are intentionally disabled (guarded in composer). All schema changes go through `supabase/migrations/`.
@@ -340,20 +336,15 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 ### Highest Priority
 1. **Frontend checkout token wiring** — Ensure every storefront order path calls checkout-session and persists `comet_session` on Shopify orders.
 2. **Shopify product ingest runtime** — Implement/finish production ingest + sync bootstrap for brand product catalog rows.
-3. **Analytics exports and schedules** — Implement export endpoints/jobs and report schedule execution.
-4. **Payout execution orchestration** — Finalize transfer automation on top of ledger + payout runs.
-5. **Enable video uploads** — Ensure `redis_video` queue worker is running, then set feature flag.
+3. **Enable video uploads** — Ensure `redis_video` queue worker is running, then set feature flag.
 
 ### Suggested Implementation Order
 1. Frontend checkout-session + token write integration
 2. Shopify catalog sync service/runtime bootstrap
-3. Export/schedule API + async generation jobs
-4. Payout transfer orchestration over ledger balances
-5. Video upload enablement (infrastructure task)
+3. Video upload enablement (infrastructure task)
 
 ### Open Questions
 - [TBD: Should fallback webhook ingestion be enabled in production permanently or restricted to break-glass use only?]
-- [TBD: Final payout rail and account onboarding flow (Stripe Connect vs alternative).]
 
 ---
 

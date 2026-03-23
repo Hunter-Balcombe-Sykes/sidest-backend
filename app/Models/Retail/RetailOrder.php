@@ -7,7 +7,6 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class RetailOrder extends BaseModel
 {
@@ -41,7 +40,6 @@ class RetailOrder extends BaseModel
         'customer_email_hash',
         'customer_region',
         'shipping_country_code',
-        'financials_snapshot',
         'raw_payload',
     ];
 
@@ -54,7 +52,6 @@ class RetailOrder extends BaseModel
         'paid_at' => 'datetime',
         'cancelled_at' => 'datetime',
         'closed_at' => 'datetime',
-        'financials_snapshot' => 'array',
         'raw_payload' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
@@ -78,11 +75,6 @@ class RetailOrder extends BaseModel
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class, 'order_id');
-    }
-
-    public function attribution(): HasOne
-    {
-        return $this->hasOne(OrderAttribution::class, 'order_id');
     }
 
     public function commissionLedgerEntries(): HasMany

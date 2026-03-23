@@ -210,7 +210,6 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         Route::get('/store/brand-analytics/products/{brandProductId}', [StoreAnalyticsV2Controller::class, 'brandProductDetail'])
             ->whereUuid('brandProductId');
         Route::get('/store/brand-analytics/commissions', [StoreAnalyticsV2Controller::class, 'brandCommissions']);
-        Route::get('/store/brand-analytics/payouts', [StoreAnalyticsV2Controller::class, 'brandPayouts']);
         Route::get('/store/brand-analytics/timeseries', [StoreAnalyticsV2Controller::class, 'brandTimeseries']);
 
         Route::get('/store/my-analytics/overview', [StoreAnalyticsV2Controller::class, 'myOverview']);
@@ -218,7 +217,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
         Route::get('/store/my-analytics/products/{brandProductId}', [StoreAnalyticsV2Controller::class, 'myProductDetail'])
             ->whereUuid('brandProductId');
         Route::get('/store/my-analytics/commissions', [StoreAnalyticsV2Controller::class, 'myCommissions']);
-        Route::get('/store/my-analytics/payouts', [StoreAnalyticsV2Controller::class, 'myPayouts']);
+        Route::get('/store/my-analytics/customers', [StoreAnalyticsV2Controller::class, 'myCustomers']);
         Route::get('/store/my-analytics/timeseries', [StoreAnalyticsV2Controller::class, 'myTimeseries']);
 
         // Store: Brand Settings & Per-Product Settings

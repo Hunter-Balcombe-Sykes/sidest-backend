@@ -21,7 +21,6 @@ class CommissionLedgerEntry extends BaseModel
         'order_item_id',
         'brand_professional_id',
         'affiliate_professional_id',
-        'payout_run_id',
         'entry_type',
         'status',
         'amount_cents',
@@ -62,8 +61,4 @@ class CommissionLedgerEntry extends BaseModel
         return $this->belongsTo(Professional::class, 'affiliate_professional_id');
     }
 
-    public function payoutRun(): BelongsTo
-    {
-        return $this->belongsTo(PayoutRun::class, 'payout_run_id');
-    }
 }

@@ -105,6 +105,7 @@ class StoreAnalyticsV2Controller extends ApiController
             ->selectRaw('COALESCE(SUM(d.commission_accrued_cents), 0) as commission_accrued_cents')
             ->selectRaw('COALESCE(SUM(d.commission_reversed_cents), 0) as commission_reversed_cents')
             ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commission_net_cents')
+            ->selectRaw('COALESCE(SUM(d.customers_count), 0) as customers_count')
             ->groupBy('d.affiliate_professional_id', 'd.currency_code', 'p.display_name', 'p.handle');
 
         $this->applySort(
@@ -137,6 +138,7 @@ class StoreAnalyticsV2Controller extends ApiController
                 'commission_accrued_cents' => (int) ($row->commission_accrued_cents ?? 0),
                 'commission_reversed_cents' => (int) ($row->commission_reversed_cents ?? 0),
                 'commission_net_cents' => (int) ($row->commission_net_cents ?? 0),
+                'customers_count' => (int) ($row->customers_count ?? 0),
             ])->values()->all(),
             'meta' => $this->metaPayload($filters['page'], $filters['per_page'], $total),
         ]);
@@ -168,6 +170,7 @@ class StoreAnalyticsV2Controller extends ApiController
             ->selectRaw('COALESCE(SUM(d.commission_accrued_cents), 0) as commission_accrued_cents')
             ->selectRaw('COALESCE(SUM(d.commission_reversed_cents), 0) as commission_reversed_cents')
             ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commission_net_cents')
+            ->selectRaw('COALESCE(SUM(d.customers_count), 0) as customers_count')
             ->first();
 
         $bucketExpr = $this->bucketExpression($filters['group_by'], 'd.day');
@@ -176,6 +179,7 @@ class StoreAnalyticsV2Controller extends ApiController
             ->selectRaw('COALESCE(SUM(d.orders_count), 0) as orders_count')
             ->selectRaw('COALESCE(SUM(d.net_cents), 0) as net_cents')
             ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commission_net_cents')
+            ->selectRaw('COALESCE(SUM(d.customers_count), 0) as customers_count')
             ->groupByRaw($bucketExpr)
             ->orderBy('bucket')
             ->get();
@@ -217,12 +221,14 @@ class StoreAnalyticsV2Controller extends ApiController
                 'commission_accrued_cents' => (int) ($totals->commission_accrued_cents ?? 0),
                 'commission_reversed_cents' => (int) ($totals->commission_reversed_cents ?? 0),
                 'commission_net_cents' => (int) ($totals->commission_net_cents ?? 0),
+                'customers_count' => (int) ($totals->customers_count ?? 0),
             ],
             'timeseries' => $timeseries->map(static fn ($row): array => [
                 'bucket' => (string) $row->bucket,
                 'orders_count' => (int) ($row->orders_count ?? 0),
                 'net_cents' => (int) ($row->net_cents ?? 0),
                 'commission_net_cents' => (int) ($row->commission_net_cents ?? 0),
+                'customers_count' => (int) ($row->customers_count ?? 0),
             ])->values()->all(),
             'products' => $products->map(static fn ($row): array => [
                 'brand_product_id' => (string) $row->brand_product_id,
@@ -463,56 +469,6 @@ class StoreAnalyticsV2Controller extends ApiController
                 'payout_cents' => (int) ($row->payout_cents ?? 0),
                 'net_outstanding_cents' => (int) ($row->net_outstanding_cents ?? 0),
                 'entries_count' => (int) ($row->entries_count ?? 0),
-            ])->values()->all(),
-            'meta' => $this->metaPayload($filters['page'], $filters['per_page'], $total),
-        ]);
-    }
-
-    public function brandPayouts(Request $request): JsonResponse
-    {
-        $professional = $this->currentProfessional($request);
-        $filters = $this->resolveFilters($request);
-        $brandIds = $this->resolveBrandScope(
-            $professional,
-            $filters['brand_professional_id'],
-            BrandAccessService::CAPABILITY_ANALYTICS_FINANCIAL_READ
-        );
-
-        $query = DB::table('analytics.brand_payout_daily as d')
-            ->whereIn('d.brand_professional_id', $brandIds)
-            ->whereBetween('d.day', [$filters['from'], $filters['to']]);
-
-        if ($filters['payout_status'] !== []) {
-            $query->whereIn('d.payout_status', $filters['payout_status']);
-        }
-
-        $query = $query
-            ->select(['d.payout_status', 'd.currency_code'])
-            ->selectRaw('COALESCE(SUM(d.payout_runs_count), 0) as payout_runs_count')
-            ->selectRaw('COALESCE(SUM(d.total_cents), 0) as total_cents')
-            ->groupBy('d.payout_status', 'd.currency_code');
-
-        $this->applySort(
-            $query,
-            $filters,
-            [
-                'payout_runs_count' => 'payout_runs_count',
-                'total_cents' => 'total_cents',
-                'payout_status' => 'payout_status',
-            ],
-            'total_cents'
-        );
-
-        [$rows, $total] = $this->paginate($query, $filters['page'], $filters['per_page']);
-
-        return $this->success([
-            'range' => $this->rangePayload($filters),
-            'brand_professional_ids' => $brandIds,
-            'data' => $rows->map(static fn ($row): array => [
-                'payout_status' => (string) $row->payout_status,
-                'currency_code' => (string) $row->currency_code,
-                'payout_runs_count' => (int) ($row->payout_runs_count ?? 0),
-                'total_cents' => (int) ($row->total_cents ?? 0),
             ])->values()->all(),
             'meta' => $this->metaPayload($filters['page'], $filters['per_page'], $total),
         ]);
@@ -827,48 +783,46 @@ class StoreAnalyticsV2Controller extends ApiController
         ]);
     }
 
-    public function myPayouts(Request $request): JsonResponse
+    public function myCustomers(Request $request): JsonResponse
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
+        $bucketExpr = $this->bucketExpression($filters['group_by'], 'd.day');
 
-        $query = DB::table('analytics.brand_commission_daily as d')
+        $base = DB::table('analytics.professional_customer_daily as d')
             ->where('d.affiliate_professional_id', (string) $professional->id)
             ->whereBetween('d.day', [$filters['from'], $filters['to']]);
 
-        if ($filters['payout_status'] !== []) {
-            $query->whereIn('d.payout_status', $filters['payout_status']);
-        }
+        $totals = (clone $base)
+            ->selectRaw('COALESCE(SUM(d.customers_count), 0) as customers_count')
+            ->selectRaw('COALESCE(SUM(d.new_customers_count), 0) as new_customers_count')
+            ->selectRaw('COALESCE(SUM(d.returning_customers_count), 0) as returning_customers_count')
+            ->first();
 
-        $query = $query
-            ->select(['d.payout_status', 'd.currency_code'])
-            ->selectRaw('COALESCE(SUM(d.payout_cents), 0) as payout_cents')
-            ->selectRaw('COALESCE(SUM(d.net_outstanding_cents), 0) as net_outstanding_cents')
-            ->groupBy('d.payout_status', 'd.currency_code');
-
-        $this->applySort(
-            $query,
-            $filters,
-            [
-                'payout_cents' => 'payout_cents',
-                'net_outstanding_cents' => 'net_outstanding_cents',
-                'payout_status' => 'payout_status',
-            ],
-            'payout_cents'
-        );
-
-        [$rows, $total] = $this->paginate($query, $filters['page'], $filters['per_page']);
+        $data = (clone $base)
+            ->selectRaw("{$bucketExpr} as bucket")
+            ->selectRaw('COALESCE(SUM(d.customers_count), 0) as customers_count')
+            ->selectRaw('COALESCE(SUM(d.new_customers_count), 0) as new_customers_count')
+            ->selectRaw('COALESCE(SUM(d.returning_customers_count), 0) as returning_customers_count')
+            ->groupByRaw($bucketExpr)
+            ->orderBy('bucket')
+            ->get();
 
         return $this->success([
             'range' => $this->rangePayload($filters),
+            'group_by' => $filters['group_by'],
             'affiliate_professional_id' => (string) $professional->id,
-            'data' => $rows->map(static fn ($row): array => [
-                'payout_status' => (string) $row->payout_status,
-                'currency_code' => (string) $row->currency_code,
-                'payout_cents' => (int) ($row->payout_cents ?? 0),
-                'net_outstanding_cents' => (int) ($row->net_outstanding_cents ?? 0),
+            'totals' => [
+                'customers_count' => (int) ($totals->customers_count ?? 0),
+                'new_customers_count' => (int) ($totals->new_customers_count ?? 0),
+                'returning_customers_count' => (int) ($totals->returning_customers_count ?? 0),
+            ],
+            'data' => $data->map(static fn ($row): array => [
+                'bucket' => (string) $row->bucket,
+                'customers_count' => (int) ($row->customers_count ?? 0),
+                'new_customers_count' => (int) ($row->new_customers_count ?? 0),
+                'returning_customers_count' => (int) ($row->returning_customers_count ?? 0),
             ])->values()->all(),
-            'meta' => $this->metaPayload($filters['page'], $filters['per_page'], $total),
         ]);
     }
 

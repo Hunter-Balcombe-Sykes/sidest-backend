@@ -1715,14 +1715,13 @@ Analytics is sourced from canonical Shopify order events normalized into `retail
 - `GET /api/store/brand-analytics/products`
 - `GET /api/store/brand-analytics/products/{brandProductId}`
 - `GET /api/store/brand-analytics/commissions`
-- `GET /api/store/brand-analytics/payouts`
 - `GET /api/store/brand-analytics/timeseries`
 
 Scope and access:
 - Auth: Required (professional)
 - Scope: restricted to brand IDs the caller can access for the required capability (`BrandAccessService` RBAC scope)
 - Non-financial endpoints (`overview`, `influencers`, `influencers/{professionalId}`, `products`, `products/{brandProductId}`, `timeseries`) require `analytics.non_financial.read`
-- Financial endpoints (`commissions`, `payouts`) require `analytics.financial.read`
+- Financial endpoints (`commissions`) require `analytics.financial.read`
 - `brand_professional_id` outside scope is rejected with 403
 
 #### My Analytics Endpoints (Self-Scoped)
@@ -1731,7 +1730,7 @@ Scope and access:
 - `GET /api/store/my-analytics/products`
 - `GET /api/store/my-analytics/products/{brandProductId}`
 - `GET /api/store/my-analytics/commissions`
-- `GET /api/store/my-analytics/payouts`
+- `GET /api/store/my-analytics/customers`
 - `GET /api/store/my-analytics/timeseries`
 
 Scope and access:
@@ -1746,7 +1745,7 @@ Validated query params (endpoint-relevant subsets apply):
 - `group_by` (`day|week|month`)
 - `brand_professional_id` (brand endpoints only)
 - `product_ids[]`, `categories[]`, `collections[]`
-- `regions[]`, `lifecycle_status[]`, `financial_status[]`, `payout_status[]`
+- `regions[]`, `lifecycle_status[]`, `financial_status[]`, `payout_status[]` (for commission ledger endpoints)
 - `sort_by`, `sort_dir` (`asc|desc`), `page`, `per_page` (max 100)
 
 Rollups:

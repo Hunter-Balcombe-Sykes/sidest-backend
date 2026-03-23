@@ -5,7 +5,6 @@ namespace App\Services\Store;
 use App\Models\Retail\BrandProduct;
 use App\Models\Retail\CheckoutSession;
 use App\Models\Retail\CommissionLedgerEntry;
-use App\Models\Retail\OrderAttribution;
 use App\Models\Retail\OrderEventInbox;
 use App\Models\Retail\OrderItem;
 use App\Models\Retail\RetailOrder;
@@ -149,14 +148,6 @@ class ShopifyOrderProcessingService
                     'customer_email_hash' => $customerEmailHash,
                     'customer_region' => $this->nullableString($customerRegion),
                     'shipping_country_code' => $this->nullableString($shippingCountryCode),
-                    'financials_snapshot' => [
-                        'gross_cents' => $grossCents,
-                        'refunded_cents' => $refundedCents,
-                        'returned_cents' => $returnedCents,
-                        'net_cents' => $netCents,
-                        'financial_status' => $payload['financial_status'] ?? null,
-                        'fulfillment_status' => $payload['fulfillment_status'] ?? null,
-                    ],
                     'raw_payload' => $payload,
                 ]);
                 $order->save();
@@ -167,21 +158,6 @@ class ShopifyOrderProcessingService
                 }
                 $checkoutSession->last_seen_at = now();
                 $checkoutSession->save();
-
-                OrderAttribution::query()->firstOrCreate(
-                    ['order_id' => (string) $order->id],
-                    [
-                        'model' => 'checkout_session_brand_owner',
-                        'model_version' => 'v1',
-                        'reason' => 'shopify_confirmed_order_with_valid_session_token',
-                        'lineage' => [
-                            'source' => 'shopify_orders_webhook',
-                            'checkout_session_token' => $token,
-                            'shop_domain' => strtolower(trim((string) ($inbox->shop_domain ?? ''))),
-                            'external_event_id' => (string) $inbox->external_event_id,
-                        ],
-                    ]
-                );
 
                 $lineItems = collect($payload['line_items'] ?? [])
                     ->filter(static fn ($value): bool => is_array($value))

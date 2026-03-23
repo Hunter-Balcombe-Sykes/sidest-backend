@@ -69,6 +69,19 @@ class OrderAnalyticsAggregateService
                 ->groupBy('o.affiliate_professional_id', 'o.currency_code')
                 ->get();
 
+            // Unique customers per affiliate for this brand+day (currency-agnostic).
+            $customersByAffiliate = DB::table('retail.orders as o')
+                ->where('o.brand_professional_id', $brandProfessionalId)
+                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereNotNull('o.customer_email_hash')
+                ->select([
+                    'o.affiliate_professional_id',
+                    DB::raw('COUNT(DISTINCT o.customer_email_hash) as customers_count'),
+                ])
+                ->groupBy('o.affiliate_professional_id')
+                ->get()
+                ->keyBy('affiliate_professional_id');
+
             $commissionByAffiliate = DB::table('retail.commission_ledger_entries as l')
                 ->where('l.brand_professional_id', $brandProfessionalId)
                 ->whereRaw('(l.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
@@ -89,8 +102,9 @@ class OrderAnalyticsAggregateService
                     (string) $row->currency_code,
                 ]);
 
+                $affiliateId = (string) $row->affiliate_professional_id;
                 $influencerMap[$key] = [
-                    'affiliate_professional_id' => (string) $row->affiliate_professional_id,
+                    'affiliate_professional_id' => $affiliateId,
                     'currency_code' => (string) $row->currency_code,
                     'orders_count' => (int) ($row->orders_count ?? 0),
                     'gross_cents' => (int) ($row->gross_cents ?? 0),
@@ -100,6 +114,7 @@ class OrderAnalyticsAggregateService
                     'commission_accrued_cents' => 0,
                     'commission_reversed_cents' => 0,
                     'commission_net_cents' => 0,
+                    'customers_count' => (int) ($customersByAffiliate[$affiliateId]->customers_count ?? 0),
                 ];
             }
 
@@ -120,6 +135,7 @@ class OrderAnalyticsAggregateService
                     'commission_accrued_cents' => 0,
                     'commission_reversed_cents' => 0,
                     'commission_net_cents' => 0,
+                    'customers_count' => (int) ($customersByAffiliate[(string) $row->affiliate_professional_id]->customers_count ?? 0),
                 ];
 
                 $existing['commission_accrued_cents'] = (int) ($row->accrual_cents ?? 0);
@@ -144,6 +160,7 @@ class OrderAnalyticsAggregateService
                     'commission_accrued_cents' => (int) $row['commission_accrued_cents'],
                     'commission_reversed_cents' => (int) $row['commission_reversed_cents'],
                     'commission_net_cents' => (int) $row['commission_net_cents'],
+                    'customers_count' => (int) $row['customers_count'],
                     'updated_at' => $now,
                 ])
                 ->values()
@@ -382,142 +399,6 @@ class OrderAnalyticsAggregateService
                 DB::table('analytics.brand_commission_daily')->insert($brandCommissionInserts);
             }
 
-            $payoutRows = DB::table('retail.payout_runs as p')
-                ->where('p.brand_professional_id', $brandProfessionalId)
-                ->whereRaw('(COALESCE(p.executed_at, p.scheduled_for, p.created_at) AT TIME ZONE ?)::date = ?', [$timezone, $day])
-                ->select([
-                    'p.status as payout_status',
-                    'p.currency_code',
-                    DB::raw('COUNT(*) as payout_runs_count'),
-                    DB::raw('COALESCE(SUM(p.total_cents), 0) as total_cents'),
-                ])
-                ->groupBy('p.status', 'p.currency_code')
-                ->get();
-
-            $brandPayoutInserts = $payoutRows->map(fn ($row): array => [
-                'day' => $day,
-                'brand_professional_id' => $brandProfessionalId,
-                'payout_status' => (string) $row->payout_status,
-                'currency_code' => (string) $row->currency_code,
-                'timezone' => $timezone,
-                'payout_runs_count' => (int) ($row->payout_runs_count ?? 0),
-                'total_cents' => (int) ($row->total_cents ?? 0),
-                'updated_at' => $now,
-            ])->values()->all();
-
-            if ($brandPayoutInserts !== []) {
-                DB::table('analytics.brand_payout_daily')->insert($brandPayoutInserts);
-            }
-
-            $regionRows = DB::table('retail.orders as o')
-                ->where('o.brand_professional_id', $brandProfessionalId)
-                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
-                ->select([
-                    'o.currency_code',
-                    DB::raw("COALESCE(NULLIF(o.customer_region, ''), NULLIF(o.shipping_country_code, ''), 'unknown') as region"),
-                    DB::raw('COUNT(*) as orders_count'),
-                    DB::raw('COALESCE(SUM(o.net_cents), 0) as net_cents'),
-                ])
-                ->groupBy('o.currency_code', DB::raw("COALESCE(NULLIF(o.customer_region, ''), NULLIF(o.shipping_country_code, ''), 'unknown')"))
-                ->get();
-
-            $brandRegionInserts = $regionRows->map(fn ($row): array => [
-                'day' => $day,
-                'brand_professional_id' => $brandProfessionalId,
-                'region' => (string) $row->region,
-                'currency_code' => (string) $row->currency_code,
-                'timezone' => $timezone,
-                'orders_count' => (int) ($row->orders_count ?? 0),
-                'net_cents' => (int) ($row->net_cents ?? 0),
-                'updated_at' => $now,
-            ])->values()->all();
-
-            if ($brandRegionInserts !== []) {
-                DB::table('analytics.brand_region_daily')->insert($brandRegionInserts);
-            }
-
-            $ordersByCurrency = $brandMetricsRows->keyBy(static fn ($row): string => (string) $row->currency_code);
-            $dayCustomerRows = DB::table('retail.orders as o')
-                ->where('o.brand_professional_id', $brandProfessionalId)
-                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
-                ->whereNotNull('o.customer_email_hash')
-                ->whereRaw("o.customer_email_hash <> ''")
-                ->select('o.currency_code', 'o.customer_email_hash')
-                ->distinct()
-                ->get();
-
-            $customerByCurrency = [];
-            $allDayHashes = $dayCustomerRows
-                ->pluck('customer_email_hash')
-                ->map(static fn ($value): string => trim((string) $value))
-                ->filter(static fn (string $value): bool => $value !== '')
-                ->unique()
-                ->values()
-                ->all();
-
-            $priorHashes = [];
-            if ($allDayHashes !== []) {
-                $priorHashes = DB::table('retail.orders as o')
-                    ->where('o.brand_professional_id', $brandProfessionalId)
-                    ->whereIn('o.customer_email_hash', $allDayHashes)
-                    ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date < ?', [$timezone, $day])
-                    ->pluck('o.customer_email_hash')
-                    ->map(static fn ($value): string => trim((string) $value))
-                    ->filter(static fn (string $value): bool => $value !== '')
-                    ->unique()
-                    ->values()
-                    ->all();
-            }
-
-            $priorLookup = array_fill_keys($priorHashes, true);
-            foreach ($dayCustomerRows as $row) {
-                $currency = (string) $row->currency_code;
-                $hash = trim((string) $row->customer_email_hash);
-                if ($currency === '' || $hash === '') {
-                    continue;
-                }
-
-                $existing = $customerByCurrency[$currency] ?? [
-                    'customers' => [],
-                    'new' => [],
-                    'returning' => [],
-                ];
-
-                $existing['customers'][$hash] = true;
-                if (isset($priorLookup[$hash])) {
-                    $existing['returning'][$hash] = true;
-                } else {
-                    $existing['new'][$hash] = true;
-                }
-
-                $customerByCurrency[$currency] = $existing;
-            }
-
-            $brandCustomerInserts = [];
-            foreach ($ordersByCurrency as $currency => $metrics) {
-                $customerStats = $customerByCurrency[(string) $currency] ?? [
-                    'customers' => [],
-                    'new' => [],
-                    'returning' => [],
-                ];
-
-                $brandCustomerInserts[] = [
-                    'day' => $day,
-                    'brand_professional_id' => $brandProfessionalId,
-                    'currency_code' => (string) $currency,
-                    'timezone' => $timezone,
-                    'customers_count' => count($customerStats['customers']),
-                    'new_customers_count' => count($customerStats['new']),
-                    'returning_customers_count' => count($customerStats['returning']),
-                    'orders_count' => (int) ($metrics->orders_count ?? 0),
-                    'net_cents' => (int) ($metrics->net_cents ?? 0),
-                    'updated_at' => $now,
-                ];
-            }
-
-            if ($brandCustomerInserts !== []) {
-                DB::table('analytics.brand_customer_daily')->insert($brandCustomerInserts);
-            }
         });
     }
 
@@ -539,6 +420,11 @@ class OrderAnalyticsAggregateService
                 ->delete();
 
             DB::table('analytics.professional_product_daily')
+                ->where('affiliate_professional_id', $affiliateProfessionalId)
+                ->where('day', $day)
+                ->delete();
+
+            DB::table('analytics.professional_customer_daily')
                 ->where('affiliate_professional_id', $affiliateProfessionalId)
                 ->where('day', $day)
                 ->delete();
@@ -717,6 +603,43 @@ class OrderAnalyticsAggregateService
             if ($professionalProductInserts !== []) {
                 DB::table('analytics.professional_product_daily')->insert($professionalProductInserts);
             }
+
+            // Customer analytics: rank each customer's orders across all time for this affiliate
+            // so rn=1 identifies their very first order (new customer), rn>1 is returning.
+            $customerRow = DB::selectOne("
+                WITH all_ranked AS (
+                    SELECT
+                        customer_email_hash,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY customer_email_hash
+                            ORDER BY ordered_at
+                        ) AS rn,
+                        (ordered_at AT TIME ZONE ?)::date AS order_day
+                    FROM retail.orders
+                    WHERE affiliate_professional_id = ?
+                    AND customer_email_hash IS NOT NULL
+                )
+                SELECT
+                    COUNT(DISTINCT customer_email_hash) AS customers_count,
+                    COUNT(DISTINCT CASE WHEN rn = 1 THEN customer_email_hash END) AS new_customers_count
+                FROM all_ranked
+                WHERE order_day = ?
+            ", [$timezone, $affiliateProfessionalId, $day]);
+
+            $customersCount = (int) ($customerRow->customers_count ?? 0);
+            $newCustomersCount = (int) ($customerRow->new_customers_count ?? 0);
+
+            if ($customersCount > 0) {
+                DB::table('analytics.professional_customer_daily')->insert([
+                    'day' => $day,
+                    'affiliate_professional_id' => $affiliateProfessionalId,
+                    'timezone' => $timezone,
+                    'customers_count' => $customersCount,
+                    'new_customers_count' => $newCustomersCount,
+                    'returning_customers_count' => max(0, $customersCount - $newCustomersCount),
+                    'updated_at' => $now,
+                ]);
+            }
         });
     }
 
@@ -747,20 +670,6 @@ class OrderAnalyticsAggregateService
             ->where('day', $day)
             ->delete();
 
-        DB::table('analytics.brand_payout_daily')
-            ->where('brand_professional_id', $brandProfessionalId)
-            ->where('day', $day)
-            ->delete();
-
-        DB::table('analytics.brand_region_daily')
-            ->where('brand_professional_id', $brandProfessionalId)
-            ->where('day', $day)
-            ->delete();
-
-        DB::table('analytics.brand_customer_daily')
-            ->where('brand_professional_id', $brandProfessionalId)
-            ->where('day', $day)
-            ->delete();
     }
 
     /** @var array<string, string> */
