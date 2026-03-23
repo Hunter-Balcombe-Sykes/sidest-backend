@@ -12,6 +12,17 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
 class ProfessionalSectionBlockController extends ApiController
 {
+    /**
+     * Section block types that influencers cannot enable.
+     *
+     * @var array<int, string>
+     */
+    private array $professionalOnlySectionTypes = [
+        'barbershop_info',
+        'sitepage_analytics',
+        'booking',
+        'services',
+    ];
 
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -31,6 +42,25 @@ class ProfessionalSectionBlockController extends ApiController
         $site = $this->currentSite($pro);
 
         $data = $request->validated();
+        $existingBlock = Block::query()
+            ->where('professional_id', $pro->id)
+            ->where('site_id', $site->id)
+            ->where('block_group', 'sections')
+            ->where('block_type', $blockType)
+            ->first();
+
+        $nextIsActive = array_key_exists('is_active', $data)
+            ? (bool) $data['is_active']
+            : ($existingBlock ? (bool) $existingBlock->is_active : true);
+        $currentlyIsActive = $existingBlock ? (bool) $existingBlock->is_active : false;
+        $isEnabling = $nextIsActive && ! $currentlyIsActive;
+
+        $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
+        $isInfluencer = $professionalType === 'influencer';
+        $isProfessionalOnlySection = in_array($blockType, $this->professionalOnlySectionTypes, true);
+        if ($isInfluencer && $isProfessionalOnlySection && $isEnabling) {
+            return $this->error('Upgrade to professional to enable this section.', 403);
+        }
 
         $block = DB::transaction(function () use ($pro, $site, $data, $blockType) {
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-sections:{$site->id}"]);

@@ -8,6 +8,7 @@ use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Core\Site\Block;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Enterprise\EnterpriseProvisioningService;
@@ -18,6 +19,17 @@ use Throwable;
 
 class ProfessionalController extends ApiController
 {
+    /**
+     * Section block types that are professional-only.
+     *
+     * @var array<int, string>
+     */
+    private array $professionalOnlySectionTypes = [
+        'barbershop_info',
+        'sitepage_analytics',
+        'booking',
+        'services',
+    ];
 
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -187,10 +199,16 @@ class ProfessionalController extends ApiController
     )
     {
         $professional = $this->currentProfessional($request);
+        $previousProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
 
-        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService): void {
+        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService, $previousProfessionalType): void {
             $professional->fill($request->validated());
             $professional->save();
+
+            $nextProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
+            if ($previousProfessionalType !== 'influencer' && $nextProfessionalType === 'influencer') {
+                $this->disableProfessionalOnlySections($professional->id);
+            }
 
             if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
                 $enterpriseProvisioningService->ensureForProfessional($professional);
@@ -201,6 +219,22 @@ class ProfessionalController extends ApiController
         return $this->success([
             'professional' => $professional->fresh(),
         ]);
+    }
+
+    private function disableProfessionalOnlySections(string $professionalId): void
+    {
+        if ($professionalId === '') {
+            return;
+        }
+
+        Block::query()
+            ->where('professional_id', $professionalId)
+            ->where('block_group', 'sections')
+            ->whereIn('block_type', $this->professionalOnlySectionTypes)
+            ->where('is_active', true)
+            ->update([
+                'is_active' => false,
+            ]);
     }
 
 }

@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateProfessionalRequest;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Site\Block;
 use App\Services\Enterprise\EnterpriseProvisioningService;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -16,6 +17,18 @@ use Illuminate\Support\Facades\DB;
 
 class StaffProfessionalController extends ApiController
 {
+    /**
+     * Section block types that are professional-only.
+     *
+     * @var array<int, string>
+     */
+    private array $professionalOnlySectionTypes = [
+        'barbershop_info',
+        'sitepage_analytics',
+        'booking',
+        'services',
+    ];
+
     use HandlesSearchQueries;
     use NormalizesPerPage;
     use ReturnsPaginatedResponse;
@@ -164,9 +177,16 @@ class StaffProfessionalController extends ApiController
         EnterpriseProvisioningService $enterpriseProvisioningService
     )
     {
-        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService): void {
+        $previousProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
+
+        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService, $previousProfessionalType): void {
             $professional->fill($request->validated());
             $professional->save();
+
+            $nextProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
+            if ($previousProfessionalType !== 'influencer' && $nextProfessionalType === 'influencer') {
+                $this->disableProfessionalOnlySections($professional->id);
+            }
 
             if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
                 $enterpriseProvisioningService->ensureForProfessional($professional);
@@ -176,6 +196,22 @@ class StaffProfessionalController extends ApiController
         return $this->success([
             'professional' => $professional->fresh(),
         ]);
+    }
+
+    private function disableProfessionalOnlySections(string $professionalId): void
+    {
+        if ($professionalId === '') {
+            return;
+        }
+
+        Block::query()
+            ->where('professional_id', $professionalId)
+            ->where('block_group', 'sections')
+            ->whereIn('block_type', $this->professionalOnlySectionTypes)
+            ->where('is_active', true)
+            ->update([
+                'is_active' => false,
+            ]);
     }
 
     /**
