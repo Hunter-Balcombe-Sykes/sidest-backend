@@ -36,15 +36,9 @@ return [
     'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
 
     'professional_types' => [
+        'brand' => 'Brand',
         'professional' => 'Professional',
         'influencer' => 'Influencer',
-        'barber' => 'Barber',
-        'hairdresser' => 'Hairdresser',
-        'ambassador' => 'Ambassador',
-        'promoter' => 'Promoter',
-        'brand' => 'Brand',
-        'barbershop' => 'Barbershop',
-        'salon' => 'Salon',
     ],
 
     'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),

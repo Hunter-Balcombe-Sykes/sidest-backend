@@ -14,7 +14,7 @@ class EnterpriseProvisioningService
      *
      * @var array<int, string>
      */
-    private array $enterpriseProfessionalTypes = ['promoter', 'barbershop', 'salon'];
+    private array $enterpriseProfessionalTypes = [];
 
     public function isEnterpriseProfessionalType(?string $professionalType): bool
     {

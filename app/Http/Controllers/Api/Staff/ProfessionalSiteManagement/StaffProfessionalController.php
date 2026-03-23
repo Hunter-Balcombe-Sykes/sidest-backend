@@ -26,7 +26,7 @@ class StaffProfessionalController extends ApiController
     public function index(Request $request): JsonResponse
     {
         $status = $request->query('status'); // optional: active|suspended
-        $professionalType = $request->query('professional_type'); // optional: barber|hairdresser|ambassador|promoter|barbershop|salon
+        $professionalType = $request->query('professional_type'); // optional: professional|influencer|brand
         $perPage = $this->normalizePerPage($request, 25, 100);
         $searchLike = $this->prepareSearchLike($request, 'q');
 
@@ -40,9 +40,6 @@ class StaffProfessionalController extends ApiController
 
         if (is_string($professionalType) && $professionalType !== '') {
             $normalizedProfessionalType = strtolower(trim($professionalType));
-            if ($normalizedProfessionalType === 'influencer') {
-                $normalizedProfessionalType = 'ambassador';
-            }
             $query->where('professional_type', $normalizedProfessionalType);
         }
 

@@ -389,7 +389,7 @@ class SiteCacheService
 
         $professional['professional_type'] = is_string($resolved) && trim($resolved) !== ''
             ? $resolved
-            : 'barber';
+            : 'professional';
         $payload['professional'] = $professional;
 
         return $payload;

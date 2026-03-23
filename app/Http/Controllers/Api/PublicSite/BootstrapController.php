@@ -40,7 +40,19 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks) {
+            $allowedProfessionalTypes = array_keys(config('comet.professional_types', []));
+            $resolveProfessionalType = static function (mixed $candidate) use ($allowedProfessionalTypes): string {
+                if (is_string($candidate)) {
+                    $normalized = mb_strtolower(trim($candidate));
+                    if ($normalized !== '' && in_array($normalized, $allowedProfessionalTypes, true)) {
+                        return $normalized;
+                    }
+                }
+
+                return 'professional';
+            };
+
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks, $resolveProfessionalType) {
             $createdProfessional = false;
             $provisionedEnterprise = null;
 
@@ -54,7 +66,7 @@ class BootstrapController extends ApiController
                     'bio'             => null,
                     'country_code'    => $data['country_code'] ?? null,
                     'timezone'        => $data['timezone'] ?? null,
-                    'professional_type' => $data['professional_type'] ?? 'barber',
+                    'professional_type' => $resolveProfessionalType($data['professional_type'] ?? null),
                     'status'          => 'active',
                     'onboarding_step' => 0,
                     'qr_slug'         => $this->generateQrSlug($data['handle'] ?? null),
@@ -84,7 +96,7 @@ class BootstrapController extends ApiController
                     'last_name'     => $data['last_name'] ?? $professional->last_name,
                     'country_code'  => $data['country_code'] ?? $professional->country_code,
                     'timezone'      => $data['timezone'] ?? $professional->timezone,
-                    'professional_type' => $data['professional_type'] ?? $professional->professional_type,
+                    'professional_type' => $resolveProfessionalType($data['professional_type'] ?? $professional->professional_type),
                     'handle_lc' => $data['handle_lc'],
                 ];
 

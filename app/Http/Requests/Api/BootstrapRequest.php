@@ -101,17 +101,10 @@ class BootstrapRequest extends BaseFormRequest
         $compact = preg_replace('/[^a-z]+/u', '', $normalized) ?? $normalized;
 
         return match ($compact) {
+            'proffesional',
             'professional' => 'professional',
             'influencer' => 'influencer',
-            'barber' => 'barber',
-            'ambassador',
-            'creator' => 'influencer',
-            'hairdresser',
-            'hairstylist' => 'hairdresser',
-            'promoter' => 'promoter',
             'brand' => 'brand',
-            'barbershop' => 'barbershop',
-            'salon' => 'salon',
             default => $normalized,
         };
     }
