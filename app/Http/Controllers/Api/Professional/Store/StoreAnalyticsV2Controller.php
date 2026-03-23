@@ -44,6 +44,23 @@ class StoreAnalyticsV2Controller extends ApiController
             ->first();
 
         $bucketExpr = $this->bucketExpression($filters['group_by'], 'd.day');
+
+        $commissionBase = DB::table('analytics.brand_influencer_daily as d')
+            ->whereIn('d.brand_professional_id', $brandIds)
+            ->whereBetween('d.day', [$filters['from'], $filters['to']]);
+
+        $commissionTotals = (clone $commissionBase)
+            ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commissions_paid_cents')
+            ->first();
+
+        $commissionTimeseries = (clone $commissionBase)
+            ->selectRaw("{$bucketExpr} as bucket")
+            ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commissions_paid_cents')
+            ->groupByRaw($bucketExpr)
+            ->orderBy('bucket')
+            ->get()
+            ->keyBy(static fn ($row): string => (string) $row->bucket);
+
         $timeseries = (clone $base)
             ->selectRaw("{$bucketExpr} as bucket")
             ->selectRaw('COALESCE(SUM(d.orders_count), 0) as orders_count')
@@ -53,6 +70,35 @@ class StoreAnalyticsV2Controller extends ApiController
             ->selectRaw('COALESCE(SUM(d.net_cents), 0) as net_cents')
             ->groupByRaw($bucketExpr)
             ->orderBy('bucket')
+            ->get();
+
+        $orderCommissions = DB::table('retail.commission_ledger_entries as l')
+            ->select('l.order_id')
+            ->selectRaw("COALESCE(SUM(CASE WHEN l.entry_type = 'accrual' THEN l.amount_cents WHEN l.entry_type = 'reversal' THEN l.amount_cents ELSE 0 END), 0) as commission_total_cents")
+            ->groupBy('l.order_id');
+
+        $recentOrders = DB::table('retail.orders as o')
+            ->leftJoin('core.professionals as p', 'p.id', '=', 'o.affiliate_professional_id')
+            ->leftJoinSub($orderCommissions, 'lc', static fn ($join) => $join->on('lc.order_id', '=', 'o.id'))
+            ->whereIn('o.brand_professional_id', $brandIds)
+            ->whereRaw('(o.ordered_at)::date between ? and ?', [$filters['from'], $filters['to']])
+            ->select([
+                'o.id',
+                'o.shopify_order_id',
+                'o.order_name',
+                'o.affiliate_professional_id',
+                'o.currency_code',
+                'o.gross_cents',
+                'o.refunded_cents',
+                'o.returned_cents',
+                'o.net_cents',
+                'o.ordered_at',
+                'p.display_name as affiliate_display_name',
+                'p.handle as affiliate_handle',
+            ])
+            ->selectRaw('COALESCE(lc.commission_total_cents, 0) as commission_total_cents')
+            ->orderByDesc('o.ordered_at')
+            ->limit(50)
             ->get();
 
         return $this->success([
@@ -65,14 +111,34 @@ class StoreAnalyticsV2Controller extends ApiController
                 'refunded_cents' => (int) ($totals->refunded_cents ?? 0),
                 'returned_cents' => (int) ($totals->returned_cents ?? 0),
                 'net_cents' => (int) ($totals->net_cents ?? 0),
+                'commissions_paid_cents' => (int) ($commissionTotals->commissions_paid_cents ?? 0),
             ],
-            'timeseries' => $timeseries->map(static fn ($row): array => [
-                'bucket' => (string) $row->bucket,
-                'orders_count' => (int) ($row->orders_count ?? 0),
+            'timeseries' => $timeseries->map(static function ($row) use ($commissionTimeseries): array {
+                $bucket = (string) $row->bucket;
+
+                return [
+                    'bucket' => $bucket,
+                    'orders_count' => (int) ($row->orders_count ?? 0),
+                    'gross_cents' => (int) ($row->gross_cents ?? 0),
+                    'refunded_cents' => (int) ($row->refunded_cents ?? 0),
+                    'returned_cents' => (int) ($row->returned_cents ?? 0),
+                    'net_cents' => (int) ($row->net_cents ?? 0),
+                    'commissions_paid_cents' => (int) (($commissionTimeseries[$bucket]->commissions_paid_cents ?? 0)),
+                ];
+            })->values()->all(),
+            'orders' => $recentOrders->map(static fn ($row): array => [
+                'order_id' => (string) $row->id,
+                'shopify_order_id' => (string) $row->shopify_order_id,
+                'order_name' => $row->order_name !== null ? (string) $row->order_name : null,
+                'affiliate_professional_id' => (string) $row->affiliate_professional_id,
+                'affiliate_name' => $row->affiliate_display_name ?: $row->affiliate_handle ?: 'Affiliate',
+                'currency_code' => (string) $row->currency_code,
                 'gross_cents' => (int) ($row->gross_cents ?? 0),
                 'refunded_cents' => (int) ($row->refunded_cents ?? 0),
                 'returned_cents' => (int) ($row->returned_cents ?? 0),
                 'net_cents' => (int) ($row->net_cents ?? 0),
+                'commission_total_cents' => (int) ($row->commission_total_cents ?? 0),
+                'ordered_at' => Carbon::parse($row->ordered_at)->toIso8601String(),
             ])->values()->all(),
         ]);
     }
@@ -542,6 +608,37 @@ class StoreAnalyticsV2Controller extends ApiController
             ->orderBy('bucket')
             ->get();
 
+        $orderCommissions = DB::table('retail.commission_ledger_entries as l')
+            ->select('l.order_id')
+            ->selectRaw("COALESCE(SUM(CASE WHEN l.entry_type = 'accrual' THEN l.amount_cents WHEN l.entry_type = 'reversal' THEN l.amount_cents ELSE 0 END), 0) as commission_total_cents")
+            ->groupBy('l.order_id');
+
+        $recentOrders = DB::table('retail.orders as o')
+            ->leftJoin('core.professionals as b', 'b.id', '=', 'o.brand_professional_id')
+            ->leftJoinSub($orderCommissions, 'lc', static fn ($join) => $join->on('lc.order_id', '=', 'o.id'))
+            ->where('o.affiliate_professional_id', (string) $professional->id)
+            ->whereRaw('(o.ordered_at)::date between ? and ?', [$filters['from'], $filters['to']])
+            ->select([
+                'o.id',
+                'o.shopify_order_id',
+                'o.order_name',
+                'o.brand_professional_id',
+                'o.currency_code',
+                'o.gross_cents',
+                'o.refunded_cents',
+                'o.returned_cents',
+                'o.net_cents',
+                'o.ordered_at',
+                'b.display_name as brand_display_name',
+                'b.handle as brand_handle',
+            ])
+            ->selectRaw('COALESCE(lc.commission_total_cents, 0) as commission_total_cents')
+            ->orderByDesc('o.ordered_at')
+            ->limit(50)
+            ->get();
+
+        $commissionEarnedTotals = (int) ($totals->commission_accrued_cents ?? 0) - (int) ($totals->commission_reversed_cents ?? 0);
+
         return $this->success([
             'range' => $this->rangePayload($filters),
             'group_by' => $filters['group_by'],
@@ -555,6 +652,7 @@ class StoreAnalyticsV2Controller extends ApiController
                 'commission_accrued_cents' => (int) ($totals->commission_accrued_cents ?? 0),
                 'commission_reversed_cents' => (int) ($totals->commission_reversed_cents ?? 0),
                 'commission_paid_cents' => (int) ($totals->commission_paid_cents ?? 0),
+                'commission_earned_cents' => $commissionEarnedTotals,
             ],
             'timeseries' => $timeseries->map(static fn ($row): array => [
                 'bucket' => (string) $row->bucket,
@@ -563,6 +661,21 @@ class StoreAnalyticsV2Controller extends ApiController
                 'commission_accrued_cents' => (int) ($row->commission_accrued_cents ?? 0),
                 'commission_reversed_cents' => (int) ($row->commission_reversed_cents ?? 0),
                 'commission_paid_cents' => (int) ($row->commission_paid_cents ?? 0),
+                'commission_earned_cents' => (int) ($row->commission_accrued_cents ?? 0) - (int) ($row->commission_reversed_cents ?? 0),
+            ])->values()->all(),
+            'orders' => $recentOrders->map(static fn ($row): array => [
+                'order_id' => (string) $row->id,
+                'shopify_order_id' => (string) $row->shopify_order_id,
+                'order_name' => $row->order_name !== null ? (string) $row->order_name : null,
+                'brand_professional_id' => (string) $row->brand_professional_id,
+                'brand_name' => $row->brand_display_name ?: $row->brand_handle ?: 'Brand',
+                'currency_code' => (string) $row->currency_code,
+                'gross_cents' => (int) ($row->gross_cents ?? 0),
+                'refunded_cents' => (int) ($row->refunded_cents ?? 0),
+                'returned_cents' => (int) ($row->returned_cents ?? 0),
+                'net_cents' => (int) ($row->net_cents ?? 0),
+                'commission_total_cents' => (int) ($row->commission_total_cents ?? 0),
+                'ordered_at' => Carbon::parse($row->ordered_at)->toIso8601String(),
             ])->values()->all(),
         ]);
     }

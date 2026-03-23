@@ -125,9 +125,56 @@ class SiteCacheService
         $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
         $data = $this->withStorePayload($data, (string) ($row->professional_id ?? ''));
 
+        $data = $this->applyBrandImageFallbacks($data);
+
         Cache::put($key, $data, now()->addMinutes(15));
 
         return $data;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function applyBrandImageFallbacks(array $payload): array
+    {
+        $professional = $payload['professional'] ?? null;
+        if (!is_array($professional) || ($professional['professional_type'] ?? null) === 'brand') {
+            return $payload;
+        }
+
+        $brandPartner = $payload['site']['settings']['brand_partner'] ?? null;
+        if (!is_array($brandPartner) || empty($brandPartner['professional_id'])) {
+            return $payload;
+        }
+
+        $brandId = $brandPartner['professional_id'];
+        $brandSite = Site::query()
+            ->where('professional_id', $brandId)
+            ->first();
+
+        if (!$brandSite) {
+            return $payload;
+        }
+
+        $placeholderImages = $brandSite->settings['design']['media']['placeholder_sitepage_images'] ?? [];
+        if (empty($placeholderImages)) {
+            return $payload;
+        }
+
+        $imageKeys = ['gallery', 'content_images'];
+
+        foreach ($imageKeys as $key) {
+            if (!isset($payload['site'][$key]) || !is_array($payload['site'][$key])) {
+                continue;
+            }
+            
+            if (empty($payload['site'][$key])) {
+                $payload['site'][$key] = $placeholderImages;
+            }
+        }
+
+        return $payload;
     }
 
     /**

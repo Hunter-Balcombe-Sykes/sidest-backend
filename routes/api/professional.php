@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
+use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
 use App\Http\Controllers\Api\Professional\ConfirmationPreferenceController;
 use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
 use App\Http\Controllers\Api\Professional\Notifications\NotificationController;
@@ -104,6 +105,7 @@ Route::middleware(['supabase.jwt', 'current.pro'])
             ->whereUuid('category')
             ->withTrashed();
         Route::post('/services/reorder-layout', [ProfessionalServiceController::class, 'reorderLayout']);
+        Route::get('/booking/my-analytics/overview', [BookingAnalyticsController::class, 'myOverview']);
 
         // View Analytics
         Route::get('/analytics', [ProfessionalAnalyticsController::class, 'summary']);

@@ -60,6 +60,8 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.brandPartner' => ['prohibited'],
             'settings.additional_brand_partners' => ['prohibited'],
             'settings.show_branding' => ['sometimes', 'boolean'],
+            'settings.charlie_enabled' => ['sometimes', 'boolean'],
+            'settings.charlieEnabled' => ['sometimes', 'boolean'],
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
             'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
             'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],

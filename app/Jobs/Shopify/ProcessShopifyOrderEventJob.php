@@ -4,6 +4,7 @@ namespace App\Jobs\Shopify;
 
 use App\Jobs\Store\RebuildBrandDailyAggregatesJob;
 use App\Jobs\Store\RebuildProfessionalDailyAggregatesJob;
+use App\Services\Notifications\CommerceNotificationService;
 use App\Services\Store\ShopifyOrderProcessingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -26,7 +27,10 @@ class ProcessShopifyOrderEventJob implements ShouldQueue
         $this->onQueue('integrations');
     }
 
-    public function handle(ShopifyOrderProcessingService $processor): void
+    public function handle(
+        ShopifyOrderProcessingService $processor,
+        CommerceNotificationService $commerceNotifications
+    ): void
     {
         $result = $processor->processInbox($this->inboxId);
 
@@ -37,6 +41,11 @@ class ProcessShopifyOrderEventJob implements ShouldQueue
         $brandProfessionalId = trim((string) ($result['brand_professional_id'] ?? ''));
         $affiliateProfessionalId = trim((string) ($result['affiliate_professional_id'] ?? ''));
         $orderedDay = trim((string) ($result['ordered_day'] ?? ''));
+        $orderId = trim((string) ($result['order_id'] ?? ''));
+
+        if ($orderId !== '') {
+            $commerceNotifications->notifyStoreOrderById($orderId);
+        }
 
         if ($brandProfessionalId !== '' && $orderedDay !== '') {
             RebuildBrandDailyAggregatesJob::dispatch($brandProfessionalId, $orderedDay, 1);
