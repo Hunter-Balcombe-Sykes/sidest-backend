@@ -13,9 +13,9 @@ class ShopifyCatalogSyncService
 {
     use NormalizesShopDomain;
 
-    private const PRODUCTS_QUERY = <<<'GRAPHQL'
-query ProductsPage($first: Int!, $after: String) {
-  products(first: $first, after: $after) {
+private const PRODUCTS_QUERY = <<<'GRAPHQL'
+query ProductsPage($first: Int!, $after: String, $query: String) {
+  products(first: $first, after: $after, query: $query) {
     pageInfo {
       hasNextPage
       endCursor
@@ -130,6 +130,9 @@ GRAPHQL;
             }
 
             $status = $this->mapShopifyStatus((string) Arr::get($product, 'status', 'unknown'));
+            if ($status === 'draft') {
+                continue;
+            }
             $handle = trim((string) Arr::get($product, 'handle', ''));
             $productUrl = trim((string) Arr::get($product, 'onlineStoreUrl', ''));
             $imageUrl = trim((string) Arr::get($product, 'featuredImage.url', ''));
@@ -225,6 +228,7 @@ GRAPHQL;
                 [
                     'first' => 250,
                     'after' => $cursor,
+                    'query' => '(status:active OR status:archived)',
                 ]
             );
 
