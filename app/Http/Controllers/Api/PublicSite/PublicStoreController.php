@@ -7,11 +7,13 @@ use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CheckoutSession;
 use App\Services\Public\PublicSiteResolver;
+use App\Services\Store\BrandProductCatalogService;
 use App\Services\Store\FeaturedProductsPayloadService;
 use App\Services\Store\PublicStripeCheckoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -23,6 +25,7 @@ class PublicStoreController extends ApiController
     public function __construct(
         private readonly PublicSiteResolver $siteResolver,
         private readonly FeaturedProductsPayloadService $featuredProductsPayloads,
+        private readonly BrandProductCatalogService $catalog,
         private readonly PublicStripeCheckoutService $stripeCheckout,
     ) {}
 
@@ -44,9 +47,10 @@ class PublicStoreController extends ApiController
         }
 
         $affiliateProfessionalId = (string) $site->professional_id;
-        $payload = $this->featuredProductsPayloads->build(
+        $payload = $this->safeFeaturedProductsPayload(
             $affiliateProfessionalId,
-            'public_store'
+            'public_store',
+            $subdomain
         );
 
         return $this->success([
@@ -288,5 +292,53 @@ class PublicStoreController extends ApiController
         return $brandProfessionalId !== ''
             ? $this->resolveCheckoutMode($brandProfessionalId)
             : 'shopify';
+    }
+
+    /**
+     * @return array{
+     *   selected_products: array<int, array<string, mixed>>,
+     *   default_product_selections: array<int, array<string, mixed>>,
+     *   default_commission_rate: float,
+     *   max_featured_products: int,
+     *   max_default_product_selections: int,
+     *   checkout_mode: string
+     * }
+     */
+    private function safeFeaturedProductsPayload(string $affiliateProfessionalId, string $context, string $subdomain): array
+    {
+        try {
+            return $this->featuredProductsPayloads->build($affiliateProfessionalId, $context);
+        } catch (\Throwable $e) {
+            Log::error('Public featured products payload build failed; falling back to direct catalog selections.', [
+                'subdomain' => $subdomain,
+                'affiliate_professional_id' => $affiliateProfessionalId,
+                'context' => $context,
+                'error' => $e->getMessage(),
+            ]);
+
+            $selectedProducts = [];
+            try {
+                $selectedProducts = $this->catalog->selectedProductsForProfessional($affiliateProfessionalId);
+            } catch (\Throwable $catalogError) {
+                Log::warning('Public featured products catalog fallback failed.', [
+                    'subdomain' => $subdomain,
+                    'affiliate_professional_id' => $affiliateProfessionalId,
+                    'context' => $context,
+                    'error' => $catalogError->getMessage(),
+                ]);
+            }
+
+            $defaultCommissionRate = (float) config('comet.store.default_commission_rate', 15);
+            $maxFeaturedProducts = (int) config('comet.store.max_featured_products', 10);
+
+            return [
+                'selected_products' => $selectedProducts,
+                'default_product_selections' => $selectedProducts,
+                'default_commission_rate' => $defaultCommissionRate,
+                'max_featured_products' => $maxFeaturedProducts,
+                'max_default_product_selections' => $maxFeaturedProducts,
+                'checkout_mode' => 'shopify',
+            ];
+        }
     }
 }
