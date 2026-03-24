@@ -52,6 +52,8 @@ class BrandPartnerController extends ApiController
             return $this->error($exception->getMessage(), 422);
         }
 
+        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+
         return $this->success([
             'connected' => true,
             'brand_professional_id' => $brandProfessionalId,
@@ -110,6 +112,8 @@ class BrandPartnerController extends ApiController
             return $this->error('Brand partner not found in your additional partners.', 404);
         }
 
+        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+
         return $this->success([
             'promoted' => true,
             'primary_professional_id' => $brandProfessionalId,
@@ -133,22 +137,106 @@ class BrandPartnerController extends ApiController
             return $this->error('Site not found.', 404);
         }
 
-        $disconnected = $brandPartnerLinks->disconnectBrandFromAffiliate((string) $professional->id, (string) $brandProfessionalId);
+        $affiliateProfessionalId = (string) $professional->id;
+        $disconnected = $brandPartnerLinks->disconnectBrandFromAffiliate($affiliateProfessionalId, (string) $brandProfessionalId);
 
         if (! $disconnected) {
+            $cleanedStaleSettings = $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
+            if (! $this->settingsStillReferenceBrand($site, (string) $brandProfessionalId) && $cleanedStaleSettings) {
+                return $this->success([
+                    'disconnected' => true,
+                    'brand_professional_id' => $brandProfessionalId,
+                    'stale_settings_cleaned' => true,
+                ]);
+            }
+
             return $this->error('Brand partner not found in your connections.', 404);
         }
 
         $selectionCleanup->removeSelectionsForAffiliateBrand(
-            (string) $professional->id,
+            $affiliateProfessionalId,
             (string) $brandProfessionalId,
             'Brand connection removed',
             '{count} selected product(s) were removed because this brand connection ended.'
         );
 
+        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
+
         return $this->success([
             'disconnected' => true,
             'brand_professional_id' => $brandProfessionalId,
         ]);
+    }
+
+    private function syncSiteBrandPartnerSettings(
+        Site $site,
+        BrandPartnerLinkService $brandPartnerLinks,
+        string $affiliateProfessionalId
+    ): bool {
+        $links = $brandPartnerLinks->getLinksForAffiliate($affiliateProfessionalId);
+        $settings = is_array($site->settings) ? $site->settings : [];
+        $originalSettings = $settings;
+
+        $brandPartner = is_array($settings['brand_partner'] ?? null)
+            ? $settings['brand_partner']
+            : [];
+
+        $primaryLink = $links->firstWhere('slot', BrandPartnerLinkService::PRIMARY_SLOT);
+        if ($primaryLink) {
+            $brandPartner['professional_id'] = (string) $primaryLink->brand_professional_id;
+        } else {
+            unset($brandPartner['professional_id'], $brandPartner['professionalId']);
+        }
+
+        $settings['brand_partner'] = $brandPartner;
+        $settings['additional_brand_partners'] = $links
+            ->filter(static fn ($link): bool => (int) $link->slot > BrandPartnerLinkService::PRIMARY_SLOT)
+            ->sortBy('slot')
+            ->map(static fn ($link): array => [
+                'professional_id' => (string) $link->brand_professional_id,
+            ])
+            ->values()
+            ->all();
+
+        if ($settings === $originalSettings) {
+            return false;
+        }
+
+        $site->settings = $settings;
+        $site->save();
+
+        return true;
+    }
+
+    private function settingsStillReferenceBrand(Site $site, string $brandProfessionalId): bool
+    {
+        $settings = is_array($site->settings) ? $site->settings : [];
+        $primaryId = trim((string) (
+            $settings['brand_partner']['professional_id']
+            ?? $settings['brand_partner']['professionalId']
+            ?? ''
+        ));
+
+        if ($primaryId === $brandProfessionalId) {
+            return true;
+        }
+
+        $additional = $settings['additional_brand_partners'] ?? $settings['additionalBrandPartners'] ?? [];
+        if (! is_array($additional)) {
+            return false;
+        }
+
+        foreach ($additional as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $entryId = trim((string) ($entry['professional_id'] ?? $entry['professionalId'] ?? ''));
+            if ($entryId === $brandProfessionalId) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
