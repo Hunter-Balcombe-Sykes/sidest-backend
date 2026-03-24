@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
 use App\Http\Controllers\Api\Professional\Store\StoreAnalyticsV2Controller;
+use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
@@ -242,6 +243,17 @@ Route::get('/store/brand-analytics/overview', [StoreAnalyticsV2Controller::class
         Route::get('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'index']);
         Route::put('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'upsert']);
         Route::delete('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'remove']);
+
+        // Stripe Connect & Payouts
+        Route::get('/stripe/status', [StripeConnectController::class, 'status']);
+        Route::post('/stripe/connect/onboard', [StripeConnectController::class, 'onboard']);
+        Route::post('/stripe/connect/dashboard', [StripeConnectController::class, 'dashboard']);
+        Route::post('/stripe/connect/disconnect', [StripeConnectController::class, 'disconnect']);
+        Route::post('/stripe/payment-method/setup', [StripeConnectController::class, 'setupPaymentMethod']);
+        Route::post('/stripe/payment-method/confirm', [StripeConnectController::class, 'confirmPaymentMethod']);
+        Route::get('/stripe/payment-methods', [StripeConnectController::class, 'listPaymentMethods']);
+        Route::delete('/stripe/payment-method', [StripeConnectController::class, 'removePaymentMethod']);
+        Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
 
         // Fresha Integration
         Route::get('/fresha/status', [FreshaIntegrationController::class, 'status']);

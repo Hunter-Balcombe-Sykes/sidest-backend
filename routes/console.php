@@ -43,3 +43,7 @@ Schedule::command('comet:purge-soft-deletes')
 
 Schedule::command('comet:prune-notifications', ['--days' => 30])
     ->dailyAt('03:25');
+
+Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob())
+    ->dailyAt('06:00')
+    ->withoutOverlapping();

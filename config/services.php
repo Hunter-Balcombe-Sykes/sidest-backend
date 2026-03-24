@@ -51,6 +51,12 @@ return [
         'webhook_notification_url' => env('FRESHA_WEBHOOK_NOTIFICATION_URL'),
     ],
 
+    'stripe' => [
+        'secret_key' => env('STRIPE_SECRET_KEY'),
+        'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
+        'connect_webhook_secret' => env('STRIPE_CONNECT_WEBHOOK_SECRET'),
+    ],
+
     'shopify' => [
         'api_key' => env('SHOPIFY_API_KEY'),
         'api_secret' => env('SHOPIFY_API_SECRET'),
