@@ -53,10 +53,7 @@ class PublicStoreController extends ApiController
             $subdomain
         );
 
-        return $this->success([
-            ...$payload,
-            'checkout_mode' => $this->resolveCheckoutModeForAffiliate($affiliateProfessionalId),
-        ]);
+        return $this->success($payload);
     }
 
     /**
