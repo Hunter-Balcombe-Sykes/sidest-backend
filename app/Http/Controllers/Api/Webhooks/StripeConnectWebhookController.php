@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Controller;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
+use App\Services\Store\PublicStripeCheckoutService;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -36,6 +37,7 @@ class StripeConnectWebhookController extends Controller
 
         match ($event->type) {
             'account.updated' => $this->handleAccountUpdated($event->data->object),
+            'checkout.session.completed' => $this->handleCheckoutSessionCompleted($event->data->object, (string) ($event->account ?? '')),
             'transfer.created' => $this->handleTransferCreated($event->data->object),
             'transfer.failed' => $this->handleTransferFailed($event->data->object),
             'transfer.reversed' => $this->handleTransferFailed($event->data->object),
@@ -45,6 +47,25 @@ class StripeConnectWebhookController extends Controller
         };
 
         return response()->json(['received' => true]);
+    }
+
+    private function handleCheckoutSessionCompleted(object $checkoutSession, string $connectedAccountId): void
+    {
+        $purpose = trim((string) ($checkoutSession->metadata?->purpose ?? ''));
+        if ($purpose !== 'public_store_stripe_checkout') {
+            return;
+        }
+
+        try {
+            app(PublicStripeCheckoutService::class)
+                ->finalizeCompletedCheckoutSession($checkoutSession, $connectedAccountId);
+        } catch (\Throwable $e) {
+            Log::error('Stripe checkout completion finalization failed', [
+                'checkout_session_id' => $checkoutSession->id ?? null,
+                'connected_account_id' => $connectedAccountId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function handleAccountUpdated(object $account): void

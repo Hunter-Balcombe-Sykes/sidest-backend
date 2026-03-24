@@ -21,6 +21,7 @@ class BrandStoreSettings extends Model
     protected $fillable = [
         'professional_id',
         'default_commission_rate',
+        'checkout_mode',
         'favourite_brand_product_ids',
     ];
 

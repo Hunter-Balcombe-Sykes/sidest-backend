@@ -37,6 +37,8 @@ Route::group([
         ->middleware('throttle:public-site');
     Route::post('/store/checkout-session', [PublicStoreController::class, 'createCheckoutSession'])
         ->middleware('throttle:public-site');
+    Route::post('/store/stripe-checkout', [PublicStoreController::class, 'createStripeCheckout'])
+        ->middleware('throttle:public-site');
 
     // Page View Analytics
     Route::post('/analytics/pageviews', [AnalyticsController::class, 'pageview'])
