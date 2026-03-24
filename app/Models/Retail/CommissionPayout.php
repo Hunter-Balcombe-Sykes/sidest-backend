@@ -32,12 +32,17 @@ class CommissionPayout extends BaseModel
         'ledger_entry_count',
         'eligible_after',
         'processed_at',
+        'funding_source',
+        'wallet_debit_cents',
+        'charge_cents',
     ];
 
     protected $casts = [
         'gross_commission_cents' => 'integer',
         'platform_fee_cents' => 'integer',
         'net_payout_cents' => 'integer',
+        'wallet_debit_cents' => 'integer',
+        'charge_cents' => 'integer',
         'ledger_entry_count' => 'integer',
         'eligible_after' => 'datetime',
         'processed_at' => 'datetime',
