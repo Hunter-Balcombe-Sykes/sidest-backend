@@ -31,14 +31,17 @@ class FeaturedProductsPayloadService
         $defaultRate = (float) config('comet.store.default_commission_rate', 15);
         $maxFeatured = max(0, (int) config('comet.store.max_featured_products', 10));
 
+        $checkoutMode = 'shopify';
+        $brandStripeAccountId = null;
         try {
-            $checkoutMode = $this->resolveCheckoutModeForAffiliate($professionalId);
+            $checkoutInfo = $this->resolveCheckoutInfoForAffiliate($professionalId);
+            $checkoutMode = $checkoutInfo['checkout_mode'];
+            $brandStripeAccountId = $checkoutInfo['brand_stripe_account_id'];
         } catch (Throwable $e) {
-            Log::warning('Could not resolve checkout mode for affiliate; defaulting to shopify.', [
+            Log::warning('Could not resolve checkout info for affiliate; defaulting to shopify.', [
                 'professional_id' => $professionalId,
                 'error' => $e->getMessage(),
             ]);
-            $checkoutMode = 'shopify';
         }
 
         $payload = [
@@ -48,6 +51,7 @@ class FeaturedProductsPayloadService
             'max_featured_products' => $maxFeatured,
             'max_default_product_selections' => $maxFeatured,
             'checkout_mode' => $checkoutMode,
+            'brand_stripe_account_id' => $brandStripeAccountId,
         ];
 
         if ($professionalId === '' || ! $this->hasSelectionsTable()) {
@@ -73,6 +77,7 @@ class FeaturedProductsPayloadService
             'max_featured_products' => $maxFeatured,
             'max_default_product_selections' => $maxFeatured,
             'checkout_mode' => $checkoutMode,
+            'brand_stripe_account_id' => $brandStripeAccountId,
         ];
     }
 
@@ -95,10 +100,17 @@ class FeaturedProductsPayloadService
         return $this->selectionsTableAvailable;
     }
 
-    private function resolveCheckoutModeForAffiliate(string $affiliateProfessionalId): string
+    /**
+     * Resolve checkout mode and brand Stripe account ID for an affiliate's storefront.
+     *
+     * @return array{checkout_mode: string, brand_stripe_account_id: string|null}
+     */
+    private function resolveCheckoutInfoForAffiliate(string $affiliateProfessionalId): array
     {
+        $default = ['checkout_mode' => 'shopify', 'brand_stripe_account_id' => null];
+
         if ($affiliateProfessionalId === '') {
-            return 'shopify';
+            return $default;
         }
 
         $brandProfessionalId = DB::table('core.brand_partner_links')
@@ -109,15 +121,30 @@ class FeaturedProductsPayloadService
 
         $brandProfessionalId = trim((string) $brandProfessionalId);
         if ($brandProfessionalId === '') {
-            return 'shopify';
+            return $default;
         }
 
-        $mode = DB::table('retail.brand_store_settings')
+        $settings = DB::table('retail.brand_store_settings')
             ->where('professional_id', $brandProfessionalId)
-            ->value('checkout_mode');
+            ->select(['checkout_mode'])
+            ->first();
 
-        $mode = strtolower(trim((string) $mode));
+        $mode = strtolower(trim((string) ($settings?->checkout_mode ?? '')));
+        $mode = in_array($mode, ['shopify', 'stripe'], true) ? $mode : 'shopify';
 
-        return in_array($mode, ['shopify', 'stripe'], true) ? $mode : 'shopify';
+        $stripeAccountId = null;
+        if ($mode === 'stripe') {
+            $stripeAccountId = DB::table('core.professionals')
+                ->where('id', $brandProfessionalId)
+                ->value('stripe_connect_account_id');
+            $stripeAccountId = trim((string) ($stripeAccountId ?? '')) ?: null;
+        }
+
+        return ['checkout_mode' => $mode, 'brand_stripe_account_id' => $stripeAccountId];
+    }
+
+    private function resolveCheckoutModeForAffiliate(string $affiliateProfessionalId): string
+    {
+        return $this->resolveCheckoutInfoForAffiliate($affiliateProfessionalId)['checkout_mode'];
     }
 }
