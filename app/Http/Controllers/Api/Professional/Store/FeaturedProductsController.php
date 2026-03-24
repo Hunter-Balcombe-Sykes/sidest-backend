@@ -238,8 +238,11 @@ class FeaturedProductsController extends ApiController
     /**
      * @return array{
      *   selected_products: array<int, array<string, mixed>>,
+     *   default_product_selections: array<int, array<string, mixed>>,
      *   default_commission_rate: float,
-     *   max_featured_products: int
+     *   max_featured_products: int,
+     *   max_default_product_selections: int,
+     *   checkout_mode: string
      * }
      */
     private function safeFeaturedProductsPayload(string $professionalId, string $context): array
@@ -253,40 +256,62 @@ class FeaturedProductsController extends ApiController
                 'error' => $e->getMessage(),
             ]);
 
+            $maxFeatured = (int) config('comet.store.max_featured_products', 10);
+
+            $selectedProducts = [];
+            try {
+                $selectedProducts = array_slice(
+                    $this->catalog->selectedProductsForProfessional($professionalId),
+                    0,
+                    $maxFeatured
+                );
+            } catch (Throwable $catalogError) {
+                Log::warning('Featured products catalog fallback also failed.', [
+                    'professional_id' => $professionalId,
+                    'context' => $context,
+                    'error' => $catalogError->getMessage(),
+                ]);
+            }
+
             return [
-                'selected_products' => $this->fallbackSelectedProducts($professionalId),
+                'selected_products' => $selectedProducts,
+                'default_product_selections' => $selectedProducts,
                 'default_commission_rate' => (float) config('comet.store.default_commission_rate', 15),
-                'max_featured_products' => (int) config('comet.store.max_featured_products', 10),
+                'max_featured_products' => $maxFeatured,
+                'max_default_product_selections' => $maxFeatured,
+                'checkout_mode' => $this->resolveCheckoutModeForAffiliate($professionalId),
             ];
         }
     }
 
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function fallbackSelectedProducts(string $professionalId): array
+    private function resolveCheckoutModeForAffiliate(string $affiliateProfessionalId): string
     {
-        return DB::table('retail.professional_selections as ps')
-            ->join('retail.brand_products as bp', 'bp.id', '=', 'ps.brand_product_id')
-            ->where('ps.professional_id', $professionalId)
-            ->orderBy('ps.sort_order')
-            ->select([
-                'ps.id as id',
-                'ps.sort_order',
-                'ps.brand_product_id',
-                'bp.shopify_product_id',
-            ])
-            ->get()
-            ->map(static function ($row): array {
-                return [
-                    'id' => (string) ($row->id ?? ''),
-                    'sort_order' => (int) ($row->sort_order ?? 0),
-                    'brand_product_id' => (string) ($row->brand_product_id ?? ''),
-                    'shopify_product_id' => (string) ($row->shopify_product_id ?? ''),
-                ];
-            })
-            ->values()
-            ->all();
+        if ($affiliateProfessionalId === '') {
+            return 'shopify';
+        }
+
+        try {
+            $brandProfessionalId = DB::table('core.brand_partner_links')
+                ->where('affiliate_professional_id', $affiliateProfessionalId)
+                ->orderByDesc('is_primary')
+                ->orderByDesc('created_at')
+                ->value('brand_professional_id');
+
+            $brandProfessionalId = trim((string) $brandProfessionalId);
+            if ($brandProfessionalId === '') {
+                return 'shopify';
+            }
+
+            $mode = DB::table('retail.brand_store_settings')
+                ->where('professional_id', $brandProfessionalId)
+                ->value('checkout_mode');
+
+            $mode = strtolower(trim((string) $mode));
+
+            return in_array($mode, ['shopify', 'stripe'], true) ? $mode : 'shopify';
+        } catch (Throwable) {
+            return 'shopify';
+        }
     }
 
     private function shouldRememberConfirmationPreference(Request $request): bool
