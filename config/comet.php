@@ -144,7 +144,7 @@ return [
         'default_commission_rate' => (float) env('COMET_STORE_DEFAULT_COMMISSION', 15),
         'max_featured_products'   => (int) env('COMET_STORE_MAX_FEATURED', 10),
         'checkout_session_ttl_minutes' => (int) env('COMET_STORE_CHECKOUT_SESSION_TTL_MINUTES', 120),
-        'payout_hold_days' => (int) env('COMET_STORE_PAYOUT_HOLD_DAYS', 7),
+        'payout_hold_days' => (int) env('COMET_STORE_PAYOUT_HOLD_DAYS', 0),
         'platform_fee_percent' => (float) env('COMET_STORE_PLATFORM_FEE_PERCENT', 3),
     ],
 

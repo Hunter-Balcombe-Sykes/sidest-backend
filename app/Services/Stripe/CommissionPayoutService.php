@@ -21,7 +21,7 @@ class CommissionPayoutService
     {
         $this->stripe = new StripeClient(config('services.stripe.secret_key'));
         $this->platformFeePercent = config('comet.store.platform_fee_percent', 3);
-        $this->holdDays = config('comet.store.payout_hold_days', 7);
+        $this->holdDays = max(0, (int) config('comet.store.payout_hold_days', 0));
     }
 
     /**
