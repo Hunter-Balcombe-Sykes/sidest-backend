@@ -8,9 +8,11 @@ use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\OrderEventInbox;
 use App\Models\Retail\OrderItem;
 use App\Models\Retail\RetailOrder;
+use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class ShopifyOrderProcessingService
@@ -26,7 +28,7 @@ class ShopifyOrderProcessingService
         }
 
         try {
-            return DB::transaction(function () use ($inboxId): array {
+            $result = DB::transaction(function () use ($inboxId): array {
                 $inbox = OrderEventInbox::query()
                     ->where('id', $inboxId)
                     ->lockForUpdate()
@@ -349,6 +351,20 @@ class ShopifyOrderProcessingService
                     'ordered_day' => $orderedAt->toDateString(),
                 ];
             });
+
+            if (($result['status'] ?? null) === 'processed') {
+                try {
+                    app(CommissionPayoutService::class)->processEligiblePayouts();
+                } catch (Throwable $payoutException) {
+                    Log::warning('Immediate commission payout attempt failed after order processing', [
+                        'inbox_id' => $inboxId,
+                        'order_id' => $result['order_id'] ?? null,
+                        'error' => $payoutException->getMessage(),
+                    ]);
+                }
+            }
+
+            return $result;
         } catch (Throwable $e) {
             OrderEventInbox::query()
                 ->where('id', $inboxId)

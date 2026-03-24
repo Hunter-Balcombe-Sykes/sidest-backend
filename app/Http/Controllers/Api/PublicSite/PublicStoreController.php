@@ -43,12 +43,16 @@ class PublicStoreController extends ApiController
             return $this->error('Site not found.', 404);
         }
 
-        return $this->success(
-            $this->featuredProductsPayloads->build(
-                (string) $site->professional_id,
-                'public_store'
-            )
+        $affiliateProfessionalId = (string) $site->professional_id;
+        $payload = $this->featuredProductsPayloads->build(
+            $affiliateProfessionalId,
+            'public_store'
         );
+
+        return $this->success([
+            ...$payload,
+            'checkout_mode' => $this->resolveCheckoutModeForAffiliate($affiliateProfessionalId),
+        ]);
     }
 
     /**
@@ -264,6 +268,25 @@ class PublicStoreController extends ApiController
 
         return in_array($checkoutMode, ['shopify', 'stripe'], true)
             ? $checkoutMode
+            : 'shopify';
+    }
+
+    private function resolveCheckoutModeForAffiliate(string $affiliateProfessionalId): string
+    {
+        if ($affiliateProfessionalId === '') {
+            return 'shopify';
+        }
+
+        $brandProfessionalId = DB::table('core.brand_partner_links')
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->orderByDesc('is_primary')
+            ->orderByDesc('created_at')
+            ->value('brand_professional_id');
+
+        $brandProfessionalId = trim((string) $brandProfessionalId);
+
+        return $brandProfessionalId !== ''
+            ? $this->resolveCheckoutMode($brandProfessionalId)
             : 'shopify';
     }
 }
