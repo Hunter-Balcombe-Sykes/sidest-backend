@@ -20,16 +20,14 @@ use App\Http\Controllers\Api\HealthController;
 // Ping
 Route::get('/ping', fn () => response()->json(['pong' => true]));
 
-// Square webhooks (no auth middleware)
-Route::post('/webhooks/square', SquareCatalogWebhookController::class);
-Route::post('/webhooks/square/catalog', SquareCatalogWebhookController::class);
-
-// Fresha webhooks (no auth middleware)
-Route::post('/webhooks/fresha', FreshaCatalogWebhookController::class);
-Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
-
-// Stripe Connect webhooks (no auth middleware — signature validated in controller)
-Route::post('/webhooks/stripe-connect', StripeConnectWebhookController::class);
+// Webhooks (no auth middleware — signature validated in controller)
+Route::middleware('throttle:webhooks')->group(function () {
+    Route::post('/webhooks/square', SquareCatalogWebhookController::class);
+    Route::post('/webhooks/square/catalog', SquareCatalogWebhookController::class);
+    Route::post('/webhooks/fresha', FreshaCatalogWebhookController::class);
+    Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
+    Route::post('/webhooks/stripe-connect', StripeConnectWebhookController::class);
+});
 
 // Shopify webhooks (no auth middleware)
 Route::middleware('throttle:shopify-webhooks')->group(function () {
@@ -38,7 +36,7 @@ Route::middleware('throttle:shopify-webhooks')->group(function () {
 });
 
 // bootstrap uses ONLY JWT middleware
-Route::middleware(['supabase.jwt'])->post('/bootstrap', [BootstrapController::class, 'bootstrap']);
+Route::middleware(['supabase.jwt', 'throttle:bootstrap'])->post('/bootstrap', [BootstrapController::class, 'bootstrap']);
 
 // Split route files (keeps api.php tidy)
 require __DIR__ . '/api/professional.php';

@@ -88,12 +88,70 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
-        // API rate limit for authenticated users
-        RateLimiter::for('api', function (Request $request) {
-            $uid = $request->attributes->get('supabase_uid') ?? $request->ip();
+        // Authenticated professional routes
+        RateLimiter::for('authenticated', function (Request $request) {
+            return Limit::perMinute(120)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests. Please try again later.',
+                    ], 429);
+                });
+        });
 
-            return Limit::perMinute(60)
-                ->by($uid);
+        // Staff panel routes
+        RateLimiter::for('staff', function (Request $request) {
+            return Limit::perMinute(200)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        // Enterprise routes
+        RateLimiter::for('enterprise', function (Request $request) {
+            return Limit::perMinute(120)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        // Webhook endpoints (Square, Fresha, Stripe Connect)
+        RateLimiter::for('webhooks', function (Request $request) {
+            return Limit::perMinute(200)
+                ->by($request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many webhook requests.',
+                    ], 429);
+                });
+        });
+
+        // Account bootstrap (creation)
+        RateLimiter::for('bootstrap', function (Request $request) {
+            return Limit::perMinute(5)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many account creation attempts. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        // Public plans listing
+        RateLimiter::for('plans', function (Request $request) {
+            return Limit::perMinute(30)
+                ->by($request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests. Please try again later.',
+                    ], 429);
+                });
         });
     }
 }

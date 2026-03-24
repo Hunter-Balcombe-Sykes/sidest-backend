@@ -1103,6 +1103,12 @@ class StoreAnalyticsV2Controller extends ApiController
 
     private function bucketExpression(string $groupBy, string $column): string
     {
+        $allowedColumns = ['d.day', 'd.created_at', 'd.order_date'];
+
+        if (! in_array($column, $allowedColumns, true)) {
+            throw new \InvalidArgumentException("Invalid bucket column: {$column}");
+        }
+
         return match ($groupBy) {
             'week' => "date_trunc('week', {$column}::timestamp)::date",
             'month' => "date_trunc('month', {$column}::timestamp)::date",
