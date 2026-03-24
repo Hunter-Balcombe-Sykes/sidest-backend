@@ -26,11 +26,17 @@ class StripeConnectController extends Controller
 
         $connectStatus = $this->connectService->syncAccountStatus($pro);
         $hasPaymentMethod = $this->connectService->brandHasPaymentMethod($pro);
+        $pro->refresh();
 
         return response()->json([
             'connect' => $connectStatus,
             'has_payment_method' => $hasPaymentMethod,
             'stripe_customer_id' => $pro->stripe_customer_id,
+            'funding_mode' => $pro->stripe_commission_funding_mode ?? 'auto_charge',
+            'manual_balance' => [
+                'cents' => (int) ($pro->stripe_manual_balance_cents ?? 0),
+                'currency_code' => strtoupper((string) ($pro->stripe_manual_balance_currency ?: 'AUD')),
+            ],
         ]);
     }
 
@@ -98,8 +104,36 @@ class StripeConnectController extends Controller
     public function setupPaymentMethod(Request $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
+        }
 
         $result = $this->connectService->createSetupIntent($pro);
+
+        return response()->json($result);
+    }
+
+    /**
+     * POST /stripe/payment-method/setup-checkout
+     * Creates a hosted Stripe Checkout setup session for brand payment method setup.
+     */
+    public function createPaymentMethodCheckoutSession(Request $request): JsonResponse
+    {
+        $request->validate([
+            'success_url' => 'required|url',
+            'cancel_url' => 'required|url',
+        ]);
+
+        $pro = $request->attributes->get('professional');
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
+        }
+
+        $result = $this->connectService->createPaymentMethodSetupCheckoutSession(
+            $pro,
+            $request->input('success_url'),
+            $request->input('cancel_url'),
+        );
 
         return response()->json($result);
     }
@@ -115,10 +149,43 @@ class StripeConnectController extends Controller
         ]);
 
         $pro = $request->attributes->get('professional');
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
+        }
 
         $this->connectService->savePaymentMethod($pro, $request->input('payment_method_id'));
 
         return response()->json(['status' => 'saved']);
+    }
+
+    /**
+     * POST /stripe/payment-method/sync-session
+     * Syncs the default payment method from a completed Checkout setup session.
+     */
+    public function syncPaymentMethodSession(Request $request): JsonResponse
+    {
+        $request->validate([
+            'session_id' => 'required|string',
+        ]);
+
+        $pro = $request->attributes->get('professional');
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
+        }
+
+        try {
+            $result = $this->connectService->syncPaymentMethodFromCheckoutSession(
+                $pro,
+                $request->input('session_id'),
+            );
+
+            return response()->json([
+                'status' => 'saved',
+                ...$result,
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 
     /**
@@ -128,6 +195,9 @@ class StripeConnectController extends Controller
     public function listPaymentMethods(Request $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
+        }
 
         $methods = $this->connectService->listPaymentMethods($pro);
 
@@ -141,10 +211,93 @@ class StripeConnectController extends Controller
     public function removePaymentMethod(Request $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
+        }
 
         $this->connectService->removeBrandPaymentSetup($pro);
 
         return response()->json(['status' => 'removed']);
+    }
+
+    /**
+     * PATCH /stripe/funding-mode
+     * Set brand commission funding mode: auto_charge or manual_topup.
+     */
+    public function updateFundingMode(Request $request): JsonResponse
+    {
+        $request->validate([
+            'mode' => 'required|string|in:auto_charge,manual_topup',
+        ]);
+
+        $pro = $request->attributes->get('professional');
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return response()->json(['error' => 'Only brand accounts can change commission funding mode.'], 403);
+        }
+        $mode = $request->input('mode');
+
+        $this->connectService->setCommissionFundingMode($pro, $mode);
+
+        return response()->json([
+            'status' => 'updated',
+            'mode' => $mode,
+        ]);
+    }
+
+    /**
+     * POST /stripe/topups/checkout
+     * Creates hosted Stripe Checkout session to manually top up commission wallet.
+     */
+    public function createTopUpCheckoutSession(Request $request): JsonResponse
+    {
+        $request->validate([
+            'amount_cents' => 'required|integer|min:100|max:10000000',
+            'currency_code' => 'nullable|string|size:3',
+            'success_url' => 'required|url',
+            'cancel_url' => 'required|url',
+        ]);
+
+        $pro = $request->attributes->get('professional');
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return response()->json(['error' => 'Only brand accounts can top up commission wallet balance.'], 403);
+        }
+
+        $result = $this->connectService->createManualTopUpCheckoutSession(
+            $pro,
+            (int) $request->input('amount_cents'),
+            strtoupper((string) $request->input('currency_code', 'AUD')),
+            $request->input('success_url'),
+            $request->input('cancel_url'),
+        );
+
+        return response()->json($result);
+    }
+
+    /**
+     * POST /stripe/topups/confirm
+     * Confirms a completed top-up Checkout session and credits the wallet.
+     */
+    public function confirmTopUpCheckoutSession(Request $request): JsonResponse
+    {
+        $request->validate([
+            'session_id' => 'required|string',
+        ]);
+
+        $pro = $request->attributes->get('professional');
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return response()->json(['error' => 'Only brand accounts can top up commission wallet balance.'], 403);
+        }
+
+        try {
+            $result = $this->connectService->confirmManualTopUpCheckoutSession(
+                $pro,
+                $request->input('session_id'),
+            );
+
+            return response()->json($result);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 
     /**

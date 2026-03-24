@@ -37,6 +37,7 @@ class StripeConnectWebhookController extends Controller
             'account.updated' => $this->handleAccountUpdated($event->data->object),
             'transfer.created' => $this->handleTransferCreated($event->data->object),
             'transfer.failed' => $this->handleTransferFailed($event->data->object),
+            'transfer.reversed' => $this->handleTransferFailed($event->data->object),
             'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object),
             'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object),
             default => Log::debug('Unhandled Stripe Connect event', ['type' => $event->type]),
@@ -55,7 +56,7 @@ class StripeConnectWebhookController extends Controller
         }
 
         $status = 'onboarding';
-        if ($account->charges_enabled && $account->payouts_enabled && $account->details_submitted) {
+        if ($account->payouts_enabled && $account->details_submitted) {
             $status = 'active';
         } elseif ($account->requirements?->disabled_reason ?? null) {
             $status = 'restricted';

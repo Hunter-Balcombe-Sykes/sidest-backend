@@ -66,10 +66,20 @@ class Professional extends BaseModel
 
         'handle_lc',
 
+        // Stripe Connect + commission funding
+        'stripe_connect_account_id',
+        'stripe_connect_status',
+        'stripe_customer_id',
+        'stripe_payment_method_id',
+        'stripe_commission_funding_mode',
+        'stripe_manual_balance_cents',
+        'stripe_manual_balance_currency',
+
     ];
 
     protected $casts = [
         'onboarding_step' => 'integer',
+        'stripe_manual_balance_cents' => 'integer',
         'created_at'      => 'datetime',
         'updated_at'      => 'datetime',
         'deleted_at'      => 'datetime',
