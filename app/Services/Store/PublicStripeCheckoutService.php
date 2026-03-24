@@ -132,6 +132,154 @@ class PublicStripeCheckoutService
         ];
     }
 
+    /**
+     * Create a PaymentIntent on the brand's connected Stripe account for an embedded card form.
+     * Returns client_secret + brand_stripe_account_id for the frontend to confirm with.
+     */
+    public function createPaymentIntent(
+        CheckoutSession $checkoutSession,
+        array $customer,
+    ): array {
+        $brand = $checkoutSession->brandProfessional()->first();
+        if (! $brand instanceof Professional) {
+            throw new \RuntimeException('Connected brand account was not found.');
+        }
+
+        $checkoutMode = $this->resolveCheckoutMode((string) $brand->id);
+        if ($checkoutMode !== 'stripe') {
+            throw new \RuntimeException('This brand is not using Comet Payments.');
+        }
+
+        if (
+            ! $brand->stripe_connect_account_id
+            || trim((string) $brand->stripe_connect_status) !== 'active'
+        ) {
+            throw new \RuntimeException('Brand Stripe account is not connected.');
+        }
+
+        $contextSnapshot = is_array($checkoutSession->context_snapshot) ? $checkoutSession->context_snapshot : [];
+        $normalizedLineItems = $this->normalizeLineItems(
+            (string) $checkoutSession->affiliate_professional_id,
+            (string) $checkoutSession->brand_professional_id,
+            Arr::get($contextSnapshot, 'line_items', [])
+        );
+
+        if ($normalizedLineItems === []) {
+            throw new \RuntimeException('No valid storefront items were supplied for checkout.');
+        }
+
+        $currencyCode = strtoupper(trim((string) ($contextSnapshot['currency_code'] ?? 'AUD')));
+        if ($currencyCode === '') {
+            $currencyCode = 'AUD';
+        }
+
+        $orderTotalCents = array_sum(array_column($normalizedLineItems, 'line_total_cents'));
+        $grossCommissionCents = array_sum(array_column($normalizedLineItems, 'commission_cents'));
+
+        if ($orderTotalCents <= 0) {
+            throw new \RuntimeException('Checkout total must be greater than zero.');
+        }
+
+        $paymentIntent = $this->stripe->paymentIntents->create([
+            'amount' => $orderTotalCents,
+            'currency' => strtolower($currencyCode),
+            'payment_method_types' => ['card'],
+            'application_fee_amount' => $grossCommissionCents,
+            'metadata' => [
+                'purpose' => 'public_store_payment',
+                'checkout_session_token' => $checkoutSession->token,
+                'site_id' => (string) $checkoutSession->site_id,
+                'affiliate_professional_id' => (string) $checkoutSession->affiliate_professional_id,
+                'brand_professional_id' => (string) $brand->id,
+                'gross_commission_cents' => (string) $grossCommissionCents,
+                'order_total_cents' => (string) $orderTotalCents,
+            ],
+        ], ['stripe_account' => $brand->stripe_connect_account_id]);
+
+        $checkoutSession->context_snapshot = array_merge($contextSnapshot, [
+            'checkout_mode' => 'stripe',
+            'customer' => $this->normalizeCustomerSnapshot($customer),
+            'line_items' => $normalizedLineItems,
+            'stripe' => array_merge(
+                is_array($contextSnapshot['stripe'] ?? null) ? $contextSnapshot['stripe'] : [],
+                [
+                    'payment_intent_id' => $paymentIntent->id,
+                    'gross_commission_cents' => $grossCommissionCents,
+                    'order_total_cents' => $orderTotalCents,
+                    'created_at' => now()->toIso8601String(),
+                ]
+            ),
+        ]);
+        $checkoutSession->save();
+
+        return [
+            'client_secret' => $paymentIntent->client_secret,
+            'brand_stripe_account_id' => $brand->stripe_connect_account_id,
+            'amount' => $orderTotalCents,
+            'currency' => strtolower($currencyCode),
+        ];
+    }
+
+    /**
+     * Finalize a storefront order after payment_intent.succeeded webhook fires.
+     */
+    public function finalizePaymentIntentOrder(object $paymentIntent, ?string $connectedAccountId = null): void
+    {
+        $token = trim((string) ($paymentIntent->metadata?->checkout_session_token ?? ''));
+        if ($token === '') {
+            return;
+        }
+
+        DB::transaction(function () use ($token, $paymentIntent, $connectedAccountId): void {
+            $checkoutSession = CheckoutSession::query()
+                ->where('token', $token)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $checkoutSession) {
+                return;
+            }
+
+            $contextSnapshot = is_array($checkoutSession->context_snapshot) ? $checkoutSession->context_snapshot : [];
+            $existingStripe = is_array($contextSnapshot['stripe'] ?? null) ? $contextSnapshot['stripe'] : [];
+
+            // Idempotency guard
+            if (trim((string) ($existingStripe['shopify_order_id'] ?? '')) !== '') {
+                return;
+            }
+
+            $brand = $checkoutSession->brandProfessional()->first();
+            if (! $brand instanceof Professional || ! $brand->stripe_connect_account_id) {
+                throw new \RuntimeException('Unable to resolve connected brand for payment intent finalization.');
+            }
+
+            if ($connectedAccountId !== null && $connectedAccountId !== '' && $brand->stripe_connect_account_id !== $connectedAccountId) {
+                throw new \RuntimeException('Stripe connected account mismatch during payment intent finalization.');
+            }
+
+            $orderResult = $this->shopifyOrders->createPaidOrderFromCheckoutSession(
+                $checkoutSession,
+                $brand,
+                $contextSnapshot,
+                [
+                    'stripe_payment_intent_id' => (string) $paymentIntent->id,
+                ]
+            );
+
+            $checkoutSession->context_snapshot = array_merge($contextSnapshot, [
+                'stripe' => array_merge($existingStripe, [
+                    'payment_intent_id' => (string) $paymentIntent->id,
+                    'payment_completed_at' => now()->toIso8601String(),
+                    'shopify_order_id' => $orderResult['order_id'] ?? null,
+                    'shopify_order_name' => $orderResult['order_name'] ?? null,
+                    'shopify_draft_order_id' => $orderResult['draft_order_id'] ?? null,
+                ]),
+            ]);
+            $checkoutSession->last_seen_at = now();
+            $checkoutSession->save();
+        });
+    }
+
     public function finalizeCompletedCheckoutSession(object $session, ?string $connectedAccountId = null): void
     {
         $sessionId = trim((string) ($session->id ?? ''));

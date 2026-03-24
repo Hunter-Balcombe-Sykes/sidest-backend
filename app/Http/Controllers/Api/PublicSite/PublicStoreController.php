@@ -224,6 +224,65 @@ class PublicStoreController extends ApiController
     }
 
     /**
+     * POST /public/store/payment-intent
+     * Creates a PaymentIntent on the brand's Express account for embedded card checkout.
+     */
+    public function createPaymentIntent(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'checkout_session_token' => ['required', 'string', 'max:255'],
+            'customer' => ['required', 'array'],
+            'customer.name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.email' => ['required', 'string', 'email:rfc', 'max:255'],
+            'customer.phone' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.address1' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.city' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.province' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.country' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.zip' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new \Illuminate\Validation\ValidationException($validator);
+        }
+
+        $validated = $validator->validated();
+        $subdomain = $this->resolveSiteSubdomain($request);
+        if (! $subdomain) {
+            return $this->error('Missing site identifier.', 400);
+        }
+
+        $site = $this->siteResolver->resolvePublishedSite($subdomain);
+        if (! $site) {
+            return $this->error('Site not found.', 404);
+        }
+
+        $checkoutSession = CheckoutSession::query()
+            ->where('token', (string) $validated['checkout_session_token'])
+            ->where('site_id', (string) $site->id)
+            ->first();
+
+        if (! $checkoutSession) {
+            return $this->error('Checkout session not found.', 404);
+        }
+
+        if ((string) $checkoutSession->status !== 'active') {
+            return $this->error('Checkout session is no longer active.', 422);
+        }
+
+        try {
+            $result = $this->stripeCheckout->createPaymentIntent(
+                $checkoutSession,
+                (array) $validated['customer'],
+            );
+
+            return $this->success($result, 201);
+        } catch (\RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+    }
+
+    /**
      * Removed during Shopify-canonical analytics cutover.
      */
     public function recordOrderAnalytics(): JsonResponse

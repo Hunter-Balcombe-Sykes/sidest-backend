@@ -15,6 +15,10 @@ use Stripe\Webhook;
 
 class StripeConnectWebhookController extends Controller
 {
+    public function __construct(
+        private readonly PublicStripeCheckoutService $stripeCheckout,
+    ) {}
+
     public function __invoke(Request $request): JsonResponse
     {
         $payload = $request->getContent();
@@ -41,7 +45,7 @@ class StripeConnectWebhookController extends Controller
             'transfer.created' => $this->handleTransferCreated($event->data->object),
             'transfer.failed' => $this->handleTransferFailed($event->data->object),
             'transfer.reversed' => $this->handleTransferFailed($event->data->object),
-            'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object),
+            'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object, (string) ($event->account ?? '')),
             'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object),
             default => Log::debug('Unhandled Stripe Connect event', ['type' => $event->type]),
         };
@@ -128,10 +132,32 @@ class StripeConnectWebhookController extends Controller
         ]);
     }
 
-    private function handlePaymentIntentSucceeded(object $paymentIntent): void
+    private function handlePaymentIntentSucceeded(object $paymentIntent, string $connectedAccountId = ''): void
     {
-        $payoutId = $paymentIntent->metadata?->comet_payout_id ?? null;
+        $purpose = $paymentIntent->metadata?->purpose ?? null;
 
+        // Storefront embedded card payment
+        if ($purpose === 'public_store_payment') {
+            try {
+                $this->stripeCheckout->finalizePaymentIntentOrder(
+                    $paymentIntent,
+                    $connectedAccountId ?: null,
+                );
+                Log::info('Storefront payment intent finalized', [
+                    'payment_intent_id' => $paymentIntent->id,
+                    'checkout_session_token' => $paymentIntent->metadata?->checkout_session_token ?? null,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('Failed to finalize storefront payment intent', [
+                    'payment_intent_id' => $paymentIntent->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+            return;
+        }
+
+        // Commission payout payment intent
+        $payoutId = $paymentIntent->metadata?->comet_payout_id ?? null;
         if (! $payoutId) {
             return;
         }
