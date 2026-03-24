@@ -30,7 +30,16 @@ class FeaturedProductsPayloadService
     {
         $defaultRate = (float) config('comet.store.default_commission_rate', 15);
         $maxFeatured = max(0, (int) config('comet.store.max_featured_products', 10));
-        $checkoutMode = $this->resolveCheckoutModeForAffiliate($professionalId);
+
+        try {
+            $checkoutMode = $this->resolveCheckoutModeForAffiliate($professionalId);
+        } catch (Throwable $e) {
+            Log::warning('Could not resolve checkout mode for affiliate; defaulting to shopify.', [
+                'professional_id' => $professionalId,
+                'error' => $e->getMessage(),
+            ]);
+            $checkoutMode = 'shopify';
+        }
 
         $payload = [
             'selected_products' => [],
