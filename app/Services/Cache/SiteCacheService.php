@@ -458,6 +458,9 @@ class SiteCacheService
                 'selected_products' => array_values($existingStore['selected_products']),
                 'default_commission_rate' => (float) $existingStore['default_commission_rate'],
                 'max_featured_products' => (int) $existingStore['max_featured_products'],
+                'checkout_mode' => in_array(($existingStore['checkout_mode'] ?? null), ['shopify', 'stripe'], true)
+                    ? $existingStore['checkout_mode']
+                    : 'shopify',
             ];
         }
 
@@ -471,6 +474,9 @@ class SiteCacheService
                 'selected_products' => array_values($payload['selected_products']),
                 'default_commission_rate' => (float) $payload['default_commission_rate'],
                 'max_featured_products' => (int) $payload['max_featured_products'],
+                'checkout_mode' => in_array(($payload['checkout_mode'] ?? null), ['shopify', 'stripe'], true)
+                    ? $payload['checkout_mode']
+                    : 'shopify',
             ];
         }
 
@@ -485,6 +491,7 @@ class SiteCacheService
         $payload['selected_products'] = $store['selected_products'];
         $payload['default_commission_rate'] = $store['default_commission_rate'];
         $payload['max_featured_products'] = $store['max_featured_products'];
+        $payload['checkout_mode'] = $store['checkout_mode'] ?? 'shopify';
 
         return $payload;
     }

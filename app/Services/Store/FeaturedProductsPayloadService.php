@@ -22,13 +22,15 @@ class FeaturedProductsPayloadService
      *   default_product_selections: array<int, array<string, mixed>>,
      *   default_commission_rate: float,
      *   max_featured_products: int,
-     *   max_default_product_selections: int
+     *   max_default_product_selections: int,
+     *   checkout_mode: string
      * }
      */
     public function build(string $professionalId, string $logContext = 'featured_products'): array
     {
         $defaultRate = (float) config('comet.store.default_commission_rate', 15);
         $maxFeatured = max(0, (int) config('comet.store.max_featured_products', 10));
+        $checkoutMode = $this->resolveCheckoutModeForAffiliate($professionalId);
 
         $payload = [
             'selected_products' => [],
@@ -36,6 +38,7 @@ class FeaturedProductsPayloadService
             'default_commission_rate' => $defaultRate,
             'max_featured_products' => $maxFeatured,
             'max_default_product_selections' => $maxFeatured,
+            'checkout_mode' => $checkoutMode,
         ];
 
         if ($professionalId === '' || ! $this->hasSelectionsTable()) {
@@ -60,6 +63,7 @@ class FeaturedProductsPayloadService
             'default_commission_rate' => $defaultRate,
             'max_featured_products' => $maxFeatured,
             'max_default_product_selections' => $maxFeatured,
+            'checkout_mode' => $checkoutMode,
         ];
     }
 
@@ -80,5 +84,31 @@ class FeaturedProductsPayloadService
         }
 
         return $this->selectionsTableAvailable;
+    }
+
+    private function resolveCheckoutModeForAffiliate(string $affiliateProfessionalId): string
+    {
+        if ($affiliateProfessionalId === '') {
+            return 'shopify';
+        }
+
+        $brandProfessionalId = DB::table('core.brand_partner_links')
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->orderByDesc('is_primary')
+            ->orderByDesc('created_at')
+            ->value('brand_professional_id');
+
+        $brandProfessionalId = trim((string) $brandProfessionalId);
+        if ($brandProfessionalId === '') {
+            return 'shopify';
+        }
+
+        $mode = DB::table('retail.brand_store_settings')
+            ->where('professional_id', $brandProfessionalId)
+            ->value('checkout_mode');
+
+        $mode = strtolower(trim((string) $mode));
+
+        return in_array($mode, ['shopify', 'stripe'], true) ? $mode : 'shopify';
     }
 }
