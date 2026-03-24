@@ -15,13 +15,22 @@ use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
+use App\Services\Professional\BrandAffiliateInviteService;
+use App\Services\Professional\BrandPartnerLinkService;
+use App\Services\Enterprise\EnterpriseProvisioningService;
 use App\Services\Legal\ProfessionalLegalContentService;
 
 
 
 class BootstrapController extends ApiController
 {
-    public function bootstrap(BootstrapRequest $request, ProfessionalLegalContentService $legalContentService)
+    public function bootstrap(
+        BootstrapRequest $request,
+        ProfessionalLegalContentService $legalContentService,
+        EnterpriseProvisioningService $enterpriseProvisioningService,
+        BrandAffiliateInviteService $brandAffiliateInviteService,
+        BrandPartnerLinkService $brandPartnerLinks
+    )
     {
         $uid = $request->attributes->get('supabase_uid');
         if (!is_string($uid) || $uid === '') {
@@ -31,8 +40,21 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService) {
+            $allowedProfessionalTypes = array_keys(config('comet.professional_types', []));
+            $resolveProfessionalType = static function (mixed $candidate) use ($allowedProfessionalTypes): string {
+                if (is_string($candidate)) {
+                    $normalized = mb_strtolower(trim($candidate));
+                    if ($normalized !== '' && in_array($normalized, $allowedProfessionalTypes, true)) {
+                        return $normalized;
+                    }
+                }
+
+                return 'professional';
+            };
+
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks, $resolveProfessionalType) {
             $createdProfessional = false;
+            $provisionedEnterprise = null;
 
             $professional = Professional::query()->where('auth_user_id', $uid)->first();
 
@@ -44,7 +66,7 @@ class BootstrapController extends ApiController
                     'bio'             => null,
                     'country_code'    => $data['country_code'] ?? null,
                     'timezone'        => $data['timezone'] ?? null,
-                    'professional_type' => $data['professional_type'] ?? 'barber',
+                    'professional_type' => $resolveProfessionalType($data['professional_type'] ?? null),
                     'status'          => 'active',
                     'onboarding_step' => 0,
                     'qr_slug'         => $this->generateQrSlug($data['handle'] ?? null),
@@ -74,7 +96,7 @@ class BootstrapController extends ApiController
                     'last_name'     => $data['last_name'] ?? $professional->last_name,
                     'country_code'  => $data['country_code'] ?? $professional->country_code,
                     'timezone'      => $data['timezone'] ?? $professional->timezone,
-                    'professional_type' => $data['professional_type'] ?? $professional->professional_type,
+                    'professional_type' => $resolveProfessionalType($data['professional_type'] ?? $professional->professional_type),
                     'handle_lc' => $data['handle_lc'],
                 ];
 
@@ -96,6 +118,10 @@ class BootstrapController extends ApiController
             }
             $professional->save();
 
+            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
+                $provisionedEnterprise = $enterpriseProvisioningService->ensureForProfessional($professional);
+            }
+
             // Add to Comet updates list once (global list). Do NOT overwrite if they already unsubscribed.
             $this->ensureCometUpdatesSubscription($professional->primary_email);
 
@@ -107,6 +133,33 @@ class BootstrapController extends ApiController
 
                 $site = $this->createSiteWithRetry($professional->id, $base);
             }
+
+                if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
+                    $invite = $brandAffiliateInviteService->findByToken((string) $data['invite_token']);
+                    if (! $invite) {
+                    throw new RuntimeException('Invite not found.');
+                }
+
+                $brandAffiliateInviteService->claimInvite($invite, $professional);
+                } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
+                    $brandPartnerProfessional = Professional::query()
+                        ->whereKey((string) $data['brand_partner_professional_id'])
+                    ->where('professional_type', 'brand')
+                    ->first();
+
+                    if (! $brandPartnerProfessional) {
+                        throw new RuntimeException('Brand partner not found.');
+                    }
+
+                    $affiliateId = (string) $professional->id;
+                    $brandId = (string) $brandPartnerProfessional->id;
+
+                    if (! $brandPartnerLinks->isConnected($affiliateId, $brandId)) {
+                        $brandPartnerLinks->connectBrandToAffiliate($affiliateId, $brandId);
+                    }
+
+                    $brandPartnerLinks->promoteBrandToPrimary($affiliateId, $brandId);
+                }
 
             $legalContentService->refreshGenerated($professional, $site);
 
@@ -120,6 +173,7 @@ class BootstrapController extends ApiController
                 return [
                     'professional' => $professional->fresh(),
                     'site' => $site->fresh(),
+                    'enterprise' => $provisionedEnterprise?->fresh(),
                 ];
             });
         } catch (\Exception $e) {
@@ -297,7 +351,7 @@ class BootstrapController extends ApiController
         Notification::query()->firstOrCreate(
             [
                 'professional_id' => $professional->id,
-                'type' => 'info',
+                'type' => 'Info',
                 'title' => 'Welcome to Sight',
             ],
             [

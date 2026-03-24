@@ -73,6 +73,18 @@ return [
             'after_commit' => false,
         ],
 
+        // Dedicated connection for video transcoding jobs.
+        // Higher retry_after to accommodate long-running ffmpeg encodes.
+        // Run workers with: php artisan queue:work redis_video --queue=videos --timeout=3600
+        'redis_video' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => env('COMET_VIDEO_QUEUE_NAME', 'videos'),
+            'retry_after' => (int) env('COMET_VIDEO_QUEUE_RETRY_AFTER', 3600),
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
         'deferred' => [
             'driver' => 'deferred',
         ],

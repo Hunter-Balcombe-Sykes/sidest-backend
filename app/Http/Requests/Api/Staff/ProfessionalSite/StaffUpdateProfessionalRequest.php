@@ -3,10 +3,12 @@
 namespace App\Http\Requests\Api\Staff\ProfessionalSite;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use Illuminate\Validation\Rule;
 
 class StaffUpdateProfessionalRequest extends BaseFormRequest
 {
+    use NormalizesProfessionalType;
 
     public function rules(): array
     {
@@ -71,9 +73,7 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
 
         if ($this->has('professional_type')) {
             $professionalType = $this->input('professional_type');
-            $merge['professional_type'] = is_string($professionalType)
-                ? (trim($professionalType) === '' ? null : mb_strtolower(trim($professionalType)))
-                : $professionalType;
+            $merge['professional_type'] = $this->normalizeProfessionalTypeInput($professionalType);
         }
 
         if ($merge) {
@@ -94,4 +94,5 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
 
         return mb_strtolower($value);
     }
+
 }

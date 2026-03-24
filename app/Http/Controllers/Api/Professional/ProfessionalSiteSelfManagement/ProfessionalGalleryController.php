@@ -6,10 +6,12 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ImageGallery\ReorderGalleryImageRequest;
-use App\Models\Core\Site\SiteImage;
+use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
+use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class ProfessionalGalleryController extends ApiController
@@ -29,16 +31,16 @@ class ProfessionalGalleryController extends ApiController
         $pro  = $this->currentProfessional(request());
         $site = $this->currentSite($pro);
 
-        $images = SiteImage::query()
+        $images = SiteMedia::query()
             ->where('site_id', $site->id)
-            ->where('pool', SiteImage::POOL_GALLERY)
+            ->where('pool', SiteMedia::POOL_GALLERY)
             ->where('is_active', true)
-            ->with('variants')
+            ->with('mediaVariants')
             ->orderBy('sort_order')
             ->orderBy('created_at')
             ->get();
 
-        $result = $images->map(fn (SiteImage $img) => [
+        $result = $images->map(fn (SiteMedia $img) => [
             'id'         => $img->id,
             'pool'       => $img->pool,
             'alt_text'   => $img->alt_text,
@@ -73,9 +75,9 @@ class ProfessionalGalleryController extends ApiController
         $ids = array_values(array_unique($request->validated()['ids'] ?? []));
 
         DB::transaction(function () use ($site, $ids) {
-            $allIds = SiteImage::query()
+            $allIds = SiteMedia::query()
                 ->where('site_id', $site->id)
-                ->where('pool', SiteImage::POOL_GALLERY)
+                ->where('pool', SiteMedia::POOL_GALLERY)
                 ->where('is_active', true)
                 ->lockForUpdate()
                 ->orderBy('sort_order')
@@ -94,7 +96,7 @@ class ProfessionalGalleryController extends ApiController
             $newOrder  = array_merge($ids, $remaining);
 
             foreach ($newOrder as $i => $id) {
-                SiteImage::query()
+                SiteMedia::query()
                     ->where('site_id', $site->id)
                     ->where('id', $id)
                     ->update(['sort_order' => $i]);
@@ -109,17 +111,31 @@ class ProfessionalGalleryController extends ApiController
     /**
      * Soft-delete the gallery image and clean up its variants from storage.
      */
-    public function destroy(SiteImage $image): JsonResponse
+    public function destroy(Request $request, SiteMedia $image): JsonResponse
     {
-        $pro  = $this->currentProfessional(request());
+        $pro  = $this->currentProfessional($request);
         $site = $this->currentSite($pro);
         abort_unless($image->site_id === $site->id, 404);
 
         $this->mediaService->deleteVariants($image->id, $image->path);
         $image->delete();
 
+        if ($this->shouldRememberConfirmationPreference($request)) {
+            app(ConfirmationPreferenceService::class)->enableForProfessional(
+                (string) $pro->id,
+                ConfirmationPreferenceService::ACTION_DELETE_MEDIA
+            );
+        }
+
         app(SiteCacheService::class)->invalidateSite($site);
 
         return $this->success(['deleted' => true]);
+    }
+
+    private function shouldRememberConfirmationPreference(Request $request): bool
+    {
+        return $request->boolean('remember_confirmation_preference')
+            || $request->boolean('always_allow_confirmation')
+            || $request->boolean('dont_ask_again');
     }
 }

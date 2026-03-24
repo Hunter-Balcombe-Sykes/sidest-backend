@@ -3,7 +3,7 @@
 This document is the single source of truth for backend so the frontend can build:
 
 - Public mini-site (read-only site payload + lead capture + email subscribe + analytics)
-- Barber dashboard (profile + site settings + links + sections + services + gallery + customers + analytics + notifications)
+- Professional dashboard (profile + site settings + links + sections + services + gallery + customers + analytics + notifications)
 - Staff dashboard (staff-only browsing + admin editing tools)
 - Backend: Laravel API (this repo)
 - Auth: Supabase Auth (JWT access token)
@@ -18,9 +18,11 @@ This document is the single source of truth for backend so the frontend can buil
 - Data Models
 - Conventions (headers, errors, pagination, rate limits)
 - Public Mini-Site API
-- Professional (Barber) Dashboard API
+- Professional Dashboard API
+- Brand Partnerships and Brand Store API
+- Enterprise API
 - Staff API
-- Image uploads & processing (server-side WebP via queue)
+- Media uploads & processing (images + videos, server-side via queue)
 - Test users and getting tokens
 - Insomnia collection
 - Frontend env var checklist
@@ -29,14 +31,38 @@ This document is the single source of truth for backend so the frontend can buil
 
 ## 0) Recent Backend Changes (Commit Log Snapshot)
 
-Snapshot date: **March 11, 2026**.
+Snapshot date: **March 20, 2026**.
 
 ### Unreleased (working tree)
 
+- Add video upload support (`POST /api/uploads` with `video` field); FFmpeg-based MP4 + HLS transcoding on dedicated `redis_video` queue; feature-flagged via `COMET_VIDEO_UPLOADS_ENABLED`.
+- Extend `core.site_images` with `media_type`, `processing_state`, `processing_error`, `duration_ms`, `poster_path`, `original_mime`, `original_size_bytes`.
+- Add `core.media_variants` table for video artifacts (MP4s, HLS playlists, poster).
+- Add `gallery_videos` and `content_videos` arrays to `public_site_payload`; `gallery` / `content_images` remain image-only.
+- Add `media_type` and `ids[]` filter params to `GET /api/images`; add `media_type` param to `POST /api/images/reorder`.
 - Add per-professional legal content storage with generated + manual variants and source toggles.
 - Add `GET /api/site/legal-content` and `PUT|PATCH /api/site/legal-content`.
 - Add public payload `legal` object with active document resolution.
 - Ensure legal defaults to templated content and never renders blank when manual content is empty.
+- Add enterprise architecture: enterprises, memberships, ambassador-promoter contracts, and promoter commerce tables.
+- Add enterprise self-service routes: `GET|POST|PATCH|DELETE /api/enterprise/me`.
+- Expand professional types to: `barber`, `hairdresser`, `ambassador`, `promoter`, `barbershop`, `salon`.
+- Update bootstrap and profile update flows to auto-provision enterprise records for enterprise owner types (`promoter`, `barbershop`, `salon`).
+- Update featured products rules for enterprise linkage and ambassador promoter-contract validation.
+- Add relational brand partner links (`brand_partner_links`) and move brand-affiliate relationship logic off heavy `site.settings` JSON lookups.
+- Add brand-affiliate invite hardening: transactional claim/decline, expired invite handling, and consistent email matching.
+- Add brand role-gates for brand store endpoints and paginate `GET /api/brand-partners`.
+- Add brand partner + invite endpoints documentation and frontend contract notes.
+- Add brand-approved affiliate commerce schema: `retail.brand_products`, `retail.brand_product_affiliate_overrides`, `core.enterprise_brand_links`, and `distributor` enterprise type support.
+- Hard-cutover `PUT /api/store/featured-products` to `selected_products[{brand_product_id, sort_order}]`; legacy Shopify-id payload is rejected.
+- Add `GET /api/store/available-products` for affiliate-visible products across connected brands (featured-first ordering).
+- Add manager catalog endpoints: `GET /api/store/brand-products`, `PATCH /api/store/brand-products/{brandProductId}`, `PATCH /api/store/brand-products/bulk`.
+- Expand affiliate override endpoints to deny/allow access control (`GET /api/store/affiliate-overrides`, `PUT|DELETE /api/store/affiliate-overrides/{deny|allow}`).
+- Add per-affiliate product pricing endpoints: `GET|PUT|DELETE /api/store/affiliate-product-settings`.
+- Enforce storefront validity via joins: connected brand link + availability + sync-active + deny override restriction.
+- Activate `allow` override behavior to bypass brand-level availability for a specific affiliate while `deny` keeps unconditional precedence.
+- Add selection cleanup flows: unavailability/disconnect/deny now remove invalid selections and create notifications.
+- Add pricing outputs for store payloads: effective commission and discounted price with ceil-to-nearest-5-cents rounding, including affiliate-level override fields.
 
 ### Recent commits
 
@@ -89,7 +115,7 @@ A Supabase-authenticated user is not automatically a professional in Comet.
 
 **For a new user, call:**
 
-- POST /api/bootstrap This creates the core.professionals and core.sites rows tied to the Supabase user id (sub in the JWT).
+- POST /api/bootstrap This creates/updates `core.professionals` and `core.sites` tied to the Supabase user id (sub in JWT), and auto-provisions enterprise records for enterprise owner types.
 
 If you skip bootstrap, professional routes will return 403 with a message prompting bootstrap.
 
@@ -97,7 +123,8 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 
 ### Auth: Required (Supabase JWT)
 
-**Purpose:** Create a new professional account and associated site. Auto-generates a unique handle from display_name if not provided.
+**Purpose:** Create or refresh the authenticated user profile + site in one call.  
+If the selected `professional_type` is an enterprise-owner type (`promoter`, `barbershop`, or `salon`), an enterprise profile and owner membership are auto-provisioned in the same transaction.
 
 **Request body:**
 
@@ -111,7 +138,9 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 "country_code": "AU",
 "timezone": "Australia/Sydney",
 "professional_type": "barber",
-"handle": "joshbarber"
+"handle": "joshbarber",
+"invite_token": null,
+"brand_partner_professional_id": null
 }
 ```
 
@@ -123,10 +152,15 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 - `last_name` (optional): Last name
 - `country_code` (optional): 2-5 letter country code
 - `timezone` (optional): IANA timezone
-- `professional_type` (optional): One of `barber`, `salon`, `influencer` (defaults to `barber`)
+- `professional_type`:
+  - required for first bootstrap of a new Supabase user
+  - optional for subsequent bootstrap calls
+  - allowed values: `professional`, `influencer`, `barber`, `hairdresser`, `ambassador`, `promoter`, `brand`, `barbershop`, `salon`
 - `handle` (optional): Unique username/slug (if omitted, auto-generated from display_name)
+- `invite_token` (optional): claim a brand-affiliate invite during bootstrap
+- `brand_partner_professional_id` (optional): connect to a brand partner during bootstrap when no invite token is provided
 
-**Response (201 or 200):**
+**Response (200):**
 
 ```json
 {
@@ -149,11 +183,16 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
         "professional_id": "uuid",
         "subdomain": "josh-barber",
         "is_published": false
-    }
+    },
+    "enterprise": null
 }
 ```
 
-**Common status codes:** 200 (existing user bootstrapped again), 201 (new professional created), 401 (invalid JWT), 422 (validation error)
+`enterprise` response behavior:
+- `null` for non-enterprise types (`barber`, `hairdresser`, `ambassador`)
+- object for enterprise-owner types (`promoter`, `barbershop`, `salon`)
+
+**Common status codes:** 200, 401 (invalid JWT), 422 (validation error)
 
 **Note:** Bootstrap automatically creates a free-tier subscription for new professionals. If a free plan (plan_key = `free`) exists in the plans table, the professional will be subscribed to it with status `active` and provider `internal`.
 
@@ -375,7 +414,8 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | handle                  | string   | no       | joshbarber                               | unqiue (case-sensitive), 3-40 char, must start with letter |
 | display_name            | string   | no       | Josh Barber                              | Max 80                                                     |
 | bio                     | string   | yes      | Mobile Barber in Darwin                  | Max 2000, also mirrored from bio section when updated      |
-| professional_type       | string   | no       | barber                                   | One of: barber, salon, influencer                          |
+| professional_type       | string   | no       | barber                                   | One of: professional, influencer, barber, hairdresser, ambassador, promoter, brand, barbershop, salon |
+| primary_enterprise_id   | uuid     | yes      | `10000000-...`                           | Optional pointer to primary enterprise (membership table is source of truth) |
 | primary_email           | email    | no       | josh@example.copm                        | Max 255                                                    |
 | phone                   | string   | no       | +6140000000                              | Max 40                                                     |
 | first_name              | string   | no       | Josh                                     | Max 80                                                     |
@@ -402,6 +442,46 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | fresha_token_expires_at | datetime | yes      | `2026-03-01T00:00:00Z`                   | When the Fresha access token expires                       |
 | fresha_partner_id       | string   | yes      | `partner_456`                            | Fresha partner identifier                                  |
 | fresha_last_synced_at   | datetime | yes      | `2026-02-20T12:00:00Z`                   | Last successful Fresha catalog sync                        |
+
+### Enterprise (core.enterprises)
+| Name                    | Type     | Nullable | Example                | Constraints / Notes |
+|-------------------------|----------|----------|------------------------|---------------------|
+| id                      | uuid     | no       | `10000000-...`         | Primary key |
+| auth_user_id            | uuid     | yes      | `30000000-...`         | Optional owner auth user id (unique among active enterprises) |
+| name                    | string   | no       | `Atlas Promotions`     | Max 255 |
+| handle                  | string   | yes      | `atlas-promotions`     | Unique among active enterprises |
+| enterprise_type         | string   | no       | `promoter`             | One of: `promoter`, `barbershop`, `salon`, `distributor` |
+| status                  | string   | no       | `active`               | One of: `active`, `inactive`, `suspended` |
+| subscription_tier       | string   | yes      | `enterprise`           | Enterprise plan key/label |
+| primary_email           | string   | yes      | `hello@example.com`    | Business contact |
+| phone                   | string   | yes      | `+61400000000`         | Business contact |
+| public_contact_email    | string   | yes      | `bookings@example.com` | Public-facing contact |
+| public_contact_number   | string   | yes      | `+61400000001`         | Public-facing contact |
+| location_*              | string   | yes      | `Melbourne`            | Address fields |
+| metadata                | jsonb    | no       | `{}`                   | Flexible metadata |
+| deleted_at              | datetime | yes      | `null`                 | Soft delete marker |
+
+### Professional Enterprise Membership (core.professional_enterprise_memberships)
+| Name                    | Type     | Nullable | Example        | Constraints / Notes |
+|-------------------------|----------|----------|----------------|---------------------|
+| id                      | uuid     | no       | `40000000-...` | Primary key |
+| professional_id         | uuid     | no       | `20000000-...` | FK to professional |
+| enterprise_id           | uuid     | no       | `10000000-...` | FK to enterprise |
+| relationship_type       | string   | no       | `owner`        | One of: `owner`, `employee`, `chair_renter`, `contractor`, `affiliate`, `member` |
+| is_primary              | boolean  | no       | `true`         | Only one active primary membership per professional |
+| starts_at               | datetime | no       | `...`          | Start timestamp |
+| ends_at                 | datetime | yes      | `null`         | Active when null |
+
+### Ambassador Promoter Contract (core.influencer_promoter_contracts)
+| Name                        | Type     | Nullable | Example        | Constraints / Notes |
+|-----------------------------|----------|----------|----------------|---------------------|
+| id                          | uuid     | no       | `50000000-...` | Primary key |
+| influencer_professional_id  | uuid     | no       | `20000000-...` | Must reference `professional_type = ambassador` |
+| promoter_enterprise_id      | uuid     | no       | `10000000-...` | Must reference `enterprise_type = promoter` |
+| status                      | string   | no       | `active`       | `draft`, `active`, `paused`, `ended`, `terminated` |
+| exclusive                   | boolean  | no       | `true`         | At most one active exclusive contract per ambassador |
+| starts_at                   | datetime | no       | `...`          | Contract start |
+| ends_at                     | datetime | yes      | `null`         | Active when null and status is `active` |
 
 
 ### Site
@@ -716,7 +796,7 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 ```json
 {
   "published": true,
-  "site": { "id": "uuid", "subdomain": "fadez", "settings": {}, "gallery": [], "content_images": [] },
+  "site": { "id": "uuid", "subdomain": "fadez", "settings": {}, "gallery": [], "content_images": [], "gallery_videos": [], "content_videos": [] },
   "professional": { "id": "uuid", "handle": "fadez", "display_name": "Fadez Studio", "professional_type": "barber", "bio": null },
   "theme": { "id": "uuid", "key": "modern", "name": "Modern", "config": {} },
   "links": [],
@@ -745,6 +825,7 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 **Notes:**
 - `blocks` is a combined, sort-ordered array of both `links` and `sections` and includes `block_group` on each item.
 - Featured-products data is embedded for theme rendering via both top-level keys (`selected_products`, rates) and a nested `store` object.
+- `site.gallery` and `site.content_images` are image-only arrays (unchanged). `site.gallery_videos` and `site.content_videos` are video-only arrays. Each video item includes `{ id, sort_order, processing_state, duration_ms, poster, variants: { optimized, maximized }, streams: { adaptive, optimized, maximized } }`. Videos with `processing_state != ready` are excluded automatically.
 
 ### `POST /api/public/analytics/pageviews`
 
@@ -1039,6 +1120,48 @@ The following booking endpoints are domain-scoped and accessed via the mini-site
 
 ---
 
+### Public Store API
+
+#### Domain-Scoped Store Endpoints
+
+The following store endpoints are domain-scoped and accessed via the mini-site subdomain:
+`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/store/...`
+
+#### `GET /api/public/store/featured-products`
+
+- Purpose: fetch publicly visible featured product payload for the resolved site
+- Auth: None
+- Rate limit: public-site
+- Response (200): selected product payload including pricing/commission context
+- Common status codes: 200, 404, 429
+
+#### `POST /api/public/store/checkout-session`
+
+- Purpose: mint deterministic checkout attribution token for Shopify order attribution
+- Auth: None
+- Rate limit: public-site
+- Site resolution order: `X-Site-Subdomain` header -> `subdomain`/`slug` query -> `subdomain`/`slug` body -> host subdomain
+- Request body (optional fields):
+  - `currency_code` (string, 3 chars)
+  - `line_items` (array, max 100)
+    - `brand_product_id` (uuid, optional)
+    - `shopify_product_id` (string, optional)
+    - `quantity` (int >= 1, optional)
+    - `unit_price_cents` (int >= 0, optional)
+    - `line_total_cents` (int >= 0, optional)
+  - `context` (object, optional)
+- Response (201):
+  - `{ "token": "comet_session_...", "expires_at": "...", "affiliate_professional_id": "...", "brand_professional_id": "...", "site_id": "...", "currency_code": "AUD" }`
+- Common status codes:
+  - 201
+  - 400 (site identifier missing)
+  - 404 (site not found)
+  - 409 (`MULTIPLE_BRANDS_NOT_SUPPORTED`)
+  - 422 (`NO_CONNECTED_BRAND` or validation failure)
+  - 429
+
+---
+
 #### Header-Based Slug Routing
 
 For frontends that cannot use subdomain DNS routing, the following endpoints accept the subdomain via the `X-Site-Subdomain` header and are accessed on the API host:
@@ -1059,8 +1182,10 @@ For frontends that cannot use subdomain DNS routing, the following endpoints acc
 #### `GET /api/public/booking/services-by-slug`
 #### `POST /api/public/booking/availability-by-slug`
 #### `POST /api/public/booking/checkout-by-slug`
+#### `GET /api/public/store/featured-products-by-slug`
+#### `POST /api/public/store/checkout-session-by-slug`
 
-- Purpose: header-based variants of the booking endpoints
+- Purpose: header-based variants of the booking/store endpoints
 - Auth: None
 - Rate limit: public-site
 - Headers: `X-Site-Subdomain` (required): the site subdomain slug
@@ -1099,7 +1224,7 @@ For frontends that cannot use subdomain DNS routing, the following endpoints acc
 
 ---
 
-## 7) Professional (Barber) Dashboard API
+## 7) Professional Dashboard API
 
 All routes below require: Authorization header AND a professional profile (current.pro middleware).
 
@@ -1108,13 +1233,19 @@ All routes below require: Authorization header AND a professional profile (curre
 - Purpose: bootstrap dashboard UI with current professional, site, blocks, services, and customer count
 - Auth: Required
 - Response (200): `{ "uid": "supabase-user-uuid", "professional": { ..., "professional_type": "barber" }, "site": { ... }, "legal_content": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
+- Enterprise fields in `professional`:
+  - `primary_enterprise_id`
+  - `primary_enterprise` (object or null)
+  - `enterprise_memberships` (array, each with `enterprise` object snapshot)
+  - `active_promoter_contract` (object or null; ambassador-focused)
 - Common status codes: 200, 401, 403
 
 ### `PATCH /api/me`
 
 - Purpose: update professional profile fields
 - Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "barber", "public_contact_email": "bookings@example.com" }`
-- `professional_type` allowed values: `barber`, `salon`, `influencer`
+- `professional_type` allowed values: `professional`, `influencer`, `barber`, `hairdresser`, `ambassador`, `promoter`, `brand`, `barbershop`, `salon`
+- Behavior: switching to `promoter`, `barbershop`, or `salon` auto-provisions/updates an enterprise profile and owner membership
 - Response (200): `{ "professional": { ... } }`
 - Common status codes: 200, 401, 403, 422
 - Images are managed via `POST /api/uploads` (pool=gallery or pool=content). No image fields are accepted on this endpoint.
@@ -1128,6 +1259,7 @@ All routes below require: Authorization header AND a professional profile (curre
 
 - Purpose: update site settings, subdomain, and theme_id
 - Request body: `{ "subdomain": "joshbarber", "theme_id": "uuid or null", "settings": { "primary_color": "#000000" } }`
+- Relationship settings are not writable here: `settings.brand_partner`, `settings.brandPartner`, and `settings.additional_brand_partners` are rejected. Use the brand partner/invite endpoints instead.
 - Response (200): `{ "site": { ... } }`
 - Common status codes: 200, 401, 403, 422
 - Banners are managed via `POST /api/uploads` (pool=content) and the frontend picks from `optimized` / `maximized`. No banner fields are accepted on this endpoint.
@@ -1166,7 +1298,97 @@ All routes below require: Authorization header AND a professional profile (curre
 
 ### `PATCH /api/site/visibility`
 
-- Purpose: publish or unpublish the mini-site Request body: { "published": true } Response (200): { published: true } Services
+- Purpose: publish or unpublish the mini-site
+- Request body: `{ "published": true }`
+- Response (200): `{ "published": true }`
+
+### Brand Partnerships & Invites
+
+#### `GET /api/brand-affiliates` (brand-only)
+- Purpose: list affiliates currently connected to the logged-in brand
+- Response (200): `{ "affiliates": [{ "id": "uuid", "full_name": "...", "handle": "...", "email": "...", "phone": "...", "connected_at": "...", "is_primary": true }] }`
+- Common status codes: 200, 401, 403
+
+#### `DELETE /api/brand-affiliates/{affiliate}` (brand-only)
+- Purpose: disconnect an affiliate from the logged-in brand
+- Path param: `affiliate` (uuid)
+- Response (200): `{ "affiliate_id": "uuid", "disconnected": true }`
+- Common status codes: 200, 401, 403, 404
+
+#### `GET /api/brand-affiliate-invites` (brand-only)
+- Purpose: list invites created by the logged-in brand
+- Response (200): `{ "invites": [{ "id": "uuid", "status": "pending|accepted|declined|expired", "invite_type": "generic|personalised", "email": "...", "token": "...", "created_at": "...", "accepted_at": "..." }] }`
+- Common status codes: 200, 401, 403
+
+#### `POST /api/brand-affiliate-invites/availability` (brand-only)
+- Purpose: check invite availability by email before creating an invite
+- Request body: `{ "email": "affiliate@example.com" }`
+- Response (200): availability object for `email` and `phone` channels
+  - `email.will_refresh` is `true` when this email already has a non-accepted invite for this brand and resend will refresh it in place.
+  - `email.available` is only `false` when the email is already connected to this brand.
+- Common status codes: 200, 401, 403, 422
+
+#### `POST /api/brand-affiliate-invites` (brand-only)
+- Purpose: create a brand-affiliate invite
+- Request body: `{ "email": "affiliate@example.com", "phone": null, "first_name": "Sam", "last_name": "Smith", "message": "Join us", "expiration": "24h|7d|30d|none" }`
+  - If `expiration` is omitted, default is `30d`.
+  - Resend behavior: same brand + same email refreshes existing non-accepted invite (`pending|expired|declined`) with the same token.
+- Response:
+  - `201` when created, `200` when refreshed.
+  - `{ "invite": { "id": "uuid", "token": "...", "status": "pending", ... }, "action": "created|refreshed" }`
+- Common status codes: 200, 201, 401, 403, 422
+
+#### `POST /api/brand-affiliate-invites/bulk` (brand-only)
+- Purpose: create/refresh many invites in one request
+- Request body:
+  - `{ "invites": [{ "email": "affiliate@example.com", "phone": null, "first_name": "Sam", "last_name": "Smith", "message": "Join us", "expiration": "24h|7d|30d|none" }] }`
+  - Max 500 rows per request.
+  - Duplicate emails in one request use last-row-wins; earlier duplicates are skipped.
+- Response (200):
+  - `{ "summary": { "total_rows": 3, "created_count": 1, "refreshed_count": 1, "skipped_count": 1, "error_count": 0 }, "results": [...] }`
+  - Partial success: valid rows are processed even when other rows fail.
+- Common status codes: 200, 401, 403, 422
+
+#### `POST /api/brand-affiliate-invites/import-csv` (brand-only)
+- Purpose: CSV import for invite create/refresh
+- Content-Type: `multipart/form-data`
+- Form fields:
+  - `file` (required CSV upload)
+- Notes:
+  - Synchronous processing, max 500 data rows.
+  - Flexible header matching (case/spacing/underscore-insensitive aliases).
+  - Unknown columns are ignored.
+  - Partial success with row-level error reporting.
+- Response shape matches `POST /api/brand-affiliate-invites/bulk`.
+- Common status codes: 200, 401, 403, 422
+
+#### `DELETE /api/brand-affiliate-invites/{invite}` (brand-only)
+- Purpose: delete an invite created by the logged-in brand
+- Path param: `invite` (uuid)
+- Response (200): `{ "invite_id": "uuid", "deleted": true }`
+- Common status codes: 200, 401, 403, 404
+
+#### `POST /api/brand-affiliate-invites/{token}/claim` (non-brand professional)
+#### `POST /api/brand-affiliate-invites/{token}/decline` (non-brand professional)
+- Purpose: claim or decline invite token
+- Path param: `token` (string)
+- Response (200): `invite` status payload
+- Common status codes: 200, 401, 404, 422
+
+#### `GET /api/brand-partners`
+- Purpose: list available active brands for partner selection
+- Pagination: query `per_page` supported (default 25, max 100)
+- Response (200): `{ "brands": [...], "meta": { "current_page": 1, "per_page": 25, "total": 123, "last_page": 5, "next_page_url": "...", "prev_page_url": null } }`
+- Common status codes: 200, 401
+
+#### `POST /api/brand-partners/{brandProfessionalId}/promote` (non-brand professional)
+#### `DELETE /api/brand-partners/{brandProfessionalId}` (non-brand professional)
+- Purpose: promote a connected brand to primary or disconnect a connected brand
+- Path param: `brandProfessionalId` (uuid)
+- Common status codes: 200, 401, 403, 404
+
+### Services
+
 - GET /api/services
 - POST /api/services
 - GET /api/services/{service}
@@ -1301,40 +1523,274 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 - `POST /api/themes/{theme}/select`
 - Select response: `{ "site": { ... } }`
 
-### Store: Featured Products
+### Store: Affiliate Product Selection
 
 #### `GET /api/store/featured-products`
 
-- Purpose: get selected Shopify products for the logged-in professional
+- Purpose: get selected, strictly-valid storefront products for the logged-in professional
 - Auth: Required
-- Response (200): `{ "selected_products": [{ "id": "uuid", "shopify_product_id": "gid://shopify/Product/...", "sort_order": 0, "commission_override": null }], "default_commission_rate": 15, "max_featured_products": 10 }`
+- Response (200): `{ "selected_products": [{ "id": "uuid", "brand_product_id": "uuid", "brand_professional_id": "uuid", "shopify_product_id": "gid://shopify/Product/...", "sort_order": 0, "commission_override": null, "affiliate_commission_override": 20, "effective_commission_rate": 20, "discount_rate": 10, "affiliate_discount_rate": 5, "custom_price": null, "affiliate_custom_price": 32.95, "base_price_cents": 3295, "discounted_price_cents": 3130 }], "default_commission_rate": 15, "max_featured_products": 10 }`
+- Validity checks:
+  - product must be sync-active
+  - brand setting must be available, unless an affiliate `allow` override exists
+  - affiliate must still be connected to the brand
+  - no deny override for that affiliate/product
 - Notes:
-  - Reads from `retail.professional_selections` when available.
-  - If retail table is unavailable, read path falls back to legacy `site.settings.selected_products`.
+  - Reads from `retail.professional_selections` + joined retail/core tables.
 - Common status codes: 200, 401, 403
 
 #### `PUT /api/store/featured-products`
 
-- Purpose: replace the full featured-products list
+- Purpose: replace the full selected product list (global max 10)
 - Auth: Required
-- Request body:
-  - `products`: array (max configured limit, default 10)
-  - `products[].shopify_product_id`: required string
-  - `products[].sort_order`: optional integer >= 0
-  - `products[].commission_override`: optional nullable number (0-100)
+- Hard cutover request body:
+  - `selected_products`: required array (max 10)
+  - `selected_products[].brand_product_id`: required uuid
+  - `selected_products[].sort_order`: optional integer >= 0
 - Response (200): same shape as GET endpoint
 - Notes:
-  - Write path requires `retail.professional_selections`; if unavailable, returns 503.
-  - Duplicate product IDs are rejected.
+  - Legacy payload (`products[].shopify_product_id`) is rejected with 422.
+  - DB triggers enforce connected brand link + sync-active + deny-override restrictions; `allow` overrides can bypass brand availability.
+  - Duplicate `brand_product_id` values are rejected.
 - Common status codes: 200, 401, 403, 422, 503
 
-### Image Uploads (server-side processing)
+#### `GET /api/store/available-products`
 
-Images are uploaded through the Comet API (not directly to storage). The server stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and generates two full-resolution WebP variants (`optimized`, `maximized`).
+- Purpose: list affiliate-visible products across connected brands
+- Auth: Required
+- Query params:
+  - `brand_professional_id` (optional uuid): limit to one connected brand
+- Ordering:
+  - `is_featured DESC`
+  - `sort_order ASC`
+  - `title ASC`
+- Response (200): `{ "available_products": [...], "max_featured_products": 10 }`
+- Product payload includes both brand-level and affiliate-level pricing fields:
+  - `commission_override`, `affiliate_commission_override`, `effective_commission_rate`
+  - `discount_rate`, `affiliate_discount_rate`
+  - `custom_price`, `affiliate_custom_price`
+- Common status codes: 200, 401, 403, 422
 
-**Queue modes:**
-- `QUEUE_CONNECTION=sync` (default for dev / early production): variants are generated **inline** during the upload request (~2-5 sec). The response contains completed variants immediately with `processing: false`. No queue worker needed.
-- `QUEUE_CONNECTION=database` or `redis` (recommended for scale): the upload returns instantly with `processing: true`, and a background queue job generates variants async. Frontend polls `GET /api/images` until `processing: false`.
+### Store: Brand/Distributor Catalog Management
+
+#### `GET /api/store/brand-products`
+- Purpose: full synced catalog + settings state for managed brands
+- Auth: Required (brand account, or professional in an active `distributor` enterprise linked via `core.enterprise_brand_links`)
+- Query params:
+  - `brand_professional_id` (optional uuid): limit to one managed brand
+- Response includes each product's synced fields and settings fields (`is_available`, `is_featured`, `commission_override`, `discount_rate`, `custom_price`, effective pricing/commission outputs).
+- Common status codes: 200, 401, 403, 422
+
+#### `PATCH /api/store/brand-products/{brandProductId}`
+- Purpose: update one brand product's settings
+- Auth: Required manager access for that brand
+- Allowed fields:
+  - `is_available`, `is_featured`, `sort_order`
+  - `commission_override`, `discount_rate`, `custom_price`
+- Notes:
+  - If a product becomes unavailable, affected affiliate selections are removed and users are notified.
+- Common status codes: 200, 401, 403, 404, 422
+
+#### `PATCH /api/store/brand-products/bulk`
+- Purpose: bulk update settings for one brand, one/many/all products
+- Auth: Required manager access for that brand
+- Request body:
+  - `brand_professional_id`: required uuid
+  - `brand_product_ids`: optional uuid[] (omit to target all products for brand)
+  - one or more mutable fields from the single-product PATCH endpoint
+- Notes:
+  - Executes in a transaction with row locking.
+  - If products become unavailable, affected selections are removed + notifications are created.
+- Common status codes: 200, 401, 403, 422
+
+### Store: Affiliate Access Overrides (Deny/Allow)
+
+#### `GET /api/store/affiliate-overrides`
+- Purpose: list affiliate access overrides for a managed brand
+- Auth: Required manager access for `brand_professional_id`
+- Query params:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (optional uuid)
+  - `override_type` (optional enum: `deny` | `allow`)
+  - `page` (optional integer, default 1)
+  - `per_page` (optional integer, default 100, max 200)
+- Response (200): paginated
+  - `{ "overrides": [...], "meta": { "current_page": 1, "per_page": 100, "total": 42, "last_page": 1, ... } }`
+- Common status codes: 200, 401, 403, 422
+
+#### `PUT /api/store/affiliate-overrides/deny`
+- Purpose: set deny overrides for one affiliate across one/many brand products
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (required uuid[], min 1)
+- Notes:
+  - Creating deny overrides also removes matching current selections for that affiliate and sends notifications.
+- Common status codes: 200, 401, 403, 422
+
+#### `DELETE /api/store/affiliate-overrides/deny`
+- Purpose: remove deny overrides for one affiliate/brand pair (all or subset)
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (optional uuid[])
+- Common status codes: 200, 401, 403, 422
+
+#### `PUT /api/store/affiliate-overrides/allow`
+- Purpose: set allow overrides for one affiliate across one/many brand products
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (required uuid[], min 1)
+- Notes:
+  - `allow` overrides bypass brand-level product availability for that affiliate.
+  - `deny` still takes precedence when present.
+- Common status codes: 200, 401, 403, 422
+
+#### `DELETE /api/store/affiliate-overrides/allow`
+- Purpose: remove allow overrides for one affiliate/brand pair (all or subset)
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (optional uuid[])
+- Common status codes: 200, 401, 403, 422
+
+### Store: Per-Affiliate Product Pricing Settings
+
+#### `GET /api/store/affiliate-product-settings`
+- Purpose: list per-affiliate product pricing settings for a managed brand
+- Auth: Required manager access for `brand_professional_id`
+- Query params:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (optional uuid)
+  - `page` (optional integer, default 1)
+  - `per_page` (optional integer, default 100, max 200)
+- Response (200): paginated
+  - `{ "settings": [...], "meta": { "current_page": 1, "per_page": 100, "total": 42, "last_page": 1, ... } }`
+- `settings[]` fields:
+  - `brand_product_id`
+  - `commission_override` (nullable, 0-100)
+  - `discount_rate` (nullable, 0-100)
+  - `custom_price` (nullable, >= 0)
+- Common status codes: 200, 401, 403, 422
+
+#### `PUT /api/store/affiliate-product-settings`
+- Purpose: batch upsert per-affiliate product pricing settings
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `settings` (required array, min 1)
+  - `settings[].brand_product_id` (required uuid)
+  - `settings[].commission_override` (nullable number, min 0, max 100)
+  - `settings[].discount_rate` (nullable number, min 0, max 100)
+  - `settings[].custom_price` (nullable number, min 0)
+- Notes:
+  - Duplicate `settings[].brand_product_id` values are rejected with 422.
+  - Effective storefront precedence is:
+    - commission: affiliate override → product override → brand default → system default
+    - discount/custom price: affiliate override → product-level value
+- Common status codes: 200, 401, 403, 422
+
+#### `DELETE /api/store/affiliate-product-settings`
+- Purpose: remove per-affiliate product pricing settings (all or subset)
+- Auth: Required manager access for the brand
+- Request body:
+  - `brand_professional_id` (required uuid)
+  - `affiliate_professional_id` (required uuid)
+  - `brand_product_ids` (optional uuid[])
+- Common status codes: 200, 401, 403, 422
+
+### Store: Brand Settings
+
+#### `GET /api/store/brand-settings`
+- Purpose: read brand default commission
+- Auth: Required (professional with `store.manage` capability for target brand)
+- Query params:
+  - `brand_professional_id` (optional uuid)
+- Behavior:
+  - direct brand users default to their own brand when `brand_professional_id` is omitted
+  - non-direct users (enterprise/team) must provide `brand_professional_id`
+- Common status codes: 200, 401, 403
+
+#### `PATCH /api/store/brand-settings`
+- Purpose: set default commission rate/favourites for a managed brand
+- Auth: Required (professional with `store.manage` capability for target brand)
+- Request body: `{ "brand_professional_id": "uuid?", "default_commission_rate": 15, "favourite_brand_product_ids": ["uuid"] }`
+- Response (200): `{ "brand_professional_id": "uuid", "default_commission_rate": 15, "favourite_brand_product_ids": [] }`
+- Common status codes: 200, 401, 403, 422
+
+### Store Analytics (Shopify-Canonical)
+
+Analytics is sourced from canonical Shopify order events normalized into `retail.orders` and daily aggregates in the `analytics` schema.
+
+#### Legacy Cutover Endpoints
+
+#### `GET /api/store/analytics`
+#### `GET /api/store/brand-analytics`
+
+- Purpose: legacy compatibility during cutover
+- Behavior: both endpoints return `410 Gone` with migration targets
+- Common status codes: 410, 401
+
+#### Brand Analytics Endpoints
+
+- `GET /api/store/brand-analytics/overview`
+- `GET /api/store/brand-analytics/influencers`
+- `GET /api/store/brand-analytics/influencers/{professionalId}`
+- `GET /api/store/brand-analytics/products`
+- `GET /api/store/brand-analytics/products/{brandProductId}`
+- `GET /api/store/brand-analytics/commissions`
+- `GET /api/store/brand-analytics/timeseries`
+
+Scope and access:
+- Auth: Required (professional)
+- Scope: restricted to brand IDs the caller can access for the required capability (`BrandAccessService` RBAC scope)
+- Non-financial endpoints (`overview`, `influencers`, `influencers/{professionalId}`, `products`, `products/{brandProductId}`, `timeseries`) require `analytics.non_financial.read`
+- Financial endpoints (`commissions`) require `analytics.financial.read`
+- `brand_professional_id` outside scope is rejected with 403
+
+#### My Analytics Endpoints (Self-Scoped)
+
+- `GET /api/store/my-analytics/overview`
+- `GET /api/store/my-analytics/products`
+- `GET /api/store/my-analytics/products/{brandProductId}`
+- `GET /api/store/my-analytics/commissions`
+- `GET /api/store/my-analytics/customers`
+- `GET /api/store/my-analytics/timeseries`
+
+Scope and access:
+- Auth: Required (professional)
+- Scope: always fixed to authenticated professional as affiliate/influencer
+- No `professional_id` override accepted
+
+#### Common Query Parameters
+
+Validated query params (endpoint-relevant subsets apply):
+- `from`, `to` (`Y-m-d`)
+- `group_by` (`day|week|month`)
+- `brand_professional_id` (brand endpoints only)
+- `product_ids[]`, `categories[]`, `collections[]`
+- `regions[]`, `lifecycle_status[]`, `financial_status[]`, `payout_status[]` (for commission ledger endpoints)
+- `sort_by`, `sort_dir` (`asc|desc`), `page`, `per_page` (max 100)
+
+Rollups:
+- Weekly/monthly results are query-time rollups from daily tables
+- Week buckets use Monday start (`date_trunc('week', day::timestamp)::date`)
+
+### Media Uploads (images and videos, server-side processing)
+
+Images and videos are uploaded through the Comet API (not directly to storage). Each upload stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and enqueues a processing job.
+
+**Processing modes:**
+- **Images:** GD-based WebP transcoding on the `images` queue. Queue `sync` mode processes inline. Async mode: poll until `processing_state = ready`.
+- **Videos:** FFmpeg-based MP4 + HLS transcoding on the dedicated `videos` queue (`redis_video` connection). Always async in production. Requires `COMET_VIDEO_UPLOADS_ENABLED=true`.
+
+**Pool limits:** Images and videos share the same per-pool cap (default 5 per pool). A video upload occupies a slot that could hold an image.
 
 #### `POST /api/uploads`
 
@@ -1342,45 +1798,78 @@ Images are uploaded through the Comet API (not directly to storage). The server 
 - Content-Type: `multipart/form-data`
 - Request body:
   - `pool` (required): `gallery` or `content`
-  - `image` (required): file upload (JPEG, PNG, or WebP; max 10 MB)
+  - `image` OR `video` (exactly one required): file upload
+    - `image`: JPEG, PNG, or WebP; max `COMET_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
+    - `video`: MP4, MOV, WebM, or AVI; max `COMET_VIDEO_MAX_UPLOAD_KB` (default 500 MB); max duration `COMET_VIDEO_MAX_DURATION_SECONDS` (default 300s / 5 min); requires `COMET_VIDEO_UPLOADS_ENABLED=true`
   - `alt_text` (optional): string, max 255
-- Response (201) — sync mode (default):
+- Response (201) — image, sync mode:
 ```json
 {
   "id": "uuid",
   "pool": "gallery",
-  "original_path": "images/<proId>/<imageId>/original_abc123.jpg",
+  "media_type": "image",
+  "processing_state": "ready",
   "processing": false,
+  "processing_error": null,
+  "original_path": "images/<proId>/<imageId>/original_abc123.jpg",
   "variants": {
     "optimized": "https://cdn.example.com/images/.../optimized_abc123.webp",
     "maximized": "https://cdn.example.com/images/.../maximized_def456.webp"
   }
 }
 ```
-- Response (201) — async mode (`QUEUE_CONNECTION=database` or `redis`):
+- Response (201) — video (always async):
 ```json
 {
   "id": "uuid",
   "pool": "gallery",
-  "original_path": "images/<proId>/<imageId>/original_abc123.jpg",
-  "processing": true
+  "media_type": "video",
+  "processing_state": "pending",
+  "processing": true,
+  "processing_error": null,
+  "duration_ms": null,
+  "poster": null,
+  "variants": [],
+  "streams": []
 }
 ```
-- `processing: false` + `variants` when `QUEUE_CONNECTION=sync` (variants generated inline). `processing: true` (no `variants` key) when using a queue worker — poll `GET /api/images` until done.
+- Response (201) — video, after processing completes (`processing_state = ready`):
+```json
+{
+  "id": "uuid",
+  "pool": "gallery",
+  "media_type": "video",
+  "processing_state": "ready",
+  "processing": false,
+  "processing_error": null,
+  "duration_ms": 45000,
+  "poster": "https://cdn.example.com/videos/.../poster.jpg",
+  "variants": {
+    "optimized": "https://cdn.example.com/videos/.../optimized.mp4",
+    "maximized": "https://cdn.example.com/videos/.../maximized.mp4"
+  },
+  "streams": {
+    "optimized": "https://cdn.example.com/videos/.../hls/optimized/playlist.m3u8",
+    "maximized": "https://cdn.example.com/videos/.../hls/maximized/playlist.m3u8",
+    "adaptive":  "https://cdn.example.com/videos/.../hls/adaptive.m3u8"
+  }
+}
+```
+- `processing_state` lifecycle: `pending → processing → ready | failed`
+- `processing` is a boolean alias for `processing_state IN (pending, processing)` (backward-compatible)
 - Business rules:
-  - Max 5 gallery images per professional (configurable via `COMET_GALLERY_IMAGE_MAX`)
-  - Max 5 content images per professional (configurable via `COMET_CONTENT_IMAGE_MAX`)
-  - Race-safe: uses PostgreSQL advisory locks to enforce pool limits under concurrent uploads
-- Variants: 2 full-resolution WebP outputs
-  - `optimized`: adaptive quality targeting `COMET_IMAGE_TARGET_KB` (default 500KB)
-  - `maximized`: highest quality output for detail-heavy views
-- Common status codes: 201, 401, 403, 422 (pool limit exceeded or validation errors)
+  - Max 5 items per pool per professional, shared across images and videos (configurable via `COMET_GALLERY_IMAGE_MAX` / `COMET_CONTENT_IMAGE_MAX`)
+  - Race-safe: PostgreSQL advisory locks
+  - Video uploads rejected with 422 if `COMET_VIDEO_UPLOADS_ENABLED=false`
+- Common status codes: 201, 401, 403, 422 (pool limit, validation, feature flag)
 
 #### `GET /api/images`
 
 - Auth: Required (professional)
 - Query params:
-  - `pool` (optional): `gallery` or `content` — filters by pool; omit for all images
+  - `pool` (optional): `gallery` or `content`
+  - `media_type` (optional): `image` | `video` | `all` — default `image` (backward-compatible)
+  - `ids[]` (optional): list of UUIDs — return only these items (efficient polling during upload)
 - Response (200):
 ```json
 {
@@ -1390,11 +1879,14 @@ Images are uploaded through the Comet API (not directly to storage). The server 
       "pool": "gallery",
       "alt_text": "Fade haircut",
       "sort_order": 0,
+      "media_type": "image",
+      "processing_state": "ready",
+      "processing": false,
+      "processing_error": null,
       "variants": {
         "optimized": "https://cdn.example.com/images/.../optimized_abc123.webp",
         "maximized": "https://cdn.example.com/images/.../maximized_def456.webp"
       },
-      "processing": false,
       "created_at": "2026-03-02T10:00:00Z",
       "updated_at": "2026-03-02T10:00:05Z"
     }
@@ -1405,13 +1897,24 @@ Images are uploaded through the Comet API (not directly to storage). The server 
   }
 }
 ```
-- Note: `processing: true` means variants have not been generated yet (queue job still running). `variants` will be an empty object in that case.
+- Video polling pattern: `GET /api/images?media_type=video&ids[]=<id>` — stop polling when `processing_state` is `ready` or `failed`.
 - Common status codes: 200, 401, 403
+
+#### `POST /api/images/reorder`
+
+- Auth: Required (professional)
+- Request body:
+  - `pool` (required): `gallery` or `content`
+  - `media_type` (optional): `image` | `video` — default `image`; reorder scope is `pool + media_type`
+  - `ids` (required): array of UUIDs in desired order
+- Response (200): `{ "ok": true }`
+- Common status codes: 200, 401, 403, 422
 
 #### `DELETE /api/images/{image}`
 
 - Auth: Required (professional)
-- Deletes the image, all its WebP variants from storage, and the original file
+- Images: synchronous cleanup (variant files + original + DB rows deleted immediately)
+- Videos: async cleanup via `DeleteMediaArtifactsJob` (many HLS segment files); `SiteImage` is soft-deleted immediately so the response is fast
 - Response (200): `{ "deleted": true }`
 - Common status codes: 200, 401, 403, 404
 
@@ -1423,6 +1926,71 @@ Gallery-pool images can also be accessed / managed via the legacy gallery routes
 - `POST /api/gallery` — **deprecated (410)**: use `POST /api/uploads` with `pool=gallery` instead
 - `POST /api/gallery/reorder` — reorder gallery images; body: `{ "ids": ["uuid1", "uuid2", ...] }`
 - `DELETE /api/gallery/{image}` — delete a gallery image and its variants
+
+### Shopify Integration
+
+Shopify integration is brand-scoped and used for canonical order attribution/analytics ingestion.
+
+#### `GET /api/shopify/status`
+
+- Purpose: get Shopify connection status for a managed brand
+- Auth: Required (professional)
+- Query params:
+  - `brand_professional_id` (optional uuid)
+- Response (200):
+  - `{ "eligible": true, "connected": true, "brand_professional_id": "uuid", "shop_domain": "example.myshopify.com", "shop_id": "12345", "expires_at": "...", "webhook_registration_state": "queued|pending_manual_setup|...", "webhook_registration_last_attempt_at": "...", "webhook_orders_topic": "orders/paid" }`
+- Notes:
+  - direct brand users default to their own brand when `brand_professional_id` is omitted
+  - non-direct users must supply a brand they are authorized to manage for Shopify
+  - when a non-direct caller omits `brand_professional_id`, response remains `eligible=false`
+- Common status codes: 200, 401
+
+#### `POST /api/shopify/connect`
+
+- Purpose: connect/update Shopify credentials + metadata for a managed brand
+- Auth: Required (`shopify.manage` capability for target brand)
+- Request body:
+  - `brand_professional_id` (optional uuid for direct brand users; required for non-direct users)
+  - `shop_domain` (required string)
+  - `access_token` (required string)
+  - `refresh_token` (optional string)
+  - `expires_at` (optional date)
+  - `shop_id` (optional string)
+  - `scopes[]` (optional string array)
+  - `webhook_orders_topic` (optional string; default from config)
+- Behavior:
+  - normalizes and persists `provider_metadata.shop_domain`
+  - rejects if the same `shop_domain` is already connected to another brand (409)
+  - queues `RegisterShopifyOrderWebhooksJob`
+- Response (200): `{ "connected": true, "brand_professional_id": "uuid", "shop_domain": "...", "shop_id": "...", "expires_at": "...", "webhook_registration_queued": true }`
+- Common status codes: 200, 401, 403, 409, 422
+
+#### `POST /api/shopify/disconnect`
+
+- Purpose: remove Shopify integration row for managed brand
+- Auth: Required (`shopify.manage` capability for target brand)
+- Request body:
+  - `brand_professional_id` (optional uuid for direct brand users; required for non-direct users)
+- Response (200): `{ "connected": false, "brand_professional_id": "uuid" }`
+- Common status codes: 200, 401, 403
+
+#### `GET /api/shopify/token`
+
+- Purpose: fetch decrypted Shopify access token for connected managed brand
+- Auth: Required (`shopify.manage` capability for target brand)
+- Query params:
+  - `brand_professional_id` (optional uuid for direct brand users; required for non-direct users)
+- Response (200): `{ "brand_professional_id": "uuid", "access_token": "...", "expires_at": "...", "shop_domain": "...", "shop_id": "..." }`
+- Common status codes: 200, 401, 403, 404
+
+#### `POST /api/shopify/webhooks/register`
+
+- Purpose: queue webhook registration/refresh job for connected Shopify integration of a managed brand
+- Auth: Required (`shopify.manage` capability for target brand)
+- Request body:
+  - `brand_professional_id` (optional uuid for direct brand users; required for non-direct users)
+- Response (200): `{ "queued": true, "integration_id": "uuid", "brand_professional_id": "uuid" }`
+- Common status codes: 200, 401, 403, 404
 
 ### Square Integration
 
@@ -1526,6 +2094,44 @@ Unlike Square (which exposes a full platform API for bookings, payments, and cat
 
 ---
 
+### Shopify Webhooks
+
+Shopify order ingestion endpoints have **no auth middleware**. Signature validation is handled at controller level.
+
+#### `POST /api/webhooks/shopify/orders`
+
+- Purpose: receive native Shopify order webhook events
+- Auth: Shopify HMAC via `X-Shopify-Hmac-Sha256` header (`SHOPIFY_WEBHOOK_SECRET`)
+- Required headers:
+  - `X-Shopify-Webhook-Id`
+  - `X-Shopify-Shop-Domain`
+  - `X-Shopify-Topic` (recommended)
+- Behavior:
+  - deduplicates by `(source, external_event_id)` in `retail.order_event_inbox`
+  - resolves brand integration by `provider='shopify'` + `provider_metadata.shop_domain`
+  - queues `ProcessShopifyOrderEventJob` when resolvable
+  - unresolved/ambiguous brand mapping is persisted as rejected inbox event
+- Response (200): `{ "received": true, "queued": true|false, "status": "pending|rejected", "inbox_id": "uuid", ... }`
+- Common status codes: 200, 400 (missing required header), 401 (invalid signature)
+
+#### `POST /api/webhooks/shopify/orders/fallback`
+
+- Purpose: fallback ingestion path when caller only has `shop_domain + order_id` (or cached payload)
+- Auth: Comet fallback HMAC via `X-Comet-Fallback-Signature` (`SHOPIFY_FALLBACK_SECRET`)
+- Request body:
+  - `shop_domain` (required)
+  - `order_id` (required; numeric id or gid containing numeric id)
+  - `event_id` (optional; default `fallback_order_{order_id}`)
+  - `topic` (optional; default `orders/fallback`)
+  - `payload` (optional full Shopify order object)
+- Behavior:
+  - if `payload` omitted, server fetches canonical order payload from Shopify Admin REST using the connected integration token
+  - ingests through same inbox/normalizer path as native webhooks
+- Response (200): same shape as native webhook ingestion
+- Common status codes: 200, 401 (invalid fallback signature), 422 (invalid input or upstream order fetch failure)
+
+---
+
 ### Fresha Webhooks
 
 Fresha sends catalog change notifications to the Comet webhook endpoint. These routes have **no auth middleware** — authentication is performed via HMAC signature validation.
@@ -1573,7 +2179,58 @@ Fresha sends catalog change notifications to the Comet webhook endpoint. These r
 - GET /api/email-subscribers?list_key=marketing&status=subscribed&search=...
 - GET /api/email-subscribers/export?list_key=marketing&status=subscribed
 
-## 8) Staff API
+## 8) Enterprise API
+
+Enterprise routes are self-service endpoints for the authenticated user and require a Supabase JWT.
+
+### `GET /api/enterprise/me`
+
+- Purpose: fetch the current user's enterprise profile (if one exists)
+- Response (200): `{ "enterprise": { ... } }`
+- Common status codes: 200, 401, 404
+
+### `POST /api/enterprise/me`
+
+- Purpose: create an enterprise profile for the authenticated user
+- Request body:
+  - `name` (required)
+  - `handle` (optional, unique among active enterprises; auto-slugged from name if omitted)
+  - `enterprise_type` (required): `promoter`, `barbershop`, `salon`, `distributor`
+  - `subscription_tier` (optional)
+  - `primary_email`, `phone`, `public_contact_email`, `public_contact_number` (optional)
+  - `country_code`, `timezone` (optional)
+  - `location_street_address`, `location_city`, `location_state`, `location_postcode`, `location_country` (optional)
+- Behavior:
+  - Requires an existing professional profile (`/api/bootstrap` first).
+  - Creates owner membership in `core.professional_enterprise_memberships`.
+  - Sets `professional.primary_enterprise_id` if empty.
+- Common status codes: 201, 401, 409, 422
+
+### `PATCH /api/enterprise/me`
+
+- Purpose: update current enterprise profile fields
+- Notes:
+  - `enterprise_type` allowed values: `promoter`, `barbershop`, `salon`, `distributor`
+  - `status` allowed values: `active`, `inactive`, `suspended`
+- Response (200): `{ "enterprise": { ... } }`
+- Common status codes: 200, 401, 404, 422
+
+### `DELETE /api/enterprise/me`
+
+- Purpose: soft-delete/deactivate current enterprise profile
+- Behavior:
+  - Ends active memberships for that enterprise (`ends_at = now()`).
+  - Clears `primary_enterprise_id` for professionals pointing to this enterprise.
+  - Marks enterprise as `inactive` and sets `deleted_at`.
+- Response (200): `{ "deleted": true }`
+- Common status codes: 200, 401, 404
+
+### Enterprise + Bootstrap integration
+
+- If `POST /api/bootstrap` is called with `professional_type` = `promoter`, `barbershop`, or `salon`, the enterprise is auto-provisioned.
+- Because of this, many enterprise-owner users will not need to call `POST /api/enterprise/me` manually.
+
+## 9) Staff API
 
 Staff routes are for internal staff tooling. They require a staff JWT (user must exist in core.comet_staff).
 
@@ -1582,6 +2239,7 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - GET /api/staff/me
 - GET /api/staff/sites/{subdomain}
 - GET /api/staff/professionals?q=...&status=...&professional_type=...&per_page=...&page=...
+  - `professional_type` filter supports: `professional`, `influencer`, `barber`, `hairdresser`, `ambassador`, `promoter`, `brand`, `barbershop`, `salon`
 - GET /api/staff/professionals/{professional}
 - DELETE /api/staff/professionals/{professional} (soft delete)
 - POST /api/staff/professionals/{professional}/restore
@@ -1632,55 +2290,75 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 
 It requires a staff JWT (core.comet_staff).
 
-## 9) Image uploads & processing (server-side WebP)
+## 10) Media uploads & processing (images + videos)
 
-Images are uploaded through the Comet API and processed entirely server-side. No direct-to-storage uploads from the frontend.
+Images and videos are uploaded through the Comet API and processed entirely server-side. No direct-to-storage uploads from the frontend.
 
 ### Architecture
 
-1. Frontend sends `POST /api/uploads` with `pool` (gallery or content) and the image file as `multipart/form-data`.
-2. The server validates the file, stores the original on the **media disk** (Laravel Cloud Object Storage / Cloudflare R2), creates a `site_images` row.
-3. Variant generation runs either **inline** (`QUEUE_CONNECTION=sync` — no worker needed, ~2-5 sec response) or **async** via queue job (`QUEUE_CONNECTION=database`/`redis` — returns instantly, worker processes in background).
-4. When async: frontend polls `GET /api/images` — when `processing` flips to `false`, the `variants` map is populated with CDN URLs. When sync: variants are ready in the upload response.
+1. Frontend sends `POST /api/uploads` with `pool` and either `image` or `video` as `multipart/form-data`.
+2. The server validates the file, stores the original on the **media disk** (Laravel Cloud Object Storage / Cloudflare R2), creates a `site_images` row with `processing_state = pending`.
+3. Processing runs on the appropriate worker queue (images → `images` queue, videos → `videos` queue on dedicated `redis_video` connection).
+4. Frontend polls `GET /api/images?media_type=video&ids[]=<id>` until `processing_state` is `ready` or `failed`.
 
 ### Queue modes
 
-| Mode | Env var | Worker needed? | Upload response time | Frontend polling? |
-|------|---------|---------------|---------------------|------------------|
-| **Sync** (dev / early prod) | `QUEUE_CONNECTION=sync` | No | ~2-5 seconds | No — variants ready immediately |
-| **Async** (scaled prod) | `QUEUE_CONNECTION=database` or `redis` | Yes (1+ worker) | ~50-100ms | Yes — poll until `processing: false` |
+| Media | Queue | Worker command |
+|-------|-------|---------------|
+| Images | `images` | `php artisan queue:work --queue=images` |
+| Videos | `videos` (`redis_video` connection) | `php artisan queue:work redis_video --queue=videos --timeout=3600` |
 
-Switch between modes with zero code changes — just change the env var and optionally add a queue worker.
+Both queues fall back to sync inline processing in `local` and `testing` environments (no worker needed for dev).
 
-### Image pools
+### Media pools
 
-Each professional has two image pools:
+Each professional has two pools:
 
-- **gallery** — portfolio / work showcase images (max configurable, default 5)
-- **content** — general-purpose branding images; frontend typically uses:
-  - `optimized` for normal display/performance
-  - `maximized` for zoom/full-detail or hero-style displays
+- **gallery** — portfolio / showcase media (max configurable, default 5 items total)
+- **content** — general-purpose branding media (max configurable, default 5 items total)
 
-### Content-hashed filenames & CDN caching
+Images and videos share the same per-pool cap.
 
-All variant filenames include a 16-char SHA-256 hash (for example, `optimized_abc123def456.webp`). The media disk is configured with `Cache-Control: public, max-age=31536000, immutable`, so CDN / browser caches are aggressive. When an image is re-processed, the hash (and therefore URL) changes, automatically busting the cache.
+### Image processing
 
-### Frontend upload flow
+- Two WebP variants per upload: `optimized` (adaptive quality ~500 KB) and `maximized` (100% quality)
+- GD-based encoding; content-hashed filenames for immutable CDN caching
+- Inline in dev/sync mode; async via `ProcessImageVariantsJob` in production
 
-1. `POST /api/uploads` with `pool=gallery` (or `content`), `image=<file>`, optional `alt_text`.
-2. If response has `processing: true` → poll `GET /api/images?pool=gallery` until `processing: false`. If `processing: false` → variants are already available in the response.
-3. Use the `variants` map to pick the right URL for each UI context (typically `variants.optimized`, or `variants.maximized` where detail quality matters).
-4. To delete: `DELETE /api/images/{image}`.
-5. To reorder gallery: `POST /api/gallery/reorder` with `{ "ids": [...] }`.
+### Video processing
+
+- Requires `COMET_VIDEO_UPLOADS_ENABLED=true` and `ffmpeg`/`ffprobe` on the worker's `$PATH`
+- Outputs per video:
+  - **MP4:** `variants.optimized` (720p / 2 Mbps), `variants.maximized` (1080p / 5 Mbps)
+  - **HLS:** `streams.optimized` (720p playlist), `streams.maximized` (1080p playlist), `streams.adaptive` (master playlist for ABR)
+  - **Poster:** `poster` — JPEG frame extracted at ~1s
+- HLS segments are stream-copied from the MP4s (no extra re-encode)
+- `processing_state` lifecycle: `pending → processing → ready | failed`
+
+### Frontend upload flow (image)
+
+1. `POST /api/uploads` with `pool=gallery`, `image=<file>`, optional `alt_text`.
+2. If `processing_state = pending/processing` → poll `GET /api/images?pool=gallery` until `ready`. If already `ready` → variants in upload response.
+3. Use `variants.optimized` for normal display, `variants.maximized` for high-detail/zoom.
+4. Delete: `DELETE /api/images/{image}`.
+5. Reorder: `POST /api/images/reorder` with `{ "pool": "gallery", "media_type": "image", "ids": [...] }`.
+
+### Frontend upload flow (video)
+
+1. `POST /api/uploads` with `pool=gallery`, `video=<file>`, optional `alt_text`.
+2. Response always has `processing_state = pending` (video is always async).
+3. Poll `GET /api/images?media_type=video&ids[]=<id>` until `processing_state = ready` or `failed`.
+4. On `ready`: render using `streams.adaptive` (best for ABR), fall back to `variants.optimized`. Use `poster` for preview/placeholder.
+5. Delete: `DELETE /api/images/{image}` (storage cleanup is async for video).
+6. Reorder: `POST /api/images/reorder` with `{ "pool": "gallery", "media_type": "video", "ids": [...] }`.
 
 ### Supported file types
 
-- JPEG (`image/jpeg`)
-- PNG (`image/png`)
-- WebP (`image/webp`)
-- Max upload size: 10 MB (configurable via `COMET_IMAGE_MAX_UPLOAD_KB`)
+**Images:** JPEG, PNG, WebP — max `COMET_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
 
-## 10) Test users and getting tokens
+**Videos:** MP4, MOV, WebM, AVI — max `COMET_VIDEO_MAX_UPLOAD_KB` (default 500 MB), max duration `COMET_VIDEO_MAX_DURATION_SECONDS` (default 300s)
+
+## 11) Test users and getting tokens
 
 Tokens come from Supabase Auth. Comet does not issue tokens.
 
@@ -1701,7 +2379,7 @@ Tokens come from Supabase Auth. Comet does not issue tokens.
 Response includes access_token. Use that token as the Authorization Bearer token when calling Comet.
 This flow is included in the Insomnia collection as Login requests.
 
-## 11) Insomnia collection
+## 12) Insomnia collection
 
 Import the provided Insomnia export JSON.
 It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
@@ -1710,7 +2388,7 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 -
 - Set workspace environment variables first (api_base_url, public_api_base_url, supabase_url, supabase_anon_key, access_token, subdomain, ids).
 
-## 12) Frontend env var checklist
+## 13) Frontend env var checklist
 
 - SUPABASE_URL
 - SUPABASE_ANON_KEY
@@ -1720,7 +2398,7 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 
 Note: The frontend does not need any storage credentials — all image URLs come from the API `variants` map.
 
-## 13) Backend env var checklist
+## 14) Backend env var checklist
 
 ### Core Laravel
 
@@ -1787,7 +2465,7 @@ Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The imag
 - QUEUE_CONNECTION: `sync` (no worker needed — processes inline) | `database` | `redis` (worker required; recommended for scale)
 - MAIL_MAILER, MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_FROM_ADDRESS
 
-## 14) Known implementation gotchas
+## 15) Known implementation gotchas
 
 ### Domain-scoped public routes
 

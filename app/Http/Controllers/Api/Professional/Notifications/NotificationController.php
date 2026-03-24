@@ -47,6 +47,9 @@ class NotificationController extends ApiController
                 'n.title',
                 'n.body',
                 'n.cta_url',
+                'n.primary_action_label',
+                'n.secondary_action_label',
+                'n.secondary_action_url',
                 'n.severity',
                 'n.starts_at',
                 'n.ends_at',
@@ -54,6 +57,16 @@ class NotificationController extends ApiController
                 'r.read_at',
                 'r.dismissed_at',
             ]);
+
+        $rows = $rows->map(function ($row) {
+            $row->type = Notification::normalizeFrontendType(
+                is_string($row->type ?? null) ? $row->type : null,
+                is_string($row->severity ?? null) ? $row->severity : null,
+            );
+            $row->severity = Notification::severityForFrontendType($row->type);
+
+            return $row;
+        });
 
         $hasMore = $rows->count() > $limit;
         if ($hasMore) {

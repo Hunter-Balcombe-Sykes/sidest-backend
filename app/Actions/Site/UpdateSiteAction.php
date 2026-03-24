@@ -7,6 +7,7 @@ use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Core\Site\Theme;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use App\Models\Core\Site\Site;
@@ -117,6 +118,9 @@ class UpdateSiteAction
             $incoming = is_array($data['settings']) ? $data['settings'] : [];
             // Product selections are stored in retail.professional_selections, not site settings JSON.
             unset($incoming['selected_products']);
+            Arr::forget($incoming, 'design.typography.font_file_name');
+            Arr::forget($incoming, 'design.typography.font_file_path');
+            Arr::forget($incoming, 'design.typography.font_file_url');
             $data['settings'] = array_replace_recursive($existing, $incoming);
         }
 

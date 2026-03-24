@@ -3,23 +3,29 @@
 namespace App\Http\Requests\Api;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Validation\Rule;
 
 class BootstrapRequest extends BaseFormRequest
 {
+    use NormalizesProfessionalType;
 
 
     public function rules(): array
     {
         $uid = $this->attributes->get('supabase_uid');
 
-        $ignoreId = null;
+        $existingProfessionalId = null;
         if (is_string($uid) && $uid !== '') {
-            $ignoreId = Professional::query()
+            $existingProfessionalId = Professional::query()
                 ->where('auth_user_id', $uid)
                 ->value('id');
         }
+
+        $professionalTypeRules = is_string($existingProfessionalId) && $existingProfessionalId !== ''
+            ? ['sometimes', 'required']
+            : ['required'];
 
         return [
             'handle' => ['sometimes','nullable','string','max:40'],
@@ -30,9 +36,10 @@ class BootstrapRequest extends BaseFormRequest
             'last_name' => ['nullable','string','max:80'],
             'country_code' => ['nullable','string','max:5'],
             'timezone' => ['nullable','string','max:64'],
+            'invite_token' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'brand_partner_professional_id' => ['sometimes', 'nullable', 'uuid', Rule::exists('professionals', 'id')],
             'professional_type' => [
-                'sometimes',
-                'required',
+                ...$professionalTypeRules,
                 'string',
                 Rule::in(array_keys(config('comet.professional_types', []))),
             ],
@@ -41,7 +48,7 @@ class BootstrapRequest extends BaseFormRequest
                 'nullable',
                 'string',
                 'max:50',
-                Rule::unique('professionals', 'handle_lc')->ignore($ignoreId, 'id'),
+                Rule::unique('professionals', 'handle_lc')->ignore($existingProfessionalId, 'id'),
             ],
         ];
     }
@@ -50,7 +57,7 @@ class BootstrapRequest extends BaseFormRequest
     {
         $this->trimStrings([
                 'handle', 'display_name', 'phone', 'first_name',
-                'last_name', 'country_code', 'timezone', 'professional_type'
+                'last_name', 'country_code', 'timezone', 'professional_type', 'invite_token'
             ]);
         $this->sanitizeEmails(['primary_email']);
 
@@ -60,14 +67,28 @@ class BootstrapRequest extends BaseFormRequest
             $handle = $this->generateHandleFromDisplayName($this->display_name ?? '');
         }
 
-        $this->merge([
+        $merge = [
             'handle' => $handle,
             'handle_lc' => is_string($handle) ? strtolower(trim($handle)) : null,
-            'professional_type' => is_string($this->professional_type ?? null) && trim((string) $this->professional_type) !== ''
-                ? strtolower(trim((string) $this->professional_type))
-                : ($this->professional_type ?? null),
-        ]);
+        ];
+
+        if ($this->exists('professional_type')) {
+            $merge['professional_type'] = $this->normalizeProfessionalTypeInput($this->professional_type);
+        }
+
+        if ($this->exists('invite_token')) {
+            $merge['invite_token'] = is_string($this->invite_token) ? trim($this->invite_token) : null;
+        }
+
+        if ($this->exists('brand_partner_professional_id')) {
+            $merge['brand_partner_professional_id'] = is_string($this->brand_partner_professional_id)
+                ? trim($this->brand_partner_professional_id)
+                : null;
+        }
+
+        $this->merge($merge);
     }
+
 
     private function generateHandleFromDisplayName(string $displayName): string
     {

@@ -51,4 +51,20 @@ return [
         'webhook_notification_url' => env('FRESHA_WEBHOOK_NOTIFICATION_URL'),
     ],
 
+    'stripe' => [
+        'secret_key' => env('STRIPE_SECRET_KEY'),
+        'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
+        'connect_webhook_secret' => env('STRIPE_CONNECT_WEBHOOK_SECRET'),
+    ],
+
+    'shopify' => [
+        'api_key' => env('SHOPIFY_API_KEY'),
+        'api_secret' => env('SHOPIFY_API_SECRET'),
+        'api_version' => env('SHOPIFY_API_VERSION', '2025-01'),
+        'app_scopes' => env('SHOPIFY_APP_SCOPES', ''),
+        'webhook_secret' => env('SHOPIFY_WEBHOOK_SECRET'),
+        'fallback_secret' => env('SHOPIFY_FALLBACK_SECRET'),
+        'webhook_orders_topic' => env('SHOPIFY_WEBHOOK_ORDERS_TOPIC', 'orders/paid'),
+    ],
+
 ];

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Core\Site\SiteMedia;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -10,13 +11,15 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * Generates all WebP variants for a freshly uploaded image.
  *
- * Dispatched immediately after the original file is stored on the media
- * disk, so the upload endpoint returns quickly while heavy GD processing
- * runs async on the "images" queue.
+ * State transitions:
+ *   pending → processing (job starts)
+ *   processing → ready   (all variants created)
+ *   processing → failed  (unrecoverable error after all retries)
  */
 class ProcessImageVariantsJob implements ShouldQueue
 {
@@ -28,7 +31,7 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     /**
      * @param  string  $originalPath  Path of the original on the media disk.
-     * @param  string  $imageId       UUID of the SiteImage row.
+     * @param  string  $imageId       UUID of the SiteMedia row.
      * @param  string  $basePath      Directory prefix for variant storage.
      */
     public function __construct(
@@ -41,33 +44,54 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     public function handle(ImageVariantService $service): void
     {
-        Log::info('ProcessImageVariantsJob: starting variant processing', [
-            'image_id' => $this->imageId,
+        Log::info('ProcessImageVariantsJob: starting', [
+            'image_id'      => $this->imageId,
             'original_path' => $this->originalPath,
         ]);
 
-        $diskName = $service->resolvedDiskName();
-        $disk = Storage::disk($diskName);
+        $siteMedia = SiteMedia::withTrashed()->find($this->imageId);
 
-        if (!$disk->exists($this->originalPath)) {
-            Log::error('ProcessImageVariantsJob: original file not found on disk.', [
-                'path' => $this->originalPath,
+        if (! $siteMedia) {
+            Log::warning('ProcessImageVariantsJob: SiteMedia row no longer exists, skipping.', [
                 'image_id' => $this->imageId,
-                'disk' => $diskName,
             ]);
-            $this->fail(new \Exception('Original file not found on media disk.'));
             return;
         }
 
+        if ($siteMedia->trashed()) {
+            Log::info('ProcessImageVariantsJob: SiteMedia row is soft-deleted, skipping.', [
+                'image_id' => $this->imageId,
+            ]);
+            return;
+        }
+
+        SiteMedia::query()
+            ->where('id', $this->imageId)
+            ->whereNull('deleted_at')
+            ->update([
+                'processing_state' => SiteMedia::PROCESSING_STATE_PROCESSING,
+                'processing_error' => null,
+            ]);
+
+        $diskName = $service->resolvedDiskName();
+        $disk     = Storage::disk($diskName);
+
+        if (! $disk->exists($this->originalPath)) {
+            $this->markFailed('Original file not found on media disk.');
+            $this->fail(new \RuntimeException('Original file not found on media disk.'));
+            return;
+        }
+
+        $localTmp = null;
+
         try {
-            // Download to a local temp file so GD can read it.
             $localTmp = tempnam(sys_get_temp_dir(), 'comet_orig_');
-            if (!$localTmp) {
+            if (! $localTmp) {
                 throw new \RuntimeException('Failed to create temporary file.');
             }
 
             $content = $disk->get($this->originalPath);
-            if (!file_put_contents($localTmp, $content)) {
+            if (! file_put_contents($localTmp, $content)) {
                 throw new \RuntimeException('Failed to write original to temp file.');
             }
 
@@ -77,20 +101,52 @@ class ProcessImageVariantsJob implements ShouldQueue
                 basePath: $this->basePath,
             );
 
-            Log::info('ProcessImageVariantsJob: variants generated successfully.', [
-                'image_id' => $this->imageId,
-            ]);
-        } catch (\Throwable $e) {
+            SiteMedia::query()
+                ->where('id', $this->imageId)
+                ->whereNull('deleted_at')
+                ->update([
+                    'processing_state' => SiteMedia::PROCESSING_STATE_READY,
+                    'processing_error' => null,
+                ]);
+
+            Log::info('ProcessImageVariantsJob: completed.', ['image_id' => $this->imageId]);
+        } catch (Throwable $e) {
             Log::error('ProcessImageVariantsJob: variant generation failed.', [
-                'image_id' => $this->imageId,
-                'error' => $e->getMessage(),
+                'image_id'  => $this->imageId,
+                'error'     => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
-            $this->fail($e);
+
+            throw $e;
         } finally {
             if (isset($localTmp) && file_exists($localTmp)) {
                 @unlink($localTmp);
             }
+        }
+    }
+
+    public function failed(Throwable $e): void
+    {
+        $this->markFailed($e->getMessage());
+    }
+
+    private function markFailed(string $reason): void
+    {
+        $updated = SiteMedia::query()
+            ->where('id', $this->imageId)
+            ->whereNull('deleted_at')
+            ->update([
+                'processing_state' => SiteMedia::PROCESSING_STATE_FAILED,
+                'processing_error' => $reason,
+            ]);
+
+        if ($updated === 0) {
+            $siteMedia = SiteMedia::withTrashed()->where('id', $this->imageId)->first();
+            Log::info('ProcessImageVariantsJob: failed-state update skipped.', [
+                'image_id'         => $this->imageId,
+                'row_exists'       => $siteMedia !== null,
+                'is_soft_deleted'  => $siteMedia?->trashed() ?? false,
+            ]);
         }
     }
 }

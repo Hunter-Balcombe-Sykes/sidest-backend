@@ -15,7 +15,8 @@
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
         "league/flysystem-aws-s3-v3": "^3.0",
-        "predis/predis": "^3.3"
+        "predis/predis": "^3.3",
+        "stripe/stripe-php": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
@@ -45,7 +46,6 @@
             "composer install",
             "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
             "@php artisan key:generate",
-            "@php artisan migrate --force",
             "npm install",
             "npm run build"
         ],
@@ -54,8 +54,12 @@
             "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --tries=1\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,logs,vite --kill-others"
         ],
         "test": [
+            "@composer guard:no-laravel-migrations",
             "@php artisan config:clear --ansi",
             "@php artisan test"
+        ],
+        "guard:no-laravel-migrations": [
+            "@php -r 'if (is_dir(\"database/migrations\")) { foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(\"database/migrations\")) as $f) { if ($f->isFile() && $f->getExtension() === \"php\") { fwrite(STDERR, \"Laravel migrations are not allowed: \" . $f->getPathname() . PHP_EOL); exit(1); } } }'"
         ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
@@ -69,8 +73,7 @@
         ],
         "post-create-project-cmd": [
             "@php artisan key:generate --ansi",
-            "@php -r \"file_exists('database/database.sqlite') || touch('database/database.sqlite');\"",
-            "@php artisan migrate --graceful --ansi"
+            "@php -r \"file_exists('database/database.sqlite') || touch('database/database.sqlite');\""
         ],
         "pre-package-uninstall": [
             "Illuminate\\Foundation\\ComposerScripts::prePackageUninstall"

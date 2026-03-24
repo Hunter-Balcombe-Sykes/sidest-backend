@@ -64,6 +64,12 @@ Tip: use a wildcard dev domain like `localtest.me` or `lvh.me` so subdomains res
 
 ## Common workflows
 
+### Schema migrations
+Schema changes are managed in `supabase/migrations` only.
+
+- Do not add Laravel migration files in `database/migrations`.
+- Apply schema updates with your Supabase migration workflow (for example `supabase db push` in environments that use the Supabase CLI).
+
 ### Bootstrap a new user
 After the frontend has a Supabase access token, call:
 - `POST /api/bootstrap`

@@ -6,7 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Service;
-use App\Models\Core\Site\SiteImage;
+use App\Models\Core\Site\SiteMedia;
 
 class PurgeSoftDeleted extends Command
 {
@@ -28,8 +28,8 @@ class PurgeSoftDeleted extends Command
         // Services
         $total += $this->purgeModel(Service::class, $cutoff);
 
-        // Site images (DB rows) — see note below about deleting storage objects too
-        $total += $this->purgeModel(SiteImage::class, $cutoff);
+        // Site media (DB rows) — see note below about deleting storage objects too
+        $total += $this->purgeModel(SiteMedia::class, $cutoff);
 
         $this->info("Done. Force-deleted {$total} rows.");
 

@@ -9,6 +9,7 @@ use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Professional\Customer\StoreCustomerRequest;
 use App\Http\Requests\Api\Professional\Customer\UpdateCustomerRequest;
 use App\Models\Core\Professional\Customer;
+use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
@@ -140,6 +141,13 @@ class ProfessionalCustomerController extends ApiController
             $customer->delete(); // soft delete (archive)
         }
 
+        if ($this->shouldRememberConfirmationPreference($request)) {
+            app(ConfirmationPreferenceService::class)->enableForProfessional(
+                (string) $pro->id,
+                ConfirmationPreferenceService::ACTION_DELETE_CUSTOMER
+            );
+        }
+
         return $this->success(['archived' => true]);
     }
 
@@ -157,4 +165,10 @@ class ProfessionalCustomerController extends ApiController
         return $this->success(['restored' => true, 'customer' => $customer->fresh()]);
     }
 
+    private function shouldRememberConfirmationPreference(Request $request): bool
+    {
+        return $request->boolean('remember_confirmation_preference')
+            || $request->boolean('always_allow_confirmation')
+            || $request->boolean('dont_ask_again');
+    }
 }

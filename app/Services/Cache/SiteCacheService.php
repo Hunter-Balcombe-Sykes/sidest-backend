@@ -2,13 +2,15 @@
 
 namespace App\Services\Cache;
 
-use App\Models\Core\ImageVariant;
+use App\Models\Core\MediaVariant;
+use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
-use App\Models\Views\PublicSitePayload;
 use App\Models\Core\Site\SiteSubdomainAlias;
+use App\Models\Views\PublicSitePayload;
+use App\Services\Branding\BrandFontResolver;
 use App\Services\Legal\ProfessionalLegalContentService;
 use App\Services\Store\FeaturedProductsPayloadService;
 use Illuminate\Support\Facades\Cache;
@@ -18,8 +20,12 @@ class SiteCacheService
 {
     private const MISS_SENTINEL = '__MISS__';
 
+    /** @var array<string, array<string, string|null>|null> */
+    private array $brandPartnerEnrichmentCache = [];
+
     public function __construct(
-        private readonly FeaturedProductsPayloadService $featuredProductsPayloads
+        private readonly FeaturedProductsPayloadService $featuredProductsPayloads,
+        private readonly BrandFontResolver $brandFonts
     ) {}
 
     /**
@@ -58,10 +64,15 @@ class SiteCacheService
                 // Always resolve image variant paths to URLs (handles pre-URL-resolution cache entries)
                 $site = $cached['site'] ?? null;
                 if (is_array($site)) {
-                    $cached['site'] = $this->resolveImageVariantUrlsInSite($site, '');
+                    $professionalId = (string) data_get($cached, 'professional.id', '');
+                    $site = $this->hydrateSiteWithBrandTypography($site, $professionalId);
+                    $site = $this->resolveImageVariantUrlsInSite($site, '');
+                    $cached['site'] = $site;
+                    $cached['site'] = $this->enrichSiteWithBrandPartnerRadius($cached['site']);
                 }
 
                 Cache::put($key, $cached, now()->addMinutes(15));
+
                 return $cached;
             }
             Cache::forget($key);
@@ -75,11 +86,12 @@ class SiteCacheService
         if (! $row) {
             // Negative-cache briefly to reduce a DB load from bot scans.
             Cache::put($key, self::MISS_SENTINEL, now()->addSeconds(30));
+
             return null;
         }
 
         $payload = $row->payload ?? [];
-        if (is_array($payload) && !$this->hasRenderableLegalContent($payload)) {
+        if (is_array($payload) && ! $this->hasRenderableLegalContent($payload)) {
             $payload = $this->backfillLegalContentPayload($row, $payload);
         }
 
@@ -89,7 +101,9 @@ class SiteCacheService
 
         $site = $payload['site'] ?? null;
         if (is_array($site)) {
+            $site = $this->hydrateSiteWithBrandTypography($site, (string) ($row->professional_id ?? ''));
             $site = $this->resolveImageVariantUrlsInSite($site, (string) ($row->site_id ?? ''));
+            $site = $this->enrichSiteWithBrandPartnerRadius($site);
         }
 
         // Must match the controller response shape exactly.
@@ -111,9 +125,206 @@ class SiteCacheService
         $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
         $data = $this->withStorePayload($data, (string) ($row->professional_id ?? ''));
 
+        $data = $this->applyBrandImageFallbacks($data);
+
         Cache::put($key, $data, now()->addMinutes(15));
 
         return $data;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function applyBrandImageFallbacks(array $payload): array
+    {
+        $professional = $payload['professional'] ?? null;
+        if (!is_array($professional) || ($professional['professional_type'] ?? null) === 'brand') {
+            return $payload;
+        }
+
+        $brandPartner = $payload['site']['settings']['brand_partner'] ?? null;
+        if (!is_array($brandPartner) || empty($brandPartner['professional_id'])) {
+            return $payload;
+        }
+
+        $brandId = $brandPartner['professional_id'];
+        $brandSite = Site::query()
+            ->where('professional_id', $brandId)
+            ->first();
+
+        if (!$brandSite) {
+            return $payload;
+        }
+
+        $placeholderImages = $brandSite->settings['design']['media']['placeholder_sitepage_images'] ?? [];
+        if (empty($placeholderImages)) {
+            return $payload;
+        }
+
+        $imageKeys = ['gallery', 'content_images'];
+
+        foreach ($imageKeys as $key) {
+            if (!isset($payload['site'][$key]) || !is_array($payload['site'][$key])) {
+                continue;
+            }
+            
+            if (empty($payload['site'][$key])) {
+                $payload['site'][$key] = $placeholderImages;
+            }
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $site
+     * @return array<string, mixed>
+     */
+    public function hydrateSiteWithBrandTypography(array $site, string $brandProfessionalId): array
+    {
+        $settings = is_array($site['settings'] ?? null) ? $site['settings'] : [];
+        $site['settings'] = $this->hydrateTypographySettings($settings, $brandProfessionalId);
+
+        return $site;
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     * @return array<string, mixed>
+     */
+    public function hydrateTypographySettings(array $settings, string $brandProfessionalId): array
+    {
+        return $this->brandFonts->hydrateTypographySettings($settings, $brandProfessionalId);
+    }
+
+    /**
+     * @param  array<string, mixed>  $site
+     * @return array<string, mixed>
+     */
+    public function enrichSiteWithBrandPartnerRadius(array $site): array
+    {
+        $settings = is_array($site['settings'] ?? null) ? $site['settings'] : [];
+        $brandPartner = is_array($settings['brand_partner'] ?? null)
+            ? $settings['brand_partner']
+            : (is_array($settings['brandPartner'] ?? null) ? $settings['brandPartner'] : []);
+
+        $professionalId = $brandPartner['professional_id'] ?? $brandPartner['professionalId'] ?? null;
+        if (! is_string($professionalId) || trim($professionalId) === '') {
+            return $site;
+        }
+
+        $enrichment = $this->resolveBrandPartnerEnrichmentData(trim($professionalId));
+        if (! is_array($enrichment)) {
+            return $site;
+        }
+
+        if ($this->isMissingBrandPartnerField($brandPartner, 'border_radius', 'borderRadius') && $this->isFilledString($enrichment['border_radius'] ?? null)) {
+            $brandPartner['border_radius'] = $enrichment['border_radius'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'font_file_url', 'fontFileUrl') && $this->isFilledString($enrichment['font_file_url'] ?? null)) {
+            $brandPartner['font_file_url'] = $enrichment['font_file_url'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'username', 'handle') && $this->isFilledString($enrichment['username'] ?? null)) {
+            $brandPartner['username'] = $enrichment['username'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'first_name', 'firstName') && $this->isFilledString($enrichment['first_name'] ?? null)) {
+            $brandPartner['first_name'] = $enrichment['first_name'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'last_name', 'lastName') && $this->isFilledString($enrichment['last_name'] ?? null)) {
+            $brandPartner['last_name'] = $enrichment['last_name'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'border_color', 'borderColor') && $this->isFilledString($enrichment['border_color'] ?? null)) {
+            $brandPartner['border_color'] = $enrichment['border_color'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'logo_letter_spacing', 'logoLetterSpacing') && $this->isFilledString($enrichment['logo_letter_spacing'] ?? null)) {
+            $brandPartner['logo_letter_spacing'] = $enrichment['logo_letter_spacing'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'logo_font_size', 'logoFontSize') && $this->isFilledString($enrichment['logo_font_size'] ?? null)) {
+            $brandPartner['logo_font_size'] = $enrichment['logo_font_size'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'border_width', 'borderWidth') && $this->isFilledString($enrichment['border_width'] ?? null)) {
+            $brandPartner['border_width'] = $enrichment['border_width'];
+        }
+        if ($this->isMissingBrandPartnerField($brandPartner, 'general_spacing_padding', 'generalSpacingPadding') && $this->isFilledString($enrichment['general_spacing_padding'] ?? null)) {
+            $brandPartner['general_spacing_padding'] = $enrichment['general_spacing_padding'];
+        }
+
+        $settings['brand_partner'] = $brandPartner;
+        $site['settings'] = $settings;
+
+        return $site;
+    }
+
+    /**
+     * @return array<string, string|null>|null
+     */
+    private function resolveBrandPartnerEnrichmentData(string $professionalId): ?array
+    {
+        if (array_key_exists($professionalId, $this->brandPartnerEnrichmentCache)) {
+            return $this->brandPartnerEnrichmentCache[$professionalId];
+        }
+
+        $partnerSite = Site::query()
+            ->where('professional_id', $professionalId)
+            ->first(['settings']);
+
+        $partnerProfessional = Professional::query()
+            ->whereKey($professionalId)
+            ->first(['handle', 'first_name', 'last_name']);
+
+        if (! $partnerSite && ! $partnerProfessional) {
+            $this->brandPartnerEnrichmentCache[$professionalId] = null;
+
+            return null;
+        }
+
+        $partnerSettings = is_array($partnerSite?->settings ?? null) ? $partnerSite->settings : [];
+        $design = is_array($partnerSettings['design'] ?? null) ? $partnerSettings['design'] : [];
+        $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
+        $fontFileUrl = $this->brandFonts->activeFontUrl($professionalId);
+
+        $resolved = [
+            'username' => $this->normalizeString($partnerProfessional?->handle ?? null),
+            'first_name' => $this->normalizeString($partnerProfessional?->first_name ?? null),
+            'last_name' => $this->normalizeString($partnerProfessional?->last_name ?? null),
+            'border_color' => $this->normalizeString($design['border_color'] ?? $design['borderColor'] ?? null),
+            'border_radius' => $this->normalizeString($design['border_radius'] ?? $design['borderRadius'] ?? null),
+            'border_width' => $this->normalizeString($design['border_width'] ?? $design['borderWidth'] ?? null),
+            'general_spacing_padding' => $this->normalizeString($design['general_spacing_padding'] ?? $design['generalSpacingPadding'] ?? null),
+            'font_file_url' => $this->normalizeString($fontFileUrl),
+            'logo_letter_spacing' => $this->normalizeString($typography['logo_letter_spacing'] ?? $typography['logoLetterSpacing'] ?? null),
+            'logo_font_size' => $this->normalizeString($typography['logo_font_size'] ?? $typography['logoFontSize'] ?? null),
+        ];
+
+        $this->brandPartnerEnrichmentCache[$professionalId] = $resolved;
+
+        return $resolved;
+    }
+
+    /**
+     * @param  array<string, mixed>  $brandPartner
+     */
+    private function isMissingBrandPartnerField(array $brandPartner, string $snakeKey, string $camelKey): bool
+    {
+        return ! $this->isFilledString($brandPartner[$snakeKey] ?? null)
+            && ! $this->isFilledString($brandPartner[$camelKey] ?? null);
+    }
+
+    private function isFilledString(mixed $value): bool
+    {
+        return is_string($value) && trim($value) !== '';
+    }
+
+    private function normalizeString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 
     /**
@@ -178,7 +389,7 @@ class SiteCacheService
 
         $professional['professional_type'] = is_string($resolved) && trim($resolved) !== ''
             ? $resolved
-            : 'barber';
+            : 'professional';
         $payload['professional'] = $professional;
 
         return $payload;
@@ -199,12 +410,14 @@ class SiteCacheService
         $normalizedLinks = array_map(function ($block): array {
             $data = is_array($block) ? $block : [];
             $data['block_group'] = 'links';
+
             return $data;
         }, $links);
 
         $normalizedSections = array_map(function ($block): array {
             $data = is_array($block) ? $block : [];
             $data['block_group'] = 'sections';
+
             return $data;
         }, $sections);
 
@@ -219,6 +432,7 @@ class SiteCacheService
 
             $aId = (string) ($a['id'] ?? '');
             $bId = (string) ($b['id'] ?? '');
+
             return $aId <=> $bId;
         });
 
@@ -231,14 +445,6 @@ class SiteCacheService
      */
     private function withStorePayload(array $payload, string $professionalId): array
     {
-        $siteSettings = [];
-        if (is_array($payload['site'] ?? null)) {
-            $siteSettingsRaw = $payload['site']['settings'] ?? [];
-            if (is_array($siteSettingsRaw)) {
-                $siteSettings = $siteSettingsRaw;
-            }
-        }
-
         $store = null;
         $existingStore = $payload['store'] ?? null;
 
@@ -270,9 +476,8 @@ class SiteCacheService
 
         if ($store === null) {
             $store = $this->featuredProductsPayloads->build(
-                $professionalId,
-                $siteSettings,
-                'public_site_payload'
+                professionalId: $professionalId,
+                logContext: 'public_site_payload'
             );
         }
 
@@ -287,37 +492,37 @@ class SiteCacheService
     /**
      * Resolve image variant paths to public URLs in the site payload.
      * The view returns storage paths; we need full URLs for the frontend.
+     * Also resolves video variant/stream/poster paths in gallery_videos and content_videos.
      *
      * @param  array<string, mixed>  $site
      * @return array<string, mixed>
      */
     private function resolveImageVariantUrlsInSite(array $site, string $siteId): array
     {
-        $imageIds = [];
-        foreach (['gallery', 'content_images'] as $key) {
-            $items = $site[$key] ?? [];
-            if (! is_array($items)) {
-                continue;
-            }
-            foreach ($items as $item) {
+        // --- Collect all media IDs (images + videos) in one pass ---
+        $allMediaIds = [];
+        foreach (['gallery', 'content_images', 'gallery_videos', 'content_videos'] as $key) {
+            foreach ($site[$key] ?? [] as $item) {
                 if (is_array($item) && ! empty($item['id'])) {
-                    $imageIds[] = $item['id'];
+                    $allMediaIds[] = $item['id'];
                 }
             }
         }
-        if ($imageIds === []) {
-            return $site;
+
+        // Single query: one DB round-trip for all variant rows across all media types.
+        // Index as: media_id → artifact_type → variant_key → URL
+        $mvByMedia = [];
+        if ($allMediaIds !== []) {
+            $allVariants = MediaVariant::query()
+                ->whereIn('media_id', array_unique($allMediaIds))
+                ->get();
+
+            foreach ($allVariants as $mv) {
+                $mvByMedia[$mv->media_id][$mv->artifact_type][$mv->variant_key] = $mv->url;
+            }
         }
 
-        $variants = ImageVariant::query()
-            ->whereIn('image_id', array_unique($imageIds))
-            ->get();
-
-        $urlByImageAndVariant = [];
-        foreach ($variants as $v) {
-            $urlByImageAndVariant[$v->image_id][$v->variant] = $v->url;
-        }
-
+        // --- Images: resolve variant URLs ---
         foreach (['gallery', 'content_images'] as $key) {
             $items = $site[$key] ?? [];
             if (! is_array($items)) {
@@ -327,16 +532,16 @@ class SiteCacheService
                 if (! is_array($item) || empty($item['id'])) {
                     continue;
                 }
-                $imageId = $item['id'];
+                $mediaId = $item['id'];
                 $pathVariants = $item['variants'] ?? [];
                 if (! is_array($pathVariants)) {
                     continue;
                 }
                 $urlVariants = [];
-                foreach ($pathVariants as $variantName => $path) {
-                    $url = $urlByImageAndVariant[$imageId][$variantName] ?? null;
+                foreach ($pathVariants as $variantKey => $path) {
+                    $url = $mvByMedia[$mediaId]['webp'][$variantKey] ?? null;
                     if ($url !== null) {
-                        $urlVariants[$variantName] = $url;
+                        $urlVariants[$variantKey] = $url;
                     }
                 }
                 $site[$key][$i]['variants'] = $urlVariants;
@@ -348,12 +553,47 @@ class SiteCacheService
                 if ($aSort !== $bSort) {
                     return $aSort <=> $bSort;
                 }
-
                 $aId = is_array($a) ? (string) ($a['id'] ?? '') : '';
                 $bId = is_array($b) ? (string) ($b['id'] ?? '') : '';
+
                 return $aId <=> $bId;
             });
         }
+
+        // --- Videos: resolve variant/stream/poster URLs ---
+        foreach (['gallery_videos', 'content_videos'] as $key) {
+            $items = $site[$key] ?? [];
+            if (! is_array($items)) {
+                continue;
+            }
+            foreach ($items as $i => $item) {
+                if (! is_array($item) || empty($item['id'])) {
+                    continue;
+                }
+                $mediaId = $item['id'];
+                $byType = $mvByMedia[$mediaId] ?? [];
+
+                $site[$key][$i]['variants'] = $byType['mp4'] ?? [];
+                $site[$key][$i]['streams'] = $byType['hls_playlist'] ?? [];
+                $site[$key][$i]['poster'] = ($byType['poster']['poster'] ?? null);
+            }
+
+            usort($site[$key], function ($a, $b) {
+                $aSort = is_array($a) ? (int) ($a['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
+                $bSort = is_array($b) ? (int) ($b['sort_order'] ?? PHP_INT_MAX) : PHP_INT_MAX;
+                if ($aSort !== $bSort) {
+                    return $aSort <=> $bSort;
+                }
+                $aId = is_array($a) ? (string) ($a['id'] ?? '') : '';
+                $bId = is_array($b) ? (string) ($b['id'] ?? '') : '';
+
+                return $aId <=> $bId;
+            });
+        }
+
+        // Ensure video keys always exist even when there are no videos (backward-compat).
+        $site['gallery_videos'] = $site['gallery_videos'] ?? [];
+        $site['content_videos'] = $site['content_videos'] ?? [];
 
         return $site;
     }
@@ -410,7 +650,7 @@ class SiteCacheService
                 ->with('site')
                 ->find($professionalId);
 
-            if (!$professional || !$professional->site) {
+            if (! $professional || ! $professional->site) {
                 return $payload;
             }
 
@@ -442,7 +682,7 @@ class SiteCacheService
     {
         $legal = $payload['legal'] ?? null;
 
-        if (!is_array($legal)) {
+        if (! is_array($legal)) {
             return false;
         }
 
@@ -457,6 +697,11 @@ class SiteCacheService
      */
     public function invalidateSite(Site $site): void
     {
+        $professionalId = (string) ($site->professional_id ?? '');
+        if ($professionalId !== '') {
+            $this->brandFonts->forget($professionalId);
+        }
+
         $keys = [
             CacheKeyGenerator::publicSitePayload($site->subdomain),
             CacheKeyGenerator::siteBlocks($site->id, 'links'),
@@ -480,7 +725,25 @@ class SiteCacheService
             ->all();
 
         foreach ($aliasSubdomains as $aliasSubdomain) {
-            $keys[] = CacheKeyGenerator::publicSitePayload(strtoLower($aliasSubdomain));
+            $keys[] = CacheKeyGenerator::publicSitePayload(strtolower($aliasSubdomain));
+        }
+
+        if ($professionalId !== '') {
+            $connectedProfessionalIds = BrandPartnerLink::query()
+                ->where('brand_professional_id', $professionalId)
+                ->pluck('affiliate_professional_id')
+                ->all();
+
+            $connectedSubdomains = Site::query()
+                ->whereIn('professional_id', $connectedProfessionalIds)
+                ->pluck('subdomain')
+                ->filter(fn ($subdomain): bool => is_string($subdomain) && trim($subdomain) !== '')
+                ->map(fn ($subdomain): string => strtolower((string) $subdomain))
+                ->all();
+
+            foreach ($connectedSubdomains as $connectedSubdomain) {
+                $keys[] = CacheKeyGenerator::publicSitePayload($connectedSubdomain);
+            }
         }
 
         Cache::deleteMultiple(array_values(array_unique($keys)));

@@ -8,12 +8,21 @@ use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateProfessionalRequest;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Site\Block;
+use App\Services\Enterprise\EnterpriseProvisioningService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class StaffProfessionalController extends ApiController
 {
+    /** @return array<int, string> */
+    private function professionalOnlySectionTypes(): array
+    {
+        return config('comet.professional_only_section_types', []);
+    }
+
     use HandlesSearchQueries;
     use NormalizesPerPage;
     use ReturnsPaginatedResponse;
@@ -24,7 +33,7 @@ class StaffProfessionalController extends ApiController
     public function index(Request $request): JsonResponse
     {
         $status = $request->query('status'); // optional: active|suspended
-        $professionalType = $request->query('professional_type'); // optional: barber|salon|influencer
+        $professionalType = $request->query('professional_type'); // optional: professional|influencer|brand
         $perPage = $this->normalizePerPage($request, 25, 100);
         $searchLike = $this->prepareSearchLike($request, 'q');
 
@@ -37,7 +46,8 @@ class StaffProfessionalController extends ApiController
         }
 
         if (is_string($professionalType) && $professionalType !== '') {
-            $query->where('professional_type', strtolower($professionalType));
+            $normalizedProfessionalType = strtolower(trim($professionalType));
+            $query->where('professional_type', $normalizedProfessionalType);
         }
 
         if ($searchLike) {
@@ -155,14 +165,47 @@ class StaffProfessionalController extends ApiController
         ]);
     }
 
-    public function update(StaffUpdateProfessionalRequest $request, Professional $professional)
+    public function update(
+        StaffUpdateProfessionalRequest $request,
+        Professional $professional,
+        EnterpriseProvisioningService $enterpriseProvisioningService
+    )
     {
-        $professional->fill($request->validated());
-        $professional->save();
+        $previousProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
+
+        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService, $previousProfessionalType): void {
+            $professional->fill($request->validated());
+            $professional->save();
+
+            $nextProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
+            if ($previousProfessionalType !== 'influencer' && $nextProfessionalType === 'influencer') {
+                $this->disableProfessionalOnlySections($professional->id);
+            }
+
+            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
+                $enterpriseProvisioningService->ensureForProfessional($professional);
+            }
+        });
 
         return $this->success([
             'professional' => $professional->fresh(),
         ]);
+    }
+
+    private function disableProfessionalOnlySections(string $professionalId): void
+    {
+        if ($professionalId === '') {
+            return;
+        }
+
+        Block::query()
+            ->where('professional_id', $professionalId)
+            ->where('block_group', 'sections')
+            ->whereIn('block_type', $this->professionalOnlySectionTypes())
+            ->where('is_active', true)
+            ->update([
+                'is_active' => false,
+            ]);
     }
 
     /**

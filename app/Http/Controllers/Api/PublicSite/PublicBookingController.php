@@ -8,6 +8,7 @@ use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
+use App\Services\Notifications\CommerceNotificationService;
 use App\Services\Public\PublicSiteResolver;
 use App\Services\Square\SquareApiClient;
 use App\Services\Square\SquareApiException;
@@ -16,6 +17,7 @@ use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -26,7 +28,8 @@ class PublicBookingController extends ApiController
 
     public function __construct(
         private readonly PublicSiteResolver $siteResolver,
-        private readonly SquareApiClient $squareApiClient
+        private readonly SquareApiClient $squareApiClient,
+        private readonly CommerceNotificationService $commerceNotifications
     ) {}
 
     /**
@@ -231,7 +234,7 @@ class PublicBookingController extends ApiController
                 'durationMinutes' => ['nullable', 'integer', 'min:1'],
                 'startAt' => ['required', 'string', 'max:80'],
                 'locationId' => ['nullable', 'string', 'max:120'],
-                'paymentMethod' => ['nullable', 'string', 'in:apple_pay,card'],
+                'paymentMethod' => ['nullable', 'string', 'in:apple_pay,google_pay,card'],
                 'sourceId' => ['nullable', 'string', 'max:255'],
                 'customer' => ['required', 'array'],
                 'customer.firstName' => ['required', 'string', 'max:120'],
@@ -304,6 +307,18 @@ class PublicBookingController extends ApiController
             $bookingVersion = (int) data_get($bookingResponse, 'booking.version', 0);
 
             if (! $requiresPayment) {
+                $this->recordBookingAnalyticsAndNotify(
+                    site: $site,
+                    professional: $professional,
+                    validated: $validated,
+                    service: $service,
+                    bookingId: $bookingId,
+                    bookingStatus: (string) data_get($bookingResponse, 'booking.status', ''),
+                    paymentId: null,
+                    amountPaidCents: 0,
+                    currencyCode: $currencyCode
+                );
+
                 return $this->success([
                     'success' => true,
                     'booking' => [
@@ -345,6 +360,19 @@ class PublicBookingController extends ApiController
                     422
                 );
             }
+
+            $paymentId = (string) data_get($paymentResponse, 'payment.id', '');
+            $this->recordBookingAnalyticsAndNotify(
+                site: $site,
+                professional: $professional,
+                validated: $validated,
+                service: $service,
+                bookingId: $bookingId,
+                bookingStatus: (string) data_get($bookingResponse, 'booking.status', ''),
+                paymentId: $paymentId !== '' ? $paymentId : null,
+                amountPaidCents: $priceCents,
+                currencyCode: $currencyCode
+            );
 
             return $this->success([
                 'success' => true,
@@ -681,6 +709,145 @@ class PublicBookingController extends ApiController
                 'message' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Persist booking analytics and trigger in-app notifications.
+     * This is non-blocking and should never fail checkout.
+     *
+     * @param  array<string, mixed>  $validated
+     * @param  array<string, mixed>  $service
+     */
+    private function recordBookingAnalyticsAndNotify(
+        Site $site,
+        Professional $professional,
+        array $validated,
+        array $service,
+        string $bookingId,
+        string $bookingStatus,
+        ?string $paymentId,
+        int $amountPaidCents,
+        string $currencyCode
+    ): void {
+        try {
+            $professionalId = (string) $professional->id;
+            $siteId = (string) $site->id;
+            $bookingId = trim($bookingId);
+            $paymentId = trim((string) ($paymentId ?? ''));
+            $currencyCode = strtoupper(trim($currencyCode));
+            if ($currencyCode === '') {
+                $currencyCode = 'AUD';
+            }
+
+            $brandProfessionalIds = DB::table('core.brand_partner_links')
+                ->where('affiliate_professional_id', $professionalId)
+                ->pluck('brand_professional_id')
+                ->map(static fn ($id): string => trim((string) $id))
+                ->filter(static fn (string $id): bool => $id !== '')
+                ->unique()
+                ->values()
+                ->all();
+
+            $existingEventId = null;
+            if ($bookingId !== '') {
+                $existingEventId = DB::table('analytics.booking_events')
+                    ->where('professional_id', $professionalId)
+                    ->where('square_booking_id', $bookingId)
+                    ->value('id');
+            }
+
+            $eventId = is_string($existingEventId) && trim($existingEventId) !== ''
+                ? trim($existingEventId)
+                : (string) Str::uuid();
+
+            $serviceName = $this->resolveServiceName($service);
+            $firstName = trim((string) ($validated['customer']['firstName'] ?? ''));
+            $lastName = trim((string) ($validated['customer']['lastName'] ?? ''));
+            $customerName = trim($firstName.' '.$lastName);
+            $customerEmail = strtolower(trim((string) ($validated['customer']['email'] ?? '')));
+            $customerPhone = trim((string) ($validated['customer']['phone'] ?? ''));
+            $occurredAt = $this->nullableTimestamp((string) ($validated['startAt'] ?? '')) ?? now();
+            $normalizedStatus = strtolower(trim($bookingStatus));
+            if (! in_array($normalizedStatus, ['accepted', 'pending', 'completed', 'cancelled', 'failed'], true)) {
+                $normalizedStatus = 'completed';
+            }
+
+            $attributes = [
+                'professional_id' => $professionalId,
+                'site_id' => $siteId,
+                'brand_professional_id' => count($brandProfessionalIds) === 1 ? $brandProfessionalIds[0] : null,
+                'occurred_at' => $occurredAt,
+                'status' => $normalizedStatus,
+                'source' => 'site_booking_checkout',
+                'square_booking_id' => $bookingId !== '' ? $bookingId : null,
+                'square_payment_id' => $paymentId !== '' ? $paymentId : null,
+                'service_variation_id' => trim((string) ($validated['serviceVariationId'] ?? '')) ?: null,
+                'service_name' => $serviceName !== '' ? $serviceName : null,
+                'payment_method' => trim((string) ($validated['paymentMethod'] ?? '')) ?: null,
+                'customer_name' => $customerName !== '' ? $customerName : null,
+                'customer_email' => $customerEmail !== '' ? $customerEmail : null,
+                'customer_phone' => $customerPhone !== '' ? $customerPhone : null,
+                'currency_code' => $currencyCode,
+                'amount_paid_cents' => max(0, $amountPaidCents),
+                'raw_payload' => [
+                    'validated' => $validated,
+                    'resolved_service' => $service,
+                    'booking_status' => $bookingStatus,
+                    'recorded_at' => now()->toIso8601String(),
+                ],
+                'updated_at' => now(),
+            ];
+
+            if ($existingEventId) {
+                DB::table('analytics.booking_events')
+                    ->where('id', $eventId)
+                    ->update($attributes);
+            } else {
+                DB::table('analytics.booking_events')
+                    ->insert(array_merge($attributes, [
+                        'id' => $eventId,
+                        'created_at' => now(),
+                    ]));
+            }
+
+            $this->commerceNotifications->notifyBookingCompleted([
+                'professional_id' => $professionalId,
+                'brand_professional_ids' => $brandProfessionalIds,
+                'booking_event_id' => $eventId,
+                'booking_id' => $bookingId !== '' ? $bookingId : null,
+                'service_name' => $serviceName !== '' ? $serviceName : null,
+                'customer_name' => $customerName !== '' ? $customerName : null,
+                'amount_paid_cents' => max(0, $amountPaidCents),
+                'currency_code' => $currencyCode,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Public booking analytics sync failed', [
+                'site_id' => $site->id,
+                'professional_id' => $professional->id,
+                'booking_id' => $bookingId,
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $service
+     */
+    private function resolveServiceName(array $service): string
+    {
+        $itemName = trim((string) ($service['item_name'] ?? $service['name'] ?? ''));
+        $variationName = trim((string) ($service['variation_name'] ?? ''));
+        $normalizedVariationName = $this->normalizeVariationName($variationName, $itemName);
+
+        if ($itemName !== '' && $normalizedVariationName !== '') {
+            return $itemName.' - '.$normalizedVariationName;
+        }
+
+        if ($itemName !== '') {
+            return $itemName;
+        }
+
+        return $normalizedVariationName;
     }
 
     private function diagnosticCode(\Throwable $exception): string

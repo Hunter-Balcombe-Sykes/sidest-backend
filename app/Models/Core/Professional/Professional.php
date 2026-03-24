@@ -6,6 +6,9 @@ use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
 use App\Models\BaseModel;
 use App\Models\Billing\Subscription;
+use App\Models\Core\Enterprise\Enterprise;
+use App\Models\Core\Enterprise\InfluencerPromoterContract;
+use App\Models\Core\Enterprise\ProfessionalEnterpriseMembership;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
@@ -13,6 +16,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -42,6 +46,7 @@ class Professional extends BaseModel
         'professional_type',
         'status',
         'onboarding_step',
+        'primary_enterprise_id',
         'qr_slug',
         'phone',
         'primary_email',
@@ -61,18 +66,67 @@ class Professional extends BaseModel
 
         'handle_lc',
 
+        // Stripe Connect + commission funding
+        'stripe_connect_account_id',
+        'stripe_connect_status',
+        'stripe_customer_id',
+        'stripe_payment_method_id',
+        'stripe_commission_funding_mode',
+        'stripe_manual_balance_cents',
+        'stripe_manual_balance_currency',
+
     ];
 
     protected $casts = [
         'onboarding_step' => 'integer',
+        'stripe_manual_balance_cents' => 'integer',
         'created_at'      => 'datetime',
         'updated_at'      => 'datetime',
         'deleted_at'      => 'datetime',
     ];
 
+    public function isInfluencer(): bool
+    {
+        return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'influencer';
+    }
+
+    public function isBrand(): bool
+    {
+        return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'brand';
+    }
+
     public function site(): HasOne
     {
         return $this->hasOne(Site::class, 'professional_id');
+    }
+
+    public function primaryEnterprise(): BelongsTo
+    {
+        return $this->belongsTo(Enterprise::class, 'primary_enterprise_id');
+    }
+
+    public function enterpriseMemberships(): HasMany
+    {
+        return $this->hasMany(ProfessionalEnterpriseMembership::class, 'professional_id')
+            ->orderByDesc('starts_at');
+    }
+
+    public function influencerPromoterContracts(): HasMany
+    {
+        return $this->hasMany(InfluencerPromoterContract::class, 'influencer_professional_id')
+            ->orderByDesc('starts_at');
+    }
+
+    public function activeInfluencerPromoterContract(): HasOne
+    {
+        return $this->hasOne(InfluencerPromoterContract::class, 'influencer_professional_id')
+            ->where('status', 'active')
+            ->where('starts_at', '<=', now())
+            ->where(function ($query) {
+                $query->whereNull('ends_at')
+                    ->orWhere('ends_at', '>', now());
+            })
+            ->latest('starts_at');
     }
 
     public function legalContent(): HasOne
@@ -131,6 +185,12 @@ class Professional extends BaseModel
         return $this->hasMany(EmailSubscription::class, 'professional_id');
     }
 
+    public function brandAffiliateInvites(): HasMany
+    {
+        return $this->hasMany(BrandAffiliateInvite::class, 'brand_professional_id')
+            ->orderByDesc('created_at');
+    }
+
     public function subscription(): HasOne
     {
         return $this->hasOne(Subscription::class, 'professional_id');
@@ -151,6 +211,12 @@ class Professional extends BaseModel
     {
         return $this->hasOne(ProfessionalIntegration::class, 'professional_id')
             ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA);
+    }
+
+    public function shopifyIntegration(): HasOne
+    {
+        return $this->hasOne(ProfessionalIntegration::class, 'professional_id')
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY);
     }
 
     public function productSelections(): HasMany

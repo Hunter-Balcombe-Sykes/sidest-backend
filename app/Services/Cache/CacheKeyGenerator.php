@@ -94,4 +94,9 @@ class CacheKeyGenerator
         return "analytics:summary:{$professionalId}:{$startDate}:{$endDate}";
     }
 
+    public static function brandFontActive(string $brandProfessionalId): string
+    {
+        return "brand:{$brandProfessionalId}:font:active";
+    }
+
 }

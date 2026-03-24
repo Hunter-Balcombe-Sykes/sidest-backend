@@ -2,7 +2,7 @@
 
 namespace App\Services\Media;
 
-use App\Models\Core\ImageVariant;
+use App\Models\Core\MediaVariant;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -29,9 +29,9 @@ class ImageVariantService
      * on the media disk, and persist ImageVariant rows for the given image.
      *
      * @param  string  $originalTmpPath  Absolute path to the temp original.
-     * @param  string  $imageId          UUID of the SiteImage row.
+     * @param  string  $imageId          UUID of the SiteMedia row.
      * @param  string  $basePath         e.g. "images/<proId>/<imageId>"
-     * @return array<string, ImageVariant>  keyed by variant name
+     * @return array<string, MediaVariant>  keyed by variant name
      */
     public function processVariants(
         string $originalTmpPath,
@@ -155,30 +155,31 @@ class ImageVariantService
                     $disk->put($storagePath, $payload, 'public');
 
                     // --- Upsert DB row ---
-                    $variant = ImageVariant::updateOrCreate(
+                    $variant = MediaVariant::updateOrCreate(
                         [
-                            'image_id' => $imageId,
-                            'variant'  => $variantName,
+                            'media_id'      => $imageId,
+                            'variant_key'   => $variantName,
+                            'artifact_type' => 'webp',
                         ],
                         [
-                            'disk'         => $this->diskName(),
-                            'path'         => $storagePath,
-                            'format'       => (string) ($def['format'] ?? 'webp'),
-                            'width'        => $dstW,
-                            'height'       => $dstH,
-                            'file_size'    => $fileBytes,
-                            'content_hash' => $hash,
+                            'disk'            => $this->diskName(),
+                            'path'            => $storagePath,
+                            'mime'            => 'image/webp',
+                            'width'           => $dstW,
+                            'height'          => $dstH,
+                            'file_size_bytes' => $fileBytes,
+                            'content_hash'    => $hash,
                         ],
                     );
 
                     $created[$variantName] = $variant;
                 } finally {
                     @unlink($tmpFile);
-                    imagedestroy($canvas);
+                    unset($canvas);
                 }
             }
         } finally {
-            imagedestroy($sourceImage);
+            unset($sourceImage);
         }
 
         \Illuminate\Support\Facades\Log::info('Image variant processing completed', [
@@ -207,13 +208,15 @@ class ImageVariantService
     }
 
     /**
-     * Delete all variant files (and DB rows) for a given SiteImage,
+     * Delete all image variant files (and DB rows) for a given SiteMedia item,
      * plus the original file stored at the image's path.
      */
     public function deleteVariants(string $imageId, ?string $originalPath = null): void
     {
-        $variants = ImageVariant::where('image_id', $imageId)->get();
-        $disk     = $this->disk();
+        $variants = MediaVariant::where('media_id', $imageId)
+            ->where('artifact_type', 'webp')
+            ->get();
+        $disk = $this->disk();
 
         foreach ($variants as $variant) {
             $disk->delete($variant->path);
@@ -227,15 +230,16 @@ class ImageVariantService
     }
 
     /**
-     * Build a variant map (variant_name → public URL) for a SiteImage.
+     * Build a variant map (variant_key → public URL) for a SiteMedia image item.
      *
      * @return array<string, string>
      */
     public function variantUrls(string $imageId): array
     {
-        return ImageVariant::where('image_id', $imageId)
+        return MediaVariant::where('media_id', $imageId)
+            ->where('artifact_type', 'webp')
             ->get()
-            ->mapWithKeys(fn (ImageVariant $v) => [$v->variant => $v->url])
+            ->mapWithKeys(fn (MediaVariant $v) => [$v->variant_key => $v->url])
             ->all();
     }
 

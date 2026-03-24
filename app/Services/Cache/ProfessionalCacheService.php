@@ -2,6 +2,7 @@
 
 namespace App\Services\Cache;
 
+use App\Services\Branding\BrandFontResolver;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use Illuminate\Support\Facades\Cache;
@@ -10,6 +11,10 @@ use Illuminate\Support\Facades\Log;
 
 class ProfessionalCacheService
 {
+    public function __construct(
+        private readonly BrandFontResolver $brandFonts
+    ) {}
+
     /* ---------------------------
      |  ID mapping (fast lookups)
      * --------------------------*/
@@ -102,6 +107,14 @@ class ProfessionalCacheService
     {
         // NOTE: your Professional model has protected $with = ['site'];
         $site = $pro->site;
+        $siteSettings = [];
+        if ($site) {
+            $siteSettingsRaw = is_array($site->settings) ? $site->settings : [];
+            $siteSettings = $this->brandFonts->hydrateTypographySettings(
+                $siteSettingsRaw,
+                (string) $pro->id
+            );
+        }
 
         return [
             'professional' => [
@@ -134,7 +147,7 @@ class ProfessionalCacheService
                 'id' => $site->id,
                 'subdomain' => $site->subdomain,
                 'is_published' => (bool) $site->is_published,
-                'settings' => $site->settings,
+                'settings' => $siteSettings,
             ] : null,
         ];
     }
