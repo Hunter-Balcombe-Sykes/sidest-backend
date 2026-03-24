@@ -38,12 +38,10 @@ class FeaturedProductsController extends ApiController
         $professional = $this->currentProfessional($request);
         $this->currentSite($professional);
 
-        return $this->success(
-            $this->featuredProductsPayloads->build(
-                (string) $professional->id,
-                'professional_store_index'
-            )
-        );
+        return $this->success($this->safeFeaturedProductsPayload(
+            (string) $professional->id,
+            'professional_store_index'
+        ));
     }
 
     /**
@@ -231,12 +229,64 @@ class FeaturedProductsController extends ApiController
             ]);
         }
 
-        return $this->success(
-            $this->featuredProductsPayloads->build(
-                $professionalId,
-                'professional_store_update'
-            )
-        );
+        return $this->success($this->safeFeaturedProductsPayload(
+            $professionalId,
+            'professional_store_update'
+        ));
+    }
+
+    /**
+     * @return array{
+     *   selected_products: array<int, array<string, mixed>>,
+     *   default_commission_rate: float,
+     *   max_featured_products: int
+     * }
+     */
+    private function safeFeaturedProductsPayload(string $professionalId, string $context): array
+    {
+        try {
+            return $this->featuredProductsPayloads->build($professionalId, $context);
+        } catch (Throwable $e) {
+            Log::error('Featured products payload build failed; falling back to minimal selection payload.', [
+                'professional_id' => $professionalId,
+                'context' => $context,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'selected_products' => $this->fallbackSelectedProducts($professionalId),
+                'default_commission_rate' => (float) config('comet.store.default_commission_rate', 15),
+                'max_featured_products' => (int) config('comet.store.max_featured_products', 10),
+            ];
+        }
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function fallbackSelectedProducts(string $professionalId): array
+    {
+        return DB::table('retail.professional_selections as ps')
+            ->join('retail.brand_products as bp', 'bp.id', '=', 'ps.brand_product_id')
+            ->where('ps.professional_id', $professionalId)
+            ->orderBy('ps.sort_order')
+            ->select([
+                'ps.id as id',
+                'ps.sort_order',
+                'ps.brand_product_id',
+                'bp.shopify_product_id',
+            ])
+            ->get()
+            ->map(static function ($row): array {
+                return [
+                    'id' => (string) ($row->id ?? ''),
+                    'sort_order' => (int) ($row->sort_order ?? 0),
+                    'brand_product_id' => (string) ($row->brand_product_id ?? ''),
+                    'shopify_product_id' => (string) ($row->shopify_product_id ?? ''),
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     private function shouldRememberConfirmationPreference(Request $request): bool
