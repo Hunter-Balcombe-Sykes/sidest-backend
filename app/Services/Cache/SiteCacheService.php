@@ -52,9 +52,10 @@ class SiteCacheService
                     $cached,
                     (string) data_get($cached, 'professional.id', '')
                 );
-                $cached = $this->withStorePayload(
+                $cached = $this->safeWithStorePayload(
                     $cached,
-                    (string) data_get($cached, 'professional.id', '')
+                    (string) data_get($cached, 'professional.id', ''),
+                    $subdomain
                 );
 
                 if (! array_key_exists('legal', $cached)) {
@@ -65,10 +66,12 @@ class SiteCacheService
                 $site = $cached['site'] ?? null;
                 if (is_array($site)) {
                     $professionalId = (string) data_get($cached, 'professional.id', '');
-                    $site = $this->hydrateSiteWithBrandTypography($site, $professionalId);
-                    $site = $this->resolveImageVariantUrlsInSite($site, '');
-                    $cached['site'] = $site;
-                    $cached['site'] = $this->enrichSiteWithBrandPartnerRadius($cached['site']);
+                    $cached['site'] = $this->safeHydrateSitePayload(
+                        $site,
+                        $professionalId,
+                        '',
+                        $subdomain
+                    );
                 }
 
                 Cache::put($key, $cached, now()->addMinutes(15));
@@ -101,9 +104,12 @@ class SiteCacheService
 
         $site = $payload['site'] ?? null;
         if (is_array($site)) {
-            $site = $this->hydrateSiteWithBrandTypography($site, (string) ($row->professional_id ?? ''));
-            $site = $this->resolveImageVariantUrlsInSite($site, (string) ($row->site_id ?? ''));
-            $site = $this->enrichSiteWithBrandPartnerRadius($site);
+            $site = $this->safeHydrateSitePayload(
+                $site,
+                (string) ($row->professional_id ?? ''),
+                (string) ($row->site_id ?? ''),
+                $subdomain
+            );
         }
 
         // Must match the controller response shape exactly.
@@ -123,9 +129,8 @@ class SiteCacheService
             'legal' => $payload['legal'] ?? null,
         ];
         $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
-        $data = $this->withStorePayload($data, (string) ($row->professional_id ?? ''));
-
-        $data = $this->applyBrandImageFallbacks($data);
+        $data = $this->safeWithStorePayload($data, (string) ($row->professional_id ?? ''), $subdomain);
+        $data = $this->safeApplyBrandImageFallbacks($data, $subdomain);
 
         Cache::put($key, $data, now()->addMinutes(15));
 
@@ -175,6 +180,67 @@ class SiteCacheService
         }
 
         return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $site
+     * @return array<string, mixed>
+     */
+    private function safeHydrateSitePayload(array $site, string $professionalId, string $siteId, string $subdomain): array
+    {
+        try {
+            $site = $this->hydrateSiteWithBrandTypography($site, $professionalId);
+            $site = $this->resolveImageVariantUrlsInSite($site, $siteId);
+
+            return $this->enrichSiteWithBrandPartnerRadius($site);
+        } catch (\Throwable $e) {
+            Log::warning('Public site payload hydration failed; returning base site payload.', [
+                'subdomain' => $subdomain,
+                'professional_id' => $professionalId,
+                'site_id' => $siteId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $site;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function safeWithStorePayload(array $payload, string $professionalId, string $subdomain): array
+    {
+        try {
+            return $this->withStorePayload($payload, $professionalId);
+        } catch (\Throwable $e) {
+            Log::warning('Public site store payload build failed; returning payload without refreshed store data.', [
+                'subdomain' => $subdomain,
+                'professional_id' => $professionalId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $payload;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function safeApplyBrandImageFallbacks(array $payload, string $subdomain): array
+    {
+        try {
+            return $this->applyBrandImageFallbacks($payload);
+        } catch (\Throwable $e) {
+            Log::warning('Brand image fallback enrichment failed; returning payload unchanged.', [
+                'subdomain' => $subdomain,
+                'professional_id' => (string) data_get($payload, 'professional.id', ''),
+                'error' => $e->getMessage(),
+            ]);
+
+            return $payload;
+        }
     }
 
     /**
