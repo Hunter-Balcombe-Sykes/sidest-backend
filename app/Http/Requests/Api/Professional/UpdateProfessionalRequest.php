@@ -3,10 +3,12 @@
 namespace App\Http\Requests\Api\Professional;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use Illuminate\Validation\Rule;
 
 class UpdateProfessionalRequest extends BaseFormRequest
 {
+    use NormalizesProfessionalType;
 
     public function rules(): array
     {
@@ -92,25 +94,4 @@ class UpdateProfessionalRequest extends BaseFormRequest
         return mb_strtolower($value);
     }
 
-    private function normalizeProfessionalTypeInput(mixed $value): mixed
-    {
-        if (! is_string($value)) {
-            return $value;
-        }
-
-        $normalized = mb_strtolower(trim($value));
-        if ($normalized === '') {
-            return null;
-        }
-
-        $compact = preg_replace('/[^a-z]+/u', '', $normalized) ?? $normalized;
-
-        return match ($compact) {
-            'proffesional',
-            'professional' => 'professional',
-            'influencer' => 'influencer',
-            'brand' => 'brand',
-            default => $normalized,
-        };
-    }
 }

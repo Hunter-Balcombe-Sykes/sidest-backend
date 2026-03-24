@@ -85,6 +85,16 @@ class Professional extends BaseModel
         'deleted_at'      => 'datetime',
     ];
 
+    public function isInfluencer(): bool
+    {
+        return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'influencer';
+    }
+
+    public function isBrand(): bool
+    {
+        return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'brand';
+    }
+
     public function site(): HasOne
     {
         return $this->hasOne(Site::class, 'professional_id');

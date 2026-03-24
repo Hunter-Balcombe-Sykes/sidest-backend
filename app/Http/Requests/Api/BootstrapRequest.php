@@ -3,11 +3,13 @@
 namespace App\Http\Requests\Api;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Validation\Rule;
 
 class BootstrapRequest extends BaseFormRequest
 {
+    use NormalizesProfessionalType;
 
 
     public function rules(): array
@@ -87,27 +89,6 @@ class BootstrapRequest extends BaseFormRequest
         $this->merge($merge);
     }
 
-    private function normalizeProfessionalTypeInput(mixed $value): mixed
-    {
-        if (! is_string($value)) {
-            return $value;
-        }
-
-        $normalized = mb_strtolower(trim($value));
-        if ($normalized === '') {
-            return null;
-        }
-
-        $compact = preg_replace('/[^a-z]+/u', '', $normalized) ?? $normalized;
-
-        return match ($compact) {
-            'proffesional',
-            'professional' => 'professional',
-            'influencer' => 'influencer',
-            'brand' => 'brand',
-            default => $normalized,
-        };
-    }
 
     private function generateHandleFromDisplayName(string $displayName): string
     {

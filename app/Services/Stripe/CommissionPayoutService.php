@@ -41,91 +41,130 @@ class CommissionPayoutService
         ];
 
         // Retry previously created batches that are still unresolved.
-        $existingPending = CommissionPayout::query()
-            ->where('status', 'pending')
-            ->whereNull('processed_at')
-            ->orderBy('eligible_after')
-            ->limit(500)
-            ->get();
+        // Claim rows with FOR UPDATE SKIP LOCKED so concurrent workers
+        // process different payouts without blocking each other.
+        $claimBatchSize = 100;
 
-        foreach ($existingPending as $pendingPayout) {
-            try {
-                $stats['existing_batches_retried']++;
-                $result = $this->processPayoutBatch($pendingPayout);
+        while (true) {
+            $claimedIds = DB::transaction(function () use ($claimBatchSize) {
+                $rows = DB::select(
+                    'SELECT id FROM retail.commission_payouts
+                     WHERE status = ? AND processed_at IS NULL
+                     ORDER BY eligible_after
+                     LIMIT ?
+                     FOR UPDATE SKIP LOCKED',
+                    ['pending', $claimBatchSize]
+                );
 
-                if ($result === true) {
-                    $stats['batches_processed']++;
-                    $stats['total_cents'] += $pendingPayout->net_payout_cents;
-                    continue;
+                if (empty($rows)) {
+                    return [];
                 }
 
-                if ($result === null) {
-                    $stats['batches_pending_funding']++;
-                    continue;
-                }
+                $ids = array_column(array_map(fn ($r) => (array) $r, $rows), 'id');
 
-                $stats['batches_failed']++;
-            } catch (\Throwable $e) {
-                Log::error('Retrying existing commission payout batch failed', [
-                    'payout_id' => $pendingPayout->id,
-                    'error' => $e->getMessage(),
-                ]);
-                $stats['batches_failed']++;
+                // Claim by moving to "collecting" so no other worker re-selects them.
+                CommissionPayout::whereIn('id', $ids)->update(['status' => 'collecting']);
+
+                return $ids;
+            });
+
+            if (empty($claimedIds)) {
+                break;
+            }
+
+            $claimedPayouts = CommissionPayout::whereIn('id', $claimedIds)->get();
+
+            foreach ($claimedPayouts as $pendingPayout) {
+                try {
+                    $stats['existing_batches_retried']++;
+                    $result = $this->processPayoutBatch($pendingPayout);
+
+                    if ($result === true) {
+                        $stats['batches_processed']++;
+                        $stats['total_cents'] += $pendingPayout->net_payout_cents;
+                        continue;
+                    }
+
+                    if ($result === null) {
+                        $stats['batches_pending_funding']++;
+                        continue;
+                    }
+
+                    $stats['batches_failed']++;
+                } catch (\Throwable $e) {
+                    Log::error('Retrying existing commission payout batch failed', [
+                        'payout_id' => $pendingPayout->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $stats['batches_failed']++;
+                }
             }
         }
 
-        $groups = CommissionLedgerEntry::query()
-            ->whereNull('payout_id')
-            ->where('entry_type', 'accrual')
-            ->where('status', 'approved')
-            ->where('occurred_at', '<=', $cutoff)
-            ->select([
-                'brand_professional_id',
-                'affiliate_professional_id',
-                'currency_code',
-                DB::raw('SUM(amount_cents) as total_cents'),
-                DB::raw('COUNT(*) as entry_count'),
-            ])
-            ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code')
-            ->having(DB::raw('SUM(amount_cents)'), '>', 0)
-            ->get();
+        // Process eligible unpaid ledger entries in chunks to avoid
+        // unbounded memory/time with large professional counts.
+        $groupBatchSize = 100;
 
-        foreach ($groups as $group) {
-            try {
-                $payout = $this->createPayoutBatch(
-                    $group->brand_professional_id,
-                    $group->affiliate_professional_id,
-                    $group->currency_code,
-                    $cutoff,
-                );
+        while (true) {
+            $groups = CommissionLedgerEntry::query()
+                ->whereNull('payout_id')
+                ->where('entry_type', 'accrual')
+                ->where('status', 'approved')
+                ->where('occurred_at', '<=', $cutoff)
+                ->select([
+                    'brand_professional_id',
+                    'affiliate_professional_id',
+                    'currency_code',
+                    DB::raw('SUM(amount_cents) as total_cents'),
+                    DB::raw('COUNT(*) as entry_count'),
+                ])
+                ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code')
+                ->having(DB::raw('SUM(amount_cents)'), '>', 0)
+                ->orderBy('brand_professional_id')
+                ->limit($groupBatchSize)
+                ->get();
 
-                if (! $payout) {
-                    continue;
+            if ($groups->isEmpty()) {
+                break;
+            }
+
+            foreach ($groups as $group) {
+                try {
+                    $payout = $this->createPayoutBatch(
+                        $group->brand_professional_id,
+                        $group->affiliate_professional_id,
+                        $group->currency_code,
+                        $cutoff,
+                    );
+
+                    if (! $payout) {
+                        continue;
+                    }
+
+                    $stats['batches_created']++;
+                    $result = $this->processPayoutBatch($payout);
+
+                    if ($result === true) {
+                        $stats['batches_processed']++;
+                        $stats['total_cents'] += $payout->net_payout_cents;
+                        continue;
+                    }
+
+                    if ($result === null) {
+                        $stats['batches_pending_funding']++;
+                        continue;
+                    }
+
+                    $stats['batches_failed']++;
+                } catch (\Throwable $e) {
+                    Log::error('Commission payout batch failed', [
+                        'brand_id' => $group->brand_professional_id,
+                        'affiliate_id' => $group->affiliate_professional_id,
+                        'currency' => $group->currency_code,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $stats['batches_failed']++;
                 }
-
-                $stats['batches_created']++;
-                $result = $this->processPayoutBatch($payout);
-
-                if ($result === true) {
-                    $stats['batches_processed']++;
-                    $stats['total_cents'] += $payout->net_payout_cents;
-                    continue;
-                }
-
-                if ($result === null) {
-                    $stats['batches_pending_funding']++;
-                    continue;
-                }
-
-                $stats['batches_failed']++;
-            } catch (\Throwable $e) {
-                Log::error('Commission payout batch failed', [
-                    'brand_id' => $group->brand_professional_id,
-                    'affiliate_id' => $group->affiliate_professional_id,
-                    'currency' => $group->currency_code,
-                    'error' => $e->getMessage(),
-                ]);
-                $stats['batches_failed']++;
             }
         }
 
@@ -197,13 +236,19 @@ class CommissionPayoutService
                 'eligible_after' => $cutoff,
             ]);
 
-            foreach ($entries as $entry) {
-                CommissionPayoutItem::create([
-                    'payout_id' => $payout->id,
-                    'commission_ledger_entry_id' => $entry->id,
-                    'amount_cents' => $entry->amount_cents,
-                ]);
-                $entry->update(['payout_id' => $payout->id]);
+            // Bulk-insert payout items and bulk-update ledger entries
+            // instead of N individual INSERT + UPDATE statements.
+            $payoutItems = $entries->map(fn ($entry) => [
+                'id' => (string) \Illuminate\Support\Str::uuid(),
+                'payout_id' => $payout->id,
+                'commission_ledger_entry_id' => $entry->id,
+                'amount_cents' => $entry->amount_cents,
+                'created_at' => now(),
+            ])->all();
+
+            if (! empty($payoutItems)) {
+                CommissionPayoutItem::insert($payoutItems);
+                CommissionLedgerEntry::whereIn('id', $entries->pluck('id'))->update(['payout_id' => $payout->id]);
             }
 
             $reversals = CommissionLedgerEntry::query()
@@ -216,13 +261,17 @@ class CommissionPayoutService
                 ->where('occurred_at', '<=', $cutoff)
                 ->get();
 
-            foreach ($reversals as $reversal) {
-                CommissionPayoutItem::create([
-                    'payout_id' => $payout->id,
-                    'commission_ledger_entry_id' => $reversal->id,
-                    'amount_cents' => $reversal->amount_cents,
-                ]);
-                $reversal->update(['payout_id' => $payout->id]);
+            $reversalItems = $reversals->map(fn ($reversal) => [
+                'id' => (string) \Illuminate\Support\Str::uuid(),
+                'payout_id' => $payout->id,
+                'commission_ledger_entry_id' => $reversal->id,
+                'amount_cents' => $reversal->amount_cents,
+                'created_at' => now(),
+            ])->all();
+
+            if (! empty($reversalItems)) {
+                CommissionPayoutItem::insert($reversalItems);
+                CommissionLedgerEntry::whereIn('id', $reversals->pluck('id'))->update(['payout_id' => $payout->id]);
             }
 
             return $payout;
@@ -258,41 +307,20 @@ class CommissionPayoutService
         $currencyUpper = strtoupper($payout->currency_code);
         $currencyLower = strtolower($currencyUpper);
         $fundingMode = $this->normalizeFundingMode($brand->stripe_commission_funding_mode ?? null);
-        $brandBalanceCents = (int) ($brand->stripe_manual_balance_cents ?? 0);
-        $brandBalanceCurrency = strtoupper((string) ($brand->stripe_manual_balance_currency ?: $currencyUpper));
-
-        if ($brandBalanceCents > 0 && $brandBalanceCurrency !== $currencyUpper) {
-            $this->markPendingFunding(
-                $payout,
-                'manual_balance_currency_mismatch',
-                sprintf(
-                    'Brand manual balance currency (%s) does not match payout currency (%s).',
-                    $brandBalanceCurrency,
-                    $currencyUpper,
-                )
-            );
-            return null;
-        }
 
         $usedManualBalance = false;
         $latestChargeId = null;
 
-        if ($brandBalanceCents >= $payout->gross_commission_cents) {
-            $payout->update([
-                'status' => 'collecting',
-                'failure_code' => null,
-                'failure_reason' => null,
-            ]);
+        // Attempt manual balance debit first (under lock — no stale read).
+        // debitBrandManualBalance() locks the row, checks balance + currency, and
+        // returns false if insufficient or mismatched, so we fall through safely.
+        $payout->update([
+            'status' => 'collecting',
+            'failure_code' => null,
+            'failure_reason' => null,
+        ]);
 
-            if (! $this->debitBrandManualBalance($brand->id, $payout->gross_commission_cents, $currencyUpper)) {
-                $this->markPendingFunding(
-                    $payout,
-                    'manual_balance_unavailable',
-                    'Manual top-up balance became unavailable. Please top up and retry.',
-                );
-                return null;
-            }
-
+        if ($this->debitBrandManualBalance($brand->id, $payout->gross_commission_cents, $currencyUpper)) {
             $usedManualBalance = true;
 
             $payout->update([
@@ -301,6 +329,7 @@ class CommissionPayoutService
                 'failure_reason' => null,
             ]);
         } else {
+            // Manual balance was insufficient or currency mismatched.
             if ($fundingMode === 'manual_topup') {
                 $this->markPendingFunding(
                     $payout,
@@ -340,7 +369,7 @@ class CommissionPayoutService
                         'affiliate_id' => $affiliate->id,
                         'funding_mode' => 'auto_charge',
                     ],
-                ]);
+                ], ['idempotency_key' => "payout_{$payout->id}_charge"]);
 
                 $latestChargeId = $this->extractLatestChargeId($paymentIntent);
 
@@ -377,7 +406,10 @@ class CommissionPayoutService
                 $transferPayload['source_transaction'] = $latestChargeId;
             }
 
-            $transfer = $this->stripe->transfers->create($transferPayload);
+            $transfer = $this->stripe->transfers->create(
+                $transferPayload,
+                ['idempotency_key' => "payout_{$payout->id}_transfer"],
+            );
 
             $payout->update([
                 'stripe_transfer_id' => $transfer->id,
@@ -400,6 +432,28 @@ class CommissionPayoutService
         } catch (ApiErrorException $e) {
             if ($usedManualBalance) {
                 $this->creditBrandManualBalance($brand->id, $payout->gross_commission_cents, $currencyUpper);
+            } elseif ($payout->stripe_payment_intent_id) {
+                try {
+                    $this->stripe->refunds->create([
+                        'payment_intent' => $payout->stripe_payment_intent_id,
+                        'reason' => 'requested_by_customer',
+                        'metadata' => [
+                            'comet_payout_id' => $payout->id,
+                            'reason' => 'transfer_failed',
+                        ],
+                    ]);
+
+                    Log::info('Auto-refunded brand charge after transfer failure', [
+                        'payout_id' => $payout->id,
+                        'payment_intent_id' => $payout->stripe_payment_intent_id,
+                    ]);
+                } catch (ApiErrorException $refundError) {
+                    Log::critical('Failed to refund brand charge after transfer failure — requires manual resolution', [
+                        'payout_id' => $payout->id,
+                        'payment_intent_id' => $payout->stripe_payment_intent_id,
+                        'refund_error' => $refundError->getMessage(),
+                    ]);
+                }
             }
 
             $this->failPayout($payout, 'transfer_failed', $e->getMessage());

@@ -133,6 +133,13 @@ return [
         ],
     ],
 
+    'professional_only_section_types' => [
+        'barbershop_info',
+        'sitepage_analytics',
+        'booking',
+        'services',
+    ],
+
     'store' => [
         'default_commission_rate' => (float) env('COMET_STORE_DEFAULT_COMMISSION', 15),
         'max_featured_products'   => (int) env('COMET_STORE_MAX_FEATURED', 10),

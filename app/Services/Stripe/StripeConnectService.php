@@ -82,12 +82,7 @@ class StripeConnectService
 
         $account = $this->stripe->accounts->retrieve($accountId);
 
-        $status = 'onboarding';
-        if ($account->payouts_enabled && $account->details_submitted) {
-            $status = 'active';
-        } elseif ($account->requirements?->disabled_reason) {
-            $status = 'restricted';
-        }
+        $status = self::determineAccountStatus($account);
 
         if ($professional->stripe_connect_status !== $status) {
             $professional->update(['stripe_connect_status' => $status]);
@@ -517,6 +512,23 @@ class StripeConnectService
     {
         $separator = str_contains($url, '?') ? '&' : '?';
         return $url.$separator.$param.'={CHECKOUT_SESSION_ID}';
+    }
+
+    /**
+     * Determine the Connect account status from a Stripe Account object.
+     * Shared by both the service and the webhook controller.
+     */
+    public static function determineAccountStatus(object $account): string
+    {
+        if ($account->charges_enabled && $account->payouts_enabled && $account->details_submitted) {
+            return 'active';
+        }
+
+        if ($account->requirements?->disabled_reason ?? null) {
+            return 'restricted';
+        }
+
+        return 'onboarding';
     }
 
     private function mapCountryCode(?string $code): string

@@ -30,6 +30,7 @@ class CommissionLedgerEntry extends BaseModel
         'idempotency_key',
         'calculation_metadata',
         'occurred_at',
+        'payout_id',
     ];
 
     protected $casts = [
@@ -61,4 +62,8 @@ class CommissionLedgerEntry extends BaseModel
         return $this->belongsTo(Professional::class, 'affiliate_professional_id');
     }
 
+    public function payout(): BelongsTo
+    {
+        return $this->belongsTo(CommissionPayout::class, 'payout_id');
+    }
 }

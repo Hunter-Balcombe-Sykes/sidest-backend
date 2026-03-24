@@ -17,17 +17,11 @@ use Illuminate\Support\Facades\DB;
 
 class StaffProfessionalController extends ApiController
 {
-    /**
-     * Section block types that are professional-only.
-     *
-     * @var array<int, string>
-     */
-    private array $professionalOnlySectionTypes = [
-        'barbershop_info',
-        'sitepage_analytics',
-        'booking',
-        'services',
-    ];
+    /** @return array<int, string> */
+    private function professionalOnlySectionTypes(): array
+    {
+        return config('comet.professional_only_section_types', []);
+    }
 
     use HandlesSearchQueries;
     use NormalizesPerPage;
@@ -207,7 +201,7 @@ class StaffProfessionalController extends ApiController
         Block::query()
             ->where('professional_id', $professionalId)
             ->where('block_group', 'sections')
-            ->whereIn('block_type', $this->professionalOnlySectionTypes)
+            ->whereIn('block_type', $this->professionalOnlySectionTypes())
             ->where('is_active', true)
             ->update([
                 'is_active' => false,

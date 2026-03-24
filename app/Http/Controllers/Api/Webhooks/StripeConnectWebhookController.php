@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Controller;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
+use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -55,19 +56,15 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
-        $status = 'onboarding';
-        if ($account->payouts_enabled && $account->details_submitted) {
-            $status = 'active';
-        } elseif ($account->requirements?->disabled_reason ?? null) {
-            $status = 'restricted';
-        }
+        $status = StripeConnectService::determineAccountStatus($account);
 
         if ($professional->stripe_connect_status !== $status) {
+            $oldStatus = $professional->stripe_connect_status;
             $professional->update(['stripe_connect_status' => $status]);
 
             Log::info('Stripe Connect status updated', [
                 'professional_id' => $professional->id,
-                'old_status' => $professional->stripe_connect_status,
+                'old_status' => $oldStatus,
                 'new_status' => $status,
             ]);
         }
@@ -96,7 +93,7 @@ class StripeConnectWebhookController extends Controller
         }
 
         $payout = CommissionPayout::find($payoutId);
-        if ($payout && $payout->status !== 'failed') {
+        if ($payout && ! in_array($payout->status, ['failed', 'completed', 'cancelled'], true)) {
             $payout->update([
                 'status' => 'failed',
                 'failure_code' => 'transfer_failed_webhook',

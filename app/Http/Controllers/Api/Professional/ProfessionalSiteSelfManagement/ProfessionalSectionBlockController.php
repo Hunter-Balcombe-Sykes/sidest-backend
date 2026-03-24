@@ -12,17 +12,11 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
 class ProfessionalSectionBlockController extends ApiController
 {
-    /**
-     * Section block types that influencers cannot enable.
-     *
-     * @var array<int, string>
-     */
-    private array $professionalOnlySectionTypes = [
-        'barbershop_info',
-        'sitepage_analytics',
-        'booking',
-        'services',
-    ];
+    /** @return array<int, string> */
+    private function professionalOnlySectionTypes(): array
+    {
+        return config('comet.professional_only_section_types', []);
+    }
 
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
@@ -57,7 +51,7 @@ class ProfessionalSectionBlockController extends ApiController
 
         $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
         $isInfluencer = $professionalType === 'influencer';
-        $isProfessionalOnlySection = in_array($blockType, $this->professionalOnlySectionTypes, true);
+        $isProfessionalOnlySection = in_array($blockType, $this->professionalOnlySectionTypes(), true);
         if ($isInfluencer && $isProfessionalOnlySection && $isEnabling) {
             return $this->error('Upgrade to professional to enable this section.', 403);
         }
