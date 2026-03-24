@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Store\SelectionCleanupService;
 use Illuminate\Http\JsonResponse;
@@ -53,6 +54,7 @@ class BrandPartnerController extends ApiController
         }
 
         $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+        $this->invalidateAffiliateCaches($site);
 
         return $this->success([
             'connected' => true,
@@ -113,6 +115,7 @@ class BrandPartnerController extends ApiController
         }
 
         $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+        $this->invalidateAffiliateCaches($site);
 
         return $this->success([
             'promoted' => true,
@@ -143,6 +146,7 @@ class BrandPartnerController extends ApiController
         if (! $disconnected) {
             $cleanedStaleSettings = $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
             if (! $this->settingsStillReferenceBrand($site, (string) $brandProfessionalId) && $cleanedStaleSettings) {
+                $this->invalidateAffiliateCaches($site);
                 return $this->success([
                     'disconnected' => true,
                     'brand_professional_id' => $brandProfessionalId,
@@ -161,6 +165,7 @@ class BrandPartnerController extends ApiController
         );
 
         $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
+        $this->invalidateAffiliateCaches($site);
 
         return $this->success([
             'disconnected' => true,
@@ -238,5 +243,16 @@ class BrandPartnerController extends ApiController
         }
 
         return false;
+    }
+
+    private function invalidateAffiliateCaches(Site $site): void
+    {
+        $site->loadMissing('professional');
+        $professional = $site->professional;
+        if (! $professional) {
+            return;
+        }
+
+        app(ProfessionalCacheService::class)->invalidateProfessional($professional);
     }
 }

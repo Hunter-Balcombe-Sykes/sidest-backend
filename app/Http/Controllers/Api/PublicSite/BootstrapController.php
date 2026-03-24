@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\BootstrapRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Services\Cache\ProfessionalCacheService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -141,6 +142,7 @@ class BootstrapController extends ApiController
                 }
 
                 $brandAffiliateInviteService->claimInvite($invite, $professional);
+                $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
                 } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
                     $brandPartnerProfessional = Professional::query()
                         ->whereKey((string) $data['brand_partner_professional_id'])
@@ -159,9 +161,11 @@ class BootstrapController extends ApiController
                     }
 
                     $brandPartnerLinks->promoteBrandToPrimary($affiliateId, $brandId);
+                    $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
                 }
 
             $legalContentService->refreshGenerated($professional, $site);
+            app(ProfessionalCacheService::class)->invalidateProfessional($professional);
 
             // Ensure the professional has a subscription – seed the free plan if none exists
             $this->ensureFreeSubscription($professional);
@@ -391,7 +395,39 @@ class BootstrapController extends ApiController
             }
         }
 
-        throw new RuntimeException('Could not generate a unique QR slug after ' . $maxAttempts . ' attempts.');
+        throw new RuntimeException('Could not generate a unique QR slug.');
     }
 
+    private function syncSiteBrandPartnerSettings(
+        Site $site,
+        BrandPartnerLinkService $brandPartnerLinks,
+        string $affiliateProfessionalId
+    ): void {
+        $links = $brandPartnerLinks->getLinksForAffiliate($affiliateProfessionalId);
+        $settings = is_array($site->settings) ? $site->settings : [];
+
+        $brandPartner = is_array($settings['brand_partner'] ?? null)
+            ? $settings['brand_partner']
+            : [];
+
+        $primaryLink = $links->firstWhere('slot', BrandPartnerLinkService::PRIMARY_SLOT);
+        if ($primaryLink) {
+            $brandPartner['professional_id'] = (string) $primaryLink->brand_professional_id;
+        } else {
+            unset($brandPartner['professional_id'], $brandPartner['professionalId']);
+        }
+
+        $settings['brand_partner'] = $brandPartner;
+        $settings['additional_brand_partners'] = $links
+            ->filter(static fn ($link): bool => (int) $link->slot > BrandPartnerLinkService::PRIMARY_SLOT)
+            ->sortBy('slot')
+            ->map(static fn ($link): array => [
+                'professional_id' => (string) $link->brand_professional_id,
+            ])
+            ->values()
+            ->all();
+
+        $site->settings = $settings;
+        $site->save();
+    }
 }

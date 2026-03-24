@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Models\Core\Site\Site;
+use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\BrandAffiliateInviteService;
+use App\Services\Professional\BrandPartnerLinkService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -160,7 +163,12 @@ class BrandAffiliateInviteController extends ApiController
         return $this->success($result);
     }
 
-    public function claim(Request $request, string $token, BrandAffiliateInviteService $inviteService): JsonResponse
+    public function claim(
+        Request $request,
+        string $token,
+        BrandAffiliateInviteService $inviteService,
+        BrandPartnerLinkService $brandPartnerLinks
+    ): JsonResponse
     {
         $professional = $this->currentProfessional($request);
         $invite = $inviteService->findByToken($token);
@@ -173,6 +181,12 @@ class BrandAffiliateInviteController extends ApiController
             $claimedInvite = $inviteService->claimInvite($invite, $professional);
         } catch (RuntimeException $exception) {
             return $this->error($exception->getMessage(), 422);
+        }
+
+        $site = Site::query()->where('professional_id', $professional->id)->first();
+        if ($site) {
+            $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+            app(ProfessionalCacheService::class)->invalidateProfessional($professional);
         }
 
         return $this->success([
@@ -206,6 +220,39 @@ class BrandAffiliateInviteController extends ApiController
                 'status' => $declinedInvite->status,
             ],
         ]);
+    }
+
+    private function syncSiteBrandPartnerSettings(
+        Site $site,
+        BrandPartnerLinkService $brandPartnerLinks,
+        string $affiliateProfessionalId
+    ): void {
+        $links = $brandPartnerLinks->getLinksForAffiliate($affiliateProfessionalId);
+        $settings = is_array($site->settings) ? $site->settings : [];
+
+        $brandPartner = is_array($settings['brand_partner'] ?? null)
+            ? $settings['brand_partner']
+            : [];
+
+        $primaryLink = $links->firstWhere('slot', BrandPartnerLinkService::PRIMARY_SLOT);
+        if ($primaryLink) {
+            $brandPartner['professional_id'] = (string) $primaryLink->brand_professional_id;
+        } else {
+            unset($brandPartner['professional_id'], $brandPartner['professionalId']);
+        }
+
+        $settings['brand_partner'] = $brandPartner;
+        $settings['additional_brand_partners'] = $links
+            ->filter(static fn ($link): bool => (int) $link->slot > BrandPartnerLinkService::PRIMARY_SLOT)
+            ->sortBy('slot')
+            ->map(static fn ($link): array => [
+                'professional_id' => (string) $link->brand_professional_id,
+            ])
+            ->values()
+            ->all();
+
+        $site->settings = $settings;
+        $site->save();
     }
 
     public function destroy(Request $request, string $inviteId): JsonResponse
