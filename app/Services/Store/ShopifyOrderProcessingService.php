@@ -50,6 +50,7 @@ class ShopifyOrderProcessingService
 
                 $payload = is_array($inbox->payload) ? $inbox->payload : [];
                 $shopifyOrderId = trim((string) ($payload['id'] ?? Arr::get($payload, 'admin_graphql_api_id', '')));
+                $source = $this->resolveOrderSource($payload);
 
                 if ($shopifyOrderId === '') {
                     return $this->rejectLockedInbox($inbox, 'MISSING_ORDER_ID');
@@ -128,7 +129,7 @@ class ShopifyOrderProcessingService
 
                 $order->fill([
                     'order_name' => $this->nullableString((string) ($payload['name'] ?? '')),
-                    'source' => 'shopify',
+                    'source' => $source,
                     'shop_domain' => strtolower(trim((string) ($inbox->shop_domain ?? ''))),
                     'brand_professional_id' => $brandProfessionalId,
                     'affiliate_professional_id' => $affiliateProfessionalId,
@@ -636,6 +637,16 @@ class ShopifyOrderProcessingService
         }
 
         return 'open';
+    }
+
+    private function resolveOrderSource(array $payload): string
+    {
+        $note = strtolower(trim((string) ($payload['note'] ?? '')));
+        if ($note !== '' && str_contains($note, 'comet_payment_mode:stripe_direct')) {
+            return 'stripe_direct';
+        }
+
+        return 'shopify';
     }
 
     private function resolveFinancialStatus(string $financialStatus): string

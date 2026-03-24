@@ -71,6 +71,8 @@ Route::get('/public/store/featured-products-by-slug', [PublicStoreController::cl
     ->middleware('throttle:public-site');
 Route::post('/public/store/checkout-session-by-slug', [PublicStoreController::class, 'createCheckoutSession'])
     ->middleware('throttle:public-site');
+Route::post('/public/store/stripe-checkout-by-slug', [PublicStoreController::class, 'createStripeCheckout'])
+    ->middleware('throttle:public-site');
 
 // Header/site-id based fallback for path-based frontend routing.
 Route::post('/public/analytics/pageviews', [AnalyticsController::class, 'pageview'])

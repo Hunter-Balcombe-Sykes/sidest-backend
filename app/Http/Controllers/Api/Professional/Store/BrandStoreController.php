@@ -17,6 +17,7 @@ class BrandStoreController extends ApiController
     use ResolveCurrentProfessional;
 
     private const DEFAULT_COMMISSION_RATE = 15.0;
+    private const DEFAULT_CHECKOUT_MODE = 'shopify';
 
     public function __construct(
         private readonly BrandAccessService $brandAccess,
@@ -55,6 +56,7 @@ class BrandStoreController extends ApiController
      *   {
      *      brand_professional_id?: uuid,
      *      default_commission_rate?: number,
+     *      checkout_mode?: "shopify"|"stripe",
      *      favourite_brand_product_ids?: uuid[]
      *   }
      */
@@ -63,6 +65,7 @@ class BrandStoreController extends ApiController
         $validator = Validator::make($request->all(), [
             'brand_professional_id' => ['sometimes', 'uuid'],
             'default_commission_rate' => ['sometimes', 'numeric', 'min:0', 'max:100'],
+            'checkout_mode' => ['sometimes', 'string', 'in:shopify,stripe'],
             'favourite_brand_product_ids' => ['sometimes', 'array', 'max:10'],
             'favourite_brand_product_ids.*' => ['uuid'],
         ]);
@@ -82,13 +85,21 @@ class BrandStoreController extends ApiController
             return $error;
         }
 
-        if (! array_key_exists('default_commission_rate', $validated) && ! array_key_exists('favourite_brand_product_ids', $validated)) {
-            return $this->error('Provide default_commission_rate and/or favourite_brand_product_ids.', 422);
+        if (
+            ! array_key_exists('default_commission_rate', $validated)
+            && ! array_key_exists('checkout_mode', $validated)
+            && ! array_key_exists('favourite_brand_product_ids', $validated)
+        ) {
+            return $this->error('Provide default_commission_rate, checkout_mode, and/or favourite_brand_product_ids.', 422);
         }
 
         $attributes = [];
         if (array_key_exists('default_commission_rate', $validated)) {
             $attributes['default_commission_rate'] = (float) $validated['default_commission_rate'];
+        }
+
+        if (array_key_exists('checkout_mode', $validated)) {
+            $attributes['checkout_mode'] = (string) $validated['checkout_mode'];
         }
 
         if (array_key_exists('favourite_brand_product_ids', $validated)) {
@@ -122,7 +133,12 @@ class BrandStoreController extends ApiController
     }
 
     /**
-     * @return array{default_commission_rate: float, favourite_brand_product_ids: array<int, string>, brand_professional_id: string}
+     * @return array{
+     *   default_commission_rate: float,
+     *   checkout_mode: string,
+     *   favourite_brand_product_ids: array<int, string>,
+     *   brand_professional_id: string
+     * }
      */
     private function storeSettingsPayloadForBrand(string $brandProfessionalId): array
     {
@@ -130,6 +146,10 @@ class BrandStoreController extends ApiController
         $defaultCommission = $storeSettings
             ? (float) $storeSettings->default_commission_rate
             : self::DEFAULT_COMMISSION_RATE;
+        $checkoutMode = trim((string) ($storeSettings?->checkout_mode ?? self::DEFAULT_CHECKOUT_MODE));
+        if (! in_array($checkoutMode, ['shopify', 'stripe'], true)) {
+            $checkoutMode = self::DEFAULT_CHECKOUT_MODE;
+        }
         $favouriteBrandProductIds = collect($storeSettings?->favourite_brand_product_ids ?? [])
             ->map(static fn ($value): string => trim((string) $value))
             ->filter(static fn (string $value): bool => $value !== '')
@@ -139,6 +159,7 @@ class BrandStoreController extends ApiController
 
         return [
             'default_commission_rate' => $defaultCommission,
+            'checkout_mode' => $checkoutMode,
             'favourite_brand_product_ids' => $favouriteBrandProductIds,
             'brand_professional_id' => $brandProfessionalId,
         ];

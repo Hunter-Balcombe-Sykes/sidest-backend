@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
+use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CheckoutSession;
 use App\Services\Public\PublicSiteResolver;
 use App\Services\Store\FeaturedProductsPayloadService;
+use App\Services\Store\PublicStripeCheckoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +23,7 @@ class PublicStoreController extends ApiController
     public function __construct(
         private readonly PublicSiteResolver $siteResolver,
         private readonly FeaturedProductsPayloadService $featuredProductsPayloads,
+        private readonly PublicStripeCheckoutService $stripeCheckout,
     ) {}
 
     /**
@@ -60,6 +63,8 @@ class PublicStoreController extends ApiController
             'line_items' => ['sometimes', 'array', 'max:100'],
             'line_items.*.brand_product_id' => ['sometimes', 'nullable', 'uuid'],
             'line_items.*.shopify_product_id' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'line_items.*.shopify_variant_id' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'line_items.*.title' => ['sometimes', 'nullable', 'string', 'max:255'],
             'line_items.*.quantity' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'line_items.*.unit_price_cents' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'line_items.*.line_total_cents' => ['sometimes', 'nullable', 'integer', 'min:0'],
@@ -129,6 +134,7 @@ class PublicStoreController extends ApiController
                 'affiliate_professional_id' => $affiliateProfessionalId,
                 'brand_professional_id' => $brandProfessionalId,
                 'currency_code' => $currencyCode,
+                'checkout_mode' => $this->resolveCheckoutMode($brandProfessionalId),
                 'line_items' => $validated['line_items'] ?? [],
                 'context' => $validated['context'] ?? [],
                 'created_at' => now()->toIso8601String(),
@@ -142,7 +148,74 @@ class PublicStoreController extends ApiController
             'brand_professional_id' => $brandProfessionalId,
             'site_id' => (string) $site->id,
             'currency_code' => $currencyCode,
+            'checkout_mode' => $this->resolveCheckoutMode($brandProfessionalId),
         ], 201);
+    }
+
+    /**
+     * POST /public/store/stripe-checkout
+     * POST /public/store/stripe-checkout-by-slug (header-based fallback)
+     * Creates a hosted Stripe Checkout session for storefront orders.
+     */
+    public function createStripeCheckout(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'checkout_session_token' => ['required', 'string', 'max:255'],
+            'success_url' => ['required', 'url'],
+            'cancel_url' => ['required', 'url'],
+            'customer' => ['required', 'array'],
+            'customer.name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.email' => ['required', 'string', 'email:rfc', 'max:255'],
+            'customer.phone' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.address1' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.address2' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.company' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.city' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.province' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.country' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer.zip' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        $validated = $validator->validated();
+        $subdomain = $this->resolveSiteSubdomain($request);
+        if (! $subdomain) {
+            return $this->error('Missing site identifier.', 400);
+        }
+
+        $site = $this->siteResolver->resolvePublishedSite($subdomain);
+        if (! $site) {
+            return $this->error('Site not found.', 404);
+        }
+
+        $checkoutSession = CheckoutSession::query()
+            ->where('token', (string) $validated['checkout_session_token'])
+            ->where('site_id', (string) $site->id)
+            ->first();
+
+        if (! $checkoutSession) {
+            return $this->error('Checkout session not found.', 404);
+        }
+
+        if ((string) $checkoutSession->status !== 'active') {
+            return $this->error('Checkout session is no longer active.', 422);
+        }
+
+        try {
+            $result = $this->stripeCheckout->createHostedCheckoutSession(
+                $checkoutSession,
+                (array) $validated['customer'],
+                (string) $validated['success_url'],
+                (string) $validated['cancel_url'],
+            );
+
+            return $this->success($result, 201);
+        } catch (\RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
     }
 
     /**
@@ -179,5 +252,18 @@ class PublicStoreController extends ApiController
         }
 
         return null;
+    }
+
+    private function resolveCheckoutMode(string $brandProfessionalId): string
+    {
+        $checkoutMode = BrandStoreSettings::query()
+            ->where('professional_id', $brandProfessionalId)
+            ->value('checkout_mode');
+
+        $checkoutMode = strtolower(trim((string) $checkoutMode));
+
+        return in_array($checkoutMode, ['shopify', 'stripe'], true)
+            ? $checkoutMode
+            : 'shopify';
     }
 }

@@ -75,6 +75,7 @@ class CommissionPayoutService
         }
 
         $groups = CommissionLedgerEntry::query()
+            ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
             ->whereNull('payout_id')
             ->where('entry_type', 'accrual')
             ->where('status', 'approved')
@@ -83,10 +84,23 @@ class CommissionPayoutService
                 'brand_professional_id',
                 'affiliate_professional_id',
                 'currency_code',
+                DB::raw("
+                    CASE
+                        WHEN lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'
+                            THEN 'stripe_sale_hold'
+                        ELSE 'brand_charge'
+                    END as funding_kind
+                "),
                 DB::raw('SUM(amount_cents) as total_cents'),
                 DB::raw('COUNT(*) as entry_count'),
             ])
-            ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code')
+            ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code', DB::raw("
+                CASE
+                    WHEN lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'
+                        THEN 'stripe_sale_hold'
+                    ELSE 'brand_charge'
+                END
+            "))
             ->having(DB::raw('SUM(amount_cents)'), '>', 0)
             ->get();
 
@@ -96,6 +110,7 @@ class CommissionPayoutService
                     $group->brand_professional_id,
                     $group->affiliate_professional_id,
                     $group->currency_code,
+                    $group->funding_kind,
                     $cutoff,
                 );
 
@@ -139,10 +154,12 @@ class CommissionPayoutService
         string $brandId,
         string $affiliateId,
         string $currency,
+        string $fundingKind,
         \DateTimeInterface $cutoff,
     ): ?CommissionPayout {
-        return DB::transaction(function () use ($brandId, $affiliateId, $currency, $cutoff) {
+        return DB::transaction(function () use ($brandId, $affiliateId, $currency, $fundingKind, $cutoff) {
             $entries = CommissionLedgerEntry::query()
+                ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
                 ->whereNull('payout_id')
                 ->where('entry_type', 'accrual')
                 ->where('status', 'approved')
@@ -150,7 +167,15 @@ class CommissionPayoutService
                 ->where('affiliate_professional_id', $affiliateId)
                 ->where('currency_code', $currency)
                 ->where('occurred_at', '<=', $cutoff)
+                ->where(function ($query) use ($fundingKind): void {
+                    if ($fundingKind === 'stripe_sale_hold') {
+                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
+                    } else {
+                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) <> 'stripe_direct'");
+                    }
+                })
                 ->lockForUpdate()
+                ->select('retail.commission_ledger_entries.*')
                 ->get();
 
             if ($entries->isEmpty()) {
@@ -163,6 +188,7 @@ class CommissionPayoutService
             }
 
             $reversalCents = CommissionLedgerEntry::query()
+                ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
                 ->whereNull('payout_id')
                 ->where('entry_type', 'reversal')
                 ->where('status', 'approved')
@@ -170,8 +196,15 @@ class CommissionPayoutService
                 ->where('affiliate_professional_id', $affiliateId)
                 ->where('currency_code', $currency)
                 ->where('occurred_at', '<=', $cutoff)
+                ->where(function ($query) use ($fundingKind): void {
+                    if ($fundingKind === 'stripe_sale_hold') {
+                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
+                    } else {
+                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) <> 'stripe_direct'");
+                    }
+                })
                 ->lockForUpdate()
-                ->sum('amount_cents');
+                ->sum('retail.commission_ledger_entries.amount_cents');
 
             $netCommission = $grossCents + $reversalCents;
             if ($netCommission <= 0) {
@@ -195,6 +228,7 @@ class CommissionPayoutService
                 'currency_code' => strtoupper($currency),
                 'ledger_entry_count' => $entries->count(),
                 'eligible_after' => $cutoff,
+                'funding_source' => $fundingKind === 'stripe_sale_hold' ? 'stripe_sale_hold' : null,
             ]);
 
             foreach ($entries as $entry) {
@@ -207,6 +241,7 @@ class CommissionPayoutService
             }
 
             $reversals = CommissionLedgerEntry::query()
+                ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
                 ->whereNull('payout_id')
                 ->where('entry_type', 'reversal')
                 ->where('status', 'approved')
@@ -214,6 +249,14 @@ class CommissionPayoutService
                 ->where('affiliate_professional_id', $affiliateId)
                 ->where('currency_code', $currency)
                 ->where('occurred_at', '<=', $cutoff)
+                ->where(function ($query) use ($fundingKind): void {
+                    if ($fundingKind === 'stripe_sale_hold') {
+                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
+                    } else {
+                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) <> 'stripe_direct'");
+                    }
+                })
+                ->select('retail.commission_ledger_entries.*')
                 ->get();
 
             foreach ($reversals as $reversal) {
@@ -246,14 +289,24 @@ class CommissionPayoutService
     {
         $brand = Professional::find($payout->brand_professional_id);
         $affiliate = Professional::find($payout->affiliate_professional_id);
+        $isPrefundedStripeSale = trim((string) ($payout->funding_source ?? '')) === 'stripe_sale_hold';
 
         if (! $affiliate?->stripe_connect_account_id || $affiliate->stripe_connect_status !== 'active') {
             $this->failPayout($payout, 'affiliate_not_connected', 'Affiliate Stripe Connect account is not active');
             return false;
         }
 
-        // Card is required for all brands
-        if (! $brand?->stripe_customer_id || ! $brand->stripe_payment_method_id) {
+        if (! $brand) {
+            $this->failPayout($payout, 'brand_missing', 'Brand account was not found.');
+            return false;
+        }
+
+        if ($isPrefundedStripeSale) {
+            return $this->completePrefundedPayout($payout, $brand, $affiliate);
+        }
+
+        // Card is required for all non-prefunded payouts.
+        if (! $brand->stripe_customer_id || ! $brand->stripe_payment_method_id) {
             $this->markPendingFunding(
                 $payout,
                 'brand_payment_method_missing',
@@ -384,6 +437,58 @@ class CommissionPayoutService
             }
 
             $this->failPayout($payout, 'transfer_failed', $e->getMessage());
+            return false;
+        }
+    }
+
+    private function completePrefundedPayout(
+        CommissionPayout $payout,
+        Professional $brand,
+        Professional $affiliate,
+    ): bool {
+        $currencyLower = strtolower((string) $payout->currency_code);
+
+        try {
+            $payout->update([
+                'status' => 'transferring',
+                'charge_cents' => 0,
+                'wallet_debit_cents' => 0,
+                'failure_code' => null,
+                'failure_reason' => null,
+            ]);
+
+            $transfer = $this->stripe->transfers->create([
+                'amount' => $payout->net_payout_cents,
+                'currency' => $currencyLower,
+                'destination' => $affiliate->stripe_connect_account_id,
+                'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
+                'metadata' => [
+                    'comet_payout_id' => $payout->id,
+                    'brand_id' => $brand->id,
+                    'affiliate_id' => $affiliate->id,
+                    'funding_source' => 'stripe_sale_hold',
+                ],
+            ]);
+
+            $payout->update([
+                'stripe_transfer_id' => $transfer->id,
+                'status' => 'completed',
+                'processed_at' => now(),
+                'failure_code' => null,
+                'failure_reason' => null,
+            ]);
+
+            Log::info('Commission payout completed from prefunded Stripe sale hold', [
+                'payout_id' => $payout->id,
+                'gross_cents' => $payout->gross_commission_cents,
+                'platform_fee_cents' => $payout->platform_fee_cents,
+                'net_cents' => $payout->net_payout_cents,
+                'currency' => $payout->currency_code,
+            ]);
+
+            return true;
+        } catch (ApiErrorException $e) {
+            $this->failPayout($payout, 'prefunded_transfer_failed', $e->getMessage());
             return false;
         }
     }
