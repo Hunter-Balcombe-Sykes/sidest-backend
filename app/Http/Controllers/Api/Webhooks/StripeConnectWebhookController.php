@@ -23,20 +23,38 @@ class StripeConnectWebhookController extends Controller
     {
         $payload = $request->getContent();
         $sigHeader = $request->header('Stripe-Signature');
-        $secret = config('services.stripe.connect_webhook_secret');
 
-        if (! $sigHeader || ! $secret) {
-            return response()->json(['error' => 'Missing signature or secret'], 400);
+        if (! $sigHeader) {
+            return response()->json(['error' => 'Missing signature'], 400);
         }
 
-        try {
-            $event = Webhook::constructEvent($payload, $sigHeader, $secret);
-        } catch (SignatureVerificationException) {
-            Log::warning('Stripe Connect webhook signature verification failed');
+        // Try both Connect and platform webhook secrets so one endpoint URL
+        // can handle events from connected accounts and destination charges.
+        $secrets = array_filter([
+            config('services.stripe.connect_webhook_secret'),
+            config('services.stripe.webhook_secret'),
+        ]);
+
+        if ($secrets === []) {
+            return response()->json(['error' => 'No webhook secret configured'], 400);
+        }
+
+        $event = null;
+        foreach ($secrets as $secret) {
+            try {
+                $event = Webhook::constructEvent($payload, $sigHeader, $secret);
+                break;
+            } catch (SignatureVerificationException) {
+                continue;
+            } catch (\Exception $e) {
+                Log::warning('Stripe webhook parse error', ['error' => $e->getMessage()]);
+                return response()->json(['error' => 'Invalid payload'], 400);
+            }
+        }
+
+        if (! $event) {
+            Log::warning('Stripe webhook signature verification failed for all configured secrets');
             return response()->json(['error' => 'Invalid signature'], 400);
-        } catch (\Exception $e) {
-            Log::warning('Stripe Connect webhook parse error', ['error' => $e->getMessage()]);
-            return response()->json(['error' => 'Invalid payload'], 400);
         }
 
         match ($event->type) {

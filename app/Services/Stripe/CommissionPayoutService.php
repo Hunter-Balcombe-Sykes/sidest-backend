@@ -198,7 +198,13 @@ class CommissionPayoutService
                 return null;
             }
 
-            $platformFeeCents = (int) round($netCommission * $this->platformFeePercent / 100);
+            // For Stripe direct sales the platform fee is already collected at charge time
+            // via the destination charge split, so no additional deduction is needed.
+            if ($fundingKind === 'stripe_sale_hold') {
+                $platformFeeCents = 0;
+            } else {
+                $platformFeeCents = (int) round($netCommission * $this->platformFeePercent / 100);
+            }
             $netPayoutCents = $netCommission - $platformFeeCents;
 
             if ($netPayoutCents <= 0) {
@@ -444,6 +450,10 @@ class CommissionPayoutService
     ): bool {
         $currencyLower = strtolower((string) $payout->currency_code);
 
+        // Retrieve the platform charge ID from the first ledger entry's metadata
+        // so we can use source_transaction to fund the transfer directly from the payment.
+        $chargeId = $this->resolveChargeIdForPayout($payout);
+
         try {
             $payout->update([
                 'status' => 'transferring',
@@ -453,7 +463,7 @@ class CommissionPayoutService
                 'failure_reason' => null,
             ]);
 
-            $transfer = $this->stripe->transfers->create([
+            $transferPayload = [
                 'amount' => $payout->net_payout_cents,
                 'currency' => $currencyLower,
                 'destination' => $affiliate->stripe_connect_account_id,
@@ -464,7 +474,13 @@ class CommissionPayoutService
                     'affiliate_id' => $affiliate->id,
                     'funding_source' => 'stripe_sale_hold',
                 ],
-            ]);
+            ];
+
+            if ($chargeId) {
+                $transferPayload['source_transaction'] = $chargeId;
+            }
+
+            $transfer = $this->stripe->transfers->create($transferPayload);
 
             $payout->update([
                 'stripe_transfer_id' => $transfer->id,
@@ -487,6 +503,27 @@ class CommissionPayoutService
             $this->failPayout($payout, 'prefunded_transfer_failed', $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Look up the platform charge ID from the ledger entries attached to a payout.
+     */
+    private function resolveChargeIdForPayout(CommissionPayout $payout): ?string
+    {
+        $entry = CommissionLedgerEntry::query()
+            ->where('payout_id', $payout->id)
+            ->whereNotNull('calculation_metadata')
+            ->first();
+
+        if (! $entry) {
+            return null;
+        }
+
+        $metadata = is_array($entry->calculation_metadata) ? $entry->calculation_metadata : [];
+
+        return is_string($metadata['charge_id'] ?? null) && ($metadata['charge_id'] ?? '') !== ''
+            ? $metadata['charge_id']
+            : null;
     }
 
     /**

@@ -63,7 +63,11 @@ class PublicStripeCheckoutService
         }
 
         $orderTotalCents = array_sum(array_column($normalizedLineItems, 'line_total_cents'));
-        $grossCommissionCents = array_sum(array_column($normalizedLineItems, 'commission_cents'));
+        $affiliateCommissionCents = array_sum(array_column($normalizedLineItems, 'commission_cents'));
+        $platformCommissionRate = (float) config('comet.store.platform_commission_rate', 10);
+        $platformCommissionCents = (int) round(($orderTotalCents * $platformCommissionRate) / 100);
+        $brandReceivesCents = max(0, $orderTotalCents - $affiliateCommissionCents - $platformCommissionCents);
+
         if ($orderTotalCents <= 0) {
             throw new \RuntimeException('Checkout total must be greater than zero.');
         }
@@ -94,19 +98,22 @@ class PublicStripeCheckoutService
                 'brand_professional_id' => (string) $checkoutSession->brand_professional_id,
             ],
             'payment_intent_data' => [
-                'application_fee_amount' => $grossCommissionCents,
+                'transfer_data' => [
+                    'destination' => $brand->stripe_connect_account_id,
+                    'amount' => $brandReceivesCents,
+                ],
                 'metadata' => [
                     'purpose' => 'public_store_stripe_checkout',
                     'checkout_session_token' => $checkoutSession->token,
                     'site_id' => (string) $checkoutSession->site_id,
                     'affiliate_professional_id' => (string) $checkoutSession->affiliate_professional_id,
                     'brand_professional_id' => (string) $checkoutSession->brand_professional_id,
-                    'gross_commission_cents' => (string) $grossCommissionCents,
+                    'affiliate_commission_cents' => (string) $affiliateCommissionCents,
+                    'platform_commission_cents' => (string) $platformCommissionCents,
+                    'brand_receives_cents' => (string) $brandReceivesCents,
                     'order_total_cents' => (string) $orderTotalCents,
                 ],
             ],
-        ], [
-            'stripe_account' => $brand->stripe_connect_account_id,
         ]);
 
         $checkoutSession->context_snapshot = array_merge($contextSnapshot, [
@@ -118,7 +125,9 @@ class PublicStripeCheckoutService
                 [
                     'checkout_session_id' => $session->id,
                     'payment_intent_id' => is_string($session->payment_intent) ? $session->payment_intent : null,
-                    'gross_commission_cents' => $grossCommissionCents,
+                    'affiliate_commission_cents' => $affiliateCommissionCents,
+                    'platform_commission_cents' => $platformCommissionCents,
+                    'brand_receives_cents' => $brandReceivesCents,
                     'order_total_cents' => $orderTotalCents,
                     'created_at' => now()->toIso8601String(),
                 ]
@@ -130,7 +139,8 @@ class PublicStripeCheckoutService
             'checkout_url' => $session->url,
             'session_id' => $session->id,
             'currency_code' => $currencyCode,
-            'gross_commission_cents' => $grossCommissionCents,
+            'affiliate_commission_cents' => $affiliateCommissionCents,
+            'platform_commission_cents' => $platformCommissionCents,
             'order_total_cents' => $orderTotalCents,
         ];
     }
@@ -177,7 +187,10 @@ class PublicStripeCheckoutService
         }
 
         $orderTotalCents = array_sum(array_column($normalizedLineItems, 'line_total_cents'));
-        $grossCommissionCents = array_sum(array_column($normalizedLineItems, 'commission_cents'));
+        $affiliateCommissionCents = array_sum(array_column($normalizedLineItems, 'commission_cents'));
+        $platformCommissionRate = (float) config('comet.store.platform_commission_rate', 10);
+        $platformCommissionCents = (int) round(($orderTotalCents * $platformCommissionRate) / 100);
+        $brandReceivesCents = max(0, $orderTotalCents - $affiliateCommissionCents - $platformCommissionCents);
 
         if ($orderTotalCents <= 0) {
             throw new \RuntimeException('Checkout total must be greater than zero.');
@@ -187,17 +200,22 @@ class PublicStripeCheckoutService
             'amount' => $orderTotalCents,
             'currency' => strtolower($currencyCode),
             'payment_method_types' => ['card'],
-            'application_fee_amount' => $grossCommissionCents,
+            'transfer_data' => [
+                'destination' => $brand->stripe_connect_account_id,
+                'amount' => $brandReceivesCents,
+            ],
             'metadata' => [
                 'purpose' => 'public_store_payment',
                 'checkout_session_token' => $checkoutSession->token,
                 'site_id' => (string) $checkoutSession->site_id,
                 'affiliate_professional_id' => (string) $checkoutSession->affiliate_professional_id,
                 'brand_professional_id' => (string) $brand->id,
-                'gross_commission_cents' => (string) $grossCommissionCents,
+                'affiliate_commission_cents' => (string) $affiliateCommissionCents,
+                'platform_commission_cents' => (string) $platformCommissionCents,
+                'brand_receives_cents' => (string) $brandReceivesCents,
                 'order_total_cents' => (string) $orderTotalCents,
             ],
-        ], ['stripe_account' => $brand->stripe_connect_account_id]);
+        ]);
 
         $checkoutSession->context_snapshot = array_merge($contextSnapshot, [
             'checkout_mode' => 'stripe',
@@ -207,7 +225,9 @@ class PublicStripeCheckoutService
                 is_array($contextSnapshot['stripe'] ?? null) ? $contextSnapshot['stripe'] : [],
                 [
                     'payment_intent_id' => $paymentIntent->id,
-                    'gross_commission_cents' => $grossCommissionCents,
+                    'affiliate_commission_cents' => $affiliateCommissionCents,
+                    'platform_commission_cents' => $platformCommissionCents,
+                    'brand_receives_cents' => $brandReceivesCents,
                     'order_total_cents' => $orderTotalCents,
                     'created_at' => now()->toIso8601String(),
                 ]
@@ -217,7 +237,6 @@ class PublicStripeCheckoutService
 
         return [
             'client_secret' => $paymentIntent->client_secret,
-            'brand_stripe_account_id' => $brand->stripe_connect_account_id,
             'amount' => $orderTotalCents,
             'currency' => strtolower($currencyCode),
         ];
@@ -256,9 +275,8 @@ class PublicStripeCheckoutService
                 throw new \RuntimeException('Unable to resolve connected brand for payment intent finalization.');
             }
 
-            if ($connectedAccountId !== null && $connectedAccountId !== '' && $brand->stripe_connect_account_id !== $connectedAccountId) {
-                throw new \RuntimeException('Stripe connected account mismatch during payment intent finalization.');
-            }
+            // Extract the platform charge ID for source_transaction on affiliate transfers.
+            $chargeId = $this->extractChargeId($paymentIntent);
 
             $orderResult = $this->shopifyOrders->createPaidOrderFromCheckoutSession(
                 $checkoutSession,
@@ -272,6 +290,7 @@ class PublicStripeCheckoutService
             $checkoutSession->context_snapshot = array_merge($contextSnapshot, [
                 'stripe' => array_merge($existingStripe, [
                     'payment_intent_id' => (string) $paymentIntent->id,
+                    'charge_id' => $chargeId,
                     'payment_completed_at' => now()->toIso8601String(),
                     'shopify_order_id' => $orderResult['order_id'] ?? null,
                     'shopify_order_name' => $orderResult['order_name'] ?? null,
@@ -282,7 +301,7 @@ class PublicStripeCheckoutService
             $checkoutSession->save();
 
             // Create commission ledger entries directly from the Stripe payment data.
-            $this->createCommissionLedgerEntries($checkoutSession, $contextSnapshot, $paymentIntent);
+            $this->createCommissionLedgerEntries($checkoutSession, $contextSnapshot, $paymentIntent, $chargeId);
         });
     }
 
@@ -293,6 +312,7 @@ class PublicStripeCheckoutService
         CheckoutSession $checkoutSession,
         array $contextSnapshot,
         object $paymentIntent,
+        ?string $chargeId = null,
     ): void {
         $lineItems = Arr::get($contextSnapshot, 'line_items', []);
         if (! is_array($lineItems) || $lineItems === []) {
@@ -329,6 +349,7 @@ class PublicStripeCheckoutService
                     'idempotency_key' => $idempotencyKey,
                     'calculation_metadata' => [
                         'payment_intent_id' => $paymentIntentId,
+                        'charge_id' => $chargeId,
                         'checkout_session_token' => (string) $checkoutSession->token,
                         'brand_product_id' => (string) ($lineItem['brand_product_id'] ?? ''),
                         'shopify_product_id' => (string) ($lineItem['shopify_product_id'] ?? ''),
@@ -344,6 +365,7 @@ class PublicStripeCheckoutService
 
         Log::info('Commission ledger entries created from Stripe payment.', [
             'payment_intent_id' => $paymentIntentId,
+            'charge_id' => $chargeId,
             'affiliate_professional_id' => $affiliateProfessionalId,
             'brand_professional_id' => $brandProfessionalId,
             'line_items_count' => count($lineItems),
@@ -533,6 +555,27 @@ class PublicStripeCheckoutService
             'country' => trim((string) ($customer['country'] ?? '')),
             'zip' => trim((string) ($customer['zip'] ?? '')),
         ];
+    }
+
+    private function extractChargeId(object $paymentIntent): ?string
+    {
+        if (is_string($paymentIntent->latest_charge ?? null) && $paymentIntent->latest_charge !== '') {
+            return $paymentIntent->latest_charge;
+        }
+
+        if (is_object($paymentIntent->latest_charge ?? null) && is_string($paymentIntent->latest_charge->id ?? null)) {
+            return $paymentIntent->latest_charge->id;
+        }
+
+        if (is_object($paymentIntent->charges ?? null) && is_array($paymentIntent->charges->data ?? null)) {
+            foreach ($paymentIntent->charges->data as $charge) {
+                if (is_object($charge) && is_string($charge->id ?? null) && $charge->id !== '') {
+                    return $charge->id;
+                }
+            }
+        }
+
+        return null;
     }
 
     private function appendSessionIdPlaceholder(string $url, string $param): string
