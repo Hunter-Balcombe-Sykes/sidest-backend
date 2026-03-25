@@ -120,8 +120,10 @@ class FeaturedProductsPayloadService
             ->value('brand_professional_id');
 
         $brandProfessionalId = trim((string) $brandProfessionalId);
+
+        // If no brand partner link found, the professional may be viewing their own brand sitepage directly.
         if ($brandProfessionalId === '') {
-            return $default;
+            $brandProfessionalId = $affiliateProfessionalId;
         }
 
         $settings = DB::table('retail.brand_store_settings')
