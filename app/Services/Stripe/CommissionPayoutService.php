@@ -450,13 +450,13 @@ class CommissionPayoutService
     ): bool {
         $currencyLower = strtolower((string) $payout->currency_code);
 
-        // Retrieve the platform charge ID from the first ledger entry's metadata
-        // so we can use source_transaction to fund the transfer directly from the payment.
-        $chargeId = $this->resolveChargeIdForPayout($payout);
+        // Group ledger entries by charge_id so each transfer uses its own source_transaction.
+        // This is required because total transfers from a single charge cannot exceed that charge amount.
+        $chargeGroups = $this->groupEntriesByCharge($payout);
 
-        Log::info('Preparing prefunded affiliate transfer', [
+        Log::info('Preparing prefunded affiliate transfers', [
             'payout_id' => $payout->id,
-            'charge_id' => $chargeId,
+            'charge_groups' => count($chargeGroups),
             'net_payout_cents' => $payout->net_payout_cents,
             'affiliate_connect_id' => $affiliate->stripe_connect_account_id,
         ]);
@@ -470,27 +470,32 @@ class CommissionPayoutService
                 'failure_reason' => null,
             ]);
 
-            $transferPayload = [
-                'amount' => $payout->net_payout_cents,
-                'currency' => $currencyLower,
-                'destination' => $affiliate->stripe_connect_account_id,
-                'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
-                'metadata' => [
-                    'comet_payout_id' => $payout->id,
-                    'brand_id' => $brand->id,
-                    'affiliate_id' => $affiliate->id,
-                    'funding_source' => 'stripe_sale_hold',
-                ],
-            ];
+            $transferIds = [];
 
-            if ($chargeId) {
-                $transferPayload['source_transaction'] = $chargeId;
+            foreach ($chargeGroups as $chargeId => $groupAmountCents) {
+                $transferPayload = [
+                    'amount' => $groupAmountCents,
+                    'currency' => $currencyLower,
+                    'destination' => $affiliate->stripe_connect_account_id,
+                    'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
+                    'metadata' => [
+                        'comet_payout_id' => $payout->id,
+                        'brand_id' => $brand->id,
+                        'affiliate_id' => $affiliate->id,
+                        'funding_source' => 'stripe_sale_hold',
+                    ],
+                ];
+
+                if ($chargeId !== '_no_charge') {
+                    $transferPayload['source_transaction'] = $chargeId;
+                }
+
+                $transfer = $this->stripe->transfers->create($transferPayload);
+                $transferIds[] = $transfer->id;
             }
 
-            $transfer = $this->stripe->transfers->create($transferPayload);
-
             $payout->update([
-                'stripe_transfer_id' => $transfer->id,
+                'stripe_transfer_id' => implode(',', $transferIds),
                 'status' => 'completed',
                 'processed_at' => now(),
                 'failure_code' => null,
@@ -502,6 +507,7 @@ class CommissionPayoutService
                 'gross_cents' => $payout->gross_commission_cents,
                 'platform_fee_cents' => $payout->platform_fee_cents,
                 'net_cents' => $payout->net_payout_cents,
+                'transfer_count' => count($transferIds),
                 'currency' => $payout->currency_code,
             ]);
 
@@ -513,24 +519,26 @@ class CommissionPayoutService
     }
 
     /**
-     * Look up the platform charge ID from the ledger entries attached to a payout.
+     * Group a payout's ledger entries by their charge_id, returning [chargeId => totalCents].
+     * Each group becomes a separate Stripe transfer with its own source_transaction.
      */
-    private function resolveChargeIdForPayout(CommissionPayout $payout): ?string
+    private function groupEntriesByCharge(CommissionPayout $payout): array
     {
-        $entry = CommissionLedgerEntry::query()
+        $entries = CommissionLedgerEntry::query()
             ->where('payout_id', $payout->id)
-            ->whereNotNull('calculation_metadata')
-            ->first();
+            ->get();
 
-        if (! $entry) {
-            return null;
+        $groups = [];
+        foreach ($entries as $entry) {
+            $metadata = is_array($entry->calculation_metadata) ? $entry->calculation_metadata : [];
+            $chargeId = is_string($metadata['charge_id'] ?? null) && ($metadata['charge_id'] ?? '') !== ''
+                ? $metadata['charge_id']
+                : '_no_charge';
+
+            $groups[$chargeId] = ($groups[$chargeId] ?? 0) + (int) $entry->amount_cents;
         }
 
-        $metadata = is_array($entry->calculation_metadata) ? $entry->calculation_metadata : [];
-
-        return is_string($metadata['charge_id'] ?? null) && ($metadata['charge_id'] ?? '') !== ''
-            ? $metadata['charge_id']
-            : null;
+        return $groups;
     }
 
     /**
