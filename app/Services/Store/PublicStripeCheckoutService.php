@@ -72,7 +72,9 @@ class PublicStripeCheckoutService
             throw new \RuntimeException('Checkout total must be greater than zero.');
         }
 
-        $transferGroup = 'store_order_' . $checkoutSession->token;
+        // Direct charge on the brand's connected account via hosted checkout.
+        // application_fee_amount = platform commission + affiliate commission (held by platform).
+        $applicationFeeCents = $platformCommissionCents + $affiliateCommissionCents;
 
         $session = $this->stripe->checkout->sessions->create([
             'mode' => 'payment',
@@ -100,7 +102,7 @@ class PublicStripeCheckoutService
                 'brand_professional_id' => (string) $checkoutSession->brand_professional_id,
             ],
             'payment_intent_data' => [
-                'transfer_group' => $transferGroup,
+                'application_fee_amount' => $applicationFeeCents,
                 'metadata' => [
                     'purpose' => 'public_store_stripe_checkout',
                     'checkout_session_token' => $checkoutSession->token,
@@ -114,6 +116,8 @@ class PublicStripeCheckoutService
                     'order_total_cents' => (string) $orderTotalCents,
                 ],
             ],
+        ], [
+            'stripe_account' => $brand->stripe_connect_account_id,
         ]);
 
         $checkoutSession->context_snapshot = array_merge($contextSnapshot, [
@@ -196,13 +200,15 @@ class PublicStripeCheckoutService
             throw new \RuntimeException('Checkout total must be greater than zero.');
         }
 
-        $transferGroup = 'store_order_' . $checkoutSession->token;
+        // Direct charge on the brand's connected account.
+        // application_fee_amount = platform commission + affiliate commission (held by platform).
+        $applicationFeeCents = $platformCommissionCents + $affiliateCommissionCents;
 
         $paymentIntent = $this->stripe->paymentIntents->create([
             'amount' => $orderTotalCents,
             'currency' => strtolower($currencyCode),
             'payment_method_types' => ['card'],
-            'transfer_group' => $transferGroup,
+            'application_fee_amount' => $applicationFeeCents,
             'metadata' => [
                 'purpose' => 'public_store_payment',
                 'checkout_session_token' => $checkoutSession->token,
@@ -215,6 +221,8 @@ class PublicStripeCheckoutService
                 'brand_receives_cents' => (string) $brandReceivesCents,
                 'order_total_cents' => (string) $orderTotalCents,
             ],
+        ], [
+            'stripe_account' => $brand->stripe_connect_account_id,
         ]);
 
         $checkoutSession->context_snapshot = array_merge($contextSnapshot, [
@@ -237,6 +245,7 @@ class PublicStripeCheckoutService
 
         return [
             'client_secret' => $paymentIntent->client_secret,
+            'brand_stripe_account_id' => (string) $brand->stripe_connect_account_id,
             'amount' => $orderTotalCents,
             'currency' => strtolower($currencyCode),
         ];
@@ -275,12 +284,6 @@ class PublicStripeCheckoutService
                 throw new \RuntimeException('Unable to resolve connected brand for payment intent finalization.');
             }
 
-            // Extract the platform charge ID for source_transaction on transfers.
-            $chargeId = $this->extractChargeId($paymentIntent);
-
-            // Transfer brand's portion immediately using source_transaction.
-            $brandTransferId = $this->transferBrandPortion($paymentIntent, $brand, $chargeId);
-
             $orderResult = $this->shopifyOrders->createPaidOrderFromCheckoutSession(
                 $checkoutSession,
                 $brand,
@@ -293,8 +296,6 @@ class PublicStripeCheckoutService
             $checkoutSession->context_snapshot = array_merge($contextSnapshot, [
                 'stripe' => array_merge($existingStripe, [
                     'payment_intent_id' => (string) $paymentIntent->id,
-                    'charge_id' => $chargeId,
-                    'brand_transfer_id' => $brandTransferId,
                     'payment_completed_at' => now()->toIso8601String(),
                     'shopify_order_id' => $orderResult['order_id'] ?? null,
                     'shopify_order_name' => $orderResult['order_name'] ?? null,
@@ -305,7 +306,7 @@ class PublicStripeCheckoutService
             $checkoutSession->save();
 
             // Create commission ledger entries directly from the Stripe payment data.
-            $this->createCommissionLedgerEntries($checkoutSession, $contextSnapshot, $paymentIntent, $chargeId);
+            $this->createCommissionLedgerEntries($checkoutSession, $contextSnapshot, $paymentIntent);
         });
     }
 
@@ -316,7 +317,6 @@ class PublicStripeCheckoutService
         CheckoutSession $checkoutSession,
         array $contextSnapshot,
         object $paymentIntent,
-        ?string $chargeId = null,
     ): void {
         $lineItems = Arr::get($contextSnapshot, 'line_items', []);
         if (! is_array($lineItems) || $lineItems === []) {
@@ -353,7 +353,6 @@ class PublicStripeCheckoutService
                     'idempotency_key' => $idempotencyKey,
                     'calculation_metadata' => [
                         'payment_intent_id' => $paymentIntentId,
-                        'charge_id' => $chargeId,
                         'checkout_session_token' => (string) $checkoutSession->token,
                         'brand_product_id' => (string) ($lineItem['brand_product_id'] ?? ''),
                         'shopify_product_id' => (string) ($lineItem['shopify_product_id'] ?? ''),
@@ -369,7 +368,6 @@ class PublicStripeCheckoutService
 
         Log::info('Commission ledger entries created from Stripe payment.', [
             'payment_intent_id' => $paymentIntentId,
-            'charge_id' => $chargeId,
             'affiliate_professional_id' => $affiliateProfessionalId,
             'brand_professional_id' => $brandProfessionalId,
             'line_items_count' => count($lineItems),
@@ -559,66 +557,6 @@ class PublicStripeCheckoutService
             'country' => trim((string) ($customer['country'] ?? '')),
             'zip' => trim((string) ($customer['zip'] ?? '')),
         ];
-    }
-
-    /**
-     * Transfer the brand's portion of a sale to their connected account.
-     */
-    private function transferBrandPortion(object $paymentIntent, Professional $brand, ?string $chargeId): ?string
-    {
-        $brandReceivesCents = (int) ($paymentIntent->metadata?->brand_receives_cents ?? 0);
-        if ($brandReceivesCents <= 0) {
-            return null;
-        }
-
-        $transferPayload = [
-            'amount' => $brandReceivesCents,
-            'currency' => strtolower((string) ($paymentIntent->currency ?? 'aud')),
-            'destination' => $brand->stripe_connect_account_id,
-            'description' => 'Store sale payout to brand',
-            'transfer_group' => $paymentIntent->transfer_group ?? null,
-            'metadata' => [
-                'purpose' => 'brand_sale_payout',
-                'payment_intent_id' => (string) $paymentIntent->id,
-                'brand_professional_id' => (string) $brand->id,
-            ],
-        ];
-
-        if ($chargeId) {
-            $transferPayload['source_transaction'] = $chargeId;
-        }
-
-        $transfer = $this->stripe->transfers->create(array_filter($transferPayload));
-
-        Log::info('Brand portion transferred', [
-            'transfer_id' => $transfer->id,
-            'brand_id' => $brand->id,
-            'amount_cents' => $brandReceivesCents,
-            'charge_id' => $chargeId,
-        ]);
-
-        return $transfer->id;
-    }
-
-    private function extractChargeId(object $paymentIntent): ?string
-    {
-        if (is_string($paymentIntent->latest_charge ?? null) && $paymentIntent->latest_charge !== '') {
-            return $paymentIntent->latest_charge;
-        }
-
-        if (is_object($paymentIntent->latest_charge ?? null) && is_string($paymentIntent->latest_charge->id ?? null)) {
-            return $paymentIntent->latest_charge->id;
-        }
-
-        if (is_object($paymentIntent->charges ?? null) && is_array($paymentIntent->charges->data ?? null)) {
-            foreach ($paymentIntent->charges->data as $charge) {
-                if (is_object($charge) && is_string($charge->id ?? null) && $charge->id !== '') {
-                    return $charge->id;
-                }
-            }
-        }
-
-        return null;
     }
 
     private function appendSessionIdPlaceholder(string $url, string $param): string
