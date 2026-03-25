@@ -75,33 +75,32 @@ class CommissionPayoutService
         }
 
         $groups = CommissionLedgerEntry::query()
-            ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
-            ->whereNull('retail.commission_ledger_entries.payout_id')
-            ->where('retail.commission_ledger_entries.entry_type', 'accrual')
-            ->where('retail.commission_ledger_entries.status', 'approved')
-            ->where('retail.commission_ledger_entries.occurred_at', '<=', $cutoff)
+            ->whereNull('payout_id')
+            ->where('entry_type', 'accrual')
+            ->where('status', 'approved')
+            ->where('occurred_at', '<=', $cutoff)
             ->select([
-                'retail.commission_ledger_entries.brand_professional_id',
-                'retail.commission_ledger_entries.affiliate_professional_id',
-                'retail.commission_ledger_entries.currency_code',
+                'brand_professional_id',
+                'affiliate_professional_id',
+                'currency_code',
                 DB::raw("
                     CASE
-                        WHEN lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'
+                        WHEN rate_source = 'stripe_storefront'
                             THEN 'stripe_sale_hold'
                         ELSE 'brand_charge'
                     END as funding_kind
                 "),
-                DB::raw('SUM(retail.commission_ledger_entries.amount_cents) as total_cents'),
+                DB::raw('SUM(amount_cents) as total_cents'),
                 DB::raw('COUNT(*) as entry_count'),
             ])
-            ->groupBy('retail.commission_ledger_entries.brand_professional_id', 'retail.commission_ledger_entries.affiliate_professional_id', 'retail.commission_ledger_entries.currency_code', DB::raw("
+            ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code', DB::raw("
                 CASE
-                    WHEN lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'
+                    WHEN rate_source = 'stripe_storefront'
                         THEN 'stripe_sale_hold'
                     ELSE 'brand_charge'
                 END
             "))
-            ->having(DB::raw('SUM(retail.commission_ledger_entries.amount_cents)'), '>', 0)
+            ->having(DB::raw('SUM(amount_cents)'), '>', 0)
             ->get();
 
         foreach ($groups as $group) {
@@ -260,19 +259,11 @@ class CommissionPayoutService
     private function applyFundingKindFilter($query, string $fundingKind): void
     {
         if ($fundingKind === 'stripe_sale_hold') {
-            $query->whereIn('order_id', function ($sub) {
-                $sub->select('id')
-                    ->from('retail.orders')
-                    ->whereRaw("lower(source) = 'stripe_direct'");
-            });
+            $query->where('rate_source', 'stripe_storefront');
         } else {
             $query->where(function ($q) {
-                $q->whereNull('order_id')
-                  ->orWhereNotIn('order_id', function ($sub) {
-                      $sub->select('id')
-                          ->from('retail.orders')
-                          ->whereRaw("lower(source) = 'stripe_direct'");
-                  });
+                $q->whereNull('rate_source')
+                  ->orWhere('rate_source', '<>', 'stripe_storefront');
             });
         }
     }
