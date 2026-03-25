@@ -3,6 +3,7 @@
 namespace App\Services\Stripe;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
@@ -15,13 +16,15 @@ class CommissionPayoutService
 {
     private StripeClient $stripe;
     private float $platformFeePercent;
-    private int $holdDays;
+    private int $systemHoldDays;
+    private int $minHoldDays;
 
     public function __construct()
     {
         $this->stripe = new StripeClient(config('services.stripe.secret_key'));
         $this->platformFeePercent = config('comet.store.platform_fee_percent', 3);
-        $this->holdDays = max(0, (int) config('comet.store.payout_hold_days', 0));
+        $this->systemHoldDays = max(0, (int) config('comet.store.payout_hold_days', 7));
+        $this->minHoldDays = (int) config('comet.store.min_payout_hold_days', 7);
     }
 
     /**
@@ -30,7 +33,6 @@ class CommissionPayoutService
      */
     public function processEligiblePayouts(): array
     {
-        $cutoff = now()->subDays($this->holdDays);
         $stats = [
             'batches_created' => 0,
             'existing_batches_retried' => 0,
@@ -74,76 +76,107 @@ class CommissionPayoutService
             }
         }
 
-        $groups = CommissionLedgerEntry::query()
+        // Find all brands that have unpaid approved accruals, then apply
+        // per-brand hold days to determine which entries are eligible.
+        $brandIds = CommissionLedgerEntry::query()
             ->whereNull('payout_id')
             ->where('entry_type', 'accrual')
             ->where('status', 'approved')
-            ->where('occurred_at', '<=', $cutoff)
-            ->select([
-                'brand_professional_id',
-                'affiliate_professional_id',
-                'currency_code',
-                DB::raw("
+            ->distinct()
+            ->pluck('brand_professional_id');
+
+        // Pre-load brand store settings for hold-day lookups.
+        $brandSettings = BrandStoreSettings::query()
+            ->whereIn('professional_id', $brandIds)
+            ->pluck('payout_hold_days', 'professional_id');
+
+        foreach ($brandIds as $brandId) {
+            $holdDays = $this->resolveHoldDays($brandSettings[$brandId] ?? null);
+            $cutoff = now()->subDays($holdDays);
+
+            $groups = CommissionLedgerEntry::query()
+                ->whereNull('payout_id')
+                ->where('entry_type', 'accrual')
+                ->where('status', 'approved')
+                ->where('brand_professional_id', $brandId)
+                ->where('occurred_at', '<=', $cutoff)
+                ->select([
+                    'brand_professional_id',
+                    'affiliate_professional_id',
+                    'currency_code',
+                    DB::raw("
+                        CASE
+                            WHEN rate_source = 'stripe_storefront'
+                                THEN 'stripe_sale_hold'
+                            ELSE 'brand_charge'
+                        END as funding_kind
+                    "),
+                    DB::raw('SUM(amount_cents) as total_cents'),
+                    DB::raw('COUNT(*) as entry_count'),
+                ])
+                ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code', DB::raw("
                     CASE
                         WHEN rate_source = 'stripe_storefront'
                             THEN 'stripe_sale_hold'
                         ELSE 'brand_charge'
-                    END as funding_kind
-                "),
-                DB::raw('SUM(amount_cents) as total_cents'),
-                DB::raw('COUNT(*) as entry_count'),
-            ])
-            ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code', DB::raw("
-                CASE
-                    WHEN rate_source = 'stripe_storefront'
-                        THEN 'stripe_sale_hold'
-                    ELSE 'brand_charge'
-                END
-            "))
-            ->having(DB::raw('SUM(amount_cents)'), '>', 0)
-            ->get();
+                    END
+                "))
+                ->having(DB::raw('SUM(amount_cents)'), '>', 0)
+                ->get();
 
-        foreach ($groups as $group) {
-            try {
-                $payout = $this->createPayoutBatch(
-                    $group->brand_professional_id,
-                    $group->affiliate_professional_id,
-                    $group->currency_code,
-                    $group->funding_kind,
-                    $cutoff,
-                );
+            foreach ($groups as $group) {
+                try {
+                    $payout = $this->createPayoutBatch(
+                        $group->brand_professional_id,
+                        $group->affiliate_professional_id,
+                        $group->currency_code,
+                        $group->funding_kind,
+                        $cutoff,
+                    );
 
-                if (! $payout) {
-                    continue;
+                    if (! $payout) {
+                        continue;
+                    }
+
+                    $stats['batches_created']++;
+                    $result = $this->processPayoutBatch($payout);
+
+                    if ($result === true) {
+                        $stats['batches_processed']++;
+                        $stats['total_cents'] += $payout->net_payout_cents;
+                        continue;
+                    }
+
+                    if ($result === null) {
+                        $stats['batches_pending_funding']++;
+                        continue;
+                    }
+
+                    $stats['batches_failed']++;
+                } catch (\Throwable $e) {
+                    Log::error('Commission payout batch failed', [
+                        'brand_id' => $group->brand_professional_id,
+                        'affiliate_id' => $group->affiliate_professional_id,
+                        'currency' => $group->currency_code,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $stats['batches_failed']++;
                 }
-
-                $stats['batches_created']++;
-                $result = $this->processPayoutBatch($payout);
-
-                if ($result === true) {
-                    $stats['batches_processed']++;
-                    $stats['total_cents'] += $payout->net_payout_cents;
-                    continue;
-                }
-
-                if ($result === null) {
-                    $stats['batches_pending_funding']++;
-                    continue;
-                }
-
-                $stats['batches_failed']++;
-            } catch (\Throwable $e) {
-                Log::error('Commission payout batch failed', [
-                    'brand_id' => $group->brand_professional_id,
-                    'affiliate_id' => $group->affiliate_professional_id,
-                    'currency' => $group->currency_code,
-                    'error' => $e->getMessage(),
-                ]);
-                $stats['batches_failed']++;
             }
         }
 
         return $stats;
+    }
+
+    /**
+     * Resolve the effective hold days for a brand.
+     * Uses brand override if set, otherwise system default. Always >= system minimum.
+     */
+    private function resolveHoldDays(?int $brandPayoutHoldDays): int
+    {
+        $days = $brandPayoutHoldDays ?? $this->systemHoldDays;
+
+        return max($this->minHoldDays, $days);
     }
 
     /**

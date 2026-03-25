@@ -62,10 +62,13 @@ class BrandStoreController extends ApiController
      */
     public function updateSettings(Request $request)
     {
+        $minHoldDays = (int) config('comet.store.min_payout_hold_days', 7);
+
         $validator = Validator::make($request->all(), [
             'brand_professional_id' => ['sometimes', 'uuid'],
             'default_commission_rate' => ['sometimes', 'numeric', 'min:0', 'max:100'],
             'checkout_mode' => ['sometimes', 'string', 'in:shopify,stripe'],
+            'payout_hold_days' => ['sometimes', 'integer', "min:{$minHoldDays}", 'max:365'],
             'favourite_brand_product_ids' => ['sometimes', 'array', 'max:10'],
             'favourite_brand_product_ids.*' => ['uuid'],
         ]);
@@ -88,9 +91,10 @@ class BrandStoreController extends ApiController
         if (
             ! array_key_exists('default_commission_rate', $validated)
             && ! array_key_exists('checkout_mode', $validated)
+            && ! array_key_exists('payout_hold_days', $validated)
             && ! array_key_exists('favourite_brand_product_ids', $validated)
         ) {
-            return $this->error('Provide default_commission_rate, checkout_mode, and/or favourite_brand_product_ids.', 422);
+            return $this->error('Provide default_commission_rate, checkout_mode, payout_hold_days, and/or favourite_brand_product_ids.', 422);
         }
 
         $attributes = [];
@@ -100,6 +104,10 @@ class BrandStoreController extends ApiController
 
         if (array_key_exists('checkout_mode', $validated)) {
             $attributes['checkout_mode'] = (string) $validated['checkout_mode'];
+        }
+
+        if (array_key_exists('payout_hold_days', $validated)) {
+            $attributes['payout_hold_days'] = (int) $validated['payout_hold_days'];
         }
 
         if (array_key_exists('favourite_brand_product_ids', $validated)) {
@@ -132,14 +140,6 @@ class BrandStoreController extends ApiController
         return $this->success($this->storeSettingsPayloadForBrand($brandProfessionalId));
     }
 
-    /**
-     * @return array{
-     *   default_commission_rate: float,
-     *   checkout_mode: string,
-     *   favourite_brand_product_ids: array<int, string>,
-     *   brand_professional_id: string
-     * }
-     */
     private function storeSettingsPayloadForBrand(string $brandProfessionalId): array
     {
         $storeSettings = BrandStoreSettings::where('professional_id', $brandProfessionalId)->first();
@@ -157,9 +157,18 @@ class BrandStoreController extends ApiController
             ->values()
             ->all();
 
+        $minHoldDays = (int) config('comet.store.min_payout_hold_days', 7);
+        $systemDefault = (int) config('comet.store.payout_hold_days', 7);
+        $effectiveHoldDays = $storeSettings
+            ? $storeSettings->effective_payout_hold_days
+            : max($minHoldDays, $systemDefault);
+
         return [
             'default_commission_rate' => $defaultCommission,
             'checkout_mode' => $checkoutMode,
+            'payout_hold_days' => $storeSettings?->payout_hold_days,
+            'effective_payout_hold_days' => $effectiveHoldDays,
+            'min_payout_hold_days' => $minHoldDays,
             'favourite_brand_product_ids' => $favouriteBrandProductIds,
             'brand_professional_id' => $brandProfessionalId,
         ];

@@ -23,11 +23,30 @@ class BrandStoreSettings extends Model
         'default_commission_rate',
         'checkout_mode',
         'favourite_brand_product_ids',
+        'payout_hold_days',
     ];
 
     protected $casts = [
         'default_commission_rate' => 'decimal:2',
+        'payout_hold_days' => 'integer',
     ];
+
+    /**
+     * Effective hold days for this brand, respecting the system minimum.
+     */
+    public function getEffectivePayoutHoldDaysAttribute(): int
+    {
+        $min = (int) config('comet.store.min_payout_hold_days', 7);
+        $systemDefault = (int) config('comet.store.payout_hold_days', 7);
+
+        $brandDays = $this->payout_hold_days;
+
+        if ($brandDays === null) {
+            return max($min, $systemDefault);
+        }
+
+        return max($min, $brandDays);
+    }
 
     /**
      * Postgres uuid[] <-> PHP string[] bridge.
