@@ -10,6 +10,7 @@ use App\Http\Middleware\RequirePlan;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -72,6 +73,11 @@ return Application::configure(basePath: dirname(__DIR__))
                 ], 403);
             }
 
+            // Preserve explicit response exceptions (e.g. throttle 429)
+            if ($e instanceof HttpResponseException) {
+                return $e->getResponse();
+            }
+
             // Generic error handling
             $statusCode = 500;
             if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpException) {
@@ -96,4 +102,3 @@ return Application::configure(basePath: dirname(__DIR__))
             ], $statusCode);
         });
     })->create();
-
