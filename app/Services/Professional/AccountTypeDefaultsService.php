@@ -132,17 +132,21 @@ class AccountTypeDefaultsService
             return;
         }
 
-        Customer::query()->firstOrCreate(
-            [
-                'professional_id' => $professional->id,
-                'email'           => $email,
-            ],
-            [
+        $exists = Customer::query()
+            ->where('professional_id', $professional->id)
+            ->where('email', $email)
+            ->exists();
+
+        if (! $exists) {
+            $customer = new Customer([
                 'full_name' => $contactData['full_name'] ?? null,
+                'email'     => $email,
                 'phone'     => $contactData['phone'] ?? null,
                 'source'    => $contactData['source'] ?? 'system_default',
-            ]
-        );
+            ]);
+            $customer->professional_id = $professional->id;
+            $customer->save();
+        }
 
         // Create marketing subscription if configured
         if ($contactData['subscribed'] ?? false) {
