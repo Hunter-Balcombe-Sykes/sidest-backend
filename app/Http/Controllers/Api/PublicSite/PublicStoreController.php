@@ -339,7 +339,6 @@ class PublicStoreController extends ApiController
 
         $brandProfessionalId = DB::table('core.brand_partner_links')
             ->where('affiliate_professional_id', $affiliateProfessionalId)
-            ->orderByDesc('is_primary')
             ->orderByDesc('created_at')
             ->value('brand_professional_id');
 

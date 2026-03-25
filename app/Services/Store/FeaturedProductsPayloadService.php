@@ -37,15 +37,10 @@ class FeaturedProductsPayloadService
             $checkoutInfo = $this->resolveCheckoutInfoForAffiliate($professionalId);
             $checkoutMode = $checkoutInfo['checkout_mode'];
             $brandStripeAccountId = $checkoutInfo['brand_stripe_account_id'];
-            Log::info('[DEBUG_CHECKOUT] resolveCheckoutInfoForAffiliate result', [
-                'professional_id' => $professionalId,
-                'checkout_info' => $checkoutInfo,
-            ]);
         } catch (Throwable $e) {
             Log::warning('Could not resolve checkout info for affiliate; defaulting to shopify.', [
                 'professional_id' => $professionalId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
         }
 
@@ -120,7 +115,6 @@ class FeaturedProductsPayloadService
 
         $brandProfessionalId = DB::table('core.brand_partner_links')
             ->where('affiliate_professional_id', $affiliateProfessionalId)
-            ->orderByDesc('is_primary')
             ->orderByDesc('created_at')
             ->value('brand_professional_id');
 
@@ -131,20 +125,10 @@ class FeaturedProductsPayloadService
             $brandProfessionalId = $affiliateProfessionalId;
         }
 
-        Log::info('[DEBUG_CHECKOUT] brand lookup', [
-            'affiliate' => $affiliateProfessionalId,
-            'resolved_brand' => $brandProfessionalId,
-        ]);
-
         $settings = DB::table('retail.brand_store_settings')
             ->where('professional_id', $brandProfessionalId)
             ->select(['checkout_mode'])
             ->first();
-
-        Log::info('[DEBUG_CHECKOUT] brand_store_settings result', [
-            'brand' => $brandProfessionalId,
-            'settings' => $settings ? (array) $settings : null,
-        ]);
 
         $mode = strtolower(trim((string) ($settings?->checkout_mode ?? '')));
         $mode = in_array($mode, ['shopify', 'stripe'], true) ? $mode : 'shopify';
