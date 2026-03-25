@@ -5,8 +5,11 @@ namespace App\Services\Store;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CheckoutSession;
+use App\Models\Retail\CommissionLedgerEntry;
+use App\Jobs\Stripe\ProcessCommissionPayoutsJob;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Stripe\StripeClient;
 
 class PublicStripeCheckoutService
@@ -277,7 +280,77 @@ class PublicStripeCheckoutService
             ]);
             $checkoutSession->last_seen_at = now();
             $checkoutSession->save();
+
+            // Create commission ledger entries directly from the Stripe payment data.
+            $this->createCommissionLedgerEntries($checkoutSession, $contextSnapshot, $paymentIntent);
         });
+    }
+
+    /**
+     * Create commission ledger entries for each line item from a Stripe storefront payment.
+     */
+    private function createCommissionLedgerEntries(
+        CheckoutSession $checkoutSession,
+        array $contextSnapshot,
+        object $paymentIntent,
+    ): void {
+        $lineItems = Arr::get($contextSnapshot, 'line_items', []);
+        if (! is_array($lineItems) || $lineItems === []) {
+            return;
+        }
+
+        $brandProfessionalId = (string) $checkoutSession->brand_professional_id;
+        $affiliateProfessionalId = (string) $checkoutSession->affiliate_professional_id;
+        $paymentIntentId = (string) $paymentIntent->id;
+
+        foreach ($lineItems as $index => $lineItem) {
+            if (! is_array($lineItem)) {
+                continue;
+            }
+
+            $commissionCents = (int) ($lineItem['commission_cents'] ?? 0);
+            if ($commissionCents <= 0) {
+                continue;
+            }
+
+            $idempotencyKey = "stripe_pi:{$paymentIntentId}:item:{$index}";
+
+            CommissionLedgerEntry::query()->firstOrCreate(
+                ['idempotency_key' => $idempotencyKey],
+                [
+                    'brand_professional_id' => $brandProfessionalId,
+                    'affiliate_professional_id' => $affiliateProfessionalId,
+                    'entry_type' => 'accrual',
+                    'status' => 'approved',
+                    'amount_cents' => $commissionCents,
+                    'currency_code' => strtoupper((string) ($lineItem['currency_code'] ?? 'AUD')),
+                    'commission_rate' => (float) ($lineItem['commission_rate'] ?? 0),
+                    'rate_source' => 'stripe_storefront',
+                    'idempotency_key' => $idempotencyKey,
+                    'calculation_metadata' => [
+                        'payment_intent_id' => $paymentIntentId,
+                        'checkout_session_token' => (string) $checkoutSession->token,
+                        'brand_product_id' => (string) ($lineItem['brand_product_id'] ?? ''),
+                        'shopify_product_id' => (string) ($lineItem['shopify_product_id'] ?? ''),
+                        'line_total_cents' => (int) ($lineItem['line_total_cents'] ?? 0),
+                        'unit_price_cents' => (int) ($lineItem['unit_price_cents'] ?? 0),
+                        'quantity' => (int) ($lineItem['quantity'] ?? 1),
+                        'funding_source' => 'stripe_sale_hold',
+                    ],
+                    'occurred_at' => now(),
+                ]
+            );
+        }
+
+        Log::info('Commission ledger entries created from Stripe payment.', [
+            'payment_intent_id' => $paymentIntentId,
+            'affiliate_professional_id' => $affiliateProfessionalId,
+            'brand_professional_id' => $brandProfessionalId,
+            'line_items_count' => count($lineItems),
+        ]);
+
+        // Dispatch payout processing so commissions are transferred promptly.
+        ProcessCommissionPayoutsJob::dispatch();
     }
 
     public function finalizeCompletedCheckoutSession(object $session, ?string $connectedAccountId = null): void
