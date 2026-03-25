@@ -15,6 +15,10 @@ class CometStaff extends BaseModel
     public $incrementing = false;
     protected $keyType = 'string';
 
+    protected $hidden = [
+        'auth_user_id',
+    ];
+
     protected $fillable = [
         'role',
         'primary_email',

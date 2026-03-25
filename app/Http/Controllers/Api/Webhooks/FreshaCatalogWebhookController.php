@@ -137,10 +137,9 @@ class FreshaCatalogWebhookController extends ApiController
         $notificationUrl = trim((string) config('services.fresha.webhook_notification_url', ''));
 
         if ($signatureKey === '' || $notificationUrl === '') {
-            // If not configured, skip validation (log warning).
-            Log::warning('Fresha webhook signature key or notification URL not configured — skipping validation');
+            Log::warning('Fresha webhook signature key or notification URL not configured — rejecting webhook');
 
-            return true;
+            return false;
         }
 
         if ($signature === '') {

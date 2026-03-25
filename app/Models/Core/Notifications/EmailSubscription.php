@@ -17,6 +17,12 @@ class EmailSubscription extends BaseModel
     public $incrementing = false;
     protected $keyType = 'string';
 
+    protected $hidden = [
+        'unsubscribe_token',
+        'consent_ip_hash',
+        'consent_user_agent',
+    ];
+
     protected $fillable = [
         'professional_id',
         'list_key',

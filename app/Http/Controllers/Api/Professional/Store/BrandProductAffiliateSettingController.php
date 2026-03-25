@@ -25,22 +25,11 @@ class BrandProductAffiliateSettingController extends ApiController
     /**
      * GET /store/affiliate-product-settings
      */
-    public function index(Request $request)
+    public function index(\App\Http\Requests\Api\Professional\Store\IndexBrandProductAffiliateSettingRequest $request)
     {
         $professional = $this->currentProfessional($request);
 
-        $validator = Validator::make($request->query(), [
-            'brand_professional_id' => ['required', 'uuid'],
-            'affiliate_professional_id' => ['sometimes', 'uuid'],
-            'page' => ['sometimes', 'integer', 'min:1'],
-            'per_page' => ['sometimes', 'integer', 'min:1', 'max:200'],
-        ]);
-
-        if ($validator->fails()) {
-            throw new ValidationException($validator);
-        }
-
-        $validated = $validator->validated();
+        $validated = $request->validated();
         $brandProfessionalId = trim((string) $validated['brand_professional_id']);
         $affiliateProfessionalId = trim((string) ($validated['affiliate_professional_id'] ?? ''));
         $page = (int) ($validated['page'] ?? 1);
@@ -98,25 +87,11 @@ class BrandProductAffiliateSettingController extends ApiController
      *   ]
      * }
      */
-    public function upsert(Request $request)
+    public function upsert(\App\Http\Requests\Api\Professional\Store\UpsertBrandProductAffiliateSettingRequest $request)
     {
         $professional = $this->currentProfessional($request);
 
-        $validator = Validator::make($request->all(), [
-            'brand_professional_id' => ['required', 'uuid'],
-            'affiliate_professional_id' => ['required', 'uuid'],
-            'settings' => ['required', 'array', 'min:1'],
-            'settings.*.brand_product_id' => ['required', 'uuid'],
-            'settings.*.commission_override' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'settings.*.discount_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'settings.*.custom_price' => ['nullable', 'numeric', 'min:0'],
-        ]);
-
-        if ($validator->fails()) {
-            throw new ValidationException($validator);
-        }
-
-        $validated = $validator->validated();
+        $validated = $request->validated();
         $brandProfessionalId = trim((string) $validated['brand_professional_id']);
         $affiliateProfessionalId = trim((string) $validated['affiliate_professional_id']);
         $settings = array_map(
@@ -194,22 +169,11 @@ class BrandProductAffiliateSettingController extends ApiController
     /**
      * DELETE /store/affiliate-product-settings
      */
-    public function remove(Request $request)
+    public function remove(\App\Http\Requests\Api\Professional\Store\RemoveBrandProductAffiliateSettingRequest $request)
     {
         $professional = $this->currentProfessional($request);
 
-        $validator = Validator::make($request->all(), [
-            'brand_professional_id' => ['required', 'uuid'],
-            'affiliate_professional_id' => ['required', 'uuid'],
-            'brand_product_ids' => ['sometimes', 'array'],
-            'brand_product_ids.*' => ['uuid'],
-        ]);
-
-        if ($validator->fails()) {
-            throw new ValidationException($validator);
-        }
-
-        $validated = $validator->validated();
+        $validated = $request->validated();
         $brandProfessionalId = trim((string) $validated['brand_professional_id']);
         $affiliateProfessionalId = trim((string) $validated['affiliate_professional_id']);
         $brandProductIds = $this->normalizeIds($validated['brand_product_ids'] ?? []);

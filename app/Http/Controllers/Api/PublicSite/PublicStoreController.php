@@ -61,26 +61,9 @@ class PublicStoreController extends ApiController
      * POST /public/store/checkout-session-by-slug (header-based fallback)
      * Creates deterministic attribution token for Shopify-confirmed checkout.
      */
-    public function createCheckoutSession(Request $request): JsonResponse
+    public function createCheckoutSession(\App\Http\Requests\Api\PublicSite\Store\CreateCheckoutSessionRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'currency_code' => ['sometimes', 'nullable', 'string', 'size:3'],
-            'line_items' => ['sometimes', 'array', 'max:100'],
-            'line_items.*.brand_product_id' => ['sometimes', 'nullable', 'uuid'],
-            'line_items.*.shopify_product_id' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'line_items.*.shopify_variant_id' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'line_items.*.title' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'line_items.*.quantity' => ['sometimes', 'nullable', 'integer', 'min:1'],
-            'line_items.*.unit_price_cents' => ['sometimes', 'nullable', 'integer', 'min:0'],
-            'line_items.*.line_total_cents' => ['sometimes', 'nullable', 'integer', 'min:0'],
-            'context' => ['sometimes', 'array'],
-        ]);
-
-        if ($validator->fails()) {
-            throw new ValidationException($validator);
-        }
-
-        $validated = $validator->validated();
+        $validated = $request->validated();
         $subdomain = $this->resolveSiteSubdomain($request);
         if (! $subdomain) {
             return $this->error('Missing site identifier.', 400);
@@ -162,30 +145,9 @@ class PublicStoreController extends ApiController
      * POST /public/store/stripe-checkout-by-slug (header-based fallback)
      * Creates a hosted Stripe Checkout session for storefront orders.
      */
-    public function createStripeCheckout(Request $request): JsonResponse
+    public function createStripeCheckout(\App\Http\Requests\Api\PublicSite\Store\StripeCheckoutRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'checkout_session_token' => ['required', 'string', 'max:255'],
-            'success_url' => ['required', 'url'],
-            'cancel_url' => ['required', 'url'],
-            'customer' => ['required', 'array'],
-            'customer.name' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.email' => ['required', 'string', 'email:rfc', 'max:255'],
-            'customer.phone' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.address1' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.address2' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.company' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.city' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.province' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.country' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.zip' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
-
-        if ($validator->fails()) {
-            throw new ValidationException($validator);
-        }
-
-        $validated = $validator->validated();
+        $validated = $request->validated();
         $subdomain = $this->resolveSiteSubdomain($request);
         if (! $subdomain) {
             return $this->error('Missing site identifier.', 400);
@@ -227,26 +189,9 @@ class PublicStoreController extends ApiController
      * POST /public/store/payment-intent
      * Creates a PaymentIntent on the brand's Express account for embedded card checkout.
      */
-    public function createPaymentIntent(Request $request): JsonResponse
+    public function createPaymentIntent(\App\Http\Requests\Api\PublicSite\Store\PaymentIntentRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'checkout_session_token' => ['required', 'string', 'max:255'],
-            'customer' => ['required', 'array'],
-            'customer.name' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.email' => ['required', 'string', 'email:rfc', 'max:255'],
-            'customer.phone' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.address1' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.city' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.province' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.country' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'customer.zip' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
-
-        if ($validator->fails()) {
-            throw new \Illuminate\Validation\ValidationException($validator);
-        }
-
-        $validated = $validator->validated();
+        $validated = $request->validated();
         $subdomain = $this->resolveSiteSubdomain($request);
         if (! $subdomain) {
             return $this->error('Missing site identifier.', 400);

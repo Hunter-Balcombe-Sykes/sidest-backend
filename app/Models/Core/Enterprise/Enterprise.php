@@ -21,6 +21,10 @@ class Enterprise extends BaseModel
 
     protected $keyType = 'string';
 
+    protected $hidden = [
+        'auth_user_id',
+    ];
+
     protected $fillable = [
         'auth_user_id',
         'name',

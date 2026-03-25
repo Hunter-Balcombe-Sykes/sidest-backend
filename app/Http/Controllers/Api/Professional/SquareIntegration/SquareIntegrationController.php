@@ -181,7 +181,7 @@ class SquareIntegrationController extends ApiController
 
     /**
      * GET /api/square/token
-     * Returns the decrypted Square access token for frontend use.
+     * Returns Square integration status (token is kept server-side).
      */
     public function token(Request $request)
     {
@@ -192,8 +192,8 @@ class SquareIntegrationController extends ApiController
         $integration = $this->currentSquareIntegration($request);
 
         return $this->success([
-            'access_token' => $integration?->access_token,
-            'expires_at'   => $integration?->expires_at
+            'connected'  => $integration?->access_token !== null,
+            'expires_at' => $integration?->expires_at
                 ? $integration->expires_at->toIso8601String()
                 : null,
         ]);

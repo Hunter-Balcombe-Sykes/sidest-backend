@@ -16,6 +16,10 @@ class Customer extends BaseModel
     public $incrementing = false;
     protected $keyType = 'string';
 
+    protected $hidden = [
+        'external_id',
+    ];
+
     protected $fillable = [
         'email',
         'phone',

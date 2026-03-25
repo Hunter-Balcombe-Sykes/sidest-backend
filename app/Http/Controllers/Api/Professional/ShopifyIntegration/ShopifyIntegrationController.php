@@ -322,7 +322,7 @@ class ShopifyIntegrationController extends ApiController
 
         return $this->success([
             'brand_professional_id' => $targetBrandId,
-            'access_token' => $integration?->access_token,
+            'connected' => $integration?->access_token !== null,
             'expires_at' => $integration?->expires_at?->toIso8601String(),
             'shop_domain' => $this->normalizeShopDomain((string) Arr::get($metadata, 'shop_domain', '')),
             'shop_id' => Arr::get($metadata, 'shop_id'),

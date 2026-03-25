@@ -7,6 +7,7 @@ use App\Http\Middleware\Auth\VerifySupabaseJwt;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
 use App\Http\Middleware\RequirePlan;
+use App\Http\Middleware\SecureHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -25,15 +26,17 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->append(SecureHeaders::class);
+
         $middleware->alias([
-        'supabase.jwt' => VerifySupabaseJwt::class,
-        'current.pro'  => LoadCurrentProfessional::class,
-        'staff' => EnsureCometStaff::class,
-        'staff.admin' => EnsureCometAdmin::class,
-        'lead.log'     => LogLeadRateLimits::class,
-            'api' => AddPublicCacheHeaders::class,
-            'plan' => RequirePlan::class,
-    ]);
+            'supabase.jwt' => VerifySupabaseJwt::class,
+            'current.pro'  => LoadCurrentProfessional::class,
+            'staff'        => EnsureCometStaff::class,
+            'staff.admin'  => EnsureCometAdmin::class,
+            'lead.log'     => LogLeadRateLimits::class,
+            'api'          => AddPublicCacheHeaders::class,
+            'plan'         => RequirePlan::class,
+        ]);
     })
 
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -1,5 +1,7 @@
 -- 1) Create runtime role
-create role app_backend login password 'blaze@@1967HBS' bypassrls;
+-- SECURITY: password must be set via Supabase dashboard or secure provisioning.
+-- DO NOT commit real credentials to version control.
+create role app_backend login password '___SET_VIA_DASHBOARD___' bypassrls;
 
 -- 2) Allow it to connect
 grant connect on database postgres to app_backend;

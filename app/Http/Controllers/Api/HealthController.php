@@ -62,16 +62,13 @@ class HealthController extends ApiController
 
             return [
                 'status' => ($read === $value) ? 'healthy' : 'unhealthy',
-                'store' => $store,
                 'ms' => $ms,
-                'mismatch' => ($read === $value) ? false : true,
             ];
         } catch (Throwable $e) {
             $ms = (microtime(true) - $start) * 1000;
 
             return [
                 'status' => 'unhealthy',
-                'store' => config('cache.default'),
                 'ms' => $ms,
                 'error' => $e->getMessage(),
             ];

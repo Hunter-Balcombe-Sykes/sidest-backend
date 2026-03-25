@@ -17,6 +17,11 @@ class RetailOrder extends BaseModel
     public $incrementing = false;
     protected $keyType = 'string';
 
+    protected $hidden = [
+        'raw_payload',
+        'customer_email_hash',
+    ];
+
     protected $fillable = [
         'shopify_order_id',
         'order_name',

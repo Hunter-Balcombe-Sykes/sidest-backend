@@ -135,7 +135,7 @@ class PublicBookingController extends ApiController
         ]);
     }
 
-    public function availability(Request $request): JsonResponse
+    public function availability(\App\Http\Requests\Api\PublicSite\Booking\PublicBookingAvailabilityRequest $request): JsonResponse
     {
         try {
             [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
@@ -143,11 +143,7 @@ class PublicBookingController extends ApiController
                 return $errorResponse;
             }
 
-            $validated = Validator::make($request->all(), [
-                'date' => ['required', 'date_format:Y-m-d'],
-                'serviceVariationId' => ['required', 'string', 'max:120'],
-                'locationId' => ['nullable', 'string', 'max:120'],
-            ])->validate();
+            $validated = $request->validated();
 
             $location = $this->resolveLocation($professional, $validated['locationId'] ?? null);
             $date = CarbonImmutable::createFromFormat('Y-m-d', (string) $validated['date']);
@@ -219,7 +215,7 @@ class PublicBookingController extends ApiController
         ]);
     }
 
-    public function checkout(Request $request): JsonResponse
+    public function checkout(\App\Http\Requests\Api\PublicSite\Booking\PublicBookingCheckoutRequest $request): JsonResponse
     {
         try {
             [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
@@ -227,22 +223,7 @@ class PublicBookingController extends ApiController
                 return $errorResponse;
             }
 
-            $validated = Validator::make($request->all(), [
-                'serviceVariationId' => ['required', 'string', 'max:120'],
-                'serviceVariationVersion' => ['required', 'integer', 'min:1'],
-                'teamMemberId' => ['required', 'string', 'max:120'],
-                'durationMinutes' => ['nullable', 'integer', 'min:1'],
-                'startAt' => ['required', 'string', 'max:80'],
-                'locationId' => ['nullable', 'string', 'max:120'],
-                'paymentMethod' => ['nullable', 'string', 'in:apple_pay,google_pay,card'],
-                'sourceId' => ['nullable', 'string', 'max:255'],
-                'customer' => ['required', 'array'],
-                'customer.firstName' => ['required', 'string', 'max:120'],
-                'customer.lastName' => ['required', 'string', 'max:120'],
-                'customer.email' => ['required', 'email', 'max:190'],
-                'customer.phone' => ['nullable', 'string', 'max:60'],
-                'customer.note' => ['nullable', 'string', 'max:1000'],
-            ])->validate();
+            $validated = $request->validated();
 
             // Non-blocking local CRM sync at checkout intent time.
             // Mirrors store behavior so contacts are captured even if payment later fails.

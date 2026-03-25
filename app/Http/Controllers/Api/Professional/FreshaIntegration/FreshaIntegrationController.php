@@ -182,7 +182,7 @@ class FreshaIntegrationController extends ApiController
 
     /**
      * GET /api/fresha/token
-     * Returns the decrypted Fresha access token for frontend use.
+     * Returns Fresha integration status (token is kept server-side).
      */
     public function token(Request $request)
     {
@@ -193,8 +193,8 @@ class FreshaIntegrationController extends ApiController
         $integration = $this->currentFreshaIntegration($request);
 
         return $this->success([
-            'access_token' => $integration?->access_token,
-            'expires_at'   => $integration?->expires_at
+            'connected'  => $integration?->access_token !== null,
+            'expires_at' => $integration?->expires_at
                 ? $integration->expires_at->toIso8601String()
                 : null,
         ]);
