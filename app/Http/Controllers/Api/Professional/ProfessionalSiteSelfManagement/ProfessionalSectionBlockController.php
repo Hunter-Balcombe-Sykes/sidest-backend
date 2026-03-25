@@ -22,18 +22,21 @@ class ProfessionalSectionBlockController extends ApiController
         private readonly AccountTypeDefaultsService $defaultsService,
     ) {}
 
-    /** @return array<int, string> */
-    private function professionalOnlySectionTypes(): array
-    {
-        return config('comet.professional_only_section_types', []);
-    }
-
     public function index(Request $request)
     {
         $pro = $this->currentProfessional($request);
 
+        $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
+        $defaults = $this->defaultsService->resolveDefaults($professionalType);
+        $allowedSections = $defaults['allowed_sections'] ?? config('comet.section_block_types', []);
+
+        $sections = $pro->sectionBlocks()
+            ->whereIn('block_type', $allowedSections)
+            ->get();
+
         return $this->success([
-            'sections' => $pro->sectionBlocks()->get(),
+            'sections' => $sections,
+            'allowed_sections' => array_values($allowedSections),
         ]);
     }
 
@@ -60,15 +63,9 @@ class ProfessionalSectionBlockController extends ApiController
         $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
 
         // ── Account-type section restrictions ────────────────────────────
-        $isInfluencer = $professionalType === 'influencer';
-        $isProfessionalOnlySection = in_array($blockType, $this->professionalOnlySectionTypes(), true);
-        if ($isInfluencer && $isProfessionalOnlySection && $isEnabling) {
-            return $this->error('Upgrade to professional to enable this section.', 403);
-        }
-
         $defaults = $this->defaultsService->resolveDefaults($professionalType);
         $allowedSections = $defaults['allowed_sections'] ?? config('comet.section_block_types', []);
-        if (! in_array($blockType, $allowedSections, true) && $isEnabling) {
+        if (! in_array($blockType, $allowedSections, true)) {
             return $this->error('This section is not available for your account type.', 403);
         }
 
