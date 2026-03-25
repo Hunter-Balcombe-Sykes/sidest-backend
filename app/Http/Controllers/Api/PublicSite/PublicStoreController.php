@@ -393,7 +393,7 @@ class PublicStoreController extends ApiController
                 'default_commission_rate' => $defaultCommissionRate,
                 'max_featured_products' => $maxFeaturedProducts,
                 'max_default_product_selections' => $maxFeaturedProducts,
-                'checkout_mode' => 'shopify',
+                'checkout_mode' => $this->resolveCheckoutModeForAffiliate($affiliateProfessionalId),
             ];
         }
     }
