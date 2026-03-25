@@ -76,14 +76,14 @@ class CommissionPayoutService
 
         $groups = CommissionLedgerEntry::query()
             ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
-            ->whereNull('payout_id')
-            ->where('entry_type', 'accrual')
-            ->where('status', 'approved')
-            ->where('occurred_at', '<=', $cutoff)
+            ->whereNull('retail.commission_ledger_entries.payout_id')
+            ->where('retail.commission_ledger_entries.entry_type', 'accrual')
+            ->where('retail.commission_ledger_entries.status', 'approved')
+            ->where('retail.commission_ledger_entries.occurred_at', '<=', $cutoff)
             ->select([
-                'brand_professional_id',
-                'affiliate_professional_id',
-                'currency_code',
+                'retail.commission_ledger_entries.brand_professional_id',
+                'retail.commission_ledger_entries.affiliate_professional_id',
+                'retail.commission_ledger_entries.currency_code',
                 DB::raw("
                     CASE
                         WHEN lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'
@@ -91,17 +91,17 @@ class CommissionPayoutService
                         ELSE 'brand_charge'
                     END as funding_kind
                 "),
-                DB::raw('SUM(amount_cents) as total_cents'),
+                DB::raw('SUM(retail.commission_ledger_entries.amount_cents) as total_cents'),
                 DB::raw('COUNT(*) as entry_count'),
             ])
-            ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code', DB::raw("
+            ->groupBy('retail.commission_ledger_entries.brand_professional_id', 'retail.commission_ledger_entries.affiliate_professional_id', 'retail.commission_ledger_entries.currency_code', DB::raw("
                 CASE
                     WHEN lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'
                         THEN 'stripe_sale_hold'
                     ELSE 'brand_charge'
                 END
             "))
-            ->having(DB::raw('SUM(amount_cents)'), '>', 0)
+            ->having(DB::raw('SUM(retail.commission_ledger_entries.amount_cents)'), '>', 0)
             ->get();
 
         foreach ($groups as $group) {
@@ -160,13 +160,13 @@ class CommissionPayoutService
         return DB::transaction(function () use ($brandId, $affiliateId, $currency, $fundingKind, $cutoff) {
             $entries = CommissionLedgerEntry::query()
                 ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
-                ->whereNull('payout_id')
-                ->where('entry_type', 'accrual')
-                ->where('status', 'approved')
-                ->where('brand_professional_id', $brandId)
-                ->where('affiliate_professional_id', $affiliateId)
-                ->where('currency_code', $currency)
-                ->where('occurred_at', '<=', $cutoff)
+                ->whereNull('retail.commission_ledger_entries.payout_id')
+                ->where('retail.commission_ledger_entries.entry_type', 'accrual')
+                ->where('retail.commission_ledger_entries.status', 'approved')
+                ->where('retail.commission_ledger_entries.brand_professional_id', $brandId)
+                ->where('retail.commission_ledger_entries.affiliate_professional_id', $affiliateId)
+                ->where('retail.commission_ledger_entries.currency_code', $currency)
+                ->where('retail.commission_ledger_entries.occurred_at', '<=', $cutoff)
                 ->where(function ($query) use ($fundingKind): void {
                     if ($fundingKind === 'stripe_sale_hold') {
                         $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
@@ -189,13 +189,13 @@ class CommissionPayoutService
 
             $reversalCents = CommissionLedgerEntry::query()
                 ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
-                ->whereNull('payout_id')
-                ->where('entry_type', 'reversal')
-                ->where('status', 'approved')
-                ->where('brand_professional_id', $brandId)
-                ->where('affiliate_professional_id', $affiliateId)
-                ->where('currency_code', $currency)
-                ->where('occurred_at', '<=', $cutoff)
+                ->whereNull('retail.commission_ledger_entries.payout_id')
+                ->where('retail.commission_ledger_entries.entry_type', 'reversal')
+                ->where('retail.commission_ledger_entries.status', 'approved')
+                ->where('retail.commission_ledger_entries.brand_professional_id', $brandId)
+                ->where('retail.commission_ledger_entries.affiliate_professional_id', $affiliateId)
+                ->where('retail.commission_ledger_entries.currency_code', $currency)
+                ->where('retail.commission_ledger_entries.occurred_at', '<=', $cutoff)
                 ->where(function ($query) use ($fundingKind): void {
                     if ($fundingKind === 'stripe_sale_hold') {
                         $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
@@ -242,13 +242,13 @@ class CommissionPayoutService
 
             $reversals = CommissionLedgerEntry::query()
                 ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
-                ->whereNull('payout_id')
-                ->where('entry_type', 'reversal')
-                ->where('status', 'approved')
-                ->where('brand_professional_id', $brandId)
-                ->where('affiliate_professional_id', $affiliateId)
-                ->where('currency_code', $currency)
-                ->where('occurred_at', '<=', $cutoff)
+                ->whereNull('retail.commission_ledger_entries.payout_id')
+                ->where('retail.commission_ledger_entries.entry_type', 'reversal')
+                ->where('retail.commission_ledger_entries.status', 'approved')
+                ->where('retail.commission_ledger_entries.brand_professional_id', $brandId)
+                ->where('retail.commission_ledger_entries.affiliate_professional_id', $affiliateId)
+                ->where('retail.commission_ledger_entries.currency_code', $currency)
+                ->where('retail.commission_ledger_entries.occurred_at', '<=', $cutoff)
                 ->where(function ($query) use ($fundingKind): void {
                     if ($fundingKind === 'stripe_sale_hold') {
                         $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
