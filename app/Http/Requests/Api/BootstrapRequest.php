@@ -61,9 +61,15 @@ class BootstrapRequest extends BaseFormRequest
             ]);
         $this->sanitizeEmails(['primary_email']);
 
-        // Auto-generate handle from display_name if not provided
+        // For brands: force handle to match display_name
+        $professionalType = mb_strtolower(trim((string) ($this->professional_type ?? '')));
+        $isBrand = $professionalType === 'brand';
+
         $handle = $this->handle;
-        if (!is_string($handle) || $handle === '') {
+        if ($isBrand) {
+            // Brand handle always derived from display_name to prevent duplicate brand names
+            $handle = $this->generateHandleFromDisplayName($this->display_name ?? '');
+        } elseif (!is_string($handle) || $handle === '') {
             $handle = $this->generateHandleFromDisplayName($this->display_name ?? '');
         }
 

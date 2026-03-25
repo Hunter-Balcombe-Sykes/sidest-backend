@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\Site\UpsertSectionBlockRequest;
 use App\Models\Core\Site\Block;
+use App\Services\Professional\AccountTypeDefaultsService;
+use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
@@ -12,14 +14,20 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
 class ProfessionalSectionBlockController extends ApiController
 {
+    use ResolveCurrentProfessional;
+    use ResolveCurrentSite;
+
+    public function __construct(
+        private readonly SectionVisibilityService $visibilityService,
+        private readonly AccountTypeDefaultsService $defaultsService,
+    ) {}
+
     /** @return array<int, string> */
     private function professionalOnlySectionTypes(): array
     {
         return config('comet.professional_only_section_types', []);
     }
 
-    use ResolveCurrentProfessional;
-    use ResolveCurrentSite;
     public function index(Request $request)
     {
         $pro = $this->currentProfessional($request);
@@ -50,10 +58,30 @@ class ProfessionalSectionBlockController extends ApiController
         $isEnabling = $nextIsActive && ! $currentlyIsActive;
 
         $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
+
+        // ── Account-type section restrictions ────────────────────────────
         $isInfluencer = $professionalType === 'influencer';
         $isProfessionalOnlySection = in_array($blockType, $this->professionalOnlySectionTypes(), true);
         if ($isInfluencer && $isProfessionalOnlySection && $isEnabling) {
             return $this->error('Upgrade to professional to enable this section.', 403);
+        }
+
+        $defaults = $this->defaultsService->resolveDefaults($professionalType);
+        $allowedSections = $defaults['allowed_sections'] ?? config('comet.section_block_types', []);
+        if (! in_array($blockType, $allowedSections, true) && $isEnabling) {
+            return $this->error('This section is not available for your account type.', 403);
+        }
+
+        // ── Visibility requirements check ────────────────────────────────
+        if ($isEnabling) {
+            [$canBeVisible, $reason] = $this->visibilityService->checkVisibilityRequirements(
+                (string) $pro->id,
+                (string) $site->id,
+                $blockType
+            );
+            if (! $canBeVisible) {
+                return $this->error($reason, 422);
+            }
         }
 
         $block = DB::transaction(function () use ($pro, $site, $data, $blockType) {
@@ -70,15 +98,24 @@ class ProfessionalSectionBlockController extends ApiController
                 $block->is_active = (bool) $data['is_active'];
             }
 
+            if (array_key_exists('is_enabled', $data)) {
+                $block->is_enabled = (bool) $data['is_enabled'];
+                // Disabling also hides from public
+                if (! $data['is_enabled']) {
+                    $block->is_active = false;
+                }
+            }
+
             if (!$block->exists) {
                 $maxSort = Block::query()
                     ->where('site_id', $site->id)
                     ->where('block_group', 'sections')
                     ->max('sort_order');
 
-                $block->sort_order = is_null($maxSort) ? 0 : ((int) $maxSort + 1);
-                $block->is_active  = $data['is_active'] ?? true;
-                $block->settings   = $data['settings'] ?? [];
+                $block->sort_order  = is_null($maxSort) ? 0 : ((int) $maxSort + 1);
+                $block->is_active   = $data['is_active'] ?? true;
+                $block->is_enabled  = $data['is_enabled'] ?? true;
+                $block->settings    = $data['settings'] ?? [];
             }
 
             // merge settings (PATCH semantics)

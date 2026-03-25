@@ -23,6 +23,9 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalThemeController;
 use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
+use App\Http\Controllers\Api\Professional\BrandOnboardingReadinessController;
+use App\Http\Controllers\Api\Professional\BrandProfileController;
+use App\Http\Controllers\Api\Professional\Store\BrandAffiliateDefaultsController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateOverrideController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateSettingController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
@@ -244,6 +247,17 @@ Route::get('/store/brand-analytics/overview', [StoreAnalyticsV2Controller::class
         Route::get('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'index']);
         Route::put('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'upsert']);
         Route::delete('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'remove']);
+
+        // Store: Brand affiliate defaults (theme + products for new affiliates)
+        Route::get('/store/affiliate-defaults', [BrandAffiliateDefaultsController::class, 'show']);
+        Route::patch('/store/affiliate-defaults', [BrandAffiliateDefaultsController::class, 'update']);
+
+        // Brand profile (business fields)
+        Route::get('/brand/profile', [BrandProfileController::class, 'show']);
+        Route::patch('/brand/profile', [BrandProfileController::class, 'update']);
+
+        // Brand onboarding readiness
+        Route::get('/brand/onboarding-readiness', [BrandOnboardingReadinessController::class, 'show']);
 
         // Stripe Connect & Payouts
         Route::get('/stripe/status', [StripeConnectController::class, 'status']);

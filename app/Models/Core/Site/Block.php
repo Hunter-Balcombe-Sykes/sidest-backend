@@ -31,15 +31,17 @@ class Block extends BaseModel
         'icon_key',
         'sort_order',
         'is_active',
+        'is_enabled',
         'settings',
     ];
 
     protected $casts = [
-        'sort_order' => 'integer',
-        'is_active'  => 'boolean',
-        'settings'   => 'array',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
+        'sort_order'  => 'integer',
+        'is_active'   => 'boolean',
+        'is_enabled'  => 'boolean',
+        'settings'    => 'array',
+        'created_at'  => 'datetime',
+        'updated_at'  => 'datetime',
     ];
 
     public function professional(): BelongsTo
@@ -60,5 +62,15 @@ class Block extends BaseModel
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    public function scopeEnabled($query)
+    {
+        return $query->where('is_enabled', true);
+    }
+
+    public function scopeVisible($query)
+    {
+        return $query->where('is_enabled', true)->where('is_active', true);
     }
 }

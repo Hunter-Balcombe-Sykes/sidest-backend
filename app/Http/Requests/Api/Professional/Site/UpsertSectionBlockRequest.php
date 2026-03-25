@@ -26,6 +26,7 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             'block_type' => ['required', 'string', Rule::in($allowed)],
             'title' => ['sometimes', 'nullable', 'string', 'max:100'],
             'is_active' => ['sometimes', 'boolean'],
+            'is_enabled' => ['sometimes', 'boolean'],
             'settings' => ['sometimes', 'array'],
             'settings.text' => $textRules,
         ];

@@ -24,6 +24,8 @@ class BrandStoreSettings extends Model
         'checkout_mode',
         'favourite_brand_product_ids',
         'payout_hold_days',
+        'default_affiliate_theme_id',
+        'default_affiliate_product_ids',
     ];
 
     protected $casts = [
@@ -57,6 +59,32 @@ class BrandStoreSettings extends Model
      * @return array<int, string>
      */
     public function getFavouriteBrandProductIdsAttribute(mixed $value): array
+    {
+        return self::decodeUuidArray($value);
+    }
+
+    public function setFavouriteBrandProductIdsAttribute(mixed $value): void
+    {
+        $this->attributes['favourite_brand_product_ids'] = self::encodeUuidArray($value);
+    }
+
+    // ── Default affiliate product IDs (uuid[]) ──────────────────────────
+
+    /** @return array<int, string> */
+    public function getDefaultAffiliateProductIdsAttribute(mixed $value): array
+    {
+        return self::decodeUuidArray($value);
+    }
+
+    public function setDefaultAffiliateProductIdsAttribute(mixed $value): void
+    {
+        $this->attributes['default_affiliate_product_ids'] = self::encodeUuidArray($value);
+    }
+
+    // ── Postgres uuid[] helpers ──────────────────────────────────────────
+
+    /** @return array<int, string> */
+    private static function decodeUuidArray(mixed $value): array
     {
         if (is_array($value)) {
             return array_values(
@@ -92,7 +120,7 @@ class BrandStoreSettings extends Model
         );
     }
 
-    public function setFavouriteBrandProductIdsAttribute(mixed $value): void
+    private static function encodeUuidArray(mixed $value): string
     {
         $ids = array_values(
             array_filter(
@@ -102,11 +130,9 @@ class BrandStoreSettings extends Model
         );
 
         if ($ids === []) {
-            $this->attributes['favourite_brand_product_ids'] = '{}';
-            return;
+            return '{}';
         }
 
-        // UUIDs are comma-safe, so pg array literal is sufficient.
-        $this->attributes['favourite_brand_product_ids'] = '{'.implode(',', $ids).'}';
+        return '{'.implode(',', $ids).'}';
     }
 }

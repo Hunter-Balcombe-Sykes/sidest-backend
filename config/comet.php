@@ -41,6 +41,55 @@ return [
         'influencer' => 'Influencer',
     ],
 
+    /*
+    |----------------------------------------------------------------------
+    | Account type defaults – applied during registration
+    |----------------------------------------------------------------------
+    | 'professional' is the base type. 'influencer' inherits from it.
+    | 'brand' has its own distinct config.
+    | 'affiliate' is an overlay applied when a professional/influencer
+    | connects to a brand (via invite or manual connection).
+    */
+    'account_type_defaults' => [
+        'professional' => [
+            'allowed_sections'   => ['shop', 'services', 'gallery'],
+            'default_sections'   => ['shop', 'services', 'gallery'],
+            'is_published'       => true,
+            'allowed_theme_count' => 3,
+            'custom_links_allowed' => false,
+        ],
+        'influencer' => [
+            'inherits' => 'professional',
+        ],
+        'brand' => [
+            'allowed_sections'   => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
+            'default_sections'   => [],
+            'is_published'       => false,
+            'allowed_theme_count' => null, // unlimited
+            'custom_links_allowed' => true,
+            'enforce_handle_equals_display_name' => true,
+            'default_checkout_mode' => null,
+            'default_site_settings' => [
+                'design' => [
+                    // System default colours, in-house font
+                ],
+            ],
+        ],
+        // Overlay applied when professional/influencer connects to a brand
+        'affiliate' => [
+            'auto_enable_sections'         => ['shop'],
+            'use_brand_affiliate_theme'    => true,
+            'use_brand_affiliate_products' => true,
+            'default_contact' => [
+                'full_name'  => 'Charlie',
+                'email'      => 'charlie@ai.com',
+                'phone'      => '1234 567 890',
+                'source'     => 'system_default',
+                'subscribed' => true,
+            ],
+        ],
+    ],
+
     'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),
 
     'throttle' => [

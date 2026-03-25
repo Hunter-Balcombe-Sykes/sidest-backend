@@ -20,6 +20,7 @@ use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Enterprise\EnterpriseProvisioningService;
 use App\Services\Legal\ProfessionalLegalContentService;
+use App\Services\Professional\AccountTypeDefaultsService;
 
 
 
@@ -30,7 +31,8 @@ class BootstrapController extends ApiController
         ProfessionalLegalContentService $legalContentService,
         EnterpriseProvisioningService $enterpriseProvisioningService,
         BrandAffiliateInviteService $brandAffiliateInviteService,
-        BrandPartnerLinkService $brandPartnerLinks
+        BrandPartnerLinkService $brandPartnerLinks,
+        AccountTypeDefaultsService $accountTypeDefaultsService
     )
     {
         $uid = $request->attributes->get('supabase_uid');
@@ -53,7 +55,7 @@ class BootstrapController extends ApiController
                 return 'professional';
             };
 
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks, $resolveProfessionalType) {
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks, $accountTypeDefaultsService, $resolveProfessionalType) {
             $createdProfessional = false;
             $provisionedEnterprise = null;
 
@@ -127,6 +129,11 @@ class BootstrapController extends ApiController
                 $site = $this->createSiteWithRetry($professional->id, $base);
             }
 
+            // Apply account-type defaults for new professionals
+            if ($createdProfessional) {
+                $accountTypeDefaultsService->applyDefaults($professional, $site);
+            }
+
                 if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
                     $invite = $brandAffiliateInviteService->findByToken((string) $data['invite_token']);
                     if (! $invite) {
@@ -135,6 +142,7 @@ class BootstrapController extends ApiController
 
                 $brandAffiliateInviteService->claimInvite($invite, $professional);
                 $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+                $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, (string) $invite->brand_professional_id);
                 } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
                     $brandPartnerProfessional = Professional::query()
                         ->whereKey((string) $data['brand_partner_professional_id'])
@@ -154,6 +162,7 @@ class BootstrapController extends ApiController
 
                     $brandPartnerLinks->promoteBrandToPrimary($affiliateId, $brandId);
                     $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
+                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, $brandId);
                 }
 
             $legalContentService->refreshGenerated($professional, $site);

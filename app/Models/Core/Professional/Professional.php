@@ -105,6 +105,16 @@ class Professional extends BaseModel
         return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'brand';
     }
 
+    public function isProfessional(): bool
+    {
+        return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'professional';
+    }
+
+    public function brandProfile(): HasOne
+    {
+        return $this->hasOne(BrandProfile::class, 'professional_id');
+    }
+
     public function site(): HasOne
     {
         return $this->hasOne(Site::class, 'professional_id');
