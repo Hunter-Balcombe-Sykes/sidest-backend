@@ -36,10 +36,11 @@ use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
 // Public Plans
-Route::get('/plans', [PlanController::class, 'index']);
+Route::get('/plans', [PlanController::class, 'index'])
+    ->middleware('throttle:plans');
 
 // Authorised Professional Logged In
-Route::middleware(['supabase.jwt', 'current.pro'])
+Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
     ->group(function () {
 
         // Show & Edit Details

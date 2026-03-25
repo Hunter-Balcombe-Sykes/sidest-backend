@@ -6,8 +6,6 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log; 
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -32,8 +30,14 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function configureRateLimiting(): void
     {
+        $throttleEnabled = (bool) config('comet.throttle.enabled', true);
+
         // Public site endpoints (viewing sites, pages)
-        RateLimiter:: for('public-site', function (Request $request) {
+        RateLimiter:: for('public-site', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
             return Limit::perMinute(60)
                 ->by($request->ip())
                 ->response(function () {
@@ -44,13 +48,21 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Analytics endpoints (pageviews, clicks)
-        RateLimiter:: for('analytics', function (Request $request) {
+        RateLimiter:: for('analytics', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
             return Limit::perMinute(120)
                 ->by($request->ip());
         });
 
         // Customer lead submissions (form submissions)
-        RateLimiter::for('leads', function (Request $request) {
+        RateLimiter::for('leads', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return [Limit::none()];
+            }
+
             $subdomain = $request->route('subdomain') ?? 'unknown';
 
             return [
@@ -75,7 +87,11 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Shopify webhook endpoints (keyed by shop domain, fallback to IP)
-        RateLimiter::for('shopify-webhooks', function (Request $request) {
+        RateLimiter::for('shopify-webhooks', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
             $key = strtolower(trim((string) $request->header('x-shopify-shop-domain', '')));
             if ($key === '') {
                 $key = $request->ip();
@@ -88,12 +104,94 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
-        // API rate limit for authenticated users
-        RateLimiter::for('api', function (Request $request) {
-            $uid = $request->attributes->get('supabase_uid') ?? $request->ip();
+        // Authenticated professional routes
+        RateLimiter::for('authenticated', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
 
-            return Limit::perMinute(60)
-                ->by($uid);
+            return Limit::perMinute(120)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        // Staff panel routes
+        RateLimiter::for('staff', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(200)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        // Enterprise routes
+        RateLimiter::for('enterprise', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(120)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        // Webhook endpoints (Square, Fresha, Stripe Connect)
+        RateLimiter::for('webhooks', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(200)
+                ->by($request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many webhook requests.',
+                    ], 429);
+                });
+        });
+
+        // Account bootstrap (creation)
+        RateLimiter::for('bootstrap', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(5)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many account creation attempts. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        // Public plans listing
+        RateLimiter::for('plans', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(30)
+                ->by($request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests. Please try again later.',
+                    ], 429);
+                });
         });
     }
 }
