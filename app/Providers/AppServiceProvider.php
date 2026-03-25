@@ -110,7 +110,7 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
-            return Limit::perMinute(120)
+            return Limit::perMinute(300)
                 ->by($request->attributes->get('supabase_uid') ?? $request->ip())
                 ->response(function () {
                     return response()->json([
@@ -125,7 +125,7 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
-            return Limit::perMinute(200)
+            return Limit::perMinute(300)
                 ->by($request->attributes->get('supabase_uid') ?? $request->ip())
                 ->response(function () {
                     return response()->json([
