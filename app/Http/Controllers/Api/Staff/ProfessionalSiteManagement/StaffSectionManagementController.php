@@ -27,7 +27,7 @@ class StaffSectionManagementController extends ApiController
 
         return $this->success([
             'professional_id' => $professional->id,
-            'sections' => $sections,l
+            'sections' => $sections,
         ]);
     }
 

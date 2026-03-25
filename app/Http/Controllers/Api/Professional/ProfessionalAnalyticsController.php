@@ -189,7 +189,7 @@ class ProfessionalAnalyticsController extends ApiController
             // Referrer/source breakdown (unique visitors)
             $sourceCase = "
                 CASE
-                    WHEN COALESCE(utm_source,'') ILIKE 'instagram%' OR COALESCE(referrer,'') ILIKE '%instagram. com%' OR COALESCE(referrer,'') ILIKE '%l.instagram.com%' THEN 'Instagram'
+                    WHEN COALESCE(utm_source,'') ILIKE 'instagram%' OR COALESCE(referrer,'') ILIKE '%instagram.com%' OR COALESCE(referrer,'') ILIKE '%l.instagram.com%' THEN 'Instagram'
                     WHEN COALESCE(utm_source,'') ILIKE 'facebook%'  OR COALESCE(referrer,'') ILIKE '%facebook.com%'  OR COALESCE(referrer,'') ILIKE '%lm.facebook.com%'  OR COALESCE(referrer,'') ILIKE '%l.facebook.com%' THEN 'Facebook'
                     WHEN COALESCE(utm_source,'') ILIKE 'tiktok%'    OR COALESCE(referrer,'') ILIKE '%tiktok.com%'    THEN 'TikTok'
                     WHEN COALESCE(utm_source,'') ILIKE 'youtube%'   OR COALESCE(referrer,'') ILIKE '%youtube.com%'   OR COALESCE(referrer,'') ILIKE '%youtu.be%' THEN 'YouTube'
@@ -305,7 +305,6 @@ class ProfessionalAnalyticsController extends ApiController
                     'id'           => $professional->id,
                     'handle'       => $professional->handle,
                     'display_name' => $professional->display_name,
-                    'professional_type' => $professional->professional_type,
                 ],
                 'site' => [
                     'id'        => $site->id,

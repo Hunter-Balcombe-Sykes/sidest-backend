@@ -18,7 +18,7 @@ class AccountTypeDefaultsService
     public function resolveDefaults(string $professionalType): array
     {
         $all = config('comet.account_type_defaults', []);
-        $typeConfig = $all[$professionalType] ?? $all['professional'] ?? [];
+        $typeConfig = $all[$professionalType] ?? $all['influencer'] ?? [];
 
         if (isset($typeConfig['inherits'])) {
             $parent = $all[$typeConfig['inherits']] ?? [];
@@ -41,7 +41,7 @@ class AccountTypeDefaultsService
             $site->is_published = (bool) $defaults['is_published'];
         }
 
-        // 2. Apply default site settings for brands
+        // 2. Apply default site settings (e.g. brand system colours/font)
         if (isset($defaults['default_site_settings'])) {
             $existing = is_array($site->settings) ? $site->settings : [];
             $site->settings = array_replace_recursive($existing, $defaults['default_site_settings']);
@@ -68,22 +68,9 @@ class AccountTypeDefaultsService
             );
         }
 
-        // 4. Professional type gets sitepage_analytics enabled
-        if ($professional->isProfessional()) {
-            Block::query()->firstOrCreate(
-                [
-                    'professional_id' => $professional->id,
-                    'site_id'         => $site->id,
-                    'block_group'     => 'sections',
-                    'block_type'      => 'sitepage_analytics',
-                ],
-                [
-                    'sort_order'  => count($defaultSections),
-                    'is_enabled'  => true,
-                    'is_active'   => false,
-                    'settings'    => [],
-                ]
-            );
+        // 4. Create default contact (for non-brand types)
+        if (isset($defaults['default_contact'])) {
+            $this->createDefaultContact($professional, $defaults['default_contact']);
         }
     }
 
@@ -132,12 +119,7 @@ class AccountTypeDefaultsService
             }
         }
 
-        // 3. Create default contact
-        if (isset($config['default_contact'])) {
-            $this->createDefaultContact($professional, $config['default_contact']);
-        }
-
-        // 4. Sync product defaults from brand
+        // 3. Sync product defaults from brand
         if ($config['use_brand_affiliate_products'] ?? false) {
             $this->syncBrandAffiliateProducts($professional, $brandProfessionalId);
         }
@@ -150,7 +132,7 @@ class AccountTypeDefaultsService
             return;
         }
 
-        $customer = Customer::query()->firstOrCreate(
+        Customer::query()->firstOrCreate(
             [
                 'professional_id' => $professional->id,
                 'email'           => $email,
@@ -171,10 +153,10 @@ class AccountTypeDefaultsService
             ]);
 
             if (! $sub->exists) {
-                $sub->email            = $email;
-                $sub->full_name        = $contactData['full_name'] ?? null;
+                $sub->email             = $email;
+                $sub->full_name         = $contactData['full_name'] ?? null;
                 $sub->unsubscribe_token = EmailSubscription::newUnsubscribeToken();
-                $sub->markSubscribed(['source' => 'affiliate_default']);
+                $sub->markSubscribed(['source' => 'account_default']);
                 $sub->save();
             }
         }

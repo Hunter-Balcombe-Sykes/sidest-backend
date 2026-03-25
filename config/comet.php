@@ -51,15 +51,27 @@ return [
     | connects to a brand (via invite or manual connection).
     */
     'account_type_defaults' => [
-        'professional' => [
-            'allowed_sections'   => ['shop', 'services', 'gallery'],
-            'default_sections'   => ['shop', 'services', 'gallery'],
-            'is_published'       => true,
+        // Influencer is the base type (most basic account)
+        'influencer' => [
+            'allowed_sections'    => ['shop', 'services', 'gallery'],
+            'default_sections'    => ['shop', 'services', 'gallery'],
+            'is_published'        => true,
             'allowed_theme_count' => 3,
             'custom_links_allowed' => false,
+            'default_contact' => [
+                'full_name'  => 'Charlie',
+                'email'      => 'charlie@ai.com',
+                'phone'      => '1234 567 890',
+                'source'     => 'system_default',
+                'subscribed' => true,
+            ],
         ],
-        'influencer' => [
-            'inherits' => 'professional',
+        // Professional inherits influencer + adds booking, analytics, custom links
+        'professional' => [
+            'inherits'            => 'influencer',
+            'allowed_sections'    => ['shop', 'services', 'gallery', 'booking', 'sitepage_analytics', 'barbershop_info'],
+            'default_sections'    => ['shop', 'services', 'gallery'],
+            'custom_links_allowed' => true,
         ],
         'brand' => [
             'allowed_sections'   => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
@@ -80,13 +92,6 @@ return [
             'auto_enable_sections'         => ['shop'],
             'use_brand_affiliate_theme'    => true,
             'use_brand_affiliate_products' => true,
-            'default_contact' => [
-                'full_name'  => 'Charlie',
-                'email'      => 'charlie@ai.com',
-                'phone'      => '1234 567 890',
-                'source'     => 'system_default',
-                'subscribed' => true,
-            ],
         ],
     ],
 
@@ -190,7 +195,6 @@ return [
         'barbershop_info',
         'sitepage_analytics',
         'booking',
-        'services',
     ],
 
     'store' => [
