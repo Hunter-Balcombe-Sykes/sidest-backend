@@ -454,6 +454,13 @@ class CommissionPayoutService
         // so we can use source_transaction to fund the transfer directly from the payment.
         $chargeId = $this->resolveChargeIdForPayout($payout);
 
+        Log::info('Preparing prefunded affiliate transfer', [
+            'payout_id' => $payout->id,
+            'charge_id' => $chargeId,
+            'net_payout_cents' => $payout->net_payout_cents,
+            'affiliate_connect_id' => $affiliate->stripe_connect_account_id,
+        ]);
+
         try {
             $payout->update([
                 'status' => 'transferring',
