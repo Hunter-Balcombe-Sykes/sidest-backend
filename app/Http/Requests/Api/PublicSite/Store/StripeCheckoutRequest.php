@@ -10,8 +10,8 @@ class StripeCheckoutRequest extends BaseFormRequest
     {
         return [
             'checkout_session_token' => ['required', 'string', 'max:255'],
-            'success_url' => ['required', 'url'],
-            'cancel_url' => ['required', 'url'],
+            'success_url' => ['required', 'url', 'regex:/^https:\/\//'],
+            'cancel_url' => ['required', 'url', 'regex:/^https:\/\//'],
             'customer' => ['required', 'array'],
             'customer.name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'customer.email' => ['required', 'string', 'email:rfc', 'max:255'],

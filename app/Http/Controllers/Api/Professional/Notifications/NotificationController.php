@@ -85,12 +85,13 @@ class NotificationController extends ApiController
         ]);
     }
 
-    /** POST /me/notifications/{id}/read */
+    private const RECEIPT_COLUMNS = ['read_at', 'dismissed_at'];
+
     private function upsertReceipt(string $notificationId, string $professionalId, array $set): void
     {
+        $set = array_intersect_key($set, array_flip(self::RECEIPT_COLUMNS));
         $id = (string) Str::uuid();
 
-        // Build dynamic SET clause safely
         $cols = array_keys($set);
         $placeholders = implode(', ', array_fill(0, count($cols), '?'));
         $updates = implode(', ', array_map(fn($c) => "{$c} = EXCLUDED.{$c}", $cols));
