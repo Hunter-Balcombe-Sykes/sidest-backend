@@ -192,7 +192,6 @@ class CommissionPayoutService
                 ->where(function ($query) use ($fundingKind): void {
                     $this->applyFundingKindFilter($query, $fundingKind);
                 })
-                ->lockForUpdate()
                 ->sum('amount_cents');
 
             $netCommission = $grossCents + $reversalCents;
