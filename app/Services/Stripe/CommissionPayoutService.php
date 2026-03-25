@@ -159,23 +159,17 @@ class CommissionPayoutService
     ): ?CommissionPayout {
         return DB::transaction(function () use ($brandId, $affiliateId, $currency, $fundingKind, $cutoff) {
             $entries = CommissionLedgerEntry::query()
-                ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
-                ->whereNull('retail.commission_ledger_entries.payout_id')
-                ->where('retail.commission_ledger_entries.entry_type', 'accrual')
-                ->where('retail.commission_ledger_entries.status', 'approved')
-                ->where('retail.commission_ledger_entries.brand_professional_id', $brandId)
-                ->where('retail.commission_ledger_entries.affiliate_professional_id', $affiliateId)
-                ->where('retail.commission_ledger_entries.currency_code', $currency)
-                ->where('retail.commission_ledger_entries.occurred_at', '<=', $cutoff)
+                ->whereNull('payout_id')
+                ->where('entry_type', 'accrual')
+                ->where('status', 'approved')
+                ->where('brand_professional_id', $brandId)
+                ->where('affiliate_professional_id', $affiliateId)
+                ->where('currency_code', $currency)
+                ->where('occurred_at', '<=', $cutoff)
                 ->where(function ($query) use ($fundingKind): void {
-                    if ($fundingKind === 'stripe_sale_hold') {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
-                    } else {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) <> 'stripe_direct'");
-                    }
+                    $this->applyFundingKindFilter($query, $fundingKind);
                 })
                 ->lockForUpdate()
-                ->select('retail.commission_ledger_entries.*')
                 ->get();
 
             if ($entries->isEmpty()) {
@@ -188,23 +182,18 @@ class CommissionPayoutService
             }
 
             $reversalCents = CommissionLedgerEntry::query()
-                ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
-                ->whereNull('retail.commission_ledger_entries.payout_id')
-                ->where('retail.commission_ledger_entries.entry_type', 'reversal')
-                ->where('retail.commission_ledger_entries.status', 'approved')
-                ->where('retail.commission_ledger_entries.brand_professional_id', $brandId)
-                ->where('retail.commission_ledger_entries.affiliate_professional_id', $affiliateId)
-                ->where('retail.commission_ledger_entries.currency_code', $currency)
-                ->where('retail.commission_ledger_entries.occurred_at', '<=', $cutoff)
+                ->whereNull('payout_id')
+                ->where('entry_type', 'reversal')
+                ->where('status', 'approved')
+                ->where('brand_professional_id', $brandId)
+                ->where('affiliate_professional_id', $affiliateId)
+                ->where('currency_code', $currency)
+                ->where('occurred_at', '<=', $cutoff)
                 ->where(function ($query) use ($fundingKind): void {
-                    if ($fundingKind === 'stripe_sale_hold') {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
-                    } else {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) <> 'stripe_direct'");
-                    }
+                    $this->applyFundingKindFilter($query, $fundingKind);
                 })
                 ->lockForUpdate()
-                ->sum('retail.commission_ledger_entries.amount_cents');
+                ->sum('amount_cents');
 
             $netCommission = $grossCents + $reversalCents;
             if ($netCommission <= 0) {
@@ -241,22 +230,16 @@ class CommissionPayoutService
             }
 
             $reversals = CommissionLedgerEntry::query()
-                ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
-                ->whereNull('retail.commission_ledger_entries.payout_id')
-                ->where('retail.commission_ledger_entries.entry_type', 'reversal')
-                ->where('retail.commission_ledger_entries.status', 'approved')
-                ->where('retail.commission_ledger_entries.brand_professional_id', $brandId)
-                ->where('retail.commission_ledger_entries.affiliate_professional_id', $affiliateId)
-                ->where('retail.commission_ledger_entries.currency_code', $currency)
-                ->where('retail.commission_ledger_entries.occurred_at', '<=', $cutoff)
+                ->whereNull('payout_id')
+                ->where('entry_type', 'reversal')
+                ->where('status', 'approved')
+                ->where('brand_professional_id', $brandId)
+                ->where('affiliate_professional_id', $affiliateId)
+                ->where('currency_code', $currency)
+                ->where('occurred_at', '<=', $cutoff)
                 ->where(function ($query) use ($fundingKind): void {
-                    if ($fundingKind === 'stripe_sale_hold') {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
-                    } else {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) <> 'stripe_direct'");
-                    }
+                    $this->applyFundingKindFilter($query, $fundingKind);
                 })
-                ->select('retail.commission_ledger_entries.*')
                 ->get();
 
             foreach ($reversals as $reversal) {
@@ -270,6 +253,29 @@ class CommissionPayoutService
 
             return $payout;
         });
+    }
+
+    /**
+     * Apply funding kind filter using a subquery instead of JOIN (avoids FOR UPDATE + LEFT JOIN conflict).
+     */
+    private function applyFundingKindFilter($query, string $fundingKind): void
+    {
+        if ($fundingKind === 'stripe_sale_hold') {
+            $query->whereIn('order_id', function ($sub) {
+                $sub->select('id')
+                    ->from('retail.orders')
+                    ->whereRaw("lower(source) = 'stripe_direct'");
+            });
+        } else {
+            $query->where(function ($q) {
+                $q->whereNull('order_id')
+                  ->orWhereNotIn('order_id', function ($sub) {
+                      $sub->select('id')
+                          ->from('retail.orders')
+                          ->whereRaw("lower(source) = 'stripe_direct'");
+                  });
+            });
+        }
     }
 
     /**
