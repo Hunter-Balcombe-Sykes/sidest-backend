@@ -76,9 +76,8 @@ class BootstrapController extends ApiController
                     'first_name'      => $data['first_name'] ?? '',
                     'last_name'       => $data['last_name'] ?? null,
 
-                    // Defaults to Main phone/email if NULL
-                    'public_contact_number' => $data['phone'] ?? null,
-                    'public_contact_email' => $data['primary_email'] ?? null,
+                    'public_contact_number' => null,
+                    'public_contact_email' => null,
                     'handle_lc' => $data['handle_lc'],
                 ]);
                 $professional->auth_user_id = $uid;
@@ -103,13 +102,6 @@ class BootstrapController extends ApiController
 
                 if (array_key_exists('phone', $data)) {
                     $fill['phone'] = $data['phone'];
-                    // only change public_contact_number if phone is being set in this request
-                    $fill['public_contact_number'] = $data['phone'] ?: null;
-                }
-
-                if (array_key_exists('primary_email', $data)) {
-                    // only change public_contact_email if email is being set in this request
-                    $fill['public_contact_email'] = $data['primary_email'] ?: null;
                 }
 
                 $professional->fill($fill);
