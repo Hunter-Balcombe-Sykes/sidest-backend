@@ -47,6 +47,11 @@ class BrandPartnerController extends ApiController
             return $this->error('Brand partner not found.', 404);
         }
 
+        $visibility = $brand->brandProfile?->affiliate_visibility ?? 'invite_only';
+        if ($visibility === 'invite_only') {
+            return $this->error('This brand is invite-only. You must accept an invitation to connect.', 403);
+        }
+
         try {
             $link = $brandPartnerLinks->connectBrandToAffiliate((string) $professional->id, (string) $brandProfessionalId);
         } catch (RuntimeException $exception) {
@@ -70,6 +75,7 @@ class BrandPartnerController extends ApiController
         $page = Professional::query()
             ->where('professional_type', 'brand')
             ->where('status', 'active')
+            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public'))
             ->with('site')
             ->orderByRaw('COALESCE(display_name, handle) asc')
             ->paginate($perPage)
@@ -160,6 +166,7 @@ class BrandPartnerController extends ApiController
             $cleanedStaleSettings = $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
             if (! $this->settingsStillReferenceBrand($site, (string) $brandProfessionalId) && $cleanedStaleSettings) {
                 $this->invalidateAffiliateCaches($site);
+
                 return $this->success([
                     'disconnected' => true,
                     'brand_professional_id' => $brandProfessionalId,

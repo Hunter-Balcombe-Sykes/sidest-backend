@@ -13,6 +13,7 @@ class BrandProfile extends BaseModel
     protected $table = 'brand_profiles';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -24,6 +25,7 @@ class BrandProfile extends BaseModel
         'industries',
         'estimated_annual_income',
         'business_website',
+        'affiliate_visibility',
     ];
 
     protected $casts = [

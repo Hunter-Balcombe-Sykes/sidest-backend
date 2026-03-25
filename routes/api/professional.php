@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Professional\AffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
@@ -61,6 +62,7 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
             ->whereUuid('invite');
         Route::post('/brand-affiliate-invites/{token}/claim', [BrandAffiliateInviteController::class, 'claim']);
         Route::post('/brand-affiliate-invites/{token}/decline', [BrandAffiliateInviteController::class, 'decline']);
+        Route::get('/affiliate-invites', [AffiliateInviteController::class, 'index']);
         Route::get('/brand-partners', [BrandPartnerController::class, 'index']);
         Route::post('/brand-partners/{brandProfessionalId}/connect', [BrandPartnerController::class, 'connect'])
             ->whereUuid('brandProfessionalId');

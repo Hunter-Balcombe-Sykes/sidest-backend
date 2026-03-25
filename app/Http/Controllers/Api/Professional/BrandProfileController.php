@@ -37,14 +37,15 @@ class BrandProfileController extends ApiController
         }
 
         $validator = Validator::make($request->all(), [
-            'abn'                     => ['sometimes', 'nullable', 'string', 'max:20'],
-            'acn'                     => ['sometimes', 'nullable', 'string', 'max:20'],
-            'legal_business_name'     => ['sometimes', 'nullable', 'string', 'max:255'],
-            'business_type'           => ['sometimes', 'nullable', 'string', 'max:100'],
-            'industries'              => ['sometimes', 'array', 'max:10'],
-            'industries.*'            => ['string', 'max:100'],
+            'abn' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'acn' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'legal_business_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'business_type' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'industries' => ['sometimes', 'array', 'max:10'],
+            'industries.*' => ['string', 'max:100'],
             'estimated_annual_income' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'business_website'        => ['sometimes', 'nullable', 'string', 'max:500'],
+            'business_website' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'affiliate_visibility' => ['sometimes', 'string', 'in:public,invite_only'],
         ]);
 
         if ($validator->fails()) {
