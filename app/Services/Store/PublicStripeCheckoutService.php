@@ -72,6 +72,8 @@ class PublicStripeCheckoutService
             throw new \RuntimeException('Checkout total must be greater than zero.');
         }
 
+        $transferGroup = 'store_order_' . $checkoutSession->token;
+
         $session = $this->stripe->checkout->sessions->create([
             'mode' => 'payment',
             'success_url' => $this->appendSessionIdPlaceholder($successUrl, 'stripe_store_session_id'),
@@ -98,16 +100,14 @@ class PublicStripeCheckoutService
                 'brand_professional_id' => (string) $checkoutSession->brand_professional_id,
             ],
             'payment_intent_data' => [
-                'transfer_data' => [
-                    'destination' => $brand->stripe_connect_account_id,
-                    'amount' => $brandReceivesCents,
-                ],
+                'transfer_group' => $transferGroup,
                 'metadata' => [
                     'purpose' => 'public_store_stripe_checkout',
                     'checkout_session_token' => $checkoutSession->token,
                     'site_id' => (string) $checkoutSession->site_id,
                     'affiliate_professional_id' => (string) $checkoutSession->affiliate_professional_id,
                     'brand_professional_id' => (string) $checkoutSession->brand_professional_id,
+                    'brand_stripe_account_id' => (string) $brand->stripe_connect_account_id,
                     'affiliate_commission_cents' => (string) $affiliateCommissionCents,
                     'platform_commission_cents' => (string) $platformCommissionCents,
                     'brand_receives_cents' => (string) $brandReceivesCents,
@@ -196,20 +196,20 @@ class PublicStripeCheckoutService
             throw new \RuntimeException('Checkout total must be greater than zero.');
         }
 
+        $transferGroup = 'store_order_' . $checkoutSession->token;
+
         $paymentIntent = $this->stripe->paymentIntents->create([
             'amount' => $orderTotalCents,
             'currency' => strtolower($currencyCode),
             'payment_method_types' => ['card'],
-            'transfer_data' => [
-                'destination' => $brand->stripe_connect_account_id,
-                'amount' => $brandReceivesCents,
-            ],
+            'transfer_group' => $transferGroup,
             'metadata' => [
                 'purpose' => 'public_store_payment',
                 'checkout_session_token' => $checkoutSession->token,
                 'site_id' => (string) $checkoutSession->site_id,
                 'affiliate_professional_id' => (string) $checkoutSession->affiliate_professional_id,
                 'brand_professional_id' => (string) $brand->id,
+                'brand_stripe_account_id' => (string) $brand->stripe_connect_account_id,
                 'affiliate_commission_cents' => (string) $affiliateCommissionCents,
                 'platform_commission_cents' => (string) $platformCommissionCents,
                 'brand_receives_cents' => (string) $brandReceivesCents,
@@ -275,8 +275,11 @@ class PublicStripeCheckoutService
                 throw new \RuntimeException('Unable to resolve connected brand for payment intent finalization.');
             }
 
-            // Extract the platform charge ID for source_transaction on affiliate transfers.
+            // Extract the platform charge ID for source_transaction on transfers.
             $chargeId = $this->extractChargeId($paymentIntent);
+
+            // Transfer brand's portion immediately using source_transaction.
+            $brandTransferId = $this->transferBrandPortion($paymentIntent, $brand, $chargeId);
 
             $orderResult = $this->shopifyOrders->createPaidOrderFromCheckoutSession(
                 $checkoutSession,
@@ -291,6 +294,7 @@ class PublicStripeCheckoutService
                 'stripe' => array_merge($existingStripe, [
                     'payment_intent_id' => (string) $paymentIntent->id,
                     'charge_id' => $chargeId,
+                    'brand_transfer_id' => $brandTransferId,
                     'payment_completed_at' => now()->toIso8601String(),
                     'shopify_order_id' => $orderResult['order_id'] ?? null,
                     'shopify_order_name' => $orderResult['order_name'] ?? null,
@@ -555,6 +559,45 @@ class PublicStripeCheckoutService
             'country' => trim((string) ($customer['country'] ?? '')),
             'zip' => trim((string) ($customer['zip'] ?? '')),
         ];
+    }
+
+    /**
+     * Transfer the brand's portion of a sale to their connected account.
+     */
+    private function transferBrandPortion(object $paymentIntent, Professional $brand, ?string $chargeId): ?string
+    {
+        $brandReceivesCents = (int) ($paymentIntent->metadata?->brand_receives_cents ?? 0);
+        if ($brandReceivesCents <= 0) {
+            return null;
+        }
+
+        $transferPayload = [
+            'amount' => $brandReceivesCents,
+            'currency' => strtolower((string) ($paymentIntent->currency ?? 'aud')),
+            'destination' => $brand->stripe_connect_account_id,
+            'description' => 'Store sale payout to brand',
+            'transfer_group' => $paymentIntent->transfer_group ?? null,
+            'metadata' => [
+                'purpose' => 'brand_sale_payout',
+                'payment_intent_id' => (string) $paymentIntent->id,
+                'brand_professional_id' => (string) $brand->id,
+            ],
+        ];
+
+        if ($chargeId) {
+            $transferPayload['source_transaction'] = $chargeId;
+        }
+
+        $transfer = $this->stripe->transfers->create(array_filter($transferPayload));
+
+        Log::info('Brand portion transferred', [
+            'transfer_id' => $transfer->id,
+            'brand_id' => $brand->id,
+            'amount_cents' => $brandReceivesCents,
+            'charge_id' => $chargeId,
+        ]);
+
+        return $transfer->id;
     }
 
     private function extractChargeId(object $paymentIntent): ?string
