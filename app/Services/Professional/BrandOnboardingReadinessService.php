@@ -2,6 +2,7 @@
 
 namespace App\Services\Professional;
 
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
@@ -27,13 +28,29 @@ class BrandOnboardingReadinessService
         ];
 
         $completedCount = collect($checks)->filter(fn (array $c): bool => $c['complete'])->count();
+        $isComplete = $completedCount === count($checks);
+
+        $brandStatus = $this->syncBrandStatus($professional, $isComplete);
 
         return [
-            'complete'        => $completedCount === count($checks),
+            'complete' => $isComplete,
             'completed_count' => $completedCount,
-            'total_count'     => count($checks),
-            'checks'          => $checks,
+            'total_count' => count($checks),
+            'checks' => $checks,
+            'brand_status' => $brandStatus,
         ];
+    }
+
+    private function syncBrandStatus(Professional $professional, bool $onboardingComplete): string
+    {
+        $newStatus = $onboardingComplete ? 'active' : 'deactivated';
+
+        BrandProfile::updateOrCreate(
+            ['professional_id' => $professional->id],
+            ['brand_status' => $newStatus]
+        );
+
+        return $newStatus;
     }
 
     private function checkSiteImages(string $siteId): array
@@ -49,10 +66,10 @@ class BrandOnboardingReadinessService
             : 0;
 
         return [
-            'key'      => 'site_images',
-            'label'    => 'Upload 5 site page image defaults',
+            'key' => 'site_images',
+            'label' => 'Upload 5 site page image defaults',
             'complete' => $count >= 5,
-            'current'  => $count,
+            'current' => $count,
             'required' => 5,
         ];
     }
@@ -67,8 +84,8 @@ class BrandOnboardingReadinessService
             ->exists();
 
         return [
-            'key'      => 'shopify_connected',
-            'label'    => 'Connect Shopify integration',
+            'key' => 'shopify_connected',
+            'label' => 'Connect Shopify integration',
             'complete' => $connected,
         ];
     }
@@ -82,10 +99,10 @@ class BrandOnboardingReadinessService
             ->count();
 
         return [
-            'key'      => 'active_products',
-            'label'    => 'Select 3+ active products',
+            'key' => 'active_products',
+            'label' => 'Select 3+ active products',
             'complete' => $count >= 3,
-            'current'  => $count,
+            'current' => $count,
             'required' => 3,
         ];
     }
@@ -96,10 +113,10 @@ class BrandOnboardingReadinessService
         $count = $settings ? count($settings->default_affiliate_product_ids) : 0;
 
         return [
-            'key'      => 'default_products',
-            'label'    => 'Set 3+ default affiliate products',
+            'key' => 'default_products',
+            'label' => 'Set 3+ default affiliate products',
             'complete' => $count >= 3,
-            'current'  => $count,
+            'current' => $count,
             'required' => 3,
         ];
     }
@@ -109,8 +126,8 @@ class BrandOnboardingReadinessService
         $connected = mb_strtolower(trim((string) $professional->stripe_connect_status)) === 'active';
 
         return [
-            'key'      => 'stripe_connected',
-            'label'    => 'Connect Stripe integration',
+            'key' => 'stripe_connected',
+            'label' => 'Connect Stripe integration',
             'complete' => $connected,
         ];
     }
@@ -123,8 +140,8 @@ class BrandOnboardingReadinessService
             && in_array($settings->checkout_mode, ['shopify', 'stripe'], true);
 
         return [
-            'key'      => 'checkout_method',
-            'label'    => 'Select a checkout method',
+            'key' => 'checkout_method',
+            'label' => 'Select a checkout method',
             'complete' => $hasMethod,
         ];
     }

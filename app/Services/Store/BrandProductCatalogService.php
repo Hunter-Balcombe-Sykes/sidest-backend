@@ -297,6 +297,7 @@ class BrandProductCatalogService
             })
             ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
             ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
+            ->leftJoin('core.brand_profiles as bpr', 'bpr.professional_id', '=', 'bp.brand_professional_id')
             ->leftJoin('retail.brand_product_affiliate_settings as bpas', function ($join) use ($professionalId): void {
                 $join->on('bpas.brand_product_id', '=', 'bp.id')
                     ->where('bpas.affiliate_professional_id', '=', $professionalId);
@@ -304,6 +305,7 @@ class BrandProductCatalogService
             ->where('ps.professional_id', $professionalId)
             ->where('bp.is_sync_active', true)
             ->whereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) IN ('active', 'archived')")
+            ->whereRaw("COALESCE(bpr.brand_status, 'deactivated') = 'active'")
             ->where(function ($query): void {
                 $query->whereRaw('COALESCE(bps.is_available, true) = true')
                     ->orWhereNotNull('oa.id');

@@ -26,6 +26,7 @@ class BrandProfile extends BaseModel
         'estimated_annual_income',
         'business_website',
         'affiliate_visibility',
+        'brand_status',
     ];
 
     protected $casts = [

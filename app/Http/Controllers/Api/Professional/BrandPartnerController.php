@@ -47,9 +47,15 @@ class BrandPartnerController extends ApiController
             return $this->error('Brand partner not found.', 404);
         }
 
-        $visibility = $brand->brandProfile?->affiliate_visibility ?? 'invite_only';
+        $brandProfile = $brand->brandProfile;
+        $visibility = $brandProfile?->affiliate_visibility ?? 'invite_only';
         if ($visibility === 'invite_only') {
             return $this->error('This brand is invite-only. You must accept an invitation to connect.', 403);
+        }
+
+        $brandStatus = $brandProfile?->brand_status ?? 'deactivated';
+        if ($brandStatus === 'deactivated') {
+            return $this->error('This brand is not currently accepting new connections.', 403);
         }
 
         try {
@@ -75,7 +81,7 @@ class BrandPartnerController extends ApiController
         $page = Professional::query()
             ->where('professional_type', 'brand')
             ->where('status', 'active')
-            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public'))
+            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public')->where('brand_status', 'active'))
             ->with('site')
             ->orderByRaw('COALESCE(display_name, handle) asc')
             ->paginate($perPage)
