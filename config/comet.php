@@ -257,9 +257,24 @@ TPL,
     ],
 
     'notification_retention_days' => [
-        'policy_update' => 365,
-        'incident' => 14,
+        'policy_update'        => 365,
+        'incident'             => 14,
         'feature_announcement' => 30,
-        'default' => 30,
+        'default'              => 30,
+        'invite'               => 90,
+        'commission'           => 365,
+        'payout'               => 365,
+        'integration'          => 60,
+        'analytics_weekly'     => 30,
+        'analytics_milestones' => 90,
+        'profile_task'         => 180,
+        'catalog_change'       => 60,
+        'brand_status'         => 60,
+        'subscription'         => 365,
+        'brand_link'           => 60,
+    ],
+
+    'notifications' => [
+        'email_enabled' => (bool) env('NOTIFICATIONS_EMAIL_ENABLED', false),
     ],
 ];

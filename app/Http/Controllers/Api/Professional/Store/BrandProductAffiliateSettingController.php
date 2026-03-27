@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Retail\BrandProduct;
 use App\Models\Retail\BrandProductAffiliateSetting;
+use App\Services\Notifications\NotificationPublisher;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -20,6 +21,7 @@ class BrandProductAffiliateSettingController extends ApiController
 
     public function __construct(
         private readonly BrandAccessService $brandAccess,
+        private readonly NotificationPublisher $notificationPublisher,
     ) {}
 
     /**
@@ -157,6 +159,26 @@ class BrandProductAffiliateSettingController extends ApiController
             });
         } catch (QueryException $e) {
             return $this->error('Failed to save affiliate product settings. Ensure the affiliate is connected to this brand.', 422);
+        }
+
+        // Notify the affiliate that their commission settings were updated
+        try {
+            $yearWeek = now()->format('o-W');
+            $this->notificationPublisher->publish(
+                professionalId: $affiliateProfessionalId,
+                frontendType: 'Info',
+                category: 'catalog_changes',
+                title: 'Commission settings updated',
+                body: 'Your commission settings for this brand have been updated.',
+                dedupeKey: "catalog.commission_changed.{$affiliateProfessionalId}.{$yearWeek}",
+                ctaUrl: '/account/store',
+                retentionConfigKey: 'catalog_change',
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Commission settings notification failed', [
+                'affiliate_professional_id' => $affiliateProfessionalId,
+                'message' => $e->getMessage(),
+            ]);
         }
 
         return $this->success([

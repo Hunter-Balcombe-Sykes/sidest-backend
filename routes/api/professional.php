@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
 use App\Http\Controllers\Api\Professional\ConfirmationPreferenceController;
 use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
 use App\Http\Controllers\Api\Professional\Notifications\NotificationController;
+use App\Http\Controllers\Api\Professional\Notifications\NotificationEmailPreferenceController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
 use App\Http\Controllers\Api\Professional\PlanController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
@@ -180,6 +181,10 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
             ->whereUuid('notification');
         Route::post('/me/notifications/{notification}/dismiss', [NotificationController::class, 'dismiss'])
             ->whereUuid('notification');
+
+        // Notification email preferences
+        Route::get('/me/notification-email-preferences', [NotificationEmailPreferenceController::class, 'index']);
+        Route::patch('/me/notification-email-preferences', [NotificationEmailPreferenceController::class, 'update']);
 
         // Email subscribers (marketing list)
         Route::get('/email-subscribers', [ProfessionalEmailSubscriptionController::class, 'index']);

@@ -47,3 +47,11 @@ Schedule::command('comet:prune-notifications', ['--days' => 30])
 Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob())
     ->dailyAt('06:00')
     ->withoutOverlapping();
+
+Schedule::job(new \App\Jobs\Notifications\InviteExpirySweepJob())
+    ->dailyAt('08:00')
+    ->withoutOverlapping();
+
+Schedule::job(new \App\Jobs\Notifications\SendWeeklyAnalyticsNotificationJob())
+    ->weeklyOn(1, '09:00') // Monday 9 AM UTC
+    ->withoutOverlapping();
