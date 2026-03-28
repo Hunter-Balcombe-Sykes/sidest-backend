@@ -48,6 +48,10 @@ Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob())
     ->dailyAt('06:00')
     ->withoutOverlapping();
 
+Schedule::command('comet:analytics:compact-hourly')
+    ->hourly()
+    ->withoutOverlapping();
+
 Schedule::job(new \App\Jobs\Notifications\InviteExpirySweepJob())
     ->dailyAt('08:00')
     ->withoutOverlapping();

@@ -3,7 +3,9 @@
 namespace App\Jobs\Shopify;
 
 use App\Jobs\Store\RebuildBrandDailyAggregatesJob;
+use App\Jobs\Store\RebuildBrandHourlyAggregatesJob;
 use App\Jobs\Store\RebuildProfessionalDailyAggregatesJob;
+use App\Jobs\Store\RebuildProfessionalHourlyAggregatesJob;
 use App\Services\Notifications\CommerceNotificationService;
 use App\Services\Store\ShopifyOrderProcessingService;
 use Illuminate\Bus\Queueable;
@@ -41,6 +43,7 @@ class ProcessShopifyOrderEventJob implements ShouldQueue
         $brandProfessionalId = trim((string) ($result['brand_professional_id'] ?? ''));
         $affiliateProfessionalId = trim((string) ($result['affiliate_professional_id'] ?? ''));
         $orderedDay = trim((string) ($result['ordered_day'] ?? ''));
+        $orderedHourStart = trim((string) ($result['ordered_hour_start'] ?? ''));
         $orderId = trim((string) ($result['order_id'] ?? ''));
 
         if ($orderId !== '') {
@@ -53,6 +56,14 @@ class ProcessShopifyOrderEventJob implements ShouldQueue
 
         if ($affiliateProfessionalId !== '' && $orderedDay !== '') {
             RebuildProfessionalDailyAggregatesJob::dispatch($affiliateProfessionalId, $orderedDay, 1);
+        }
+
+        if ($brandProfessionalId !== '' && $orderedHourStart !== '') {
+            RebuildBrandHourlyAggregatesJob::dispatch($brandProfessionalId, $orderedHourStart);
+        }
+
+        if ($affiliateProfessionalId !== '' && $orderedHourStart !== '') {
+            RebuildProfessionalHourlyAggregatesJob::dispatch($affiliateProfessionalId, $orderedHourStart);
         }
     }
 

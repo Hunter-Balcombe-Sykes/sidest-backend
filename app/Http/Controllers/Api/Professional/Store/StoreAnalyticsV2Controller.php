@@ -31,9 +31,11 @@ class StoreAnalyticsV2Controller extends ApiController
             BrandAccessService::CAPABILITY_ANALYTICS_NON_FINANCIAL_READ
         );
 
-        $base = DB::table('analytics.brand_metrics_daily as d')
+        $metricsContext = $this->resolveMetricAggregationContext($filters, 'brand');
+
+        $base = DB::table($metricsContext['table'])
             ->whereIn('d.brand_professional_id', $brandIds)
-            ->whereBetween('d.day', [$filters['from'], $filters['to']]);
+            ->whereBetween($metricsContext['time_column'], [$metricsContext['from'], $metricsContext['to']]);
 
         $totals = (clone $base)
             ->selectRaw('COALESCE(SUM(d.orders_count), 0) as orders_count')
@@ -43,23 +45,32 @@ class StoreAnalyticsV2Controller extends ApiController
             ->selectRaw('COALESCE(SUM(d.net_cents), 0) as net_cents')
             ->first();
 
-        $bucketExpr = $this->bucketExpression($filters['group_by'], 'd.day');
+        $bucketExpr = $this->bucketExpression($metricsContext['group_by'], $metricsContext['time_column']);
 
-        $commissionBase = DB::table('analytics.brand_influencer_daily as d')
-            ->whereIn('d.brand_professional_id', $brandIds)
-            ->whereBetween('d.day', [$filters['from'], $filters['to']]);
+        $commissionTotals = (object) ['commissions_paid_cents' => 0];
+        $commissionTimeseries = collect();
 
-        $commissionTotals = (clone $commissionBase)
-            ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commissions_paid_cents')
-            ->first();
+        if ($metricsContext['use_hourly']) {
+            $commissionTotals = (clone $base)
+                ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commissions_paid_cents')
+                ->first();
+        } else {
+            $commissionBase = DB::table('analytics.brand_influencer_daily as d')
+                ->whereIn('d.brand_professional_id', $brandIds)
+                ->whereBetween('d.day', [$filters['from'], $filters['to']]);
 
-        $commissionTimeseries = (clone $commissionBase)
-            ->selectRaw("{$bucketExpr} as bucket")
-            ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commissions_paid_cents')
-            ->groupByRaw($bucketExpr)
-            ->orderBy('bucket')
-            ->get()
-            ->keyBy(static fn ($row): string => (string) $row->bucket);
+            $commissionTotals = (clone $commissionBase)
+                ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commissions_paid_cents')
+                ->first();
+
+            $commissionTimeseries = (clone $commissionBase)
+                ->selectRaw("{$bucketExpr} as bucket")
+                ->selectRaw('COALESCE(SUM(d.commission_net_cents), 0) as commissions_paid_cents')
+                ->groupByRaw($bucketExpr)
+                ->orderBy('bucket')
+                ->get()
+                ->keyBy(static fn ($row): string => (string) $row->bucket);
+        }
 
         $timeseries = (clone $base)
             ->selectRaw("{$bucketExpr} as bucket")
@@ -68,6 +79,10 @@ class StoreAnalyticsV2Controller extends ApiController
             ->selectRaw('COALESCE(SUM(d.refunded_cents), 0) as refunded_cents')
             ->selectRaw('COALESCE(SUM(d.returned_cents), 0) as returned_cents')
             ->selectRaw('COALESCE(SUM(d.net_cents), 0) as net_cents')
+            ->selectRaw($metricsContext['use_hourly']
+                ? 'COALESCE(SUM(d.commission_net_cents), 0) as commissions_paid_cents'
+                : '0 as commissions_paid_cents'
+            )
             ->groupByRaw($bucketExpr)
             ->orderBy('bucket')
             ->get();
@@ -103,7 +118,9 @@ class StoreAnalyticsV2Controller extends ApiController
 
         return $this->success([
             'range' => $this->rangePayload($filters),
-            'group_by' => $filters['group_by'],
+            'group_by' => $metricsContext['group_by'],
+            'granularity' => $metricsContext['granularity'],
+            'bucket_timezone' => $metricsContext['bucket_timezone'],
             'brand_professional_ids' => $brandIds,
             'totals' => [
                 'orders_count' => (int) ($totals->orders_count ?? 0),
@@ -113,7 +130,7 @@ class StoreAnalyticsV2Controller extends ApiController
                 'net_cents' => (int) ($totals->net_cents ?? 0),
                 'commissions_paid_cents' => (int) ($commissionTotals->commissions_paid_cents ?? 0),
             ],
-            'timeseries' => $timeseries->map(static function ($row) use ($commissionTimeseries): array {
+            'timeseries' => $timeseries->map(static function ($row) use ($commissionTimeseries, $metricsContext): array {
                 $bucket = (string) $row->bucket;
 
                 return [
@@ -123,7 +140,10 @@ class StoreAnalyticsV2Controller extends ApiController
                     'refunded_cents' => (int) ($row->refunded_cents ?? 0),
                     'returned_cents' => (int) ($row->returned_cents ?? 0),
                     'net_cents' => (int) ($row->net_cents ?? 0),
-                    'commissions_paid_cents' => (int) (($commissionTimeseries[$bucket]->commissions_paid_cents ?? 0)),
+                    'commissions_paid_cents' => (int) ($metricsContext['use_hourly']
+                        ? ($row->commissions_paid_cents ?? 0)
+                        : ($commissionTimeseries[$bucket]->commissions_paid_cents ?? 0)
+                    ),
                 ];
             })->values()->all(),
             'orders' => $recentOrders->map(static fn ($row): array => [
@@ -550,11 +570,12 @@ class StoreAnalyticsV2Controller extends ApiController
             BrandAccessService::CAPABILITY_ANALYTICS_NON_FINANCIAL_READ
         );
 
-        $bucketExpr = $this->bucketExpression($filters['group_by'], 'd.day');
+        $metricsContext = $this->resolveMetricAggregationContext($filters, 'brand');
+        $bucketExpr = $this->bucketExpression($metricsContext['group_by'], $metricsContext['time_column']);
 
-        $timeseries = DB::table('analytics.brand_metrics_daily as d')
+        $timeseries = DB::table($metricsContext['table'])
             ->whereIn('d.brand_professional_id', $brandIds)
-            ->whereBetween('d.day', [$filters['from'], $filters['to']])
+            ->whereBetween($metricsContext['time_column'], [$metricsContext['from'], $metricsContext['to']])
             ->selectRaw("{$bucketExpr} as bucket")
             ->selectRaw('COALESCE(SUM(d.orders_count), 0) as orders_count')
             ->selectRaw('COALESCE(SUM(d.gross_cents), 0) as gross_cents')
@@ -565,7 +586,9 @@ class StoreAnalyticsV2Controller extends ApiController
 
         return $this->success([
             'range' => $this->rangePayload($filters),
-            'group_by' => $filters['group_by'],
+            'group_by' => $metricsContext['group_by'],
+            'granularity' => $metricsContext['granularity'],
+            'bucket_timezone' => $metricsContext['bucket_timezone'],
             'brand_professional_ids' => $brandIds,
             'data' => $timeseries->map(static fn ($row): array => [
                 'bucket' => (string) $row->bucket,
@@ -580,10 +603,11 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
+        $metricsContext = $this->resolveMetricAggregationContext($filters, 'professional');
 
-        $base = DB::table('analytics.professional_metrics_daily as d')
+        $base = DB::table($metricsContext['table'])
             ->where('d.affiliate_professional_id', (string) $professional->id)
-            ->whereBetween('d.day', [$filters['from'], $filters['to']]);
+            ->whereBetween($metricsContext['time_column'], [$metricsContext['from'], $metricsContext['to']]);
 
         $totals = (clone $base)
             ->selectRaw('COALESCE(SUM(d.orders_count), 0) as orders_count')
@@ -596,7 +620,7 @@ class StoreAnalyticsV2Controller extends ApiController
             ->selectRaw('COALESCE(SUM(d.commission_paid_cents), 0) as commission_paid_cents')
             ->first();
 
-        $bucketExpr = $this->bucketExpression($filters['group_by'], 'd.day');
+        $bucketExpr = $this->bucketExpression($metricsContext['group_by'], $metricsContext['time_column']);
         $timeseries = (clone $base)
             ->selectRaw("{$bucketExpr} as bucket")
             ->selectRaw('COALESCE(SUM(d.orders_count), 0) as orders_count')
@@ -641,7 +665,9 @@ class StoreAnalyticsV2Controller extends ApiController
 
         return $this->success([
             'range' => $this->rangePayload($filters),
-            'group_by' => $filters['group_by'],
+            'group_by' => $metricsContext['group_by'],
+            'granularity' => $metricsContext['granularity'],
+            'bucket_timezone' => $metricsContext['bucket_timezone'],
             'affiliate_professional_id' => (string) $professional->id,
             'totals' => [
                 'orders_count' => (int) ($totals->orders_count ?? 0),
@@ -943,11 +969,12 @@ class StoreAnalyticsV2Controller extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $filters = $this->resolveFilters($request);
-        $bucketExpr = $this->bucketExpression($filters['group_by'], 'd.day');
+        $metricsContext = $this->resolveMetricAggregationContext($filters, 'professional');
+        $bucketExpr = $this->bucketExpression($metricsContext['group_by'], $metricsContext['time_column']);
 
-        $data = DB::table('analytics.professional_metrics_daily as d')
+        $data = DB::table($metricsContext['table'])
             ->where('d.affiliate_professional_id', (string) $professional->id)
-            ->whereBetween('d.day', [$filters['from'], $filters['to']])
+            ->whereBetween($metricsContext['time_column'], [$metricsContext['from'], $metricsContext['to']])
             ->selectRaw("{$bucketExpr} as bucket")
             ->selectRaw('COALESCE(SUM(d.orders_count), 0) as orders_count')
             ->selectRaw('COALESCE(SUM(d.gross_cents), 0) as gross_cents')
@@ -961,7 +988,9 @@ class StoreAnalyticsV2Controller extends ApiController
 
         return $this->success([
             'range' => $this->rangePayload($filters),
-            'group_by' => $filters['group_by'],
+            'group_by' => $metricsContext['group_by'],
+            'granularity' => $metricsContext['granularity'],
+            'bucket_timezone' => $metricsContext['bucket_timezone'],
             'affiliate_professional_id' => (string) $professional->id,
             'data' => $data->map(static fn ($row): array => [
                 'bucket' => (string) $row->bucket,
@@ -983,7 +1012,7 @@ class StoreAnalyticsV2Controller extends ApiController
         $validator = Validator::make($request->query(), [
             'from' => ['sometimes', 'date_format:Y-m-d'],
             'to' => ['sometimes', 'date_format:Y-m-d'],
-            'group_by' => ['sometimes', 'in:day,week,month'],
+            'group_by' => ['sometimes', 'in:hour,day,week,month'],
             'brand_professional_id' => ['sometimes', 'uuid'],
             'product_ids' => ['sometimes', 'array'],
             'product_ids.*' => ['uuid'],
@@ -1101,15 +1130,70 @@ class StoreAnalyticsV2Controller extends ApiController
         $query->orderBy($column, $sortDir);
     }
 
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array{
+     *   table: string,
+     *   time_column: string,
+     *   from: mixed,
+     *   to: mixed,
+     *   group_by: string,
+     *   use_hourly: bool,
+     *   granularity: string,
+     *   bucket_timezone: string|null
+     * }
+     */
+    private function resolveMetricAggregationContext(array $filters, string $scope): array
+    {
+        $requestedGroupBy = (string) ($filters['group_by'] ?? 'day');
+        $from = Carbon::createFromFormat('Y-m-d', (string) $filters['from'])->startOfDay();
+        $to = Carbon::createFromFormat('Y-m-d', (string) $filters['to'])->endOfDay();
+        $cutoff = now()->utc()->subHours(24);
+        $forceHourly = $requestedGroupBy === 'hour';
+
+        $useHourly = $forceHourly || (
+            $from->copy()->utc()->gte($cutoff)
+            && $to->copy()->utc()->lte(now()->utc()->addMinute())
+        );
+
+        $table = match ($scope) {
+            'professional' => $useHourly
+                ? 'analytics.professional_metrics_hourly as d'
+                : 'analytics.professional_metrics_daily as d',
+            default => $useHourly
+                ? 'analytics.brand_metrics_hourly as d'
+                : 'analytics.brand_metrics_daily as d',
+        };
+
+        $hourlyFrom = $from->copy()->utc();
+        $hourlyTo = $to->copy()->min(now())->utc();
+        if ($forceHourly) {
+            $hourlyTo = now()->utc();
+            $hourlyFrom = $hourlyTo->copy()->subHours(24)->startOfHour();
+        }
+
+        return [
+            'table' => $table,
+            'time_column' => $useHourly ? 'd.hour_start' : 'd.day',
+            'from' => $useHourly ? $hourlyFrom : (string) $filters['from'],
+            'to' => $useHourly ? $hourlyTo : (string) $filters['to'],
+            'group_by' => $useHourly ? 'hour' : $requestedGroupBy,
+            'use_hourly' => $useHourly,
+            'granularity' => $useHourly ? 'hour' : 'day',
+            'bucket_timezone' => $useHourly ? 'UTC' : null,
+        ];
+    }
+
     private function bucketExpression(string $groupBy, string $column): string
     {
-        $allowedColumns = ['d.day', 'd.created_at', 'd.order_date'];
+        $allowedColumns = ['d.day', 'd.hour_start', 'd.created_at', 'd.order_date'];
 
         if (! in_array($column, $allowedColumns, true)) {
             throw new \InvalidArgumentException("Invalid bucket column: {$column}");
         }
 
         return match ($groupBy) {
+            'hour' => "date_trunc('hour', {$column})",
             'week' => "date_trunc('week', {$column}::timestamp)::date",
             'month' => "date_trunc('month', {$column}::timestamp)::date",
             default => $column,

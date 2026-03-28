@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
+use App\Jobs\Analytics\RebuildBookingHourlyAggregatesJob;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Models\Core\Professional\Customer;
@@ -790,6 +791,11 @@ class PublicBookingController extends ApiController
                         'created_at' => now(),
                     ]));
             }
+
+            RebuildBookingHourlyAggregatesJob::dispatch(
+                $professionalId,
+                $occurredAt->copy()->utc()->startOfHour()->toIso8601String()
+            );
 
             $this->commerceNotifications->notifyBookingCompleted([
                 'professional_id' => $professionalId,

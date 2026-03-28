@@ -25,12 +25,17 @@ class ProfessionalAnalyticsController extends ApiController
 
         $days = (int) $request->query('days', 30);
         $days = max(1, min(365, $days));
+        $groupBy = mb_strtolower(trim((string) $request->query('group_by', 'day')));
+        $forceHourly = $groupBy === 'hour';
 
         $fromParam = $request->query('from');
         $toParam = $request->query('to');
 
         try {
-            if ($fromParam || $toParam) {
+            if ($forceHourly && ! $fromParam && ! $toParam) {
+                $to = Carbon::now()->utc();
+                $from = $to->copy()->subHours(24)->startOfHour();
+            } elseif ($fromParam || $toParam) {
                 $from = $fromParam
                     ? Carbon::parse($fromParam)->startOfDay()
                     :  Carbon::now()->subDays($days)->startOfDay();
@@ -62,17 +67,24 @@ class ProfessionalAnalyticsController extends ApiController
             return $this->error('professional has no site.', 404);
         }
 
+        $professionalTimezone = trim((string) ($professional->timezone ?? '')) ?: 'UTC';
+        $hourlyCutoff = now()->utc()->subHours(24);
+        $useHourlyBuckets = $forceHourly || (
+            $from->copy()->utc()->gte($hourlyCutoff)
+            && $to->copy()->utc()->lte(now()->utc()->addMinute())
+        );
+
         // Generate a cache key based on professional, date range
         $cacheKey = CacheKeyGenerator::analyticsSummary(
             $professional->id,
-            $from->format('Ymd'),
-            $to->format('Ymd')
-        );
+            $from->format('YmdH'),
+            $to->format('YmdH')
+        ).':'.($useHourlyBuckets ? 'hour' : 'day');
 
         // Cache for 5 minutes (or longer for historical data)
         $cacheTTL = $to->isToday() ? now()->addMinutes(5) : now()->addHours(24);
 
-        $data = Cache::remember($cacheKey, $cacheTTL, function () use ($professional, $from, $to, $site) {
+        $data = Cache::remember($cacheKey, $cacheTTL, function () use ($professional, $from, $to, $site, $professionalTimezone, $useHourlyBuckets) {
             // All your existing query logic here
 
             // Totals (visits)
@@ -114,24 +126,47 @@ class ProfessionalAnalyticsController extends ApiController
             $totalClicks = (int) ($clicksAgg->total_clicks ?? 0);
 
             // Daily charts (unique visitors/clickers)
-            $visitsByDay = DB::table('analytics.site_visits')
-                ->where('professional_id', $professional->id)
-                ->whereBetween('occurred_at', [$from, $to])
-                ->selectRaw("DATE(occurred_at) as day, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count")
-                ->groupByRaw('DATE(occurred_at)')
-                ->orderBy('day')
-                ->get();
+            if ($useHourlyBuckets) {
+                $fromUtc = $from->copy()->utc();
+                $toUtc = $to->copy()->utc();
 
-            try {
-                $clicksByDay = DB::table('analytics.link_clicks')
+                $visitsByDay = DB::table('analytics.site_metrics_hourly as h')
+                    ->where('h.professional_id', $professional->id)
+                    ->whereBetween('h.hour_start', [$fromUtc, $toUtc])
+                    ->selectRaw("DATE_TRUNC('hour', h.hour_start) as day")
+                    ->selectRaw('COALESCE(SUM(h.unique_visitors), 0) as count')
+                    ->groupByRaw("DATE_TRUNC('hour', h.hour_start)")
+                    ->orderBy('day')
+                    ->get();
+
+                $clicksByDay = DB::table('analytics.site_metrics_hourly as h')
+                    ->where('h.professional_id', $professional->id)
+                    ->whereBetween('h.hour_start', [$fromUtc, $toUtc])
+                    ->selectRaw("DATE_TRUNC('hour', h.hour_start) as day")
+                    ->selectRaw('COALESCE(SUM(h.unique_clickers), 0) as count')
+                    ->groupByRaw("DATE_TRUNC('hour', h.hour_start)")
+                    ->orderBy('day')
+                    ->get();
+            } else {
+                $visitsByDay = DB::table('analytics.site_visits')
                     ->where('professional_id', $professional->id)
                     ->whereBetween('occurred_at', [$from, $to])
                     ->selectRaw("DATE(occurred_at) as day, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count")
                     ->groupByRaw('DATE(occurred_at)')
                     ->orderBy('day')
                     ->get();
-            } catch (Throwable) {
-                $clicksByDay = collect();
+
+                try {
+                    $clicksByDay = DB::table('analytics.link_clicks')
+                        ->where('professional_id', $professional->id)
+                        ->whereBetween('occurred_at', [$from, $to])
+                        ->selectRaw("DATE(occurred_at) as day, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count")
+                        ->groupByRaw('DATE(occurred_at)')
+                        ->orderBy('day')
+                        ->get();
+                } catch (Throwable) {
+                    $clicksByDay = collect();
+                }
             }
 
             // Device breakdown (unique visitors)
@@ -301,6 +336,8 @@ class ProfessionalAnalyticsController extends ApiController
                     'from' => $from->toDateString(),
                     'to'   => $to->toDateString(),
                 ],
+                'granularity' => $useHourlyBuckets ? 'hour' : 'day',
+                'bucket_timezone' => $useHourlyBuckets ? 'UTC' : $professionalTimezone,
                 'professional' => [
                     'id'           => $professional->id,
                     'handle'       => $professional->handle,

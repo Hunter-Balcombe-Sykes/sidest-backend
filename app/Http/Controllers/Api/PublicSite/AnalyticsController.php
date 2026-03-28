@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
+use App\Jobs\Analytics\RebuildSiteHourlyAggregatesJob;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\DetectsClientInfo;
 use App\Http\Controllers\Concerns\HashesClientData;
@@ -59,6 +60,11 @@ class AnalyticsController extends ApiController
         $visit->professional_id = $site->professional_id;
         $visit->site_id = $site->id;
         $visit->save();
+
+        RebuildSiteHourlyAggregatesJob::dispatch(
+            (string) $site->professional_id,
+            $visit->occurred_at?->copy()->utc()->startOfHour()->toIso8601String() ?? now()->utc()->startOfHour()->toIso8601String()
+        );
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);
@@ -146,6 +152,11 @@ class AnalyticsController extends ApiController
         if (!$click instanceof LinkClick) {
             return $this->error('Unable to record click due to schema mismatch', 500);
         }
+
+        RebuildSiteHourlyAggregatesJob::dispatch(
+            (string) $site->professional_id,
+            $click->occurred_at?->copy()->utc()->startOfHour()->toIso8601String() ?? now()->utc()->startOfHour()->toIso8601String()
+        );
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);

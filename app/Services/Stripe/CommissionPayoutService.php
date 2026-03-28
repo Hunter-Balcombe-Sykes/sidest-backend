@@ -46,6 +46,7 @@ class CommissionPayoutService
         $existingPending = CommissionPayout::query()
             ->where('status', 'pending')
             ->whereNull('processed_at')
+            ->where('eligible_after', '<=', now())
             ->orderBy('eligible_after')
             ->limit(500)
             ->get();
@@ -92,75 +93,83 @@ class CommissionPayoutService
 
         foreach ($brandIds as $brandId) {
             $holdDays = $this->resolveHoldDays($brandSettings[$brandId] ?? null);
-            $cutoff = now()->subDays($holdDays);
 
-            $groups = CommissionLedgerEntry::query()
-                ->whereNull('payout_id')
-                ->where('entry_type', 'accrual')
-                ->where('status', 'approved')
-                ->where('brand_professional_id', $brandId)
-                ->where('occurred_at', '<=', $cutoff)
-                ->select([
-                    'brand_professional_id',
-                    'affiliate_professional_id',
-                    'currency_code',
-                    DB::raw("
-                        CASE
-                            WHEN rate_source = 'stripe_storefront'
-                                THEN 'stripe_sale_hold'
-                            ELSE 'brand_charge'
-                        END as funding_kind
-                    "),
-                    DB::raw('SUM(amount_cents) as total_cents'),
-                    DB::raw('COUNT(*) as entry_count'),
-                ])
-                ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code', DB::raw("
-                    CASE
-                        WHEN rate_source = 'stripe_storefront'
-                            THEN 'stripe_sale_hold'
-                        ELSE 'brand_charge'
-                    END
-                "))
-                ->having(DB::raw('SUM(amount_cents)'), '>', 0)
-                ->get();
+            $groupDefinitions = [
+                [
+                    'funding_kind' => 'brand_charge',
+                    'cutoff' => now()->subDays($holdDays),
+                ],
+                [
+                    // Stripe-direct storefront commissions are prefunded at sale time.
+                    // Keep these immediately eligible so affiliate payouts aren't delayed.
+                    'funding_kind' => 'stripe_sale_hold',
+                    'cutoff' => now(),
+                ],
+            ];
 
-            foreach ($groups as $group) {
-                try {
-                    $payout = $this->createPayoutBatch(
-                        $group->brand_professional_id,
-                        $group->affiliate_professional_id,
-                        $group->currency_code,
-                        $group->funding_kind,
-                        $cutoff,
-                    );
+            foreach ($groupDefinitions as $definition) {
+                $fundingKind = (string) $definition['funding_kind'];
+                $cutoff = $definition['cutoff'];
 
-                    if (! $payout) {
-                        continue;
+                $groups = CommissionLedgerEntry::query()
+                    ->whereNull('payout_id')
+                    ->where('entry_type', 'accrual')
+                    ->where('status', 'approved')
+                    ->where('brand_professional_id', $brandId)
+                    ->where('occurred_at', '<=', $cutoff)
+                    ->where(function ($query) use ($fundingKind): void {
+                        $this->applyFundingKindFilter($query, $fundingKind);
+                    })
+                    ->select([
+                        'brand_professional_id',
+                        'affiliate_professional_id',
+                        'currency_code',
+                        DB::raw('SUM(amount_cents) as total_cents'),
+                        DB::raw('COUNT(*) as entry_count'),
+                    ])
+                    ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code')
+                    ->having(DB::raw('SUM(amount_cents)'), '>', 0)
+                    ->get();
+
+                foreach ($groups as $group) {
+                    try {
+                        $payout = $this->createPayoutBatch(
+                            $group->brand_professional_id,
+                            $group->affiliate_professional_id,
+                            $group->currency_code,
+                            $fundingKind,
+                            $cutoff,
+                        );
+
+                        if (! $payout) {
+                            continue;
+                        }
+
+                        $stats['batches_created']++;
+                        $result = $this->processPayoutBatch($payout);
+
+                        if ($result === true) {
+                            $stats['batches_processed']++;
+                            $stats['total_cents'] += $payout->net_payout_cents;
+                            continue;
+                        }
+
+                        if ($result === null) {
+                            $stats['batches_pending_funding']++;
+                            continue;
+                        }
+
+                        $stats['batches_failed']++;
+                    } catch (\Throwable $e) {
+                        Log::error('Commission payout batch failed', [
+                            'brand_id' => $group->brand_professional_id,
+                            'affiliate_id' => $group->affiliate_professional_id,
+                            'currency' => $group->currency_code,
+                            'funding_kind' => $fundingKind,
+                            'error' => $e->getMessage(),
+                        ]);
+                        $stats['batches_failed']++;
                     }
-
-                    $stats['batches_created']++;
-                    $result = $this->processPayoutBatch($payout);
-
-                    if ($result === true) {
-                        $stats['batches_processed']++;
-                        $stats['total_cents'] += $payout->net_payout_cents;
-                        continue;
-                    }
-
-                    if ($result === null) {
-                        $stats['batches_pending_funding']++;
-                        continue;
-                    }
-
-                    $stats['batches_failed']++;
-                } catch (\Throwable $e) {
-                    Log::error('Commission payout batch failed', [
-                        'brand_id' => $group->brand_professional_id,
-                        'affiliate_id' => $group->affiliate_professional_id,
-                        'currency' => $group->currency_code,
-                        'error' => $e->getMessage(),
-                    ]);
-                    $stats['batches_failed']++;
                 }
             }
         }

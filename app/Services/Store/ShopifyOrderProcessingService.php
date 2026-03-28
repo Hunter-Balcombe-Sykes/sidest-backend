@@ -255,28 +255,53 @@ class ShopifyOrderProcessingService
                         $lineId
                     );
 
-                    $accrualEntry = CommissionLedgerEntry::query()->firstOrCreate(
-                        ['idempotency_key' => $accrualKey],
-                        [
-                            'order_id' => (string) $order->id,
-                            'order_item_id' => (string) $item->id,
-                            'brand_professional_id' => $brandProfessionalId,
-                            'affiliate_professional_id' => $affiliateProfessionalId,
-                            'entry_type' => 'accrual',
-                            'status' => 'approved',
-                            'amount_cents' => $accrualCents,
-                            'currency_code' => $lineCurrencyCode,
-                            'commission_rate' => $commissionRate,
-                            'rate_source' => $rateSource,
-                            'calculation_metadata' => array_merge($rateMetadata, [
-                                'accrual_base_line_cents' => $accrualBaseLineCents,
-                                'current_net_line_cents' => $netLineCents,
-                                'line_id' => $lineId,
-                                'order_id' => (string) $order->id,
-                            ]),
-                            'occurred_at' => $orderedAt,
-                        ]
+                    $accrualEntry = $this->findStripeStorefrontAccrualEntry(
+                        $brandProfessionalId,
+                        $affiliateProfessionalId,
+                        $token,
+                        $normalizedShopifyProductId,
+                        $lineCurrencyCode,
+                        $accrualCents
                     );
+
+                    if ($accrualEntry instanceof CommissionLedgerEntry) {
+                        $updates = [];
+                        if (empty($accrualEntry->order_id)) {
+                            $updates['order_id'] = (string) $order->id;
+                        }
+                        if (empty($accrualEntry->order_item_id)) {
+                            $updates['order_item_id'] = (string) $item->id;
+                        }
+                        if ($updates !== []) {
+                            $accrualEntry->fill($updates);
+                            $accrualEntry->save();
+                        }
+                    }
+
+                    if (! $accrualEntry instanceof CommissionLedgerEntry) {
+                        $accrualEntry = CommissionLedgerEntry::query()->firstOrCreate(
+                            ['idempotency_key' => $accrualKey],
+                            [
+                                'order_id' => (string) $order->id,
+                                'order_item_id' => (string) $item->id,
+                                'brand_professional_id' => $brandProfessionalId,
+                                'affiliate_professional_id' => $affiliateProfessionalId,
+                                'entry_type' => 'accrual',
+                                'status' => 'approved',
+                                'amount_cents' => $accrualCents,
+                                'currency_code' => $lineCurrencyCode,
+                                'commission_rate' => $commissionRate,
+                                'rate_source' => $rateSource,
+                                'calculation_metadata' => array_merge($rateMetadata, [
+                                    'accrual_base_line_cents' => $accrualBaseLineCents,
+                                    'current_net_line_cents' => $netLineCents,
+                                    'line_id' => $lineId,
+                                    'order_id' => (string) $order->id,
+                                ]),
+                                'occurred_at' => $orderedAt,
+                            ]
+                        );
+                    }
 
                     $accrualEntryAmount = abs((int) $accrualEntry->amount_cents);
                     if ($accrualEntryAmount <= 0 || $refundedLineCents <= 0 || $accrualBaseLineCents <= 0) {
@@ -349,6 +374,7 @@ class ShopifyOrderProcessingService
                     'brand_professional_id' => $brandProfessionalId,
                     'affiliate_professional_id' => $affiliateProfessionalId,
                     'ordered_day' => $orderedAt->toDateString(),
+                    'ordered_hour_start' => $orderedAt->copy()->utc()->startOfHour()->toIso8601String(),
                 ];
             });
 
@@ -662,6 +688,23 @@ class ShopifyOrderProcessingService
             return 'stripe_direct';
         }
 
+        foreach (collect($payload['note_attributes'] ?? [])->filter(static fn ($value): bool => is_array($value)) as $row) {
+            $name = strtolower(trim((string) ($row['name'] ?? '')));
+            $value = strtolower(trim((string) ($row['value'] ?? '')));
+
+            if (
+                in_array($name, ['comet_payment_mode', 'cometpaymentmode'], true)
+                && in_array($value, ['stripe_direct', 'stripe'], true)
+            ) {
+                return 'stripe_direct';
+            }
+        }
+
+        $tags = strtolower(trim((string) ($payload['tags'] ?? '')));
+        if ($tags !== '' && str_contains($tags, 'comet_payment_mode:stripe_direct')) {
+            return 'stripe_direct';
+        }
+
         return 'shopify';
     }
 
@@ -743,6 +786,41 @@ class ShopifyOrderProcessingService
         return null;
     }
 
+    private function findStripeStorefrontAccrualEntry(
+        string $brandProfessionalId,
+        string $affiliateProfessionalId,
+        string $checkoutSessionToken,
+        ?string $normalizedShopifyProductId,
+        string $currencyCode,
+        int $amountCents,
+    ): ?CommissionLedgerEntry {
+        $checkoutSessionToken = trim($checkoutSessionToken);
+        if ($checkoutSessionToken === '' || $amountCents <= 0) {
+            return null;
+        }
+
+        $query = CommissionLedgerEntry::query()
+            ->where('entry_type', 'accrual')
+            ->where('status', 'approved')
+            ->where('rate_source', 'stripe_storefront')
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('currency_code', $currencyCode)
+            ->where('amount_cents', $amountCents)
+            ->whereRaw("coalesce(calculation_metadata->>'checkout_session_token', '') = ?", [$checkoutSessionToken]);
+
+        if ($normalizedShopifyProductId !== null && $normalizedShopifyProductId !== '') {
+            $query->whereRaw(
+                "coalesce(lower(calculation_metadata->>'shopify_product_id'), '') = ?",
+                [strtolower($normalizedShopifyProductId)]
+            );
+        }
+
+        return $query
+            ->orderByDesc('created_at')
+            ->first();
+    }
+
     private function toCents(mixed $value): int
     {
         if ($value === null || $value === '') {
@@ -764,7 +842,9 @@ class ShopifyOrderProcessingService
         }
 
         try {
-            return Carbon::parse($value);
+            // Normalize incoming Shopify timestamps to UTC so persisted
+            // timestamptz values don't drift across server/app timezones.
+            return Carbon::parse($value)->utc();
         } catch (Throwable) {
             return null;
         }
