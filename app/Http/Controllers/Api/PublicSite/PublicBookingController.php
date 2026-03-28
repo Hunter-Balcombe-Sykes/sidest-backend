@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
+use App\Jobs\Analytics\RebuildBookingDailyAggregatesJob;
 use App\Jobs\Analytics\RebuildBookingHourlyAggregatesJob;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
@@ -748,17 +749,21 @@ class PublicBookingController extends ApiController
             $customerName = trim($firstName.' '.$lastName);
             $customerEmail = strtolower(trim((string) ($validated['customer']['email'] ?? '')));
             $customerPhone = trim((string) ($validated['customer']['phone'] ?? ''));
-            $occurredAt = $this->nullableTimestamp((string) ($validated['startAt'] ?? '')) ?? now();
+            $appointmentStartAt = $this->nullableTimestamp((string) ($validated['startAt'] ?? ''));
+            $occurredAt = now();
             $normalizedStatus = strtolower(trim($bookingStatus));
             if (! in_array($normalizedStatus, ['accepted', 'pending', 'completed', 'cancelled', 'failed'], true)) {
                 $normalizedStatus = 'completed';
             }
+            $professionalTimezone = trim((string) ($professional->timezone ?? '')) ?: 'UTC';
+            $localDay = $occurredAt->copy()->setTimezone($professionalTimezone)->toDateString();
 
             $attributes = [
                 'professional_id' => $professionalId,
                 'site_id' => $siteId,
                 'brand_professional_id' => count($brandProfessionalIds) === 1 ? $brandProfessionalIds[0] : null,
                 'occurred_at' => $occurredAt,
+                'appointment_start_at' => $appointmentStartAt,
                 'status' => $normalizedStatus,
                 'source' => 'site_booking_checkout',
                 'square_booking_id' => $bookingId !== '' ? $bookingId : null,
@@ -795,6 +800,10 @@ class PublicBookingController extends ApiController
             RebuildBookingHourlyAggregatesJob::dispatch(
                 $professionalId,
                 $occurredAt->copy()->utc()->startOfHour()->toIso8601String()
+            );
+            RebuildBookingDailyAggregatesJob::dispatch(
+                $professionalId,
+                $localDay
             );
 
             $this->commerceNotifications->notifyBookingCompleted([
