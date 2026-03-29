@@ -45,10 +45,8 @@ class BrandProductSettingsService
                     'brand_product_id' => (string) $row->brand_product_id,
                     'shopify_product_id' => (string) $row->shopify_product_id,
                     'is_featured' => false,
-                    'is_favourite' => false,
                     'is_available' => true,
                     'sort_order' => 0,
-                    'favourite_sort_order' => 0,
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
