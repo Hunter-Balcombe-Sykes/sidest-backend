@@ -28,8 +28,19 @@ query ProductsPage($first: Int!, $after: String, $query: String) {
         status
         onlineStoreUrl
         updatedAt
+        description
+        productType
+        tags
         featuredImage {
           url
+        }
+        images(first: 10) {
+          edges {
+            node {
+              url
+              altText
+            }
+          }
         }
         priceRangeV2 {
           minVariantPrice {
@@ -137,6 +148,21 @@ GRAPHQL;
             $productUrl = trim((string) Arr::get($product, 'onlineStoreUrl', ''));
             $imageUrl = trim((string) Arr::get($product, 'featuredImage.url', ''));
             $shopifyUpdatedAt = trim((string) Arr::get($product, 'updatedAt', ''));
+            $description = trim((string) Arr::get($product, 'description', ''));
+            $productType = trim((string) Arr::get($product, 'productType', ''));
+            $tags = array_values(array_filter(
+                array_map('trim', (array) Arr::get($product, 'tags', [])),
+                static fn (string $t): bool => $t !== ''
+            ));
+            $imageEdges = (array) Arr::get($product, 'images.edges', []);
+            $images = array_values(array_filter(array_map(static function ($edge): ?array {
+                $node = is_array($edge) ? Arr::get($edge, 'node') : null;
+                if (! is_array($node)) {
+                    return null;
+                }
+                $url = trim((string) ($node['url'] ?? ''));
+                return $url !== '' ? ['url' => $url, 'altText' => ($node['altText'] ?? null)] : null;
+            }, $imageEdges)));
 
             $upsertRows[] = [
                 'brand_professional_id' => $brandProfessionalId,
@@ -146,6 +172,10 @@ GRAPHQL;
                 'handle' => $handle !== '' ? $handle : null,
                 'product_url' => $productUrl !== '' ? $productUrl : null,
                 'image_url' => $imageUrl !== '' ? $imageUrl : null,
+                'description' => $description !== '' ? $description : null,
+                'product_type' => $productType !== '' ? $productType : null,
+                'tags' => '{' . implode(',', array_map(static fn (string $t): string => '"' . str_replace('"', '\\"', $t) . '"', $tags)) . '}',
+                'images' => json_encode($images, JSON_UNESCAPED_SLASHES),
                 'price_cents' => $priceCents,
                 'currency_code' => $currencyCode,
                 'shopify_status' => $status,
@@ -173,6 +203,10 @@ GRAPHQL;
                     'handle',
                     'product_url',
                     'image_url',
+                    'description',
+                    'product_type',
+                    'tags',
+                    'images',
                     'price_cents',
                     'currency_code',
                     'shopify_status',

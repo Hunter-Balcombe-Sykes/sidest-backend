@@ -114,6 +114,10 @@ class BrandProductCatalogService
                 'bp.handle',
                 'bp.product_url',
                 'bp.image_url',
+                'bp.description',
+                'bp.product_type',
+                'bp.tags',
+                'bp.images',
                 'bp.price_cents',
                 'bp.currency_code',
                 'bp.shopify_status',
@@ -209,6 +213,10 @@ class BrandProductCatalogService
                 'bp.handle',
                 'bp.product_url',
                 'bp.image_url',
+                'bp.description',
+                'bp.product_type',
+                'bp.tags',
+                'bp.images',
                 'bp.price_cents',
                 'bp.currency_code',
                 'bp.shopify_status',
@@ -322,6 +330,10 @@ class BrandProductCatalogService
                 'bp.handle',
                 'bp.product_url',
                 'bp.image_url',
+                'bp.description',
+                'bp.product_type',
+                'bp.tags',
+                'bp.images',
                 'bp.price_cents',
                 'bp.currency_code',
                 'bp.shopify_status',
@@ -457,6 +469,11 @@ class BrandProductCatalogService
                     $defaultCommissionRate
                 );
 
+                $description = $this->nullableString($row->description ?? null);
+                $productType = $this->nullableString($row->product_type ?? null);
+                $tags = $this->parsePostgresTextArray($row->tags ?? null);
+                $images = $this->parseJsonArray($row->images ?? null);
+
                 $payload = [
                     'brand_product_id' => (string) ($row->brand_product_id ?? ''),
                     'brand_professional_id' => (string) ($row->brand_professional_id ?? ''),
@@ -465,6 +482,10 @@ class BrandProductCatalogService
                     'handle' => $handle,
                     'product_url' => $productUrl,
                     'image_url' => $imageUrl,
+                    'description' => $description,
+                    'product_type' => $productType,
+                    'tags' => $tags,
+                    'images' => $images,
                     'currency_code' => $currencyCode,
                     'shopify_status' => (string) ($row->shopify_status ?? 'unknown'),
                     'is_sync_active' => (bool) ($row->is_sync_active ?? false),
@@ -616,5 +637,52 @@ class BrandProductCatalogService
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function parsePostgresTextArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return array_values(array_filter(array_map('trim', $value), static fn (string $v): bool => $v !== ''));
+        }
+
+        $raw = trim((string) $value);
+        if ($raw === '' || $raw === '{}') {
+            return [];
+        }
+
+        // Strip outer braces and parse comma-separated, possibly quoted values.
+        $inner = substr($raw, 1, -1);
+        preg_match_all('/"(?:[^"\\\\]|\\\\.)*"|[^,]+/', $inner, $matches);
+
+        return array_values(array_filter(array_map(static function (string $v): string {
+            $v = trim($v);
+            if (str_starts_with($v, '"') && str_ends_with($v, '"')) {
+                $v = substr($v, 1, -1);
+                $v = str_replace('\\"', '"', $v);
+            }
+            return $v;
+        }, $matches[0] ?? []), static fn (string $v): bool => $v !== ''));
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function parseJsonArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return array_values($value);
+        }
+
+        $raw = trim((string) $value);
+        if ($raw === '' || $raw === '[]') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? array_values($decoded) : [];
     }
 }
