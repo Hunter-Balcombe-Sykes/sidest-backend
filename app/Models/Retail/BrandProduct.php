@@ -63,4 +63,9 @@ class BrandProduct extends BaseModel
     {
         return $this->hasMany(BrandProductAffiliateOverride::class, 'brand_product_id');
     }
+
+    public function productMedia(): HasMany
+    {
+        return $this->hasMany(BrandProductMedia::class, 'brand_product_id');
+    }
 }

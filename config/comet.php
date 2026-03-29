@@ -115,6 +115,7 @@ return [
     'image_pools' => [
         'gallery' => ['max' => (int) env('COMET_GALLERY_IMAGE_MAX', 5)],
         'content' => ['max' => (int) env('COMET_CONTENT_IMAGE_MAX', 5)],
+        'product' => ['max' => (int) env('COMET_PRODUCT_IMAGE_MAX', 5)],
     ],
 
     /*
