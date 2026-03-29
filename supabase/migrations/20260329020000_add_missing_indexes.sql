@@ -1,7 +1,4 @@
 -- Add missing indexes identified in bottleneck analysis.
--- All indexes created CONCURRENTLY to avoid table locks.
--- Must be run outside an explicit transaction (Supabase runs each migration file
--- in autocommit mode, so CONCURRENTLY is safe here).
 
 -- ---------------------------------------------------------------------------
 -- retail.orders – composite indexes for brand/affiliate payout period queries
@@ -9,11 +6,11 @@
 -- Existing: orders_brand_ordered_idx (brand_professional_id, ordered_at DESC)
 --           orders_financial_status_idx (financial_status, ordered_at DESC)
 -- Missing: brand-scoped + status filter (e.g. "paid orders for brand in period")
-CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_brand_financial_status_idx
+CREATE INDEX IF NOT EXISTS orders_brand_financial_status_idx
     ON retail.orders (brand_professional_id, financial_status, ordered_at DESC);
 
 -- Missing: affiliate-scoped + status filter (e.g. "paid orders for affiliate earnings")
-CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_affiliate_financial_status_idx
+CREATE INDEX IF NOT EXISTS orders_affiliate_financial_status_idx
     ON retail.orders (affiliate_professional_id, financial_status, ordered_at DESC);
 
 -- ---------------------------------------------------------------------------
@@ -21,7 +18,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_affiliate_financial_status_idx
 -- ---------------------------------------------------------------------------
 -- Cleanup jobs that sweep expired/stale sessions have no index to satisfy
 -- WHERE status IN ('active', 'expired') ORDER BY expires_at.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS checkout_sessions_expires_status_idx
+CREATE INDEX IF NOT EXISTS checkout_sessions_expires_status_idx
     ON retail.checkout_sessions (expires_at, status)
     WHERE status IN ('active', 'expired');
 
@@ -33,7 +30,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS checkout_sessions_expires_status_idx
 -- Replace with (scheduled_for, status) for range + filter lookups.
 DROP INDEX IF EXISTS retail.payout_runs_status_idx;
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS payout_runs_scheduled_status_idx
+CREATE INDEX IF NOT EXISTS payout_runs_scheduled_status_idx
     ON retail.payout_runs (scheduled_for, status)
     WHERE status IN ('scheduled', 'processing');
 
@@ -42,7 +39,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS payout_runs_scheduled_status_idx
 -- ---------------------------------------------------------------------------
 -- Site rendering queries filter by block_type (e.g. 'link', 'shop', 'gallery')
 -- but the existing active index only covers (site_id, block_group, sort_order).
-CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_site_type_active_idx
+CREATE INDEX IF NOT EXISTS blocks_site_type_active_idx
     ON core.blocks (site_id, block_type, sort_order)
     WHERE deleted_at IS NULL AND is_active = true;
 
@@ -50,17 +47,17 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS blocks_site_type_active_idx
 -- billing.subscriptions – batch operation indexes
 -- ---------------------------------------------------------------------------
 -- Trial expiry sweep: find trialing/active subs nearing trial end
-CREATE INDEX CONCURRENTLY IF NOT EXISTS billing_subscriptions_trial_ends_idx
+CREATE INDEX IF NOT EXISTS billing_subscriptions_trial_ends_idx
     ON billing.subscriptions (trial_ends_at)
     WHERE status IN ('trialing', 'active') AND trial_ends_at IS NOT NULL;
 
 -- Cancel-at-period-end processing: find subs scheduled for cancellation
-CREATE INDEX CONCURRENTLY IF NOT EXISTS billing_subscriptions_cancel_period_end_idx
+CREATE INDEX IF NOT EXISTS billing_subscriptions_cancel_period_end_idx
     ON billing.subscriptions (current_period_end)
     WHERE cancel_at_period_end = true AND ended_at IS NULL;
 
 -- Plan distribution / reporting: which plans have active subscribers
-CREATE INDEX CONCURRENTLY IF NOT EXISTS billing_subscriptions_plan_status_idx
+CREATE INDEX IF NOT EXISTS billing_subscriptions_plan_status_idx
     ON billing.subscriptions (plan_id, status)
     WHERE ended_at IS NULL;
 
@@ -72,7 +69,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS billing_subscriptions_plan_status_idx
 -- Drop the old non-covering partial index first (safe: replaced below).
 DROP INDEX IF EXISTS core.site_images_site_active_sort_idx;
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS site_media_site_active_sort_covering_idx
+CREATE INDEX IF NOT EXISTS site_media_site_active_sort_covering_idx
     ON core.site_media (site_id, sort_order)
     INCLUDE (bucket, path, alt_text, media_type)
     WHERE deleted_at IS NULL AND is_active = true;

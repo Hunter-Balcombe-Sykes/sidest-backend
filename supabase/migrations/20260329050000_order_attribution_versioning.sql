@@ -12,8 +12,6 @@
 -- Application code fetching attribution for an order MUST add
 -- ->orderByDesc('created_at')->first() to retrieve the latest version.
 
-BEGIN;
-
 -- Drop the constraint that limited one attribution per order.
 ALTER TABLE retail.order_attributions
     DROP CONSTRAINT IF EXISTS order_attributions_order_unique;
@@ -27,12 +25,10 @@ ALTER TABLE retail.order_attributions
     ALTER COLUMN created_at SET NOT NULL,
     ALTER COLUMN created_at SET DEFAULT now();
 
-COMMIT;
-
 -- Unique per (order, timestamp) — prevents duplicate writes at the same instant.
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS order_attributions_order_created_uq
+CREATE UNIQUE INDEX IF NOT EXISTS order_attributions_order_created_uq
     ON retail.order_attributions (order_id, created_at);
 
 -- Fast "latest attribution for order" lookup.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS order_attributions_order_latest_idx
+CREATE INDEX IF NOT EXISTS order_attributions_order_latest_idx
     ON retail.order_attributions (order_id, created_at DESC);

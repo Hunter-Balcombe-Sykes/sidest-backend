@@ -9,8 +9,6 @@
 -- write time, then rebuild the unique index on the plain column. Application code
 -- can use the simple column name instead of the expression.
 
-BEGIN;
-
 ALTER TABLE core.professional_integrations
     ADD COLUMN IF NOT EXISTS shopify_shop_domain text
     GENERATED ALWAYS AS (
@@ -21,11 +19,8 @@ ALTER TABLE core.professional_integrations
         END
     ) STORED;
 
-COMMIT;
-
--- Build the new unique index on the generated column (outside transaction so
--- CONCURRENTLY is allowed).
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS professional_integrations_shopify_domain_uq
+-- Build the new unique index on the generated column.
+CREATE UNIQUE INDEX IF NOT EXISTS professional_integrations_shopify_domain_uq
     ON core.professional_integrations (shopify_shop_domain)
     WHERE shopify_shop_domain IS NOT NULL;
 
