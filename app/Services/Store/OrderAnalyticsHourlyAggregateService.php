@@ -2,12 +2,13 @@
 
 namespace App\Services\Store;
 
-use App\Models\Core\Professional\Professional;
+use App\Services\Analytics\Concerns\ResolvesTimezone;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class OrderAnalyticsHourlyAggregateService
 {
+    use ResolvesTimezone;
     public function rebuildBrandHour(string $brandProfessionalId, Carbon|string $hourStart): void
     {
         $brandProfessionalId = trim($brandProfessionalId);
@@ -21,6 +22,8 @@ class OrderAnalyticsHourlyAggregateService
         $now = now();
 
         DB::transaction(function () use ($brandProfessionalId, $hour, $hourEnd, $timezone, $now): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["analytics-rebuild:{$brandProfessionalId}"]);
+
             DB::table('analytics.brand_metrics_hourly')
                 ->where('brand_professional_id', $brandProfessionalId)
                 ->where('hour_start', $hour)
@@ -119,6 +122,8 @@ class OrderAnalyticsHourlyAggregateService
         $now = now();
 
         DB::transaction(function () use ($affiliateProfessionalId, $hour, $hourEnd, $timezone, $now): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["analytics-rebuild:{$affiliateProfessionalId}"]);
+
             DB::table('analytics.professional_metrics_hourly')
                 ->where('affiliate_professional_id', $affiliateProfessionalId)
                 ->where('hour_start', $hour)
@@ -218,26 +223,5 @@ class OrderAnalyticsHourlyAggregateService
     private function normalizeHour(Carbon|string $hourStart): Carbon
     {
         return Carbon::parse($hourStart)->utc()->startOfHour();
-    }
-
-    /** @var array<string, string> */
-    private array $timezoneCache = [];
-
-    private function professionalTimezone(string $professionalId): string
-    {
-        if (isset($this->timezoneCache[$professionalId])) {
-            return $this->timezoneCache[$professionalId];
-        }
-
-        $timezone = Professional::query()
-            ->where('id', $professionalId)
-            ->value('timezone');
-
-        $timezone = trim((string) $timezone);
-        $resolved = $timezone !== '' ? $timezone : 'UTC';
-
-        $this->timezoneCache[$professionalId] = $resolved;
-
-        return $resolved;
     }
 }

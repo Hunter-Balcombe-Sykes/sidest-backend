@@ -2,12 +2,13 @@
 
 namespace App\Services\Analytics;
 
-use App\Models\Core\Professional\Professional;
+use App\Services\Analytics\Concerns\ResolvesTimezone;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class BookingAnalyticsAggregateService
 {
+    use ResolvesTimezone;
     public function rebuildProfessionalHour(string $professionalId, Carbon|string $hourStart): void
     {
         $professionalId = trim($professionalId);
@@ -21,6 +22,8 @@ class BookingAnalyticsAggregateService
         $now = now();
 
         DB::transaction(function () use ($professionalId, $hour, $hourEnd, $timezone, $now): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["analytics-rebuild:{$professionalId}"]);
+
             DB::table('analytics.booking_metrics_hourly')
                 ->where('professional_id', $professionalId)
                 ->where('hour_start', $hour)
@@ -69,9 +72,13 @@ class BookingAnalyticsAggregateService
 
         $day = Carbon::parse($day)->toDateString();
         $timezone = $this->professionalTimezone($professionalId);
+        $utcFrom = Carbon::parse($day, $timezone)->startOfDay()->utc();
+        $utcTo = Carbon::parse($day, $timezone)->endOfDay()->utc();
         $now = now();
 
-        DB::transaction(function () use ($professionalId, $day, $timezone, $now): void {
+        DB::transaction(function () use ($professionalId, $day, $timezone, $now, $utcFrom, $utcTo): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["analytics-rebuild:{$professionalId}"]);
+
             DB::table('analytics.booking_metrics_daily')
                 ->where('professional_id', $professionalId)
                 ->where('day', $day)
@@ -79,7 +86,7 @@ class BookingAnalyticsAggregateService
 
             $rows = DB::table('analytics.booking_events as e')
                 ->where('e.professional_id', $professionalId)
-                ->whereRaw('(e.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('e.occurred_at', [$utcFrom, $utcTo])
                 ->select([
                     'e.currency_code',
                     DB::raw('COUNT(*) as bookings_count'),
@@ -110,24 +117,4 @@ class BookingAnalyticsAggregateService
         });
     }
 
-    /** @var array<string, string> */
-    private array $timezoneCache = [];
-
-    private function professionalTimezone(string $professionalId): string
-    {
-        if (isset($this->timezoneCache[$professionalId])) {
-            return $this->timezoneCache[$professionalId];
-        }
-
-        $timezone = Professional::query()
-            ->where('id', $professionalId)
-            ->value('timezone');
-
-        $timezone = trim((string) $timezone);
-        $resolved = $timezone !== '' ? $timezone : 'UTC';
-
-        $this->timezoneCache[$professionalId] = $resolved;
-
-        return $resolved;
-    }
 }

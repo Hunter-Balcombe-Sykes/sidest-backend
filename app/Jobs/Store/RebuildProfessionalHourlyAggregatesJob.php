@@ -4,13 +4,14 @@ namespace App\Jobs\Store;
 
 use App\Services\Store\OrderAnalyticsHourlyAggregateService;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-class RebuildProfessionalHourlyAggregatesJob implements ShouldQueue
+class RebuildProfessionalHourlyAggregatesJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -18,11 +19,18 @@ class RebuildProfessionalHourlyAggregatesJob implements ShouldQueue
 
     public int $timeout = 300;
 
+    public int $uniqueFor = 300;
+
     public function __construct(
         public string $affiliateProfessionalId,
         public string $hourStart
     ) {
         $this->onQueue('analytics');
+    }
+
+    public function uniqueId(): string
+    {
+        return "professional-hourly:{$this->affiliateProfessionalId}:{$this->hourStart}";
     }
 
     public function handle(OrderAnalyticsHourlyAggregateService $aggregates): void

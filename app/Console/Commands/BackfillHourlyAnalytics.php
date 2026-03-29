@@ -2,9 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Analytics\BookingAnalyticsAggregateService;
-use App\Services\Analytics\SiteAnalyticsAggregateService;
-use App\Services\Store\OrderAnalyticsHourlyAggregateService;
+use App\Jobs\Analytics\RebuildBookingHourlyAggregatesJob;
+use App\Jobs\Analytics\RebuildSiteHourlyAggregatesJob;
+use App\Jobs\Store\RebuildBrandHourlyAggregatesJob;
+use App\Jobs\Store\RebuildProfessionalHourlyAggregatesJob;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -18,11 +19,8 @@ class BackfillHourlyAnalytics extends Command
 
     protected $description = 'Backfills hourly analytics aggregates from source-of-truth event/order data.';
 
-    public function handle(
-        OrderAnalyticsHourlyAggregateService $commerceAggregates,
-        SiteAnalyticsAggregateService $siteAggregates,
-        BookingAnalyticsAggregateService $bookingAggregates
-    ): int {
+    public function handle(): int
+    {
         $hours = max(1, min(168, (int) $this->option('hours')));
         $domains = $this->resolveDomains((string) $this->option('domains'));
 
@@ -32,7 +30,7 @@ class BackfillHourlyAnalytics extends Command
         $hourBuckets = collect();
         $cursor = $start->copy();
         while ($cursor->lt($endExclusive)) {
-            $hourBuckets->push($cursor->copy());
+            $hourBuckets->push($cursor->copy()->toIso8601String());
             $cursor->addHour();
         }
 
@@ -40,18 +38,18 @@ class BackfillHourlyAnalytics extends Command
         $this->line('Domains: '.implode(', ', $domains));
 
         if (in_array('commerce', $domains, true)) {
-            $this->backfillCommerce($commerceAggregates, $hourBuckets, $start, $endExclusive);
+            $this->backfillCommerce($hourBuckets, $start, $endExclusive);
         }
 
         if (in_array('site', $domains, true)) {
-            $this->backfillSite($siteAggregates, $hourBuckets, $start, $endExclusive);
+            $this->backfillSite($hourBuckets, $start, $endExclusive);
         }
 
         if (in_array('booking', $domains, true)) {
-            $this->backfillBooking($bookingAggregates, $hourBuckets, $start, $endExclusive);
+            $this->backfillBooking($hourBuckets, $start, $endExclusive);
         }
 
-        $this->info('Hourly backfill complete.');
+        $this->info('Hourly backfill jobs dispatched.');
 
         return self::SUCCESS;
     }
@@ -80,121 +78,109 @@ class BackfillHourlyAnalytics extends Command
     }
 
     /**
-     * @param  Collection<int, Carbon>  $hourBuckets
+     * @param  Collection<int, string>  $hourBuckets ISO8601 strings
      */
-    private function backfillCommerce(
-        OrderAnalyticsHourlyAggregateService $commerceAggregates,
-        Collection $hourBuckets,
-        Carbon $start,
-        Carbon $endExclusive
-    ): void {
+    private function backfillCommerce(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
+    {
         $brandIds = DB::table('retail.orders')
-            ->where('ordered_at', '>=', $start)
-            ->where('ordered_at', '<', $endExclusive)
+            ->select('brand_professional_id')
+            ->whereBetween('ordered_at', [$start, $endExclusive])
             ->whereNotNull('brand_professional_id')
-            ->pluck('brand_professional_id')
-            ->merge(
+            ->union(
                 DB::table('retail.commission_ledger_entries')
-                    ->where('occurred_at', '>=', $start)
-                    ->where('occurred_at', '<', $endExclusive)
+                    ->select('brand_professional_id')
+                    ->whereBetween('occurred_at', [$start, $endExclusive])
                     ->whereNotNull('brand_professional_id')
-                    ->pluck('brand_professional_id')
             )
-            ->map(static fn ($id): string => trim((string) $id))
-            ->filter()
-            ->unique()
-            ->values();
+            ->distinct()
+            ->lazy()
+            ->map(static fn ($row): string => trim((string) $row->brand_professional_id))
+            ->filter();
 
         $affiliateIds = DB::table('retail.orders')
-            ->where('ordered_at', '>=', $start)
-            ->where('ordered_at', '<', $endExclusive)
+            ->select('affiliate_professional_id')
+            ->whereBetween('ordered_at', [$start, $endExclusive])
             ->whereNotNull('affiliate_professional_id')
-            ->pluck('affiliate_professional_id')
-            ->merge(
+            ->union(
                 DB::table('retail.commission_ledger_entries')
-                    ->where('occurred_at', '>=', $start)
-                    ->where('occurred_at', '<', $endExclusive)
+                    ->select('affiliate_professional_id')
+                    ->whereBetween('occurred_at', [$start, $endExclusive])
                     ->whereNotNull('affiliate_professional_id')
-                    ->pluck('affiliate_professional_id')
             )
-            ->map(static fn ($id): string => trim((string) $id))
-            ->filter()
-            ->unique()
-            ->values();
+            ->distinct()
+            ->lazy()
+            ->map(static fn ($row): string => trim((string) $row->affiliate_professional_id))
+            ->filter();
 
-        $this->line("Commerce entities: brands={$brandIds->count()}, affiliates={$affiliateIds->count()}");
-
+        $brandCount = 0;
         foreach ($brandIds as $brandId) {
             foreach ($hourBuckets as $hour) {
-                $commerceAggregates->rebuildBrandHour($brandId, $hour);
+                RebuildBrandHourlyAggregatesJob::dispatch($brandId, $hour);
             }
+            $brandCount++;
         }
 
+        $affiliateCount = 0;
         foreach ($affiliateIds as $affiliateId) {
             foreach ($hourBuckets as $hour) {
-                $commerceAggregates->rebuildProfessionalHour($affiliateId, $hour);
+                RebuildProfessionalHourlyAggregatesJob::dispatch($affiliateId, $hour);
             }
+            $affiliateCount++;
         }
+
+        $this->line("Commerce jobs dispatched: brands={$brandCount}, affiliates={$affiliateCount}");
     }
 
     /**
-     * @param  Collection<int, Carbon>  $hourBuckets
+     * @param  Collection<int, string>  $hourBuckets ISO8601 strings
      */
-    private function backfillSite(
-        SiteAnalyticsAggregateService $siteAggregates,
-        Collection $hourBuckets,
-        Carbon $start,
-        Carbon $endExclusive
-    ): void {
+    private function backfillSite(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
+    {
         $professionalIds = DB::table('analytics.site_visits')
-            ->where('occurred_at', '>=', $start)
-            ->where('occurred_at', '<', $endExclusive)
-            ->pluck('professional_id')
-            ->merge(
+            ->select('professional_id')
+            ->whereBetween('occurred_at', [$start, $endExclusive])
+            ->union(
                 DB::table('analytics.link_clicks')
-                    ->where('occurred_at', '>=', $start)
-                    ->where('occurred_at', '<', $endExclusive)
-                    ->pluck('professional_id')
+                    ->select('professional_id')
+                    ->whereBetween('occurred_at', [$start, $endExclusive])
             )
-            ->map(static fn ($id): string => trim((string) $id))
-            ->filter()
-            ->unique()
-            ->values();
+            ->distinct()
+            ->lazy()
+            ->map(static fn ($row): string => trim((string) $row->professional_id))
+            ->filter();
 
-        $this->line("Site entities: professionals={$professionalIds->count()}");
-
+        $count = 0;
         foreach ($professionalIds as $professionalId) {
             foreach ($hourBuckets as $hour) {
-                $siteAggregates->rebuildProfessionalHour($professionalId, $hour);
+                RebuildSiteHourlyAggregatesJob::dispatch($professionalId, $hour);
             }
+            $count++;
         }
+
+        $this->line("Site jobs dispatched: professionals={$count}");
     }
 
     /**
-     * @param  Collection<int, Carbon>  $hourBuckets
+     * @param  Collection<int, string>  $hourBuckets ISO8601 strings
      */
-    private function backfillBooking(
-        BookingAnalyticsAggregateService $bookingAggregates,
-        Collection $hourBuckets,
-        Carbon $start,
-        Carbon $endExclusive
-    ): void {
+    private function backfillBooking(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
+    {
         $professionalIds = DB::table('analytics.booking_events')
-            ->where('occurred_at', '>=', $start)
-            ->where('occurred_at', '<', $endExclusive)
-            ->pluck('professional_id')
-            ->map(static fn ($id): string => trim((string) $id))
-            ->filter()
-            ->unique()
-            ->values();
+            ->select('professional_id')
+            ->whereBetween('occurred_at', [$start, $endExclusive])
+            ->distinct()
+            ->lazy()
+            ->map(static fn ($row): string => trim((string) $row->professional_id))
+            ->filter();
 
-        $this->line("Booking entities: professionals={$professionalIds->count()}");
-
+        $count = 0;
         foreach ($professionalIds as $professionalId) {
             foreach ($hourBuckets as $hour) {
-                $bookingAggregates->rebuildProfessionalHour($professionalId, $hour);
+                RebuildBookingHourlyAggregatesJob::dispatch($professionalId, $hour);
             }
+            $count++;
         }
+
+        $this->line("Booking jobs dispatched: professionals={$count}");
     }
 }
-

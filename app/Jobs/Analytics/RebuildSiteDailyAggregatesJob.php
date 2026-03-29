@@ -2,7 +2,7 @@
 
 namespace App\Jobs\Analytics;
 
-use App\Services\Analytics\BookingAnalyticsAggregateService;
+use App\Services\Analytics\SiteAnalyticsAggregateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -11,7 +11,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-class RebuildBookingDailyAggregatesJob implements ShouldQueue, ShouldBeUnique
+class RebuildSiteDailyAggregatesJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -30,10 +30,10 @@ class RebuildBookingDailyAggregatesJob implements ShouldQueue, ShouldBeUnique
 
     public function uniqueId(): string
     {
-        return "booking-daily:{$this->professionalId}:{$this->day}";
+        return "site-daily:{$this->professionalId}:{$this->day}";
     }
 
-    public function handle(BookingAnalyticsAggregateService $aggregates): void
+    public function handle(SiteAnalyticsAggregateService $aggregates): void
     {
         $professionalId = trim($this->professionalId);
         $day = trim($this->day);
@@ -47,11 +47,10 @@ class RebuildBookingDailyAggregatesJob implements ShouldQueue, ShouldBeUnique
 
     public function failed(\Throwable $e): void
     {
-        Log::warning('Booking daily aggregate rebuild failed', [
+        Log::warning('Site daily aggregate rebuild failed', [
             'professional_id' => $this->professionalId,
             'day' => $this->day,
             'message' => $e->getMessage(),
         ]);
     }
 }
-

@@ -2,9 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Analytics\BookingAnalyticsAggregateService;
-use App\Services\Analytics\SiteAnalyticsAggregateService;
-use App\Services\Store\OrderAnalyticsAggregateService;
+use App\Jobs\Analytics\RebuildBookingDailyAggregatesJob;
+use App\Jobs\Analytics\RebuildSiteDailyAggregatesJob;
+use App\Jobs\Store\RebuildBrandDailyAggregatesJob;
+use App\Jobs\Store\RebuildProfessionalDailyAggregatesJob;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -15,11 +16,8 @@ class CompactHourlyAnalytics extends Command
 
     protected $description = 'Compacts hourly analytics older than 24h into daily aggregates.';
 
-    public function handle(
-        OrderAnalyticsAggregateService $orderDailyAggregates,
-        SiteAnalyticsAggregateService $siteAggregates,
-        BookingAnalyticsAggregateService $bookingAggregates
-    ): int {
+    public function handle(): int
+    {
         $dryRun = (bool) $this->option('dry-run');
         $cutoff = Carbon::now()->utc()->subHours(24)->startOfHour();
 
@@ -28,16 +26,16 @@ class CompactHourlyAnalytics extends Command
             $this->warn('Dry run mode is enabled. No rows will be deleted or rebuilt.');
         }
 
-        $this->compactCommerce($orderDailyAggregates, $cutoff, $dryRun);
-        $this->compactSite($siteAggregates, $cutoff, $dryRun);
-        $this->compactBooking($bookingAggregates, $cutoff, $dryRun);
+        $this->compactCommerce($cutoff, $dryRun);
+        $this->compactSite($cutoff, $dryRun);
+        $this->compactBooking($cutoff, $dryRun);
 
         $this->info('Hourly analytics compaction complete.');
 
         return self::SUCCESS;
     }
 
-    private function compactCommerce(OrderAnalyticsAggregateService $orderDailyAggregates, Carbon $cutoff, bool $dryRun): void
+    private function compactCommerce(Carbon $cutoff, bool $dryRun): void
     {
         $staleBrandDays = DB::table('analytics.brand_metrics_hourly')
             ->where('hour_start', '<', $cutoff)
@@ -58,17 +56,17 @@ class CompactHourlyAnalytics extends Command
 
         if (! $dryRun) {
             foreach ($staleBrandDays as $row) {
-                $orderDailyAggregates->rebuildBrandDay((string) $row->brand_professional_id, (string) $row->day);
+                RebuildBrandDailyAggregatesJob::dispatch((string) $row->brand_professional_id, (string) $row->day, 1);
             }
 
             foreach ($staleAffiliateDays as $row) {
-                $orderDailyAggregates->rebuildProfessionalDay((string) $row->affiliate_professional_id, (string) $row->day);
+                RebuildProfessionalDailyAggregatesJob::dispatch((string) $row->affiliate_professional_id, (string) $row->day, 1);
             }
         }
 
-        $brandRows = (clone DB::table('analytics.brand_metrics_hourly'))
+        $brandRows = DB::table('analytics.brand_metrics_hourly')
             ->where('hour_start', '<', $cutoff);
-        $affiliateRows = (clone DB::table('analytics.professional_metrics_hourly'))
+        $affiliateRows = DB::table('analytics.professional_metrics_hourly')
             ->where('hour_start', '<', $cutoff);
 
         $brandCount = (clone $brandRows)->count();
@@ -82,7 +80,7 @@ class CompactHourlyAnalytics extends Command
         $this->line("Commerce hourly rows aged out: brand={$brandCount}, affiliate={$affiliateCount}");
     }
 
-    private function compactSite(SiteAnalyticsAggregateService $siteAggregates, Carbon $cutoff, bool $dryRun): void
+    private function compactSite(Carbon $cutoff, bool $dryRun): void
     {
         $staleDays = DB::table('analytics.site_metrics_hourly')
             ->where('hour_start', '<', $cutoff)
@@ -95,7 +93,7 @@ class CompactHourlyAnalytics extends Command
 
         if (! $dryRun) {
             foreach ($staleDays as $row) {
-                $siteAggregates->rebuildProfessionalDay((string) $row->professional_id, (string) $row->day);
+                RebuildSiteDailyAggregatesJob::dispatch((string) $row->professional_id, (string) $row->day);
             }
         }
 
@@ -110,7 +108,7 @@ class CompactHourlyAnalytics extends Command
         $this->line("Site hourly rows aged out: {$count}");
     }
 
-    private function compactBooking(BookingAnalyticsAggregateService $bookingAggregates, Carbon $cutoff, bool $dryRun): void
+    private function compactBooking(Carbon $cutoff, bool $dryRun): void
     {
         $staleDays = DB::table('analytics.booking_metrics_hourly')
             ->where('hour_start', '<', $cutoff)
@@ -123,7 +121,7 @@ class CompactHourlyAnalytics extends Command
 
         if (! $dryRun) {
             foreach ($staleDays as $row) {
-                $bookingAggregates->rebuildProfessionalDay((string) $row->professional_id, (string) $row->day);
+                RebuildBookingDailyAggregatesJob::dispatch((string) $row->professional_id, (string) $row->day);
             }
         }
 
@@ -138,4 +136,3 @@ class CompactHourlyAnalytics extends Command
         $this->line("Booking hourly rows aged out: {$count}");
     }
 }
-

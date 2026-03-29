@@ -2,12 +2,13 @@
 
 namespace App\Services\Analytics;
 
-use App\Models\Core\Professional\Professional;
+use App\Services\Analytics\Concerns\ResolvesTimezone;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class SiteAnalyticsAggregateService
 {
+    use ResolvesTimezone;
     public function rebuildProfessionalHour(string $professionalId, Carbon|string $hourStart): void
     {
         $professionalId = trim($professionalId);
@@ -21,6 +22,8 @@ class SiteAnalyticsAggregateService
         $now = now();
 
         DB::transaction(function () use ($professionalId, $hour, $hourEnd, $timezone, $now): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["analytics-rebuild:{$professionalId}"]);
+
             DB::table('analytics.site_metrics_hourly')
                 ->where('professional_id', $professionalId)
                 ->where('hour_start', $hour)
@@ -108,9 +111,13 @@ class SiteAnalyticsAggregateService
 
         $day = Carbon::parse($day)->toDateString();
         $timezone = $this->professionalTimezone($professionalId);
+        $utcFrom = Carbon::parse($day, $timezone)->startOfDay()->utc();
+        $utcTo = Carbon::parse($day, $timezone)->endOfDay()->utc();
         $now = now();
 
-        DB::transaction(function () use ($professionalId, $day, $timezone, $now): void {
+        DB::transaction(function () use ($professionalId, $day, $timezone, $now, $utcFrom, $utcTo): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["analytics-rebuild:{$professionalId}"]);
+
             DB::table('analytics.site_metrics_daily')
                 ->where('professional_id', $professionalId)
                 ->where('day', $day)
@@ -118,7 +125,7 @@ class SiteAnalyticsAggregateService
 
             $visits = DB::table('analytics.site_visits as v')
                 ->where('v.professional_id', $professionalId)
-                ->whereRaw('(v.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('v.occurred_at', [$utcFrom, $utcTo])
                 ->select([
                     'v.site_id',
                     DB::raw('COUNT(*) as visits_count'),
@@ -129,7 +136,7 @@ class SiteAnalyticsAggregateService
 
             $clicks = DB::table('analytics.link_clicks as c')
                 ->where('c.professional_id', $professionalId)
-                ->whereRaw('(c.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('c.occurred_at', [$utcFrom, $utcTo])
                 ->select([
                     'c.site_id',
                     DB::raw('COUNT(*) as clicks_count'),
@@ -187,24 +194,4 @@ class SiteAnalyticsAggregateService
         });
     }
 
-    /** @var array<string, string> */
-    private array $timezoneCache = [];
-
-    private function professionalTimezone(string $professionalId): string
-    {
-        if (isset($this->timezoneCache[$professionalId])) {
-            return $this->timezoneCache[$professionalId];
-        }
-
-        $timezone = Professional::query()
-            ->where('id', $professionalId)
-            ->value('timezone');
-
-        $timezone = trim((string) $timezone);
-        $resolved = $timezone !== '' ? $timezone : 'UTC';
-
-        $this->timezoneCache[$professionalId] = $resolved;
-
-        return $resolved;
-    }
 }
