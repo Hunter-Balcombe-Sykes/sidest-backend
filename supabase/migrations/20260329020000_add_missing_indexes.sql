@@ -22,19 +22,7 @@ CREATE INDEX IF NOT EXISTS checkout_sessions_expires_status_idx
     ON retail.checkout_sessions (expires_at, status)
     WHERE status IN ('active', 'expired');
 
--- ---------------------------------------------------------------------------
--- retail.payout_runs – fix column order on scheduling index
--- ---------------------------------------------------------------------------
--- Existing payout_runs_status_idx leads with status (~5 distinct values),
--- which forces a wide scan when fetching "scheduled runs due today".
--- Replace with (scheduled_for, status) for range + filter lookups.
-DROP INDEX IF EXISTS retail.payout_runs_status_idx;
-
-CREATE INDEX IF NOT EXISTS payout_runs_scheduled_status_idx
-    ON retail.payout_runs (scheduled_for, status)
-    WHERE status IN ('scheduled', 'processing');
-
--- ---------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 -- core.blocks – block_type partial index for site rendering
 -- ---------------------------------------------------------------------------
 -- Site rendering queries filter by block_type (e.g. 'link', 'shop', 'gallery')
