@@ -8,6 +8,7 @@ use App\Http\Requests\Api\Professional\Site\IndexLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\ReorderBlocksRequest;
 use App\Http\Requests\Api\Professional\Site\StoreLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
@@ -16,6 +17,16 @@ class ProfessionalLinkBlockController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+
+    private function authorizeCustomLinks(Professional $pro): void
+    {
+        $type = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
+        abort_unless(
+            (bool) config("comet.account_type_defaults.{$type}.custom_links_allowed", false),
+            403,
+            'Custom links are not available on your account type.'
+        );
+    }
     public function index(IndexLinkBlockRequest $request)
     {
         $pro = $this->currentProfessional($request);
@@ -28,6 +39,7 @@ class ProfessionalLinkBlockController extends ApiController
     public function store(StoreLinkBlockRequest $request)
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeCustomLinks($pro);
         $site = $this->currentSite($pro);
 
         $data = $request->validated();
@@ -65,6 +77,7 @@ class ProfessionalLinkBlockController extends ApiController
     public function update(UpdateLinkBlockRequest $request, Block $linkBlock)
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeCustomLinks($pro);
 
         abort_unless(
             $linkBlock->professional_id === $pro->id &&
@@ -103,6 +116,7 @@ class ProfessionalLinkBlockController extends ApiController
     public function reorder(ReorderBlocksRequest $request)
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeCustomLinks($pro);
 
         $ids = array_values(array_unique($request->validated()['ids'] ?? []));
 
