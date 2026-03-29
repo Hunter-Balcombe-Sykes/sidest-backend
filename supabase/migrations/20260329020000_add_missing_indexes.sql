@@ -59,5 +59,5 @@ DROP INDEX IF EXISTS core.site_images_site_active_sort_idx;
 
 CREATE INDEX IF NOT EXISTS site_media_site_active_sort_covering_idx
     ON core.site_media (site_id, sort_order)
-    INCLUDE (bucket, path, alt_text, media_type)
+    INCLUDE (alt_text, media_type, pool)
     WHERE deleted_at IS NULL AND is_active = true;
