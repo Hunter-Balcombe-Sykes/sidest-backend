@@ -26,8 +26,10 @@ class BrandProductSetting extends Model
         'discount_rate',
         'custom_price',
         'is_featured',
+        'is_favourite',
         'is_available',
         'sort_order',
+        'favourite_sort_order',
     ];
 
     protected $casts = [
@@ -35,8 +37,10 @@ class BrandProductSetting extends Model
         'discount_rate' => 'decimal:2',
         'custom_price' => 'decimal:2',
         'is_featured' => 'boolean',
+        'is_favourite' => 'boolean',
         'is_available' => 'boolean',
         'sort_order' => 'integer',
+        'favourite_sort_order' => 'integer',
     ];
 
     public function brandProduct(): BelongsTo

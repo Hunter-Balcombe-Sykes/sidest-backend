@@ -7,8 +7,10 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Retail\BrandProduct;
 use App\Models\Retail\BrandStoreSettings;
 use App\Services\Store\BrandAccessService;
+use App\Services\Store\BrandProductSettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
@@ -21,6 +23,7 @@ class BrandStoreController extends ApiController
 
     public function __construct(
         private readonly BrandAccessService $brandAccess,
+        private readonly BrandProductSettingsService $settingsRows,
     ) {}
 
     /**
@@ -129,7 +132,28 @@ class BrandStoreController extends ApiController
                 }
             }
 
-            $attributes['favourite_brand_product_ids'] = $favouriteIds;
+            $this->settingsRows->ensureSettingsRowsForBrand($brandProfessionalId);
+
+            DB::transaction(function () use ($brandProfessionalId, $favouriteIds): void {
+                DB::table('retail.brand_product_settings')
+                    ->where('professional_id', $brandProfessionalId)
+                    ->update([
+                        'is_favourite' => false,
+                        'favourite_sort_order' => 0,
+                        'updated_at' => now(),
+                    ]);
+
+                foreach ($favouriteIds as $index => $brandProductId) {
+                    DB::table('retail.brand_product_settings')
+                        ->where('professional_id', $brandProfessionalId)
+                        ->where('brand_product_id', $brandProductId)
+                        ->update([
+                            'is_favourite' => true,
+                            'favourite_sort_order' => $index,
+                            'updated_at' => now(),
+                        ]);
+                }
+            });
         }
 
         BrandStoreSettings::updateOrCreate(
@@ -150,7 +174,12 @@ class BrandStoreController extends ApiController
         if (! in_array($checkoutMode, ['shopify', 'stripe'], true)) {
             $checkoutMode = self::DEFAULT_CHECKOUT_MODE;
         }
-        $favouriteBrandProductIds = collect($storeSettings?->favourite_brand_product_ids ?? [])
+        $favouriteBrandProductIds = DB::table('retail.brand_product_settings')
+            ->where('professional_id', $brandProfessionalId)
+            ->where('is_favourite', true)
+            ->orderBy('favourite_sort_order')
+            ->orderBy('updated_at')
+            ->pluck('brand_product_id')
             ->map(static fn ($value): string => trim((string) $value))
             ->filter(static fn (string $value): bool => $value !== '')
             ->unique()

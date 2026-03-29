@@ -128,8 +128,10 @@ class BrandProductsController extends ApiController
                         'brand_product_id' => (string) $brandProduct->id,
                         'shopify_product_id' => (string) $brandProduct->shopify_product_id,
                         'is_featured' => false,
+                        'is_favourite' => false,
                         'is_available' => true,
                         'sort_order' => 0,
+                        'favourite_sort_order' => 0,
                     ]);
                 }
 
@@ -252,8 +254,10 @@ class BrandProductsController extends ApiController
                             'brand_product_id' => (string) $product->id,
                             'shopify_product_id' => (string) $product->shopify_product_id,
                             'is_featured' => false,
+                            'is_favourite' => false,
                             'is_available' => true,
                             'sort_order' => 0,
+                            'favourite_sort_order' => 0,
                         ]);
                     }
 
@@ -300,7 +304,9 @@ class BrandProductsController extends ApiController
         return [
             'is_available' => ['sometimes', 'boolean'],
             'is_featured' => ['sometimes', 'boolean'],
+            'is_favourite' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
+            'favourite_sort_order' => ['sometimes', 'integer', 'min:0'],
             'commission_override' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'discount_rate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'custom_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
@@ -316,7 +322,9 @@ class BrandProductsController extends ApiController
         $allowed = [
             'is_available',
             'is_featured',
+            'is_favourite',
             'sort_order',
+            'favourite_sort_order',
             'commission_override',
             'discount_rate',
             'custom_price',
