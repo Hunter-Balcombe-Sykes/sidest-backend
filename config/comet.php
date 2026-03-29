@@ -97,6 +97,8 @@ return [
 
     'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),
 
+    'analytics_raw_event_retention_days' => (int) env('ANALYTICS_RAW_EVENT_RETENTION_DAYS', 90),
+
     'throttle' => [
         'enabled' => (bool) env('COMET_THROTTLE_ENABLED', true),
     ],

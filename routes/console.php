@@ -64,6 +64,13 @@ Schedule::command('comet:analytics:compact-hourly')
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: compact-hourly');
     });
 
+Schedule::command('comet:analytics:purge-raw-events')
+    ->dailyAt('03:00')
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: purge-raw-events');
+    });
+
 Schedule::job(new \App\Jobs\Notifications\InviteExpirySweepJob())
     ->dailyAt('08:00')
     ->withoutOverlapping()

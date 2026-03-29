@@ -168,7 +168,7 @@ class ShopifyIntegrationController extends ApiController
         $conflictingIntegration = ProfessionalIntegration::query()
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->where('professional_id', '!=', $targetBrandId)
-            ->whereRaw("lower(provider_metadata->>'shop_domain') = ?", [$shopDomain])
+            ->where('shopify_shop_domain', $shopDomain)
             ->exists();
 
         if ($conflictingIntegration) {

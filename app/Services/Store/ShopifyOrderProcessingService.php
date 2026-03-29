@@ -168,7 +168,24 @@ class ShopifyOrderProcessingService
 
                 $brandProductMap = $this->resolveBrandProductMap($brandProfessionalId);
                 $refundsByLineItem = $this->refundsByLineItem($payload);
-                $commissionCache = [];
+
+                // Resolve all brand product IDs upfront so commission rates can
+                // be batch-loaded before the loop (3 queries total, not 3 per item).
+                $brandProductIds = $lineItems->map(function (array $lineItem) use ($brandProductMap): ?string {
+                    $shopifyProductRaw = $this->firstNonEmpty([
+                        (string) ($lineItem['product_id'] ?? ''),
+                        (string) Arr::get($lineItem, 'product.id', ''),
+                        (string) Arr::get($lineItem, 'admin_graphql_api_id', ''),
+                    ]);
+
+                    return $this->matchBrandProductId($shopifyProductRaw, $brandProductMap);
+                })->all();
+
+                $commissionCache = $this->prefetchCommissionRates(
+                    $brandProfessionalId,
+                    $affiliateProfessionalId,
+                    $brandProductIds
+                );
 
                 foreach ($lineItems as $index => $lineItem) {
                     $lineId = trim((string) ($lineItem['id'] ?? ''));
@@ -549,6 +566,70 @@ class ShopifyOrderProcessingService
         }
 
         return $refunds;
+    }
+
+    /**
+     * Batch-load all commission rates for the line items in an order into the
+     * cache structure expected by resolveCommissionRate(). Executes 3 queries
+     * regardless of how many line items the order contains.
+     *
+     * @param  array<int, string|null>  $brandProductIds  Ordered list of resolved brand_product_id per line item (may contain nulls)
+     * @return array<string, array{rate: float, source: string, metadata: array<string, mixed>}>
+     */
+    private function prefetchCommissionRates(
+        string $brandProfessionalId,
+        string $affiliateProfessionalId,
+        array $brandProductIds
+    ): array {
+        $cache = [];
+        $nonNullIds = array_values(array_unique(array_filter($brandProductIds, static fn ($id): bool => $id !== null)));
+
+        $affiliateOverrides = [];
+        $brandProductOverrides = [];
+
+        if ($nonNullIds !== []) {
+            $affiliateOverrides = DB::table('retail.brand_product_affiliate_settings')
+                ->where('brand_professional_id', $brandProfessionalId)
+                ->where('affiliate_professional_id', $affiliateProfessionalId)
+                ->whereIn('brand_product_id', $nonNullIds)
+                ->whereNotNull('commission_override')
+                ->pluck('commission_override', 'brand_product_id')
+                ->all();
+
+            $brandProductOverrides = DB::table('retail.brand_product_settings')
+                ->where('professional_id', $brandProfessionalId)
+                ->whereIn('brand_product_id', $nonNullIds)
+                ->whereNotNull('commission_override')
+                ->pluck('commission_override', 'brand_product_id')
+                ->all();
+        }
+
+        $brandDefault = DB::table('retail.brand_store_settings')
+            ->where('professional_id', $brandProfessionalId)
+            ->whereNotNull('default_commission_rate')
+            ->value('default_commission_rate');
+
+        $systemDefault = (float) config('comet.store.default_commission_rate', 15);
+
+        foreach ($brandProductIds as $brandProductId) {
+            $cacheKey = implode('|', [$brandProfessionalId, $affiliateProfessionalId, $brandProductId ?? 'none']);
+
+            if (isset($cache[$cacheKey])) {
+                continue;
+            }
+
+            if ($brandProductId !== null && isset($affiliateOverrides[$brandProductId])) {
+                $this->storeCommissionRateCache($cache, $cacheKey, (float) $affiliateOverrides[$brandProductId], 'affiliate_product_override', ['brand_product_id' => $brandProductId]);
+            } elseif ($brandProductId !== null && isset($brandProductOverrides[$brandProductId])) {
+                $this->storeCommissionRateCache($cache, $cacheKey, (float) $brandProductOverrides[$brandProductId], 'brand_product_override', ['brand_product_id' => $brandProductId]);
+            } elseif ($brandDefault !== null) {
+                $this->storeCommissionRateCache($cache, $cacheKey, (float) $brandDefault, 'brand_default', []);
+            } else {
+                $this->storeCommissionRateCache($cache, $cacheKey, $systemDefault, 'system_default', []);
+            }
+        }
+
+        return $cache;
     }
 
     /**
