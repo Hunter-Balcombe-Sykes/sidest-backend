@@ -23,7 +23,8 @@ class FeaturedProductsPayloadService
      *   default_commission_rate: float,
      *   max_featured_products: int,
      *   max_default_product_selections: int,
-     *   checkout_mode: string
+     *   checkout_mode: string,
+     *   favourite_brand_product_ids: string[]
      * }
      */
     public function build(string $professionalId, string $logContext = 'featured_products'): array
@@ -33,16 +34,20 @@ class FeaturedProductsPayloadService
 
         $checkoutMode = 'shopify';
         $brandStripeAccountId = null;
+        $brandProfessionalId = null;
         try {
             $checkoutInfo = $this->resolveCheckoutInfoForAffiliate($professionalId);
             $checkoutMode = $checkoutInfo['checkout_mode'];
             $brandStripeAccountId = $checkoutInfo['brand_stripe_account_id'];
+            $brandProfessionalId = $checkoutInfo['brand_professional_id'] ?? null;
         } catch (Throwable $e) {
             Log::warning('Could not resolve checkout info for affiliate; defaulting to shopify.', [
                 'professional_id' => $professionalId,
                 'error' => $e->getMessage(),
             ]);
         }
+
+        $favouriteBrandProductIds = $this->resolveFavouriteBrandProductIds($brandProfessionalId);
 
         $payload = [
             'selected_products' => [],
@@ -52,6 +57,7 @@ class FeaturedProductsPayloadService
             'max_default_product_selections' => $maxFeatured,
             'checkout_mode' => $checkoutMode,
             'brand_stripe_account_id' => $brandStripeAccountId,
+            'favourite_brand_product_ids' => $favouriteBrandProductIds,
         ];
 
         if ($professionalId === '' || ! $this->hasSelectionsTable()) {
@@ -78,6 +84,7 @@ class FeaturedProductsPayloadService
             'max_default_product_selections' => $maxFeatured,
             'checkout_mode' => $checkoutMode,
             'brand_stripe_account_id' => $brandStripeAccountId,
+            'favourite_brand_product_ids' => $favouriteBrandProductIds,
         ];
     }
 
@@ -101,13 +108,13 @@ class FeaturedProductsPayloadService
     }
 
     /**
-     * Resolve checkout mode and brand Stripe account ID for an affiliate's storefront.
+     * Resolve checkout mode, brand Stripe account ID, and brand professional ID for an affiliate.
      *
-     * @return array{checkout_mode: string, brand_stripe_account_id: string|null}
+     * @return array{checkout_mode: string, brand_stripe_account_id: string|null, brand_professional_id: string|null}
      */
     private function resolveCheckoutInfoForAffiliate(string $affiliateProfessionalId): array
     {
-        $default = ['checkout_mode' => 'shopify', 'brand_stripe_account_id' => null];
+        $default = ['checkout_mode' => 'shopify', 'brand_stripe_account_id' => null, 'brand_professional_id' => null];
 
         if ($affiliateProfessionalId === '') {
             return $default;
@@ -141,7 +148,51 @@ class FeaturedProductsPayloadService
             $stripeAccountId = trim((string) ($stripeAccountId ?? '')) ?: null;
         }
 
-        return ['checkout_mode' => $mode, 'brand_stripe_account_id' => $stripeAccountId];
+        return [
+            'checkout_mode' => $mode,
+            'brand_stripe_account_id' => $stripeAccountId,
+            'brand_professional_id' => $brandProfessionalId,
+        ];
+    }
+
+    /**
+     * Resolve the brand's favourite product IDs from brand_store_settings.
+     *
+     * @return string[]
+     */
+    private function resolveFavouriteBrandProductIds(?string $brandProfessionalId): array
+    {
+        if ($brandProfessionalId === null || $brandProfessionalId === '') {
+            return [];
+        }
+
+        try {
+            $raw = DB::table('retail.brand_store_settings')
+                ->where('professional_id', $brandProfessionalId)
+                ->value('favourite_brand_product_ids');
+
+            if ($raw === null) {
+                return [];
+            }
+
+            $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+
+            if (! is_array($decoded)) {
+                return [];
+            }
+
+            return array_values(array_filter(
+                array_map(fn ($v) => trim((string) $v), $decoded),
+                fn (string $v) => $v !== ''
+            ));
+        } catch (Throwable $e) {
+            Log::warning('Could not resolve favourite brand product IDs.', [
+                'brand_professional_id' => $brandProfessionalId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
     }
 
     private function resolveCheckoutModeForAffiliate(string $affiliateProfessionalId): string
