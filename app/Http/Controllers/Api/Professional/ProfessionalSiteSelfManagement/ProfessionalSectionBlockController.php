@@ -6,8 +6,8 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\Site\UpsertSectionBlockRequest;
 use App\Models\Core\Site\Block;
 use App\Services\Professional\AccountTypeDefaultsService;
-use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Http\Request;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
@@ -18,20 +18,25 @@ class ProfessionalSectionBlockController extends ApiController
     use ResolveCurrentSite;
 
     public function __construct(
-        private readonly SectionVisibilityService $visibilityService,
         private readonly AccountTypeDefaultsService $defaultsService,
     ) {}
 
     public function index(Request $request)
     {
         $pro = $this->currentProfessional($request);
+        $site = $this->currentSite($pro);
 
         $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
         $defaults = $this->defaultsService->resolveDefaults($professionalType);
         $allowedSections = $defaults['allowed_sections'] ?? config('comet.section_block_types', []);
 
+        $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
+
         $sections = $pro->sectionBlocks()
+            ->where('site_id', $site->id)
             ->whereIn('block_type', $allowedSections)
+            ->where('is_enabled', true)
+            ->where('is_active', true)
             ->get();
 
         return $this->success([
@@ -47,19 +52,6 @@ class ProfessionalSectionBlockController extends ApiController
         $site = $this->currentSite($pro);
 
         $data = $request->validated();
-        $existingBlock = Block::query()
-            ->where('professional_id', $pro->id)
-            ->where('site_id', $site->id)
-            ->where('block_group', 'sections')
-            ->where('block_type', $blockType)
-            ->first();
-
-        $nextIsActive = array_key_exists('is_active', $data)
-            ? (bool) $data['is_active']
-            : ($existingBlock ? (bool) $existingBlock->is_active : true);
-        $currentlyIsActive = $existingBlock ? (bool) $existingBlock->is_active : false;
-        $isEnabling = $nextIsActive && ! $currentlyIsActive;
-
         $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
 
         // ── Account-type section restrictions ────────────────────────────
@@ -69,17 +61,7 @@ class ProfessionalSectionBlockController extends ApiController
             return $this->error('This section is not available for your account type.', 403);
         }
 
-        // ── Visibility requirements check ────────────────────────────────
-        if ($isEnabling) {
-            [$canBeVisible, $reason] = $this->visibilityService->checkVisibilityRequirements(
-                (string) $pro->id,
-                (string) $site->id,
-                $blockType
-            );
-            if (! $canBeVisible) {
-                return $this->error($reason, 422);
-            }
-        }
+        $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
 
         $block = DB::transaction(function () use ($pro, $site, $data, $blockType) {
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-sections:{$site->id}"]);
@@ -91,29 +73,18 @@ class ProfessionalSectionBlockController extends ApiController
                 'block_type'      => $blockType,
             ]);
 
-            if (array_key_exists('is_active', $data)) {
-                $block->is_active = (bool) $data['is_active'];
-            }
-
-            if (array_key_exists('is_enabled', $data)) {
-                $block->is_enabled = (bool) $data['is_enabled'];
-                // Disabling also hides from public
-                if (! $data['is_enabled']) {
-                    $block->is_active = false;
-                }
-            }
-
             if (!$block->exists) {
-                $maxSort = Block::query()
+                $existingCount = Block::query()
                     ->where('site_id', $site->id)
                     ->where('block_group', 'sections')
-                    ->max('sort_order');
-
-                $block->sort_order  = is_null($maxSort) ? 0 : ((int) $maxSort + 1);
-                $block->is_active   = $data['is_active'] ?? true;
-                $block->is_enabled  = $data['is_enabled'] ?? true;
+                    ->count();
+                $block->sort_order  = (int) $existingCount;
                 $block->settings    = $data['settings'] ?? [];
             }
+
+            // Account-allowed sections are always enabled and active.
+            $block->is_enabled = true;
+            $block->is_active = true;
 
             // merge settings (PATCH semantics)
             if (array_key_exists('settings', $data)) {
@@ -148,24 +119,59 @@ class ProfessionalSectionBlockController extends ApiController
     public function remove(Request $request, string $blockType)
     {
         $pro = $this->currentProfessional($request);
-
         $site = $this->currentSite($pro);
-
-        $block = Block::query()
-            ->where('professional_id', $pro->id)
-            ->where('site_id', $site->id)
-            ->where('block_group', 'sections')
-            ->where('block_type', $blockType)
-            ->first();
-
-        if (!$block) {
-            // idempotent delete (nice for UI)
-            return $this->success(['ok' => true]);
+        $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
+        $defaults = $this->defaultsService->resolveDefaults($professionalType);
+        $allowedSections = $defaults['allowed_sections'] ?? config('comet.section_block_types', []);
+        if (! in_array($blockType, $allowedSections, true)) {
+            return $this->error('This section is not available for your account type.', 403);
         }
 
-        $block->is_active = false;
-        $block->save();
+        $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
 
         return $this->success(['ok' => true]);
+    }
+
+    /**
+     * Ensure every account-type-allowed section exists and is always enabled + active.
+     *
+     * @param  array<int, string>  $allowedSections
+     */
+    private function syncAllowedSections(string $professionalId, string $siteId, array $allowedSections): Collection
+    {
+        $orderedAllowed = array_values(array_unique(array_filter($allowedSections, static fn ($value) => is_string($value))));
+
+        return DB::transaction(function () use ($professionalId, $siteId, $orderedAllowed) {
+            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-sections:{$siteId}"]);
+
+            $blocks = Block::query()
+                ->where('professional_id', $professionalId)
+                ->where('site_id', $siteId)
+                ->where('block_group', 'sections')
+                ->whereIn('block_type', $orderedAllowed)
+                ->get()
+                ->keyBy('block_type');
+
+            foreach ($orderedAllowed as $sortOrder => $blockType) {
+                $block = $blocks->get($blockType) ?? new Block([
+                    'professional_id' => $professionalId,
+                    'site_id' => $siteId,
+                    'block_group' => 'sections',
+                    'block_type' => $blockType,
+                ]);
+
+                if (! $block->exists) {
+                    $block->settings = [];
+                }
+
+                $block->sort_order = $sortOrder;
+                $block->is_enabled = true;
+                $block->is_active = true;
+                $block->save();
+                $blocks->put($blockType, $block);
+            }
+
+            return $blocks->values();
+        });
     }
 }
