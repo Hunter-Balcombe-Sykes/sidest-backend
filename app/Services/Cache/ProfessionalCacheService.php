@@ -128,7 +128,34 @@ class ProfessionalCacheService
     public function getByAuthId(string $authUserId): ?Professional
     {
         $id = $this->getIdByAuthId($authUserId);
-        return $id ? Professional::query()->find($id) : null;
+        if (! $id) {
+            return null;
+        }
+
+        $professional = Professional::query()->find($id);
+        if (! $professional) {
+            return null;
+        }
+
+        // Defensive guard: if cache is stale/corrupt, never return another user's profile.
+        if ((string) $professional->auth_user_id !== $authUserId) {
+            $cacheKey = CacheKeyGenerator::professionalIdByAuthId($authUserId);
+            Cache::forget($cacheKey);
+
+            $freshId = Professional::query()
+                ->where('auth_user_id', $authUserId)
+                ->value('id');
+
+            if (! $freshId) {
+                return null;
+            }
+
+            Cache::put($cacheKey, $freshId, now()->addMinutes(30));
+
+            return Professional::query()->find($freshId);
+        }
+
+        return $professional;
     }
 
     /* ---------------------------
