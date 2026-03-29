@@ -27,6 +27,7 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             'title' => ['sometimes', 'nullable', 'string', 'max:100'],
             'is_active' => ['sometimes', 'boolean'],
             'is_enabled' => ['sometimes', 'boolean'],
+            'publication_state' => ['sometimes', 'string', Rule::in(['live', 'draft'])],
             'settings' => ['sometimes', 'array'],
             'settings.text' => $textRules,
         ];
@@ -38,6 +39,11 @@ class UpsertSectionBlockRequest extends BaseFormRequest
         $blockType = $this->route('blockType') ?? $this->route('block_type') ?? $this->route('type');
         if (is_string($blockType)) {
             $this->merge(['block_type' => strtolower(trim($blockType))]);
+        }
+
+        $publicationState = $this->input('publication_state');
+        if (is_string($publicationState)) {
+            $this->merge(['publication_state' => strtolower(trim($publicationState))]);
         }
 
         // normalize text

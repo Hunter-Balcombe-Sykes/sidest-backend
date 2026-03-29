@@ -50,7 +50,7 @@ class AccountTypeDefaultsService
         $site->save();
 
         // 3. Create section blocks for allowed account-type sections.
-        // For professional/influencer accounts we keep these enabled + active by default.
+        // For professional/influencer accounts we keep these enabled + draft by default.
         $allowedSections = $defaults['allowed_sections'] ?? [];
         $defaultSections = $defaults['default_sections'] ?? [];
         $sectionsToCreate = $professional->isBrand() ? $defaultSections : $allowedSections;
@@ -66,7 +66,7 @@ class AccountTypeDefaultsService
                 [
                     'sort_order'  => $sortOrder,
                     'is_enabled'  => true,
-                    'is_active'   => true,
+                    'is_active'   => false,
                     'settings'    => [],
                 ]
             );

@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\Site\UpsertSectionBlockRequest;
 use App\Models\Core\Site\Block;
 use App\Services\Professional\AccountTypeDefaultsService;
+use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Http\Request;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,7 @@ class ProfessionalSectionBlockController extends ApiController
 
     public function __construct(
         private readonly AccountTypeDefaultsService $defaultsService,
+        private readonly SectionVisibilityService $visibilityService,
     ) {}
 
     public function index(Request $request)
@@ -29,6 +31,8 @@ class ProfessionalSectionBlockController extends ApiController
         $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
         $defaults = $this->defaultsService->resolveDefaults($professionalType);
         $allowedSections = $defaults['allowed_sections'] ?? config('comet.section_block_types', []);
+        $allSections = config('comet.section_block_types', []);
+        $unavailableSections = array_values(array_diff($allSections, $allowedSections));
 
         $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
 
@@ -36,12 +40,13 @@ class ProfessionalSectionBlockController extends ApiController
             ->where('site_id', $site->id)
             ->whereIn('block_type', $allowedSections)
             ->where('is_enabled', true)
-            ->where('is_active', true)
+            ->orderBy('sort_order')
             ->get();
 
         return $this->success([
-            'sections' => $sections,
+            'sections' => $sections->map(fn (Block $section) => $this->serializeSection($section))->values(),
             'allowed_sections' => array_values($allowedSections),
+            'unavailable_sections' => $unavailableSections,
         ]);
     }
 
@@ -62,8 +67,39 @@ class ProfessionalSectionBlockController extends ApiController
         }
 
         $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
+        $existingBlock = Block::query()
+            ->where('professional_id', $pro->id)
+            ->where('site_id', $site->id)
+            ->where('block_group', 'sections')
+            ->where('block_type', $blockType)
+            ->first();
 
-        $block = DB::transaction(function () use ($pro, $site, $data, $blockType) {
+        $requestedPublicationState = is_string($data['publication_state'] ?? null)
+            ? mb_strtolower(trim((string) $data['publication_state']))
+            : null;
+        $nextIsLive = match (true) {
+            $requestedPublicationState === 'live' => true,
+            $requestedPublicationState === 'draft' => false,
+            array_key_exists('is_active', $data) => (bool) $data['is_active'],
+            $existingBlock !== null => (bool) $existingBlock->is_active,
+            default => false,
+        };
+        $currentlyIsLive = $existingBlock ? (bool) $existingBlock->is_active : false;
+        $isPublishing = $nextIsLive && ! $currentlyIsLive;
+
+        // Keep setup requirements tied to publishing Live state.
+        if ($isPublishing) {
+            [$canBeVisible, $reason] = $this->visibilityService->checkVisibilityRequirements(
+                (string) $pro->id,
+                (string) $site->id,
+                $blockType
+            );
+            if (! $canBeVisible) {
+                return $this->error($reason, 422);
+            }
+        }
+
+        $block = DB::transaction(function () use ($pro, $site, $data, $blockType, $nextIsLive) {
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-sections:{$site->id}"]);
 
             $block = Block::query()->firstOrNew([
@@ -82,9 +118,9 @@ class ProfessionalSectionBlockController extends ApiController
                 $block->settings    = $data['settings'] ?? [];
             }
 
-            // Account-allowed sections are always enabled and active.
+            // Account-allowed sections are always available in account pages.
             $block->is_enabled = true;
-            $block->is_active = true;
+            $block->is_active = $nextIsLive;
 
             // merge settings (PATCH semantics)
             if (array_key_exists('settings', $data)) {
@@ -112,7 +148,7 @@ class ProfessionalSectionBlockController extends ApiController
 
 
         return $this->success([
-            'section' => $block->fresh(),
+            'section' => $this->serializeSection($block->fresh()),
         ], $block->wasRecentlyCreated ? 201 : 200);
     }
 
@@ -128,12 +164,28 @@ class ProfessionalSectionBlockController extends ApiController
         }
 
         $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
+        $block = Block::query()
+            ->where('professional_id', $pro->id)
+            ->where('site_id', $site->id)
+            ->where('block_group', 'sections')
+            ->where('block_type', $blockType)
+            ->first();
 
-        return $this->success(['ok' => true]);
+        if ($block) {
+            // DELETE behaves as "move to draft" for backward compatibility.
+            $block->is_enabled = true;
+            $block->is_active = false;
+            $block->save();
+        }
+
+        return $this->success([
+            'ok' => true,
+            'section' => $block ? $this->serializeSection($block->fresh()) : null,
+        ]);
     }
 
     /**
-     * Ensure every account-type-allowed section exists and is always enabled + active.
+     * Ensure every account-type-allowed section exists and is always enabled.
      *
      * @param  array<int, string>  $allowedSections
      */
@@ -162,16 +214,25 @@ class ProfessionalSectionBlockController extends ApiController
 
                 if (! $block->exists) {
                     $block->settings = [];
+                    $block->is_active = false;
                 }
 
                 $block->sort_order = $sortOrder;
                 $block->is_enabled = true;
-                $block->is_active = true;
                 $block->save();
                 $blocks->put($blockType, $block);
             }
 
             return $blocks->values();
         });
+    }
+
+    private function serializeSection(Block $section): array
+    {
+        $payload = $section->toArray();
+        $isLive = (bool) ($section->is_active ?? false);
+        $payload['publication_state'] = $isLive ? 'live' : 'draft';
+        $payload['is_live'] = $isLive;
+        return $payload;
     }
 }
