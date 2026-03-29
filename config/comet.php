@@ -69,7 +69,7 @@ return [
         // Professional inherits influencer + adds booking, analytics, custom links
         'professional' => [
             'inherits'            => 'influencer',
-            'allowed_sections'    => ['shop', 'services', 'gallery', 'booking', 'sitepage_analytics', 'barbershop_info'],
+            'allowed_sections'    => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
             'default_sections'    => ['shop', 'services', 'gallery'],
             'custom_links_allowed' => true,
         ],
