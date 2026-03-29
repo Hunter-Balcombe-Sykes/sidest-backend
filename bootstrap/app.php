@@ -75,6 +75,11 @@ return Application::configure(basePath: dirname(__DIR__))
 
             // Forbidden (403)
             if ($e instanceof AccessDeniedHttpException) {
+                \Illuminate\Support\Facades\Log::warning('Access denied', [
+                    'path' => $request->path(),
+                    'message' => $e->getMessage(),
+                ]);
+
                 return response()->json([
                     'message' => $e->getMessage() ?: 'Access denied',
                 ], 403);

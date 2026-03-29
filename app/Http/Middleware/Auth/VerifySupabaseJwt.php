@@ -15,8 +15,6 @@ class VerifySupabaseJwt
 {
     public function handle(Request $request, Closure $next): Response
     {
-        Log::info('VerifySupabaseJwt start');
-
         $token = $this->getBearerToken($request);
         if (!$token) {
             return response()->json(['message' => 'Missing Bearer token'], 401);
@@ -38,7 +36,6 @@ class VerifySupabaseJwt
 
             $request->attributes->set('supabase_uid', $uid);
             $request->attributes->set('supabase_claims', $claims);
-            Log::info('VerifySupabaseJwt after verification', ['uid' => $uid]);
             return $next($request);
         } catch (\Throwable $e) {
             // 2) Fallback for legacy/shared-secret setups:
@@ -50,9 +47,12 @@ class VerifySupabaseJwt
                 }
 
                 $request->attributes->set('supabase_uid', $uid);
-                Log::info('VerifySupabaseJwt after verification', ['uid' => $uid]);
                 return $next($request);
             } catch (\Throwable $e2) {
+                Log::warning('JWT verification failed', [
+                    'reason' => $e2->getMessage(),
+                    'ip'     => $request->ip(),
+                ]);
                 return response()->json(['message' => 'Invalid token'], 401);
             }
         }

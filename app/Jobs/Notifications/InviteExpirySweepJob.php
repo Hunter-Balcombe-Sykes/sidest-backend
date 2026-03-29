@@ -65,4 +65,11 @@ class InviteExpirySweepJob implements ShouldQueue
             }
         }
     }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::error('Invite expiry sweep job failed', [
+            'message' => $e->getMessage(),
+        ]);
+    }
 }

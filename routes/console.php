@@ -39,23 +39,41 @@ Artisan::command('comet:normalize-professional-types {--dry-run : Show count onl
 })->purpose('Normalize legacy professional_type values to professional.');
 
 Schedule::command('comet:purge-soft-deletes')
-    ->dailyAt('03:20');
+    ->dailyAt('03:20')
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: purge-soft-deletes');
+    });
 
 Schedule::command('comet:prune-notifications', ['--days' => 30])
-    ->dailyAt('03:25');
+    ->dailyAt('03:25')
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-notifications');
+    });
 
 Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob())
     ->dailyAt('06:00')
-    ->withoutOverlapping();
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: process-commission-payouts');
+    });
 
 Schedule::command('comet:analytics:compact-hourly')
     ->hourly()
-    ->withoutOverlapping();
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: compact-hourly');
+    });
 
 Schedule::job(new \App\Jobs\Notifications\InviteExpirySweepJob())
     ->dailyAt('08:00')
-    ->withoutOverlapping();
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: invite-expiry-sweep');
+    });
 
 Schedule::job(new \App\Jobs\Notifications\SendWeeklyAnalyticsNotificationJob())
     ->weeklyOn(1, '09:00') // Monday 9 AM UTC
-    ->withoutOverlapping();
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: send-weekly-analytics-notification');
+    });

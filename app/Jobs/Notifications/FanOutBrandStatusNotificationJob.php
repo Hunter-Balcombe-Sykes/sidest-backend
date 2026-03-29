@@ -67,4 +67,13 @@ class FanOutBrandStatusNotificationJob implements ShouldQueue
             }
         }
     }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::error('Brand status fan-out job failed', [
+            'brand_professional_id' => $this->brandProfessionalId,
+            'brand_status' => $this->brandStatus,
+            'message' => $e->getMessage(),
+        ]);
+    }
 }

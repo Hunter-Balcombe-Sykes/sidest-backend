@@ -40,15 +40,25 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
     public function handle(): void
     {
         if (! config('comet.notifications.email_enabled', false)) {
+            Log::debug('Notification email skipped: feature disabled', [
+                'category' => $this->category,
+            ]);
             return;
         }
 
         if (! NotificationPublisher::resolveEmailEnabled($this->professionalId, $this->category)) {
+            Log::debug('Notification email skipped: user preference disabled', [
+                'category' => $this->category,
+                'professional_id' => $this->professionalId,
+            ]);
             return;
         }
 
         $notification = Notification::query()->find($this->notificationId);
         if (! $notification instanceof Notification) {
+            Log::warning('Notification email skipped: notification not found', [
+                'notification_id' => $this->notificationId,
+            ]);
             return;
         }
 
@@ -57,15 +67,31 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
             ->value('primary_email');
 
         if (! $email) {
+            Log::warning('Notification email skipped: no email on record', [
+                'professional_id' => $this->professionalId,
+            ]);
             return;
         }
 
         $mailable = $this->buildMailable($notification);
         if ($mailable === null) {
+            Log::warning('Notification email skipped: unrecognised category', [
+                'category' => $this->category,
+            ]);
             return;
         }
 
         Mail::to($email)->send($mailable);
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::error('Transactional notification email failed', [
+            'notification_id' => $this->notificationId,
+            'category' => $this->category,
+            'professional_id' => $this->professionalId,
+            'message' => $e->getMessage(),
+        ]);
     }
 
     private function buildMailable(Notification $notification): ?\Illuminate\Mail\Mailable
