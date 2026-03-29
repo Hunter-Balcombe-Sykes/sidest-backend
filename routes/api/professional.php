@@ -28,8 +28,10 @@ use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationCon
 use App\Http\Controllers\Api\Professional\BrandOnboardingReadinessController;
 use App\Http\Controllers\Api\Professional\BrandProfileController;
 use App\Http\Controllers\Api\Professional\Store\BrandAffiliateDefaultsController;
+use App\Http\Controllers\Api\Professional\Store\BrandAffiliateSettingsController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateOverrideController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateSettingController;
+use App\Http\Controllers\Api\Professional\Store\BrandProductMediaController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
@@ -255,9 +257,26 @@ Route::get('/store/brand-analytics/overview', [StoreAnalyticsV2Controller::class
         Route::put('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'upsert']);
         Route::delete('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'remove']);
 
+        // Store: Affiliate custom product media
+        Route::get('/store/products/{brandProductId}/media', [BrandProductMediaController::class, 'index'])
+            ->whereUuid('brandProductId');
+        Route::post('/store/products/{brandProductId}/media', [BrandProductMediaController::class, 'upload'])
+            ->whereUuid('brandProductId');
+        Route::post('/store/products/{brandProductId}/media/reorder', [BrandProductMediaController::class, 'reorder'])
+            ->whereUuid('brandProductId');
+        Route::delete('/store/products/{brandProductId}/media/{mediaId}', [BrandProductMediaController::class, 'destroy'])
+            ->whereUuid('brandProductId')
+            ->whereUuid('mediaId');
+
         // Store: Brand affiliate defaults (theme + products for new affiliates)
         Route::get('/store/affiliate-defaults', [BrandAffiliateDefaultsController::class, 'show']);
         Route::patch('/store/affiliate-defaults', [BrandAffiliateDefaultsController::class, 'update']);
+
+        // Store: Per-affiliate settings (brand-managed)
+        Route::get('/store/affiliate-settings/{affiliateId}', [BrandAffiliateSettingsController::class, 'show'])
+            ->whereUuid('affiliateId');
+        Route::patch('/store/affiliate-settings/{affiliateId}', [BrandAffiliateSettingsController::class, 'update'])
+            ->whereUuid('affiliateId');
 
         // Brand profile (business fields)
         Route::get('/brand/profile', [BrandProfileController::class, 'show']);

@@ -26,11 +26,13 @@ class BrandStoreSettings extends Model
         'payout_hold_days',
         'default_affiliate_theme_id',
         'default_affiliate_product_ids',
+        'allow_affiliate_media',
     ];
 
     protected $casts = [
         'default_commission_rate' => 'decimal:2',
-        'payout_hold_days' => 'integer',
+        'payout_hold_days'        => 'integer',
+        'allow_affiliate_media'   => 'boolean',
     ];
 
     /**

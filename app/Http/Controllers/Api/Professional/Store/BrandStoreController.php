@@ -71,6 +71,7 @@ class BrandStoreController extends ApiController
             'payout_hold_days' => ['sometimes', 'integer', "min:{$minHoldDays}", 'max:365'],
             'favourite_brand_product_ids' => ['sometimes', 'array', 'max:10'],
             'favourite_brand_product_ids.*' => ['uuid'],
+            'allow_affiliate_media' => ['sometimes', 'boolean'],
         ]);
 
         if ($validator->fails()) {
@@ -93,8 +94,9 @@ class BrandStoreController extends ApiController
             && ! array_key_exists('checkout_mode', $validated)
             && ! array_key_exists('payout_hold_days', $validated)
             && ! array_key_exists('favourite_brand_product_ids', $validated)
+            && ! array_key_exists('allow_affiliate_media', $validated)
         ) {
-            return $this->error('Provide default_commission_rate, checkout_mode, payout_hold_days, and/or favourite_brand_product_ids.', 422);
+            return $this->error('Provide default_commission_rate, checkout_mode, payout_hold_days, favourite_brand_product_ids, and/or allow_affiliate_media.', 422);
         }
 
         $attributes = [];
@@ -132,6 +134,10 @@ class BrandStoreController extends ApiController
             $attributes['favourite_brand_product_ids'] = $favouriteIds;
         }
 
+        if (array_key_exists('allow_affiliate_media', $validated)) {
+            $attributes['allow_affiliate_media'] = (bool) $validated['allow_affiliate_media'];
+        }
+
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $brandProfessionalId],
             $attributes
@@ -164,13 +170,14 @@ class BrandStoreController extends ApiController
             : max($minHoldDays, $systemDefault);
 
         return [
-            'default_commission_rate' => $defaultCommission,
-            'checkout_mode' => $checkoutMode,
-            'payout_hold_days' => $storeSettings?->payout_hold_days,
-            'effective_payout_hold_days' => $effectiveHoldDays,
-            'min_payout_hold_days' => $minHoldDays,
+            'default_commission_rate'     => $defaultCommission,
+            'checkout_mode'               => $checkoutMode,
+            'payout_hold_days'            => $storeSettings?->payout_hold_days,
+            'effective_payout_hold_days'  => $effectiveHoldDays,
+            'min_payout_hold_days'        => $minHoldDays,
             'favourite_brand_product_ids' => $favouriteBrandProductIds,
-            'brand_professional_id' => $brandProfessionalId,
+            'allow_affiliate_media'       => $storeSettings ? (bool) $storeSettings->allow_affiliate_media : true,
+            'brand_professional_id'       => $brandProfessionalId,
         ];
     }
 

@@ -28,15 +28,17 @@ class BrandProductSetting extends Model
         'is_featured',
         'is_available',
         'sort_order',
+        'allow_affiliate_media',
     ];
 
     protected $casts = [
-        'commission_override' => 'decimal:2',
-        'discount_rate' => 'decimal:2',
-        'custom_price' => 'decimal:2',
-        'is_featured' => 'boolean',
-        'is_available' => 'boolean',
-        'sort_order' => 'integer',
+        'commission_override'  => 'decimal:2',
+        'discount_rate'        => 'decimal:2',
+        'custom_price'         => 'decimal:2',
+        'is_featured'          => 'boolean',
+        'is_available'         => 'boolean',
+        'sort_order'           => 'integer',
+        'allow_affiliate_media' => 'boolean',
     ];
 
     public function brandProduct(): BelongsTo
