@@ -117,13 +117,16 @@ class ProfessionalLinkBlockController extends ApiController
     {
         $pro = $this->currentProfessional($request);
         $this->authorizeCustomLinks($pro);
+        $site = $this->currentSite($pro);
 
         $ids = array_values(array_unique($request->validated()['ids'] ?? []));
 
-        DB::transaction(function () use ($pro, $ids) {
+        DB::transaction(function () use ($pro, $site, $ids) {
+            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-links:{$site->id}"]);
 
             $allIds = Block::query()
                 ->where('professional_id', $pro->id)
+                ->where('site_id', $site->id)
                 ->where('block_group', 'links')
                 ->where('block_type', 'link')
                 ->lockForUpdate()
@@ -142,10 +145,26 @@ class ProfessionalLinkBlockController extends ApiController
 
             $remaining = array_values(array_diff($allIds, $ids));
             $newOrder  = array_merge($ids, $remaining);
+            $offset    = (int) Block::query()
+                    ->where('professional_id', $pro->id)
+                    ->where('site_id', $site->id)
+                    ->where('block_group', 'links')
+                    ->max('sort_order') + 1000;
 
             foreach ($newOrder as $i => $id) {
                 Block::query()
                     ->where('professional_id', $pro->id)
+                    ->where('site_id', $site->id)
+                    ->where('block_group', 'links')
+                    ->where('block_type', 'link')
+                    ->where('id', $id)
+                    ->update(['sort_order' => $offset + $i]);
+            }
+
+            foreach ($newOrder as $i => $id) {
+                Block::query()
+                    ->where('professional_id', $pro->id)
+                    ->where('site_id', $site->id)
                     ->where('block_group', 'links')
                     ->where('block_type', 'link')
                     ->where('id', $id)
