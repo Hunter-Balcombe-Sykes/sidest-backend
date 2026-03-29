@@ -74,12 +74,18 @@ class ProfessionalAnalyticsController extends ApiController
             && $to->copy()->utc()->lte(now()->utc()->addMinute())
         );
 
-        // Generate a cache key based on professional, date range
+        // Version token lets invalidateAnalytics() bust ALL summary keys for this
+        // professional at once, regardless of date-range or granularity suffix.
+        $summaryVersion = (int) Cache::get(
+            CacheKeyGenerator::analyticsSummaryVersion($professional->id),
+            0
+        );
+
         $cacheKey = CacheKeyGenerator::analyticsSummary(
             $professional->id,
             $from->format('YmdH'),
             $to->format('YmdH')
-        ).':'.($useHourlyBuckets ? 'hour' : 'day');
+        ).':'.($useHourlyBuckets ? 'hour' : 'day').":v{$summaryVersion}";
 
         // Cache for 5 minutes (or longer for historical data)
         $cacheTTL = $to->isToday() ? now()->addMinutes(5) : now()->addHours(24);

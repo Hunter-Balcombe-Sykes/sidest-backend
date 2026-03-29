@@ -81,60 +81,90 @@ class SiteCacheService
             Cache::forget($key);
         }
 
-        $row = PublicSitePayload::query()
-            ->whereRaw('lower(subdomain) = ?', [$subdomain])
-            ->first();
+        // Cache miss — acquire a per-subdomain fill lock so only one process rebuilds
+        // the payload from the DB view while concurrent requests wait (single-flight).
+        $fillLock = Cache::lock('site:fill:' . $subdomain, 10);
 
-        // View only contains published sites; if not found, treat as 404.
-        if (! $row) {
-            // Negative-cache briefly to reduce a DB load from bot scans.
-            Cache::put($key, self::MISS_SENTINEL, now()->addSeconds(30));
-
-            return null;
+        try {
+            // Block up to 5 s for the lock; raises LockTimeoutException if it can't.
+            $fillLock->block(5);
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+            // Another process is (or was) filling the cache.
+            // Return whatever is now in cache, or null if it's still a miss.
+            $warm = Cache::get($key);
+            if ($warm === self::MISS_SENTINEL) {
+                return null;
+            }
+            return is_array($warm) ? $warm : null;
         }
 
-        $payload = $row->payload ?? [];
-        if (is_array($payload) && ! $this->hasRenderableLegalContent($payload)) {
-            $payload = $this->backfillLegalContentPayload($row, $payload);
+        try {
+            // Double-check: the lock winner may have filled the cache while we waited.
+            $rechecked = Cache::get($key);
+            if ($rechecked === self::MISS_SENTINEL) {
+                return null;
+            }
+            if (is_array($rechecked) && array_key_exists('services', $rechecked)) {
+                return $rechecked;
+            }
+
+            $row = PublicSitePayload::query()
+                ->whereRaw('lower(subdomain) = ?', [$subdomain])
+                ->first();
+
+            // View only contains published sites; if not found, treat as 404.
+            if (! $row) {
+                // Negative-cache briefly to reduce DB load from bot scans.
+                Cache::put($key, self::MISS_SENTINEL, now()->addSeconds(30));
+
+                return null;
+            }
+
+            $payload = $row->payload ?? [];
+            if (is_array($payload) && ! $this->hasRenderableLegalContent($payload)) {
+                $payload = $this->backfillLegalContentPayload($row, $payload);
+            }
+
+            $services = is_array($payload['services'] ?? null)
+                ? $payload['services']
+                : $this->buildServicesPayload((string) ($row->professional_id ?? ''));
+
+            $site = $payload['site'] ?? null;
+            if (is_array($site)) {
+                $site = $this->safeHydrateSitePayload(
+                    $site,
+                    (string) ($row->professional_id ?? ''),
+                    (string) ($row->site_id ?? ''),
+                    $subdomain
+                );
+            }
+
+            // Must match the controller response shape exactly.
+            $links = is_array($payload['links'] ?? null) ? array_values($payload['links']) : [];
+            $sections = is_array($payload['sections'] ?? null) ? array_values($payload['sections']) : [];
+            $existingBlocks = is_array($payload['blocks'] ?? null) ? array_values($payload['blocks']) : [];
+
+            $data = [
+                'published' => true,
+                'site' => $site,
+                'professional' => $payload['professional'] ?? null,
+                'theme' => $payload['theme'] ?? null,
+                'services' => $services,
+                'links' => $links,
+                'sections' => $sections,
+                'blocks' => $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks),
+                'legal' => $payload['legal'] ?? null,
+            ];
+            $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
+            $data = $this->safeWithStorePayload($data, (string) ($row->professional_id ?? ''), $subdomain);
+            $data = $this->safeApplyBrandImageFallbacks($data, $subdomain);
+
+            Cache::put($key, $data, now()->addMinutes(15));
+
+            return $data;
+        } finally {
+            $fillLock->release();
         }
-
-        $services = is_array($payload['services'] ?? null)
-            ? $payload['services']
-            : $this->buildServicesPayload((string) ($row->professional_id ?? ''));
-
-        $site = $payload['site'] ?? null;
-        if (is_array($site)) {
-            $site = $this->safeHydrateSitePayload(
-                $site,
-                (string) ($row->professional_id ?? ''),
-                (string) ($row->site_id ?? ''),
-                $subdomain
-            );
-        }
-
-        // Must match the controller response shape exactly.
-        $links = is_array($payload['links'] ?? null) ? array_values($payload['links']) : [];
-        $sections = is_array($payload['sections'] ?? null) ? array_values($payload['sections']) : [];
-        $existingBlocks = is_array($payload['blocks'] ?? null) ? array_values($payload['blocks']) : [];
-
-        $data = [
-            'published' => true,
-            'site' => $site,
-            'professional' => $payload['professional'] ?? null,
-            'theme' => $payload['theme'] ?? null,
-            'services' => $services,
-            'links' => $links,
-            'sections' => $sections,
-            'blocks' => $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks),
-            'legal' => $payload['legal'] ?? null,
-        ];
-        $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
-        $data = $this->safeWithStorePayload($data, (string) ($row->professional_id ?? ''), $subdomain);
-        $data = $this->safeApplyBrandImageFallbacks($data, $subdomain);
-
-        Cache::put($key, $data, now()->addMinutes(15));
-
-        return $data;
     }
 
     /**

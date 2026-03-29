@@ -36,3 +36,83 @@ it('adds cache headers to successful public get api responses', function () {
     expect((string) $response->headers->get('Vary', ''))->toContain('Accept-Encoding');
     expect($response->headers->get('X-Cache-Status'))->toBe('MISS');
 });
+
+it('adds Vary: X-Site-Subdomain to allow-listed public cacheable routes', function () {
+    $cacheablePaths = [
+        '/api/public/site-by-slug',
+        '/api/public/booking/config-by-slug',
+        '/api/public/booking/services-by-slug',
+        '/api/public/store/featured-products-by-slug',
+    ];
+
+    $middleware = new AddPublicCacheHeaders();
+
+    foreach ($cacheablePaths as $path) {
+        $request = Request::create($path, 'GET');
+        $response = $middleware->handle($request, fn () => new Response('ok', 200));
+
+        $vary = (string) $response->headers->get('Vary', '');
+        expect($vary)->toContain('X-Site-Subdomain');
+    }
+});
+
+it('returns no-store for tokenized unsubscribe endpoint', function () {
+    $request = Request::create('/api/public/unsubscribe/abc123token', 'GET');
+
+    $middleware = new AddPublicCacheHeaders();
+    $response = $middleware->handle($request, fn () => new Response('ok', 200));
+
+    $cacheControl = (string) $response->headers->get('Cache-Control', '');
+    expect($cacheControl)->toContain('no-store');
+    expect($cacheControl)->not->toContain('public');
+});
+
+it('returns no-store for tokenized brand-affiliate-invites endpoint', function () {
+    $request = Request::create('/api/public/brand-affiliate-invites/sometoken123', 'GET');
+
+    $middleware = new AddPublicCacheHeaders();
+    $response = $middleware->handle($request, fn () => new Response('ok', 200));
+
+    $cacheControl = (string) $response->headers->get('Cache-Control', '');
+    expect($cacheControl)->toContain('no-store');
+    expect($cacheControl)->not->toContain('public');
+});
+
+it('does not add public cache headers to non-allow-listed public paths', function () {
+    $nonCacheablePaths = [
+        '/api/public/subscribe',
+        '/api/public/customers',
+        '/api/public/signup/availability',
+        '/api/public/analytics/pageviews',
+    ];
+
+    $middleware = new AddPublicCacheHeaders();
+
+    foreach ($nonCacheablePaths as $path) {
+        $request = Request::create($path, 'GET');
+        $response = $middleware->handle($request, fn () => new Response('ok', 200));
+
+        $cacheControl = (string) $response->headers->get('Cache-Control', '');
+        expect($cacheControl)->not->toContain('public');
+    }
+});
+
+it('does not cache failed responses', function () {
+    $request = Request::create('/api/public/site-by-slug', 'GET');
+
+    $middleware = new AddPublicCacheHeaders();
+    $response = $middleware->handle($request, fn () => new Response('not found', 404));
+
+    $cacheControl = (string) $response->headers->get('Cache-Control', '');
+    expect($cacheControl)->not->toContain('public');
+});
+
+it('does not cache POST requests to public paths', function () {
+    $request = Request::create('/api/public/site-by-slug', 'POST');
+
+    $middleware = new AddPublicCacheHeaders();
+    $response = $middleware->handle($request, fn () => new Response('ok', 200));
+
+    $cacheControl = (string) $response->headers->get('Cache-Control', '');
+    expect($cacheControl)->not->toContain('public');
+});

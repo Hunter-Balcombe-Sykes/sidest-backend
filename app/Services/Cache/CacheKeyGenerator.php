@@ -94,6 +94,16 @@ class CacheKeyGenerator
         return "analytics:summary:{$professionalId}:{$startDate}:{$endDate}";
     }
 
+    /**
+     * Version token used to bust all analytics summary keys for a professional at once.
+     * Incrementing this key makes every date-range summary key for the professional stale
+     * without requiring a full key-space scan.
+     */
+    public static function analyticsSummaryVersion(string $professionalId): string
+    {
+        return "analytics:summary:ver:{$professionalId}";
+    }
+
     public static function brandFontActive(string $brandProfessionalId): string
     {
         return "brand:{$brandProfessionalId}:font:active";

@@ -16,7 +16,10 @@ class WarmPublicSiteCacheJob implements ShouldQueue
     public function __construct(
         public string $subdomain
     ) {
-        $this->onQueue('cache');
+        // Use the 'default' queue so standard workers pick this up automatically.
+        // Previously dispatched to 'cache', a named queue that may not be consumed
+        // in all worker deployments, which would silently prevent cache warming.
+        $this->onQueue('default');
     }
 
     public function handle(SiteCacheService $siteCache): void

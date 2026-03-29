@@ -32,13 +32,17 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->append(SecureHeaders::class);
 
+        // Apply public-cache headers to every API route. The middleware itself
+        // only emits Cache-Control/Vary headers for the allow-listed public paths;
+        // all other routes pass through untouched.
+        $middleware->appendToGroup('api', AddPublicCacheHeaders::class);
+
         $middleware->alias([
             'supabase.jwt' => VerifySupabaseJwt::class,
             'current.pro'  => LoadCurrentProfessional::class,
             'staff'        => EnsureCometStaff::class,
             'staff.admin'  => EnsureCometAdmin::class,
             'lead.log'     => LogLeadRateLimits::class,
-            'api'          => AddPublicCacheHeaders::class,
             'plan'         => RequirePlan::class,
         ]);
     })
