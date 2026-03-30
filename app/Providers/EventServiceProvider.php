@@ -10,11 +10,13 @@ use App\Models\Core\Professional\ProfessionalLegalContent;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteMedia;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\ProfessionalSelection;
 use App\Models\Core\Professional\Customer;
 use App\Observers\Core\BrandAffiliateInviteObserver;
+use App\Observers\Core\SiteMediaObserver;
 use App\Observers\Core\BrandProfileObserver;
 use App\Observers\Core\BlockObserver;
 use App\Observers\Core\CommissionLedgerEntryObserver;
@@ -48,5 +50,6 @@ class EventServiceProvider extends ServiceProvider
         ProfessionalIntegration::observe(ProfessionalIntegrationObserver::class);
         BrandProfile::observe(BrandProfileObserver::class);
         ProfessionalSelection::observe(ProfessionalSelectionObserver::class);
+        SiteMedia::observe(SiteMediaObserver::class);
     }
 }

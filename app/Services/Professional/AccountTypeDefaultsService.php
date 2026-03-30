@@ -9,9 +9,13 @@ use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\ProfessionalSelection;
+use App\Services\Professional\SectionVisibilityService;
 
 class AccountTypeDefaultsService
 {
+    public function __construct(
+        private readonly SectionVisibilityService $visibilityService,
+    ) {}
     /**
      * Resolve the effective config for a professional type, handling inheritance.
      */
@@ -54,8 +58,12 @@ class AccountTypeDefaultsService
         $allowedSections = $defaults['allowed_sections'] ?? [];
         $defaultSections = $defaults['default_sections'] ?? [];
         $sectionsToCreate = $professional->isBrand() ? $defaultSections : $allowedSections;
-
         foreach (array_values($sectionsToCreate) as $sortOrder => $blockType) {
+            [$isEnabled] = $this->visibilityService->checkVisibilityRequirements(
+                (string) $professional->id,
+                (string) $site->id,
+                $blockType
+            );
             Block::query()->firstOrCreate(
                 [
                     'professional_id' => $professional->id,
@@ -65,7 +73,7 @@ class AccountTypeDefaultsService
                 ],
                 [
                     'sort_order'  => $sortOrder,
-                    'is_enabled'  => true,
+                    'is_enabled'  => $isEnabled,
                     'is_active'   => false,
                     'settings'    => [],
                 ]

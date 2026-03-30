@@ -8,6 +8,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Services\Cache\ProfessionalCacheService;
+use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
 
 class ServiceObserver
@@ -15,7 +16,8 @@ class ServiceObserver
     public bool $afterCommit = true;
 
     public function __construct(
-        private readonly ProfessionalCacheService $professionalCache
+        private readonly ProfessionalCacheService $professionalCache,
+        private readonly SectionVisibilityService $visibilityService,
     ) {}
 
     private function bust(Service $service): ?Professional
@@ -42,6 +44,8 @@ class ServiceObserver
     {
         $pro = $this->bust($service);
 
+        $this->reevaluateBooking($service, $pro);
+
         if ($this->shouldDispatchSquareSync($pro)) {
             $this->dispatchSquareSync($service->id, 'upsert');
         }
@@ -54,6 +58,8 @@ class ServiceObserver
     public function deleted(Service $service): void
     {
         $pro = $this->bust($service);
+
+        $this->reevaluateBooking($service, $pro);
 
         if ($this->shouldDispatchSquareSync($pro)) {
             $this->dispatchSquareSync($service->id, 'delete');
@@ -68,12 +74,36 @@ class ServiceObserver
     {
         $pro = $this->bust($service);
 
+        $this->reevaluateBooking($service, $pro);
+
         if ($this->shouldDispatchSquareSync($pro)) {
             $this->dispatchSquareSync($service->id, 'upsert');
         }
 
         if ($this->shouldDispatchFreshaSync($pro)) {
             $this->dispatchFreshaSync($service->id, 'upsert');
+        }
+    }
+
+    private function reevaluateBooking(Service $service, ?Professional $pro): void
+    {
+        try {
+            $site = $pro?->site;
+            if (! $site) {
+                return;
+            }
+
+            $this->visibilityService->reevaluateEnabled(
+                (string) $service->professional_id,
+                (string) $site->id,
+                'booking'
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Booking section visibility reevaluation failed on service change', [
+                'service_id'      => $service->id,
+                'professional_id' => $service->professional_id,
+                'message'         => $e->getMessage(),
+            ]);
         }
     }
 
