@@ -196,16 +196,22 @@ class ProfessionalSectionBlockController extends ApiController
         return DB::transaction(function () use ($professionalId, $siteId, $orderedAllowed) {
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-sections:{$siteId}"]);
 
-            $blocks = Block::query()
+            $allBlocks = Block::query()
                 ->where('professional_id', $professionalId)
                 ->where('site_id', $siteId)
                 ->where('block_group', 'sections')
-                ->whereIn('block_type', $orderedAllowed)
+                ->lockForUpdate()
+                ->orderBy('sort_order')
+                ->orderBy('created_at')
                 ->get()
-                ->keyBy('block_type');
+                ->values();
 
-            foreach ($orderedAllowed as $sortOrder => $blockType) {
-                $block = $blocks->get($blockType) ?? new Block([
+            $blocksByType = $allBlocks->keyBy('block_type');
+
+            $orderedBlocks = collect();
+
+            foreach ($orderedAllowed as $blockType) {
+                $block = $blocksByType->get($blockType) ?? new Block([
                     'professional_id' => $professionalId,
                     'site_id' => $siteId,
                     'block_group' => 'sections',
@@ -217,13 +223,50 @@ class ProfessionalSectionBlockController extends ApiController
                     $block->is_active = false;
                 }
 
-                $block->sort_order = $sortOrder;
                 $block->is_enabled = true;
-                $block->save();
-                $blocks->put($blockType, $block);
+                $blocksByType->put($blockType, $block);
+                $orderedBlocks->push($block);
             }
 
-            return $blocks->values();
+            $maxSort = Block::query()
+                ->where('professional_id', $professionalId)
+                ->where('site_id', $siteId)
+                ->where('block_group', 'sections')
+                ->max('sort_order');
+
+            $offset = (int) (is_null($maxSort) ? 0 : $maxSort) + 1000;
+
+            // Two-pass update to avoid transient unique collisions while reshuffling.
+            foreach ($allBlocks as $index => $block) {
+                $block->sort_order = $offset + $index;
+                $block->save();
+            }
+
+            $nextTempSort = $offset + $allBlocks->count();
+            foreach ($orderedBlocks as $block) {
+                if (! $block->exists) {
+                    $block->sort_order = $nextTempSort++;
+                    $block->save();
+                }
+            }
+
+            foreach ($orderedBlocks as $sortOrder => $block) {
+                $block->sort_order = $sortOrder;
+                $block->save();
+            }
+
+            $allowedSet = array_flip($orderedAllowed);
+            $nextSortOrder = $orderedBlocks->count();
+            foreach ($allBlocks as $block) {
+                if (isset($allowedSet[$block->block_type])) {
+                    continue;
+                }
+
+                $block->sort_order = $nextSortOrder++;
+                $block->save();
+            }
+
+            return $orderedBlocks->values();
         });
     }
 
