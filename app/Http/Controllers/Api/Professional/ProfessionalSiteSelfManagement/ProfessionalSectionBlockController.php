@@ -204,17 +204,10 @@ class ProfessionalSectionBlockController extends ApiController
                 ->get()
                 ->keyBy('block_type');
 
-<<<<<<< ours
-            $blocksByType = $allBlocks->keyBy('block_type');
-
-            $orderedBlocks = new Collection();
-
-            foreach ($orderedAllowed as $blockType) {
-                $block = $blocksByType->get($blockType) ?? new Block([
-=======
+                
             foreach ($orderedAllowed as $sortOrder => $blockType) {
                 $block = $blocks->get($blockType) ?? new Block([
->>>>>>> theirs
+
                     'professional_id' => $professionalId,
                     'site_id' => $siteId,
                     'block_group' => 'sections',
@@ -232,22 +225,8 @@ class ProfessionalSectionBlockController extends ApiController
                 $blocks->put($blockType, $block);
             }
 
-<<<<<<< ours
-            $allowedSet = array_flip($orderedAllowed);
-            $nextSortOrder = $orderedBlocks->count();
-            foreach ($allBlocks as $block) {
-                if (isset($allowedSet[$block->block_type])) {
-                    continue;
-                }
-
-                $block->sort_order = $nextSortOrder++;
-                $block->save();
-            }
-
-            return new Collection($orderedBlocks->values()->all());
-=======
             return $blocks->values();
->>>>>>> theirs
+            
         });
     }
 
