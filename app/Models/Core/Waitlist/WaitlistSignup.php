@@ -9,7 +9,7 @@ class WaitlistSignup extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'waitlist_signups';
+    protected $table = 'core.waitlist_signups';
 
     public $incrementing = false;
     protected $keyType = 'string';

@@ -94,59 +94,93 @@ class SendPromotionStartNotificationsJob implements ShouldQueue
 
     private function notifyAffiliates(BrandPromotion $promotion, NotificationPublisher $publisher): void
     {
-        $affiliateIds = $this->resolveAffiliateIds($promotion);
-
-        if ($affiliateIds === []) {
-            return;
-        }
-
         $promotionId = (string) $promotion->id;
         $title = 'New promotion started';
         $body = "A new promotion is active: {$promotion->name}";
 
-        foreach (array_chunk($affiliateIds, self::BATCH_SIZE) as $batch) {
-            foreach ($batch as $affiliateId) {
-                try {
-                    $publisher->publish(
-                        professionalId: $affiliateId,
-                        frontendType: 'Info',
-                        category: 'catalog_changes',
-                        title: $title,
-                        body: $body,
-                        dedupeKey: "promotion.started.{$promotionId}.{$affiliateId}",
-                        ctaUrl: '/account/store',
-                    );
-                } catch (Throwable $e) {
-                    Log::warning('SendPromotionStartNotificationsJob: failed to notify affiliate', [
-                        'affiliate_id' => $affiliateId,
-                        'promotion_id' => $promotionId,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
+        $notify = function (string $affiliateId) use ($publisher, $promotionId, $title, $body): void {
+            try {
+                $publisher->publish(
+                    professionalId: $affiliateId,
+                    frontendType: 'Info',
+                    category: 'catalog_changes',
+                    title: $title,
+                    body: $body,
+                    dedupeKey: "promotion.started.{$promotionId}.{$affiliateId}",
+                    ctaUrl: '/account/store',
+                );
+            } catch (Throwable $e) {
+                Log::warning('SendPromotionStartNotificationsJob: failed to notify affiliate', [
+                    'affiliate_id' => $affiliateId,
+                    'promotion_id' => $promotionId,
+                    'error' => $e->getMessage(),
+                ]);
             }
+        };
+
+        match ($promotion->affiliate_scope) {
+            'affiliates' => $this->notifyExplicitAffiliates($promotion->affiliate_ids, $notify),
+            'segments' => $this->notifySegmentAffiliates($promotion->affiliate_segment_ids, $notify),
+            default => $this->notifyAllAffiliates((string) $promotion->brand_professional_id, $notify),
+        };
+    }
+
+    /**
+     * Scope = 'affiliates': bounded list from the promotion, safe to iterate directly.
+     *
+     * @param  array<int, string>  $affiliateIds
+     * @param  callable(string): void  $notify
+     */
+    private function notifyExplicitAffiliates(array $affiliateIds, callable $notify): void
+    {
+        foreach ($affiliateIds as $affiliateId) {
+            $notify($affiliateId);
         }
     }
 
     /**
-     * @return array<int, string>
+     * Scope = 'segments': stream affiliate IDs from segment membership in chunks.
+     *
+     * @param  array<int, string>  $segmentIds
+     * @param  callable(string): void  $notify
      */
-    private function resolveAffiliateIds(BrandPromotion $promotion): array
+    private function notifySegmentAffiliates(array $segmentIds, callable $notify): void
     {
-        $brandId = (string) $promotion->brand_professional_id;
+        $seen = [];
 
-        return match ($promotion->affiliate_scope) {
-            'affiliates' => $promotion->affiliate_ids,
-            'segments' => DB::table('retail.brand_affiliate_segment_members')
-                ->whereIn('segment_id', $promotion->affiliate_segment_ids)
-                ->distinct()
-                ->pluck('affiliate_professional_id')
-                ->map(static fn ($id): string => (string) $id)
-                ->all(),
-            default => DB::table('core.brand_partner_links')
-                ->where('brand_professional_id', $brandId)
-                ->pluck('affiliate_professional_id')
-                ->map(static fn ($id): string => (string) $id)
-                ->all(),
-        };
+        DB::table('retail.brand_affiliate_segment_members')
+            ->select('id', 'affiliate_professional_id')
+            ->whereIn('segment_id', $segmentIds)
+            ->orderBy('id')
+            ->chunkById(self::BATCH_SIZE, function ($rows) use ($notify, &$seen): void {
+                foreach ($rows as $row) {
+                    $affiliateId = (string) $row->affiliate_professional_id;
+
+                    if (isset($seen[$affiliateId])) {
+                        continue;
+                    }
+
+                    $seen[$affiliateId] = true;
+                    $notify($affiliateId);
+                }
+            }, 'id');
+    }
+
+    /**
+     * Scope = 'all' (default): stream all brand partner links in chunks.
+     *
+     * @param  callable(string): void  $notify
+     */
+    private function notifyAllAffiliates(string $brandId, callable $notify): void
+    {
+        DB::table('core.brand_partner_links')
+            ->select('id', 'affiliate_professional_id')
+            ->where('brand_professional_id', $brandId)
+            ->orderBy('id')
+            ->chunkById(self::BATCH_SIZE, function ($rows) use ($notify): void {
+                foreach ($rows as $row) {
+                    $notify((string) $row->affiliate_professional_id);
+                }
+            }, 'id');
     }
 }

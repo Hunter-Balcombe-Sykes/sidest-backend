@@ -10,6 +10,13 @@ class SegmentEvaluationService
 {
     private const MAX_SEGMENT_SIZE = 200;
 
+    private const ALLOWED_METRIC_COLUMNS = ['net_cents', 'orders_count', 'commission_net_cents'];
+
+    private const ALLOWED_DIRECTIONS = ['ASC', 'DESC'];
+
+    /** @var array<string, string> In-memory cache for primary currency per brand. */
+    private array $currencyCache = [];
+
     /**
      * Evaluate the segment criteria and refresh the cached membership.
      *
@@ -33,7 +40,7 @@ class SegmentEvaluationService
                             'created_at' => now()->toDateTimeString(),
                         ]), $members),
                         ['segment_id', 'affiliate_professional_id'],
-                        ['rank', 'metric_value', 'created_at']
+                        ['rank', 'metric_value']
                     );
             }
 
@@ -97,6 +104,14 @@ class SegmentEvaluationService
         int $size,
         ?int $lookbackDays
     ): array {
+        if (! in_array($metricColumn, self::ALLOWED_METRIC_COLUMNS, true)) {
+            throw new \InvalidArgumentException("Invalid metric column: {$metricColumn}");
+        }
+
+        if (! in_array($direction, self::ALLOWED_DIRECTIONS, true)) {
+            throw new \InvalidArgumentException("Invalid sort direction: {$direction}");
+        }
+
         $primaryCurrency = $this->resolvePrimaryCurrency($brandId);
 
         $query = DB::table('analytics.brand_influencer_daily')
@@ -108,7 +123,7 @@ class SegmentEvaluationService
             ->limit($size);
 
         if ($lookbackDays !== null && $lookbackDays > 0) {
-            $query->whereRaw("day >= CURRENT_DATE - INTERVAL '{$lookbackDays} days'");
+            $query->where('day', '>=', now()->subDays($lookbackDays)->toDateString());
         }
 
         return $this->buildMemberRows($query->get()->all());
@@ -178,6 +193,10 @@ class SegmentEvaluationService
      */
     private function resolvePrimaryCurrency(string $brandId): string
     {
+        if (isset($this->currencyCache[$brandId])) {
+            return $this->currencyCache[$brandId];
+        }
+
         $currency = DB::table('retail.orders')
             ->selectRaw('currency_code, COUNT(*) as cnt')
             ->where('brand_professional_id', $brandId)
@@ -185,6 +204,10 @@ class SegmentEvaluationService
             ->orderByDesc('cnt')
             ->value('currency_code');
 
-        return is_string($currency) && $currency !== '' ? strtoupper($currency) : 'AUD';
+        $resolved = is_string($currency) && $currency !== '' ? strtoupper($currency) : 'AUD';
+
+        $this->currencyCache[$brandId] = $resolved;
+
+        return $resolved;
     }
 }

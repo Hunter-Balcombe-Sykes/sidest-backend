@@ -6,8 +6,9 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\HashesClientData;
 use App\Http\Requests\Api\PublicSite\PublicWaitlistSignupRequest;
 use App\Models\Core\Waitlist\WaitlistSignup;
-use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class PublicWaitlistController extends ApiController
 {
@@ -35,7 +36,7 @@ class PublicWaitlistController extends ApiController
             'currently_sells_products' => $data['currently_sells_products'] ?? null,
             'consent_source' => 'waitlist_form',
             'consent_ip_hash' => $this->hashIp($request->ip()),
-            'consent_user_agent' => $request->userAgent(),
+            'consent_user_agent' => mb_substr((string) ($request->userAgent() ?? ''), 0, 500) ?: null,
             'last_submitted_at' => $submittedAt,
         ];
 
@@ -46,39 +47,24 @@ class PublicWaitlistController extends ApiController
 
     private function upsertWaitlistSignup(string $emailLc, array $payload): WaitlistSignup
     {
-        try {
-            return WaitlistSignup::query()->updateOrCreate(
-                ['email_lc' => $emailLc],
-                $payload
-            );
-        } catch (QueryException $exception) {
-            if (! $this->isUniqueConstraintViolation($exception)) {
-                throw $exception;
-            }
+        $wasInserted = DB::table('core.waitlist_signups')
+            ->where('email_lc', $emailLc)
+            ->doesntExist();
 
-            $existing = WaitlistSignup::query()
-                ->where('email_lc', $emailLc)
-                ->first();
+        WaitlistSignup::query()->upsert(
+            [array_merge($payload, ['id' => (string) Str::uuid()])],
+            ['email_lc'],
+            array_keys(array_diff_key($payload, array_flip(['email_lc'])))
+        );
 
-            if (! $existing) {
-                throw $exception;
-            }
+        $signup = WaitlistSignup::query()->where('email_lc', $emailLc)->firstOrFail();
 
-            $existing->fill($payload);
-            $existing->save();
-
-            return $existing;
-        }
-    }
-
-    private function isUniqueConstraintViolation(QueryException $exception): bool
-    {
-        $code = (string) $exception->getCode();
-        if ($code === '23505' || $code === '23000') {
-            return true;
+        // Simulate wasRecentlyCreated for status code logic
+        if ($wasInserted) {
+            // Use reflection or a flag since upsert doesn't set wasRecentlyCreated
+            $signup->wasRecentlyCreated = true;
         }
 
-        $message = mb_strtolower((string) $exception->getMessage());
-        return str_contains($message, 'unique') && str_contains($message, 'email_lc');
+        return $signup;
     }
 }

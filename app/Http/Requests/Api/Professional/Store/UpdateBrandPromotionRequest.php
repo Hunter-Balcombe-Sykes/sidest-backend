@@ -59,6 +59,38 @@ class UpdateBrandPromotionRequest extends BaseFormRequest
                     // Handled by 'date' rules above.
                 }
             }
+
+            // When only ends_at is provided, validate against the existing starts_at
+            if (!empty($data['ends_at']) && empty($data['starts_at'])) {
+                $promotionId = $this->route('promotionId');
+                if ($promotionId) {
+                    $existing = \App\Models\Retail\BrandPromotion::find($promotionId);
+                    if ($existing && $existing->starts_at) {
+                        try {
+                            $endsAt = new \DateTime($data['ends_at']);
+                            if ($endsAt <= $existing->starts_at) {
+                                $v->errors()->add('ends_at', 'ends_at must be after the existing starts_at.');
+                            }
+                        } catch (\Exception) {}
+                    }
+                }
+            }
+
+            // When only starts_at is provided, validate against the existing ends_at
+            if (!empty($data['starts_at']) && empty($data['ends_at'])) {
+                $promotionId = $this->route('promotionId');
+                if ($promotionId) {
+                    $existing = \App\Models\Retail\BrandPromotion::find($promotionId);
+                    if ($existing && $existing->ends_at) {
+                        try {
+                            $startsAt = new \DateTime($data['starts_at']);
+                            if ($existing->ends_at <= $startsAt) {
+                                $v->errors()->add('starts_at', 'starts_at must be before the existing ends_at.');
+                            }
+                        } catch (\Exception) {}
+                    }
+                }
+            }
         });
     }
 }

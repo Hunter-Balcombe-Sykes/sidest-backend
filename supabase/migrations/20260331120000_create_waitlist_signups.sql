@@ -129,7 +129,7 @@ DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_backend') THEN
         EXECUTE 'GRANT USAGE ON SCHEMA core TO app_backend';
-        EXECUTE 'GRANT SELECT, INSERT, UPDATE ON TABLE core.waitlist_signups TO app_backend';
+        EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE core.waitlist_signups TO app_backend';
     END IF;
 END $$;
 

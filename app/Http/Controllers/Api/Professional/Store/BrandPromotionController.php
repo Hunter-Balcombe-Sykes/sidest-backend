@@ -55,9 +55,18 @@ class BrandPromotionController extends ApiController
             default => null,
         };
 
-        $promotions = $query->get();
+        $perPage = min((int) ($request->query('per_page', 50)), 100);
+        $promotions = $query->paginate($perPage);
 
-        return $this->success($promotions->map(fn ($p) => $this->buildPayload($p))->values()->all());
+        return $this->success([
+            'data' => collect($promotions->items())->map(fn ($p) => $this->buildPayload($p))->values()->all(),
+            'meta' => [
+                'current_page' => $promotions->currentPage(),
+                'per_page' => $promotions->perPage(),
+                'total' => $promotions->total(),
+                'last_page' => $promotions->lastPage(),
+            ],
+        ]);
     }
 
     /**
