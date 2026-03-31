@@ -40,6 +40,14 @@ class BootstrapController extends ApiController
             return $this->error('Unauthenticated', 401);
         }
 
+        if ($this->isWaitlistModeEnabled() && ! $this->hasExistingProfessional($uid)) {
+            return $this->error(
+                'New account creation is currently waitlist-only. Please join the waitlist.',
+                403,
+                ['code' => 'WAITLIST_ONLY']
+            );
+        }
+
         $data = $request->validated();
 
         try {
@@ -430,5 +438,17 @@ class BootstrapController extends ApiController
 
         $site->settings = $settings;
         $site->save();
+    }
+
+    private function isWaitlistModeEnabled(): bool
+    {
+        return (bool) config('comet.waitlist.enabled', false);
+    }
+
+    private function hasExistingProfessional(string $uid): bool
+    {
+        return Professional::query()
+            ->where('auth_user_id', $uid)
+            ->exists();
     }
 }

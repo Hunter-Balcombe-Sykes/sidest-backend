@@ -41,6 +41,24 @@ return [
         'influencer' => 'Influencer',
     ],
 
+    'waitlist' => [
+        'enabled' => (bool) env('COMET_WAITLIST_ENABLED', false),
+        'types' => [
+            'influencer' => 'Influencer',
+            'professional' => 'Professional',
+            'brand' => 'Brand',
+            'other' => 'Other',
+        ],
+        'industries' => [
+            'mens_grooming' => 'Mens Grooming',
+            'womens_haircare' => 'Womens Haircare',
+            'beauty_products' => 'Beauty Products',
+            'vitamins_and_supplements' => 'Vitamins and Supplements',
+            'services_and_software' => 'Services and Software',
+            'other' => 'Other',
+        ],
+    ],
+
     /*
     |----------------------------------------------------------------------
     | Account type defaults – applied during registration

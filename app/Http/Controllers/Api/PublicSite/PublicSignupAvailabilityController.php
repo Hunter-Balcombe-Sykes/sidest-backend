@@ -11,6 +11,8 @@ class PublicSignupAvailabilityController extends ApiController
 {
     public function check(Request $request): JsonResponse
     {
+        $signupsOpen = ! (bool) config('comet.waitlist.enabled', false);
+
         $validated = $request->validate([
             'email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'phone' => ['sometimes', 'nullable', 'string', 'max:50'],
@@ -61,6 +63,8 @@ class PublicSignupAvailabilityController extends ApiController
                 'available' => !$handleExists,
                 'exists' => $handleExists,
             ],
+            'signups_open' => $signupsOpen,
+            'waitlist_only' => ! $signupsOpen,
         ]);
     }
 }
