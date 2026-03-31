@@ -208,7 +208,7 @@ class ProfessionalSectionBlockController extends ApiController
 
             $blocksByType = $allBlocks->keyBy('block_type');
 
-            $orderedBlocks = new Collection();
+            $orderedBlocks = collect();
 
             foreach ($orderedAllowed as $blockType) {
                 $block = $blocksByType->get($blockType) ?? new Block([
@@ -266,7 +266,7 @@ class ProfessionalSectionBlockController extends ApiController
                 $block->save();
             }
 
-            return new Collection($orderedBlocks->values()->all());
+            return $orderedBlocks->values();
         });
     }
 
