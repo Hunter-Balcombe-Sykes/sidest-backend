@@ -5,12 +5,14 @@ namespace App\Services\Store;
 use App\Models\Core\Professional\BrandPartnerLink;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use App\Services\Store\PromotionResolutionService;
 
 class BrandProductCatalogService
 {
     public function __construct(
         private readonly BrandPricingService $pricing,
-        private readonly BrandProductSettingsService $settingsRows
+        private readonly BrandProductSettingsService $settingsRows,
+        private readonly PromotionResolutionService $promotionService,
     ) {}
 
     /**
@@ -147,7 +149,7 @@ class BrandProductCatalogService
             ])
             ->get();
 
-        return $this->mapCatalogRows($rows);
+        return $this->mapCatalogRows($rows, false, $affiliateProfessionalId);
     }
 
     /**
@@ -243,7 +245,7 @@ class BrandProductCatalogService
             ])
             ->get();
 
-        return $this->mapCatalogRows($rows);
+        return $this->mapCatalogRows($rows, false, null);
     }
 
     /**
@@ -363,7 +365,7 @@ class BrandProductCatalogService
             ])
             ->get();
 
-        return $this->mapCatalogRows($rows, true);
+        return $this->mapCatalogRows($rows, true, $professionalId);
     }
 
     private function pruneInvalidSelectionsForProfessional(string $professionalId): void
@@ -419,19 +421,41 @@ class BrandProductCatalogService
      * @param  Collection<int, mixed>  $rows
      * @return array<int, array<string, mixed>>
      */
-    private function mapCatalogRows(Collection $rows, bool $selectedRows = false): array
+    private function mapCatalogRows(Collection $rows, bool $selectedRows = false, ?string $affiliateProfessionalId = null): array
     {
         $defaultSystemCommission = $this->pricing->defaultCommissionRate();
 
+        // Warm the promotion cache once per brand before iterating rows.
+        $firstBrandId = (string) ($rows->first()->brand_professional_id ?? '');
+        if ($firstBrandId !== '') {
+            $this->promotionService->getActivePromotionsForBrand($firstBrandId);
+        }
+
         return $rows
-            ->map(function ($row) use ($defaultSystemCommission, $selectedRows): array {
+            ->map(function ($row) use ($defaultSystemCommission, $selectedRows, $affiliateProfessionalId): array {
                 $commissionOverride = $this->toNullableFloat($row->commission_override ?? null);
                 $discountRate = $this->toNullableFloat($row->discount_rate ?? null);
                 $customPrice = $this->toNullableFloat($row->custom_price ?? null);
                 $affiliateCommissionOverride = $this->toNullableFloat($row->affiliate_commission_override ?? null);
                 $affiliateDiscountRate = $this->toNullableFloat($row->affiliate_discount_rate ?? null);
                 $affiliateCustomPrice = $this->toNullableFloat($row->affiliate_custom_price ?? null);
-                $effectiveDiscountRate = $affiliateDiscountRate ?? $discountRate;
+
+                // Resolve active promotion (PHP-only after cache warm above).
+                $promotion = ($affiliateProfessionalId !== null && $affiliateProfessionalId !== '')
+                    ? $this->promotionService->resolveActivePromotion(
+                        (string) ($row->brand_professional_id ?? ''),
+                        $affiliateProfessionalId,
+                        (string) ($row->brand_product_id ?? '')
+                    )
+                    : null;
+
+                // Discount: higher rate wins (higher discount = better for customer).
+                $staticDiscountRate = $affiliateDiscountRate ?? $discountRate;
+                $promoDiscountRate = $promotion['discount_rate'] ?? null;
+                $effectiveDiscountRate = ($promoDiscountRate !== null && $promoDiscountRate > ($staticDiscountRate ?? 0.0))
+                    ? $promoDiscountRate
+                    : $staticDiscountRate;
+
                 $effectiveCustomPrice = $affiliateCustomPrice ?? $customPrice;
                 $defaultCommissionRate = $this->toNullableFloat($row->default_commission_rate ?? null)
                     ?? $defaultSystemCommission;
@@ -464,6 +488,7 @@ class BrandProductCatalogService
                 );
                 $discountedPriceCents = $this->pricing->discountedPriceCents($basePriceCents, $effectiveDiscountRate);
                 $effectiveCommissionRate = $this->pricing->effectiveCommissionRate(
+                    $promotion['commission_rate'] ?? null,
                     $affiliateCommissionOverride,
                     $commissionOverride,
                     $defaultCommissionRate

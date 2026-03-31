@@ -9,6 +9,7 @@ use App\Models\Retail\OrderEventInbox;
 use App\Models\Retail\OrderItem;
 use App\Models\Retail\RetailOrder;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Store\PromotionResolutionService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,10 @@ use Throwable;
 
 class ShopifyOrderProcessingService
 {
+    public function __construct(
+        private readonly PromotionResolutionService $promotionService,
+    ) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -574,7 +579,7 @@ class ShopifyOrderProcessingService
      * regardless of how many line items the order contains.
      *
      * @param  array<int, string|null>  $brandProductIds  Ordered list of resolved brand_product_id per line item (may contain nulls)
-     * @return array<string, array{rate: float, source: string, metadata: array<string, mixed>}>
+     * @return array<string, array{rate: float, source: string, metadata: array<string, mixed>, is_static: bool}>
      */
     private function prefetchCommissionRates(
         string $brandProfessionalId,
@@ -611,6 +616,10 @@ class ShopifyOrderProcessingService
 
         $systemDefault = (float) config('comet.store.default_commission_rate', 15);
 
+        // Warm the promotion cache for this brand so resolveCommissionRate() can use it
+        // without issuing additional queries per line item.
+        $this->promotionService->getActivePromotionsForBrand($brandProfessionalId);
+
         foreach ($brandProductIds as $brandProductId) {
             $cacheKey = implode('|', [$brandProfessionalId, $affiliateProfessionalId, $brandProductId ?? 'none']);
 
@@ -619,13 +628,13 @@ class ShopifyOrderProcessingService
             }
 
             if ($brandProductId !== null && isset($affiliateOverrides[$brandProductId])) {
-                $this->storeCommissionRateCache($cache, $cacheKey, (float) $affiliateOverrides[$brandProductId], 'affiliate_product_override', ['brand_product_id' => $brandProductId]);
+                $this->storeCommissionRateCache($cache, $cacheKey, (float) $affiliateOverrides[$brandProductId], 'affiliate_product_override', ['brand_product_id' => $brandProductId], true);
             } elseif ($brandProductId !== null && isset($brandProductOverrides[$brandProductId])) {
-                $this->storeCommissionRateCache($cache, $cacheKey, (float) $brandProductOverrides[$brandProductId], 'brand_product_override', ['brand_product_id' => $brandProductId]);
+                $this->storeCommissionRateCache($cache, $cacheKey, (float) $brandProductOverrides[$brandProductId], 'brand_product_override', ['brand_product_id' => $brandProductId], true);
             } elseif ($brandDefault !== null) {
-                $this->storeCommissionRateCache($cache, $cacheKey, (float) $brandDefault, 'brand_default', []);
+                $this->storeCommissionRateCache($cache, $cacheKey, (float) $brandDefault, 'brand_default', [], true);
             } else {
-                $this->storeCommissionRateCache($cache, $cacheKey, $systemDefault, 'system_default', []);
+                $this->storeCommissionRateCache($cache, $cacheKey, $systemDefault, 'system_default', [], true);
             }
         }
 
@@ -633,7 +642,7 @@ class ShopifyOrderProcessingService
     }
 
     /**
-     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>}>  $cache
+     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>, is_static: bool}>  $cache
      * @return array{0: float, 1: string, 2: array<string, mixed>}
      */
     private function resolveCommissionRate(
@@ -645,6 +654,20 @@ class ShopifyOrderProcessingService
         $cacheKey = implode('|', [$brandProfessionalId, $affiliateProfessionalId, $brandProductId ?? 'none']);
         if (isset($cache[$cacheKey])) {
             $cached = $cache[$cacheKey];
+
+            if (($cached['is_static'] ?? false) === true) {
+                // Prefetch stores static hierarchy values only; merge promotion each time.
+                return $this->applyPromotionRate(
+                    $cache,
+                    $cacheKey,
+                    $cached['rate'],
+                    $cached['source'],
+                    $cached['metadata'],
+                    $brandProfessionalId,
+                    $affiliateProfessionalId,
+                    $brandProductId
+                );
+            }
 
             return [$cached['rate'], $cached['source'], $cached['metadata']];
         }
@@ -658,12 +681,15 @@ class ShopifyOrderProcessingService
                 ->value('bpas.commission_override');
 
             if ($affiliateOverride !== null) {
-                return $this->storeCommissionRateCache(
+                return $this->applyPromotionRate(
                     $cache,
                     $cacheKey,
                     (float) $affiliateOverride,
                     'affiliate_product_override',
-                    ['brand_product_id' => $brandProductId]
+                    ['brand_product_id' => $brandProductId],
+                    $brandProfessionalId,
+                    $affiliateProfessionalId,
+                    $brandProductId
                 );
             }
 
@@ -674,12 +700,15 @@ class ShopifyOrderProcessingService
                 ->value('bps.commission_override');
 
             if ($brandOverride !== null) {
-                return $this->storeCommissionRateCache(
+                return $this->applyPromotionRate(
                     $cache,
                     $cacheKey,
                     (float) $brandOverride,
                     'brand_product_override',
-                    ['brand_product_id' => $brandProductId]
+                    ['brand_product_id' => $brandProductId],
+                    $brandProfessionalId,
+                    $affiliateProfessionalId,
+                    $brandProductId
                 );
             }
         }
@@ -690,26 +719,79 @@ class ShopifyOrderProcessingService
             ->value('bss.default_commission_rate');
 
         if ($brandDefault !== null) {
-            return $this->storeCommissionRateCache(
+            return $this->applyPromotionRate(
                 $cache,
                 $cacheKey,
                 (float) $brandDefault,
                 'brand_default',
-                []
+                [],
+                $brandProfessionalId,
+                $affiliateProfessionalId,
+                $brandProductId
             );
         }
 
-        return $this->storeCommissionRateCache(
+        return $this->applyPromotionRate(
             $cache,
             $cacheKey,
             (float) config('comet.store.default_commission_rate', 15),
             'system_default',
-            []
+            [],
+            $brandProfessionalId,
+            $affiliateProfessionalId,
+            $brandProductId
         );
     }
 
     /**
-     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>}>  $cache
+     * Compare the resolved static rate against any active promotion and return the higher rate.
+     * Promotions act as a rate boost — they never reduce a rate below the static hierarchy.
+     *
+     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>, is_static: bool}>  $cache
+     * @param  array<string, mixed>  $staticMetadata
+     * @return array{0: float, 1: string, 2: array<string, mixed>}
+     */
+    private function applyPromotionRate(
+        array &$cache,
+        string $cacheKey,
+        float $staticRate,
+        string $staticSource,
+        array $staticMetadata,
+        string $brandProfessionalId,
+        string $affiliateProfessionalId,
+        ?string $brandProductId
+    ): array {
+        $promotion = $this->promotionService->resolveActivePromotion(
+            $brandProfessionalId,
+            $affiliateProfessionalId,
+            $brandProductId
+        );
+
+        if ($promotion !== null && $promotion['commission_rate'] !== null && $promotion['commission_rate'] > $staticRate) {
+            return $this->storeCommissionRateCache(
+                $cache,
+                $cacheKey,
+                $promotion['commission_rate'],
+                'promotion',
+                [
+                    'promotion_id' => $promotion['promotion_id'],
+                    'promotion_name' => $promotion['promotion_name'],
+                    'static_rate' => $staticRate,
+                    'static_source' => $staticSource,
+                ],
+                false
+            );
+        }
+
+        if ($promotion !== null && $promotion['commission_rate'] !== null) {
+            $staticMetadata['bypassed_promotion_id'] = $promotion['promotion_id'];
+        }
+
+        return $this->storeCommissionRateCache($cache, $cacheKey, $staticRate, $staticSource, $staticMetadata, false);
+    }
+
+    /**
+     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>, is_static: bool}>  $cache
      * @param  array<string, mixed>  $metadata
      * @return array{0: float, 1: string, 2: array<string, mixed>}
      */
@@ -718,7 +800,8 @@ class ShopifyOrderProcessingService
         string $cacheKey,
         float $rate,
         string $source,
-        array $metadata
+        array $metadata,
+        bool $isStatic = false
     ): array {
         $normalizedRate = round(max(0.0, min(100.0, $rate)), 4);
 
@@ -726,6 +809,7 @@ class ShopifyOrderProcessingService
             'rate' => $normalizedRate,
             'source' => $source,
             'metadata' => $metadata,
+            'is_static' => $isStatic,
         ];
 
         return [$normalizedRate, $source, $metadata];

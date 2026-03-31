@@ -1,6 +1,3 @@
--- Add description, product_type, tags, and images columns to brand_products
--- so the frontend product detail modal can display full product information.
-
 ALTER TABLE retail.brand_products
     ADD COLUMN IF NOT EXISTS description text,
     ADD COLUMN IF NOT EXISTS product_type text,

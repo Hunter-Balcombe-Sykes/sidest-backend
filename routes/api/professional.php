@@ -33,6 +33,8 @@ use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateOverrideCon
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateSettingController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductMediaController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
+use App\Http\Controllers\Api\Professional\Store\BrandAffiliateSegmentController;
+use App\Http\Controllers\Api\Professional\Store\BrandPromotionController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
 use App\Http\Controllers\Api\Professional\Store\StoreAnalyticsV2Controller;
@@ -277,6 +279,33 @@ Route::get('/store/brand-analytics/overview', [StoreAnalyticsV2Controller::class
             ->whereUuid('affiliateId');
         Route::patch('/store/affiliate-settings/{affiliateId}', [BrandAffiliateSettingsController::class, 'update'])
             ->whereUuid('affiliateId');
+
+        // Store: Affiliate segments (dynamic criteria-based groupings)
+        Route::get('/store/affiliate-segments', [BrandAffiliateSegmentController::class, 'index']);
+        Route::post('/store/affiliate-segments', [BrandAffiliateSegmentController::class, 'store']);
+        Route::get('/store/affiliate-segments/{segmentId}', [BrandAffiliateSegmentController::class, 'show'])
+            ->whereUuid('segmentId');
+        Route::patch('/store/affiliate-segments/{segmentId}', [BrandAffiliateSegmentController::class, 'update'])
+            ->whereUuid('segmentId');
+        Route::delete('/store/affiliate-segments/{segmentId}', [BrandAffiliateSegmentController::class, 'destroy'])
+            ->whereUuid('segmentId');
+        Route::post('/store/affiliate-segments/{segmentId}/refresh', [BrandAffiliateSegmentController::class, 'refresh'])
+            ->whereUuid('segmentId');
+
+        // Store: Promotions (time-bounded commission/discount campaigns)
+        Route::get('/store/promotions', [BrandPromotionController::class, 'index']);
+        Route::post('/store/promotions', [BrandPromotionController::class, 'store']);
+        Route::post('/store/promotions/preview', [BrandPromotionController::class, 'preview']);
+        Route::get('/store/promotions/{promotionId}', [BrandPromotionController::class, 'show'])
+            ->whereUuid('promotionId');
+        Route::patch('/store/promotions/{promotionId}', [BrandPromotionController::class, 'update'])
+            ->whereUuid('promotionId');
+        Route::delete('/store/promotions/{promotionId}', [BrandPromotionController::class, 'destroy'])
+            ->whereUuid('promotionId');
+        Route::post('/store/promotions/{promotionId}/clone', [BrandPromotionController::class, 'clone'])
+            ->whereUuid('promotionId');
+        Route::get('/store/promotions/{promotionId}/analytics', [BrandPromotionController::class, 'analytics'])
+            ->whereUuid('promotionId');
 
         // Brand profile (business fields)
         Route::get('/brand/profile', [BrandProfileController::class, 'show']);

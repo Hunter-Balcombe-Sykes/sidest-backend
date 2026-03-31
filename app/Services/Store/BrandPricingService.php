@@ -9,9 +9,10 @@ class BrandPricingService
         return (float) config('comet.store.default_commission_rate', 15);
     }
 
-    public function effectiveCommissionRate(?float $affiliateCommissionOverride, ?float $commissionOverride, ?float $defaultCommissionRate): float
+    public function effectiveCommissionRate(?float $promotionCommissionRate, ?float $affiliateCommissionOverride, ?float $commissionOverride, ?float $defaultCommissionRate): float
     {
-        $base = $affiliateCommissionOverride ?? $commissionOverride ?? $defaultCommissionRate ?? $this->defaultCommissionRate();
+        $staticRate = $affiliateCommissionOverride ?? $commissionOverride ?? $defaultCommissionRate ?? $this->defaultCommissionRate();
+        $base = ($promotionCommissionRate !== null) ? max($staticRate, $promotionCommissionRate) : $staticRate;
 
         return round(max(0.0, min(100.0, (float) $base)), 2);
     }

@@ -34,8 +34,7 @@ class VerifySupabaseJwt
                 return response()->json(['message' => 'Token missing sub'], 401);
             }
 
-            $request->attributes->set('supabase_uid', $uid);
-            $request->attributes->set('supabase_claims', $claims);
+            $this->setSupabaseContext($request, $uid, $claims);
             return $next($request);
         } catch (\Throwable $e) {
             // 2) Fallback for legacy/shared-secret setups:
@@ -46,7 +45,7 @@ class VerifySupabaseJwt
                     return response()->json(['message' => 'Invalid token'], 401);
                 }
 
-                $request->attributes->set('supabase_uid', $uid);
+                $this->setSupabaseContext($request, $uid);
                 return $next($request);
             } catch (\Throwable $e2) {
                 Log::warning('JWT verification failed', [
@@ -65,6 +64,20 @@ class VerifySupabaseJwt
             return null;
         }
         return trim(substr($auth, 7));
+    }
+
+    private function setSupabaseContext(Request $request, string $uid, ?array $claims = null): void
+    {
+        $request->attributes->set('supabase_uid', $uid);
+
+        if ($claims !== null) {
+            $request->attributes->set('supabase_claims', $claims);
+        }
+
+        // Nightwatch falls back to hidden context when no Laravel auth guard is resolved.
+        if (class_exists(\Laravel\Nightwatch\Compatibility::class)) {
+            \Laravel\Nightwatch\Compatibility::addUserIdToContext($uid);
+        }
     }
 
     private function verifyWithJwks(string $jwt): array
