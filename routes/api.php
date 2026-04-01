@@ -17,9 +17,16 @@ use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
+use App\Http\Controllers\Api\Shopify\ShopifyAppOAuthController;
 
 // Ping
 Route::get('/ping', fn () => response()->json(['pong' => true]));
+
+// Shopify App OAuth (no auth — Shopify redirects here during install)
+Route::middleware('throttle:60,1')->group(function () {
+    Route::get('/shopify/install', [ShopifyAppOAuthController::class, 'install']);
+    Route::get('/shopify/callback', [ShopifyAppOAuthController::class, 'callback']);
+});
 
 // Webhooks (no auth middleware — signature validated in controller)
 Route::middleware('throttle:webhooks')->group(function () {
