@@ -158,7 +158,7 @@ class ShopifyAppOAuthController extends ApiController
         ]);
 
         // Redirect to the Side St dashboard
-        $dashboardUrl = rtrim((string) config('app.frontend_url', env('FRONTEND_URL', 'https://sidest.co')), '/');
+        $dashboardUrl = rtrim((string) config('app.frontend_url', env('FRONTEND_URL', 'https://app.sidest.co')), '/');
 
         return redirect()->away("{$dashboardUrl}/account/commerce");
     }
