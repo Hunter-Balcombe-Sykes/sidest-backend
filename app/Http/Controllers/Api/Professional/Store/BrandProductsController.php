@@ -298,12 +298,13 @@ class BrandProductsController extends ApiController
     private function settingsPatchRules(): array
     {
         return [
-            'is_available' => ['sometimes', 'boolean'],
-            'is_featured' => ['sometimes', 'boolean'],
-            'sort_order' => ['sometimes', 'integer', 'min:0'],
-            'commission_override' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
-            'discount_rate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
-            'custom_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'is_available'          => ['sometimes', 'boolean'],
+            'is_featured'           => ['sometimes', 'boolean'],
+            'sort_order'            => ['sometimes', 'integer', 'min:0'],
+            'commission_override'   => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'discount_rate'         => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'custom_price'          => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'allow_affiliate_media' => ['sometimes', 'boolean'],
         ];
     }
 
@@ -320,6 +321,7 @@ class BrandProductsController extends ApiController
             'commission_override',
             'discount_rate',
             'custom_price',
+            'allow_affiliate_media',
         ];
 
         $patch = [];

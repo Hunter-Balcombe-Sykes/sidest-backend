@@ -1,5 +1,8 @@
 <?php
 
+use App\Jobs\RefreshActiveSegmentMembersJob;
+use App\Jobs\SendPromotionEndNotificationsJob;
+use App\Jobs\SendPromotionStartNotificationsJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -39,11 +42,69 @@ Artisan::command('comet:normalize-professional-types {--dry-run : Show count onl
 })->purpose('Normalize legacy professional_type values to professional.');
 
 Schedule::command('comet:purge-soft-deletes')
-    ->dailyAt('03:20');
+    ->dailyAt('03:20')
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: purge-soft-deletes');
+    });
 
 Schedule::command('comet:prune-notifications', ['--days' => 30])
-    ->dailyAt('03:25');
+    ->dailyAt('03:25')
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-notifications');
+    });
 
 Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob())
     ->dailyAt('06:00')
-    ->withoutOverlapping();
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: process-commission-payouts');
+    });
+
+Schedule::command('comet:analytics:compact-hourly')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: compact-hourly');
+    });
+
+Schedule::command('comet:analytics:purge-raw-events')
+    ->dailyAt('03:00')
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: purge-raw-events');
+    });
+
+Schedule::job(new \App\Jobs\Notifications\InviteExpirySweepJob())
+    ->dailyAt('08:00')
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: invite-expiry-sweep');
+    });
+
+Schedule::job(new \App\Jobs\Notifications\SendWeeklyAnalyticsNotificationJob())
+    ->weeklyOn(1, '09:00') // Monday 9 AM UTC
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: send-weekly-analytics-notification');
+    });
+
+Schedule::job(new RefreshActiveSegmentMembersJob())
+    ->hourly()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: refresh-active-segment-members');
+    });
+
+Schedule::job(new SendPromotionStartNotificationsJob())
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: send-promotion-start-notifications');
+    });
+
+Schedule::job(new SendPromotionEndNotificationsJob())
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: send-promotion-end-notifications');
+    });

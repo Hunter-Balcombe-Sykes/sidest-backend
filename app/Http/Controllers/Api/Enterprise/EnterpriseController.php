@@ -29,7 +29,7 @@ class EnterpriseController extends ApiController
         }
 
         return $this->success([
-            'enterprise' => $enterprise,
+            'enterprise' => new \App\Http\Resources\EnterpriseResource($enterprise),
         ]);
     }
 
@@ -112,7 +112,7 @@ class EnterpriseController extends ApiController
         });
 
         return $this->success([
-            'enterprise' => $enterprise->fresh(),
+            'enterprise' => new \App\Http\Resources\EnterpriseResource($enterprise->fresh()),
         ], 201);
     }
 
@@ -135,7 +135,7 @@ class EnterpriseController extends ApiController
         $enterprise->save();
 
         return $this->success([
-            'enterprise' => $enterprise->fresh(),
+            'enterprise' => new \App\Http\Resources\EnterpriseResource($enterprise->fresh()),
         ]);
     }
 

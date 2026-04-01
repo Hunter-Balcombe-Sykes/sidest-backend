@@ -8,6 +8,7 @@ use App\Http\Requests\Api\Professional\Site\IndexLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\ReorderBlocksRequest;
 use App\Http\Requests\Api\Professional\Site\StoreLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
@@ -16,6 +17,16 @@ class ProfessionalLinkBlockController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+
+    private function authorizeCustomLinks(Professional $pro): void
+    {
+        $type = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
+        abort_unless(
+            (bool) config("comet.account_type_defaults.{$type}.custom_links_allowed", false),
+            403,
+            'Custom links are not available on your account type.'
+        );
+    }
     public function index(IndexLinkBlockRequest $request)
     {
         $pro = $this->currentProfessional($request);
@@ -28,6 +39,7 @@ class ProfessionalLinkBlockController extends ApiController
     public function store(StoreLinkBlockRequest $request)
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeCustomLinks($pro);
         $site = $this->currentSite($pro);
 
         $data = $request->validated();
@@ -65,6 +77,7 @@ class ProfessionalLinkBlockController extends ApiController
     public function update(UpdateLinkBlockRequest $request, Block $linkBlock)
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeCustomLinks($pro);
 
         abort_unless(
             $linkBlock->professional_id === $pro->id &&
@@ -103,13 +116,17 @@ class ProfessionalLinkBlockController extends ApiController
     public function reorder(ReorderBlocksRequest $request)
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeCustomLinks($pro);
+        $site = $this->currentSite($pro);
 
         $ids = array_values(array_unique($request->validated()['ids'] ?? []));
 
-        DB::transaction(function () use ($pro, $ids) {
+        DB::transaction(function () use ($pro, $site, $ids) {
+            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-links:{$site->id}"]);
 
             $allIds = Block::query()
                 ->where('professional_id', $pro->id)
+                ->where('site_id', $site->id)
                 ->where('block_group', 'links')
                 ->where('block_type', 'link')
                 ->lockForUpdate()
@@ -128,10 +145,26 @@ class ProfessionalLinkBlockController extends ApiController
 
             $remaining = array_values(array_diff($allIds, $ids));
             $newOrder  = array_merge($ids, $remaining);
+            $offset    = (int) Block::query()
+                    ->where('professional_id', $pro->id)
+                    ->where('site_id', $site->id)
+                    ->where('block_group', 'links')
+                    ->max('sort_order') + 1000;
 
             foreach ($newOrder as $i => $id) {
                 Block::query()
                     ->where('professional_id', $pro->id)
+                    ->where('site_id', $site->id)
+                    ->where('block_group', 'links')
+                    ->where('block_type', 'link')
+                    ->where('id', $id)
+                    ->update(['sort_order' => $offset + $i]);
+            }
+
+            foreach ($newOrder as $i => $id) {
+                Block::query()
+                    ->where('professional_id', $pro->id)
+                    ->where('site_id', $site->id)
                     ->where('block_group', 'links')
                     ->where('block_type', 'link')
                     ->where('id', $id)

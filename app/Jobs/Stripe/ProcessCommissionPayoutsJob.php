@@ -25,4 +25,11 @@ class ProcessCommissionPayoutsJob implements ShouldQueue
 
         Log::info('Commission payout processing complete', $stats);
     }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::error('Commission payout job failed', [
+            'message' => $e->getMessage(),
+        ]);
+    }
 }

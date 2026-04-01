@@ -41,7 +41,81 @@ return [
         'influencer' => 'Influencer',
     ],
 
+    'waitlist' => [
+        'enabled' => (bool) env('COMET_WAITLIST_ENABLED', false),
+        'types' => [
+            'influencer' => 'Influencer',
+            'professional' => 'Professional',
+            'brand' => 'Brand',
+            'other' => 'Other',
+        ],
+        'industries' => [
+            'mens_grooming' => 'Mens Grooming',
+            'womens_haircare' => 'Womens Haircare',
+            'beauty_products' => 'Beauty Products',
+            'vitamins_and_supplements' => 'Vitamins and Supplements',
+            'services_and_software' => 'Services and Software',
+            'other' => 'Other',
+        ],
+    ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Account type defaults – applied during registration
+    |----------------------------------------------------------------------
+    | 'professional' is the base type. 'influencer' inherits from it.
+    | 'brand' has its own distinct config.
+    | 'affiliate' is an overlay applied when a professional/influencer
+    | connects to a brand (via invite or manual connection).
+    */
+    'account_type_defaults' => [
+        // Influencer is the base type (most basic account)
+        'influencer' => [
+            'allowed_sections'    => ['shop', 'services', 'gallery'],
+            'default_sections'    => ['shop', 'services', 'gallery'],
+            'is_published'        => true,
+            'allowed_theme_count' => 3,
+            'custom_links_allowed' => false,
+            'default_contact' => [
+                'full_name'  => 'Charlie',
+                'email'      => 'charlie@ai.com',
+                'phone'      => '1234 567 890',
+                'source'     => 'system_default',
+                'subscribed' => true,
+            ],
+        ],
+        // Professional inherits influencer + adds booking, analytics, custom links
+        'professional' => [
+            'inherits'            => 'influencer',
+            'allowed_sections'    => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
+            'default_sections'    => ['shop', 'services', 'gallery'],
+            'custom_links_allowed' => true,
+        ],
+        'brand' => [
+            'allowed_sections'   => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
+            'default_sections'   => [],
+            'is_published'       => false,
+            'allowed_theme_count' => null, // unlimited
+            'custom_links_allowed' => true,
+            'enforce_handle_equals_display_name' => true,
+            'default_checkout_mode' => null,
+            'default_site_settings' => [
+                'design' => [
+                    // System default colours, in-house font
+                ],
+            ],
+        ],
+        // Overlay applied when professional/influencer connects to a brand
+        'affiliate' => [
+            'auto_enable_sections'         => ['shop'],
+            'use_brand_affiliate_theme'    => true,
+            'use_brand_affiliate_products' => true,
+        ],
+    ],
+
     'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),
+
+    'analytics_raw_event_retention_days' => (int) env('ANALYTICS_RAW_EVENT_RETENTION_DAYS', 90),
 
     'throttle' => [
         'enabled' => (bool) env('COMET_THROTTLE_ENABLED', true),
@@ -59,6 +133,7 @@ return [
     'image_pools' => [
         'gallery' => ['max' => (int) env('COMET_GALLERY_IMAGE_MAX', 5)],
         'content' => ['max' => (int) env('COMET_CONTENT_IMAGE_MAX', 5)],
+        'product' => ['max' => (int) env('COMET_PRODUCT_IMAGE_MAX', 5)],
     ],
 
     /*
@@ -141,14 +216,14 @@ return [
         'barbershop_info',
         'sitepage_analytics',
         'booking',
-        'services',
     ],
 
     'store' => [
         'default_commission_rate' => (float) env('COMET_STORE_DEFAULT_COMMISSION', 15),
         'max_featured_products'   => (int) env('COMET_STORE_MAX_FEATURED', 10),
         'checkout_session_ttl_minutes' => (int) env('COMET_STORE_CHECKOUT_SESSION_TTL_MINUTES', 120),
-        'payout_hold_days' => (int) env('COMET_STORE_PAYOUT_HOLD_DAYS', 0),
+        'payout_hold_days' => (int) env('COMET_STORE_PAYOUT_HOLD_DAYS', 7),
+        'min_payout_hold_days' => 7,
         'platform_fee_percent' => (float) env('COMET_STORE_PLATFORM_FEE_PERCENT', 3),
     ],
 
@@ -203,9 +278,24 @@ TPL,
     ],
 
     'notification_retention_days' => [
-        'policy_update' => 365,
-        'incident' => 14,
+        'policy_update'        => 365,
+        'incident'             => 14,
         'feature_announcement' => 30,
-        'default' => 30,
+        'default'              => 30,
+        'invite'               => 90,
+        'commission'           => 365,
+        'payout'               => 365,
+        'integration'          => 60,
+        'analytics_weekly'     => 30,
+        'analytics_milestones' => 90,
+        'profile_task'         => 180,
+        'catalog_change'       => 60,
+        'brand_status'         => 60,
+        'subscription'         => 365,
+        'brand_link'           => 60,
+    ],
+
+    'notifications' => [
+        'email_enabled' => (bool) env('NOTIFICATIONS_EMAIL_ENABLED', false),
     ],
 ];

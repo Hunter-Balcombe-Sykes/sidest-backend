@@ -3,6 +3,7 @@
 namespace App\Services\Stripe;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
@@ -15,13 +16,15 @@ class CommissionPayoutService
 {
     private StripeClient $stripe;
     private float $platformFeePercent;
-    private int $holdDays;
+    private int $systemHoldDays;
+    private int $minHoldDays;
 
     public function __construct()
     {
         $this->stripe = new StripeClient(config('services.stripe.secret_key'));
         $this->platformFeePercent = config('comet.store.platform_fee_percent', 3);
-        $this->holdDays = max(0, (int) config('comet.store.payout_hold_days', 0));
+        $this->systemHoldDays = max(0, (int) config('comet.store.payout_hold_days', 7));
+        $this->minHoldDays = (int) config('comet.store.min_payout_hold_days', 7);
     }
 
     /**
@@ -30,7 +33,6 @@ class CommissionPayoutService
      */
     public function processEligiblePayouts(): array
     {
-        $cutoff = now()->subDays($this->holdDays);
         $stats = [
             'batches_created' => 0,
             'existing_batches_retried' => 0,
@@ -44,6 +46,7 @@ class CommissionPayoutService
         $existingPending = CommissionPayout::query()
             ->where('status', 'pending')
             ->whereNull('processed_at')
+            ->where('eligible_after', '<=', now())
             ->orderBy('eligible_after')
             ->limit(500)
             ->get();
@@ -74,77 +77,115 @@ class CommissionPayoutService
             }
         }
 
-        $groups = CommissionLedgerEntry::query()
-            ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
+        // Find all brands that have unpaid approved accruals, then apply
+        // per-brand hold days to determine which entries are eligible.
+        $brandIds = CommissionLedgerEntry::query()
             ->whereNull('payout_id')
             ->where('entry_type', 'accrual')
             ->where('status', 'approved')
-            ->where('occurred_at', '<=', $cutoff)
-            ->select([
-                'brand_professional_id',
-                'affiliate_professional_id',
-                'currency_code',
-                DB::raw("
-                    CASE
-                        WHEN lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'
-                            THEN 'stripe_sale_hold'
-                        ELSE 'brand_charge'
-                    END as funding_kind
-                "),
-                DB::raw('SUM(amount_cents) as total_cents'),
-                DB::raw('COUNT(*) as entry_count'),
-            ])
-            ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code', DB::raw("
-                CASE
-                    WHEN lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'
-                        THEN 'stripe_sale_hold'
-                    ELSE 'brand_charge'
-                END
-            "))
-            ->having(DB::raw('SUM(amount_cents)'), '>', 0)
-            ->get();
+            ->distinct()
+            ->pluck('brand_professional_id');
 
-        foreach ($groups as $group) {
-            try {
-                $payout = $this->createPayoutBatch(
-                    $group->brand_professional_id,
-                    $group->affiliate_professional_id,
-                    $group->currency_code,
-                    $group->funding_kind,
-                    $cutoff,
-                );
+        // Pre-load brand store settings for hold-day lookups.
+        $brandSettings = BrandStoreSettings::query()
+            ->whereIn('professional_id', $brandIds)
+            ->pluck('payout_hold_days', 'professional_id');
 
-                if (! $payout) {
-                    continue;
+        foreach ($brandIds as $brandId) {
+            $holdDays = $this->resolveHoldDays($brandSettings[$brandId] ?? null);
+
+            $groupDefinitions = [
+                [
+                    'funding_kind' => 'brand_charge',
+                    'cutoff' => now()->subDays($holdDays),
+                ],
+                [
+                    // Stripe-direct storefront commissions are prefunded at sale time.
+                    // Keep these immediately eligible so affiliate payouts aren't delayed.
+                    'funding_kind' => 'stripe_sale_hold',
+                    'cutoff' => now(),
+                ],
+            ];
+
+            foreach ($groupDefinitions as $definition) {
+                $fundingKind = (string) $definition['funding_kind'];
+                $cutoff = $definition['cutoff'];
+
+                $groups = CommissionLedgerEntry::query()
+                    ->whereNull('payout_id')
+                    ->where('entry_type', 'accrual')
+                    ->where('status', 'approved')
+                    ->where('brand_professional_id', $brandId)
+                    ->where('occurred_at', '<=', $cutoff)
+                    ->where(function ($query) use ($fundingKind): void {
+                        $this->applyFundingKindFilter($query, $fundingKind);
+                    })
+                    ->select([
+                        'brand_professional_id',
+                        'affiliate_professional_id',
+                        'currency_code',
+                        DB::raw('SUM(amount_cents) as total_cents'),
+                        DB::raw('COUNT(*) as entry_count'),
+                    ])
+                    ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code')
+                    ->having(DB::raw('SUM(amount_cents)'), '>', 0)
+                    ->get();
+
+                foreach ($groups as $group) {
+                    try {
+                        $payout = $this->createPayoutBatch(
+                            $group->brand_professional_id,
+                            $group->affiliate_professional_id,
+                            $group->currency_code,
+                            $fundingKind,
+                            $cutoff,
+                        );
+
+                        if (! $payout) {
+                            continue;
+                        }
+
+                        $stats['batches_created']++;
+                        $result = $this->processPayoutBatch($payout);
+
+                        if ($result === true) {
+                            $stats['batches_processed']++;
+                            $stats['total_cents'] += $payout->net_payout_cents;
+                            continue;
+                        }
+
+                        if ($result === null) {
+                            $stats['batches_pending_funding']++;
+                            continue;
+                        }
+
+                        $stats['batches_failed']++;
+                    } catch (\Throwable $e) {
+                        Log::error('Commission payout batch failed', [
+                            'brand_id' => $group->brand_professional_id,
+                            'affiliate_id' => $group->affiliate_professional_id,
+                            'currency' => $group->currency_code,
+                            'funding_kind' => $fundingKind,
+                            'error' => $e->getMessage(),
+                        ]);
+                        $stats['batches_failed']++;
+                    }
                 }
-
-                $stats['batches_created']++;
-                $result = $this->processPayoutBatch($payout);
-
-                if ($result === true) {
-                    $stats['batches_processed']++;
-                    $stats['total_cents'] += $payout->net_payout_cents;
-                    continue;
-                }
-
-                if ($result === null) {
-                    $stats['batches_pending_funding']++;
-                    continue;
-                }
-
-                $stats['batches_failed']++;
-            } catch (\Throwable $e) {
-                Log::error('Commission payout batch failed', [
-                    'brand_id' => $group->brand_professional_id,
-                    'affiliate_id' => $group->affiliate_professional_id,
-                    'currency' => $group->currency_code,
-                    'error' => $e->getMessage(),
-                ]);
-                $stats['batches_failed']++;
             }
         }
 
         return $stats;
+    }
+
+    /**
+     * Resolve the effective hold days for a brand.
+     * Uses brand override if set, otherwise system default. Always >= system minimum.
+     */
+    private function resolveHoldDays(?int $brandPayoutHoldDays): int
+    {
+        $days = $brandPayoutHoldDays ?? $this->systemHoldDays;
+
+        return max($this->minHoldDays, $days);
     }
 
     /**
@@ -159,7 +200,6 @@ class CommissionPayoutService
     ): ?CommissionPayout {
         return DB::transaction(function () use ($brandId, $affiliateId, $currency, $fundingKind, $cutoff) {
             $entries = CommissionLedgerEntry::query()
-                ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
                 ->whereNull('payout_id')
                 ->where('entry_type', 'accrual')
                 ->where('status', 'approved')
@@ -168,14 +208,9 @@ class CommissionPayoutService
                 ->where('currency_code', $currency)
                 ->where('occurred_at', '<=', $cutoff)
                 ->where(function ($query) use ($fundingKind): void {
-                    if ($fundingKind === 'stripe_sale_hold') {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
-                    } else {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) <> 'stripe_direct'");
-                    }
+                    $this->applyFundingKindFilter($query, $fundingKind);
                 })
                 ->lockForUpdate()
-                ->select('retail.commission_ledger_entries.*')
                 ->get();
 
             if ($entries->isEmpty()) {
@@ -188,7 +223,6 @@ class CommissionPayoutService
             }
 
             $reversalCents = CommissionLedgerEntry::query()
-                ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
                 ->whereNull('payout_id')
                 ->where('entry_type', 'reversal')
                 ->where('status', 'approved')
@@ -197,21 +231,22 @@ class CommissionPayoutService
                 ->where('currency_code', $currency)
                 ->where('occurred_at', '<=', $cutoff)
                 ->where(function ($query) use ($fundingKind): void {
-                    if ($fundingKind === 'stripe_sale_hold') {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
-                    } else {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) <> 'stripe_direct'");
-                    }
+                    $this->applyFundingKindFilter($query, $fundingKind);
                 })
-                ->lockForUpdate()
-                ->sum('retail.commission_ledger_entries.amount_cents');
+                ->sum('amount_cents');
 
             $netCommission = $grossCents + $reversalCents;
             if ($netCommission <= 0) {
                 return null;
             }
 
-            $platformFeeCents = (int) round($netCommission * $this->platformFeePercent / 100);
+            // For Stripe direct sales the platform fee is already collected at charge time
+            // via the destination charge split, so no additional deduction is needed.
+            if ($fundingKind === 'stripe_sale_hold') {
+                $platformFeeCents = 0;
+            } else {
+                $platformFeeCents = (int) round($netCommission * $this->platformFeePercent / 100);
+            }
             $netPayoutCents = $netCommission - $platformFeeCents;
 
             if ($netPayoutCents <= 0) {
@@ -241,7 +276,6 @@ class CommissionPayoutService
             }
 
             $reversals = CommissionLedgerEntry::query()
-                ->leftJoin('retail.orders as o', 'o.id', '=', 'retail.commission_ledger_entries.order_id')
                 ->whereNull('payout_id')
                 ->where('entry_type', 'reversal')
                 ->where('status', 'approved')
@@ -250,13 +284,8 @@ class CommissionPayoutService
                 ->where('currency_code', $currency)
                 ->where('occurred_at', '<=', $cutoff)
                 ->where(function ($query) use ($fundingKind): void {
-                    if ($fundingKind === 'stripe_sale_hold') {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) = 'stripe_direct'");
-                    } else {
-                        $query->whereRaw("lower(COALESCE(o.source, 'shopify')) <> 'stripe_direct'");
-                    }
+                    $this->applyFundingKindFilter($query, $fundingKind);
                 })
-                ->select('retail.commission_ledger_entries.*')
                 ->get();
 
             foreach ($reversals as $reversal) {
@@ -270,6 +299,21 @@ class CommissionPayoutService
 
             return $payout;
         });
+    }
+
+    /**
+     * Apply funding kind filter using a subquery instead of JOIN (avoids FOR UPDATE + LEFT JOIN conflict).
+     */
+    private function applyFundingKindFilter($query, string $fundingKind): void
+    {
+        if ($fundingKind === 'stripe_sale_hold') {
+            $query->where('rate_source', 'stripe_storefront');
+        } else {
+            $query->where(function ($q) {
+                $q->whereNull('rate_source')
+                  ->orWhere('rate_source', '<>', 'stripe_storefront');
+            });
+        }
     }
 
     /**
@@ -448,6 +492,12 @@ class CommissionPayoutService
     ): bool {
         $currencyLower = strtolower((string) $payout->currency_code);
 
+        Log::info('Preparing prefunded affiliate transfer from platform balance', [
+            'payout_id' => $payout->id,
+            'net_payout_cents' => $payout->net_payout_cents,
+            'affiliate_connect_id' => $affiliate->stripe_connect_account_id,
+        ]);
+
         try {
             $payout->update([
                 'status' => 'transferring',
@@ -457,6 +507,8 @@ class CommissionPayoutService
                 'failure_reason' => null,
             ]);
 
+            // With direct charges, the application_fee_amount is already in the platform balance.
+            // Transfer the affiliate's commission from platform balance to their connected account.
             $transfer = $this->stripe->transfers->create([
                 'amount' => $payout->net_payout_cents,
                 'currency' => $currencyLower,
@@ -483,6 +535,7 @@ class CommissionPayoutService
                 'gross_cents' => $payout->gross_commission_cents,
                 'platform_fee_cents' => $payout->platform_fee_cents,
                 'net_cents' => $payout->net_payout_cents,
+                'transfer_id' => $transfer->id,
                 'currency' => $payout->currency_code,
             ]);
 

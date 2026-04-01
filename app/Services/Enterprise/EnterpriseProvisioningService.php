@@ -65,8 +65,8 @@ class EnterpriseProvisioningService
                     'status' => 'active',
                     'primary_email' => $professional->primary_email,
                     'phone' => $professional->phone,
-                    'public_contact_email' => $professional->public_contact_email,
-                    'public_contact_number' => $professional->public_contact_number,
+                    'public_contact_email' => null,
+                    'public_contact_number' => null,
                     'country_code' => $professional->country_code,
                     'timezone' => $professional->timezone,
                     'location_street_address' => $professional->location_street_address,
@@ -86,8 +86,8 @@ class EnterpriseProvisioningService
                 $enterprise->handle = $enterprise->handle ?: ($professional->handle ?: null);
                 $enterprise->primary_email = $enterprise->primary_email ?: $professional->primary_email;
                 $enterprise->phone = $enterprise->phone ?: $professional->phone;
-                $enterprise->public_contact_email = $enterprise->public_contact_email ?: $professional->public_contact_email;
-                $enterprise->public_contact_number = $enterprise->public_contact_number ?: $professional->public_contact_number;
+                // public_contact fields are only set explicitly by the user
+
                 $enterprise->country_code = $enterprise->country_code ?: $professional->country_code;
                 $enterprise->timezone = $enterprise->timezone ?: $professional->timezone;
                 $enterprise->location_street_address = $enterprise->location_street_address ?: $professional->location_street_address;

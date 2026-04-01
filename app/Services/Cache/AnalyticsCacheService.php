@@ -68,6 +68,12 @@ class AnalyticsCacheService
 
     public function invalidateAnalytics(string $professionalId): void
     {
+        // Bump the version token so every cached summary for this professional
+        // becomes unreachable immediately, regardless of date-range or granularity.
+        // The stale entries will expire on their own TTL (≤ 24 h).
+        Cache::increment(CacheKeyGenerator::analyticsSummaryVersion($professionalId));
+
+        // Delete the rolling 90-day window of visit and click stat keys.
         $keys = [];
         $end = Carbon::now();
 
@@ -78,7 +84,6 @@ class AnalyticsCacheService
 
             $keys[] = CacheKeyGenerator::analyticsVisits($professionalId, $start, $endStr);
             $keys[] = CacheKeyGenerator::analyticsClicks($professionalId, $start, $endStr);
-            $keys[] = CacheKeyGenerator::analyticsSummary($professionalId, $start, $endStr); // clear summary cache too
         }
 
         Cache::deleteMultiple(array_values(array_unique($keys)));

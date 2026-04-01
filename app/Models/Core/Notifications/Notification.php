@@ -30,6 +30,7 @@ class Notification extends BaseModel
     protected $fillable = [
         'professional_id',
         'type',
+        'category',
         'title',
         'body',
         'cta_url',

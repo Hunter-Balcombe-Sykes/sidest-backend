@@ -4,6 +4,7 @@ namespace App\Jobs\Store;
 
 use App\Services\Store\OrderAnalyticsAggregateService;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -11,7 +12,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
-class RebuildBrandDailyAggregatesJob implements ShouldQueue
+class RebuildBrandDailyAggregatesJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -19,12 +20,19 @@ class RebuildBrandDailyAggregatesJob implements ShouldQueue
 
     public int $timeout = 300;
 
+    public int $uniqueFor = 300;
+
     public function __construct(
         public string $brandProfessionalId,
         public string $anchorDay,
         public int $windowDays = 35
     ) {
         $this->onQueue('analytics');
+    }
+
+    public function uniqueId(): string
+    {
+        return "brand-daily:{$this->brandProfessionalId}:{$this->anchorDay}:{$this->windowDays}";
     }
 
     public function handle(OrderAnalyticsAggregateService $aggregates): void

@@ -63,6 +63,8 @@ Snapshot date: **March 20, 2026**.
 - Activate `allow` override behavior to bypass brand-level availability for a specific affiliate while `deny` keeps unconditional precedence.
 - Add selection cleanup flows: unavailability/disconnect/deny now remove invalid selections and create notifications.
 - Add pricing outputs for store payloads: effective commission and discounted price with ceil-to-nearest-5-cents rounding, including affiliate-level override fields.
+- Add pre-launch waitlist capture endpoint (`POST /api/public/waitlist`) with conditional fields and email-based upsert semantics.
+- Add waitlist-mode gate on `POST /api/bootstrap` for new users only (existing professionals continue to bootstrap).
 
 ### Recent commits
 
@@ -160,6 +162,13 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 - `invite_token` (optional): claim a brand-affiliate invite during bootstrap
 - `brand_partner_professional_id` (optional): connect to a brand partner during bootstrap when no invite token is provided
 
+**Waitlist mode behavior:**
+- If `COMET_WAITLIST_ENABLED=true`, bootstrap is blocked for users who do not already have a professional row.
+- Existing professionals can still call bootstrap normally.
+- Blocked response shape:
+  - Status: `403`
+  - Body: `{ "message": "New account creation is currently waitlist-only. Please join the waitlist.", "errors": { "code": "WAITLIST_ONLY" } }`
+
 **Response (200):**
 
 ```json
@@ -192,7 +201,7 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 - `null` for non-enterprise types (`barber`, `hairdresser`, `ambassador`)
 - object for enterprise-owner types (`promoter`, `barbershop`, `salon`)
 
-**Common status codes:** 200, 401 (invalid JWT), 422 (validation error)
+**Common status codes:** 200, 401 (invalid JWT), 403 (waitlist-only gate or disabled account), 422 (validation error)
 
 **Note:** Bootstrap automatically creates a free-tier subscription for new professionals. If a free plan (plan_key = `free`) exists in the plans table, the professional will be subscribed to it with status `active` and provider `internal`.
 
@@ -903,6 +912,30 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 - Request body (example): `{ "full_name": "Sam Smith", "email": "sam@example.com", "phone": "+61411111111", "notes": "optional", "marketing_opt_in": true, "form_started_at_ms": 1700000000000 }`
 - Response (201): `{ "ok": true, "customer_id": "uuid" }`
 - Common status codes: 201, 400 (cannot determine site), 404, 403, 422, 429
+
+### `POST /api/public/waitlist`
+
+- Purpose: collect pre-launch waitlist submissions for Comet account access
+- Auth: None
+- Rate limit: waitlist
+- Request body:
+  - `name` (required)
+  - `email` (required)
+  - `phone` (required)
+  - `type` (required): `influencer`, `professional`, `brand`, `other`
+  - `industry` (required): `mens_grooming`, `womens_haircare`, `beauty_products`, `vitamins_and_supplements`, `services_and_software`, `other`
+  - `pilot_program_opt_in` (required boolean)
+  - `type_other_text` (required when `type = other`)
+  - `industry_other_text` (required when `industry = other`)
+  - `number_of_team_members` (required when `type = brand`)
+  - `number_of_affiliates_ambassadors` (required when `type = brand`)
+  - `is_brand_partner_or_ambassador` (required when `type = influencer` or `professional`)
+  - `currently_sells_products` (required when `type = influencer` or `professional`)
+- Upsert semantics: submissions are deduplicated by normalized email (`email_lc`), then updated on re-submit.
+- Response:
+  - `201` for a new email submission: `{ "ok": true }`
+  - `200` for a repeat email submission (updated row): `{ "ok": true }`
+- Common status codes: 200, 201, 422, 429
 
 ### `POST /api/public/subscribe`
 
@@ -2429,7 +2462,14 @@ Note: The frontend does not need any storage credentials — all image URLs come
 - COMET_LEGAL_DEFAULT_CONTACT_NAME (default: `Customer Support`)
 - COMET_LEGAL_DEFAULT_SUPPORT_EMAIL (default: `support@comet.app`)
 - COMET_LEGAL_DEFAULT_SUPPORT_PHONE (default: `N/A`)
+- COMET_WAITLIST_ENABLED (default: `false`; when true, blocks bootstrap for new users)
 - SOFT_DELETE_RETENTION_DAYS (default: 30)
+
+### Pre-launch account gating
+
+- Set `COMET_WAITLIST_ENABLED=true` to block new account creation at `POST /api/bootstrap`.
+- Existing professionals are unaffected by this gate.
+- Also disable public signups in Supabase Auth (Dashboard -> Authentication -> Providers -> Email -> Disable Signups) to prevent new auth accounts during waitlist-only mode.
 
 ### Media disk (Laravel Cloud Object Storage / Cloudflare R2)
 

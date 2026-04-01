@@ -16,6 +16,10 @@ class Customer extends BaseModel
     public $incrementing = false;
     protected $keyType = 'string';
 
+    protected $hidden = [
+        'external_id',
+    ];
+
     protected $fillable = [
         'email',
         'phone',
@@ -34,18 +38,26 @@ class Customer extends BaseModel
     ];
 
     /**
-     * Get the current marketing opt-in status from EmailSubscription (source of truth).
-     * Falls back to cache if available.
+     * Get the current marketing opt-in status.
+     *
+     * Uses the cached column as the primary source to avoid N+1 queries when
+     * iterating over customers. Falls back to a live DB lookup only when the
+     * cache is null (un-synced row). syncMarketingOptInCache() keeps the cache
+     * fresh whenever the underlying EmailSubscription changes.
      */
     public function isMarketingOptedIn(): bool
     {
-        $subscription = \App\Models\Core\Notifications\EmailSubscription::query()
+        if ($this->marketing_opt_in_cached !== null) {
+            return (bool) $this->marketing_opt_in_cached;
+        }
+
+        $status = \App\Models\Core\Notifications\EmailSubscription::query()
             ->where('professional_id', $this->professional_id)
             ->where('list_key', 'marketing')
             ->where('email_lc', strtolower($this->email ?? ''))
-            ->first();
+            ->value('status');
 
-        return $subscription?->status === 'subscribed' ?? ($this->marketing_opt_in_cached ?? false);
+        return $status === 'subscribed';
     }
 
     /**

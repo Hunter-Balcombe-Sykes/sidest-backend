@@ -11,6 +11,8 @@ class PublicSignupAvailabilityController extends ApiController
 {
     public function check(Request $request): JsonResponse
     {
+        $signupsOpen = ! (bool) config('comet.waitlist.enabled', false);
+
         $validated = $request->validate([
             'email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'phone' => ['sometimes', 'nullable', 'string', 'max:50'],
@@ -23,7 +25,7 @@ class PublicSignupAvailabilityController extends ApiController
 
         $emailExists = false;
         if ($email) {
-            $emailExists = Professional::withTrashed()
+            $emailExists = Professional::query()
                 ->where(function ($query) use ($email) {
                     $query->whereRaw('LOWER(primary_email) = ?', [$email])
                         ->orWhereRaw('LOWER(public_contact_email) = ?', [$email]);
@@ -33,7 +35,7 @@ class PublicSignupAvailabilityController extends ApiController
 
         $phoneExists = false;
         if ($phone) {
-            $phoneExists = Professional::withTrashed()
+            $phoneExists = Professional::query()
                 ->where(function ($query) use ($phone) {
                     $query->where('phone', $phone)
                         ->orWhere('public_contact_number', $phone);
@@ -43,7 +45,7 @@ class PublicSignupAvailabilityController extends ApiController
 
         $handleExists = false;
         if ($handleLc) {
-            $handleExists = Professional::withTrashed()
+            $handleExists = Professional::query()
                 ->where('handle_lc', $handleLc)
                 ->exists();
         }
@@ -61,6 +63,8 @@ class PublicSignupAvailabilityController extends ApiController
                 'available' => !$handleExists,
                 'exists' => $handleExists,
             ],
+            'signups_open' => $signupsOpen,
+            'waitlist_only' => ! $signupsOpen,
         ]);
     }
 }

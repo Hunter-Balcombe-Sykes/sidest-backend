@@ -5,12 +5,14 @@ namespace App\Services\Store;
 use App\Models\Core\Professional\BrandPartnerLink;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use App\Services\Store\PromotionResolutionService;
 
 class BrandProductCatalogService
 {
     public function __construct(
         private readonly BrandPricingService $pricing,
-        private readonly BrandProductSettingsService $settingsRows
+        private readonly BrandProductSettingsService $settingsRows,
+        private readonly PromotionResolutionService $promotionService,
     ) {}
 
     /**
@@ -114,6 +116,10 @@ class BrandProductCatalogService
                 'bp.handle',
                 'bp.product_url',
                 'bp.image_url',
+                'bp.description',
+                'bp.product_type',
+                'bp.tags',
+                'bp.images',
                 'bp.price_cents',
                 'bp.currency_code',
                 'bp.shopify_status',
@@ -143,7 +149,7 @@ class BrandProductCatalogService
             ])
             ->get();
 
-        return $this->mapCatalogRows($rows);
+        return $this->mapCatalogRows($rows, false, $affiliateProfessionalId);
     }
 
     /**
@@ -209,6 +215,10 @@ class BrandProductCatalogService
                 'bp.handle',
                 'bp.product_url',
                 'bp.image_url',
+                'bp.description',
+                'bp.product_type',
+                'bp.tags',
+                'bp.images',
                 'bp.price_cents',
                 'bp.currency_code',
                 'bp.shopify_status',
@@ -235,7 +245,7 @@ class BrandProductCatalogService
             ])
             ->get();
 
-        return $this->mapCatalogRows($rows);
+        return $this->mapCatalogRows($rows, false, null);
     }
 
     /**
@@ -297,6 +307,7 @@ class BrandProductCatalogService
             })
             ->leftJoin('retail.brand_store_settings as bss', 'bss.professional_id', '=', 'bp.brand_professional_id')
             ->leftJoin('core.professionals as p', 'p.id', '=', 'bp.brand_professional_id')
+            ->leftJoin('core.brand_profiles as bpr', 'bpr.professional_id', '=', 'bp.brand_professional_id')
             ->leftJoin('retail.brand_product_affiliate_settings as bpas', function ($join) use ($professionalId): void {
                 $join->on('bpas.brand_product_id', '=', 'bp.id')
                     ->where('bpas.affiliate_professional_id', '=', $professionalId);
@@ -304,6 +315,7 @@ class BrandProductCatalogService
             ->where('ps.professional_id', $professionalId)
             ->where('bp.is_sync_active', true)
             ->whereRaw("lower(COALESCE(bp.shopify_status, 'unknown')) IN ('active', 'archived')")
+            ->whereRaw("COALESCE(bpr.brand_status, 'deactivated') = 'active'")
             ->where(function ($query): void {
                 $query->whereRaw('COALESCE(bps.is_available, true) = true')
                     ->orWhereNotNull('oa.id');
@@ -320,6 +332,10 @@ class BrandProductCatalogService
                 'bp.handle',
                 'bp.product_url',
                 'bp.image_url',
+                'bp.description',
+                'bp.product_type',
+                'bp.tags',
+                'bp.images',
                 'bp.price_cents',
                 'bp.currency_code',
                 'bp.shopify_status',
@@ -349,7 +365,7 @@ class BrandProductCatalogService
             ])
             ->get();
 
-        return $this->mapCatalogRows($rows, true);
+        return $this->mapCatalogRows($rows, true, $professionalId);
     }
 
     private function pruneInvalidSelectionsForProfessional(string $professionalId): void
@@ -405,19 +421,41 @@ class BrandProductCatalogService
      * @param  Collection<int, mixed>  $rows
      * @return array<int, array<string, mixed>>
      */
-    private function mapCatalogRows(Collection $rows, bool $selectedRows = false): array
+    private function mapCatalogRows(Collection $rows, bool $selectedRows = false, ?string $affiliateProfessionalId = null): array
     {
         $defaultSystemCommission = $this->pricing->defaultCommissionRate();
 
+        // Warm the promotion cache once per brand before iterating rows.
+        $firstBrandId = (string) ($rows->first()->brand_professional_id ?? '');
+        if ($firstBrandId !== '') {
+            $this->promotionService->getActivePromotionsForBrand($firstBrandId);
+        }
+
         return $rows
-            ->map(function ($row) use ($defaultSystemCommission, $selectedRows): array {
+            ->map(function ($row) use ($defaultSystemCommission, $selectedRows, $affiliateProfessionalId): array {
                 $commissionOverride = $this->toNullableFloat($row->commission_override ?? null);
                 $discountRate = $this->toNullableFloat($row->discount_rate ?? null);
                 $customPrice = $this->toNullableFloat($row->custom_price ?? null);
                 $affiliateCommissionOverride = $this->toNullableFloat($row->affiliate_commission_override ?? null);
                 $affiliateDiscountRate = $this->toNullableFloat($row->affiliate_discount_rate ?? null);
                 $affiliateCustomPrice = $this->toNullableFloat($row->affiliate_custom_price ?? null);
-                $effectiveDiscountRate = $affiliateDiscountRate ?? $discountRate;
+
+                // Resolve active promotion (PHP-only after cache warm above).
+                $promotion = ($affiliateProfessionalId !== null && $affiliateProfessionalId !== '')
+                    ? $this->promotionService->resolveActivePromotion(
+                        (string) ($row->brand_professional_id ?? ''),
+                        $affiliateProfessionalId,
+                        (string) ($row->brand_product_id ?? '')
+                    )
+                    : null;
+
+                // Discount: higher rate wins (higher discount = better for customer).
+                $staticDiscountRate = $affiliateDiscountRate ?? $discountRate;
+                $promoDiscountRate = $promotion['discount_rate'] ?? null;
+                $effectiveDiscountRate = ($promoDiscountRate !== null && $promoDiscountRate > ($staticDiscountRate ?? 0.0))
+                    ? $promoDiscountRate
+                    : $staticDiscountRate;
+
                 $effectiveCustomPrice = $affiliateCustomPrice ?? $customPrice;
                 $defaultCommissionRate = $this->toNullableFloat($row->default_commission_rate ?? null)
                     ?? $defaultSystemCommission;
@@ -450,10 +488,16 @@ class BrandProductCatalogService
                 );
                 $discountedPriceCents = $this->pricing->discountedPriceCents($basePriceCents, $effectiveDiscountRate);
                 $effectiveCommissionRate = $this->pricing->effectiveCommissionRate(
+                    $promotion['commission_rate'] ?? null,
                     $affiliateCommissionOverride,
                     $commissionOverride,
                     $defaultCommissionRate
                 );
+
+                $description = $this->nullableString($row->description ?? null);
+                $productType = $this->nullableString($row->product_type ?? null);
+                $tags = $this->parsePostgresTextArray($row->tags ?? null);
+                $images = $this->parseJsonArray($row->images ?? null);
 
                 $payload = [
                     'brand_product_id' => (string) ($row->brand_product_id ?? ''),
@@ -463,6 +507,10 @@ class BrandProductCatalogService
                     'handle' => $handle,
                     'product_url' => $productUrl,
                     'image_url' => $imageUrl,
+                    'description' => $description,
+                    'product_type' => $productType,
+                    'tags' => $tags,
+                    'images' => $images,
                     'currency_code' => $currencyCode,
                     'shopify_status' => (string) ($row->shopify_status ?? 'unknown'),
                     'is_sync_active' => (bool) ($row->is_sync_active ?? false),
@@ -614,5 +662,52 @@ class BrandProductCatalogService
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function parsePostgresTextArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return array_values(array_filter(array_map('trim', $value), static fn (string $v): bool => $v !== ''));
+        }
+
+        $raw = trim((string) $value);
+        if ($raw === '' || $raw === '{}') {
+            return [];
+        }
+
+        // Strip outer braces and parse comma-separated, possibly quoted values.
+        $inner = substr($raw, 1, -1);
+        preg_match_all('/"(?:[^"\\\\]|\\\\.)*"|[^,]+/', $inner, $matches);
+
+        return array_values(array_filter(array_map(static function (string $v): string {
+            $v = trim($v);
+            if (str_starts_with($v, '"') && str_ends_with($v, '"')) {
+                $v = substr($v, 1, -1);
+                $v = str_replace('\\"', '"', $v);
+            }
+            return $v;
+        }, $matches[0] ?? []), static fn (string $v): bool => $v !== ''));
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function parseJsonArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return array_values($value);
+        }
+
+        $raw = trim((string) $value);
+        if ($raw === '' || $raw === '[]') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? array_values($decoded) : [];
     }
 }

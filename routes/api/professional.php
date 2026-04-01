@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Professional\AffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
@@ -7,6 +8,7 @@ use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
 use App\Http\Controllers\Api\Professional\ConfirmationPreferenceController;
 use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
 use App\Http\Controllers\Api\Professional\Notifications\NotificationController;
+use App\Http\Controllers\Api\Professional\Notifications\NotificationEmailPreferenceController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
 use App\Http\Controllers\Api\Professional\PlanController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
@@ -23,9 +25,16 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalThemeController;
 use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
+use App\Http\Controllers\Api\Professional\BrandOnboardingReadinessController;
+use App\Http\Controllers\Api\Professional\BrandProfileController;
+use App\Http\Controllers\Api\Professional\Store\BrandAffiliateDefaultsController;
+use App\Http\Controllers\Api\Professional\Store\BrandAffiliateSettingsController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateOverrideController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateSettingController;
+use App\Http\Controllers\Api\Professional\Store\BrandProductMediaController;
 use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
+use App\Http\Controllers\Api\Professional\Store\BrandAffiliateSegmentController;
+use App\Http\Controllers\Api\Professional\Store\BrandPromotionController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
 use App\Http\Controllers\Api\Professional\Store\StoreAnalyticsV2Controller;
@@ -58,6 +67,7 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
             ->whereUuid('invite');
         Route::post('/brand-affiliate-invites/{token}/claim', [BrandAffiliateInviteController::class, 'claim']);
         Route::post('/brand-affiliate-invites/{token}/decline', [BrandAffiliateInviteController::class, 'decline']);
+        Route::get('/affiliate-invites', [AffiliateInviteController::class, 'index']);
         Route::get('/brand-partners', [BrandPartnerController::class, 'index']);
         Route::post('/brand-partners/{brandProfessionalId}/connect', [BrandPartnerController::class, 'connect'])
             ->whereUuid('brandProfessionalId');
@@ -176,6 +186,10 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::post('/me/notifications/{notification}/dismiss', [NotificationController::class, 'dismiss'])
             ->whereUuid('notification');
 
+        // Notification email preferences
+        Route::get('/me/notification-email-preferences', [NotificationEmailPreferenceController::class, 'index']);
+        Route::patch('/me/notification-email-preferences', [NotificationEmailPreferenceController::class, 'update']);
+
         // Email subscribers (marketing list)
         Route::get('/email-subscribers', [ProfessionalEmailSubscriptionController::class, 'index']);
         Route::get('/email-subscribers/export', [ProfessionalEmailSubscriptionController::class, 'export']);
@@ -244,6 +258,61 @@ Route::get('/store/brand-analytics/overview', [StoreAnalyticsV2Controller::class
         Route::get('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'index']);
         Route::put('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'upsert']);
         Route::delete('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'remove']);
+
+        // Store: Affiliate custom product media
+        Route::get('/store/products/{brandProductId}/media', [BrandProductMediaController::class, 'index'])
+            ->whereUuid('brandProductId');
+        Route::post('/store/products/{brandProductId}/media', [BrandProductMediaController::class, 'upload'])
+            ->whereUuid('brandProductId');
+        Route::post('/store/products/{brandProductId}/media/reorder', [BrandProductMediaController::class, 'reorder'])
+            ->whereUuid('brandProductId');
+        Route::delete('/store/products/{brandProductId}/media/{mediaId}', [BrandProductMediaController::class, 'destroy'])
+            ->whereUuid('brandProductId')
+            ->whereUuid('mediaId');
+
+        // Store: Brand affiliate defaults (theme + products for new affiliates)
+        Route::get('/store/affiliate-defaults', [BrandAffiliateDefaultsController::class, 'show']);
+        Route::patch('/store/affiliate-defaults', [BrandAffiliateDefaultsController::class, 'update']);
+
+        // Store: Per-affiliate settings (brand-managed)
+        Route::get('/store/affiliate-settings/{affiliateId}', [BrandAffiliateSettingsController::class, 'show'])
+            ->whereUuid('affiliateId');
+        Route::patch('/store/affiliate-settings/{affiliateId}', [BrandAffiliateSettingsController::class, 'update'])
+            ->whereUuid('affiliateId');
+
+        // Store: Affiliate segments (dynamic criteria-based groupings)
+        Route::get('/store/affiliate-segments', [BrandAffiliateSegmentController::class, 'index']);
+        Route::post('/store/affiliate-segments', [BrandAffiliateSegmentController::class, 'store']);
+        Route::get('/store/affiliate-segments/{segmentId}', [BrandAffiliateSegmentController::class, 'show'])
+            ->whereUuid('segmentId');
+        Route::patch('/store/affiliate-segments/{segmentId}', [BrandAffiliateSegmentController::class, 'update'])
+            ->whereUuid('segmentId');
+        Route::delete('/store/affiliate-segments/{segmentId}', [BrandAffiliateSegmentController::class, 'destroy'])
+            ->whereUuid('segmentId');
+        Route::post('/store/affiliate-segments/{segmentId}/refresh', [BrandAffiliateSegmentController::class, 'refresh'])
+            ->whereUuid('segmentId');
+
+        // Store: Promotions (time-bounded commission/discount campaigns)
+        Route::get('/store/promotions', [BrandPromotionController::class, 'index']);
+        Route::post('/store/promotions', [BrandPromotionController::class, 'store']);
+        Route::post('/store/promotions/preview', [BrandPromotionController::class, 'preview']);
+        Route::get('/store/promotions/{promotionId}', [BrandPromotionController::class, 'show'])
+            ->whereUuid('promotionId');
+        Route::patch('/store/promotions/{promotionId}', [BrandPromotionController::class, 'update'])
+            ->whereUuid('promotionId');
+        Route::delete('/store/promotions/{promotionId}', [BrandPromotionController::class, 'destroy'])
+            ->whereUuid('promotionId');
+        Route::post('/store/promotions/{promotionId}/clone', [BrandPromotionController::class, 'clone'])
+            ->whereUuid('promotionId');
+        Route::get('/store/promotions/{promotionId}/analytics', [BrandPromotionController::class, 'analytics'])
+            ->whereUuid('promotionId');
+
+        // Brand profile (business fields)
+        Route::get('/brand/profile', [BrandProfileController::class, 'show']);
+        Route::patch('/brand/profile', [BrandProfileController::class, 'update']);
+
+        // Brand onboarding readiness
+        Route::get('/brand/onboarding-readiness', [BrandOnboardingReadinessController::class, 'show']);
 
         // Stripe Connect & Payouts
         Route::get('/stripe/status', [StripeConnectController::class, 'status']);

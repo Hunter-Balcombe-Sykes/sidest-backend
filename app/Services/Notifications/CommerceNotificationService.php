@@ -2,7 +2,6 @@
 
 namespace App\Services\Notifications;
 
-use App\Models\Core\Notifications\Notification;
 use App\Models\Retail\RetailOrder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -21,6 +20,8 @@ class CommerceNotificationService
 
     /** @var array<int, int> */
     private const BOOKING_REVENUE_MILESTONES_CENTS = [5_000, 10_000, 25_000, 50_000, 100_000, 250_000];
+
+    public function __construct(private readonly NotificationPublisher $publisher) {}
 
     public function notifyStoreOrderById(string $orderId): void
     {
@@ -77,22 +78,26 @@ class CommerceNotificationService
         $ctaForUser = '/account/store?section=analytics&order='.$order->id;
         $ctaForBrand = '/account/commerce?section=analytics&order='.$order->id;
 
-        $this->insertNotificationIfMissing(
+        $this->publisher->publish(
             professionalId: $affiliateProfessionalId,
             frontendType: 'Success',
+            category: 'analytics_milestones',
             title: 'New sale received',
             body: "{$orderLabel} generated {$amountLabel} in sales.",
+            dedupeKey: 'store-sale:affiliate:'.$order->id,
             ctaUrl: $ctaForUser,
-            dedupeKey: 'store-sale:affiliate:'.$order->id
+            retentionConfigKey: 'analytics_milestones',
         );
 
-        $this->insertNotificationIfMissing(
+        $this->publisher->publish(
             professionalId: $brandProfessionalId,
             frontendType: 'Info',
+            category: 'analytics_milestones',
             title: 'New affiliate sale',
             body: "{$affiliateName} generated {$amountLabel} in sales ({$orderLabel}).",
+            dedupeKey: 'store-sale:brand:'.$order->id,
             ctaUrl: $ctaForBrand,
-            dedupeKey: 'store-sale:brand:'.$order->id
+            retentionConfigKey: 'analytics_milestones',
         );
 
         $this->notifySalesMilestonesForProfessional($affiliateProfessionalId, false);
@@ -143,13 +148,15 @@ class CommerceNotificationService
                 ? "{$customerLabel} booked {$serviceLabel} ({$amountLabel})."
                 : "{$customerLabel} booked {$serviceLabel}.";
 
-            $this->insertNotificationIfMissing(
+            $this->publisher->publish(
                 professionalId: $professionalId,
                 frontendType: 'Success',
+                category: 'analytics_milestones',
                 title: 'New booking received',
                 body: $body,
+                dedupeKey: 'booking:user:'.$eventKey,
                 ctaUrl: $ctaUrl,
-                dedupeKey: 'booking:user:'.$eventKey
+                retentionConfigKey: 'analytics_milestones',
             );
 
             $brandProfessionalIds = collect($context['brand_professional_ids'] ?? [])
@@ -164,13 +171,15 @@ class CommerceNotificationService
                     ? "{$affiliateName} received a booking for {$serviceLabel} ({$amountLabel})."
                     : "{$affiliateName} received a booking for {$serviceLabel}.";
 
-                $this->insertNotificationIfMissing(
+                $this->publisher->publish(
                     professionalId: $brandProfessionalId,
                     frontendType: 'Info',
+                    category: 'analytics_milestones',
                     title: 'New partner booking',
                     body: $brandBody,
+                    dedupeKey: 'booking:brand:'.$brandProfessionalId.':'.$eventKey,
                     ctaUrl: '/account/commerce?section=analytics&booking='.$eventKey,
-                    dedupeKey: 'booking:brand:'.$brandProfessionalId.':'.$eventKey
+                    retentionConfigKey: 'analytics_milestones',
                 );
             }
 
@@ -203,25 +212,29 @@ class CommerceNotificationService
 
         $orderMilestone = $this->latestReachedThreshold($ordersCount, self::SALES_ORDER_MILESTONES);
         if ($orderMilestone !== null) {
-            $this->insertNotificationIfMissing(
+            $this->publisher->publish(
                 professionalId: $professionalId,
                 frontendType: 'Success',
+                category: 'analytics_milestones',
                 title: 'Sales milestone reached',
                 body: "You have reached {$orderMilestone} total sales.",
+                dedupeKey: ($isBrand ? 'brand' : 'user').':sales:orders:'.$orderMilestone,
                 ctaUrl: $basePath,
-                dedupeKey: ($isBrand ? 'brand' : 'user').':sales:orders:'.$orderMilestone
+                retentionConfigKey: 'analytics_milestones',
             );
         }
 
         $revenueMilestoneCents = $this->latestReachedThreshold($revenueCents, self::SALES_REVENUE_MILESTONES_CENTS);
         if ($revenueMilestoneCents !== null) {
-            $this->insertNotificationIfMissing(
+            $this->publisher->publish(
                 professionalId: $professionalId,
                 frontendType: 'Success',
+                category: 'analytics_milestones',
                 title: 'Revenue milestone reached',
                 body: 'Total sales revenue reached '.$this->formatMoneyFromCents($revenueMilestoneCents, 'AUD').'.',
+                dedupeKey: ($isBrand ? 'brand' : 'user').':sales:revenue:'.$revenueMilestoneCents,
                 ctaUrl: $basePath,
-                dedupeKey: ($isBrand ? 'brand' : 'user').':sales:revenue:'.$revenueMilestoneCents
+                retentionConfigKey: 'analytics_milestones',
             );
         }
     }
@@ -244,25 +257,29 @@ class CommerceNotificationService
 
         $bookingMilestone = $this->latestReachedThreshold($bookingsCount, self::BOOKING_COUNT_MILESTONES);
         if ($bookingMilestone !== null) {
-            $this->insertNotificationIfMissing(
+            $this->publisher->publish(
                 professionalId: $professionalId,
                 frontendType: 'Success',
+                category: 'analytics_milestones',
                 title: 'Booking milestone reached',
                 body: "You have reached {$bookingMilestone} total bookings.",
+                dedupeKey: 'booking:count:'.$bookingMilestone,
                 ctaUrl: '/account/booking?section=analytics',
-                dedupeKey: 'booking:count:'.$bookingMilestone
+                retentionConfigKey: 'analytics_milestones',
             );
         }
 
         $revenueMilestone = $this->latestReachedThreshold($totalSpentCents, self::BOOKING_REVENUE_MILESTONES_CENTS);
         if ($revenueMilestone !== null) {
-            $this->insertNotificationIfMissing(
+            $this->publisher->publish(
                 professionalId: $professionalId,
                 frontendType: 'Success',
+                category: 'analytics_milestones',
                 title: 'Booking revenue milestone reached',
                 body: 'Bookings revenue reached '.$this->formatMoneyFromCents($revenueMilestone, 'AUD').'.',
+                dedupeKey: 'booking:revenue:'.$revenueMilestone,
                 ctaUrl: '/account/booking?section=analytics',
-                dedupeKey: 'booking:revenue:'.$revenueMilestone
+                retentionConfigKey: 'analytics_milestones',
             );
         }
     }
@@ -281,68 +298,6 @@ class CommerceNotificationService
         }
 
         return (int) $reached->max();
-    }
-
-    private function insertNotificationIfMissing(
-        string $professionalId,
-        string $frontendType,
-        string $title,
-        string $body,
-        string $ctaUrl,
-        string $dedupeKey
-    ): void {
-        $professionalId = trim($professionalId);
-        if ($professionalId === '') {
-            return;
-        }
-
-        $title = trim($title);
-        $body = trim($body);
-        if ($title === '' || $body === '') {
-            return;
-        }
-
-        $cta = $this->withDedupeKey($ctaUrl, $dedupeKey);
-        $exists = DB::table('notifications')
-            ->where('professional_id', $professionalId)
-            ->where('cta_url', $cta)
-            ->exists();
-
-        if ($exists) {
-            return;
-        }
-
-        $now = now();
-        $type = Notification::normalizeFrontendType($frontendType);
-
-        DB::table('notifications')->insert([
-            'id' => (string) Str::uuid(),
-            'professional_id' => $professionalId,
-            'type' => $type,
-            'title' => $title,
-            'body' => $body,
-            'cta_url' => $cta,
-            'primary_action_label' => 'View',
-            'secondary_action_label' => 'Dismiss',
-            'secondary_action_url' => null,
-            'severity' => Notification::severityForFrontendType($type),
-            'starts_at' => $now,
-            'ends_at' => null,
-            'created_at' => $now,
-            'updated_at' => $now,
-        ]);
-    }
-
-    private function withDedupeKey(string $url, string $dedupeKey): string
-    {
-        $trimmedUrl = trim($url);
-        if ($trimmedUrl === '') {
-            $trimmedUrl = '/account/overview';
-        }
-
-        $join = str_contains($trimmedUrl, '?') ? '&' : '?';
-
-        return $trimmedUrl.$join.'notif='.$dedupeKey;
     }
 
     private function formatMoneyFromCents(int $cents, string $currencyCode): string

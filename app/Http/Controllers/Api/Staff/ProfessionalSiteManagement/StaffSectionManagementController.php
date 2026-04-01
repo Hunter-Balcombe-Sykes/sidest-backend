@@ -27,7 +27,7 @@ class StaffSectionManagementController extends ApiController
 
         return $this->success([
             'professional_id' => $professional->id,
-            'sections' => $sections,l
+            'sections' => $sections,
         ]);
     }
 
@@ -95,11 +95,14 @@ class StaffSectionManagementController extends ApiController
     public function reorder(ReorderBlocksRequest $request, Professional $professional): JsonResponse
     {
         $ids = array_values(array_unique($request->validated()['ids'] ?? []));
+        $site = $this->currentSite($professional);
 
-        DB::transaction(function () use ($professional, $ids) {
+        DB::transaction(function () use ($professional, $site, $ids) {
+            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-sections:{$site->id}"]);
 
             $allIds = Block::query()
                 ->where('professional_id', $professional->id)
+                ->where('site_id', $site->id)
                 ->where('block_group', 'sections')
                 ->lockForUpdate()
                 ->orderBy('sort_order')
@@ -117,10 +120,25 @@ class StaffSectionManagementController extends ApiController
 
             $remaining = array_values(array_diff($allIds, $ids));
             $newOrder  = array_merge($ids, $remaining);
+            $offset    = (int) Block::query()
+                    ->where('professional_id', $professional->id)
+                    ->where('site_id', $site->id)
+                    ->where('block_group', 'sections')
+                    ->max('sort_order') + 1000;
 
             foreach ($newOrder as $i => $id) {
                 Block::query()
                     ->where('professional_id', $professional->id)
+                    ->where('site_id', $site->id)
+                    ->where('block_group', 'sections')
+                    ->where('id', $id)
+                    ->update(['sort_order' => $offset + $i]);
+            }
+
+            foreach ($newOrder as $i => $id) {
+                Block::query()
+                    ->where('professional_id', $professional->id)
+                    ->where('site_id', $site->id)
                     ->where('block_group', 'sections')
                     ->where('id', $id)
                     ->update(['sort_order' => $i]);

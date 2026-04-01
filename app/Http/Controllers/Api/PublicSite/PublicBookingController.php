@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
+use App\Jobs\Analytics\RebuildBookingDailyAggregatesJob;
+use App\Jobs\Analytics\RebuildBookingHourlyAggregatesJob;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Models\Core\Professional\Customer;
@@ -135,7 +137,7 @@ class PublicBookingController extends ApiController
         ]);
     }
 
-    public function availability(Request $request): JsonResponse
+    public function availability(\App\Http\Requests\Api\PublicSite\Booking\PublicBookingAvailabilityRequest $request): JsonResponse
     {
         try {
             [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
@@ -143,11 +145,7 @@ class PublicBookingController extends ApiController
                 return $errorResponse;
             }
 
-            $validated = Validator::make($request->all(), [
-                'date' => ['required', 'date_format:Y-m-d'],
-                'serviceVariationId' => ['required', 'string', 'max:120'],
-                'locationId' => ['nullable', 'string', 'max:120'],
-            ])->validate();
+            $validated = $request->validated();
 
             $location = $this->resolveLocation($professional, $validated['locationId'] ?? null);
             $date = CarbonImmutable::createFromFormat('Y-m-d', (string) $validated['date']);
@@ -219,7 +217,7 @@ class PublicBookingController extends ApiController
         ]);
     }
 
-    public function checkout(Request $request): JsonResponse
+    public function checkout(\App\Http\Requests\Api\PublicSite\Booking\PublicBookingCheckoutRequest $request): JsonResponse
     {
         try {
             [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
@@ -227,22 +225,7 @@ class PublicBookingController extends ApiController
                 return $errorResponse;
             }
 
-            $validated = Validator::make($request->all(), [
-                'serviceVariationId' => ['required', 'string', 'max:120'],
-                'serviceVariationVersion' => ['required', 'integer', 'min:1'],
-                'teamMemberId' => ['required', 'string', 'max:120'],
-                'durationMinutes' => ['nullable', 'integer', 'min:1'],
-                'startAt' => ['required', 'string', 'max:80'],
-                'locationId' => ['nullable', 'string', 'max:120'],
-                'paymentMethod' => ['nullable', 'string', 'in:apple_pay,google_pay,card'],
-                'sourceId' => ['nullable', 'string', 'max:255'],
-                'customer' => ['required', 'array'],
-                'customer.firstName' => ['required', 'string', 'max:120'],
-                'customer.lastName' => ['required', 'string', 'max:120'],
-                'customer.email' => ['required', 'email', 'max:190'],
-                'customer.phone' => ['nullable', 'string', 'max:60'],
-                'customer.note' => ['nullable', 'string', 'max:1000'],
-            ])->validate();
+            $validated = $request->validated();
 
             // Non-blocking local CRM sync at checkout intent time.
             // Mirrors store behavior so contacts are captured even if payment later fails.
@@ -766,17 +749,21 @@ class PublicBookingController extends ApiController
             $customerName = trim($firstName.' '.$lastName);
             $customerEmail = strtolower(trim((string) ($validated['customer']['email'] ?? '')));
             $customerPhone = trim((string) ($validated['customer']['phone'] ?? ''));
-            $occurredAt = $this->nullableTimestamp((string) ($validated['startAt'] ?? '')) ?? now();
+            $appointmentStartAt = $this->nullableTimestamp((string) ($validated['startAt'] ?? ''));
+            $occurredAt = now();
             $normalizedStatus = strtolower(trim($bookingStatus));
             if (! in_array($normalizedStatus, ['accepted', 'pending', 'completed', 'cancelled', 'failed'], true)) {
                 $normalizedStatus = 'completed';
             }
+            $professionalTimezone = trim((string) ($professional->timezone ?? '')) ?: 'UTC';
+            $localDay = $occurredAt->copy()->setTimezone($professionalTimezone)->toDateString();
 
             $attributes = [
                 'professional_id' => $professionalId,
                 'site_id' => $siteId,
                 'brand_professional_id' => count($brandProfessionalIds) === 1 ? $brandProfessionalIds[0] : null,
                 'occurred_at' => $occurredAt,
+                'appointment_start_at' => $appointmentStartAt,
                 'status' => $normalizedStatus,
                 'source' => 'site_booking_checkout',
                 'square_booking_id' => $bookingId !== '' ? $bookingId : null,
@@ -809,6 +796,15 @@ class PublicBookingController extends ApiController
                         'created_at' => now(),
                     ]));
             }
+
+            RebuildBookingHourlyAggregatesJob::dispatch(
+                $professionalId,
+                $occurredAt->copy()->utc()->startOfHour()->toIso8601String()
+            );
+            RebuildBookingDailyAggregatesJob::dispatch(
+                $professionalId,
+                $localDay
+            );
 
             $this->commerceNotifications->notifyBookingCompleted([
                 'professional_id' => $professionalId,

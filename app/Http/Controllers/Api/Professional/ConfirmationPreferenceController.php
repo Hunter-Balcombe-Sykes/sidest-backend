@@ -27,19 +27,9 @@ class ConfirmationPreferenceController extends ApiController
         ]);
     }
 
-    public function update(Request $request): JsonResponse
+    public function update(\App\Http\Requests\Api\Professional\UpdateConfirmationPreferenceRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            ConfirmationPreferenceService::ACTION_DELETE_CUSTOMER => ['sometimes', 'boolean'],
-            ConfirmationPreferenceService::ACTION_DELETE_MEDIA => ['sometimes', 'boolean'],
-            ConfirmationPreferenceService::ACTION_UNSELECT_PRODUCT => ['sometimes', 'boolean'],
-        ]);
-
-        if ($validator->fails()) {
-            throw new ValidationException($validator);
-        }
-
-        $validated = $validator->validated();
+        $validated = $request->validated();
         if ($validated === []) {
             return $this->error(
                 'No confirmation preference fields were provided.',

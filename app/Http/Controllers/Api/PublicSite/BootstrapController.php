@@ -20,6 +20,7 @@ use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Enterprise\EnterpriseProvisioningService;
 use App\Services\Legal\ProfessionalLegalContentService;
+use App\Services\Professional\AccountTypeDefaultsService;
 
 
 
@@ -30,12 +31,21 @@ class BootstrapController extends ApiController
         ProfessionalLegalContentService $legalContentService,
         EnterpriseProvisioningService $enterpriseProvisioningService,
         BrandAffiliateInviteService $brandAffiliateInviteService,
-        BrandPartnerLinkService $brandPartnerLinks
+        BrandPartnerLinkService $brandPartnerLinks,
+        AccountTypeDefaultsService $accountTypeDefaultsService
     )
     {
         $uid = $request->attributes->get('supabase_uid');
         if (!is_string($uid) || $uid === '') {
             return $this->error('Unauthenticated', 401);
+        }
+
+        if ($this->isWaitlistModeEnabled() && ! $this->hasExistingProfessional($uid)) {
+            return $this->error(
+                'New account creation is currently waitlist-only. Please join the waitlist.',
+                403,
+                ['code' => 'WAITLIST_ONLY']
+            );
         }
 
         $data = $request->validated();
@@ -53,7 +63,7 @@ class BootstrapController extends ApiController
                 return 'professional';
             };
 
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks, $resolveProfessionalType) {
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks, $accountTypeDefaultsService, $resolveProfessionalType) {
             $createdProfessional = false;
             $provisionedEnterprise = null;
 
@@ -76,9 +86,8 @@ class BootstrapController extends ApiController
                     'first_name'      => $data['first_name'] ?? '',
                     'last_name'       => $data['last_name'] ?? null,
 
-                    // Defaults to Main phone/email if NULL
-                    'public_contact_number' => $data['phone'] ?? null,
-                    'public_contact_email' => $data['primary_email'] ?? null,
+                    'public_contact_number' => null,
+                    'public_contact_email' => null,
                     'handle_lc' => $data['handle_lc'],
                 ]);
                 $professional->auth_user_id = $uid;
@@ -103,13 +112,6 @@ class BootstrapController extends ApiController
 
                 if (array_key_exists('phone', $data)) {
                     $fill['phone'] = $data['phone'];
-                    // only change public_contact_number if phone is being set in this request
-                    $fill['public_contact_number'] = $data['phone'] ?: null;
-                }
-
-                if (array_key_exists('primary_email', $data)) {
-                    // only change public_contact_email if email is being set in this request
-                    $fill['public_contact_email'] = $data['primary_email'] ?: null;
                 }
 
                 $professional->fill($fill);
@@ -135,6 +137,11 @@ class BootstrapController extends ApiController
                 $site = $this->createSiteWithRetry($professional->id, $base);
             }
 
+            // Apply account-type defaults for new professionals
+            if ($createdProfessional) {
+                $accountTypeDefaultsService->applyDefaults($professional, $site);
+            }
+
                 if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
                     $invite = $brandAffiliateInviteService->findByToken((string) $data['invite_token']);
                     if (! $invite) {
@@ -143,6 +150,7 @@ class BootstrapController extends ApiController
 
                 $brandAffiliateInviteService->claimInvite($invite, $professional);
                 $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+                $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, (string) $invite->brand_professional_id);
                 } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
                     $brandPartnerProfessional = Professional::query()
                         ->whereKey((string) $data['brand_partner_professional_id'])
@@ -162,6 +170,7 @@ class BootstrapController extends ApiController
 
                     $brandPartnerLinks->promoteBrandToPrimary($affiliateId, $brandId);
                     $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
+                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, $brandId);
                 }
 
             $legalContentService->refreshGenerated($professional, $site);
@@ -429,5 +438,17 @@ class BootstrapController extends ApiController
 
         $site->settings = $settings;
         $site->save();
+    }
+
+    private function isWaitlistModeEnabled(): bool
+    {
+        return (bool) config('comet.waitlist.enabled', false);
+    }
+
+    private function hasExistingProfessional(string $uid): bool
+    {
+        return Professional::query()
+            ->where('auth_user_id', $uid)
+            ->exists();
     }
 }

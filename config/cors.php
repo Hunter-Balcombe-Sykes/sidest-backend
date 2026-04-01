@@ -7,15 +7,16 @@ return [
         [
             'https://www.hunterbalcombesykes.com',
             'https://hunterbalcombesykes.com',
+            'http://localhost:3000',
         ],
         in_array(env('APP_ENV'), ['local', 'development', 'testing']) ? [
-            'http://localhost:3000',
             'http://localhost:5173',
         ] : []
     ),
     'allowed_origins_patterns' => array_merge(
         [
             '#^https://.*\.vercel\.app$#', // For Vercel preview deployments
+            '#^https?://localhost:3000$#',
         ],
         in_array(env('APP_ENV'), ['local', 'development', 'testing']) ? [
             '#^https?://localhost(?::\d+)?$#',

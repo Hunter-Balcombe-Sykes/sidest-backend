@@ -37,6 +37,16 @@ class Professional extends BaseModel
     public $incrementing = false;
     protected $keyType = 'string';
 
+    protected $hidden = [
+        'auth_user_id',
+        'stripe_connect_account_id',
+        'stripe_customer_id',
+        'stripe_payment_method_id',
+        'stripe_commission_funding_mode',
+        'stripe_manual_balance_cents',
+        'stripe_manual_balance_currency',
+    ];
+
     protected $fillable = [
         'handle',
         'display_name',
@@ -93,6 +103,16 @@ class Professional extends BaseModel
     public function isBrand(): bool
     {
         return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'brand';
+    }
+
+    public function isProfessional(): bool
+    {
+        return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'professional';
+    }
+
+    public function brandProfile(): HasOne
+    {
+        return $this->hasOne(BrandProfile::class, 'professional_id');
     }
 
     public function site(): HasOne

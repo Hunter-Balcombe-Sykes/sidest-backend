@@ -9,6 +9,7 @@ use App\Models\Retail\OrderEventInbox;
 use App\Models\Retail\OrderItem;
 use App\Models\Retail\RetailOrder;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Store\PromotionResolutionService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,10 @@ use Throwable;
 
 class ShopifyOrderProcessingService
 {
+    public function __construct(
+        private readonly PromotionResolutionService $promotionService,
+    ) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -168,7 +173,24 @@ class ShopifyOrderProcessingService
 
                 $brandProductMap = $this->resolveBrandProductMap($brandProfessionalId);
                 $refundsByLineItem = $this->refundsByLineItem($payload);
-                $commissionCache = [];
+
+                // Resolve all brand product IDs upfront so commission rates can
+                // be batch-loaded before the loop (3 queries total, not 3 per item).
+                $brandProductIds = $lineItems->map(function (array $lineItem) use ($brandProductMap): ?string {
+                    $shopifyProductRaw = $this->firstNonEmpty([
+                        (string) ($lineItem['product_id'] ?? ''),
+                        (string) Arr::get($lineItem, 'product.id', ''),
+                        (string) Arr::get($lineItem, 'admin_graphql_api_id', ''),
+                    ]);
+
+                    return $this->matchBrandProductId($shopifyProductRaw, $brandProductMap);
+                })->all();
+
+                $commissionCache = $this->prefetchCommissionRates(
+                    $brandProfessionalId,
+                    $affiliateProfessionalId,
+                    $brandProductIds
+                );
 
                 foreach ($lineItems as $index => $lineItem) {
                     $lineId = trim((string) ($lineItem['id'] ?? ''));
@@ -255,28 +277,53 @@ class ShopifyOrderProcessingService
                         $lineId
                     );
 
-                    $accrualEntry = CommissionLedgerEntry::query()->firstOrCreate(
-                        ['idempotency_key' => $accrualKey],
-                        [
-                            'order_id' => (string) $order->id,
-                            'order_item_id' => (string) $item->id,
-                            'brand_professional_id' => $brandProfessionalId,
-                            'affiliate_professional_id' => $affiliateProfessionalId,
-                            'entry_type' => 'accrual',
-                            'status' => 'approved',
-                            'amount_cents' => $accrualCents,
-                            'currency_code' => $lineCurrencyCode,
-                            'commission_rate' => $commissionRate,
-                            'rate_source' => $rateSource,
-                            'calculation_metadata' => array_merge($rateMetadata, [
-                                'accrual_base_line_cents' => $accrualBaseLineCents,
-                                'current_net_line_cents' => $netLineCents,
-                                'line_id' => $lineId,
-                                'order_id' => (string) $order->id,
-                            ]),
-                            'occurred_at' => $orderedAt,
-                        ]
+                    $accrualEntry = $this->findStripeStorefrontAccrualEntry(
+                        $brandProfessionalId,
+                        $affiliateProfessionalId,
+                        $token,
+                        $normalizedShopifyProductId,
+                        $lineCurrencyCode,
+                        $accrualCents
                     );
+
+                    if ($accrualEntry instanceof CommissionLedgerEntry) {
+                        $updates = [];
+                        if (empty($accrualEntry->order_id)) {
+                            $updates['order_id'] = (string) $order->id;
+                        }
+                        if (empty($accrualEntry->order_item_id)) {
+                            $updates['order_item_id'] = (string) $item->id;
+                        }
+                        if ($updates !== []) {
+                            $accrualEntry->fill($updates);
+                            $accrualEntry->save();
+                        }
+                    }
+
+                    if (! $accrualEntry instanceof CommissionLedgerEntry) {
+                        $accrualEntry = CommissionLedgerEntry::query()->firstOrCreate(
+                            ['idempotency_key' => $accrualKey],
+                            [
+                                'order_id' => (string) $order->id,
+                                'order_item_id' => (string) $item->id,
+                                'brand_professional_id' => $brandProfessionalId,
+                                'affiliate_professional_id' => $affiliateProfessionalId,
+                                'entry_type' => 'accrual',
+                                'status' => 'approved',
+                                'amount_cents' => $accrualCents,
+                                'currency_code' => $lineCurrencyCode,
+                                'commission_rate' => $commissionRate,
+                                'rate_source' => $rateSource,
+                                'calculation_metadata' => array_merge($rateMetadata, [
+                                    'accrual_base_line_cents' => $accrualBaseLineCents,
+                                    'current_net_line_cents' => $netLineCents,
+                                    'line_id' => $lineId,
+                                    'order_id' => (string) $order->id,
+                                ]),
+                                'occurred_at' => $orderedAt,
+                            ]
+                        );
+                    }
 
                     $accrualEntryAmount = abs((int) $accrualEntry->amount_cents);
                     if ($accrualEntryAmount <= 0 || $refundedLineCents <= 0 || $accrualBaseLineCents <= 0) {
@@ -349,6 +396,7 @@ class ShopifyOrderProcessingService
                     'brand_professional_id' => $brandProfessionalId,
                     'affiliate_professional_id' => $affiliateProfessionalId,
                     'ordered_day' => $orderedAt->toDateString(),
+                    'ordered_hour_start' => $orderedAt->copy()->utc()->startOfHour()->toIso8601String(),
                 ];
             });
 
@@ -526,7 +574,75 @@ class ShopifyOrderProcessingService
     }
 
     /**
-     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>}>  $cache
+     * Batch-load all commission rates for the line items in an order into the
+     * cache structure expected by resolveCommissionRate(). Executes 3 queries
+     * regardless of how many line items the order contains.
+     *
+     * @param  array<int, string|null>  $brandProductIds  Ordered list of resolved brand_product_id per line item (may contain nulls)
+     * @return array<string, array{rate: float, source: string, metadata: array<string, mixed>, is_static: bool}>
+     */
+    private function prefetchCommissionRates(
+        string $brandProfessionalId,
+        string $affiliateProfessionalId,
+        array $brandProductIds
+    ): array {
+        $cache = [];
+        $nonNullIds = array_values(array_unique(array_filter($brandProductIds, static fn ($id): bool => $id !== null)));
+
+        $affiliateOverrides = [];
+        $brandProductOverrides = [];
+
+        if ($nonNullIds !== []) {
+            $affiliateOverrides = DB::table('retail.brand_product_affiliate_settings')
+                ->where('brand_professional_id', $brandProfessionalId)
+                ->where('affiliate_professional_id', $affiliateProfessionalId)
+                ->whereIn('brand_product_id', $nonNullIds)
+                ->whereNotNull('commission_override')
+                ->pluck('commission_override', 'brand_product_id')
+                ->all();
+
+            $brandProductOverrides = DB::table('retail.brand_product_settings')
+                ->where('professional_id', $brandProfessionalId)
+                ->whereIn('brand_product_id', $nonNullIds)
+                ->whereNotNull('commission_override')
+                ->pluck('commission_override', 'brand_product_id')
+                ->all();
+        }
+
+        $brandDefault = DB::table('retail.brand_store_settings')
+            ->where('professional_id', $brandProfessionalId)
+            ->whereNotNull('default_commission_rate')
+            ->value('default_commission_rate');
+
+        $systemDefault = (float) config('comet.store.default_commission_rate', 15);
+
+        // Warm the promotion cache for this brand so resolveCommissionRate() can use it
+        // without issuing additional queries per line item.
+        $this->promotionService->getActivePromotionsForBrand($brandProfessionalId);
+
+        foreach ($brandProductIds as $brandProductId) {
+            $cacheKey = implode('|', [$brandProfessionalId, $affiliateProfessionalId, $brandProductId ?? 'none']);
+
+            if (isset($cache[$cacheKey])) {
+                continue;
+            }
+
+            if ($brandProductId !== null && isset($affiliateOverrides[$brandProductId])) {
+                $this->storeCommissionRateCache($cache, $cacheKey, (float) $affiliateOverrides[$brandProductId], 'affiliate_product_override', ['brand_product_id' => $brandProductId], true);
+            } elseif ($brandProductId !== null && isset($brandProductOverrides[$brandProductId])) {
+                $this->storeCommissionRateCache($cache, $cacheKey, (float) $brandProductOverrides[$brandProductId], 'brand_product_override', ['brand_product_id' => $brandProductId], true);
+            } elseif ($brandDefault !== null) {
+                $this->storeCommissionRateCache($cache, $cacheKey, (float) $brandDefault, 'brand_default', [], true);
+            } else {
+                $this->storeCommissionRateCache($cache, $cacheKey, $systemDefault, 'system_default', [], true);
+            }
+        }
+
+        return $cache;
+    }
+
+    /**
+     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>, is_static: bool}>  $cache
      * @return array{0: float, 1: string, 2: array<string, mixed>}
      */
     private function resolveCommissionRate(
@@ -538,6 +654,20 @@ class ShopifyOrderProcessingService
         $cacheKey = implode('|', [$brandProfessionalId, $affiliateProfessionalId, $brandProductId ?? 'none']);
         if (isset($cache[$cacheKey])) {
             $cached = $cache[$cacheKey];
+
+            if (($cached['is_static'] ?? false) === true) {
+                // Prefetch stores static hierarchy values only; merge promotion each time.
+                return $this->applyPromotionRate(
+                    $cache,
+                    $cacheKey,
+                    $cached['rate'],
+                    $cached['source'],
+                    $cached['metadata'],
+                    $brandProfessionalId,
+                    $affiliateProfessionalId,
+                    $brandProductId
+                );
+            }
 
             return [$cached['rate'], $cached['source'], $cached['metadata']];
         }
@@ -551,12 +681,15 @@ class ShopifyOrderProcessingService
                 ->value('bpas.commission_override');
 
             if ($affiliateOverride !== null) {
-                return $this->storeCommissionRateCache(
+                return $this->applyPromotionRate(
                     $cache,
                     $cacheKey,
                     (float) $affiliateOverride,
                     'affiliate_product_override',
-                    ['brand_product_id' => $brandProductId]
+                    ['brand_product_id' => $brandProductId],
+                    $brandProfessionalId,
+                    $affiliateProfessionalId,
+                    $brandProductId
                 );
             }
 
@@ -567,12 +700,15 @@ class ShopifyOrderProcessingService
                 ->value('bps.commission_override');
 
             if ($brandOverride !== null) {
-                return $this->storeCommissionRateCache(
+                return $this->applyPromotionRate(
                     $cache,
                     $cacheKey,
                     (float) $brandOverride,
                     'brand_product_override',
-                    ['brand_product_id' => $brandProductId]
+                    ['brand_product_id' => $brandProductId],
+                    $brandProfessionalId,
+                    $affiliateProfessionalId,
+                    $brandProductId
                 );
             }
         }
@@ -583,26 +719,79 @@ class ShopifyOrderProcessingService
             ->value('bss.default_commission_rate');
 
         if ($brandDefault !== null) {
-            return $this->storeCommissionRateCache(
+            return $this->applyPromotionRate(
                 $cache,
                 $cacheKey,
                 (float) $brandDefault,
                 'brand_default',
-                []
+                [],
+                $brandProfessionalId,
+                $affiliateProfessionalId,
+                $brandProductId
             );
         }
 
-        return $this->storeCommissionRateCache(
+        return $this->applyPromotionRate(
             $cache,
             $cacheKey,
             (float) config('comet.store.default_commission_rate', 15),
             'system_default',
-            []
+            [],
+            $brandProfessionalId,
+            $affiliateProfessionalId,
+            $brandProductId
         );
     }
 
     /**
-     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>}>  $cache
+     * Compare the resolved static rate against any active promotion and return the higher rate.
+     * Promotions act as a rate boost — they never reduce a rate below the static hierarchy.
+     *
+     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>, is_static: bool}>  $cache
+     * @param  array<string, mixed>  $staticMetadata
+     * @return array{0: float, 1: string, 2: array<string, mixed>}
+     */
+    private function applyPromotionRate(
+        array &$cache,
+        string $cacheKey,
+        float $staticRate,
+        string $staticSource,
+        array $staticMetadata,
+        string $brandProfessionalId,
+        string $affiliateProfessionalId,
+        ?string $brandProductId
+    ): array {
+        $promotion = $this->promotionService->resolveActivePromotion(
+            $brandProfessionalId,
+            $affiliateProfessionalId,
+            $brandProductId
+        );
+
+        if ($promotion !== null && $promotion['commission_rate'] !== null && $promotion['commission_rate'] > $staticRate) {
+            return $this->storeCommissionRateCache(
+                $cache,
+                $cacheKey,
+                $promotion['commission_rate'],
+                'promotion',
+                [
+                    'promotion_id' => $promotion['promotion_id'],
+                    'promotion_name' => $promotion['promotion_name'],
+                    'static_rate' => $staticRate,
+                    'static_source' => $staticSource,
+                ],
+                false
+            );
+        }
+
+        if ($promotion !== null && $promotion['commission_rate'] !== null) {
+            $staticMetadata['bypassed_promotion_id'] = $promotion['promotion_id'];
+        }
+
+        return $this->storeCommissionRateCache($cache, $cacheKey, $staticRate, $staticSource, $staticMetadata, false);
+    }
+
+    /**
+     * @param  array<string, array{rate: float, source: string, metadata: array<string, mixed>, is_static: bool}>  $cache
      * @param  array<string, mixed>  $metadata
      * @return array{0: float, 1: string, 2: array<string, mixed>}
      */
@@ -611,7 +800,8 @@ class ShopifyOrderProcessingService
         string $cacheKey,
         float $rate,
         string $source,
-        array $metadata
+        array $metadata,
+        bool $isStatic = false
     ): array {
         $normalizedRate = round(max(0.0, min(100.0, $rate)), 4);
 
@@ -619,6 +809,7 @@ class ShopifyOrderProcessingService
             'rate' => $normalizedRate,
             'source' => $source,
             'metadata' => $metadata,
+            'is_static' => $isStatic,
         ];
 
         return [$normalizedRate, $source, $metadata];
@@ -659,6 +850,23 @@ class ShopifyOrderProcessingService
     {
         $note = strtolower(trim((string) ($payload['note'] ?? '')));
         if ($note !== '' && str_contains($note, 'comet_payment_mode:stripe_direct')) {
+            return 'stripe_direct';
+        }
+
+        foreach (collect($payload['note_attributes'] ?? [])->filter(static fn ($value): bool => is_array($value)) as $row) {
+            $name = strtolower(trim((string) ($row['name'] ?? '')));
+            $value = strtolower(trim((string) ($row['value'] ?? '')));
+
+            if (
+                in_array($name, ['comet_payment_mode', 'cometpaymentmode'], true)
+                && in_array($value, ['stripe_direct', 'stripe'], true)
+            ) {
+                return 'stripe_direct';
+            }
+        }
+
+        $tags = strtolower(trim((string) ($payload['tags'] ?? '')));
+        if ($tags !== '' && str_contains($tags, 'comet_payment_mode:stripe_direct')) {
             return 'stripe_direct';
         }
 
@@ -743,6 +951,41 @@ class ShopifyOrderProcessingService
         return null;
     }
 
+    private function findStripeStorefrontAccrualEntry(
+        string $brandProfessionalId,
+        string $affiliateProfessionalId,
+        string $checkoutSessionToken,
+        ?string $normalizedShopifyProductId,
+        string $currencyCode,
+        int $amountCents,
+    ): ?CommissionLedgerEntry {
+        $checkoutSessionToken = trim($checkoutSessionToken);
+        if ($checkoutSessionToken === '' || $amountCents <= 0) {
+            return null;
+        }
+
+        $query = CommissionLedgerEntry::query()
+            ->where('entry_type', 'accrual')
+            ->where('status', 'approved')
+            ->where('rate_source', 'stripe_storefront')
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('currency_code', $currencyCode)
+            ->where('amount_cents', $amountCents)
+            ->whereRaw("coalesce(calculation_metadata->>'checkout_session_token', '') = ?", [$checkoutSessionToken]);
+
+        if ($normalizedShopifyProductId !== null && $normalizedShopifyProductId !== '') {
+            $query->whereRaw(
+                "coalesce(lower(calculation_metadata->>'shopify_product_id'), '') = ?",
+                [strtolower($normalizedShopifyProductId)]
+            );
+        }
+
+        return $query
+            ->orderByDesc('created_at')
+            ->first();
+    }
+
     private function toCents(mixed $value): int
     {
         if ($value === null || $value === '') {
@@ -764,7 +1007,9 @@ class ShopifyOrderProcessingService
         }
 
         try {
-            return Carbon::parse($value);
+            // Normalize incoming Shopify timestamps to UTC so persisted
+            // timestamptz values don't drift across server/app timezones.
+            return Carbon::parse($value)->utc();
         } catch (Throwable) {
             return null;
         }

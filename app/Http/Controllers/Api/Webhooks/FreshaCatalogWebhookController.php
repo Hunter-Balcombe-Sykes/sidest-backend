@@ -34,14 +34,14 @@ class FreshaCatalogWebhookController extends ApiController
         $eventType = trim((string) ($payload['type'] ?? $payload['event_type'] ?? ''));
         $businessId = trim((string) ($payload['business_id'] ?? data_get($payload, 'data.business_id', '')));
 
-        // Deduplicate
+        // Deduplicate — Cache::add() is atomic: it sets the key only if absent and
+        // returns false when the key already exists, eliminating the has()+put() race.
         $eventId = trim((string) ($payload['event_id'] ?? $payload['id'] ?? ''));
         if ($eventId !== '') {
             $cacheKey = 'fresha_webhook:' . $eventId;
-            if (Cache::has($cacheKey)) {
+            if (! Cache::add($cacheKey, true, now()->addHours(24))) {
                 return $this->success(['received' => true, 'duplicate' => true]);
             }
-            Cache::put($cacheKey, true, now()->addHours(24));
         }
 
         Log::info('Fresha webhook received', [
@@ -137,10 +137,9 @@ class FreshaCatalogWebhookController extends ApiController
         $notificationUrl = trim((string) config('services.fresha.webhook_notification_url', ''));
 
         if ($signatureKey === '' || $notificationUrl === '') {
-            // If not configured, skip validation (log warning).
-            Log::warning('Fresha webhook signature key or notification URL not configured — skipping validation');
+            Log::warning('Fresha webhook signature key or notification URL not configured — rejecting webhook');
 
-            return true;
+            return false;
         }
 
         if ($signature === '') {

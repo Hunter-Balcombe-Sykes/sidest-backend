@@ -7,6 +7,7 @@ use App\Http\Middleware\Auth\VerifySupabaseJwt;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
 use App\Http\Middleware\RequirePlan;
+use App\Http\Middleware\SecureHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -24,16 +25,26 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withCommands([
+        \App\Console\Commands\BackfillHourlyAnalytics::class,
+        \App\Console\Commands\CompactHourlyAnalytics::class,
+    ])
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->append(SecureHeaders::class);
+
+        // Apply public-cache headers to every API route. The middleware itself
+        // only emits Cache-Control/Vary headers for the allow-listed public paths;
+        // all other routes pass through untouched.
+        $middleware->appendToGroup('api', AddPublicCacheHeaders::class);
+
         $middleware->alias([
-        'supabase.jwt' => VerifySupabaseJwt::class,
-        'current.pro'  => LoadCurrentProfessional::class,
-        'staff' => EnsureCometStaff::class,
-        'staff.admin' => EnsureCometAdmin::class,
-        'lead.log'     => LogLeadRateLimits::class,
-            'api' => AddPublicCacheHeaders::class,
-            'plan' => RequirePlan::class,
-    ]);
+            'supabase.jwt' => VerifySupabaseJwt::class,
+            'current.pro'  => LoadCurrentProfessional::class,
+            'staff'        => EnsureCometStaff::class,
+            'staff.admin'  => EnsureCometAdmin::class,
+            'lead.log'     => LogLeadRateLimits::class,
+            'plan'         => RequirePlan::class,
+        ]);
     })
 
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -68,6 +79,11 @@ return Application::configure(basePath: dirname(__DIR__))
 
             // Forbidden (403)
             if ($e instanceof AccessDeniedHttpException) {
+                \Illuminate\Support\Facades\Log::warning('Access denied', [
+                    'path' => $request->path(),
+                    'message' => $e->getMessage(),
+                ]);
+
                 return response()->json([
                     'message' => $e->getMessage() ?: 'Access denied',
                 ], 403);

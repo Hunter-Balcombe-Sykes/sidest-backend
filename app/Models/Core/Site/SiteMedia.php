@@ -18,8 +18,9 @@ class SiteMedia extends BaseModel
     public $incrementing = false;
     protected $keyType = 'string';
 
-    public const POOL_GALLERY = 'gallery';
-    public const POOL_CONTENT = 'content';
+    public const POOL_GALLERY  = 'gallery';
+    public const POOL_CONTENT  = 'content';
+    public const POOL_PRODUCT  = 'product';
 
     public const MEDIA_TYPE_IMAGE = 'image';
     public const MEDIA_TYPE_VIDEO = 'video';

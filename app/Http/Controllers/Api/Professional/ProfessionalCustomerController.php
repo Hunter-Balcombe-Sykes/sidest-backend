@@ -101,8 +101,7 @@ class ProfessionalCustomerController extends ApiController
             $customer = $pro->customers()->create($data);
         }
 
-        return $this->success(['customer' => $customer], 201);
-
+        return $this->success(['customer' => new \App\Http\Resources\CustomerResource($customer)], 201);
     }
 
     public function show(Request $request, Customer $customer)
@@ -115,7 +114,7 @@ class ProfessionalCustomerController extends ApiController
             abort(404);
         }
 
-        return $this->success(['customer' => $customer]);
+        return $this->success(['customer' => new \App\Http\Resources\CustomerResource($customer)]);
     }
 
     public function update(UpdateCustomerRequest $request, Customer $customer)
@@ -128,7 +127,7 @@ class ProfessionalCustomerController extends ApiController
         $customer->fill($request->validated());
         $customer->save();
 
-        return $this->success(['customer' => $customer->fresh()]);
+        return $this->success(['customer' => new \App\Http\Resources\CustomerResource($customer->fresh())]);
     }
 
     // Archive Soft Delete

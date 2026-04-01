@@ -139,6 +139,7 @@ class BrandAffiliateInviteService
                     'error_code' => 'skipped_duplicate_superseded',
                     'error_message' => 'Superseded by a later row for the same email.',
                 ];
+
                 continue;
             }
 
@@ -152,6 +153,7 @@ class BrandAffiliateInviteService
                     'error_code' => 'validation_failed',
                     'error_message' => (string) $validator->errors()->first(),
                 ];
+
                 continue;
             }
 
@@ -208,7 +210,7 @@ class BrandAffiliateInviteService
     public function findByToken(string $token): ?BrandAffiliateInvite
     {
         $invite = BrandAffiliateInvite::query()
-            ->with(['brandProfessional'])
+            ->with(['brandProfessional.brandProfile'])
             ->where('token', trim($token))
             ->first();
 
@@ -224,6 +226,12 @@ class BrandAffiliateInviteService
         return DB::transaction(function () use ($invite, $professional): BrandAffiliateInvite {
             if (mb_strtolower(trim((string) $professional->professional_type)) === 'brand') {
                 throw new RuntimeException('Brand accounts cannot claim affiliate invites.');
+            }
+
+            $brandProfile = $invite->brandProfessional?->brandProfile;
+            $brandStatus = $brandProfile?->brand_status ?? 'deactivated';
+            if ($brandStatus === 'deactivated') {
+                throw new RuntimeException('This brand is not currently accepting new connections.');
             }
 
             $lockedInvite = BrandAffiliateInvite::query()
@@ -637,7 +645,6 @@ class BrandAffiliateInviteService
     }
 
     /**
-     * @param  mixed  $rawRow
      * @return array<string, mixed>
      */
     private function extractBulkInviteAttributes(mixed $rawRow): array
@@ -670,9 +677,6 @@ class BrandAffiliateInviteService
         return $this->normalizeInviteAttributes($attributes);
     }
 
-    /**
-     * @param  mixed  $rawRow
-     */
     private function extractBulkRowNumber(mixed $rawRow, int $fallback): int
     {
         $row = is_array($rawRow) ? $rawRow : [];

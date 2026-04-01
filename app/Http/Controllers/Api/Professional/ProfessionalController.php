@@ -209,9 +209,8 @@ class ProfessionalController extends ApiController
             }
         });
 
-        // return the updated pro (fresh)
         return $this->success([
-            'professional' => $professional->fresh(),
+            'professional' => new \App\Http\Resources\ProfessionalResource($professional->fresh()),
         ]);
     }
 

@@ -47,6 +47,17 @@ class BrandPartnerController extends ApiController
             return $this->error('Brand partner not found.', 404);
         }
 
+        $brandProfile = $brand->brandProfile;
+        $visibility = $brandProfile?->affiliate_visibility ?? 'invite_only';
+        if ($visibility === 'invite_only') {
+            return $this->error('This brand is invite-only. You must accept an invitation to connect.', 403);
+        }
+
+        $brandStatus = $brandProfile?->brand_status ?? 'deactivated';
+        if ($brandStatus === 'deactivated') {
+            return $this->error('This brand is not currently accepting new connections.', 403);
+        }
+
         try {
             $link = $brandPartnerLinks->connectBrandToAffiliate((string) $professional->id, (string) $brandProfessionalId);
         } catch (RuntimeException $exception) {
@@ -70,6 +81,7 @@ class BrandPartnerController extends ApiController
         $page = Professional::query()
             ->where('professional_type', 'brand')
             ->where('status', 'active')
+            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public')->where('brand_status', 'active'))
             ->with('site')
             ->orderByRaw('COALESCE(display_name, handle) asc')
             ->paginate($perPage)
@@ -77,11 +89,24 @@ class BrandPartnerController extends ApiController
 
         $brands = $page->getCollection()
             ->map(function (Professional $professional): array {
+                $siteSettings = is_array($professional->site?->settings ?? null) ? $professional->site->settings : [];
+                $designSettings = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
+                $mediaSettings = is_array($designSettings['media'] ?? null) ? $designSettings['media'] : [];
+
                 return [
                     'id' => $professional->id,
                     'display_name' => $professional->display_name,
                     'handle' => $professional->handle,
                     'subdomain' => $professional->site?->subdomain,
+                    'brand_logo_url' => is_string($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'] ?? null)
+                        ? ($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'])
+                        : null,
+                    'brand_color' => is_string($designSettings['dark_color'] ?? $designSettings['darkColor'] ?? null)
+                        ? ($designSettings['dark_color'] ?? $designSettings['darkColor'])
+                        : null,
+                    'brand_contrast_color' => is_string($designSettings['white_color'] ?? $designSettings['whiteColor'] ?? null)
+                        ? ($designSettings['white_color'] ?? $designSettings['whiteColor'])
+                        : null,
                 ];
             })
             ->values()
@@ -147,6 +172,7 @@ class BrandPartnerController extends ApiController
             $cleanedStaleSettings = $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
             if (! $this->settingsStillReferenceBrand($site, (string) $brandProfessionalId) && $cleanedStaleSettings) {
                 $this->invalidateAffiliateCaches($site);
+
                 return $this->success([
                     'disconnected' => true,
                     'brand_professional_id' => $brandProfessionalId,

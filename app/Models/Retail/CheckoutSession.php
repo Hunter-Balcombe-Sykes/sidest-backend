@@ -18,6 +18,11 @@ class CheckoutSession extends BaseModel
     public $incrementing = false;
     protected $keyType = 'string';
 
+    protected $hidden = [
+        'token',
+        'context_snapshot',
+    ];
+
     protected $fillable = [
         'token',
         'affiliate_professional_id',

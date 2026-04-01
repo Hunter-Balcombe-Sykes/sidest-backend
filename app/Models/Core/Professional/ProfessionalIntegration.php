@@ -19,6 +19,12 @@ class ProfessionalIntegration extends BaseModel
     public $incrementing = false;
     protected $keyType = 'string';
 
+    protected $hidden = [
+        'access_token',
+        'refresh_token',
+        'provider_metadata',
+    ];
+
     protected $fillable = [
         'professional_id',
         'provider',

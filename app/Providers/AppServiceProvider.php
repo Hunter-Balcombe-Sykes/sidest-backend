@@ -86,6 +86,34 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Public waitlist submissions
+        RateLimiter::for('waitlist', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return [Limit::none()];
+            }
+
+            $email = strtolower(trim((string) $request->input('email', '')));
+            $emailKey = $email !== '' ? hash('sha256', $email) : 'unknown';
+
+            return [
+                Limit::perMinute(5)
+                    ->by('waitlist:ip:'.$request->ip())
+                    ->response(function () {
+                        return response()->json([
+                            'message' => 'Too many waitlist submissions. Please try again shortly.',
+                        ], 429);
+                    }),
+
+                Limit::perHour(12)
+                    ->by('waitlist:email:'.$emailKey)
+                    ->response(function () {
+                        return response()->json([
+                            'message' => 'This email has been submitted recently. Please try again later.',
+                        ], 429);
+                    }),
+            ];
+        });
+
         // Shopify webhook endpoints (keyed by shop domain, fallback to IP)
         RateLimiter::for('shopify-webhooks', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {
@@ -110,7 +138,7 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
-            return Limit::perMinute(120)
+            return Limit::perMinute(300)
                 ->by($request->attributes->get('supabase_uid') ?? $request->ip())
                 ->response(function () {
                     return response()->json([
@@ -125,7 +153,7 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
-            return Limit::perMinute(200)
+            return Limit::perMinute(300)
                 ->by($request->attributes->get('supabase_uid') ?? $request->ip())
                 ->response(function () {
                     return response()->json([

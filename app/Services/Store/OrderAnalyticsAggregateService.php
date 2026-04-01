@@ -18,14 +18,18 @@ class OrderAnalyticsAggregateService
 
         $day = Carbon::parse($day)->toDateString();
         $timezone = $this->professionalTimezone($brandProfessionalId);
+        $utcFrom = Carbon::parse($day, $timezone)->startOfDay()->utc();
+        $utcTo = Carbon::parse($day, $timezone)->endOfDay()->utc();
         $now = now();
 
-        DB::transaction(function () use ($brandProfessionalId, $day, $timezone, $now): void {
+        DB::transaction(function () use ($brandProfessionalId, $day, $timezone, $now, $utcFrom, $utcTo): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["analytics-rebuild:{$brandProfessionalId}"]);
+
             $this->deleteBrandDayRows($brandProfessionalId, $day);
 
             $brandMetricsRows = DB::table('retail.orders as o')
                 ->where('o.brand_professional_id', $brandProfessionalId)
-                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('o.ordered_at', [$utcFrom, $utcTo])
                 ->select([
                     'o.currency_code',
                     DB::raw('COUNT(*) as orders_count'),
@@ -56,7 +60,7 @@ class OrderAnalyticsAggregateService
 
             $ordersByAffiliate = DB::table('retail.orders as o')
                 ->where('o.brand_professional_id', $brandProfessionalId)
-                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('o.ordered_at', [$utcFrom, $utcTo])
                 ->select([
                     'o.affiliate_professional_id',
                     'o.currency_code',
@@ -72,7 +76,7 @@ class OrderAnalyticsAggregateService
             // Unique customers per affiliate for this brand+day (currency-agnostic).
             $customersByAffiliate = DB::table('retail.orders as o')
                 ->where('o.brand_professional_id', $brandProfessionalId)
-                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('o.ordered_at', [$utcFrom, $utcTo])
                 ->whereNotNull('o.customer_email_hash')
                 ->select([
                     'o.affiliate_professional_id',
@@ -84,7 +88,7 @@ class OrderAnalyticsAggregateService
 
             $commissionByAffiliate = DB::table('retail.commission_ledger_entries as l')
                 ->where('l.brand_professional_id', $brandProfessionalId)
-                ->whereRaw('(l.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('l.occurred_at', [$utcFrom, $utcTo])
                 ->select([
                     'l.affiliate_professional_id',
                     'l.currency_code',
@@ -175,7 +179,7 @@ class OrderAnalyticsAggregateService
                 ->leftJoin('retail.brand_products as bp', 'bp.id', '=', 'i.brand_product_id')
                 ->where('o.brand_professional_id', $brandProfessionalId)
                 ->whereNotNull('i.brand_product_id')
-                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('o.ordered_at', [$utcFrom, $utcTo])
                 ->select([
                     'i.brand_product_id',
                     'o.currency_code',
@@ -194,7 +198,7 @@ class OrderAnalyticsAggregateService
                 ->join('retail.order_items as i', 'i.id', '=', 'l.order_item_id')
                 ->where('l.brand_professional_id', $brandProfessionalId)
                 ->whereNotNull('i.brand_product_id')
-                ->whereRaw('(l.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('l.occurred_at', [$utcFrom, $utcTo])
                 ->select([
                     'i.brand_product_id',
                     'l.currency_code',
@@ -269,7 +273,7 @@ class OrderAnalyticsAggregateService
                 ->leftJoin('retail.brand_products as bp', 'bp.id', '=', 'i.brand_product_id')
                 ->where('o.brand_professional_id', $brandProfessionalId)
                 ->whereNotNull('i.brand_product_id')
-                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('o.ordered_at', [$utcFrom, $utcTo])
                 ->select([
                     'o.affiliate_professional_id',
                     'i.brand_product_id',
@@ -289,7 +293,7 @@ class OrderAnalyticsAggregateService
                 ->join('retail.order_items as i', 'i.id', '=', 'l.order_item_id')
                 ->where('l.brand_professional_id', $brandProfessionalId)
                 ->whereNotNull('i.brand_product_id')
-                ->whereRaw('(l.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('l.occurred_at', [$utcFrom, $utcTo])
                 ->select([
                     'l.affiliate_professional_id',
                     'i.brand_product_id',
@@ -366,7 +370,7 @@ class OrderAnalyticsAggregateService
 
             $commissionDailyRows = DB::table('retail.commission_ledger_entries as l')
                 ->where('l.brand_professional_id', $brandProfessionalId)
-                ->whereRaw('(l.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('l.occurred_at', [$utcFrom, $utcTo])
                 ->select([
                     'l.affiliate_professional_id',
                     'l.status as payout_status',
@@ -411,9 +415,13 @@ class OrderAnalyticsAggregateService
 
         $day = Carbon::parse($day)->toDateString();
         $timezone = $this->professionalTimezone($affiliateProfessionalId);
+        $utcFrom = Carbon::parse($day, $timezone)->startOfDay()->utc();
+        $utcTo = Carbon::parse($day, $timezone)->endOfDay()->utc();
         $now = now();
 
-        DB::transaction(function () use ($affiliateProfessionalId, $day, $timezone, $now): void {
+        DB::transaction(function () use ($affiliateProfessionalId, $day, $timezone, $now, $utcFrom, $utcTo): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["analytics-rebuild:{$affiliateProfessionalId}"]);
+
             DB::table('analytics.professional_metrics_daily')
                 ->where('affiliate_professional_id', $affiliateProfessionalId)
                 ->where('day', $day)
@@ -431,7 +439,7 @@ class OrderAnalyticsAggregateService
 
             $metricsRows = DB::table('retail.orders as o')
                 ->where('o.affiliate_professional_id', $affiliateProfessionalId)
-                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('o.ordered_at', [$utcFrom, $utcTo])
                 ->select([
                     'o.currency_code',
                     DB::raw('COUNT(*) as orders_count'),
@@ -445,7 +453,7 @@ class OrderAnalyticsAggregateService
 
             $commissionRows = DB::table('retail.commission_ledger_entries as l')
                 ->where('l.affiliate_professional_id', $affiliateProfessionalId)
-                ->whereRaw('(l.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('l.occurred_at', [$utcFrom, $utcTo])
                 ->select([
                     'l.currency_code',
                     DB::raw("COALESCE(SUM(CASE WHEN l.entry_type = 'accrual' THEN l.amount_cents ELSE 0 END), 0) as accrued_cents"),
@@ -517,7 +525,7 @@ class OrderAnalyticsAggregateService
                 ->leftJoin('retail.brand_products as bp', 'bp.id', '=', 'i.brand_product_id')
                 ->where('o.affiliate_professional_id', $affiliateProfessionalId)
                 ->whereNotNull('i.brand_product_id')
-                ->whereRaw('(o.ordered_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('o.ordered_at', [$utcFrom, $utcTo])
                 ->select([
                     'o.brand_professional_id',
                     'i.brand_product_id',
@@ -535,7 +543,7 @@ class OrderAnalyticsAggregateService
                 ->join('retail.orders as o', 'o.id', '=', 'i.order_id')
                 ->where('l.affiliate_professional_id', $affiliateProfessionalId)
                 ->whereNotNull('i.brand_product_id')
-                ->whereRaw('(l.occurred_at AT TIME ZONE ?)::date = ?', [$timezone, $day])
+                ->whereBetween('l.occurred_at', [$utcFrom, $utcTo])
                 ->select([
                     'o.brand_professional_id',
                     'i.brand_product_id',

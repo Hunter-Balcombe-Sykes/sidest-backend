@@ -85,7 +85,7 @@ class ShopifyOrderWebhookController extends ApiController
 
         $integrationCandidates = ProfessionalIntegration::query()
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
-            ->whereRaw("lower(provider_metadata->>'shop_domain') = ?", [$shopDomain])
+            ->where('shopify_shop_domain', $shopDomain)
             ->get(['id', 'professional_id', 'access_token', 'provider_metadata']);
 
         if ($integrationCandidates->count() !== 1) {
@@ -164,7 +164,7 @@ class ShopifyOrderWebhookController extends ApiController
     ): JsonResponse {
         $integrationCandidates = ProfessionalIntegration::query()
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
-            ->whereRaw("lower(provider_metadata->>'shop_domain') = ?", [$shopDomain])
+            ->where('shopify_shop_domain', $shopDomain)
             ->get(['id', 'professional_id']);
 
         $resolutionStatus = 'pending';

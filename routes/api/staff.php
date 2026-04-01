@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSubscriptionM
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAnalyticsController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffMeController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationEmailPolicyController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffSiteController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCustomerManagementController;
 use Illuminate\Support\Facades\Route;
@@ -152,4 +153,10 @@ Route::prefix('staff')
 
     // Notifications
     Route::post('/notifications', [StaffNotificationController::class, 'store']);
+
+    // Notification email policies
+    Route::get('/notification-email-policies', [StaffNotificationEmailPolicyController::class, 'indexGlobal']);
+    Route::patch('/notification-email-policies', [StaffNotificationEmailPolicyController::class, 'updateGlobal']);
+    Route::get('/professionals/{professional}/notification-email-policies', [StaffNotificationEmailPolicyController::class, 'indexProfessional']);
+    Route::patch('/professionals/{professional}/notification-email-policies', [StaffNotificationEmailPolicyController::class, 'updateProfessional']);
 });
