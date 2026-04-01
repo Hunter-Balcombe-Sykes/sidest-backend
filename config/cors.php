@@ -5,8 +5,8 @@ return [
     'allowed_methods' => ['*'],
     'allowed_origins' => array_merge(
         [
-            'https://www.hunterbalcombesykes.com',
-            'https://hunterbalcombesykes.com',
+            'https://app.sidest.co',
+            'https://sidest.co',
             'http://localhost:3000',
         ],
         in_array(env('APP_ENV'), ['local', 'development', 'testing']) ? [
