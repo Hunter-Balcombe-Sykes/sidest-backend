@@ -175,7 +175,16 @@ class FeaturedProductsPayloadService
                 return [];
             }
 
-            $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+            if (is_string($raw)) {
+                $decoded = json_decode($raw, true);
+                // Postgres UUID[] arrays are returned as "{uuid1,uuid2}" — not valid JSON
+                if (! is_array($decoded) && str_starts_with($raw, '{') && str_ends_with($raw, '}')) {
+                    $inner = substr($raw, 1, -1);
+                    $decoded = $inner !== '' ? explode(',', $inner) : [];
+                }
+            } else {
+                $decoded = $raw;
+            }
 
             if (! is_array($decoded)) {
                 return [];
