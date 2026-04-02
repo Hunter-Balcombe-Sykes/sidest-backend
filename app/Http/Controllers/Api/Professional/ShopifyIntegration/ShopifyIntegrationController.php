@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Shopify\RegisterShopifyOrderWebhooksJob;
+use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Store\BrandAccessService;
 use App\Services\Store\ShopifyCatalogSyncService;
@@ -214,6 +215,7 @@ class ShopifyIntegrationController extends ApiController
         $webhookRegistrationQueued = false;
         try {
             RegisterShopifyOrderWebhooksJob::dispatch((string) $integration->id);
+            CreateStorefrontAccessTokenJob::dispatch((string) $integration->id);
             $webhookRegistrationQueued = true;
         } catch (\Throwable $e) {
             Log::warning('Failed to queue Shopify webhook registration job', [

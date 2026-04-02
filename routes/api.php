@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\PublicSite\PublicSignupAvailabilityController;
 use App\Http\Controllers\Api\PublicSite\PublicWaitlistController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
+use App\Http\Controllers\Api\PublicSite\PublicShopifyStorefrontController;
 use App\Http\Controllers\Api\PublicSite\PublicStoreController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
@@ -73,6 +74,9 @@ Route::post('/public/booking/availability-by-slug', [PublicBookingController::cl
     ->middleware('throttle:public-site');
 Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
     ->middleware('throttle:public-site');
+Route::get('/public/shopify/storefront-config', [PublicShopifyStorefrontController::class, 'storefrontConfig'])
+    ->middleware('throttle:public-site');
+
 Route::get('/public/store/featured-products-by-slug', [PublicStoreController::class, 'featuredProducts'])
     ->middleware('throttle:public-site');
 Route::post('/public/store/checkout-session-by-slug', [PublicStoreController::class, 'createCheckoutSession'])
