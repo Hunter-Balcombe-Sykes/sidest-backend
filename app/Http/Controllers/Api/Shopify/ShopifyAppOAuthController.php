@@ -173,12 +173,12 @@ class ShopifyAppOAuthController extends ApiController
      */
     private function isValidHmac(array $params, string $secret): bool
     {
-        $params = array_filter($params, static fn ($key) => $key !== 'hmac', ARRAY_FILTER_USE_KEY);
-        ksort($params);
-        $message = http_build_query($params);
+        $actual = (string) ($params['hmac'] ?? '');
+        $filtered = array_filter($params, static fn ($key) => $key !== 'hmac', ARRAY_FILTER_USE_KEY);
+        ksort($filtered);
+        $message = http_build_query($filtered);
         $expected = hash_hmac('sha256', $message, $secret);
-        $actual = (string) ($params['hmac'] ?? request()->query('hmac', ''));
 
-        return hash_equals($expected, $actual);
+        return $actual !== '' && hash_equals($expected, $actual);
     }
 }
