@@ -41,7 +41,7 @@ class PublicShopifyStorefrontController extends ApiController
             ->first();
 
         if (! $site) {
-            return $this->error('Brand not found.', 404);
+            return $this->error("Brand site not found for slug: {$brandSlug}", 404);
         }
 
         $integration = ProfessionalIntegration::query()
@@ -50,7 +50,7 @@ class PublicShopifyStorefrontController extends ApiController
             ->first();
 
         if (! $integration || empty($integration->access_token)) {
-            return $this->error('Shopify not connected for this brand.', 404);
+            return $this->error("Shopify not connected for brand (professional_id: {$site->professional_id})", 404);
         }
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
