@@ -10,7 +10,6 @@ use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Views\PublicSitePayload;
-use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -117,9 +116,6 @@ class SiteCacheService
             }
 
             $payload = $row->payload ?? [];
-            if (is_array($payload) && ! $this->hasRenderableLegalContent($payload)) {
-                $payload = $this->backfillLegalContentPayload($row, $payload);
-            }
 
             $services = is_array($payload['services'] ?? null)
                 ? $payload['services']
@@ -729,66 +725,6 @@ class SiteCacheService
             ])
             ->values()
             ->all();
-    }
-
-    /**
-     * Backfill templated legal content for older professionals whose legal row has not been generated yet.
-     *
-     * @param  array<string, mixed>  $payload
-     * @return array<string, mixed>
-     */
-    private function backfillLegalContentPayload(PublicSitePayload $row, array $payload): array
-    {
-        $professionalId = (string) ($row->professional_id ?? '');
-        if ($professionalId === '') {
-            return $payload;
-        }
-
-        try {
-            $professional = Professional::query()
-                ->with('site')
-                ->find($professionalId);
-
-            if (! $professional || ! $professional->site) {
-                return $payload;
-            }
-
-            app(ProfessionalLegalContentService::class)->refreshGenerated($professional, $professional->site);
-
-            $freshRow = PublicSitePayload::query()
-                ->where('site_id', $row->site_id)
-                ->first();
-
-            $freshPayload = $freshRow?->payload;
-            if (is_array($freshPayload) && $this->hasRenderableLegalContent($freshPayload)) {
-                return $freshPayload;
-            }
-        } catch (\Throwable $e) {
-            Log::warning('Unable to backfill legal content for public payload.', [
-                'site_id' => $row->site_id,
-                'professional_id' => $professionalId,
-                'message' => $e->getMessage(),
-            ]);
-        }
-
-        return $payload;
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     */
-    private function hasRenderableLegalContent(array $payload): bool
-    {
-        $legal = $payload['legal'] ?? null;
-
-        if (! is_array($legal)) {
-            return false;
-        }
-
-        $privacy = trim((string) ($legal['privacy_policy'] ?? ''));
-        $terms = trim((string) ($legal['terms_and_conditions'] ?? ''));
-
-        return $privacy !== '' && $terms !== '';
     }
 
     /**

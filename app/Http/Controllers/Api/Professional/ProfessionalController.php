@@ -11,11 +11,10 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Block;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
-use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-// V2: Returns authenticated professional's full profile with site, services, and legal content. Dashboard entry point.
+// V2: Returns authenticated professional's full profile with site, services, and blocks. Dashboard entry point.
 class ProfessionalController extends ApiController
 {
     /** @return array<int, string> */
@@ -26,7 +25,7 @@ class ProfessionalController extends ApiController
 
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
-    public function show(ProfessionalShowRequest $request, ProfessionalLegalContentService $legalService)
+    public function show(ProfessionalShowRequest $request)
     {
         $uid = $request->attributes->get('supabase_uid');
         Log::info('/api/me start');
@@ -99,8 +98,6 @@ class ProfessionalController extends ApiController
             ] : null,
         ];
 
-        $legal = $legalService->getOrCreate($pro, $pro->site);
-
         $services = $cache->getActiveServices($pro->id);
         $customersCount = $cache->getCustomerCount($pro->id);
         $blocks = $pro->site
@@ -110,7 +107,6 @@ class ProfessionalController extends ApiController
         return $this->success([
             'uid' => $uid,
             ...$payload,
-            'legal_content' => $legalService->toApiPayload($legal),
             'blocks' => $blocks,
             'services' => $services,
             'customers_count' => $customersCount,

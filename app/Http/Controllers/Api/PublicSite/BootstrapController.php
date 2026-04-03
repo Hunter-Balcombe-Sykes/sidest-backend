@@ -15,7 +15,6 @@ use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
 use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
-use App\Services\Legal\ProfessionalLegalContentService;
 use App\Services\Professional\AccountTypeDefaultsService;
 use App\Services\Professional\SiteProvisioningService;
 
@@ -30,7 +29,6 @@ class BootstrapController extends ApiController
 
     public function bootstrap(
         BootstrapRequest $request,
-        ProfessionalLegalContentService $legalContentService,
         BrandAffiliateInviteService $brandAffiliateInviteService,
         BrandPartnerLinkService $brandPartnerLinks,
         AccountTypeDefaultsService $accountTypeDefaultsService
@@ -64,7 +62,7 @@ class BootstrapController extends ApiController
                 return 'professional';
             };
 
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $brandAffiliateInviteService, $brandPartnerLinks, $accountTypeDefaultsService, $resolveProfessionalType) {
+            $result = DB::transaction(function () use ($uid, $data, $brandAffiliateInviteService, $brandPartnerLinks, $accountTypeDefaultsService, $resolveProfessionalType) {
             $createdProfessional = false;
 
             $professional = Professional::query()->where('auth_user_id', $uid)->first();
@@ -176,7 +174,6 @@ class BootstrapController extends ApiController
                     $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, $brandId);
                 }
 
-            $legalContentService->refreshGenerated($professional, $site);
             app(ProfessionalCacheService::class)->invalidateProfessional($professional);
 
             // Ensure the professional has a subscription – seed the free plan if none exists

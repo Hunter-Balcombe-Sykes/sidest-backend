@@ -2,7 +2,6 @@
 
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
 use App\Http\Requests\Api\BootstrapRequest;
-use App\Services\Legal\ProfessionalLegalContentService;
 use App\Services\Professional\AccountTypeDefaultsService;
 use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
@@ -35,7 +34,6 @@ it('blocks bootstrap for new users when waitlist mode is enabled', function () {
 
     $response = $controller->bootstrap(
         $request,
-        \Mockery::mock(ProfessionalLegalContentService::class),
         \Mockery::mock(BrandAffiliateInviteService::class),
         \Mockery::mock(BrandPartnerLinkService::class),
         \Mockery::mock(AccountTypeDefaultsService::class),

@@ -16,7 +16,6 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Services\Auth\SupabaseAdminService;
 use App\Services\Cache\ProfessionalCacheService;
-use App\Services\Legal\ProfessionalLegalContentService;
 use App\Services\Professional\AccountTypeDefaultsService;
 use App\Services\Professional\SiteProvisioningService;
 use Illuminate\Support\Arr;
@@ -33,7 +32,6 @@ class BrandSignupService
         private readonly ShopProfileAutoFillService $autoFill,
         private readonly AccountTypeDefaultsService $accountDefaults,
         private readonly SiteProvisioningService $siteProvisioning,
-        private readonly ProfessionalLegalContentService $legalContent,
     ) {}
 
     public function handleOAuthCallback(
@@ -152,9 +150,6 @@ class BrandSignupService
 
             // Auto-fill profile from Shopify shop data
             $this->autoFill->fillFromShopData($professional, $site, $brandProfile, $shopData);
-
-            // Legal content
-            $this->legalContent->refreshGenerated($professional, $site);
 
             // Seed free subscription
             $this->siteProvisioning->ensureFreeSubscription($professional);

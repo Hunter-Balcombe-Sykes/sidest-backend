@@ -116,11 +116,6 @@ class Professional extends BaseModel
         return $this->hasOne(Site::class, 'professional_id');
     }
 
-    public function legalContent(): HasOne
-    {
-        return $this->hasOne(ProfessionalLegalContent::class, 'professional_id');
-    }
-
     public function blocks(): HasMany
     {
         return $this->hasMany(Block::class, 'professional_id');

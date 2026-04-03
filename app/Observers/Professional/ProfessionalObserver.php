@@ -4,29 +4,18 @@ namespace App\Observers\Professional;
 
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\ProfessionalCacheService;
-use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Support\Facades\Log;
 
-// V2: Invalidates professional cache and refreshes legal templates on profile update/delete/restore.
+// V2: Invalidates professional cache on profile update/delete/restore.
 class ProfessionalObserver
 {
     public bool $afterCommit = true;
     public function __construct(
         private ProfessionalCacheService $professionalCache,
-        private ProfessionalLegalContentService $legalContentService
     ) {}
 
     public function updated(Professional $professional): void
     {
-        try {
-            $this->legalContentService->refreshGenerated($professional, $professional->site);
-        } catch (\Throwable $e) {
-            Log::warning('Legal template regeneration failed on professional update', [
-                'professional_id' => $professional->id,
-                'message' => $e->getMessage(),
-            ]);
-        }
-
         try {
             $this->professionalCache->invalidateProfessional($professional);
         } catch (\Throwable $e) {

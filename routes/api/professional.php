@@ -17,7 +17,6 @@ use App\Http\Controllers\Api\Professional\ProfessionalController;
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGoogleBusinessProfileController;
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLegalContentController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSectionBlockController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceCategoryController;
@@ -69,13 +68,10 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         // View Site Details
         Route::get('/site', [ProfessionalSiteController::class, 'show']);
         Route::get('/site/google-business-profile', [ProfessionalGoogleBusinessProfileController::class, 'show']);
-        Route::get('/site/legal-content', [ProfessionalLegalContentController::class, 'show']);
 
         // Update Site Details
         Route::patch('/site', [ProfessionalSiteController::class, 'update']);
         Route::put('/site/google-business-profile', [ProfessionalGoogleBusinessProfileController::class, 'upsert']);
-        Route::put('/site/legal-content', [ProfessionalLegalContentController::class, 'upsert']);
-        Route::patch('/site/legal-content', [ProfessionalLegalContentController::class, 'upsert']);
         Route::patch('/site/visibility', [SiteVisibilityController::class, 'update']);
 
         // Service Details and Edit
