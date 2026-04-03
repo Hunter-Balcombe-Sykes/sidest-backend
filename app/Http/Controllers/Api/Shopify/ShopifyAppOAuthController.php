@@ -4,16 +4,21 @@ namespace App\Http\Controllers\Api\Shopify;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
+use App\Services\Shopify\BrandSignupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-// V2: Core. Shopify app install OAuth flow (HMAC validation, token exchange, shop details). Entry point for brand Shopify connection.
+// V2: Core. Shopify app install OAuth flow (HMAC validation, token exchange, shop details). Creates brand account on install.
 class ShopifyAppOAuthController extends ApiController
 {
     use NormalizesShopDomain;
+
+    public function __construct(
+        private readonly BrandSignupService $brandSignup,
+    ) {}
 
     /**
      * Step 1 — Shopify hits this URL when the merchant clicks install.
@@ -52,7 +57,8 @@ class ShopifyAppOAuthController extends ApiController
 
     /**
      * Step 2 — Shopify redirects back here with a code after the merchant approves.
-     * We exchange the code for an access token and store it.
+     * We exchange the code for an access token, create the brand account, and redirect
+     * to the embedded app.
      */
     public function callback(Request $request): RedirectResponse|JsonResponse
     {
@@ -100,33 +106,43 @@ class ShopifyAppOAuthController extends ApiController
             return $this->error('Empty access token received from Shopify.', 502);
         }
 
-        // Fetch shop details
+        // Fetch full shop details
         $shopResponse = Http::withHeaders([
             'X-Shopify-Access-Token' => $accessToken,
         ])->get("https://{$shop}/admin/api/" . config('services.shopify.api_version') . "/shop.json");
 
-        $shopId = null;
+        $shopData = [];
         if ($shopResponse->successful()) {
-            $shopId = (string) ($shopResponse->json('shop.id') ?? '');
+            $shopData = (array) ($shopResponse->json('shop') ?? []);
+        }
+
+        // Create brand account (or handle reinstall)
+        try {
+            $result = $this->brandSignup->handleOAuthCallback($shop, $accessToken, $shopData, $scopes);
+        } catch (\Throwable $e) {
+            Log::error('Shopify OAuth: brand signup failed', [
+                'shop' => $shop,
+                'error' => $e->getMessage(),
+            ]);
+            return $this->error('Failed to create brand account.', 500);
         }
 
         Log::info('Shopify OAuth callback successful', [
             'shop' => $shop,
-            'shop_id' => $shopId,
+            'professional_id' => (string) $result->professional->id,
+            'is_reinstall' => $result->isReinstall,
         ]);
 
-        // Redirect to the dashboard with the token — the authenticated connect
-        // endpoint will store it against the brand's professional_id.
-        $dashboardUrl = rtrim((string) config('app.frontend_url', env('FRONTEND_URL', 'https://app.sidest.co')), '/');
+        // Build redirect to embedded app
+        $shopHandle = str_replace('.myshopify.com', '', $shop);
+        $appHandle = (string) config('services.shopify.app_handle', 'side-st');
+        $basePath = "https://admin.shopify.com/store/{$shopHandle}/apps/{$appHandle}";
 
-        $params = http_build_query([
-            'shopify_oauth_shop' => $shop,
-            'shopify_oauth_token' => $accessToken,
-            'shopify_oauth_shop_id' => $shopId ?? '',
-            'shopify_oauth_scopes' => implode(',', $scopes),
-        ]);
+        if ($result->isReinstall) {
+            return redirect()->away($basePath);
+        }
 
-        return redirect()->away("{$dashboardUrl}/account/commerce?section=settings&{$params}");
+        return redirect()->away("{$basePath}/setup");
     }
 
     private function isValidShopDomain(string $shop): bool

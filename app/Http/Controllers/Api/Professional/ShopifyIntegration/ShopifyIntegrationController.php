@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Api\Professional\ShopifyIntegration;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Jobs\Shopify\CreateShopifyCollectionsJob;
+use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
+use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\RegisterShopifyOrderWebhooksJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -215,6 +218,9 @@ class ShopifyIntegrationController extends ApiController
         try {
             RegisterShopifyOrderWebhooksJob::dispatch((string) $integration->id);
             CreateStorefrontAccessTokenJob::dispatch((string) $integration->id);
+            CreateShopifyMetafieldsJob::dispatch((string) $integration->id);
+            CreateShopifyCollectionsJob::dispatch((string) $integration->id);
+            CreateShopifySalesChannelJob::dispatch((string) $integration->id);
             $webhookRegistrationQueued = true;
         } catch (\Throwable $e) {
             Log::warning('Failed to queue Shopify webhook registration job', [

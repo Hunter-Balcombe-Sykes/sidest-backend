@@ -2064,7 +2064,11 @@ GRANT SELECT ON billing.subscriptions TO authenticated;
 -- app_backend runtime role
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_backend') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_backend') THEN
+        CREATE ROLE app_backend WITH LOGIN PASSWORD 'blaze@@1967HBS';
+    END IF;
+
+    -- Grant permissions (always runs now that role is guaranteed to exist)
         -- Schema usage
         EXECUTE 'GRANT USAGE ON SCHEMA core TO app_backend';
         EXECUTE 'GRANT USAGE ON SCHEMA site TO app_backend';
@@ -2113,7 +2117,6 @@ BEGIN
         EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA analytics GRANT USAGE, SELECT ON SEQUENCES TO app_backend';
         EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA billing GRANT USAGE, SELECT ON SEQUENCES TO app_backend';
         EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_backend';
-    END IF;
 END $$;
 
 COMMIT;

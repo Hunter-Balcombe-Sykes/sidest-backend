@@ -7,25 +7,26 @@ use App\Http\Requests\Api\BootstrapRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
-use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use RuntimeException;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
-use App\Models\Billing\Plan;
-use App\Models\Billing\Subscription;
 use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Legal\ProfessionalLegalContentService;
 use App\Services\Professional\AccountTypeDefaultsService;
+use App\Services\Professional\SiteProvisioningService;
 
 
 
-// V2: Account signup/update. Creates professional + site, applies type defaults, handles affiliate invite claims and brand partner connections. Entry point for Shopify OAuth signup flow.
+// V2: Account signup/update. Creates professional + site, applies type defaults, handles affiliate invite claims and brand partner connections. Entry point for affiliate/professional signup.
 class BootstrapController extends ApiController
 {
+    public function __construct(
+        private readonly SiteProvisioningService $siteProvisioning,
+    ) {}
+
     public function bootstrap(
         BootstrapRequest $request,
         ProfessionalLegalContentService $legalContentService,
@@ -78,7 +79,7 @@ class BootstrapController extends ApiController
                     'professional_type' => $resolveProfessionalType($data['professional_type'] ?? null),
                     'status'          => 'active',
                     'onboarding_step' => 0,
-                    'qr_slug'         => $this->generateQrSlug($data['handle'] ?? null),
+                    'qr_slug'         => $this->siteProvisioning->generateQrSlug($data['handle'] ?? null),
                     'phone' => $data['phone'] ?? null,
                     'primary_email'   => $data['primary_email'],
                     'first_name'      => $data['first_name'] ?? '',
@@ -115,7 +116,7 @@ class BootstrapController extends ApiController
                 $professional->fill($fill);
             }
             if (!is_string($professional->qr_slug) || $professional->qr_slug === '') {
-                $professional->qr_slug = $this->generateQrSlug($professional->handle ?? null);
+                $professional->qr_slug = $this->siteProvisioning->generateQrSlug($professional->handle ?? null);
             }
             $professional->save();
 
@@ -126,9 +127,9 @@ class BootstrapController extends ApiController
             $site = Site::query()->where('professional_id', $professional->id)->first();
 
             if (!$site) {
-                $base = $this->subdomainBaseFromHandle($data['handle']);
+                $base = $this->siteProvisioning->subdomainBaseFromHandle($data['handle']);
 
-                $site = $this->createSiteWithRetry($professional->id, $base);
+                $site = $this->siteProvisioning->createSiteWithRetry($professional->id, $base);
             }
 
             // Apply account-type defaults for new professionals
@@ -171,7 +172,7 @@ class BootstrapController extends ApiController
             app(ProfessionalCacheService::class)->invalidateProfessional($professional);
 
             // Ensure the professional has a subscription – seed the free plan if none exists
-            $this->ensureFreeSubscription($professional);
+            $this->siteProvisioning->ensureFreeSubscription($professional);
 
             if ($createdProfessional) {
                 $this->createWelcomeNotification($professional);
@@ -191,135 +192,6 @@ class BootstrapController extends ApiController
         }
 
         return $this->success($result);
-    }
-
-    private function createSiteWithRetry(string $professionalId, string $base): Site
-    {
-        $reserved = array_map('strtolower', config('comet.reserved_subdomains', []));
-        $base = strtolower($base);
-        $baseIsReserved = in_array($base, $reserved, true);
-
-        // If reserved: only try base-1...base-20
-        if ($baseIsReserved) {
-            for ($i = 1; $i <= 20; $i++) {
-                $candidate = $this->buildCandidate($base, (string) $i);
-                $site = $this->tryCreateSite($professionalId, $candidate);
-                if ($site) return $site;
-            }
-        } else {
-            // Not reserved: base, base-1...base-19
-            for ($i = 0; $i < 20; $i++) {
-                $suffix = $i === 0 ? null : (string) $i;
-                $candidate = $this->buildCandidate($base, $suffix);
-                $site = $this->tryCreateSite($professionalId, $candidate);
-                if ($site) return $site;
-            }
-        }
-
-        // Fallback: random suffix
-        for ($i = 0; $i < 10; $i++) {
-            $rand = Str::lower(Str::random(6));
-            $candidate = $this->buildCandidate($base, $rand);
-            $site = $this->tryCreateSite($professionalId, $candidate);
-            if ($site) return $site;
-        }
-
-        throw new RuntimeException('Could not allocate a unique subdomain.');
-    }
-
-    private function isUniqueViolation(QueryException $e): bool
-    {
-        // Postgres unique_violation
-        return $e->getCode() === '23505';
-    }
-
-    private function buildCandidate(string $base, ?string $suffix): string
-    {
-        if ($suffix === null) {
-            return $base;
-        }
-
-        $base = $this->limitSubdomainBase($base, '-' . $suffix);
-        return $base . '-' . $suffix;
-    }
-
-    private function limitSubdomainBase(string $base, string $suffixIncludingHyphen): string
-    {
-        // max subdomain length is 63
-        $max = 63 - strlen($suffixIncludingHyphen);
-        if ($max < 1) {
-            return substr($base, 0, 1);
-        }
-        return substr($base, 0, $max);
-    }
-
-    private function subdomainBaseFromHandle(string $handle): string
-    {
-        $v = mb_strtolower(trim($handle));
-        $v = preg_replace('/[^a-z0-9]+/', '-', $v);
-        $v = trim($v, '-');
-
-        // Generate UUID-based fallback if handle is empty
-        if ($v === '') {
-            $v = 'user-' . substr(Str::uuid()->toString(), 0, 8);
-        }
-
-        return $v;
-    }
-
-    private function tryCreateSite(string $professionalId, string $candidate): ?Site
-    {
-        try {
-            $site = new Site([
-                'subdomain'    => $candidate,
-                'theme_id'     => null,
-                'is_published' => false,
-                'settings'     => [],
-            ]);
-
-            $site->professional_id = $professionalId;
-            $site->save();
-
-            return $site;
-        } catch (QueryException $e) {
-            if ($this->isUniqueViolation($e)) {
-                return null; // collision -> caller retries
-            }
-            throw $e;
-        }
-    }
-
-    /**
-     * Seed the free plan subscription if the professional has none.
-     */
-    private function ensureFreeSubscription(Professional $professional): void
-    {
-        // Reload the relationship in case it was cached as null during this transaction
-        $professional->load('subscription');
-
-        // Already has a current (non-ended) subscription – nothing to do
-        if ($professional->subscription && $professional->subscription->ended_at === null) {
-            return;
-        }
-
-        $freePlan = Plan::where('plan_key', 'free')->where('is_active', true)->first();
-        if (!$freePlan) {
-            Log::warning('No active free plan found – skipping subscription seed', [
-                'professional_id' => $professional->id,
-            ]);
-            return;
-        }
-
-        Subscription::create([
-            'id' => Str::uuid()->toString(),
-            'professional_id' => $professional->id,
-            'plan_id' => $freePlan->id,
-            'provider' => 'internal',
-            'status' => 'active',
-            'current_period_start' => now(),
-            'current_period_end' => null,
-            'cancel_at_period_end' => false,
-        ]);
     }
 
     private function ensureCometUpdatesSubscription(?string $email): void
@@ -368,36 +240,6 @@ class BootstrapController extends ApiController
                 'ends_at' => null,
             ]
         );
-    }
-
-    private function generateQrSlug(?string $handle): string
-    {
-        $base = is_string($handle) ? Str::slug($handle) : '';
-        if ($base === '') {
-            $base = 'pro';
-        }
-
-        // Retry with exponential backoff to handle race conditions
-        $maxAttempts = 10;
-        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
-            $suffix = Str::lower(Str::random(6));
-            $slug = $base . '-' . $suffix;
-
-            try {
-                // Check if slug exists (optimistic check before insert)
-                if (!Professional::query()->where('qr_slug', $slug)->exists()) {
-                    return $slug;
-                }
-            } catch (QueryException $e) {
-                // If unique violation occurs during insert, keep retrying
-                if ($this->isUniqueViolation($e)) {
-                    continue;
-                }
-                throw $e;
-            }
-        }
-
-        throw new RuntimeException('Could not generate a unique QR slug.');
     }
 
     private function syncSiteBrandPartnerSettings(

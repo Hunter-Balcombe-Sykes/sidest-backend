@@ -66,6 +66,7 @@ return [
         'webhook_secret' => env('SHOPIFY_WEBHOOK_SECRET'),
         'fallback_secret' => env('SHOPIFY_FALLBACK_SECRET'),
         'webhook_orders_topic' => env('SHOPIFY_WEBHOOK_ORDERS_TOPIC', 'orders/paid'),
+        'app_handle' => env('SHOPIFY_APP_HANDLE', 'side-st'),
     ],
 
 ];

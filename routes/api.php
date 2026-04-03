@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\PublicSite\PublicShopifyStorefrontController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
@@ -34,6 +35,8 @@ Route::middleware('throttle:webhooks')->group(function () {
     Route::post('/webhooks/fresha', FreshaCatalogWebhookController::class);
     Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
     Route::post('/webhooks/stripe-connect', StripeConnectWebhookController::class);
+    Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
 });
 
 // bootstrap uses ONLY JWT middleware

@@ -6,6 +6,7 @@ use App\Services\Legal\ProfessionalLegalContentService;
 use App\Services\Professional\AccountTypeDefaultsService;
 use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
+use App\Services\Professional\SiteProvisioningService;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
@@ -28,7 +29,7 @@ beforeEach(function () {
 })->group('bootstrap-waitlist-gate');
 
 it('blocks bootstrap for new users when waitlist mode is enabled', function () {
-    $controller = new BootstrapController();
+    $controller = new BootstrapController(new SiteProvisioningService());
     $request = BootstrapRequest::create('/api/bootstrap', 'POST');
     $request->attributes->set('supabase_uid', 'new-user-uid');
 
@@ -50,7 +51,7 @@ it('detects existing professionals by supabase auth user id', function () {
         'auth_user_id' => 'existing-user-uid',
     ]);
 
-    $controller = new BootstrapController();
+    $controller = new BootstrapController(new SiteProvisioningService());
     $method = new ReflectionMethod(BootstrapController::class, 'hasExistingProfessional');
     $method->setAccessible(true);
 

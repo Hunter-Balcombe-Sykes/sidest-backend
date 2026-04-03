@@ -28,10 +28,12 @@ class BrandProfile extends BaseModel
         'business_website',
         'affiliate_visibility',
         'brand_status',
+        'setup_complete',
     ];
 
     protected $casts = [
         'industries' => 'array',
+        'setup_complete' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

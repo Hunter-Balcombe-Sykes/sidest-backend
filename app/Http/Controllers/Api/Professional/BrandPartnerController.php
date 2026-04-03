@@ -49,10 +49,6 @@ class BrandPartnerController extends ApiController
         }
 
         $brandProfile = $brand->brandProfile;
-        $visibility = $brandProfile?->affiliate_visibility ?? 'invite_only';
-        if ($visibility === 'invite_only') {
-            return $this->error('This brand is invite-only. You must accept an invitation to connect.', 403);
-        }
 
         $brandStatus = $brandProfile?->brand_status ?? 'deactivated';
         if ($brandStatus === 'deactivated') {

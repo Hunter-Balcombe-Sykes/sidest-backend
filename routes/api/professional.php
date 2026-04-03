@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Professional\AffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
+use App\Http\Controllers\Api\Professional\BrandSetupController;
 use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
 use App\Http\Controllers\Api\Professional\ConfirmationPreferenceController;
 use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
@@ -211,6 +212,10 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
 
         // Brand onboarding readiness
         Route::get('/brand/onboarding-readiness', [BrandOnboardingReadinessController::class, 'show']);
+
+        // Brand setup wizard
+        Route::get('/brand/setup/status', [BrandSetupController::class, 'setupStatus']);
+        Route::post('/brand/setup/complete', [BrandSetupController::class, 'completeSetup']);
 
         // Stripe Connect & Payouts
         Route::get('/stripe/status', [StripeConnectController::class, 'status']);

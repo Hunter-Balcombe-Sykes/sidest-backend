@@ -12,4 +12,7 @@ return [
 
     'jwks_url' => env('SUPABASE_JWKS_URL'),             // full URL
     'jwks_cache_seconds' => (int) env('SUPABASE_JWKS_CACHE_SECONDS', 600),
+
+    // Service role key for server-side admin operations (user creation, etc.)
+    'service_role_key' => env('SUPABASE_SERVICE_ROLE_KEY'),
 ];
