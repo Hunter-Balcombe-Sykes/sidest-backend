@@ -12,12 +12,13 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-// V2: Core. Creates Shopify Storefront API token ("Side St") via GraphQL. Required for Hydrogen storefronts to fetch product data.
+// V2: Core. Creates Shopify Storefront API token ("Side St Hydrogen") via GraphQL. Required for Hydrogen storefronts to fetch product data. Matches existing "Side St" tokens for backward compat.
 class CreateStorefrontAccessTokenJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
+
     public int $timeout = 30;
 
     private const STOREFRONT_TOKEN_CREATE = <<<'GRAPHQL'
@@ -50,7 +51,8 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
     }
     GRAPHQL;
 
-    public function __construct(public string $integrationId) {
+    public function __construct(public string $integrationId)
+    {
         $this->onQueue('integrations');
     }
 
@@ -79,17 +81,14 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
             // Check if we already have a Side St token
             $existing = $this->findExistingToken($shopDomain, $accessToken, $apiVersion);
             if ($existing) {
-                $metadata['storefront_access_token'] = $existing;
-                $integration->provider_metadata = $metadata;
-                $integration->save();
+                $integration->mergeProviderMetadata(['storefront_access_token' => $existing]);
+
                 return;
             }
 
             // Create a new one
             $token = $this->createToken($shopDomain, $accessToken, $apiVersion);
-            $metadata['storefront_access_token'] = $token;
-            $integration->provider_metadata = $metadata;
-            $integration->save();
+            $integration->mergeProviderMetadata(['storefront_access_token' => $token]);
 
             Log::info('Shopify Storefront API token created.', [
                 'integration_id' => $this->integrationId,
@@ -111,7 +110,7 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
 
         foreach ($edges as $edge) {
             $title = (string) Arr::get($edge, 'node.title', '');
-            if ($title === 'Side St') {
+            if ($title === 'Side St' || $title === 'Side St Hydrogen') {
                 return (string) Arr::get($edge, 'node.accessToken', '');
             }
         }
@@ -122,7 +121,7 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
     private function createToken(string $shopDomain, string $accessToken, string $apiVersion): string
     {
         $data = $this->queryShopify($shopDomain, $accessToken, $apiVersion, self::STOREFRONT_TOKEN_CREATE, [
-            'input' => ['title' => 'Side St'],
+            'input' => ['title' => 'Side St Hydrogen'],
         ]);
 
         $userErrors = Arr::get($data, 'storefrontAccessTokenCreate.userErrors', []);

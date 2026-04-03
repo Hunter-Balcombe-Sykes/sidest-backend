@@ -72,18 +72,20 @@ class CreateShopifySalesChannelJob implements ShouldQueue
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
         if ($shopDomain === '' || $accessToken === '') {
-            $metadata['sales_channel_state'] = 'failed';
-            $integration->provider_metadata = $metadata;
-            $integration->save();
+            $integration->mergeProviderMetadata(['sales_channel_state' => 'failed']);
+
             return;
         }
 
         try {
             // Check if publication already exists
-            if ($this->publicationExists($shopDomain, $accessToken, $apiVersion)) {
-                $metadata['sales_channel_state'] = 'registered';
-                $integration->provider_metadata = $metadata;
-                $integration->save();
+            $existingPublicationId = $this->findExistingPublicationId($shopDomain, $accessToken, $apiVersion);
+            if ($existingPublicationId !== null) {
+                $integration->mergeProviderMetadata([
+                    'sales_channel_state' => 'registered',
+                    'publication_id' => $existingPublicationId,
+                ]);
+
                 return;
             }
 
@@ -103,19 +105,30 @@ class CreateShopifySalesChannelJob implements ShouldQueue
                 ]
             );
 
-            $userErrors = $response->json('data.publicationCreate.userErrors', []);
-            if (! empty($userErrors)) {
-                Log::warning('Shopify publication creation had errors', [
-                    'integration_id' => $this->integrationId,
-                    'errors' => $userErrors,
-                ]);
+            if (! $response->ok()) {
+                throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
             }
 
-            $metadata['sales_channel_state'] = 'registered';
+            $userErrors = $response->json('data.publicationCreate.userErrors', []);
+            if (! empty($userErrors)) {
+                $message = (string) Arr::get($userErrors, '0.message', 'Unknown error.');
+                throw new \RuntimeException("Shopify publication creation failed: {$message}");
+            }
+
+            $publicationId = $response->json('data.publicationCreate.publication.id');
+            if (! $publicationId) {
+                throw new \RuntimeException('Publication created but no ID returned.');
+            }
+
+            $integration->mergeProviderMetadata([
+                'sales_channel_state' => 'registered',
+                'publication_id' => (string) $publicationId,
+            ]);
 
             Log::info('Shopify sales channel publication created', [
                 'integration_id' => $this->integrationId,
                 'shop_domain' => $shopDomain,
+                'publication_id' => $publicationId,
             ]);
         } catch (\Throwable $e) {
             Log::error('Failed to create Shopify sales channel publication', [
@@ -124,14 +137,11 @@ class CreateShopifySalesChannelJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
 
-            $metadata['sales_channel_state'] = 'failed';
+            $integration->mergeProviderMetadata(['sales_channel_state' => 'failed']);
         }
-
-        $integration->provider_metadata = $metadata;
-        $integration->save();
     }
 
-    private function publicationExists(string $shopDomain, string $accessToken, string $apiVersion): bool
+    private function findExistingPublicationId(string $shopDomain, string $accessToken, string $apiVersion): ?string
     {
         $response = Http::withHeaders([
             'X-Shopify-Access-Token' => $accessToken,
@@ -144,16 +154,20 @@ class CreateShopifySalesChannelJob implements ShouldQueue
             ]
         );
 
+        if (! $response->ok()) {
+            throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
+        }
+
         $edges = $response->json('data.publications.edges', []);
 
         // The app's own publication is automatically named after the app
         foreach ($edges as $edge) {
             $name = strtolower(trim((string) Arr::get($edge, 'node.name', '')));
             if (str_contains($name, 'side st') || str_contains($name, 'sidest')) {
-                return true;
+                return (string) Arr::get($edge, 'node.id', '');
             }
         }
 
-        return false;
+        return null;
     }
 }

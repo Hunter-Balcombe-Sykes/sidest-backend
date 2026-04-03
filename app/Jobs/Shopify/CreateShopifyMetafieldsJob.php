@@ -110,9 +110,8 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
         if ($shopDomain === '' || $accessToken === '') {
-            $metadata['metafield_definitions_state'] = 'failed';
-            $integration->provider_metadata = $metadata;
-            $integration->save();
+            $integration->mergeProviderMetadata(['metafield_definitions_state' => 'failed']);
+
             return;
         }
 
@@ -137,7 +136,7 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
                 $this->createDefinition($shopDomain, $accessToken, $apiVersion, 'SHOP', $def);
             }
 
-            $metadata['metafield_definitions_state'] = 'registered';
+            $integration->mergeProviderMetadata(['metafield_definitions_state' => 'registered']);
 
             Log::info('Shopify metafield definitions created', [
                 'integration_id' => $this->integrationId,
@@ -150,11 +149,8 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
 
-            $metadata['metafield_definitions_state'] = 'failed';
+            $integration->mergeProviderMetadata(['metafield_definitions_state' => 'failed']);
         }
-
-        $integration->provider_metadata = $metadata;
-        $integration->save();
     }
 
     /**

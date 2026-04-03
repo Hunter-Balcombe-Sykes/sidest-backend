@@ -123,9 +123,8 @@ class CreateShopifyCollectionsJob implements ShouldQueue
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
         if ($shopDomain === '' || $accessToken === '') {
-            $metadata['collections_state'] = 'failed';
-            $integration->provider_metadata = $metadata;
-            $integration->save();
+            $integration->mergeProviderMetadata(['collections_state' => 'failed']);
+
             return;
         }
 
@@ -153,7 +152,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue
                 $this->setMetafields($shopDomain, $accessToken, $apiVersion, $metafieldsToSet);
             }
 
-            $metadata['collections_state'] = 'registered';
+            $integration->mergeProviderMetadata(['collections_state' => 'registered']);
 
             Log::info('Shopify collections created', [
                 'integration_id' => $this->integrationId,
@@ -166,11 +165,8 @@ class CreateShopifyCollectionsJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
 
-            $metadata['collections_state'] = 'failed';
+            $integration->mergeProviderMetadata(['collections_state' => 'failed']);
         }
-
-        $integration->provider_metadata = $metadata;
-        $integration->save();
     }
 
     private function findOrCreateCollection(string $shopDomain, string $accessToken, string $apiVersion, array $def): ?string
@@ -206,6 +202,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue
                 'title' => $def['title'],
                 'errors' => $userErrors,
             ]);
+
             return null;
         }
 

@@ -3,55 +3,57 @@
 namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
 
-// V2: New in V2. Serves Shopify Storefront API credentials (domain + token) to Hydrogen storefronts. Enables product display without exposing admin tokens.
+// V2: Serves Shopify Storefront API credentials (domain + token + collection handle) to Hydrogen storefronts. Accepts shop_domain or brand_slug lookup.
 class PublicShopifyStorefrontController extends ApiController
 {
+    use NormalizesShopDomain;
+
     /**
+     * GET /public/shopify/storefront-config?shop_domain={domain}
      * GET /public/shopify/storefront-config?brand_slug={slug}
      *
-     * Returns the Shopify Storefront API credentials for a brand,
-     * keyed by their site subdomain. Called by the Hydrogen storefront
-     * at runtime to fetch products for an affiliate page.
+     * Returns the Shopify Storefront API credentials for a brand.
+     * Called by the Hydrogen storefront at runtime to fetch products.
+     * Accepts shop_domain (primary) or brand_slug (backward compat).
      */
     public function storefrontConfig(Request $request): JsonResponse
     {
         $validator = Validator::make($request->query(), [
-            'brand_slug' => ['required', 'string', 'max:120'],
+            'shop_domain' => ['sometimes', 'string', 'max:255'],
+            'brand_slug' => ['sometimes', 'string', 'max:120'],
         ]);
 
+        $validator->after(function ($validator) {
+            $data = $validator->getData();
+            if (empty($data['shop_domain']) && empty($data['brand_slug'])) {
+                $validator->errors()->add('shop_domain', 'Either shop_domain or brand_slug is required.');
+            }
+        });
+
         if ($validator->fails()) {
-            throw new ValidationException($validator);
+            return $this->error($validator->errors()->first(), 422);
         }
 
-        $brandSlug = strtolower(trim((string) $validator->validated()['brand_slug']));
+        $validated = $validator->validated();
 
-        // Try exact subdomain match first; fall back to unpublished so we can
-        // still serve the storefront even if the brand's site isn't published.
-        $site = Site::query()
-            ->whereRaw('lower(subdomain) = ?', [$brandSlug])
-            ->first();
+        // Resolve integration: shop_domain takes precedence over brand_slug
+        $integration = ! empty($validated['shop_domain'])
+            ? $this->resolveByShopDomain($validated['shop_domain'])
+            : $this->resolveByBrandSlug($validated['brand_slug']);
 
-        if (! $site) {
-            return $this->error("Brand site not found for slug: {$brandSlug}", 404);
-        }
-
-        $integration = ProfessionalIntegration::query()
-            ->where('professional_id', $site->professional_id)
-            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
-            ->first();
-
-        if (! $integration || empty($integration->access_token)) {
-            return $this->error("Shopify not connected for brand (professional_id: {$site->professional_id})", 404);
+        if (! $integration) {
+            return $this->error('Not found.', 404);
         }
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
@@ -59,17 +61,19 @@ class PublicShopifyStorefrontController extends ApiController
         $storefrontToken = trim((string) Arr::get($metadata, 'storefront_access_token', ''));
 
         if ($shopDomain === '') {
-            return $this->error('Shopify storefront not configured for this brand.', 404);
+            return $this->error('Not found.', 404);
         }
 
-        // Token missing — the job hasn't run yet (e.g. brand connected before this feature
-        // was deployed). Dispatch it now so the next request will succeed.
+        // Token missing — dispatch creation job (with dedup) so the next request succeeds.
         if ($storefrontToken === '') {
-            Log::info('Storefront token missing, dispatching creation job.', [
-                'integration_id' => (string) $integration->id,
-                'brand_slug' => $brandSlug,
-            ]);
-            CreateStorefrontAccessTokenJob::dispatch((string) $integration->id);
+            $jobKey = 'storefront-token-job:'.$integration->id;
+            if (! Cache::has($jobKey)) {
+                Log::info('Storefront token missing, dispatching creation job.', [
+                    'integration_id' => (string) $integration->id,
+                ]);
+                CreateStorefrontAccessTokenJob::dispatch((string) $integration->id);
+                Cache::put($jobKey, true, 600);
+            }
 
             return response()->json([
                 'status' => 'pending',
@@ -80,6 +84,41 @@ class PublicShopifyStorefrontController extends ApiController
         return $this->success([
             'shop_domain' => $shopDomain,
             'storefront_access_token' => $storefrontToken,
+            'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'sidest-default-products'),
         ]);
+    }
+
+    private function resolveByShopDomain(string $shopDomain): ?ProfessionalIntegration
+    {
+        $normalized = $this->normalizeShopDomain($shopDomain);
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        return ProfessionalIntegration::query()
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->where('shopify_shop_domain', $normalized)
+            ->whereNotNull('access_token')
+            ->first();
+    }
+
+    private function resolveByBrandSlug(string $brandSlug): ?ProfessionalIntegration
+    {
+        $slug = strtolower(trim($brandSlug));
+
+        $site = Site::query()
+            ->whereRaw('lower(subdomain) = ?', [$slug])
+            ->first();
+
+        if (! $site) {
+            return null;
+        }
+
+        return ProfessionalIntegration::query()
+            ->where('professional_id', $site->professional_id)
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->whereNotNull('access_token')
+            ->first();
     }
 }

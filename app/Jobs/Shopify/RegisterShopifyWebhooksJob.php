@@ -91,10 +91,10 @@ class RegisterShopifyWebhooksJob implements ShouldQueue
         $accessToken = trim((string) $integration->access_token);
 
         if ($shopDomain === '' || $accessToken === '') {
-            $metadata['webhooks_state'] = 'failed';
-            $metadata['webhooks_error'] = 'Missing shop domain or access token.';
-            $integration->provider_metadata = $metadata;
-            $integration->save();
+            $integration->mergeProviderMetadata([
+                'webhooks_state' => 'failed',
+                'webhooks_error' => 'Missing shop domain or access token.',
+            ]);
 
             return;
         }
@@ -105,7 +105,7 @@ class RegisterShopifyWebhooksJob implements ShouldQueue
         $allSucceeded = true;
 
         foreach (self::WEBHOOKS as $topic => $path) {
-            $callbackUrl = $baseUrl . $path;
+            $callbackUrl = $baseUrl.$path;
 
             try {
                 $existing = $this->findExistingWebhook($shopDomain, $accessToken, $apiVersion, $topic, $callbackUrl);
@@ -131,16 +131,14 @@ class RegisterShopifyWebhooksJob implements ShouldQueue
             }
         }
 
-        $metadata['webhooks_state'] = $allSucceeded ? 'registered' : 'partial';
-        $metadata['webhooks_registered_at'] = now()->toIso8601String();
-        $metadata['webhooks_results'] = $results;
-
-        // Keep backward-compat key for status endpoint
-        $metadata['webhook_registration_state'] = $allSucceeded ? 'registered' : 'partial';
-        $metadata['webhook_registration_last_attempt_at'] = now()->toIso8601String();
-
-        $integration->provider_metadata = $metadata;
-        $integration->save();
+        $integration->mergeProviderMetadata([
+            'webhooks_state' => $allSucceeded ? 'registered' : 'partial',
+            'webhooks_registered_at' => now()->toIso8601String(),
+            'webhooks_results' => $results,
+            // Backward-compat keys
+            'webhook_registration_state' => $allSucceeded ? 'registered' : 'partial',
+            'webhook_registration_last_attempt_at' => now()->toIso8601String(),
+        ]);
 
         Log::info('Shopify webhook registration complete.', [
             'integration_id' => $this->integrationId,
