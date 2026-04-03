@@ -68,6 +68,8 @@ class ProfessionalController extends ApiController
                 'display_name' => $pro->display_name,
                 'first_name' => $pro->first_name,
                 'last_name' => $pro->last_name,
+                'phone' => $pro->phone,
+                'primary_email' => $pro->primary_email,
                 'bio' => $pro->bio,
                 'country_code' => $pro->country_code,
                 'timezone' => $pro->timezone,
