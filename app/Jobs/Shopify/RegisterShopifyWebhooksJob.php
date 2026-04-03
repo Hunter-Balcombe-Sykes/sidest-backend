@@ -12,14 +12,14 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-// V2: Core. Registers orders/paid webhook via GraphQL. Required for commission recording when orders complete.
-class RegisterShopifyOrderWebhooksJob implements ShouldQueue
+// V2: Core. Registers all Shopify webhooks (functional + GDPR) via GraphQL on install. Idempotent — skips already-registered topics.
+class RegisterShopifyWebhooksJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
-    public int $timeout = 30;
+    public int $timeout = 300;
 
     private const WEBHOOK_SUBSCRIPTION_CREATE = <<<'GRAPHQL'
     mutation webhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
@@ -59,6 +59,16 @@ class RegisterShopifyOrderWebhooksJob implements ShouldQueue
     }
     GRAPHQL;
 
+    private const WEBHOOKS = [
+        'ORDERS_PAID' => '/api/webhooks/shopify/orders-paid',
+        'ORDERS_UPDATED' => '/api/webhooks/shopify/orders-updated',
+        'APP_UNINSTALLED' => '/api/webhooks/shopify/app-uninstalled',
+        'SHOP_UPDATE' => '/api/webhooks/shopify/shop-update',
+        'CUSTOMERS_DATA_REQUEST' => '/api/webhooks/shopify/gdpr/customers-data-request',
+        'CUSTOMERS_REDACT' => '/api/webhooks/shopify/gdpr/customers-redact',
+        'SHOP_REDACT' => '/api/webhooks/shopify/gdpr/shop-redact',
+    ];
+
     public function __construct(
         public string $integrationId
     ) {
@@ -77,68 +87,68 @@ class RegisterShopifyOrderWebhooksJob implements ShouldQueue
         }
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-        $metadata['webhook_registration_last_attempt_at'] = now()->toIso8601String();
-
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
         $accessToken = trim((string) $integration->access_token);
 
         if ($shopDomain === '' || $accessToken === '') {
-            $metadata['webhook_registration_state'] = 'failed';
-            $metadata['webhook_registration_error'] = 'Missing shop domain or access token.';
+            $metadata['webhooks_state'] = 'failed';
+            $metadata['webhooks_error'] = 'Missing shop domain or access token.';
             $integration->provider_metadata = $metadata;
             $integration->save();
 
             return;
         }
 
-        $callbackUrl = rtrim((string) config('app.url'), '/').'/api/webhooks/shopify/orders';
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
-        $topic = $this->resolveGraphqlTopic();
+        $baseUrl = rtrim((string) config('app.url'), '/');
+        $results = [];
+        $allSucceeded = true;
 
-        try {
-            // Check if webhook already exists for this topic
-            $existing = $this->findExistingWebhook($shopDomain, $accessToken, $apiVersion, $topic, $callbackUrl);
+        foreach (self::WEBHOOKS as $topic => $path) {
+            $callbackUrl = $baseUrl . $path;
 
-            if ($existing) {
-                Log::info('Shopify order webhook already registered.', [
+            try {
+                $existing = $this->findExistingWebhook($shopDomain, $accessToken, $apiVersion, $topic, $callbackUrl);
+
+                if ($existing) {
+                    $results[$topic] = ['state' => 'registered', 'webhook_id' => $existing, 'existed' => true];
+
+                    continue;
+                }
+
+                $webhookId = $this->createWebhook($shopDomain, $accessToken, $apiVersion, $topic, $callbackUrl);
+                $results[$topic] = ['state' => 'registered', 'webhook_id' => $webhookId, 'existed' => false];
+            } catch (\Throwable $e) {
+                Log::error('Failed to register Shopify webhook.', [
                     'integration_id' => $this->integrationId,
                     'shop_domain' => $shopDomain,
-                    'webhook_id' => $existing,
+                    'topic' => $topic,
+                    'error' => $e->getMessage(),
                 ]);
 
-                $metadata['webhook_registration_state'] = 'registered';
-                $metadata['webhook_id'] = $existing;
-                $integration->provider_metadata = $metadata;
-                $integration->save();
-
-                return;
+                $results[$topic] = ['state' => 'failed', 'error' => $e->getMessage()];
+                $allSucceeded = false;
             }
-
-            // Register new webhook
-            $webhookId = $this->createWebhook($shopDomain, $accessToken, $apiVersion, $topic, $callbackUrl);
-
-            $metadata['webhook_registration_state'] = 'registered';
-            $metadata['webhook_id'] = $webhookId;
-
-            Log::info('Shopify order webhook registered.', [
-                'integration_id' => $this->integrationId,
-                'shop_domain' => $shopDomain,
-                'webhook_id' => $webhookId,
-                'callback_url' => $callbackUrl,
-            ]);
-        } catch (\Throwable $e) {
-            Log::error('Failed to register Shopify order webhook.', [
-                'integration_id' => $this->integrationId,
-                'shop_domain' => $shopDomain,
-                'error' => $e->getMessage(),
-            ]);
-
-            $metadata['webhook_registration_state'] = 'failed';
-            $metadata['webhook_registration_error'] = $e->getMessage();
         }
+
+        $metadata['webhooks_state'] = $allSucceeded ? 'registered' : 'partial';
+        $metadata['webhooks_registered_at'] = now()->toIso8601String();
+        $metadata['webhooks_results'] = $results;
+
+        // Keep backward-compat key for status endpoint
+        $metadata['webhook_registration_state'] = $allSucceeded ? 'registered' : 'partial';
+        $metadata['webhook_registration_last_attempt_at'] = now()->toIso8601String();
 
         $integration->provider_metadata = $metadata;
         $integration->save();
+
+        Log::info('Shopify webhook registration complete.', [
+            'integration_id' => $this->integrationId,
+            'shop_domain' => $shopDomain,
+            'all_succeeded' => $allSucceeded,
+            'topics_registered' => collect($results)->where('state', 'registered')->count(),
+            'topics_failed' => collect($results)->where('state', 'failed')->count(),
+        ]);
     }
 
     private function findExistingWebhook(string $shopDomain, string $accessToken, string $apiVersion, string $topic, string $callbackUrl): ?string
@@ -181,12 +191,12 @@ class RegisterShopifyOrderWebhooksJob implements ShouldQueue
         $userErrors = Arr::get($data, 'webhookSubscriptionCreate.userErrors', []);
         if (is_array($userErrors) && $userErrors !== []) {
             $message = (string) Arr::get($userErrors, '0.message', 'Unknown webhook creation error.');
-            throw new \RuntimeException("Shopify webhook creation failed: {$message}");
+            throw new \RuntimeException("Shopify webhook creation failed for {$topic}: {$message}");
         }
 
         $webhookId = Arr::get($data, 'webhookSubscriptionCreate.webhookSubscription.id');
         if (! $webhookId) {
-            throw new \RuntimeException('Shopify webhook was created but no ID was returned.');
+            throw new \RuntimeException("Shopify webhook was created for {$topic} but no ID was returned.");
         }
 
         return (string) $webhookId;
@@ -218,15 +228,5 @@ class RegisterShopifyOrderWebhooksJob implements ShouldQueue
         }
 
         return is_array(Arr::get($payload, 'data')) ? $payload['data'] : [];
-    }
-
-    /**
-     * Map the configured webhook topic (e.g. orders/paid) to the Shopify GraphQL enum (ORDERS_PAID).
-     */
-    private function resolveGraphqlTopic(): string
-    {
-        $topic = trim((string) config('services.shopify.webhook_orders_topic', 'orders/paid'));
-
-        return strtoupper(str_replace('/', '_', $topic));
     }
 }

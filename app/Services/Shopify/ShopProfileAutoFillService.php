@@ -4,6 +4,7 @@ namespace App\Services\Shopify;
 
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use Illuminate\Support\Arr;
 
@@ -19,9 +20,11 @@ class ShopProfileAutoFillService
         Site $site,
         ?BrandProfile $brandProfile,
         array $shopData,
+        ?ProfessionalIntegration $integration = null,
     ): void {
         $this->fillProfessional($professional, $shopData);
         $this->fillBrandProfile($brandProfile, $shopData);
+        $this->fillIntegrationCurrency($integration, $shopData);
 
         $professional->save();
 
@@ -55,6 +58,26 @@ class ShopProfileAutoFillService
         $domain = $this->str($shopData, 'domain');
         if ($domain !== '' && ($brandProfile->business_website === null || $brandProfile->business_website === '')) {
             $brandProfile->business_website = $domain;
+        }
+    }
+
+    private function fillIntegrationCurrency(?ProfessionalIntegration $integration, array $shopData): void
+    {
+        if ($integration === null) {
+            return;
+        }
+
+        $currency = strtoupper($this->str($shopData, 'currency'));
+        if ($currency === '') {
+            return;
+        }
+
+        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+
+        if (($metadata['shop_currency'] ?? '') === '') {
+            $metadata['shop_currency'] = $currency;
+            $integration->provider_metadata = $metadata;
+            $integration->save();
         }
     }
 

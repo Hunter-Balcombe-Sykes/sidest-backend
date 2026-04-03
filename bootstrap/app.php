@@ -3,6 +3,7 @@
 use App\Http\Middleware\AddPublicCacheHeaders;
 use App\Http\Middleware\Auth\EnsureCometAdmin;
 use App\Http\Middleware\Auth\EnsureCometStaff;
+use App\Http\Middleware\Auth\VerifyHydrogenApiKey;
 use App\Http\Middleware\Auth\VerifySupabaseJwt;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
@@ -44,6 +45,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'staff.admin'  => EnsureCometAdmin::class,
             'lead.log'     => LogLeadRateLimits::class,
             'plan'         => RequirePlan::class,
+            'hydrogen.key' => VerifyHydrogenApiKey::class,
         ]);
     })
 

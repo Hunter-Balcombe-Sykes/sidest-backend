@@ -58,6 +58,10 @@ return [
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
     ],
 
+    'hydrogen' => [
+        'api_key' => env('HYDROGEN_API_KEY'),
+    ],
+
     'shopify' => [
         'api_key' => env('SHOPIFY_API_KEY'),
         'api_secret' => env('SHOPIFY_API_SECRET'),

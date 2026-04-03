@@ -8,8 +8,9 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Shopify\CreateShopifyCollectionsJob;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
-use App\Jobs\Shopify\RegisterShopifyOrderWebhooksJob;
+use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
+use App\Jobs\Shopify\SyncShopifyBrandLogoJob;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -233,17 +234,18 @@ class ShopifyIntegrationController extends ApiController
             $brandProfile = BrandProfile::where('professional_id', $targetBrandId)->first();
 
             if ($professional && $site) {
-                app(ShopProfileAutoFillService::class)->fillFromShopData($professional, $site, $brandProfile, $shopData);
+                app(ShopProfileAutoFillService::class)->fillFromShopData($professional, $site, $brandProfile, $shopData, $integration);
             }
         }
 
         $webhookRegistrationQueued = false;
         try {
-            RegisterShopifyOrderWebhooksJob::dispatch((string) $integration->id);
+            RegisterShopifyWebhooksJob::dispatch((string) $integration->id);
             CreateStorefrontAccessTokenJob::dispatch((string) $integration->id);
             CreateShopifyMetafieldsJob::dispatch((string) $integration->id);
             CreateShopifyCollectionsJob::dispatch((string) $integration->id);
             CreateShopifySalesChannelJob::dispatch((string) $integration->id);
+            SyncShopifyBrandLogoJob::dispatch((string) $integration->id);
             $webhookRegistrationQueued = true;
         } catch (\Throwable $e) {
             Log::warning('Failed to queue Shopify webhook registration job', [
@@ -364,7 +366,7 @@ class ShopifyIntegrationController extends ApiController
             return $error;
         }
 
-        RegisterShopifyOrderWebhooksJob::dispatch((string) $integration->id);
+        RegisterShopifyWebhooksJob::dispatch((string) $integration->id);
 
         return $this->success([
             'queued' => true,

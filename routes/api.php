@@ -13,7 +13,14 @@ use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\PublicSite\PublicShopifyStorefrontController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
+use App\Http\Controllers\Api\Internal\HydrogenAffiliateController;
+use App\Http\Controllers\Api\Internal\HydrogenAffiliateProductsController;
+use App\Http\Controllers\Api\Internal\HydrogenBrandConfigController;
+use App\Http\Controllers\Api\Webhooks\ShopifyAppUninstalledWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyGdprWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyOrdersUpdatedWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyShopUpdateWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
@@ -36,6 +43,20 @@ Route::middleware('throttle:webhooks')->group(function () {
     Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
     Route::post('/webhooks/stripe-connect', StripeConnectWebhookController::class);
     Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/orders-paid', ShopifyOrderWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/orders-updated', ShopifyOrdersUpdatedWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/app-uninstalled', ShopifyAppUninstalledWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/shop-update', ShopifyShopUpdateWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/gdpr/customers-data-request', [ShopifyGdprWebhookController::class, 'customersDataRequest'])
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/gdpr/customers-redact', [ShopifyGdprWebhookController::class, 'customersRedact'])
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/gdpr/shop-redact', [ShopifyGdprWebhookController::class, 'shopRedact'])
         ->middleware('throttle:shopify-webhooks');
 });
 
@@ -89,5 +110,12 @@ Route::get('/public/brand-affiliate-invites/{token}', [PublicBrandAffiliateInvit
 
 Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])
     ->middleware(['lead.log', 'throttle:leads']);
+
+// Internal Hydrogen endpoints (server-to-server, API key auth)
+Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('internal/hydrogen')->group(function () {
+    Route::get('/brand-config', [HydrogenBrandConfigController::class, 'show']);
+    Route::get('/affiliate', [HydrogenAffiliateController::class, 'show']);
+    Route::get('/affiliate-products', [HydrogenAffiliateProductsController::class, 'show']);
+});
 
 Route::get('/ready', [HealthController::class, 'check']);

@@ -7,7 +7,8 @@ use App\Jobs\Shopify\CreateShopifyCollectionsJob;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
-use App\Jobs\Shopify\RegisterShopifyOrderWebhooksJob;
+use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
+use App\Jobs\Shopify\SyncShopifyBrandLogoJob;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
 use App\Models\Core\Professional\BrandProfile;
@@ -175,6 +176,7 @@ class BrandSignupService
 
             // Create integration
             $shopId = trim((string) Arr::get($shopData, 'id', ''));
+            $shopCurrency = strtoupper(trim((string) Arr::get($shopData, 'currency', '')));
             $integration = ProfessionalIntegration::create([
                 'professional_id' => (string) $professional->id,
                 'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
@@ -183,6 +185,7 @@ class BrandSignupService
                 'provider_metadata' => [
                     'shop_domain' => $shopDomain,
                     'shop_id' => $shopId !== '' ? "gid://shopify/Shop/{$shopId}" : null,
+                    'shop_currency' => $shopCurrency !== '' ? $shopCurrency : null,
                     'scopes' => $scopes,
                     'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
                     'connected_at' => now()->toIso8601String(),
@@ -215,11 +218,12 @@ class BrandSignupService
     private function dispatchInstallJobs(string $integrationId): void
     {
         try {
-            RegisterShopifyOrderWebhooksJob::dispatch($integrationId);
+            RegisterShopifyWebhooksJob::dispatch($integrationId);
             CreateStorefrontAccessTokenJob::dispatch($integrationId);
             CreateShopifyMetafieldsJob::dispatch($integrationId);
             CreateShopifyCollectionsJob::dispatch($integrationId);
             CreateShopifySalesChannelJob::dispatch($integrationId);
+            SyncShopifyBrandLogoJob::dispatch($integrationId);
         } catch (\Throwable $e) {
             Log::warning('Failed to dispatch Shopify install jobs', [
                 'integration_id' => $integrationId,

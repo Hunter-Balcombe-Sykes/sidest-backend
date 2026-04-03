@@ -192,6 +192,21 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        // Internal Hydrogen endpoints (server-to-server)
+        RateLimiter::for('hydrogen-internal', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(120)
+                ->by($request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests.',
+                    ], 429);
+                });
+        });
+
         // Public plans listing
         RateLimiter::for('plans', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {
