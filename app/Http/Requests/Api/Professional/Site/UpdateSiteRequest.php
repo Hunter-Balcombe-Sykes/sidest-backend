@@ -110,7 +110,7 @@ class UpdateSiteRequest extends BaseFormRequest
                 'sometimes',
                 'nullable',
                 'uuid',
-                Rule::exists('site.themes', 'id'),
+                Rule::exists('themes', 'id'),
             ],
 
             // Publish

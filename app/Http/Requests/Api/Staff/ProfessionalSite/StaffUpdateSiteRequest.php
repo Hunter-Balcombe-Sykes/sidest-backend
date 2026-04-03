@@ -31,8 +31,7 @@ class StaffUpdateSiteRequest extends BaseFormRequest
                 'sometimes',
                 'nullable',
                 'uuid',
-                // IMPORTANT: using Rule::exists avoids the "connection.table" parsing issue.
-                Rule::exists('site.themes', 'id'),
+                Rule::exists('themes', 'id'),
             ],
 
             'settings' => ['sometimes', 'array'],

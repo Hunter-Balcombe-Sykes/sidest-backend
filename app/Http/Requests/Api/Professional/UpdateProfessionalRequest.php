@@ -20,7 +20,11 @@ class UpdateProfessionalRequest extends BaseFormRequest
             'first_name'    => ['sometimes', 'required', 'string', 'max:255'],
             'last_name'     => ['sometimes', 'nullable', 'string', 'max:255'],
 
-            'primary_email' => ['sometimes', 'required', 'email', 'max:255'],
+            'primary_email' => [
+                'sometimes', 'required', 'email', 'max:255',
+                Rule::unique('professionals', 'primary_email')
+                    ->ignore($this->attributes->get('professional')?->id, 'id'),
+            ],
             'phone'         => ['sometimes', 'required', 'string', 'max:50'],
             'public_contact_number' => ['sometimes', 'nullable', 'string', 'max:50'],
             'public_contact_email' => ['sometimes', 'nullable', 'email', 'max:255'],
