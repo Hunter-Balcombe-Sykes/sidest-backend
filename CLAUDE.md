@@ -30,18 +30,18 @@ For API endpoint reference, read `docs/api.md`.
 ```
 app/
   Actions/{Customer,Professional,Site,Subscription}/  — single-responsibility action classes
-  Http/Controllers/Api/{Professional,PublicSite,Staff,Enterprise,Shopify,Webhooks}/
+  Http/Controllers/Api/{Professional,PublicSite,Staff,Shopify,Webhooks,Internal}/
   Http/Middleware/{Auth,Context,Logging}/
   Http/Requests/                                      — Form Request validation
   Http/Resources/                                     — API response transformers (always use these)
-  Jobs/{Analytics,Cache,Notifications,Square,Fresha,Shopify,Store}/
-  Models/{Core,Retail,Analytics,Billing,Views}/        — organized by DB schema
+  Jobs/{Analytics,Cache,Notifications,Square,Fresha,Shopify,Stripe}/
+  Models/{Core,Retail,Commerce,Analytics,Billing,Views}/ — organized by DB schema
   Models/BaseModel.php                                — all models extend this (forces pgsql connection)
   Observers/                                          — model lifecycle hooks
-  Services/{Branding,Cache,Enterprise,Fresha,Legal,Media,Notifications,Professional,Public,Square,Store,Stripe}/
+  Services/{Analytics,Auth,Billing,Cache,Fresha,Media,Notifications,Professional,Public,Shopify,Square,Store,Stripe}/
 routes/
   api.php                                             — bootstrap, health, webhooks, Shopify OAuth
-  api/{professional,publicSite,staff,enterprise}.php  — domain-specific routes
+  api/{professional,publicSite,staff}.php             — domain-specific routes
 config/
   sidest.php                                           — all Side St feature config & limits
 ```

@@ -91,8 +91,14 @@ Daily payout job → Stripe Connect transfer (80/20 split)
 /
 ├── app/
 │   ├── Models/
-│   │   ├── Core/           — Professional, Site, Service, Customer, Block, SiteMedia, Integrations, Brand links
-│   │   ├── Retail/         — CommissionLedgerEntry, CommissionPayout, BrandStoreSettings, BrandTeamMembership
+│   │   ├── Core/
+│   │   │   ├── Professional/ — Professional, BrandProfile, BrandPartnerLink, BrandAffiliateInvite, Customer, Service, ServiceCategory, ProfessionalIntegration, ProfessionalConfirmationPreference
+│   │   │   ├── Site/         — Site, Block, SiteMedia, SiteSubdomainAlias, Theme
+│   │   │   ├── Notifications/ — Notification, NotificationReceipt, EmailSubscription, NotificationEmailPolicy, NotificationEmailPreference
+│   │   │   ├── Staff/        — SidestStaff
+│   │   │   ├── Waitlist/     — WaitlistSignup
+│   │   │   └── MediaVariant
+│   │   ├── Retail/         — CommissionLedgerEntry, CommissionPayout, CommissionPayoutItem, BrandStoreSettings, BrandCommissionTopup, BrandTeamMembership
 │   │   ├── Commerce/       — AffiliateProductSelection (V2 new — Shopify GID-based)
 │   │   ├── Billing/        — Plan, Subscription
 │   │   ├── Analytics/      — SiteVisit, LinkClick, LeadSubmission
@@ -103,25 +109,27 @@ Daily payout job → Stripe Connect transfer (80/20 split)
 │   │   │   ├── PublicSite/    — Unauthenticated mini-site + storefront endpoints
 │   │   │   ├── Staff/         — Internal staff/admin endpoints
 │   │   │   ├── Shopify/       — Shopify OAuth controller
-│   │   │   └── Webhooks/      — Stripe Connect, Square, Fresha webhook receivers
+│   │   │   ├── Webhooks/      — Shopify (orders/paid, orders/updated, app/uninstalled, shop/update, GDPR), Stripe Connect, Square, Fresha
+│   │   │   └── Internal/      — Hydrogen server-to-server endpoints (brand config, affiliate lookup, affiliate products)
 │   │   ├── Middleware/        — JWT auth, role guards, plan gates, cache headers
 │   │   ├── Requests/          — Form request validation classes
 │   │   └── Resources/         — API response transformers
 │   ├── Services/
 │   │   ├── Analytics/         — Site + booking analytics aggregation
+│   │   ├── Auth/              — SupabaseAdminService (admin auth operations)
 │   │   ├── Billing/           — Entitlements / plan tier checks
 │   │   ├── Cache/             — Site, professional, analytics caching
-│   │   ├── Fresha/            — Fresha API client + service sync
-│   │   ├── Legal/             — Privacy policy + terms generation
+│   │   ├── Fresha/            — Fresha API client, token management, service sync
 │   │   ├── Media/             — Image + video variant processing
-│   │   ├── Notifications/     — Notification publishing + email dispatch
-│   │   ├── Professional/      — Brand onboarding, invites, partner links, defaults
+│   │   ├── Notifications/     — Notification publishing, commerce notifications, email dispatch
+│   │   ├── Professional/      — Brand onboarding, invites, partner links, defaults, site provisioning, section visibility
 │   │   ├── Public/            — Public site resolution
-│   │   ├── Square/            — Square API client + service sync
+│   │   ├── Shopify/           — Brand signup, shop profile auto-fill
+│   │   ├── Square/            — Square API client, token management, service sync
 │   │   ├── Store/             — Brand access RBAC, pricing, selection cleanup
 │   │   └── Stripe/            — Stripe Connect + commission payouts
 │   ├── Actions/               — UpdateSiteAction, subscription actions
-│   ├── Jobs/                  — Analytics, cache, media, notifications, Shopify, Stripe, Square, Fresha
+│   ├── Jobs/                  — Analytics, Cache, Notifications, Shopify, Stripe, Square, Fresha + root-level media jobs
 │   ├── Observers/             — Cache invalidation, notifications, integration sync triggers
 │   └── Console/Commands/      — Analytics backfill/compact/purge, notification pruning, soft-delete purge
 ├── routes/
@@ -162,6 +170,16 @@ Daily payout job → Stripe Connect transfer (80/20 split)
 | `BrandCommissionTopup` | `retail.brand_commission_topups` | Manual wallet top-ups via Stripe Checkout |
 | `BrandTeamMembership` | `retail.brand_team_memberships` | Brand team roles for RBAC |
 | `AffiliateProductSelection` | `retail.affiliate_product_selections` | V2 new — uses `shopify_product_gid` (not local UUID) |
+| `SidestStaff` | `core.sidest_staff` | Staff/admin accounts for internal dashboard |
+| `Notification` | `core.notifications` | In-app notification records |
+| `NotificationReceipt` | `core.notification_receipts` | Notification delivery tracking |
+| `EmailSubscription` | `core.email_subscriptions` | Notification preference per professional |
+| `NotificationEmailPolicy` | `core.notification_email_policies` | Staff-managed email notification policies |
+| `NotificationEmailPreference` | `core.notification_email_preferences` | Per-category email preferences |
+| `ProfessionalConfirmationPreference` | `core.professional_confirmation_preferences` | UI dialog suppression preferences |
+| `SiteSubdomainAlias` | `core.site_subdomain_aliases` | Subdomain alias management |
+| `Theme` | `core.themes` | Site theme definitions |
+| `WaitlistSignup` | `core.waitlist_signups` | Waitlist feature for pre-launch |
 | `Plan` | `billing.plans` | Subscription tiers with entitlements |
 | `Subscription` | `billing.subscriptions` | Professional's current plan status |
 | `SiteVisit` | `analytics.site_visits` | Page view events |
@@ -180,13 +198,25 @@ Daily payout job → Stripe Connect transfer (80/20 split)
 | `BrandAffiliateInviteService` | Invite lifecycle (create, bulk, CSV, claim, decline) |
 | `BrandPartnerLinkService` | Brand-affiliate connection management |
 | `BrandOnboardingReadinessService` | Brand activation checklist (images, Shopify, Stripe) |
+| `BrandSignupService` | Shopify brand signup workflow (OAuth → provisioning) |
+| `ShopProfileAutoFillService` | Auto-populate brand profile from Shopify shop data |
+| `SiteProvisioningService` | Site provisioning workflow for new affiliates |
+| `AccountTypeDefaultsService` | Applies type-based defaults on affiliate onboarding |
+| `SectionVisibilityService` | Section visibility logic for site builder |
+| `ConfirmationPreferenceService` | UI confirmation dialog preference management |
 | `SiteCacheService` | Public site payload caching with single-flight locking |
 | `ProfessionalCacheService` | Multi-lookup professional caching |
+| `AnalyticsCacheService` | Analytics-specific caching layer |
+| `SiteAnalyticsAggregateService` | Site analytics aggregation (hourly/daily) |
+| `BookingAnalyticsAggregateService` | Booking analytics aggregation (hourly/daily) |
+| `Entitlements` | Plan entitlement / tier checking |
+| `SupabaseAdminService` | Admin Supabase auth operations |
 | `ImageVariantService` | WebP variant generation |
 | `VideoVariantService` | MP4 + HLS transcoding (feature-flagged) |
 | `SquareApiClient` / `SquareServiceSyncService` | Square booking integration |
 | `FreshaApiClient` / `FreshaServiceSyncService` | Fresha booking integration |
 | `NotificationPublisher` | Core notification engine with dedup and email dispatch |
+| `CommerceNotificationService` | Commerce-specific notifications (orders, commissions) |
 | `PublicSiteResolver` | Subdomain → site resolution |
 
 ---
@@ -198,9 +228,16 @@ Daily payout job → Stripe Connect transfer (80/20 split)
 #### 1. Brand Onboarding
 ```
 Shopify OAuth → ShopifyAppOAuthController (HMAC, token exchange)
-  → CreateStorefrontAccessTokenJob (Storefront API token for Hydrogen)
-  → RegisterShopifyOrderWebhooksJob (orders/paid webhook)
-  → BootstrapController (professional + site creation)
+  → BrandSignupService (creates professional, brand profile, site)
+  → ShopProfileAutoFillService (auto-populates brand profile from Shopify shop data)
+  → Post-OAuth setup jobs (dispatched in parallel):
+    → CreateStorefrontAccessTokenJob (Storefront API token for Hydrogen)
+    → RegisterShopifyWebhooksJob (orders/paid, orders/updated, app/uninstalled, shop/update, GDPR)
+    → CreateShopifySalesChannelJob (Hydrogen sales channel)
+    → CreateShopifyCollectionsJob (default collections)
+    → CreateShopifyMetafieldsJob (commission rate metafields)
+    → SyncShopifyBrandLogoJob (pulls logo from Shopify)
+    → SetShopifySetupCompleteJob (marks setup complete after all jobs finish)
   → BrandOnboardingReadinessService (checklist: 5+ images, Shopify, Stripe)
   → StripeConnectController@onboard (Stripe Express setup)
 ```
@@ -217,13 +254,19 @@ BrandAffiliateInviteController@store (brand sends invite)
 
 #### 3. Commission Flow
 ```
-Shopify orders/paid webhook
+Shopify orders/paid webhook → ShopifyOrderWebhookController
+  → ProcessShopifyOrderWebhookJob
   → CommissionLedgerEntry created (status: approved, rate from metafields)
   → CommissionLedgerEntryObserver → notification to affiliate
   → ProcessCommissionPayoutsJob (daily cron)
     → CommissionPayoutService (hybrid: wallet balance first, card for shortfall)
     → Stripe Connect transfer (80% to affiliate, 20% platform fee)
   → CommissionPayoutObserver → notification on failure
+
+Shopify orders/updated webhook → ShopifyOrdersUpdatedWebhookController
+  → ProcessShopifyOrderUpdatedWebhookJob
+  → Handles refunds and cancellations
+  → Updates or reverses CommissionLedgerEntry accordingly
 ```
 
 #### 4. Storefront Data
@@ -232,6 +275,23 @@ Hydrogen storefront → PublicShopifyStorefrontController
   → Returns Shopify domain + Storefront API token
   → Hydrogen fetches products directly from Shopify Storefront API
   → No local product data involved
+
+Hydrogen internal API (server-to-server, token-authenticated):
+  → HydrogenBrandConfigController — brand theme, logo, colours for storefront rendering
+  → HydrogenAffiliateController — affiliate lookup by slug/identifier
+  → HydrogenAffiliateProductsController — affiliate's selected products list
+```
+
+#### 4a. Shopify Webhook Lifecycle
+```
+Registered webhooks (via RegisterShopifyWebhooksJob):
+  orders/paid    → ShopifyOrderWebhookController → commission ledger entry
+  orders/updated → ShopifyOrdersUpdatedWebhookController → refund/cancellation handling
+  app/uninstalled → ShopifyAppUninstalledWebhookController → cleanup brand integration
+  shop/update    → ShopifyShopUpdateWebhookController → ProcessShopifyShopUpdateJob → sync shop data
+  GDPR (customers/redact, customers/data_request, shop/redact) → ShopifyGdprWebhookController
+
+All Shopify webhooks validated via HMAC signature (ValidatesShopifyWebhookHmac concern).
 ```
 
 #### 5. Public Site Visit
@@ -307,14 +367,15 @@ The following V1 code has been deleted. Do NOT recreate these:
 - Multi-brand affiliates — V2 is single-brand per affiliate
 - Public store/checkout endpoints — Hydrogen handles checkout natively
 - Shopify webhook order processing controller — order processing via Stripe Connect now
+- Legal content (auto-generated T&Cs + privacy) — tables dropped, services and controllers removed
 
 ---
 
 ## Current Progress (V2)
 
 ### Fully Implemented
-- Professional profile CRUD (types: barber, hairdresser, influencer, promoter, brand, etc.)
-- Mini-site builder (subdomain routing, blocks, sections, links, themes)
+- Professional profile CRUD (types enforced via config: brand, professional, influencer; schema supports additional types)
+- Mini-site builder (subdomain routing, blocks, sections, links, themes, subdomain aliases)
 - Service and category management with Square/Fresha bidirectional sync
 - Customer database (soft delete, restore, marketing preferences)
 - Email marketing subscriptions (opt-in/out with token-based unsubscribe)
@@ -325,7 +386,13 @@ The following V1 code has been deleted. Do NOT recreate these:
 - Fresha OAuth integration + service sync
 - Brand partner link management (connect/disconnect affiliates)
 - Brand affiliate invite system (token, expiry, claim, bulk, CSV import)
-- Shopify integration (OAuth, Storefront API token creation, order webhook registration)
+- Shopify integration:
+  - OAuth flow with auto brand signup and profile auto-fill
+  - Storefront API token creation
+  - Full webhook suite (orders/paid, orders/updated, app/uninstalled, shop/update, GDPR)
+  - Post-OAuth setup: sales channel, collections, metafields, logo sync
+  - Refund/cancellation handling via orders/updated webhook
+- Hydrogen internal API (brand config, affiliate lookup, affiliate products)
 - Stripe Connect Express onboarding and payment method management
 - Commission payout processing (hybrid funding: wallet + card → Stripe transfer)
 - Commission wallet top-ups via Stripe Checkout
@@ -333,10 +400,11 @@ The following V1 code has been deleted. Do NOT recreate these:
 - Brand onboarding readiness checklist
 - Subscription and plan management
 - Site analytics (page views, link clicks, leads) with hourly/daily aggregation
-- Legal content (auto-generated T&Cs + privacy, manual override)
 - Google Business Profile sync
 - Staff dashboard (browse, search, edit, archive, restore, hard delete)
 - In-app notification system with email preferences and policies
+- Waitlist signup system
+- UI confirmation preference management
 - Redis caching with single-flight locking across professional and public site layers
 - V1 dead code removal (controllers, services, models, jobs, routes)
 - V2 comments added to all surviving backend classes
@@ -424,6 +492,12 @@ When another AI reads this file, it should:
 | 2026-04-03 | V1 dead code removal | 12 controllers, 9 services, 10 models, 7 jobs, 60+ routes removed |
 | 2026-04-03 | Added V2 comments to all surviving backend classes | Enables developers and AI agents to understand each class's V2 role without prior V1 context |
 | 2026-04-03 | Created V2_BACKEND_REFERENCE.md | Quick-context document for navigating the backend without reading every file |
+| 2026-04-03 | Removed legal content feature | Legal content tables dropped; services and controllers removed. Not needed in V2 affiliate model |
+| 2026-04-03 | Expanded Shopify webhook suite | Added orders/updated (refunds), app/uninstalled, shop/update, GDPR webhooks beyond initial orders/paid |
+| 2026-04-03 | Post-OAuth Shopify setup pipeline | Auto-creates sales channel, collections, metafields, syncs logo, and marks setup complete after OAuth |
+| 2026-04-03 | Hydrogen internal API | Server-to-server endpoints for brand config, affiliate lookup, and affiliate products |
+| 2026-04-03 | Brand signup auto-fill | ShopProfileAutoFillService populates brand profile from Shopify shop data during OAuth |
+| 2026-04-03 | Renamed Comet → Side St | Full codebase rename across config, routes, middleware, models |
 
 ---
 

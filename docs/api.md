@@ -20,7 +20,7 @@ This document is the single source of truth for backend so the frontend can buil
 - Public Mini-Site API
 - Professional Dashboard API
 - Brand Partnerships and Brand Store API
-- Enterprise API
+- Enterprise API *(not implemented — placeholder)*
 - Staff API
 - Media uploads & processing (images + videos, server-side via queue)
 - Test users and getting tokens
@@ -31,7 +31,7 @@ This document is the single source of truth for backend so the frontend can buil
 
 ## 0) Recent Backend Changes (Commit Log Snapshot)
 
-Snapshot date: **March 20, 2026**.
+Snapshot date: **April 3, 2026**.
 
 ### Unreleased (working tree)
 
@@ -40,29 +40,19 @@ Snapshot date: **March 20, 2026**.
 - Add `core.media_variants` table for video artifacts (MP4s, HLS playlists, poster).
 - Add `gallery_videos` and `content_videos` arrays to `public_site_payload`; `gallery` / `content_images` remain image-only.
 - Add `media_type` and `ids[]` filter params to `GET /api/images`; add `media_type` param to `POST /api/images/reorder`.
-- Add per-professional legal content storage with generated + manual variants and source toggles.
-- Add `GET /api/site/legal-content` and `PUT|PATCH /api/site/legal-content`.
-- Add public payload `legal` object with active document resolution.
-- Ensure legal defaults to templated content and never renders blank when manual content is empty.
-- Add enterprise architecture: enterprises, memberships, ambassador-promoter contracts, and promoter commerce tables.
-- Add enterprise self-service routes: `GET|POST|PATCH|DELETE /api/enterprise/me`.
-- Expand professional types to: `barber`, `hairdresser`, `ambassador`, `promoter`, `barbershop`, `salon`.
-- Update bootstrap and profile update flows to auto-provision enterprise records for enterprise owner types (`promoter`, `barbershop`, `salon`).
-- Update featured products rules for enterprise linkage and ambassador promoter-contract validation.
+- ~~Add per-professional legal content~~ **REMOVED** — legal content tables dropped, services and controllers removed in V2.
+- ~~Add enterprise architecture~~ **REMOVED** — enterprise tables exist in schema but no controllers, routes, or services implemented. Not part of V2.
+- ~~Expand professional types~~ **NOT IMPLEMENTED** — config enforces 3 types only: `brand`, `professional`, `influencer`. Schema supports additional types but they are not active.
+- Add Shopify post-OAuth setup: auto brand signup, profile auto-fill, sales channel, collections, metafields, logo sync.
+- Add expanded Shopify webhook suite: orders/updated (refunds/cancellations), app/uninstalled, shop/update, GDPR handlers.
+- Add Hydrogen internal API: brand config, affiliate lookup, affiliate products (server-to-server endpoints).
 - Add relational brand partner links (`brand_partner_links`) and move brand-affiliate relationship logic off heavy `site.settings` JSON lookups.
 - Add brand-affiliate invite hardening: transactional claim/decline, expired invite handling, and consistent email matching.
 - Add brand role-gates for brand store endpoints and paginate `GET /api/brand-partners`.
 - Add brand partner + invite endpoints documentation and frontend contract notes.
-- Add brand-approved affiliate commerce schema: `retail.brand_products`, `retail.brand_product_affiliate_overrides`, `core.enterprise_brand_links`, and `distributor` enterprise type support.
-- Hard-cutover `PUT /api/store/featured-products` to `selected_products[{brand_product_id, sort_order}]`; legacy Shopify-id payload is rejected.
-- Add `GET /api/store/available-products` for affiliate-visible products across connected brands (featured-first ordering).
-- Add manager catalog endpoints: `GET /api/store/brand-products`, `PATCH /api/store/brand-products/{brandProductId}`, `PATCH /api/store/brand-products/bulk`.
-- Expand affiliate override endpoints to deny/allow access control (`GET /api/store/affiliate-overrides`, `PUT|DELETE /api/store/affiliate-overrides/{deny|allow}`).
-- Add per-affiliate product pricing endpoints: `GET|PUT|DELETE /api/store/affiliate-product-settings`.
-- Enforce storefront validity via joins: connected brand link + availability + sync-active + deny override restriction.
-- Activate `allow` override behavior to bypass brand-level availability for a specific affiliate while `deny` keeps unconditional precedence.
-- Add selection cleanup flows: unavailability/disconnect/deny now remove invalid selections and create notifications.
-- Add pricing outputs for store payloads: effective commission and discounted price with ceil-to-nearest-5-cents rounding, including affiliate-level override fields.
+- ~~Add brand-approved affiliate commerce schema~~ **REMOVED** — V1 local product tables removed; products live in Shopify.
+- ~~Store catalog/override/pricing endpoints~~ **REMOVED** — V1 endpoints removed; Hydrogen handles product display natively via Shopify Storefront API.
+- Selection cleanup retained for `affiliate_product_selections` using Shopify GIDs (not local brand_product_ids).
 - Add pre-launch waitlist capture endpoint (`POST /api/public/waitlist`) with conditional fields and email-based upsert semantics.
 - Add waitlist-mode gate on `POST /api/bootstrap` for new users only (existing professionals continue to bootstrap).
 
@@ -117,7 +107,7 @@ A Supabase-authenticated user is not automatically a professional in Side St.
 
 **For a new user, call:**
 
-- POST /api/bootstrap This creates/updates `core.professionals` and `core.sites` tied to the Supabase user id (sub in JWT), and auto-provisions enterprise records for enterprise owner types.
+- POST /api/bootstrap This creates/updates `core.professionals` and `core.sites` tied to the Supabase user id (sub in JWT).
 
 If you skip bootstrap, professional routes will return 403 with a message prompting bootstrap.
 
@@ -125,8 +115,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 
 ### Auth: Required (Supabase JWT)
 
-**Purpose:** Create or refresh the authenticated user profile + site in one call.  
-If the selected `professional_type` is an enterprise-owner type (`promoter`, `barbershop`, or `salon`), an enterprise profile and owner membership are auto-provisioned in the same transaction.
+**Purpose:** Create or refresh the authenticated user profile + site in one call.
 
 **Request body:**
 
@@ -139,7 +128,7 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 "last_name": "Barber",
 "country_code": "AU",
 "timezone": "Australia/Sydney",
-"professional_type": "barber",
+"professional_type": "professional",
 "handle": "joshbarber",
 "invite_token": null,
 "brand_partner_professional_id": null
@@ -157,7 +146,7 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 - `professional_type`:
   - required for first bootstrap of a new Supabase user
   - optional for subsequent bootstrap calls
-  - allowed values: `professional`, `influencer`, `barber`, `hairdresser`, `ambassador`, `promoter`, `brand`, `barbershop`, `salon`
+  - allowed values: `professional`, `influencer`, `brand`
 - `handle` (optional): Unique username/slug (if omitted, auto-generated from display_name)
 - `invite_token` (optional): claim a brand-affiliate invite during bootstrap
 - `brand_partner_professional_id` (optional): connect to a brand partner during bootstrap when no invite token is provided
@@ -183,7 +172,7 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
         "last_name": "Barber",
         "country_code": "AU",
         "timezone": "Australia/Sydney",
-        "professional_type": "barber",
+        "professional_type": "professional",
         "status": "active",
         "onboarding_step": 0
     },
@@ -192,14 +181,8 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
         "professional_id": "uuid",
         "subdomain": "josh-barber",
         "is_published": false
-    },
-    "enterprise": null
+    }
 }
-```
-
-`enterprise` response behavior:
-- `null` for non-enterprise types (`barber`, `hairdresser`, `ambassador`)
-- object for enterprise-owner types (`promoter`, `barbershop`, `salon`)
 
 **Common status codes:** 200, 401 (invalid JWT), 403 (waitlist-only gate or disabled account), 422 (validation error)
 
@@ -423,8 +406,7 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | handle                  | string   | no       | joshbarber                               | unqiue (case-sensitive), 3-40 char, must start with letter |
 | display_name            | string   | no       | Josh Barber                              | Max 80                                                     |
 | bio                     | string   | yes      | Mobile Barber in Darwin                  | Max 2000, also mirrored from bio section when updated      |
-| professional_type       | string   | no       | barber                                   | One of: professional, influencer, barber, hairdresser, ambassador, promoter, brand, barbershop, salon |
-| primary_enterprise_id   | uuid     | yes      | `10000000-...`                           | Optional pointer to primary enterprise (membership table is source of truth) |
+| professional_type       | string   | no       | professional                             | One of: `professional`, `influencer`, `brand` (enforced via config) |
 | primary_email           | email    | no       | josh@example.copm                        | Max 255                                                    |
 | phone                   | string   | no       | +6140000000                              | Max 40                                                     |
 | first_name              | string   | no       | Josh                                     | Max 80                                                     |
@@ -452,45 +434,7 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | fresha_partner_id       | string   | yes      | `partner_456`                            | Fresha partner identifier                                  |
 | fresha_last_synced_at   | datetime | yes      | `2026-02-20T12:00:00Z`                   | Last successful Fresha catalog sync                        |
 
-### Enterprise (core.enterprises)
-| Name                    | Type     | Nullable | Example                | Constraints / Notes |
-|-------------------------|----------|----------|------------------------|---------------------|
-| id                      | uuid     | no       | `10000000-...`         | Primary key |
-| auth_user_id            | uuid     | yes      | `30000000-...`         | Optional owner auth user id (unique among active enterprises) |
-| name                    | string   | no       | `Atlas Promotions`     | Max 255 |
-| handle                  | string   | yes      | `atlas-promotions`     | Unique among active enterprises |
-| enterprise_type         | string   | no       | `promoter`             | One of: `promoter`, `barbershop`, `salon`, `distributor` |
-| status                  | string   | no       | `active`               | One of: `active`, `inactive`, `suspended` |
-| subscription_tier       | string   | yes      | `enterprise`           | Enterprise plan key/label |
-| primary_email           | string   | yes      | `hello@example.com`    | Business contact |
-| phone                   | string   | yes      | `+61400000000`         | Business contact |
-| public_contact_email    | string   | yes      | `bookings@example.com` | Public-facing contact |
-| public_contact_number   | string   | yes      | `+61400000001`         | Public-facing contact |
-| location_*              | string   | yes      | `Melbourne`            | Address fields |
-| metadata                | jsonb    | no       | `{}`                   | Flexible metadata |
-| deleted_at              | datetime | yes      | `null`                 | Soft delete marker |
-
-### Professional Enterprise Membership (core.professional_enterprise_memberships)
-| Name                    | Type     | Nullable | Example        | Constraints / Notes |
-|-------------------------|----------|----------|----------------|---------------------|
-| id                      | uuid     | no       | `40000000-...` | Primary key |
-| professional_id         | uuid     | no       | `20000000-...` | FK to professional |
-| enterprise_id           | uuid     | no       | `10000000-...` | FK to enterprise |
-| relationship_type       | string   | no       | `owner`        | One of: `owner`, `employee`, `chair_renter`, `contractor`, `affiliate`, `member` |
-| is_primary              | boolean  | no       | `true`         | Only one active primary membership per professional |
-| starts_at               | datetime | no       | `...`          | Start timestamp |
-| ends_at                 | datetime | yes      | `null`         | Active when null |
-
-### Ambassador Promoter Contract (core.influencer_promoter_contracts)
-| Name                        | Type     | Nullable | Example        | Constraints / Notes |
-|-----------------------------|----------|----------|----------------|---------------------|
-| id                          | uuid     | no       | `50000000-...` | Primary key |
-| influencer_professional_id  | uuid     | no       | `20000000-...` | Must reference `professional_type = ambassador` |
-| promoter_enterprise_id      | uuid     | no       | `10000000-...` | Must reference `enterprise_type = promoter` |
-| status                      | string   | no       | `active`       | `draft`, `active`, `paused`, `ended`, `terminated` |
-| exclusive                   | boolean  | no       | `true`         | At most one active exclusive contract per ambassador |
-| starts_at                   | datetime | no       | `...`          | Contract start |
-| ends_at                     | datetime | yes      | `null`         | Active when null and status is `active` |
+<!-- Enterprise, Professional Enterprise Membership, and Ambassador Promoter Contract tables removed — schema exists but no controllers/routes/services implemented in V2 -->
 
 
 ### Site
@@ -1265,20 +1209,14 @@ All routes below require: Authorization header AND a professional profile (curre
 
 - Purpose: bootstrap dashboard UI with current professional, site, blocks, services, and customer count
 - Auth: Required
-- Response (200): `{ "uid": "supabase-user-uuid", "professional": { ..., "professional_type": "barber" }, "site": { ... }, "legal_content": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
-- Enterprise fields in `professional`:
-  - `primary_enterprise_id`
-  - `primary_enterprise` (object or null)
-  - `enterprise_memberships` (array, each with `enterprise` object snapshot)
-  - `active_promoter_contract` (object or null; ambassador-focused)
+- Response (200): `{ "uid": "supabase-user-uuid", "professional": { ..., "professional_type": "professional" }, "site": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
 - Common status codes: 200, 401, 403
 
 ### `PATCH /api/me`
 
 - Purpose: update professional profile fields
-- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "barber", "public_contact_email": "bookings@example.com" }`
-- `professional_type` allowed values: `professional`, `influencer`, `barber`, `hairdresser`, `ambassador`, `promoter`, `brand`, `barbershop`, `salon`
-- Behavior: switching to `promoter`, `barbershop`, or `salon` auto-provisions/updates an enterprise profile and owner membership
+- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "professional", "public_contact_email": "bookings@example.com" }`
+- `professional_type` allowed values: `professional`, `influencer`, `brand`
 - Response (200): `{ "professional": { ... } }`
 - Common status codes: 200, 401, 403, 422
 - Images are managed via `POST /api/uploads` (pool=gallery or pool=content). No image fields are accepted on this endpoint.
@@ -1312,22 +1250,7 @@ All routes below require: Authorization header AND a professional profile (curre
 - Response (200): `{ "google_business_profile": { ... } }`
 - Common status codes: 200, 401, 403, 422
 
-### `GET /api/site/legal-content`
-
-- Purpose: fetch generated/manual legal content and current active sources for the logged-in professional
-- Auth: Required
-- Response (200): `{ "legal_content": { "generated_privacy_policy": "...", "manual_privacy_policy": "...", "active_privacy_source": "templated", "active_privacy_policy": "...", "generated_terms_and_conditions": "...", "manual_terms_and_conditions": "...", "active_terms_source": "templated", "active_terms_and_conditions": "...", "template_variables": { ... }, "generated_at": "...", "updated_at": "..." } }`
-- Common status codes: 200, 401, 403
-
-### `PUT /api/site/legal-content`
-### `PATCH /api/site/legal-content`
-
-- Purpose: save manual legal text, toggle active sources, or regenerate templated documents
-- Auth: Required
-- Request body (all fields optional): `{ "manual_privacy_policy": "...", "manual_terms_and_conditions": "...", "active_privacy_source": "templated|manual", "active_terms_source": "templated|manual", "regenerate_templated": true }`
-- Behavior: if active source is `manual` but manual content is empty, source is forced back to `templated` (never blank output)
-- Response (200): `{ "legal_content": { ... } }`
-- Common status codes: 200, 401, 403, 422
+<!-- Legal content endpoints (GET/PUT/PATCH /api/site/legal-content) removed in V2 — tables dropped -->
 
 ### `PATCH /api/site/visibility`
 
@@ -1604,139 +1527,8 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
   - `custom_price`, `affiliate_custom_price`
 - Common status codes: 200, 401, 403, 422
 
-### Store: Brand/Distributor Catalog Management
-
-#### `GET /api/store/brand-products`
-- Purpose: full synced catalog + settings state for managed brands
-- Auth: Required (brand account, or professional in an active `distributor` enterprise linked via `core.enterprise_brand_links`)
-- Query params:
-  - `brand_professional_id` (optional uuid): limit to one managed brand
-- Response includes each product's synced fields and settings fields (`is_available`, `is_featured`, `commission_override`, `discount_rate`, `custom_price`, effective pricing/commission outputs).
-- Common status codes: 200, 401, 403, 422
-
-#### `PATCH /api/store/brand-products/{brandProductId}`
-- Purpose: update one brand product's settings
-- Auth: Required manager access for that brand
-- Allowed fields:
-  - `is_available`, `is_featured`, `sort_order`
-  - `commission_override`, `discount_rate`, `custom_price`
-- Notes:
-  - If a product becomes unavailable, affected affiliate selections are removed and users are notified.
-- Common status codes: 200, 401, 403, 404, 422
-
-#### `PATCH /api/store/brand-products/bulk`
-- Purpose: bulk update settings for one brand, one/many/all products
-- Auth: Required manager access for that brand
-- Request body:
-  - `brand_professional_id`: required uuid
-  - `brand_product_ids`: optional uuid[] (omit to target all products for brand)
-  - one or more mutable fields from the single-product PATCH endpoint
-- Notes:
-  - Executes in a transaction with row locking.
-  - If products become unavailable, affected selections are removed + notifications are created.
-- Common status codes: 200, 401, 403, 422
-
-### Store: Affiliate Access Overrides (Deny/Allow)
-
-#### `GET /api/store/affiliate-overrides`
-- Purpose: list affiliate access overrides for a managed brand
-- Auth: Required manager access for `brand_professional_id`
-- Query params:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (optional uuid)
-  - `override_type` (optional enum: `deny` | `allow`)
-  - `page` (optional integer, default 1)
-  - `per_page` (optional integer, default 100, max 200)
-- Response (200): paginated
-  - `{ "overrides": [...], "meta": { "current_page": 1, "per_page": 100, "total": 42, "last_page": 1, ... } }`
-- Common status codes: 200, 401, 403, 422
-
-#### `PUT /api/store/affiliate-overrides/deny`
-- Purpose: set deny overrides for one affiliate across one/many brand products
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (required uuid[], min 1)
-- Notes:
-  - Creating deny overrides also removes matching current selections for that affiliate and sends notifications.
-- Common status codes: 200, 401, 403, 422
-
-#### `DELETE /api/store/affiliate-overrides/deny`
-- Purpose: remove deny overrides for one affiliate/brand pair (all or subset)
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (optional uuid[])
-- Common status codes: 200, 401, 403, 422
-
-#### `PUT /api/store/affiliate-overrides/allow`
-- Purpose: set allow overrides for one affiliate across one/many brand products
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (required uuid[], min 1)
-- Notes:
-  - `allow` overrides bypass brand-level product availability for that affiliate.
-  - `deny` still takes precedence when present.
-- Common status codes: 200, 401, 403, 422
-
-#### `DELETE /api/store/affiliate-overrides/allow`
-- Purpose: remove allow overrides for one affiliate/brand pair (all or subset)
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (optional uuid[])
-- Common status codes: 200, 401, 403, 422
-
-### Store: Per-Affiliate Product Pricing Settings
-
-#### `GET /api/store/affiliate-product-settings`
-- Purpose: list per-affiliate product pricing settings for a managed brand
-- Auth: Required manager access for `brand_professional_id`
-- Query params:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (optional uuid)
-  - `page` (optional integer, default 1)
-  - `per_page` (optional integer, default 100, max 200)
-- Response (200): paginated
-  - `{ "settings": [...], "meta": { "current_page": 1, "per_page": 100, "total": 42, "last_page": 1, ... } }`
-- `settings[]` fields:
-  - `brand_product_id`
-  - `commission_override` (nullable, 0-100)
-  - `discount_rate` (nullable, 0-100)
-  - `custom_price` (nullable, >= 0)
-- Common status codes: 200, 401, 403, 422
-
-#### `PUT /api/store/affiliate-product-settings`
-- Purpose: batch upsert per-affiliate product pricing settings
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `settings` (required array, min 1)
-  - `settings[].brand_product_id` (required uuid)
-  - `settings[].commission_override` (nullable number, min 0, max 100)
-  - `settings[].discount_rate` (nullable number, min 0, max 100)
-  - `settings[].custom_price` (nullable number, min 0)
-- Notes:
-  - Duplicate `settings[].brand_product_id` values are rejected with 422.
-  - Effective storefront precedence is:
-    - commission: affiliate override → product override → brand default → system default
-    - discount/custom price: affiliate override → product-level value
-- Common status codes: 200, 401, 403, 422
-
-#### `DELETE /api/store/affiliate-product-settings`
-- Purpose: remove per-affiliate product pricing settings (all or subset)
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (optional uuid[])
-- Common status codes: 200, 401, 403, 422
+<!-- V1 Store sections removed: Brand/Distributor Catalog Management, Affiliate Access Overrides, Per-Affiliate Product Pricing Settings.
+     Products live in Shopify; commission rates in Shopify metafields. No local brand_products table. -->
 
 ### Store: Brand Settings
 
@@ -1747,7 +1539,7 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
   - `brand_professional_id` (optional uuid)
 - Behavior:
   - direct brand users default to their own brand when `brand_professional_id` is omitted
-  - non-direct users (enterprise/team) must provide `brand_professional_id`
+  - non-direct users (team) must provide `brand_professional_id`
 - Common status codes: 200, 401, 403
 
 #### `PATCH /api/store/brand-settings`
@@ -2214,54 +2006,7 @@ Fresha sends catalog change notifications to the Side St webhook endpoint. These
 
 ## 8) Enterprise API
 
-Enterprise routes are self-service endpoints for the authenticated user and require a Supabase JWT.
-
-### `GET /api/enterprise/me`
-
-- Purpose: fetch the current user's enterprise profile (if one exists)
-- Response (200): `{ "enterprise": { ... } }`
-- Common status codes: 200, 401, 404
-
-### `POST /api/enterprise/me`
-
-- Purpose: create an enterprise profile for the authenticated user
-- Request body:
-  - `name` (required)
-  - `handle` (optional, unique among active enterprises; auto-slugged from name if omitted)
-  - `enterprise_type` (required): `promoter`, `barbershop`, `salon`, `distributor`
-  - `subscription_tier` (optional)
-  - `primary_email`, `phone`, `public_contact_email`, `public_contact_number` (optional)
-  - `country_code`, `timezone` (optional)
-  - `location_street_address`, `location_city`, `location_state`, `location_postcode`, `location_country` (optional)
-- Behavior:
-  - Requires an existing professional profile (`/api/bootstrap` first).
-  - Creates owner membership in `core.professional_enterprise_memberships`.
-  - Sets `professional.primary_enterprise_id` if empty.
-- Common status codes: 201, 401, 409, 422
-
-### `PATCH /api/enterprise/me`
-
-- Purpose: update current enterprise profile fields
-- Notes:
-  - `enterprise_type` allowed values: `promoter`, `barbershop`, `salon`, `distributor`
-  - `status` allowed values: `active`, `inactive`, `suspended`
-- Response (200): `{ "enterprise": { ... } }`
-- Common status codes: 200, 401, 404, 422
-
-### `DELETE /api/enterprise/me`
-
-- Purpose: soft-delete/deactivate current enterprise profile
-- Behavior:
-  - Ends active memberships for that enterprise (`ends_at = now()`).
-  - Clears `primary_enterprise_id` for professionals pointing to this enterprise.
-  - Marks enterprise as `inactive` and sets `deleted_at`.
-- Response (200): `{ "deleted": true }`
-- Common status codes: 200, 401, 404
-
-### Enterprise + Bootstrap integration
-
-- If `POST /api/bootstrap` is called with `professional_type` = `promoter`, `barbershop`, or `salon`, the enterprise is auto-provisioned.
-- Because of this, many enterprise-owner users will not need to call `POST /api/enterprise/me` manually.
+> **NOT IMPLEMENTED in V2.** Enterprise tables exist in the database schema but no controllers, routes, or services have been built. This section is retained as a placeholder for future work. Do not build against these endpoints.
 
 ## 9) Staff API
 
@@ -2272,7 +2017,7 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - GET /api/staff/me
 - GET /api/staff/sites/{subdomain}
 - GET /api/staff/professionals?q=...&status=...&professional_type=...&per_page=...&page=...
-  - `professional_type` filter supports: `professional`, `influencer`, `barber`, `hairdresser`, `ambassador`, `promoter`, `brand`, `barbershop`, `salon`
+  - `professional_type` filter supports: `professional`, `influencer`, `brand`
 - GET /api/staff/professionals/{professional}
 - DELETE /api/staff/professionals/{professional} (soft delete)
 - POST /api/staff/professionals/{professional}/restore
