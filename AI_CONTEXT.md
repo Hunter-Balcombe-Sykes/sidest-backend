@@ -130,7 +130,7 @@ Daily payout job → Stripe Connect transfer (80/20 split)
 │   ├── api/publicSite.php     — Public mini-site routes (subdomain-scoped)
 │   └── api/staff.php          — Staff/admin routes
 ├── supabase/migrations/       — All DB migrations (SQL, NOT Laravel migrations)
-├── config/comet.php           — Feature flags and limits
+├── config/sidest.php           — Feature flags and limits
 ├── tests/                     — Pest framework tests
 ├── docs/api.md                — Comprehensive API reference
 ├── V2_BACKEND_REFERENCE.md    — Detailed per-file V2 role descriptions
@@ -259,8 +259,8 @@ Video: ProcessVideoVariantsJob → FFmpeg MP4 + HLS (feature-flagged off)
 ```
 Request → VerifySupabaseJwt (validate JWT via JWKS, extract supabase_uid)
         → LoadCurrentProfessional (load Professional from cache)
-        → [EnsureCometStaff] (require staff role)
-        → [EnsureCometAdmin] (require admin role)
+        → [EnsureSidestStaff] (require staff role)
+        → [EnsureSidestAdmin] (require admin role)
         → [RequirePlan] (check subscription entitlement)
         → Controller
 ```
@@ -345,7 +345,7 @@ The following V1 code has been deleted. Do NOT recreate these:
 - **V2 database migration** — Dropping V1 tables, creating `affiliate_product_selections`, renaming analytics tables
 - **Hydrogen storefront** — Separate repo (`sidest-hydrogen`), not part of this backend
 - **Embedded Shopify app** — Separate repo (`sidest-embedded`), brand setup wizard
-- **Video uploads** — Code exists, feature-flagged off (`COMET_VIDEO_UPLOADS_ENABLED=false`)
+- **Video uploads** — Code exists, feature-flagged off (`SIDEST_VIDEO_UPLOADS_ENABLED=false`)
 
 ### Known Issues / Notes
 - Laravel database migrations are intentionally disabled (guarded in composer). All schema changes go through `supabase/migrations/`.
@@ -377,7 +377,7 @@ The following V1 code has been deleted. Do NOT recreate these:
 
 ### API Conventions
 - All routes require `Accept: application/json`.
-- Public mini-site routes are domain-scoped to `{subdomain}.{COMET_PUBLIC_DOMAIN}`.
+- Public mini-site routes are domain-scoped to `{subdomain}.{SIDEST_PUBLIC_DOMAIN}`.
 - Professional/staff routes are on the API host (`APP_URL`).
 - Rate limiting: `throttle:public-site` for public, `throttle:analytics` for analytics endpoints.
 - Return consistent JSON responses — use Laravel's resource/collection pattern.
@@ -438,7 +438,7 @@ When another AI reads this file, it should:
 5. **V1 dead code is gone.** Do not recreate BrandProduct, ProfessionalSelection, BrandPromotion, BrandAffiliateSegment, or any of the other removed V1 models/services/controllers.
 6. **Every class has a `// V2:` comment** above its declaration explaining its role. Read these for quick context.
 7. **`V2_BACKEND_REFERENCE.md`** has a complete per-file reference with V2 critical paths, queue architecture, and what was removed.
-8. **Video uploads are disabled by default.** Set `COMET_VIDEO_UPLOADS_ENABLED=true` and ensure the `redis_video` queue worker is running.
+8. **Video uploads are disabled by default.** Set `SIDEST_VIDEO_UPLOADS_ENABLED=true` and ensure the `redis_video` queue worker is running.
 
 ### Fragile Parts
 - `PublicSiteResolver` — resolves site by subdomain. Changing resolution logic affects all public site functionality.

@@ -34,9 +34,9 @@ use Illuminate\Support\Facades\Storage;
  *       adaptive.m3u8             (master playlist)
  *     poster.jpg
  *
- * Requires ffmpeg and ffprobe to be available (configured via config/comet.php).
+ * Requires ffmpeg and ffprobe to be available (configured via config/sidest.php).
  */
-// V2: Transcodes videos to MP4 + HLS via FFmpeg. Feature-flagged (COMET_VIDEO_UPLOADS_ENABLED). Uses dedicated redis_video connection.
+// V2: Transcodes videos to MP4 + HLS via FFmpeg. Feature-flagged (SIDEST_VIDEO_UPLOADS_ENABLED). Uses dedicated redis_video connection.
 class VideoVariantService
 {
     /* ------------------------------------------------------------------ */
@@ -90,7 +90,7 @@ class VideoVariantService
         // --- 1. Probe metadata ---
         $probe      = $this->probe($localOriginalPath);
         $durationMs = $this->extractDurationMs($probe);
-        $maxDur     = (int) config('comet.video_max_duration_seconds', 300);
+        $maxDur     = (int) config('sidest.video_max_duration_seconds', 300);
 
         if ($durationMs > $maxDur * 1000) {
             throw new \RuntimeException(
@@ -98,14 +98,14 @@ class VideoVariantService
             );
         }
 
-        $variantDefs = (array) config('comet.video_variants', []);
+        $variantDefs = (array) config('sidest.video_variants', []);
         $tmpDirs     = [];
 
         try {
             // --- 2 & 3. Encode MP4 variants ---
             $mp4Paths = [];
             foreach ($variantDefs as $variantKey => $def) {
-                $tmpMp4 = $this->makeTmpFile("comet_mp4_{$variantKey}_", '.mp4');
+                $tmpMp4 = $this->makeTmpFile("sidest_mp4_{$variantKey}_", '.mp4');
                 $this->encodeMp4($localOriginalPath, $tmpMp4, $def);
                 $mp4Paths[$variantKey] = $tmpMp4;
             }
@@ -113,7 +113,7 @@ class VideoVariantService
             // --- 4. Package HLS from each MP4 ---
             $hlsDirs = [];
             foreach ($mp4Paths as $variantKey => $mp4) {
-                $tmpHlsDir = sys_get_temp_dir() . '/comet_hls_' . $variantKey . '_' . uniqid();
+                $tmpHlsDir = sys_get_temp_dir() . '/sidest_hls_' . $variantKey . '_' . uniqid();
                 if (! mkdir($tmpHlsDir, 0755, true)) {
                     throw new \RuntimeException("Failed to create HLS temp dir: {$tmpHlsDir}");
                 }
@@ -126,7 +126,7 @@ class VideoVariantService
             $adaptiveContent = $this->buildAdaptivePlaylist($variantDefs);
 
             // --- 6. Extract poster ---
-            $tmpPoster = $this->makeTmpFile('comet_poster_', '.jpg');
+            $tmpPoster = $this->makeTmpFile('sidest_poster_', '.jpg');
             $this->extractPoster($localOriginalPath, $tmpPoster);
 
             // --- 7. Upload all artifacts ---
@@ -504,9 +504,9 @@ class VideoVariantService
 
     private function diskName(): string
     {
-        $configured = (string) config('comet.media_disk', 'media');
+        $configured = (string) config('sidest.media_disk', 'media');
 
-        $explicit = $_ENV['COMET_MEDIA_DISK'] ?? $_SERVER['COMET_MEDIA_DISK'] ?? null;
+        $explicit = $_ENV['SIDEST_MEDIA_DISK'] ?? $_SERVER['SIDEST_MEDIA_DISK'] ?? null;
         if (is_string($explicit) && trim($explicit) !== '') {
             return $configured;
         }
@@ -536,11 +536,11 @@ class VideoVariantService
 
     private function ffmpegBinary(): string
     {
-        return (string) config('comet.ffmpeg_binary', 'ffmpeg');
+        return (string) config('sidest.ffmpeg_binary', 'ffmpeg');
     }
 
     private function ffprobeBinary(): string
     {
-        return (string) config('comet.ffprobe_binary', 'ffprobe');
+        return (string) config('sidest.ffprobe_binary', 'ffprobe');
     }
 }

@@ -35,7 +35,7 @@ Snapshot date: **March 20, 2026**.
 
 ### Unreleased (working tree)
 
-- Add video upload support (`POST /api/uploads` with `video` field); FFmpeg-based MP4 + HLS transcoding on dedicated `redis_video` queue; feature-flagged via `COMET_VIDEO_UPLOADS_ENABLED`.
+- Add video upload support (`POST /api/uploads` with `video` field); FFmpeg-based MP4 + HLS transcoding on dedicated `redis_video` queue; feature-flagged via `SIDEST_VIDEO_UPLOADS_ENABLED`.
 - Extend `core.site_images` with `media_type`, `processing_state`, `processing_error`, `duration_ms`, `poster_path`, `original_mime`, `original_size_bytes`.
 - Add `core.media_variants` table for video artifacts (MP4s, HLS playlists, poster).
 - Add `gallery_videos` and `content_videos` arrays to `public_site_payload`; `gallery` / `content_images` remain image-only.
@@ -87,13 +87,13 @@ All endpoints below are served under the Laravel API base URL, with the default 
 
 ### API base URL
 
-- API base URL is your APP_URL (Laravel). Example: https://api.comet.app
-- All API routes live under /api. Example: https://api.comet.app/api/me Public mini-site domain rules Public mini-site routes are domain-scoped. They MUST be called on the mini-site host, not the API host.
-- Host pattern: https://{subdomain}.{COMET_PUBLIC_DOMAIN}
-- Public API base URL: https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api
+- API base URL is your APP_URL (Laravel). Example: https://api.sidest.co
+- All API routes live under /api. Example: https://api.sidest.co/api/me Public mini-site domain rules Public mini-site routes are domain-scoped. They MUST be called on the mini-site host, not the API host.
+- Host pattern: https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}
+- Public API base URL: https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api
 - Example: https://joshbarber.localtest.me/api/public/site Local development tip
 - Use a wildcard-friendly domain such as localtest.me or lvh.me so subdomains resolve to 127.0.0.1.
-- Set COMET_PUBLIC_DOMAIN=localtest.me and APP_URL=http://api.localtest.me (or similar).
+- Set SIDEST_PUBLIC_DOMAIN=localtest.me and APP_URL=http://api.localtest.me (or similar).
 
 ## 2) Authentication (Supabase JWT)
 
@@ -105,15 +105,15 @@ All authenticated requests MUST include the Supabase access token:
 - Also send: Accept: application/json
 - For JSON bodies: Content-Type: application/json Tokens are verified by the supabase.jwt middleware using Supabase JWKS + issuer/audience settings.
 
-### No login endpoint in Comet
+### No login endpoint in Side St
 
-- Comet does not manage passwords or sessions.
+- Side St does not manage passwords or sessions.
 - Frontend signs in with Supabase Auth.
-- Frontend calls Comet API with the returned access_token.
+- Frontend calls Side St API with the returned access_token.
 
 ### Bootstrap required for new users
 
-A Supabase-authenticated user is not automatically a professional in Comet.
+A Supabase-authenticated user is not automatically a professional in Side St.
 
 **For a new user, call:**
 
@@ -163,7 +163,7 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 - `brand_partner_professional_id` (optional): connect to a brand partner during bootstrap when no invite token is provided
 
 **Waitlist mode behavior:**
-- If `COMET_WAITLIST_ENABLED=true`, bootstrap is blocked for users who do not already have a professional row.
+- If `SIDEST_WAITLIST_ENABLED=true`, bootstrap is blocked for users who do not already have a professional row.
 - Existing professionals can still call bootstrap normally.
 - Blocked response shape:
   - Status: `403`
@@ -401,15 +401,15 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 
 - Public (anon): no token, can only access public mini-site routes and health routes.
 - Professional: valid Supabase JWT AND a core.professionals row where auth_user_id matches JWT sub.
-- Staff: valid Supabase JWT AND a core.comet_staff row where auth_user_id matches JWT sub.
-- Staff admin: staff plus is_admin = true in core.comet_staff.
+- Staff: valid Supabase JWT AND a core.sidest_staff row where auth_user_id matches JWT sub.
+- Staff admin: staff plus is_admin = true in core.sidest_staff.
 
 ### RLS behavior
 
-Comet reads/writes Postgres through Laravel using the configured database user.
+Side St reads/writes Postgres through Laravel using the configured database user.
 
-- Database table RLS does not gate Comet API calls if the DB user bypasses RLS (typical for server-side roles).
-- Image uploads go through the Comet API (server-side), not through Supabase Storage. Supabase Storage is not used at all — all media is stored on Laravel Cloud Object Storage (Cloudflare R2).
+- Database table RLS does not gate Side St API calls if the DB user bypasses RLS (typical for server-side roles).
+- Image uploads go through the Side St API (server-side), not through Supabase Storage. Supabase Storage is not used at all — all media is stored on Laravel Cloud Object Storage (Cloudflare R2).
 
 ## 4) Data Models
 
@@ -523,8 +523,8 @@ All images (gallery showcase and content/branding) live in the `site_images` tab
 | deleted_at | datetime | yes      | `null`                                          | Soft delete                                                      |
 
 **Pool limits** (configurable via env):
-- `gallery`: max 5 images (env `COMET_GALLERY_IMAGE_MAX`)
-- `content`: max 5 images (env `COMET_CONTENT_IMAGE_MAX`)
+- `gallery`: max 5 images (env `SIDEST_GALLERY_IMAGE_MAX`)
+- `content`: max 5 images (env `SIDEST_CONTENT_IMAGE_MAX`)
 
 ### ImageVariant (core.image_variants)
 
@@ -549,8 +549,8 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 
 | Variant   | Resolution policy   | Quality policy                                  | Typical use                             |
 |-----------|---------------------|--------------------------------------------------|-----------------------------------------|
-| optimized | Preserve original   | Adaptive quality, targets `COMET_IMAGE_TARGET_KB` (default 500KB) | Fast page loads / default display |
-| maximized | Preserve original   | Highest quality (`COMET_IMAGE_MAXIMIZED_QUALITY`, default 100)    | Zoom/full-detail display          |
+| optimized | Preserve original   | Adaptive quality, targets `SIDEST_IMAGE_TARGET_KB` (default 500KB) | Fast page loads / default display |
+| maximized | Preserve original   | Highest quality (`SIDEST_IMAGE_MAXIMIZED_QUALITY`, default 100)    | Zoom/full-detail display          |
 
 ### Customer
 | Name                      | Type     | Nullable | Example                | Constraints / Notes                                                         |
@@ -714,7 +714,7 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 
 ### Standard error format
 
-**Most Comet errors use:**
+**Most Side St errors use:**
 
 ```json
 {
@@ -763,16 +763,16 @@ All routes below are unauthenticated.
 Frontend can connect in 2 modes:
 
 1. Domain-scoped mini-site host  
-`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/...`
+`https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api/public/...`
 2. Header-based API host fallback (no subdomain DNS needed)  
-`https://api.{COMET_PUBLIC_DOMAIN}/api/public/...` with header `X-Site-Subdomain: {subdomain}`
+`https://api.{SIDEST_PUBLIC_DOMAIN}/api/public/...` with header `X-Site-Subdomain: {subdomain}`
 
 For analytics endpoints, provide either `site_id` in the JSON body OR `X-Site-Subdomain` header.
 
 Frontend quick-start (header-based API host):
 
 ```ts
-const API_BASE = "https://api.<COMET_PUBLIC_DOMAIN>/api/public";
+const API_BASE = "https://api.<SIDEST_PUBLIC_DOMAIN>/api/public";
 const subdomain = "fadez";
 const visitorId = localStorage.getItem("comet_visitor_id") ?? crypto.randomUUID();
 localStorage.setItem("comet_visitor_id", visitorId);
@@ -915,7 +915,7 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 
 ### `POST /api/public/waitlist`
 
-- Purpose: collect pre-launch waitlist submissions for Comet account access
+- Purpose: collect pre-launch waitlist submissions for Side St account access
 - Auth: None
 - Rate limit: waitlist
 - Request body:
@@ -1011,7 +1011,7 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 #### Domain-Scoped Booking Endpoints
 
 The following booking endpoints are domain-scoped and accessed via the mini-site subdomain:
-`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/booking/...`
+`https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api/public/booking/...`
 
 #### `GET /api/public/booking/config`
 
@@ -1158,7 +1158,7 @@ The following booking endpoints are domain-scoped and accessed via the mini-site
 #### Domain-Scoped Store Endpoints
 
 The following store endpoints are domain-scoped and accessed via the mini-site subdomain:
-`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/store/...`
+`https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api/public/store/...`
 
 #### `GET /api/public/store/featured-products`
 
@@ -1198,7 +1198,7 @@ The following store endpoints are domain-scoped and accessed via the mini-site s
 #### Header-Based Slug Routing
 
 For frontends that cannot use subdomain DNS routing, the following endpoints accept the subdomain via the `X-Site-Subdomain` header and are accessed on the API host:
-`https://api.{COMET_PUBLIC_DOMAIN}/api/public/...`
+`https://api.{SIDEST_PUBLIC_DOMAIN}/api/public/...`
 
 #### `GET /api/public/site-by-slug`
 
@@ -1817,11 +1817,11 @@ Rollups:
 
 ### Media Uploads (images and videos, server-side processing)
 
-Images and videos are uploaded through the Comet API (not directly to storage). Each upload stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and enqueues a processing job.
+Images and videos are uploaded through the Side St API (not directly to storage). Each upload stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and enqueues a processing job.
 
 **Processing modes:**
 - **Images:** GD-based WebP transcoding on the `images` queue. Queue `sync` mode processes inline. Async mode: poll until `processing_state = ready`.
-- **Videos:** FFmpeg-based MP4 + HLS transcoding on the dedicated `videos` queue (`redis_video` connection). Always async in production. Requires `COMET_VIDEO_UPLOADS_ENABLED=true`.
+- **Videos:** FFmpeg-based MP4 + HLS transcoding on the dedicated `videos` queue (`redis_video` connection). Always async in production. Requires `SIDEST_VIDEO_UPLOADS_ENABLED=true`.
 
 **Pool limits:** Images and videos share the same per-pool cap (default 5 per pool). A video upload occupies a slot that could hold an image.
 
@@ -1832,8 +1832,8 @@ Images and videos are uploaded through the Comet API (not directly to storage). 
 - Request body:
   - `pool` (required): `gallery` or `content`
   - `image` OR `video` (exactly one required): file upload
-    - `image`: JPEG, PNG, or WebP; max `COMET_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
-    - `video`: MP4, MOV, WebM, or AVI; max `COMET_VIDEO_MAX_UPLOAD_KB` (default 500 MB); max duration `COMET_VIDEO_MAX_DURATION_SECONDS` (default 300s / 5 min); requires `COMET_VIDEO_UPLOADS_ENABLED=true`
+    - `image`: JPEG, PNG, or WebP; max `SIDEST_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
+    - `video`: MP4, MOV, WebM, or AVI; max `SIDEST_VIDEO_MAX_UPLOAD_KB` (default 500 MB); max duration `SIDEST_VIDEO_MAX_DURATION_SECONDS` (default 300s / 5 min); requires `SIDEST_VIDEO_UPLOADS_ENABLED=true`
   - `alt_text` (optional): string, max 255
 - Response (201) — image, sync mode:
 ```json
@@ -1891,9 +1891,9 @@ Images and videos are uploaded through the Comet API (not directly to storage). 
 - `processing_state` lifecycle: `pending → processing → ready | failed`
 - `processing` is a boolean alias for `processing_state IN (pending, processing)` (backward-compatible)
 - Business rules:
-  - Max 5 items per pool per professional, shared across images and videos (configurable via `COMET_GALLERY_IMAGE_MAX` / `COMET_CONTENT_IMAGE_MAX`)
+  - Max 5 items per pool per professional, shared across images and videos (configurable via `SIDEST_GALLERY_IMAGE_MAX` / `SIDEST_CONTENT_IMAGE_MAX`)
   - Race-safe: PostgreSQL advisory locks
-  - Video uploads rejected with 422 if `COMET_VIDEO_UPLOADS_ENABLED=false`
+  - Video uploads rejected with 422 if `SIDEST_VIDEO_UPLOADS_ENABLED=false`
 - Common status codes: 201, 401, 403, 422 (pool limit, validation, feature flag)
 
 #### `GET /api/images`
@@ -2076,9 +2076,9 @@ Square integration manages online booking appointments and service synchronizati
 
 ### Fresha Integration
 
-Fresha integration manages service catalog synchronization between Comet and Fresha.
+Fresha integration manages service catalog synchronization between Side St and Fresha.
 
-Unlike Square (which exposes a full platform API for bookings, payments, and catalog), Fresha restricts third-party integrations to **catalog sync only**. Bookings, payments, and availability remain within the Fresha ecosystem. The Fresha integration therefore focuses on keeping the service catalog in sync between Comet and Fresha. The `FreshaApiClient` does include prepared methods for availability, bookings, and customer creation — these are scaffolded for future use if Fresha opens its API further, but they are not currently wired to any public routes.
+Unlike Square (which exposes a full platform API for bookings, payments, and catalog), Fresha restricts third-party integrations to **catalog sync only**. Bookings, payments, and availability remain within the Fresha ecosystem. The Fresha integration therefore focuses on keeping the service catalog in sync between Side St and Fresha. The `FreshaApiClient` does include prepared methods for availability, bookings, and customer creation — these are scaffolded for future use if Fresha opens its API further, but they are not currently wired to any public routes.
 
 #### `GET /api/fresha/status`
 
@@ -2150,7 +2150,7 @@ Shopify order ingestion endpoints have **no auth middleware**. Signature validat
 #### `POST /api/webhooks/shopify/orders/fallback`
 
 - Purpose: fallback ingestion path when caller only has `shop_domain + order_id` (or cached payload)
-- Auth: Comet fallback HMAC via `X-Comet-Fallback-Signature` (`SHOPIFY_FALLBACK_SECRET`)
+- Auth: Side St fallback HMAC via `X-Side St-Fallback-Signature` (`SHOPIFY_FALLBACK_SECRET`)
 - Request body:
   - `shop_domain` (required)
   - `order_id` (required; numeric id or gid containing numeric id)
@@ -2167,7 +2167,7 @@ Shopify order ingestion endpoints have **no auth middleware**. Signature validat
 
 ### Fresha Webhooks
 
-Fresha sends catalog change notifications to the Comet webhook endpoint. These routes have **no auth middleware** — authentication is performed via HMAC signature validation.
+Fresha sends catalog change notifications to the Side St webhook endpoint. These routes have **no auth middleware** — authentication is performed via HMAC signature validation.
 
 #### `POST /api/webhooks/fresha`
 #### `POST /api/webhooks/fresha/catalog`
@@ -2200,7 +2200,7 @@ Fresha sends catalog change notifications to the Comet webhook endpoint. These r
 | Observer auto-sync       | Yes (on service save/delete)   | Yes (on service save/delete)             |
 | Queue                    | `integrations`                 | `integrations`                           |
 
-**Why they differ:** Square exposes a complete platform API — catalog, bookings, payments, availability, customers, and locations are all accessible to third-party developers. Comet leverages this to offer a full public booking + payment flow embedded in the mini-site. Fresha, by contrast, restricts third-party API access to catalog (service) management. Bookings, payments, availability, and customer data remain within the Fresha ecosystem. The Fresha integration therefore focuses exclusively on keeping the service catalog synchronized. The `FreshaApiClient` includes scaffolded methods for availability, bookings, and customer creation to allow rapid expansion if Fresha opens these APIs in the future.
+**Why they differ:** Square exposes a complete platform API — catalog, bookings, payments, availability, customers, and locations are all accessible to third-party developers. Side St leverages this to offer a full public booking + payment flow embedded in the mini-site. Fresha, by contrast, restricts third-party API access to catalog (service) management. Bookings, payments, availability, and customer data remain within the Fresha ecosystem. The Fresha integration therefore focuses exclusively on keeping the service catalog synchronized. The `FreshaApiClient` includes scaffolded methods for availability, bookings, and customer creation to allow rapid expansion if Fresha opens these APIs in the future.
 
 ---
 
@@ -2265,7 +2265,7 @@ Enterprise routes are self-service endpoints for the authenticated user and requ
 
 ## 9) Staff API
 
-Staff routes are for internal staff tooling. They require a staff JWT (user must exist in core.comet_staff).
+Staff routes are for internal staff tooling. They require a staff JWT (user must exist in core.sidest_staff).
 
 ### Staff (non-admin) routes
 
@@ -2288,7 +2288,7 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - GET /api/staff/professionals/{professional}/site
 - GET /api/staff/professionals/{professional}/analytics
 - GET /api/staff/professionals/{professional}/links
-- GET /api/staff/professionals/{professional}/sections Staff-admin routes (requires core.comet_staff.is_admin = true)
+- GET /api/staff/professionals/{professional}/sections Staff-admin routes (requires core.sidest_staff.is_admin = true)
 - PATCH /api/staff/professionals/{professional}/status
 - PATCH /api/staff/professionals/{professional}
 - DELETE /api/staff/professionals/{professional}/force (hard delete)
@@ -2321,11 +2321,11 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - POST /api/staff/notifications Staff analytics summary endpoints Stage 1-2 staff analytics is:
 - GET /api/staff/professionals/{professional}/analytics It returns totals, daily charts, and top links for the selected professional.
 
-It requires a staff JWT (core.comet_staff).
+It requires a staff JWT (core.sidest_staff).
 
 ## 10) Media uploads & processing (images + videos)
 
-Images and videos are uploaded through the Comet API and processed entirely server-side. No direct-to-storage uploads from the frontend.
+Images and videos are uploaded through the Side St API and processed entirely server-side. No direct-to-storage uploads from the frontend.
 
 ### Architecture
 
@@ -2360,7 +2360,7 @@ Images and videos share the same per-pool cap.
 
 ### Video processing
 
-- Requires `COMET_VIDEO_UPLOADS_ENABLED=true` and `ffmpeg`/`ffprobe` on the worker's `$PATH`
+- Requires `SIDEST_VIDEO_UPLOADS_ENABLED=true` and `ffmpeg`/`ffprobe` on the worker's `$PATH`
 - Outputs per video:
   - **MP4:** `variants.optimized` (720p / 2 Mbps), `variants.maximized` (1080p / 5 Mbps)
   - **HLS:** `streams.optimized` (720p playlist), `streams.maximized` (1080p playlist), `streams.adaptive` (master playlist for ABR)
@@ -2387,18 +2387,18 @@ Images and videos share the same per-pool cap.
 
 ### Supported file types
 
-**Images:** JPEG, PNG, WebP — max `COMET_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
+**Images:** JPEG, PNG, WebP — max `SIDEST_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
 
-**Videos:** MP4, MOV, WebM, AVI — max `COMET_VIDEO_MAX_UPLOAD_KB` (default 500 MB), max duration `COMET_VIDEO_MAX_DURATION_SECONDS` (default 300s)
+**Videos:** MP4, MOV, WebM, AVI — max `SIDEST_VIDEO_MAX_UPLOAD_KB` (default 500 MB), max duration `SIDEST_VIDEO_MAX_DURATION_SECONDS` (default 300s)
 
 ## 11) Test users and getting tokens
 
-Tokens come from Supabase Auth. Comet does not issue tokens.
+Tokens come from Supabase Auth. Side St does not issue tokens.
 
 ### Create test users
 
 - Professional user: create in Supabase Auth, then call POST /api/bootstrap once.
-- Staff user: create in Supabase Auth, then insert a row into core.comet_staff with auth_user_id = the Supabase user id.
+- Staff user: create in Supabase Auth, then insert a row into core.sidest_staff with auth_user_id = the Supabase user id.
 - Staff admin: same as staff user, but set is_admin = true.
 
 ### Get an access token via Supabase REST
@@ -2409,7 +2409,7 @@ Tokens come from Supabase Auth. Comet does not issue tokens.
 
 ### Body:
 
-Response includes access_token. Use that token as the Authorization Bearer token when calling Comet.
+Response includes access_token. Use that token as the Authorization Bearer token when calling Side St.
 This flow is included in the Insomnia collection as Login requests.
 
 ## 12) Insomnia collection
@@ -2425,8 +2425,8 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 
 - SUPABASE_URL
 - SUPABASE_ANON_KEY
-- API_BASE_URL (example: https://api.comet.app/api)
-- PUBLIC_DOMAIN (example: comet.app or localtest.me)
+- API_BASE_URL (example: https://api.sidest.co/api)
+- PUBLIC_DOMAIN (example: sidest.co or localtest.me)
 - Optionally: STAFF_DASHBOARD_ENABLED flag if you ship staff tooling in the same frontend
 
 Note: The frontend does not need any storage credentials — all image URLs come from the API `variants` map.
@@ -2451,32 +2451,32 @@ Note: The frontend does not need any storage credentials — all image URLs come
 - SUPABASE_JWKS_URL
 - SUPABASE_JWKS_CACHE_SECONDS (default: 600)
 
-### Comet app settings
+### Side St app settings
 
-- COMET_PUBLIC_DOMAIN (used for domain-scoped public routes)
-- COMET_MEDIA_DISK (default: media — the Laravel filesystem disk name)
-- COMET_GALLERY_IMAGE_MAX (default: 5)
-- COMET_CONTENT_IMAGE_MAX (default: 5)
-- COMET_IMAGE_MAX_UPLOAD_KB (default: 10240 = 10 MB)
-- COMET_LEGAL_SITE_SCHEME (default: `https`)
-- COMET_LEGAL_DEFAULT_CONTACT_NAME (default: `Customer Support`)
-- COMET_LEGAL_DEFAULT_SUPPORT_EMAIL (default: `support@comet.app`)
-- COMET_LEGAL_DEFAULT_SUPPORT_PHONE (default: `N/A`)
-- COMET_WAITLIST_ENABLED (default: `false`; when true, blocks bootstrap for new users)
+- SIDEST_PUBLIC_DOMAIN (used for domain-scoped public routes)
+- SIDEST_MEDIA_DISK (default: media — the Laravel filesystem disk name)
+- SIDEST_GALLERY_IMAGE_MAX (default: 5)
+- SIDEST_CONTENT_IMAGE_MAX (default: 5)
+- SIDEST_IMAGE_MAX_UPLOAD_KB (default: 10240 = 10 MB)
+- SIDEST_LEGAL_SITE_SCHEME (default: `https`)
+- SIDEST_LEGAL_DEFAULT_CONTACT_NAME (default: `Customer Support`)
+- SIDEST_LEGAL_DEFAULT_SUPPORT_EMAIL (default: `support@sidest.co`)
+- SIDEST_LEGAL_DEFAULT_SUPPORT_PHONE (default: `N/A`)
+- SIDEST_WAITLIST_ENABLED (default: `false`; when true, blocks bootstrap for new users)
 - SOFT_DELETE_RETENTION_DAYS (default: 30)
 
 ### Pre-launch account gating
 
-- Set `COMET_WAITLIST_ENABLED=true` to block new account creation at `POST /api/bootstrap`.
+- Set `SIDEST_WAITLIST_ENABLED=true` to block new account creation at `POST /api/bootstrap`.
 - Existing professionals are unaffected by this gate.
 - Also disable public signups in Supabase Auth (Dashboard -> Authentication -> Providers -> Email -> Disable Signups) to prevent new auth accounts during waitlist-only mode.
 
 ### Media disk (Laravel Cloud Object Storage / Cloudflare R2)
 
 **On Laravel Cloud:** No manual env vars needed. Create a bucket in the Cloud dashboard, and set:
-- `COMET_MEDIA_DISK` = the disk name from `LARAVEL_CLOUD_DISK_CONFIG` (e.g., `public_dev`)
+- `SIDEST_MEDIA_DISK` = the disk name from `LARAVEL_CLOUD_DISK_CONFIG` (e.g., `public_dev`)
 
-Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The image system reads `COMET_MEDIA_DISK` to find the right disk.
+Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The image system reads `SIDEST_MEDIA_DISK` to find the right disk.
 
 **Self-managed (standalone R2 / AWS S3):** Configure the `media` disk manually:
 - MEDIA_DISK_KEY (S3 access key)
@@ -2509,8 +2509,8 @@ Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The imag
 
 ### Domain-scoped public routes
 
-- If you call /api/public/site on the API host instead of {subdomain}.{COMET_PUBLIC_DOMAIN}, the route may not match or may return 404.
-- Always use public_api_base_url = https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api for public routes.
+- If you call /api/public/site on the API host instead of {subdomain}.{SIDEST_PUBLIC_DOMAIN}, the route may not match or may return 404.
+- Always use public_api_base_url = https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api for public routes.
 
 ### Analytics timestamps
 
@@ -2519,7 +2519,7 @@ Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The imag
 
 ### Gallery limits and ordering
 
-- Gallery pool: max 5 active images (configurable via `COMET_GALLERY_IMAGE_MAX`). Content pool: max 5 (via `COMET_CONTENT_IMAGE_MAX`).
+- Gallery pool: max 5 active images (configurable via `SIDEST_GALLERY_IMAGE_MAX`). Content pool: max 5 (via `SIDEST_CONTENT_IMAGE_MAX`).
 - Pool limits are enforced server-side with PostgreSQL advisory locks for race safety.
 - `POST /api/uploads` validates the pool limit before creating a new image.
 - Reorder endpoint (`POST /api/gallery/reorder`) accepts an `ids` array; any omitted ids will be appended in existing order.

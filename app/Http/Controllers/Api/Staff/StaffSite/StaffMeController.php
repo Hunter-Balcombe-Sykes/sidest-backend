@@ -12,7 +12,7 @@ class StaffMeController extends ApiController
     {
         return $this->success([
             'uid' => $request->attributes->get('supabase_uid'),
-            'staff' => $request->attributes->get('comet_staff'),
+            'staff' => $request->attributes->get('sidest_staff'),
         ]);
     }
 }

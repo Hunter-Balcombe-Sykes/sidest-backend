@@ -105,7 +105,7 @@ class ImageVariantService
                 );
 
                 // --- Encode to WebP ---
-                $tmpFile = tempnam(sys_get_temp_dir(), 'comet_img_');
+                $tmpFile = tempnam(sys_get_temp_dir(), 'sidest_img_');
                 if (!is_string($tmpFile) || $tmpFile === '') {
                     throw new \RuntimeException('Failed to create temp file for WebP encoding.');
                 }
@@ -258,10 +258,10 @@ class ImageVariantService
 
     private function diskName(): string
     {
-        $configured = (string) config('comet.media_disk', 'media');
+        $configured = (string) config('sidest.media_disk', 'media');
 
-        // If COMET_MEDIA_DISK is explicitly set, always honour it.
-        $explicit = $_ENV['COMET_MEDIA_DISK'] ?? $_SERVER['COMET_MEDIA_DISK'] ?? null;
+        // If SIDEST_MEDIA_DISK is explicitly set, always honour it.
+        $explicit = $_ENV['SIDEST_MEDIA_DISK'] ?? $_SERVER['SIDEST_MEDIA_DISK'] ?? null;
         if (is_string($explicit) && trim($explicit) !== '') {
             return $configured;
         }
@@ -280,7 +280,7 @@ class ImageVariantService
                 is_array($defaultConfig) &&
                 (($defaultConfig['driver'] ?? null) === 's3')
             ) {
-                Log::warning('COMET_MEDIA_DISK not set; using filesystems.default disk for media operations.', [
+                Log::warning('SIDEST_MEDIA_DISK not set; using filesystems.default disk for media operations.', [
                     'configured_media_disk' => $configured,
                     'fallback_disk' => $default,
                 ]);
@@ -302,7 +302,7 @@ class ImageVariantService
      */
     private function variantDefinitions(): array
     {
-        $definitions = (array) config('comet.image_variants', []);
+        $definitions = (array) config('sidest.image_variants', []);
 
         if ($definitions !== []) {
             return $definitions;

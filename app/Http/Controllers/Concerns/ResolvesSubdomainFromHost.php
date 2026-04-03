@@ -19,7 +19,7 @@ trait ResolvesSubdomainFromHost
 
         // Extract from host
         $host = $request->getHost();
-        $publicDomain = config('comet.public_domain');
+        $publicDomain = config('sidest.public_domain');
 
         if (! $publicDomain || !str_ends_with($host, $publicDomain)) {
             return null;

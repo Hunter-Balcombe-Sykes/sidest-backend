@@ -11,12 +11,12 @@ use App\Models\Core\Site\SiteMedia;
 // V2: Hard-deletes soft-deleted rows (customers, services, media) past retention window (default 30 days).
 class PurgeSoftDeleted extends Command
 {
-    protected $signature = 'comet:purge-soft-deletes {--days= : Override retention days}';
+    protected $signature = 'sidest:purge-soft-deletes {--days= : Override retention days}';
     protected $description = 'Permanently delete soft-deleted rows older than retention window.';
 
     public function handle(): int
     {
-        $days = (int) ($this->option('days') ?: config('comet.soft_delete_retention_days', 30));
+        $days = (int) ($this->option('days') ?: config('sidest.soft_delete_retention_days', 30));
         $cutoff = now()->subDays($days);
 
         $this->info("Purging soft-deleted rows older than {$days} days (before {$cutoff}).");

@@ -2,7 +2,7 @@
 
 ## Project Identity
 
-**Comet** — Laravel 12 + Supabase + PostgreSQL multi-tenant affiliate SaaS platform.
+**Side St** — Laravel 12 + Supabase + PostgreSQL multi-tenant affiliate SaaS platform.
 For full business context, domain model, and entity relationships, read `AI_CONTEXT.md`.
 For API endpoint reference, read `docs/api.md`.
 
@@ -43,7 +43,7 @@ routes/
   api.php                                             — bootstrap, health, webhooks, Shopify OAuth
   api/{professional,publicSite,staff,enterprise}.php  — domain-specific routes
 config/
-  comet.php                                           — all Comet feature config & limits
+  sidest.php                                           — all Side St feature config & limits
 ```
 
 ### Patterns
@@ -52,7 +52,7 @@ config/
 - **Resource classes** for all API responses — never return raw Eloquent models.
 - **Form Request classes** for input validation.
 - **Observer pattern** for model lifecycle side-effects (auto-triggering jobs, cache invalidation).
-- **Feature flags** via env vars (e.g., `COMET_VIDEO_UPLOADS_ENABLED`). Check `config/comet.php` for all flags.
+- **Feature flags** via env vars (e.g., `SIDEST_VIDEO_UPLOADS_ENABLED`). Check `config/sidest.php` for all flags.
 - **UUID primary keys** on all tables.
 - **Soft deletes** with 30-day retention (configurable via `SOFT_DELETE_RETENTION_DAYS`).
 - **JSON columns** for flexible settings (site.settings, brand product configs, etc.).

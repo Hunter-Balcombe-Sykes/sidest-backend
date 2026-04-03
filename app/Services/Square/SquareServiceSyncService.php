@@ -10,7 +10,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-// V2: Bidirectional service sync between Square and Comet. Booking integration — not V2 commerce.
+// V2: Bidirectional service sync between Square and Side St. Booking integration — not V2 commerce.
 class SquareServiceSyncService
 {
     public function __construct(

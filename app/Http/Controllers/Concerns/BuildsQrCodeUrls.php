@@ -11,7 +11,7 @@ trait BuildsQrCodeUrls
      */
     protected function qrUrl(string $qrSlug, Request $request): string
     {
-        $publicDomain = (string) config('comet.public_domain', '');
+        $publicDomain = (string) config('sidest.public_domain', '');
         $scheme = $this->baseScheme($request);
 
         $host = $publicDomain !== ''

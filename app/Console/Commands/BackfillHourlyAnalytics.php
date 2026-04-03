@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 // V2: Backfills hourly analytics aggregates for trailing N hours. Used after outages or data corrections.
 class BackfillHourlyAnalytics extends Command
 {
-    protected $signature = 'comet:analytics:backfill-hourly
+    protected $signature = 'sidest:analytics:backfill-hourly
         {--hours=24 : Number of trailing hours to backfill (1-168)}
         {--domains=all : all,commerce,site,booking (comma-separated)}';
 

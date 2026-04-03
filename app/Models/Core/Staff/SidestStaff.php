@@ -6,11 +6,11 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
-class CometStaff extends BaseModel
+class SidestStaff extends BaseModel
 {
     use HasFactory, HasUuids;
 
-    protected $table = 'core.comet_staff';
+    protected $table = 'core.sidest_staff';
 
     public $incrementing = false;
     protected $keyType = 'string';

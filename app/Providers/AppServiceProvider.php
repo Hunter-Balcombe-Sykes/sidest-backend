@@ -30,7 +30,7 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function configureRateLimiting(): void
     {
-        $throttleEnabled = (bool) config('comet.throttle.enabled', true);
+        $throttleEnabled = (bool) config('sidest.throttle.enabled', true);
 
         // Public site endpoints (viewing sites, pages)
         RateLimiter:: for('public-site', function (Request $request) use ($throttleEnabled) {

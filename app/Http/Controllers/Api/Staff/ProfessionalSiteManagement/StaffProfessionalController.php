@@ -20,7 +20,7 @@ class StaffProfessionalController extends ApiController
     /** @return array<int, string> */
     private function professionalOnlySectionTypes(): array
     {
-        return config('comet.professional_only_section_types', []);
+        return config('sidest.professional_only_section_types', []);
     }
 
     use HandlesSearchQueries;

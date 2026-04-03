@@ -207,7 +207,7 @@
 | Service | V2 Role |
 |---------|---------|
 | `ImageVariantService` | Generates WebP variants from uploads via GD. Handles content-hashed storage on R2. |
-| `VideoVariantService` | Transcodes videos to MP4 + HLS via FFmpeg. Feature-flagged (`COMET_VIDEO_UPLOADS_ENABLED`). |
+| `VideoVariantService` | Transcodes videos to MP4 + HLS via FFmpeg. Feature-flagged (`SIDEST_VIDEO_UPLOADS_ENABLED`). |
 
 ### Notifications
 
@@ -354,8 +354,8 @@
 | Middleware | V2 Role |
 |-----------|---------|
 | `VerifySupabaseJwt` | JWT authentication via Supabase JWKS. All authenticated routes. |
-| `EnsureCometStaff` | Staff role gate. |
-| `EnsureCometAdmin` | Admin role gate (subset of staff). |
+| `EnsureSidestStaff` | Staff role gate. |
+| `EnsureSidestAdmin` | Admin role gate (subset of staff). |
 | `LoadCurrentProfessional` | Loads professional into request context. Checks active/suspended status. |
 | `AddPublicCacheHeaders` | Cache-Control headers. Public GET = 15min cache; authenticated = no-store. |
 | `SecureHeaders` | Security headers (XFO, CSP, HSTS, etc). |
@@ -386,7 +386,7 @@
 | `SiteMedia` | `core.site_media` | Images and videos with processing states. |
 | `SiteSubdomainAlias` | `core.site_subdomain_aliases` | Subdomain redirects after handle changes. |
 | `MediaVariant` | `core.media_variants` | Processed media variants (WebP, MP4, HLS, poster). |
-| `CometStaff` | `core.comet_staff` | Internal staff accounts. |
+| `SidestStaff` | `core.sidest_staff` | Internal staff accounts. |
 | `WaitlistSignup` | `core.waitlist_signups` | Pre-launch waitlist entries. |
 
 ### retail.* (commerce)

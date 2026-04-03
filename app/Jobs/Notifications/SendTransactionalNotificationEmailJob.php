@@ -40,7 +40,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
 
     public function handle(): void
     {
-        if (! config('comet.notifications.email_enabled', false)) {
+        if (! config('sidest.notifications.email_enabled', false)) {
             Log::debug('Notification email skipped: feature disabled', [
                 'category' => $this->category,
             ]);

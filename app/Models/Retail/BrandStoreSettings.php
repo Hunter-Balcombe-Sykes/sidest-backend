@@ -34,8 +34,8 @@ class BrandStoreSettings extends Model
      */
     public function getEffectivePayoutHoldDaysAttribute(): int
     {
-        $min = (int) config('comet.store.min_payout_hold_days', 7);
-        $systemDefault = (int) config('comet.store.payout_hold_days', 7);
+        $min = (int) config('sidest.store.min_payout_hold_days', 7);
+        $systemDefault = (int) config('sidest.store.payout_hold_days', 7);
 
         $brandDays = $this->payout_hold_days;
 

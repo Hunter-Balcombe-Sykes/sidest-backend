@@ -9,19 +9,19 @@ We're proposing that each affiliate page (e.g., `josh.eco.com`) becomes a **Shop
 ## KEEP (Still Needed)
 
 ### `core.professionals`
-**Keep.** This is our identity layer. We still need to know who affiliates, brands, and influencers are, their types, handles, contact info, onboarding status, etc. Even with Hydrogen storefronts, Comet is still the **relationship manager** between brands and affiliates.
+**Keep.** This is our identity layer. We still need to know who affiliates, brands, and influencers are, their types, handles, contact info, onboarding status, etc. Even with Hydrogen storefronts, Side St is still the **relationship manager** between brands and affiliates.
 
 ### `core.brand_partner_links`
-**Keep.** The affiliate <-> brand relationship mapping is core to our business logic. Shopify doesn't know that "Josh" is an affiliate of "Brand X" -- Comet does.
+**Keep.** The affiliate <-> brand relationship mapping is core to our business logic. Shopify doesn't know that "Josh" is an affiliate of "Brand X" -- Side St does.
 
 ### `core.brand_affiliate_invites`
-**Keep.** The invite/claim flow for onboarding affiliates to brands is a Comet feature, not a Shopify feature.
+**Keep.** The invite/claim flow for onboarding affiliates to brands is a Side St feature, not a Shopify feature.
 
 ### `core.brand_profiles`
-**Keep.** ABN, legal business name, industries, etc. -- this is Comet's brand metadata, independent of Shopify.
+**Keep.** ABN, legal business name, industries, etc. -- this is Side St's brand metadata, independent of Shopify.
 
 ### `core.enterprises`
-**Keep.** Enterprise management (multi-brand orgs) is a Comet concept.
+**Keep.** Enterprise management (multi-brand orgs) is a Side St concept.
 
 ### `core.enterprise_brand_links`
 **Keep.** Enterprise <-> brand RBAC mapping.
@@ -45,10 +45,10 @@ We're proposing that each affiliate page (e.g., `josh.eco.com`) becomes a **Shop
 **Keep.** We may still want a CRM layer for affiliate-level customer tracking, email lists, lead capture -- even if Shopify handles checkout customers.
 
 ### `core.email_subscriptions`
-**Keep.** Email marketing/opt-in is a Comet feature.
+**Keep.** Email marketing/opt-in is a Side St feature.
 
 ### `billing.plans` + `billing.subscriptions`
-**Keep.** Comet's own SaaS billing for brands/affiliates.
+**Keep.** Side St's own SaaS billing for brands/affiliates.
 
 ### `core.professional_legal_contents`
 **Keep.** Privacy policies, T&Cs -- legal content for affiliate sites.
@@ -64,22 +64,22 @@ We're proposing that each affiliate page (e.g., `josh.eco.com`) becomes a **Shop
 ## DELETE (No Longer Needed)
 
 ### `core.sites`
-**Delete.** The entire concept of Comet-hosted mini-sites with subdomains goes away. Hydrogen storefronts on Oxygen replace this. Subdomain routing (`{subdomain}.comet.app`) is replaced by Shopify's domain management or custom domain pointing to Oxygen.
+**Delete.** The entire concept of Side St-hosted mini-sites with subdomains goes away. Hydrogen storefronts on Oxygen replace this. Subdomain routing (`{subdomain}.comet.app`) is replaced by Shopify's domain management or custom domain pointing to Oxygen.
 
 ### `core.blocks`
-**Delete.** The modular block system (links, gallery, sections, shop, booking blocks) was for building the Comet-hosted site. Hydrogen storefronts have their own component system.
+**Delete.** The modular block system (links, gallery, sections, shop, booking blocks) was for building the Side St-hosted site. Hydrogen storefronts have their own component system.
 
 ### `core.site_media`
-**Delete.** Media uploaded for Comet site pages. Hydrogen storefronts would use Shopify's media/CDN or a separate asset pipeline.
+**Delete.** Media uploaded for Side St site pages. Hydrogen storefronts would use Shopify's media/CDN or a separate asset pipeline.
 
 ### `core.media_variants`
-**Delete.** Processed image/video variants (WebP, MP4, HLS) for the Comet site. No longer relevant.
+**Delete.** Processed image/video variants (WebP, MP4, HLS) for the Side St site. No longer relevant.
 
 ### `core.themes`
-**Delete.** Comet's theme system. Hydrogen has its own theming/component architecture.
+**Delete.** Side St's theme system. Hydrogen has its own theming/component architecture.
 
 ### `core.site_subdomain_aliases`
-**Delete.** Custom domain aliasing for Comet-hosted sites. Oxygen/Shopify handles this now.
+**Delete.** Custom domain aliasing for Side St-hosted sites. Oxygen/Shopify handles this now.
 
 ### `core.all_site_data` (likely a view)
 **Delete.** Denormalized view that joins sites, blocks, themes, professionals -- all going away.
@@ -88,7 +88,7 @@ We're proposing that each affiliate page (e.g., `josh.eco.com`) becomes a **Shop
 **Delete.** Cached public site JSON payload -- no longer relevant.
 
 ### `core.brand_fonts`
-**Delete.** Custom fonts for Comet-hosted brand themes. Hydrogen storefronts manage their own typography.
+**Delete.** Custom fonts for Side St-hosted brand themes. Hydrogen storefronts manage their own typography.
 
 ### `retail.checkout_sessions`
 **Delete.** This was our attribution mechanism -- a token passed through Shopify order metadata to link a Shopify order back to an affiliate. With Hydrogen, we have **much better options** (see Changes section).
@@ -100,16 +100,16 @@ We're proposing that each affiliate page (e.g., `josh.eco.com`) becomes a **Shop
 **Delete.** Affiliate-uploaded product media. Hydrogen storefronts use Shopify's product media.
 
 ### `analytics.site_visits`
-**Delete.** Comet site visit tracking. Shopify Analytics + Hydrogen's built-in analytics replace this.
+**Delete.** Side St site visit tracking. Shopify Analytics + Hydrogen's built-in analytics replace this.
 
 ### `analytics.link_clicks`
-**Delete.** Link click tracking for Comet site blocks. No more link blocks.
+**Delete.** Link click tracking for Side St site blocks. No more link blocks.
 
 ### `analytics.site_metrics_daily` + `analytics.site_metrics_hourly`
 **Delete.** Aggregated site visit metrics -- replaced by Shopify Analytics.
 
 ### `analytics.lead_submissions`
-**Delete.** Lead form submissions on Comet sites. Would need to be rebuilt as a Hydrogen component if still wanted.
+**Delete.** Lead form submissions on Side St sites. Would need to be rebuilt as a Hydrogen component if still wanted.
 
 ### `analytics.store_order_events` + `analytics.store_order_event_items`
 **Likely delete.** These appear to be a legacy/denormalized event log. The `retail.orders` + `retail.order_items` tables are the canonical source.
@@ -133,13 +133,13 @@ We're proposing that each affiliate page (e.g., `josh.eco.com`) becomes a **Shop
 - Availability/access control per affiliate
 - Analytics aggregation
 
-**Change:** This becomes a lightweight "product settings" table rather than a full product catalog mirror. We might drop `title`, `handle`, `image_url`, `price_cents`, `description`, `product_type`, `tags`, `images` (all queryable from Shopify in real-time) and keep only `shopify_product_id` + Comet-specific metadata.
+**Change:** This becomes a lightweight "product settings" table rather than a full product catalog mirror. We might drop `title`, `handle`, `image_url`, `price_cents`, `description`, `product_type`, `tags`, `images` (all queryable from Shopify in real-time) and keep only `shopify_product_id` + Side St-specific metadata.
 
 ### `retail.brand_product_settings`
-**Keep.** Commission rates, featured status, availability per product -- Comet business logic that Shopify doesn't handle.
+**Keep.** Commission rates, featured status, availability per product -- Side St business logic that Shopify doesn't handle.
 
 ### `retail.brand_product_affiliate_overrides`
-**Keep.** Per-affiliate product access control (deny/allow). This is Comet's access layer on top of Shopify's catalog.
+**Keep.** Per-affiliate product access control (deny/allow). This is Side St's access layer on top of Shopify's catalog.
 
 ### `retail.brand_product_affiliate_settings`
 **Keep.** Per-affiliate commission/discount overrides.
@@ -203,14 +203,14 @@ These aggregate **order/commission data** which still lives in our DB. They're o
 ### 1. Booking -- Keep or Kill?
 We have a full booking system: `core.services`, `core.service_categories`, `analytics.booking_events`, `analytics.booking_metrics_daily/hourly`, with Square/Fresha integrations.
 
-**Question:** Does the Hydrogen/Oxygen move affect booking? If professionals who don't sell products still use Comet for booking, we keep the entire booking stack. If booking is also moving to Shopify (via Shopify's booking apps), this whole subsystem can go.
+**Question:** Does the Hydrogen/Oxygen move affect booking? If professionals who don't sell products still use Side St for booking, we keep the entire booking stack. If booking is also moving to Shopify (via Shopify's booking apps), this whole subsystem can go.
 
 ### 2. What happens to non-brand professionals?
 We mentioned "professionals will need to be kept as we still want to keep site pages for those who don't want to connect to brands without Shopify stores."
 
 **This means we're running TWO systems in parallel:**
 - **Hydrogen storefronts** for brand-affiliated professionals (`josh.brand.com`)
-- **Comet-hosted sites** for independent professionals (`josh.comet.app`)
+- **Side St-hosted sites** for independent professionals (`josh.comet.app`)
 
 If so, we **cannot delete** `sites`, `blocks`, `themes`, `site_media`, etc. -- they're still needed for the non-Shopify path. This significantly complicates things. We'd need a clear fork: `professional.storefront_type = 'comet' | 'hydrogen'`.
 
@@ -220,12 +220,12 @@ Currently: `josh.comet.app`. We mentioned `josh.eco.com`.
 **Question:** Who manages DNS/domains? With Oxygen, Shopify handles hosting, but we'd need:
 - A wildcard DNS setup pointing `*.eco.com` to Oxygen
 - OR per-affiliate domain provisioning
-- **How does Comet know which Hydrogen storefront belongs to which affiliate?** We still need a mapping table (even if `sites` is deleted, we need something like `hydrogen_storefronts`).
+- **How does Side St know which Hydrogen storefront belongs to which affiliate?** We still need a mapping table (even if `sites` is deleted, we need something like `hydrogen_storefronts`).
 
 ### 4. Affiliate customization
-Currently affiliates customize their Comet pages (bio, links, gallery, media).
+Currently affiliates customize their Side St pages (bio, links, gallery, media).
 
-**Question:** What customization do affiliates get on their Hydrogen storefront? If it's just "here's the brand's store with your name on it" -- simpler. If affiliates can customize layout, content, featured products -- we need a customization layer, possibly stored in Comet and served to Hydrogen via API, or via Shopify metafields.
+**Question:** What customization do affiliates get on their Hydrogen storefront? If it's just "here's the brand's store with your name on it" -- simpler. If affiliates can customize layout, content, featured products -- we need a customization layer, possibly stored in Side St and served to Hydrogen via API, or via Shopify metafields.
 
 ### 5. Enterprise product tables
 `retail.enterprise_shopify_accounts`, `retail.enterprise_products`, `retail.enterprise_brands` -- these are an enterprise-level product management layer.
@@ -235,14 +235,14 @@ Currently affiliates customize their Comet pages (bio, links, gallery, media).
 ### 6. Analytics source of truth
 With Hydrogen, we get Shopify Analytics for free (traffic, conversion, AOV, etc.).
 
-**Question:** Is Shopify Analytics sufficient, or do we still need Comet-level analytics? If we need affiliate-attributed analytics (which Shopify doesn't natively do), we still need our own tracking -- but it would be implemented as a Hydrogen component (e.g., an analytics pixel) rather than Comet's current `site_visits`/`link_clicks` system.
+**Question:** Is Shopify Analytics sufficient, or do we still need Side St-level analytics? If we need affiliate-attributed analytics (which Shopify doesn't natively do), we still need our own tracking -- but it would be implemented as a Hydrogen component (e.g., an analytics pixel) rather than Side St's current `site_visits`/`link_clicks` system.
 
 ### 7. Stripe checkout path
 We have `PublicStripeCheckoutService` for non-Shopify checkout.
 
 **Question:** If ALL commerce goes through Shopify checkout (via Hydrogen), do we still need direct Stripe checkout? Or does Stripe only remain for:
 - Commission payouts (Stripe Connect)
-- Comet SaaS billing
+- Side St SaaS billing
 - Brand wallet top-ups
 
 ---
@@ -267,10 +267,10 @@ We have `PublicStripeCheckoutService` for non-Shopify checkout.
 - For our target market (DTC brands working with influencers/affiliates), Shopify is likely **70-80%+ of potential partners**. This is our sweet spot.
 - We **would** lock out some bigger brands on other platforms. The risk is real but manageable if we:
   1. Start with Shopify-only (Hydrogen/Oxygen) as the primary path
-  2. Keep the Comet-hosted site as a fallback for non-Shopify brands
+  2. Keep the Side St-hosted site as a fallback for non-Shopify brands
   3. Plan for future platform integrations (WooCommerce, BigCommerce) down the line
 
-**Bottom line:** This is a reasonable bet for our vertical. Most affiliate/influencer-friendly brands are on Shopify. But making it the ONLY path would cut off ~20-30% of the addressable market. The dual-system approach (Hydrogen for Shopify brands, Comet sites for everyone else) hedges this risk but adds complexity.
+**Bottom line:** This is a reasonable bet for our vertical. Most affiliate/influencer-friendly brands are on Shopify. But making it the ONLY path would cut off ~20-30% of the addressable market. The dual-system approach (Hydrogen for Shopify brands, Side St sites for everyone else) hedges this risk but adds complexity.
 
 ---
 
@@ -279,7 +279,7 @@ We have `PublicStripeCheckoutService` for non-Shopify checkout.
 | Category | Tables | Verdict |
 |----------|--------|---------|
 | Identity/Relationships | `professionals`, `brand_partner_links`, `invites`, `enterprises` | **KEEP** |
-| Comet Sites | `sites`, `blocks`, `themes`, `site_media`, `media_variants`, `brand_fonts`, `subdomain_aliases` | **DELETE** (or keep if dual-system) |
+| Side St Sites | `sites`, `blocks`, `themes`, `site_media`, `media_variants`, `brand_fonts`, `subdomain_aliases` | **DELETE** (or keep if dual-system) |
 | Retail Commerce | `brand_products`, `product_settings`, `overrides`, `affiliate_settings` | **KEEP (simplify)** |
 | Orders/Commissions | `orders`, `order_items`, `commission_ledger`, `payouts` | **KEEP** |
 | Checkout Sessions | `checkout_sessions` | **DELETE** (better attribution via Hydrogen) |

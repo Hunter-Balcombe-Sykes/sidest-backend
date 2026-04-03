@@ -73,8 +73,8 @@ return [
             'key' => env('MEDIA_DISK_KEY', env('AWS_ACCESS_KEY_ID')),
             'secret' => env('MEDIA_DISK_SECRET', env('AWS_SECRET_ACCESS_KEY')),
             'region' => env('MEDIA_DISK_REGION', env('AWS_DEFAULT_REGION', 'auto')),
-            'bucket' => env('MEDIA_DISK_BUCKET', 'comet-media'),
-            'url' => env('MEDIA_DISK_URL'),               // e.g. https://media.cometpages.com
+            'bucket' => env('MEDIA_DISK_BUCKET', 'sidest-media'),
+            'url' => env('MEDIA_DISK_URL'),               // e.g. https://media.sidest.co
             'endpoint' => env('MEDIA_DISK_ENDPOINT'),      // e.g. https://<account>.r2.cloudflarestorage.com
             'use_path_style_endpoint' => env('MEDIA_DISK_PATH_STYLE', false),
             'throw' => true,

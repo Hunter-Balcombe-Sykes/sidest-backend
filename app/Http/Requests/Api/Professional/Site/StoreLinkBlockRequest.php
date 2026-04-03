@@ -32,7 +32,7 @@ class StoreLinkBlockRequest extends BaseFormRequest
         return [
             'title' => ['required','string','max:80'],
             'url' => ['required','url','max:2048'],
-            'icon_key' => ['nullable','string', Rule::in(config('comet.link_block_icon_keys', []))],
+            'icon_key' => ['nullable','string', Rule::in(config('sidest.link_block_icon_keys', []))],
             'is_active' => ['sometimes','boolean'],
             'settings' => ['sometimes','array'],
             'settings.highlight' => ['sometimes','boolean'],
@@ -48,7 +48,7 @@ class StoreLinkBlockRequest extends BaseFormRequest
                 return;
             }
 
-            $allowed = config('comet.link_block_settings_keys', []);
+            $allowed = config('sidest.link_block_settings_keys', []);
             $extra = array_diff(array_keys($settings), $allowed);
             if (!empty($extra)) {
                 $validator->errors()->add(

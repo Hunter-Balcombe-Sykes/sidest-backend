@@ -86,7 +86,7 @@ class ProcessImageVariantsJob implements ShouldQueue
         $localTmp = null;
 
         try {
-            $localTmp = tempnam(sys_get_temp_dir(), 'comet_orig_');
+            $localTmp = tempnam(sys_get_temp_dir(), 'sidest_orig_');
             if (! $localTmp) {
                 throw new \RuntimeException('Failed to create temporary file.');
             }

@@ -38,7 +38,7 @@ class PublicSiteController extends ApiController
                 $canonicalPayload = $this->siteCache->getPublicSitePayload($site->subdomain);
 
                 if ($canonicalPayload) {
-                    $host = $site->subdomain . '.' . config('comet.public_domain');
+                    $host = $site->subdomain . '.' . config('sidest.public_domain');
                     $url = $request->getScheme() . '://' . $host . $request->getRequestUri();
                     return redirect()->to($url, 301);
                 }

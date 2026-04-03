@@ -45,7 +45,7 @@ class StaffUpdateSiteRequest extends BaseFormRequest
                 'max:63',
                 'regex:/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/',
                 function ($attribute, $value, $fail) use ($currentSiteId) {
-                    $reserved = array_map('strtolower', config('comet.reserved_subdomains', []));
+                    $reserved = array_map('strtolower', config('sidest.reserved_subdomains', []));
                     if (in_array(strtolower($value), $reserved, true)) {
                         $fail('The subdomain "' . $value . '" is reserved and cannot be used.');
                         return;

@@ -22,7 +22,7 @@ beforeEach(function () {
     bootstrapMediaUploadFailureSchema();
 
     config([
-        'comet.media_disk' => 'local',
+        'sidest.media_disk' => 'local',
         'filesystems.disks.local.root' => storage_path('framework/testing/disks/media-upload-failure'),
     ]);
 
@@ -82,8 +82,8 @@ it('returns 503 and soft-deletes media when video dispatch fails', function () {
 
     config([
         'queue.default' => 'database',
-        'comet.video_queue.connection' => 'missing_video_connection',
-        'comet.video_uploads_enabled' => true,
+        'sidest.video_queue.connection' => 'missing_video_connection',
+        'sidest.video_uploads_enabled' => true,
     ]);
 
     app()->instance('env', 'production');

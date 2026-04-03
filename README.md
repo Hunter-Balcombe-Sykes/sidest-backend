@@ -1,6 +1,6 @@
-# Comet Backend API
+# Side St Backend API
 
-Laravel API for Comet.
+Laravel API for Side St.
 
 - Public mini-site API (domain-scoped, unauthenticated)
 - Barber dashboard API (authenticated via Supabase JWT)
@@ -15,18 +15,18 @@ Laravel API for Comet.
 ### Two hosts matter
 Public mini-site endpoints must be called on the **mini-site host**, not the API host.
 
-- API host (Laravel): `APP_URL` (example: `https://api.comet.app`)
-- Mini-site host: `https://{subdomain}.{COMET_PUBLIC_DOMAIN}`
-- Public API base: `https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api`
+- API host (Laravel): `APP_URL` (example: `https://api.sidest.co`)
+- Mini-site host: `https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}`
+- Public API base: `https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api`
 
 ### Authentication
-Comet uses **Supabase Auth** access tokens (JWT).
+Side St uses **Supabase Auth** access tokens (JWT).
 
 Send on authenticated endpoints:
 - `Authorization: Bearer <SUPABASE_ACCESS_TOKEN>`
 - `Accept: application/json`
 
-Comet does not provide a login endpoint. The frontend signs in via Supabase and forwards the token.
+Side St does not provide a login endpoint. The frontend signs in via Supabase and forwards the token.
 
 ### Media uploads
 Uploads are direct from the frontend to **Supabase Storage**.  
@@ -47,7 +47,7 @@ php artisan key:generate
 
 Set at minimum:
 - `APP_URL`
-- `COMET_PUBLIC_DOMAIN`
+- `SIDEST_PUBLIC_DOMAIN`
 - Database connection variables
 - Supabase JWT verification variables (issuer/audience/JWKS)
 
@@ -59,7 +59,7 @@ php artisan serve
 ```
 
 Tip: use a wildcard dev domain like `localtest.me` or `lvh.me` so subdomains resolve locally:
-- `COMET_PUBLIC_DOMAIN=localtest.me`
+- `SIDEST_PUBLIC_DOMAIN=localtest.me`
 - `APP_URL=http://api.localtest.me`
 
 ## Common workflows

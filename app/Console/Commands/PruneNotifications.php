@@ -8,7 +8,7 @@ use App\Models\Core\Notifications\Notification;
 // V2: Deletes expired notifications older than N days. Cascades to notification receipts.
 class PruneNotifications extends Command
 {
-    protected $signature = 'comet:prune-notifications {--days=30} {--dry-run}';
+    protected $signature = 'sidest:prune-notifications {--days=30} {--dry-run}';
     protected $description = 'Delete notifications whose ends_at is older than N days (cascades receipts)';
 
     public function handle(): int

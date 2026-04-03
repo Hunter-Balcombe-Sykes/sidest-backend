@@ -819,7 +819,7 @@ Each task is tagged with one or more segments indicating which part of the codeb
 
 | Segment | What it covers |
 |---|---|
-| **Laravel** | Backend API, services, jobs, webhooks (`Comet-Backend/`) |
+| **Laravel** | Backend API, services, jobs, webhooks (`Side St-Backend/`) |
 | **Supabase** | DB migrations, schema changes, RLS policies |
 | **Hydrogen** | Hydrogen app — affiliate storefronts, Oxygen deployment |
 | **Next Frontend** | Next.js dashboard — `app.sidest.co`, `Commet-web/` |

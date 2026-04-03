@@ -5,7 +5,7 @@ use App\Services\Store\BrandPricingService;
 it('returns system default commission rate from config', function () {
     $service = new BrandPricingService;
 
-    expect($service->defaultCommissionRate())->toBe((float) config('comet.store.default_commission_rate', 15));
+    expect($service->defaultCommissionRate())->toBe((float) config('sidest.store.default_commission_rate', 15));
 });
 
 it('resolves effective commission with override and default fallback', function () {

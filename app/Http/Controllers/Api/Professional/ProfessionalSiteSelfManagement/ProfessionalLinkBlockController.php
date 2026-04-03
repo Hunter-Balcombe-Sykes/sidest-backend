@@ -23,7 +23,7 @@ class ProfessionalLinkBlockController extends ApiController
     {
         $type = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
         abort_unless(
-            (bool) config("comet.account_type_defaults.{$type}.custom_links_allowed", false),
+            (bool) config("sidest.account_type_defaults.{$type}.custom_links_allowed", false),
             403,
             'Custom links are not available on your account type.'
         );

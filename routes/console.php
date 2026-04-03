@@ -9,7 +9,7 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Artisan::command('comet:normalize-professional-types {--dry-run : Show count only without updating}', function () {
+Artisan::command('sidest:normalize-professional-types {--dry-run : Show count only without updating}', function () {
     $allowed = ['professional', 'influencer', 'brand'];
 
     $query = DB::table('professionals')->where(function ($builder) use ($allowed): void {
@@ -38,13 +38,13 @@ Artisan::command('comet:normalize-professional-types {--dry-run : Show count onl
     $this->info("Normalized {$updated} professional record(s) to professional_type=professional.");
 })->purpose('Normalize legacy professional_type values to professional.');
 
-Schedule::command('comet:purge-soft-deletes')
+Schedule::command('sidest:purge-soft-deletes')
     ->dailyAt('03:20')
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: purge-soft-deletes');
     });
 
-Schedule::command('comet:prune-notifications', ['--days' => 30])
+Schedule::command('sidest:prune-notifications', ['--days' => 30])
     ->dailyAt('03:25')
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-notifications');
@@ -57,14 +57,14 @@ Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob())
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: process-commission-payouts');
     });
 
-Schedule::command('comet:analytics:compact-hourly')
+Schedule::command('sidest:analytics:compact-hourly')
     ->hourly()
     ->withoutOverlapping()
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: compact-hourly');
     });
 
-Schedule::command('comet:analytics:purge-raw-events')
+Schedule::command('sidest:analytics:purge-raw-events')
     ->dailyAt('03:00')
     ->withoutOverlapping()
     ->onFailure(function (): void {

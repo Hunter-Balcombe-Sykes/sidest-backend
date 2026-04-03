@@ -44,7 +44,7 @@ class BootstrapRequest extends BaseFormRequest
             'professional_type' => [
                 ...$professionalTypeRules,
                 'string',
-                Rule::in(array_keys(config('comet.professional_types', []))),
+                Rule::in(array_keys(config('sidest.professional_types', []))),
             ],
             'handle_lc' => [
                 'sometimes',

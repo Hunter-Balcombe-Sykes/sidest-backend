@@ -8,7 +8,7 @@ use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicMarketingPreferenceController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
-$publicDomain = config('comet.public_domain');
+$publicDomain = config('sidest.public_domain');
 
 // Public/Anon
 Route::group([

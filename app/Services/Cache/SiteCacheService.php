@@ -569,8 +569,8 @@ class SiteCacheService
         if ($store === null) {
             $store = [
                 'selected_products' => [],
-                'default_commission_rate' => (float) config('comet.store.default_commission_rate', 15),
-                'max_featured_products' => (int) config('comet.store.max_featured_products', 12),
+                'default_commission_rate' => (float) config('sidest.store.default_commission_rate', 15),
+                'max_featured_products' => (int) config('sidest.store.max_featured_products', 12),
                 'checkout_mode' => 'shopify',
             ];
         }

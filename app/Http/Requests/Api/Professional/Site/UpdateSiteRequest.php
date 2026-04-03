@@ -77,7 +77,7 @@ class UpdateSiteRequest extends BaseFormRequest
                 'regex:/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/',
                 function ($attribute, $value, $fail) use ($currentSiteId) {
                     // Check reserved words
-                    $reserved = array_map('strtolower', config('comet.reserved_subdomains', []));
+                    $reserved = array_map('strtolower', config('sidest.reserved_subdomains', []));
                     if (in_array(strtolower($value), $reserved, true)) {
                         $fail('The subdomain "' . $value . '" is reserved and cannot be used.');
                         return;

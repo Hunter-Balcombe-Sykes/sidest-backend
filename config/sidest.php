@@ -2,7 +2,7 @@
 
 return [
     'public_domain' => env(
-        'COMET_PUBLIC_DOMAIN',
+        'SIDEST_PUBLIC_DOMAIN',
         parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST) ?: 'localhost'
     ),
     'reserved_subdomains' => [
@@ -42,7 +42,7 @@ return [
     ],
 
     'waitlist' => [
-        'enabled' => (bool) env('COMET_WAITLIST_ENABLED', false),
+        'enabled' => (bool) env('SIDEST_WAITLIST_ENABLED', false),
         'types' => [
             'influencer' => 'Influencer',
             'professional' => 'Professional',
@@ -118,10 +118,10 @@ return [
     'analytics_raw_event_retention_days' => (int) env('ANALYTICS_RAW_EVENT_RETENTION_DAYS', 90),
 
     'throttle' => [
-        'enabled' => (bool) env('COMET_THROTTLE_ENABLED', true),
+        'enabled' => (bool) env('SIDEST_THROTTLE_ENABLED', true),
     ],
 
-    'media_disk' => env('COMET_MEDIA_DISK', 'media'),
+    'media_disk' => env('SIDEST_MEDIA_DISK', 'media'),
 
     /*
     |----------------------------------------------------------------------
@@ -131,9 +131,9 @@ return [
     | content = broad-use images (icon, headshot, banner, etc. – frontend assigns purpose)
     */
     'image_pools' => [
-        'gallery' => ['max' => (int) env('COMET_GALLERY_IMAGE_MAX', 5)],
-        'content' => ['max' => (int) env('COMET_CONTENT_IMAGE_MAX', 5)],
-        'product' => ['max' => (int) env('COMET_PRODUCT_IMAGE_MAX', 5)],
+        'gallery' => ['max' => (int) env('SIDEST_GALLERY_IMAGE_MAX', 5)],
+        'content' => ['max' => (int) env('SIDEST_CONTENT_IMAGE_MAX', 5)],
+        'product' => ['max' => (int) env('SIDEST_PRODUCT_IMAGE_MAX', 5)],
     ],
 
     /*
@@ -153,24 +153,24 @@ return [
         'optimized' => [
             'format' => 'webp',
             'preserve_resolution' => true,
-            'quality' => (int) env('COMET_IMAGE_QUALITY', 92),
-            'min_quality' => (int) env('COMET_IMAGE_MIN_QUALITY', 60),
-            'target_kb' => (int) env('COMET_IMAGE_TARGET_KB', 500),
+            'quality' => (int) env('SIDEST_IMAGE_QUALITY', 92),
+            'min_quality' => (int) env('SIDEST_IMAGE_MIN_QUALITY', 60),
+            'target_kb' => (int) env('SIDEST_IMAGE_TARGET_KB', 500),
         ],
         'maximized' => [
             'format' => 'webp',
             'preserve_resolution' => true,
-            'quality' => (int) env('COMET_IMAGE_MAXIMIZED_QUALITY', 100),
+            'quality' => (int) env('SIDEST_IMAGE_MAXIMIZED_QUALITY', 100),
         ],
     ],
 
-    'image_max_upload_size' => (int) env('COMET_IMAGE_MAX_UPLOAD_KB', 10240), // 10 MB
+    'image_max_upload_size' => (int) env('SIDEST_IMAGE_MAX_UPLOAD_KB', 10240), // 10 MB
 
     /*
     |----------------------------------------------------------------------
     | Video uploads – feature flag + processing config
     |----------------------------------------------------------------------
-    | Set COMET_VIDEO_UPLOADS_ENABLED=true only after dedicated video
+    | Set SIDEST_VIDEO_UPLOADS_ENABLED=true only after dedicated video
     | workers are running on the "videos" queue.
     |
     | video_max_upload_size  = max video file size accepted (KB)
@@ -185,30 +185,30 @@ return [
     | video_variants define the two MP4 output tiers.  HLS streams are
     | packaged from these MP4 files (no extra re-encode).
     */
-    'video_uploads_enabled' => (bool) env('COMET_VIDEO_UPLOADS_ENABLED', false),
+    'video_uploads_enabled' => (bool) env('SIDEST_VIDEO_UPLOADS_ENABLED', false),
 
-    'video_max_upload_size'      => (int) env('COMET_VIDEO_MAX_UPLOAD_KB', 512000), // 500 MB
-    'video_max_duration_seconds' => (int) env('COMET_VIDEO_MAX_DURATION_SECONDS', 300), // 5 min
+    'video_max_upload_size'      => (int) env('SIDEST_VIDEO_MAX_UPLOAD_KB', 512000), // 500 MB
+    'video_max_duration_seconds' => (int) env('SIDEST_VIDEO_MAX_DURATION_SECONDS', 300), // 5 min
 
-    'ffmpeg_binary'  => env('COMET_FFMPEG_BINARY', 'ffmpeg'),
-    'ffprobe_binary' => env('COMET_FFPROBE_BINARY', 'ffprobe'),
+    'ffmpeg_binary'  => env('SIDEST_FFMPEG_BINARY', 'ffmpeg'),
+    'ffprobe_binary' => env('SIDEST_FFPROBE_BINARY', 'ffprobe'),
 
     'video_queue' => [
-        'connection' => env('COMET_VIDEO_QUEUE_CONNECTION', 'redis_video'),
-        'name'       => env('COMET_VIDEO_QUEUE_NAME', 'videos'),
-        'timeout'    => (int) env('COMET_VIDEO_QUEUE_TIMEOUT', 3600),
+        'connection' => env('SIDEST_VIDEO_QUEUE_CONNECTION', 'redis_video'),
+        'name'       => env('SIDEST_VIDEO_QUEUE_NAME', 'videos'),
+        'timeout'    => (int) env('SIDEST_VIDEO_QUEUE_TIMEOUT', 3600),
     ],
 
     'video_variants' => [
         'optimized' => [
-            'resolution'       => env('COMET_VIDEO_OPTIMIZED_RESOLUTION', '1280x720'),
-            'video_bitrate_kbps' => (int) env('COMET_VIDEO_OPTIMIZED_BITRATE', 2000),
-            'audio_bitrate_kbps' => (int) env('COMET_VIDEO_OPTIMIZED_AUDIO_BITRATE', 128),
+            'resolution'       => env('SIDEST_VIDEO_OPTIMIZED_RESOLUTION', '1280x720'),
+            'video_bitrate_kbps' => (int) env('SIDEST_VIDEO_OPTIMIZED_BITRATE', 2000),
+            'audio_bitrate_kbps' => (int) env('SIDEST_VIDEO_OPTIMIZED_AUDIO_BITRATE', 128),
         ],
         'maximized' => [
-            'resolution'       => env('COMET_VIDEO_MAXIMIZED_RESOLUTION', '1920x1080'),
-            'video_bitrate_kbps' => (int) env('COMET_VIDEO_MAXIMIZED_BITRATE', 5000),
-            'audio_bitrate_kbps' => (int) env('COMET_VIDEO_MAXIMIZED_AUDIO_BITRATE', 192),
+            'resolution'       => env('SIDEST_VIDEO_MAXIMIZED_RESOLUTION', '1920x1080'),
+            'video_bitrate_kbps' => (int) env('SIDEST_VIDEO_MAXIMIZED_BITRATE', 5000),
+            'audio_bitrate_kbps' => (int) env('SIDEST_VIDEO_MAXIMIZED_AUDIO_BITRATE', 192),
         ],
     ],
 
@@ -219,12 +219,12 @@ return [
     ],
 
     'store' => [
-        'default_commission_rate' => (float) env('COMET_STORE_DEFAULT_COMMISSION', 15),
-        'max_featured_products'   => (int) env('COMET_STORE_MAX_FEATURED', 10),
-        'checkout_session_ttl_minutes' => (int) env('COMET_STORE_CHECKOUT_SESSION_TTL_MINUTES', 120),
-        'payout_hold_days' => (int) env('COMET_STORE_PAYOUT_HOLD_DAYS', 7),
+        'default_commission_rate' => (float) env('SIDEST_STORE_DEFAULT_COMMISSION', 15),
+        'max_featured_products'   => (int) env('SIDEST_STORE_MAX_FEATURED', 10),
+        'checkout_session_ttl_minutes' => (int) env('SIDEST_STORE_CHECKOUT_SESSION_TTL_MINUTES', 120),
+        'payout_hold_days' => (int) env('SIDEST_STORE_PAYOUT_HOLD_DAYS', 7),
         'min_payout_hold_days' => 7,
-        'platform_fee_percent' => (float) env('COMET_STORE_PLATFORM_FEE_PERCENT', 3),
+        'platform_fee_percent' => (float) env('SIDEST_STORE_PLATFORM_FEE_PERCENT', 3),
     ],
 
     'form_timing' => [

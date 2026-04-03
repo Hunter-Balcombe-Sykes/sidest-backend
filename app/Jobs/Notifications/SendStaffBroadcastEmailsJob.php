@@ -19,7 +19,7 @@ class SendStaffBroadcastEmailsJob implements ShouldQueue
 
     public function __construct(
         public string $notificationId,
-        public string $listKey = 'comet_updates'
+        public string $listKey = 'sidest_updates'
     ) {}
 
     public function handle(): void

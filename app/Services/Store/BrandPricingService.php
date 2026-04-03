@@ -7,7 +7,7 @@ class BrandPricingService
 {
     public function defaultCommissionRate(): float
     {
-        return (float) config('comet.store.default_commission_rate', 15);
+        return (float) config('sidest.store.default_commission_rate', 15);
     }
 
     public function effectiveCommissionRate(?float $commissionOverride, ?float $defaultCommissionRate): float

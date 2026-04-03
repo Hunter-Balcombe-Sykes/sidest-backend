@@ -14,7 +14,7 @@ class SiteProvisioningService
 {
     public function createSiteWithRetry(string $professionalId, string $base): Site
     {
-        $reserved = array_map('strtolower', config('comet.reserved_subdomains', []));
+        $reserved = array_map('strtolower', config('sidest.reserved_subdomains', []));
         $base = strtolower($base);
         $baseIsReserved = in_array($base, $reserved, true);
 

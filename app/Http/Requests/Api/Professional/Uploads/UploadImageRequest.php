@@ -10,8 +10,8 @@ class UploadImageRequest extends BaseFormRequest
 {
     public function rules(): array
     {
-        $imageMaxKb = (int) config('comet.image_max_upload_size', 10240);
-        $videoMaxKb = (int) config('comet.video_max_upload_size', 512000);
+        $imageMaxKb = (int) config('sidest.image_max_upload_size', 10240);
+        $videoMaxKb = (int) config('sidest.video_max_upload_size', 512000);
 
         return [
             'pool' => [
@@ -56,7 +56,7 @@ class UploadImageRequest extends BaseFormRequest
                 return;
             }
 
-            if ($hasVideo && ! config('comet.video_uploads_enabled', false)) {
+            if ($hasVideo && ! config('sidest.video_uploads_enabled', false)) {
                 $v->errors()->add('video', 'Video uploads are not currently enabled.');
             }
         });
@@ -71,8 +71,8 @@ class UploadImageRequest extends BaseFormRequest
 
     public function messages(): array
     {
-        $imageMaxMb = round(((int) config('comet.image_max_upload_size', 10240)) / 1024, 1);
-        $videoMaxMb = round(((int) config('comet.video_max_upload_size', 512000)) / 1024, 0);
+        $imageMaxMb = round(((int) config('sidest.image_max_upload_size', 10240)) / 1024, 1);
+        $videoMaxMb = round(((int) config('sidest.video_max_upload_size', 512000)) / 1024, 0);
 
         return [
             'pool.in'      => 'Pool must be "gallery" or "content".',

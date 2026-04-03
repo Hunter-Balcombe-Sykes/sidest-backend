@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 // V2: Compacts hourly analytics older than 24h into daily aggregates. Runs on schedule to control table size.
 class CompactHourlyAnalytics extends Command
 {
-    protected $signature = 'comet:analytics:compact-hourly {--dry-run : Show work without mutating data}';
+    protected $signature = 'sidest:analytics:compact-hourly {--dry-run : Show work without mutating data}';
 
     protected $description = 'Compacts hourly analytics older than 24h into daily aggregates.';
 

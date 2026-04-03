@@ -28,7 +28,7 @@ class StripeConnectService
             'country' => $this->mapCountryCode($professional->country_code),
             'email' => $professional->primary_email,
             'metadata' => [
-                'comet_professional_id' => $professional->id,
+                'sidest_professional_id' => $professional->id,
                 'professional_type' => $professional->professional_type,
             ],
             'capabilities' => [
@@ -138,7 +138,7 @@ class StripeConnectService
             'email' => $brand->primary_email,
             'name' => $brand->display_name,
             'metadata' => [
-                'comet_professional_id' => $brand->id,
+                'sidest_professional_id' => $brand->id,
                 'professional_type' => $brand->professional_type,
             ],
         ]);
@@ -165,7 +165,7 @@ class StripeConnectService
             'customer' => $customerId,
             'payment_method_types' => ['card', 'au_becs_debit'],
             'metadata' => [
-                'comet_professional_id' => $brand->id,
+                'sidest_professional_id' => $brand->id,
             ],
         ]);
 
@@ -197,7 +197,7 @@ class StripeConnectService
             'cancel_url' => $cancelUrl,
             'metadata' => [
                 'purpose' => 'brand_commission_payment_method',
-                'comet_professional_id' => $brand->id,
+                'sidest_professional_id' => $brand->id,
             ],
         ]);
 
@@ -224,7 +224,7 @@ class StripeConnectService
             throw new \RuntimeException('Setup session is not complete yet.');
         }
 
-        $metadataProId = $session->metadata?->comet_professional_id ?? null;
+        $metadataProId = $session->metadata?->sidest_professional_id ?? null;
         if ($metadataProId && $metadataProId !== $brand->id) {
             throw new \RuntimeException('Setup session does not belong to this account.');
         }
@@ -391,7 +391,7 @@ class StripeConnectService
             ]],
             'metadata' => [
                 'purpose' => 'brand_commission_topup',
-                'comet_professional_id' => $brand->id,
+                'sidest_professional_id' => $brand->id,
                 'currency' => $currency,
             ],
         ]);
@@ -433,7 +433,7 @@ class StripeConnectService
             throw new \RuntimeException('Top-up payment is not completed yet.');
         }
 
-        $metadataProId = $session->metadata?->comet_professional_id ?? null;
+        $metadataProId = $session->metadata?->sidest_professional_id ?? null;
         if ($metadataProId && $metadataProId !== $brand->id) {
             throw new \RuntimeException('Top-up session does not belong to this account.');
         }

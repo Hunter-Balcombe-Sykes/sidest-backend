@@ -40,8 +40,8 @@ class DeleteMediaArtifactsJob implements ShouldQueue
         public readonly string $basePath,
         public readonly string $pool,
     ) {
-        $this->onConnection((string) config('comet.video_queue.connection', 'redis_video'));
-        $this->onQueue((string) config('comet.video_queue.name', 'videos'));
+        $this->onConnection((string) config('sidest.video_queue.connection', 'redis_video'));
+        $this->onQueue((string) config('sidest.video_queue.name', 'videos'));
     }
 
     public function handle(VideoVariantService $service): void

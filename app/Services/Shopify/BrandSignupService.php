@@ -171,8 +171,8 @@ class BrandSignupService
                 ]
             );
 
-            // Comet updates subscription
-            $this->ensureCometUpdatesSubscription($shopEmail);
+            // Side St updates subscription
+            $this->ensureSidestUpdatesSubscription($shopEmail);
 
             // Create integration
             $shopId = trim((string) Arr::get($shopData, 'id', ''));
@@ -259,12 +259,12 @@ class BrandSignupService
         return $base . '-' . Str::lower(Str::random(6));
     }
 
-    private function ensureCometUpdatesSubscription(string $email): void
+    private function ensureSidestUpdatesSubscription(string $email): void
     {
         $email = strtolower(trim($email));
         if ($email === '') return;
 
-        $listKey = 'comet_updates';
+        $listKey = 'sidest_updates';
 
         $existing = EmailSubscription::query()
             ->whereNull('professional_id')

@@ -23,9 +23,9 @@ class CommissionPayoutService
     public function __construct()
     {
         $this->stripe = new StripeClient(config('services.stripe.secret_key'));
-        $this->platformFeePercent = config('comet.store.platform_fee_percent', 3);
-        $this->systemHoldDays = max(0, (int) config('comet.store.payout_hold_days', 7));
-        $this->minHoldDays = (int) config('comet.store.min_payout_hold_days', 7);
+        $this->platformFeePercent = config('sidest.store.platform_fee_percent', 3);
+        $this->systemHoldDays = max(0, (int) config('sidest.store.payout_hold_days', 7));
+        $this->minHoldDays = (int) config('sidest.store.min_payout_hold_days', 7);
     }
 
     /**
@@ -397,7 +397,7 @@ class CommissionPayoutService
                     'off_session' => true,
                     'description' => "Commission payout #{$payout->id}",
                     'metadata' => [
-                        'comet_payout_id' => $payout->id,
+                        'sidest_payout_id' => $payout->id,
                         'brand_id' => $brand->id,
                         'affiliate_id' => $affiliate->id,
                     ],
@@ -441,7 +441,7 @@ class CommissionPayoutService
                 'destination' => $affiliate->stripe_connect_account_id,
                 'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
                 'metadata' => [
-                    'comet_payout_id' => $payout->id,
+                    'sidest_payout_id' => $payout->id,
                     'brand_id' => $brand->id,
                     'affiliate_id' => $affiliate->id,
                 ],
@@ -516,7 +516,7 @@ class CommissionPayoutService
                 'destination' => $affiliate->stripe_connect_account_id,
                 'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
                 'metadata' => [
-                    'comet_payout_id' => $payout->id,
+                    'sidest_payout_id' => $payout->id,
                     'brand_id' => $brand->id,
                     'affiliate_id' => $affiliate->id,
                     'funding_source' => 'stripe_sale_hold',

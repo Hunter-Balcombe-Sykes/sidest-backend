@@ -62,8 +62,8 @@ class NotificationPublisher
         $now  = now();
         $type = Notification::normalizeFrontendType($frontendType);
         $key  = $retentionConfigKey ?? 'default';
-        $days = config("comet.notification_retention_days.{$key}")
-            ?? config('comet.notification_retention_days.default', 30);
+        $days = config("sidest.notification_retention_days.{$key}")
+            ?? config('sidest.notification_retention_days.default', 30);
 
         $notificationId = (string) Str::uuid();
 
@@ -85,7 +85,7 @@ class NotificationPublisher
             'updated_at'             => $now,
         ]);
 
-        if (config('comet.notifications.email_enabled', false)) {
+        if (config('sidest.notifications.email_enabled', false)) {
             SendTransactionalNotificationEmailJob::dispatch(
                 $notificationId,
                 $category,

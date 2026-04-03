@@ -3,7 +3,7 @@
     "laravel-boost": {
       "command": "/Users/joshuahunter/Library/Application Support/Herd/bin/php84",
       "args": [
-        "/Users/joshuahunter/Herd/Comet-Development/artisan",
+        "/Users/joshuahunter/Herd/Side Street/Comet-Development/artisan",
         "boost:mcp"
       ]
     },
@@ -13,7 +13,7 @@
         "/Applications/Herd.app/Contents/Resources/herd-mcp.phar"
       ],
       "env": {
-        "SITE_PATH": "/Users/joshuahunter/Herd/Comet-Development"
+        "SITE_PATH": "/Users/joshuahunter/Herd/Side Street/Comet-Development"
       }
     }
   }

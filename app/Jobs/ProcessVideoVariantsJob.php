@@ -46,8 +46,8 @@ class ProcessVideoVariantsJob implements ShouldQueue
         public readonly string $originalPath,
         public readonly string $basePath,
     ) {
-        $this->onConnection((string) config('comet.video_queue.connection', 'redis_video'));
-        $this->onQueue((string) config('comet.video_queue.name', 'videos'));
+        $this->onConnection((string) config('sidest.video_queue.connection', 'redis_video'));
+        $this->onQueue((string) config('sidest.video_queue.name', 'videos'));
     }
 
     public function handle(VideoVariantService $service): void
@@ -95,7 +95,7 @@ class ProcessVideoVariantsJob implements ShouldQueue
         try {
             // Stream the original to a local temp file for FFmpeg processing.
             $ext      = pathinfo($this->originalPath, PATHINFO_EXTENSION) ?: 'mp4';
-            $localTmp = tempnam(sys_get_temp_dir(), 'comet_vid_') . '.' . $ext;
+            $localTmp = tempnam(sys_get_temp_dir(), 'sidest_vid_') . '.' . $ext;
 
             $stream = $disk->readStream($this->originalPath);
             if (! $stream) {

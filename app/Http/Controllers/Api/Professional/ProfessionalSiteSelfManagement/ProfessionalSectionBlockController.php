@@ -31,8 +31,8 @@ class ProfessionalSectionBlockController extends ApiController
 
         $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
         $defaults = $this->defaultsService->resolveDefaults($professionalType);
-        $allowedSections = $defaults['allowed_sections'] ?? config('comet.section_block_types', []);
-        $allSections = config('comet.section_block_types', []);
+        $allowedSections = $defaults['allowed_sections'] ?? config('sidest.section_block_types', []);
+        $allSections = config('sidest.section_block_types', []);
         $unavailableSections = array_values(array_diff($allSections, $allowedSections));
 
         $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
@@ -62,7 +62,7 @@ class ProfessionalSectionBlockController extends ApiController
 
         // ── Account-type section restrictions ────────────────────────────
         $defaults = $this->defaultsService->resolveDefaults($professionalType);
-        $allowedSections = $defaults['allowed_sections'] ?? config('comet.section_block_types', []);
+        $allowedSections = $defaults['allowed_sections'] ?? config('sidest.section_block_types', []);
         if (! in_array($blockType, $allowedSections, true)) {
             return $this->error('This section is not available for your account type.', 403);
         }
@@ -159,7 +159,7 @@ class ProfessionalSectionBlockController extends ApiController
         $site = $this->currentSite($pro);
         $professionalType = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
         $defaults = $this->defaultsService->resolveDefaults($professionalType);
-        $allowedSections = $defaults['allowed_sections'] ?? config('comet.section_block_types', []);
+        $allowedSections = $defaults['allowed_sections'] ?? config('sidest.section_block_types', []);
         if (! in_array($blockType, $allowedSections, true)) {
             return $this->error('This section is not available for your account type.', 403);
         }

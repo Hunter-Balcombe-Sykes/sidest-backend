@@ -30,7 +30,7 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
                 'sometimes',
                 'required',
                 'string',
-                Rule::in(array_keys(config('comet.professional_types', []))),
+                Rule::in(array_keys(config('sidest.professional_types', []))),
             ],
 
             // Location

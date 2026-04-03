@@ -34,7 +34,7 @@ class StaffNotificationController extends ApiController
         $data['severity'] = Notification::severityForFrontendType($data['type']);
 
         if (empty($data['ends_at'])) {
-            $map = config('comet.notification_retention_days', []);
+            $map = config('sidest.notification_retention_days', []);
             $days = $map[$data['type']] ?? ($map['default'] ?? 30);
 
             // null means "keep until manually ended/dismissed"
@@ -46,7 +46,7 @@ class StaffNotificationController extends ApiController
         $notification = Notification::query()->create($data);
 
         $sendEmail = (bool)($data['send_email'] ?? false);
-        $emailListKey = $data['email_list_key'] ?? 'comet_updates';
+        $emailListKey = $data['email_list_key'] ?? 'sidest_updates';
 
         if ($sendEmail) {
             // Only broadcast emails for global notifications (professional_id null)

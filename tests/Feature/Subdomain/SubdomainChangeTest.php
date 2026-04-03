@@ -80,7 +80,7 @@ it('stores old subdomain as alias after a valid change', function () {
 });
 
 it('redirects old subdomain to new site host', function () {
-    $domain = config('comet.public_domain');
+    $domain = config('sidest.public_domain');
     $oldHost = 'old.' . $domain;
     $newHost = 'new.' . $domain;
 

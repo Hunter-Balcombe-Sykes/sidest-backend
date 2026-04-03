@@ -20,7 +20,7 @@ beforeEach(function () {
     bootstrapMediaJobsSchema();
 
     config([
-        'comet.media_disk' => 'local',
+        'sidest.media_disk' => 'local',
         'filesystems.disks.local.root' => storage_path('framework/testing/disks/media-jobs'),
     ]);
 

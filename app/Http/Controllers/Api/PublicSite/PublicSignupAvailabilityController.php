@@ -12,7 +12,7 @@ class PublicSignupAvailabilityController extends ApiController
 {
     public function check(Request $request): JsonResponse
     {
-        $signupsOpen = ! (bool) config('comet.waitlist.enabled', false);
+        $signupsOpen = ! (bool) config('sidest.waitlist.enabled', false);
 
         $validated = $request->validate([
             'email' => ['sometimes', 'nullable', 'email', 'max:255'],

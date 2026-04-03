@@ -32,7 +32,7 @@ class QrCodeController extends ApiController
             abort(404);
         }
 
-        $publicDomain = (string) config('comet.public_domain', '');
+        $publicDomain = (string) config('sidest.public_domain', '');
         if ($publicDomain === '') {
             abort(500, 'Public domain not configured.');
         }

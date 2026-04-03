@@ -100,7 +100,7 @@ class StripeConnectWebhookController extends Controller
 
     private function handleTransferCreated(object $transfer): void
     {
-        $payoutId = $transfer->metadata?->comet_payout_id ?? null;
+        $payoutId = $transfer->metadata?->sidest_payout_id ?? null;
 
         if (! $payoutId) {
             return;
@@ -114,7 +114,7 @@ class StripeConnectWebhookController extends Controller
 
     private function handleTransferFailed(object $transfer): void
     {
-        $payoutId = $transfer->metadata?->comet_payout_id ?? null;
+        $payoutId = $transfer->metadata?->sidest_payout_id ?? null;
 
         if (! $payoutId) {
             return;
@@ -138,7 +138,7 @@ class StripeConnectWebhookController extends Controller
     private function handlePaymentIntentSucceeded(object $paymentIntent, string $connectedAccountId = ''): void
     {
         // Commission payout payment intent
-        $payoutId = $paymentIntent->metadata?->comet_payout_id ?? null;
+        $payoutId = $paymentIntent->metadata?->sidest_payout_id ?? null;
         if (! $payoutId) {
             return;
         }
@@ -151,7 +151,7 @@ class StripeConnectWebhookController extends Controller
 
     private function handlePaymentIntentFailed(object $paymentIntent): void
     {
-        $payoutId = $paymentIntent->metadata?->comet_payout_id ?? null;
+        $payoutId = $paymentIntent->metadata?->sidest_payout_id ?? null;
 
         if (! $payoutId) {
             return;

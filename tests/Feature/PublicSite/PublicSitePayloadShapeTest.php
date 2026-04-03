@@ -59,8 +59,8 @@ it('includes featured products and combined blocks in the public payload', funct
                     'sort_order' => 0,
                 ],
             ],
-            'default_commission_rate' => (float) config('comet.store.default_commission_rate', 15),
-            'max_featured_products' => (int) config('comet.store.max_featured_products', 10),
+            'default_commission_rate' => (float) config('sidest.store.default_commission_rate', 15),
+            'max_featured_products' => (int) config('sidest.store.max_featured_products', 10),
         ],
         'legal' => [
             'privacy_policy' => 'Privacy policy',
@@ -83,8 +83,8 @@ it('includes featured products and combined blocks in the public payload', funct
 
     $response->assertOk();
     $response->assertJsonPath('selected_products.0.shopify_product_id', 'gid://shopify/Product/111');
-    $response->assertJsonPath('default_commission_rate', (float) config('comet.store.default_commission_rate', 15));
-    $response->assertJsonPath('max_featured_products', (int) config('comet.store.max_featured_products', 10));
+    $response->assertJsonPath('default_commission_rate', (float) config('sidest.store.default_commission_rate', 15));
+    $response->assertJsonPath('max_featured_products', (int) config('sidest.store.max_featured_products', 10));
     $response->assertJsonPath('store.selected_products.0.shopify_product_id', 'gid://shopify/Product/111');
 
     $response->assertJsonCount(2, 'blocks');

@@ -50,7 +50,7 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $allowedProfessionalTypes = array_keys(config('comet.professional_types', []));
+            $allowedProfessionalTypes = array_keys(config('sidest.professional_types', []));
             $resolveProfessionalType = static function (mixed $candidate) use ($allowedProfessionalTypes): string {
                 if (is_string($candidate)) {
                     $normalized = mb_strtolower(trim($candidate));
@@ -119,8 +119,8 @@ class BootstrapController extends ApiController
             }
             $professional->save();
 
-            // Add to Comet updates list once (global list). Do NOT overwrite if they already unsubscribed.
-            $this->ensureCometUpdatesSubscription($professional->primary_email);
+            // Add to Side St updates list once (global list). Do NOT overwrite if they already unsubscribed.
+            $this->ensureSidestUpdatesSubscription($professional->primary_email);
 
 
             $site = Site::query()->where('professional_id', $professional->id)->first();
@@ -199,12 +199,12 @@ class BootstrapController extends ApiController
         return $this->success($result);
     }
 
-    private function ensureCometUpdatesSubscription(?string $email): void
+    private function ensureSidestUpdatesSubscription(?string $email): void
     {
         $email = is_string($email) ? strtolower(trim($email)) : '';
         if ($email === '') return;
 
-        $listKey = 'comet_updates';
+        $listKey = 'sidest_updates';
 
         $existing = EmailSubscription::query()
             ->whereNull('professional_id')
@@ -282,7 +282,7 @@ class BootstrapController extends ApiController
 
     private function isWaitlistModeEnabled(): bool
     {
-        return (bool) config('comet.waitlist.enabled', false);
+        return (bool) config('sidest.waitlist.enabled', false);
     }
 
     private function hasExistingProfessional(string $uid): bool
