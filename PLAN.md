@@ -837,78 +837,48 @@ Each task is tagged with one or more segments indicating which part of the codeb
 
 ---
 
-#### Remove V1 Database Tables
+#### ~~Remove V1 Database Tables~~ ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Pre-Beta
 **Segments:** Laravel, Supabase
 
-Write two Laravel migrations (each with a `down()` method) to drop the V1 product sync tables that are fully replaced by Shopify's native data layer in V2.
-
-Tables to drop:
-- `retail.brand_products` — product data now comes from Shopify Storefront API live
-- `retail.brand_product_settings` — replaced by Shopify product metafields (`sidest.commission_override`, `sidest.affiliate_discount_pct`)
-
-Run `php artisan test --parallel` after to confirm nothing breaks.
+Tables `retail.brand_products` and `retail.brand_product_settings` removed in v2_baseline migration. No code references remain.
 
 ---
 
-#### Remove V1 Database Columns
+#### ~~Remove V1 Database Columns~~ ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Pre-Beta
 **Segments:** Laravel, Supabase
 
-Write a migration to drop V1 columns from `retail.brand_store_settings` that are replaced by Shopify shop metafields:
-- `default_commission_rate` → replaced by `sidest.default_commission_rate` shop metafield
-- `favourite_brand_product_ids` → replaced by Shopify Collection + `sidest.default_collection_handle` shop metafield
-- `product_image_ratio` → replaced by `sidest.product_image_ratio` shop metafield
+`favourite_brand_product_ids` and `product_image_ratio` removed in v2_baseline migration. `default_commission_rate` intentionally kept — it's the backend source of truth for `ProcessShopifyOrderWebhookJob` commission calculations. The Shopify metafield `sidest.default_commission_rate` is created as a sync target but not yet read back; migrating reads to Shopify is future scope.
 
 ---
 
-#### Migrate affiliate_product_selections FK to Shopify GIDs
+#### ~~Migrate affiliate_product_selections FK to Shopify GIDs~~ ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Pre-Beta
 **Segments:** Laravel, Supabase
 
-The `retail.affiliate_product_selections` table currently references `brand_product_id` (foreign key into the now-deleted `brand_products` table). Migrate it to reference Shopify product GIDs directly.
-
-Change: `brand_product_id UUID FK` → `shopify_product_gid TEXT NOT NULL` (e.g. `gid://shopify/Product/123`).
-
-No `brand_id` column is needed. Each affiliate belongs to exactly one brand — this is the single-brand constraint. Brand context is always resolved by joining through the affiliate record. All product data is fetched live from Shopify by GID, never stored locally.
+`commerce.affiliate_product_selections` now uses `shopify_product_gid TEXT NOT NULL`. Model and `SelectionCleanupService` updated to match.
 
 ---
 
-#### Archive V1 Laravel Services and Endpoints
+#### ~~Archive V1 Laravel Services and Endpoints~~ ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Pre-Beta
 **Segments:** Laravel
 
-Delete or archive the following V1 code that has no equivalent in V2:
-
-**Services to delete:**
-- `BrandProductCatalogService` — no local catalog to serve
-- `BrandProductSettingsService` — settings now live in Shopify metafields
-- Shopify product ingest/sync runtime and any associated jobs (e.g. `ShopifyProductIngestJob`)
-
-**Services to simplify (don't delete, but gut the Shopify-sync parts):**
-- `BrandPricingService` — keep commission calculation logic, remove any price/discount lookup that tried to mirror Shopify data
-- `SelectionCleanupService` — simplify to work with Shopify GIDs instead of `brand_product_id` joins
-
-**Endpoints to delete:**
-- `GET/PATCH /api/store/brand-products` (bulk patch)
-- `PUT /api/store/featured-products`
-- `GET /api/store/available-products`
-- Any remaining legacy `/api/store/brand-product-settings` variants
-
-Run `php artisan test --parallel` after.
+V1 services deleted (`BrandProductCatalogService`, `BrandProductSettingsService`, `ShopifyProductIngestJob`). `BrandPricingService` simplified to commission-only. `SelectionCleanupService` updated for Shopify GIDs. All V1 endpoints removed.
 
 ---
 
-#### Add V2 Comments to Backend Code
+#### ~~Add V2 Comments to Backend Code~~ ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Pre-Beta
 **Segments:** Laravel
 
-Add doc-comments to all surviving controllers, services, and jobs explaining their V2 role. Format: `// V2: [what this does and why it exists]` above each class/method that isn't self-evident. This is so both developers can navigate the backend without prior V1 context.
+`// V2:` comments added to all controllers, services, and jobs. `V2_BACKEND_REFERENCE.md` and `AI_CONTEXT.md` rewritten for V2.
 
 ---
 
@@ -961,36 +931,21 @@ Verify the `shopify.app.toml` config is correctly set up for V2 before any Beta 
 
 ---
 
-#### Brand Signup — Entry Points (Shopify OAuth + Manual)
+#### ~~Brand Signup — Entry Points (Shopify OAuth + Manual)~~ ✅ DONE (Backend)
 **Assigned:** Frontend Dev + Backend Dev
 **Release Batch:** Pre-Beta
 **Segments:** Next Frontend, Laravel, Supabase
 
-Implement both brand signup entry points at `app.sidest.co`. Brands can sign up via Shopify OAuth or manually with email + password. Both paths lead to the same setup wizard.
+**Backend complete:**
+- **Path A (Shopify OAuth):** `ShopifyAppOAuthController` → `BrandSignupService.handleOAuthCallback()` creates Supabase user, Professional, Site, BrandProfile, integration, dispatches install jobs. Reinstall detection by `shopify_shop_domain`.
+- **Path B (Manual signup):** `BootstrapController` with `professional_type: 'brand'` creates Professional, Site, BrandProfile (`setup_complete: false`), account-type defaults, legal content, free subscription. Frontend creates Supabase user (email+password) then calls `POST /api/bootstrap` with JWT.
+- **Shopify connect (later):** `ShopifyIntegrationController::connect()` accepts optional `shop_data` array, auto-fills empty profile fields via `ShopProfileAutoFillService`, ensures BrandProfile exists, dispatches install jobs.
+- **Account merging:** Implicit — manual brand authenticates with their Supabase JWT, then calls `connect()` to link Shopify. No separate merge needed since the brand is already authenticated.
 
-**Frontend — signup page:**
-- "Sign up with Shopify" button — initiates Shopify OAuth install flow
-- "Sign up manually" option — standard email + password form (Supabase auth)
-- Existing brands: "Log in" link
-
-**Path A — Shopify OAuth:**
-- Redirects to Shopify to install the Side St app
-- OAuth callback creates Supabase user from `shop.email`, creates brand record, fires full install sequence (metafields, webhooks, collections, profile auto-fill — see Beta 1 tasks)
-- No password set — brand authenticates via magic link or App Bridge session token
-- `sidest.setup_complete = false` → redirected to setup wizard with profile pre-filled
-- Returning brands / reinstalls: matched by `myshopify_domain` → update access token, redirect to dashboard
-
-**Path B — Manual signup:**
-- Standard Supabase email + password signup
-- Brand record created with empty profile fields
-- Redirected to setup wizard — all profile fields (name, email, phone, address, etc.) collected there manually
-- Brand can connect Shopify at any point from the dashboard settings:
-  - On connect: any empty profile fields are filled from the Shopify shop object
-  - Logo is always overwritten with the Shopify logo on connect (Shopify is the source of truth for logo)
-  - Fields the brand has already filled in manually are not overwritten — only empty fields are filled
-- If `shop.email` matches an existing manual account email on OAuth → accounts are merged
-
-**Auth note:** Brands authenticate to `app.sidest.co` via Supabase JWT (both paths). Inside the Shopify embedded app, App Bridge session token is used in addition.
+**Frontend (sidest-dashboard) still needed:**
+- Signup page with "Sign up with Shopify" + manual email form
+- Login page
+- Setup wizard UI
 
 ---
 

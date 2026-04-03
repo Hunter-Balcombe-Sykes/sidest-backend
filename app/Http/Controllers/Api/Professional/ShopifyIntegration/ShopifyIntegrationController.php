@@ -10,7 +10,11 @@ use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\RegisterShopifyOrderWebhooksJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
+use App\Models\Core\Professional\BrandProfile;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Core\Site\Site;
+use App\Services\Shopify\ShopProfileAutoFillService;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -143,6 +147,7 @@ class ShopifyIntegrationController extends ApiController
             'scopes' => ['sometimes', 'array'],
             'scopes.*' => ['string', 'max:120'],
             'webhook_orders_topic' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'shop_data' => ['sometimes', 'nullable', 'array'],
         ]);
 
         if ($validator->fails()) {
@@ -213,6 +218,24 @@ class ShopifyIntegrationController extends ApiController
                 'provider_metadata' => $metadata,
             ]
         );
+
+        // Ensure BrandProfile exists (covers manual-signup brands connecting Shopify later)
+        BrandProfile::firstOrCreate(
+            ['professional_id' => $targetBrandId],
+            ['setup_complete' => false]
+        );
+
+        // Auto-fill empty profile fields from Shopify shop data (manual-signup → Shopify connect)
+        $shopData = $validated['shop_data'] ?? null;
+        if (is_array($shopData) && $shopData !== []) {
+            $professional = Professional::find($targetBrandId);
+            $site = Site::where('professional_id', $targetBrandId)->first();
+            $brandProfile = BrandProfile::where('professional_id', $targetBrandId)->first();
+
+            if ($professional && $site) {
+                app(ShopProfileAutoFillService::class)->fillFromShopData($professional, $site, $brandProfile, $shopData);
+            }
+        }
 
         $webhookRegistrationQueued = false;
         try {

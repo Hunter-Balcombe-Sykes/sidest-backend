@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\BootstrapRequest;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
@@ -135,6 +136,13 @@ class BootstrapController extends ApiController
             // Apply account-type defaults for new professionals
             if ($createdProfessional) {
                 $accountTypeDefaultsService->applyDefaults($professional, $site);
+
+                if ($professional->professional_type === 'brand') {
+                    BrandProfile::firstOrCreate(
+                        ['professional_id' => (string) $professional->id],
+                        ['setup_complete' => false]
+                    );
+                }
             }
 
                 if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
