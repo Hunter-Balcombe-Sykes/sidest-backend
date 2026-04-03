@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+// V2: Gallery image management — listing, reordering, and deletion with variant cleanup.
 class ProfessionalGalleryController extends ApiController
 {
     use ResolveCurrentProfessional;

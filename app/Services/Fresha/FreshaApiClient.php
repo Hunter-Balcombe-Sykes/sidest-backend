@@ -7,6 +7,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
+// V2: Fresha Partner API client for services, bookings, and availability. Automatic token refresh on 401.
 class FreshaApiClient
 {
     public function __construct(

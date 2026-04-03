@@ -6,6 +6,7 @@ use App\Services\Analytics\Concerns\ResolvesTimezone;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
+// V2: Aggregates site visits and clicks into hourly/daily metrics with transactional safety and advisory locks.
 class SiteAnalyticsAggregateService
 {
     use ResolvesTimezone;

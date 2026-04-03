@@ -6,6 +6,7 @@ use App\Models\Core\Professional\Customer;
 use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Support\Facades\Cache;
 
+// V2: Invalidates customer count cache on any customer change (create, update, delete, restore).
 class CustomerObserver
 {
     public bool $afterCommit = true;

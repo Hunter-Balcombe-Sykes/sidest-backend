@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+// V2: Staff manages service categories with full CRUD, reordering, and hard delete.
 class StaffServiceCategoryManagementController extends ApiController
 {
     public function index(Request $request, Professional $professional): JsonResponse

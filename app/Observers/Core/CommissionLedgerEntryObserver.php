@@ -6,6 +6,7 @@ use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;
 
+// V2: Core. Publishes commission earned/reversed notifications to affiliates when ledger entries are created or status changes.
 class CommissionLedgerEntryObserver
 {
     public bool $afterCommit = true;

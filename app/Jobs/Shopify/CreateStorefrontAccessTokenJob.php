@@ -12,6 +12,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
+// V2: Core. Creates Shopify Storefront API token ("Side St") via GraphQL. Required for Hydrogen storefronts to fetch product data.
 class CreateStorefrontAccessTokenJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

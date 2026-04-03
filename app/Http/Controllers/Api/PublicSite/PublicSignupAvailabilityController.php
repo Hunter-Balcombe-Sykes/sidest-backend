@@ -7,6 +7,7 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Handle/email/phone availability check during signup. Includes waitlist mode support.
 class PublicSignupAvailabilityController extends ApiController
 {
     public function check(Request $request): JsonResponse

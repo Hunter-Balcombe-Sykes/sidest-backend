@@ -9,12 +9,12 @@ use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateProfessionalRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
-use App\Services\Enterprise\EnterpriseProvisioningService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+// V2: Staff browses, searches, and manages professionals (status updates, archive, restore, hard delete). Primary staff dashboard entry point.
 class StaffProfessionalController extends ApiController
 {
     /** @return array<int, string> */
@@ -168,22 +168,17 @@ class StaffProfessionalController extends ApiController
     public function update(
         StaffUpdateProfessionalRequest $request,
         Professional $professional,
-        EnterpriseProvisioningService $enterpriseProvisioningService
     )
     {
         $previousProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
 
-        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService, $previousProfessionalType): void {
+        DB::transaction(function () use ($professional, $request, $previousProfessionalType): void {
             $professional->fill($request->validated());
             $professional->save();
 
             $nextProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
             if ($previousProfessionalType !== 'influencer' && $nextProfessionalType === 'influencer') {
                 $this->disableProfessionalOnlySections($professional->id);
-            }
-
-            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
-                $enterpriseProvisioningService->ensureForProfessional($professional);
             }
         });
 

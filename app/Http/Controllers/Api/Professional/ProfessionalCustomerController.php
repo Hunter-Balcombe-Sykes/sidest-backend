@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
+// V2: CRUD for customer contacts. Supports lead capture from public sites and email subscriber management.
 class ProfessionalCustomerController extends ApiController
 {
     use HandlesSearchQueries;

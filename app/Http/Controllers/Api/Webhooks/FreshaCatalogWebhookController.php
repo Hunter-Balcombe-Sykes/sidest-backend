@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
+// V2: Fresha catalog webhook — validates signature, deduplicates events, triggers service sync. Booking integration only.
 class FreshaCatalogWebhookController extends ApiController
 {
     public function __invoke(Request $request, FreshaServiceSyncService $syncService): JsonResponse

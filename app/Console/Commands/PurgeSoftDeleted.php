@@ -8,6 +8,7 @@ use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\SiteMedia;
 
+// V2: Hard-deletes soft-deleted rows (customers, services, media) past retention window (default 30 days).
 class PurgeSoftDeleted extends Command
 {
     protected $signature = 'comet:purge-soft-deletes {--days= : Override retention days}';

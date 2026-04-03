@@ -16,6 +16,7 @@ use App\Services\Cache\AnalyticsCacheService;
 use Illuminate\Http\JsonResponse;
 use Throwable;
 
+// V2: Records pageview and click analytics events from public mini-sites. Events feed into hourly/daily aggregate jobs.
 class AnalyticsController extends ApiController
 {
     use DetectsClientInfo;

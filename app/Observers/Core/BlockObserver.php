@@ -6,6 +6,7 @@ use App\Models\Core\Site\Block;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Invalidates site cache when any block (link, section) is created, updated, or deleted.
 class BlockObserver
 {
     public bool $afterCommit = true;

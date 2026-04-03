@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Storage;
  *
  * Requires the GD extension with WebP support (ships with PHP 8.2+).
  */
+// V2: Generates WebP image variants from uploads via GD. Content-hashed storage on Cloudflare R2 with adaptive quality targeting.
 class ImageVariantService
 {
     /* ------------------------------------------------------------------ */

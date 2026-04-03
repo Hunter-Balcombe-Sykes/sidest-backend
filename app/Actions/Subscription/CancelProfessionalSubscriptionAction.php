@@ -5,6 +5,7 @@ namespace App\Actions\Subscription;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Validation\ValidationException;
 
+// V2: Cancels subscription at billing period end (not immediately). Sets cancel_at_period_end flag.
 class CancelProfessionalSubscriptionAction
 {
     /**

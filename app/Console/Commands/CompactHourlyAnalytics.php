@@ -4,12 +4,11 @@ namespace App\Console\Commands;
 
 use App\Jobs\Analytics\RebuildBookingDailyAggregatesJob;
 use App\Jobs\Analytics\RebuildSiteDailyAggregatesJob;
-use App\Jobs\Store\RebuildBrandDailyAggregatesJob;
-use App\Jobs\Store\RebuildProfessionalDailyAggregatesJob;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
+// V2: Compacts hourly analytics older than 24h into daily aggregates. Runs on schedule to control table size.
 class CompactHourlyAnalytics extends Command
 {
     protected $signature = 'comet:analytics:compact-hourly {--dry-run : Show work without mutating data}';
@@ -53,16 +52,6 @@ class CompactHourlyAnalytics extends Command
 
         $this->line("Commerce brand-day rebuild keys: {$staleBrandDays->count()}");
         $this->line("Commerce affiliate-day rebuild keys: {$staleAffiliateDays->count()}");
-
-        if (! $dryRun) {
-            foreach ($staleBrandDays as $row) {
-                RebuildBrandDailyAggregatesJob::dispatch((string) $row->brand_professional_id, (string) $row->day, 1);
-            }
-
-            foreach ($staleAffiliateDays as $row) {
-                RebuildProfessionalDailyAggregatesJob::dispatch((string) $row->affiliate_professional_id, (string) $row->day, 1);
-            }
-        }
 
         $brandRows = DB::table('analytics.brand_metrics_hourly')
             ->where('hour_start', '<', $cutoff);

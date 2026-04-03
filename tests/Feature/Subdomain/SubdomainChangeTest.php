@@ -9,14 +9,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use Tests\TestCase;
-
-uses(TestCase::class)->in(__FILE__);
-
-/**
- * @mixin TestCase
- */
-
 beforeEach(function () {
     setupCoreSchema();
 

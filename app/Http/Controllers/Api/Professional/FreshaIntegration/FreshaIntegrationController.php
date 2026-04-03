@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
+// V2: Fresha POS connection for booking/service sync. Unrelated to V2 commerce — booking integration only.
 class FreshaIntegrationController extends ApiController
 {
     use ResolveCurrentProfessional;

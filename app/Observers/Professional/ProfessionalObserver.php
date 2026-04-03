@@ -7,6 +7,7 @@ use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Invalidates professional cache and refreshes legal templates on profile update/delete/restore.
 class ProfessionalObserver
 {
     public bool $afterCommit = true;

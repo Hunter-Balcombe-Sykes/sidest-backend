@@ -6,6 +6,7 @@ use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;
 
+// V2: Publishes invite notifications — "invited" to affiliate, "accepted"/"declined" to brand.
 class BrandAffiliateInviteObserver
 {
     public bool $afterCommit = true;

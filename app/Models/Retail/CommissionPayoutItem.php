@@ -10,7 +10,7 @@ class CommissionPayoutItem extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'retail.commission_payout_items';
+    protected $table = 'commerce.commission_payout_items';
 
     public $incrementing = false;
     protected $keyType = 'string';

@@ -10,7 +10,7 @@ class CometStaff extends BaseModel
 {
     use HasFactory, HasUuids;
 
-    protected $table = 'comet_staff';
+    protected $table = 'core.comet_staff';
 
     public $incrementing = false;
     protected $keyType = 'string';

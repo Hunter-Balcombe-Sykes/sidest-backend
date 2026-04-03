@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
+// V2: Creates subscription record with trial period support. Validates no existing active subscription.
 class CreateProfessionalSubscriptionAction
 {
     /**

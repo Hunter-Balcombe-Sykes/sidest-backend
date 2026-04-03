@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
+// V2: Lists available site themes and allows selection of active theme for the professional's mini-site.
 class ProfessionalThemeController extends ApiController
 {
     use ResolveCurrentProfessional;

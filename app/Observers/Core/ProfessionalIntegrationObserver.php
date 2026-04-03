@@ -8,6 +8,7 @@ use App\Services\Notifications\NotificationPublisher;
 use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Publishes integration connect/disconnect notifications and re-evaluates booking section visibility.
 class ProfessionalIntegrationObserver
 {
     public bool $afterCommit = true;

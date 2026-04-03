@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+// V2: Cache-Control headers — public GET endpoints get 15min cache; authenticated requests get no-store. Varies on X-Site-Subdomain for multi-tenant safety.
 class AddPublicCacheHeaders
 {
     /**

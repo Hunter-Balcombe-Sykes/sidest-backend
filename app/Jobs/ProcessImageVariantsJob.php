@@ -21,6 +21,7 @@ use Throwable;
  *   processing → ready   (all variants created)
  *   processing → failed  (unrecoverable error after all retries)
  */
+// V2: Generates WebP variants for uploaded images. Updates SiteMedia state (pending → ready/failed). Queue: images.
 class ProcessImageVariantsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

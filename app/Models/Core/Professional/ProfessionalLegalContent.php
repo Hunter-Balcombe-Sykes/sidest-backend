@@ -10,7 +10,7 @@ class ProfessionalLegalContent extends BaseModel
     public const SOURCE_TEMPLATED = 'templated';
     public const SOURCE_MANUAL = 'manual';
 
-    protected $table = 'professional_legal_contents';
+    protected $table = 'core.professional_legal_contents';
     protected $primaryKey = 'professional_id';
 
     public $incrementing = false;

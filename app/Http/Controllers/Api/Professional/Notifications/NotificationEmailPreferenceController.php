@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+// V2: Per-category email notification opt-in/out with staff policy overrides support.
 class NotificationEmailPreferenceController extends ApiController
 {
     use ResolveCurrentProfessional;

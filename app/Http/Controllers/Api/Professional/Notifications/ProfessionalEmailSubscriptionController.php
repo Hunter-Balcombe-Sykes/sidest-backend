@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
+// V2: Lists and exports email subscribers to a professional's marketing lists.
 class ProfessionalEmailSubscriptionController extends ApiController
 {
     use HandlesSearchQueries;

@@ -7,6 +7,7 @@ use App\Models\Core\Site\Site;
 use App\Services\Professional\BrandAffiliateInviteService;
 use Illuminate\Http\JsonResponse;
 
+// V2: Public invite detail retrieval by token. Used by affiliate claim/decline pages during onboarding.
 class PublicBrandAffiliateInviteController extends ApiController
 {
     public function show(string $token, BrandAffiliateInviteService $inviteService): JsonResponse

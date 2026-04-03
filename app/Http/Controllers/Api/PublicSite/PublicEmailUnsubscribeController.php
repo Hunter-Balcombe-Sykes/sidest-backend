@@ -7,6 +7,7 @@ use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Processes token-based email unsubscribe requests from email footer links.
 class PublicEmailUnsubscribeController extends ApiController
 {
     public function unsubscribe(Request $request, string $token): JsonResponse

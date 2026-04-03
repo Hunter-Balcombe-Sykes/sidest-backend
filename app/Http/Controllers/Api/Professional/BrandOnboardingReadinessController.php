@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Professional\BrandOnboardingReadinessService;
 use Illuminate\Http\Request;
 
+// V2: Returns brand setup checklist (images uploaded, Shopify connected, Stripe connected). Gates brand activation.
 class BrandOnboardingReadinessController extends ApiController
 {
     use ResolveCurrentProfessional;

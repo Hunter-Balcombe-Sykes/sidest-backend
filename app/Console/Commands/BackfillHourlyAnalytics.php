@@ -4,13 +4,12 @@ namespace App\Console\Commands;
 
 use App\Jobs\Analytics\RebuildBookingHourlyAggregatesJob;
 use App\Jobs\Analytics\RebuildSiteHourlyAggregatesJob;
-use App\Jobs\Store\RebuildBrandHourlyAggregatesJob;
-use App\Jobs\Store\RebuildProfessionalHourlyAggregatesJob;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
+// V2: Backfills hourly analytics aggregates for trailing N hours. Used after outages or data corrections.
 class BackfillHourlyAnalytics extends Command
 {
     protected $signature = 'comet:analytics:backfill-hourly
@@ -82,53 +81,7 @@ class BackfillHourlyAnalytics extends Command
      */
     private function backfillCommerce(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
     {
-        $brandIds = DB::table('retail.orders')
-            ->select('brand_professional_id')
-            ->whereBetween('ordered_at', [$start, $endExclusive])
-            ->whereNotNull('brand_professional_id')
-            ->union(
-                DB::table('retail.commission_ledger_entries')
-                    ->select('brand_professional_id')
-                    ->whereBetween('occurred_at', [$start, $endExclusive])
-                    ->whereNotNull('brand_professional_id')
-            )
-            ->distinct()
-            ->lazy()
-            ->map(static fn ($row): string => trim((string) $row->brand_professional_id))
-            ->filter();
-
-        $affiliateIds = DB::table('retail.orders')
-            ->select('affiliate_professional_id')
-            ->whereBetween('ordered_at', [$start, $endExclusive])
-            ->whereNotNull('affiliate_professional_id')
-            ->union(
-                DB::table('retail.commission_ledger_entries')
-                    ->select('affiliate_professional_id')
-                    ->whereBetween('occurred_at', [$start, $endExclusive])
-                    ->whereNotNull('affiliate_professional_id')
-            )
-            ->distinct()
-            ->lazy()
-            ->map(static fn ($row): string => trim((string) $row->affiliate_professional_id))
-            ->filter();
-
-        $brandCount = 0;
-        foreach ($brandIds as $brandId) {
-            foreach ($hourBuckets as $hour) {
-                RebuildBrandHourlyAggregatesJob::dispatch($brandId, $hour);
-            }
-            $brandCount++;
-        }
-
-        $affiliateCount = 0;
-        foreach ($affiliateIds as $affiliateId) {
-            foreach ($hourBuckets as $hour) {
-                RebuildProfessionalHourlyAggregatesJob::dispatch($affiliateId, $hour);
-            }
-            $affiliateCount++;
-        }
-
-        $this->line("Commerce jobs dispatched: brands={$brandCount}, affiliates={$affiliateCount}");
+        $this->line('Commerce backfill: V2 rebuild jobs not yet implemented, skipping.');
     }
 
     /**

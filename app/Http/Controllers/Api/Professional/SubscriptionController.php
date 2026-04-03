@@ -11,6 +11,7 @@ use App\Http\Requests\Api\Professional\UpdatePlanSubscriptionRequest;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use Illuminate\Http\Request;
 
+// V2: Subscription lifecycle (create, change plan, cancel, resume). Billing foundation for professional accounts.
 class SubscriptionController extends ApiController
 {
     use ResolveCurrentProfessional;

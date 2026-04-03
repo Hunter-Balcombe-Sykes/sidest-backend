@@ -9,6 +9,7 @@ use App\Services\Cache\SiteCacheService;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+// V2: Site settings management (subdomain, theme, settings JSON, publish status). Powers the mini-site builder.
 class ProfessionalSiteController extends ApiController
 {
     use ResolveCurrentProfessional;

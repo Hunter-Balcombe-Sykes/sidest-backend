@@ -12,6 +12,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
+// V2: Delta/full catalog sync from Fresha to Comet. Booking integration only. Queue: integrations.
 class SyncFreshaCatalogDeltaJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

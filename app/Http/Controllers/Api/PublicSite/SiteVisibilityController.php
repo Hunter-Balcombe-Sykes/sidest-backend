@@ -8,6 +8,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use Illuminate\Http\JsonResponse;
 
+// V2: Toggles whether a professional's mini-site is publicly published or hidden.
 class SiteVisibilityController extends ApiController
 {
     public function update(UpdateVisibilityRequest $request): JsonResponse

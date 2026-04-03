@@ -22,7 +22,7 @@ class Notification extends BaseModel
         'Info',
     ];
 
-    protected $table = 'notifications';
+    protected $table = 'notifications.notifications';
 
     public $incrementing = false;
     protected $keyType = 'string';

@@ -7,6 +7,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 
+// V2: Square OAuth2 token management with auto-refresh when within 5 minutes of expiration.
 class SquareTokenService
 {
     public function getAccessToken(Professional $professional): string

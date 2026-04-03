@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Http;
 use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\Log;
 
+// V2: JWT authentication via Supabase JWKS (asymmetric). Falls back to Auth Server query. All authenticated routes require this.
 class VerifySupabaseJwt
 {
     public function handle(Request $request, Closure $next): Response

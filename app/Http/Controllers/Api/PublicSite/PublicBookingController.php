@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
+// V2: Public booking flow (config, services, availability, checkout via Square). Booking integration — unrelated to V2 commerce.
 class PublicBookingController extends ApiController
 {
     use ResolvesSubdomainFromHost;

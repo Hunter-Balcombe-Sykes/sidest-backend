@@ -12,6 +12,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
+// V2: Core. Registers orders/paid webhook via GraphQL. Required for commission recording when orders complete.
 class RegisterShopifyOrderWebhooksJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

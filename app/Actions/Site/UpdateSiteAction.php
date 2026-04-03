@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use App\Models\Core\Site\Site;
 
+// V2: Site update with business logic — subdomain cooldown (30-day), theme defaults, PATCH-style settings merge, publish validation.
 class UpdateSiteAction
 {
     /**
@@ -116,7 +117,7 @@ class UpdateSiteAction
         if (array_key_exists('settings', $data)) {
             $existing = is_array($site->settings) ? $site->settings : [];
             $incoming = is_array($data['settings']) ? $data['settings'] : [];
-            // Product selections are stored in retail.professional_selections, not site settings JSON.
+            // Product selections are stored in commerce.affiliate_product_selections, not site settings JSON.
             unset($incoming['selected_products']);
             Arr::forget($incoming, 'design.typography.font_file_name');
             Arr::forget($incoming, 'design.typography.font_file_path');

@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+// V2: Service CRUD + reorder. Integrates with Square/Fresha bidirectional sync via observers.
 class ProfessionalServiceController extends ApiController
 {
     use ResolveCurrentProfessional;

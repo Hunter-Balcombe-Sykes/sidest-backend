@@ -11,6 +11,7 @@ use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Privacy policy and terms of service management with templated and manual content sources.
 class ProfessionalLegalContentController extends ApiController
 {
     use ResolveCurrentProfessional;

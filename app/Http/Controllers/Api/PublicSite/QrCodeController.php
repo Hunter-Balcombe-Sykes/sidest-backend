@@ -10,6 +10,7 @@ use Endroid\QrCode\Writer\SvgWriter;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+// V2: QR code generation (SVG) and short-link redirection using the professional's qr_slug.
 class QrCodeController extends ApiController
 {
     use BuildsQrCodeUrls;

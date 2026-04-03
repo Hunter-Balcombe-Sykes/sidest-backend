@@ -10,6 +10,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
+// V2: Core. Batch-processes all eligible commission payouts via CommissionPayoutService. Runs on daily cron.
 class ProcessCommissionPayoutsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

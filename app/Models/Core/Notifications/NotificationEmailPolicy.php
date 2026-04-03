@@ -9,7 +9,7 @@ class NotificationEmailPolicy extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'notification_email_policies';
+    protected $table = 'notifications.notification_email_policies';
     public $incrementing = false;
     protected $keyType = 'string';
 

@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
+// V2: New in V2. Serves Shopify Storefront API credentials (domain + token) to Hydrogen storefronts. Enables product display without exposing admin tokens.
 class PublicShopifyStorefrontController extends ApiController
 {
     /**

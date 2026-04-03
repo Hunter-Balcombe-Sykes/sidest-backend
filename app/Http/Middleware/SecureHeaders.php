@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+// V2: Security headers on all responses (XFO, CSP, HSTS in production, nosniff, referrer-policy, permissions-policy).
 class SecureHeaders
 {
     public function handle(Request $request, Closure $next): Response

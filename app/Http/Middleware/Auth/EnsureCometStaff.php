@@ -7,6 +7,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+// V2: Staff-only gate. Checks supabase_uid maps to a CometStaff record.
 class EnsureCometStaff
 {
     public function handle(Request $request, Closure $next): Response

@@ -22,16 +22,21 @@ class DatabaseServiceProvider extends ServiceProvider
     {
         // Set PostgreSQL timeouts ONCE per connection, not per query
         $connectionName = config('database.default');
-        
-        if ($connectionName === 'pgsql') {
+
+        if ($connectionName !== 'pgsql') {
+            return;
+        }
+
+        try {
             $pdo = DB::connection()->getPdo();
-            
+
             $statementTimeout = config('database.connections.pgsql.statement_timeout', 30000);
             $lockTimeout = config('database.connections.pgsql.lock_timeout', 10000);
 
-            // Execute directly on PDO to avoid triggering DB::listen recursively
             $pdo->exec("SET statement_timeout = {$statementTimeout}");
             $pdo->exec("SET lock_timeout = {$lockTimeout}");
+        } catch (\PDOException) {
+            // Connection unavailable (e.g. missing credentials during config:clear)
         }
     }
 }

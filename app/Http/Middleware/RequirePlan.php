@@ -7,6 +7,7 @@ use App\Services\Billing\Entitlements;
 use Closure;
 use Illuminate\Http\Request;
 
+// V2: Subscription tier gate. Checks professional's plan meets minimum required tier via Entitlements service.
 class RequirePlan
 {
     public function __construct(private Entitlements $entitlements) {}

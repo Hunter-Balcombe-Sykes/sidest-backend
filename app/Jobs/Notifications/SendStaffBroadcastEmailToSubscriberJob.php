@@ -12,6 +12,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Mail;
 
+// V2: Sends individual staff broadcast email, respecting unsubscribe preferences and subscriber status.
 class SendStaffBroadcastEmailToSubscriberJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

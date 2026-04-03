@@ -36,6 +36,7 @@ use Illuminate\Support\Facades\Storage;
  *
  * Requires ffmpeg and ffprobe to be available (configured via config/comet.php).
  */
+// V2: Transcodes videos to MP4 + HLS via FFmpeg. Feature-flagged (COMET_VIDEO_UPLOADS_ENABLED). Uses dedicated redis_video connection.
 class VideoVariantService
 {
     /* ------------------------------------------------------------------ */

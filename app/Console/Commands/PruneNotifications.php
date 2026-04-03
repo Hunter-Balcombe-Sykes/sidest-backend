@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use App\Models\Core\Notifications\Notification;
 
+// V2: Deletes expired notifications older than N days. Cascades to notification receipts.
 class PruneNotifications extends Command
 {
     protected $signature = 'comet:prune-notifications {--days=30} {--dry-run}';

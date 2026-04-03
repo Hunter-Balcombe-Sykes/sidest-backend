@@ -6,6 +6,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalLegalContent;
 use App\Models\Core\Site\Site;
 
+// V2: Generates templated privacy policies and terms of service. Supports manual overrides and auto-refreshes on profile/site changes.
 class ProfessionalLegalContentService
 {
     public function getOrCreate(Professional $professional, ?Site $site = null): ProfessionalLegalContent

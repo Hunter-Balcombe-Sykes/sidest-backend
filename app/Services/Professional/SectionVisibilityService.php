@@ -8,6 +8,7 @@ use App\Models\Core\Site\Block;
 use App\Models\Core\Site\SiteMedia;
 use Illuminate\Support\Facades\Log;
 
+// V2: Validates section visibility requirements. Gallery needs 1+ images; booking needs 1+ service AND a booking integration or link.
 class SectionVisibilityService
 {
     /**

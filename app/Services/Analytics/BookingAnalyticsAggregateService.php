@@ -6,6 +6,7 @@ use App\Services\Analytics\Concerns\ResolvesTimezone;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
+// V2: Aggregates booking metrics (counts, revenue, customers) from Square/Fresha. Not V2 commerce — booking analytics only.
 class BookingAnalyticsAggregateService
 {
     use ResolvesTimezone;

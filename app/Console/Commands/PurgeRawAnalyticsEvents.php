@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
+// V2: Deletes raw analytics events older than retention window (min 30 days). Aggregate data preserved in hourly/daily tables.
 class PurgeRawAnalyticsEvents extends Command
 {
     protected $signature = 'comet:analytics:purge-raw-events
@@ -19,12 +20,9 @@ class PurgeRawAnalyticsEvents extends Command
     private const BATCH_SIZE = 10_000;
 
     private const TABLES = [
-        // Child tables first (FK cascades prevent reverse order).
-        'analytics.store_order_event_items' => 'created_at',
-        'analytics.store_order_events'      => 'occurred_at',
-        'analytics.link_clicks'             => 'occurred_at',
-        'analytics.site_visits'             => 'occurred_at',
-        'analytics.lead_submissions'        => 'occurred_at',
+        'analytics.link_clicks'      => 'occurred_at',
+        'analytics.site_visits'      => 'occurred_at',
+        'analytics.lead_submissions' => 'occurred_at',
     ];
 
     public function handle(): int

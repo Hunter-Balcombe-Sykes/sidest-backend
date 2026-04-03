@@ -13,6 +13,7 @@ use App\Models\Core\Site\Block;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+// V2: CRUD + reorder for custom link blocks on the professional's mini-site.
 class ProfessionalLinkBlockController extends ApiController
 {
     use ResolveCurrentProfessional;

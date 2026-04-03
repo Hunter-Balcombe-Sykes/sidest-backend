@@ -6,6 +6,7 @@ use App\Models\Retail\CommissionPayout;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;
 
+// V2: Core. Publishes payout failure notifications to affiliates and action-required alerts to brands.
 class CommissionPayoutObserver
 {
     public bool $afterCommit = true;

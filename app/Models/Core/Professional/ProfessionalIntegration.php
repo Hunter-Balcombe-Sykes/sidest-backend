@@ -6,6 +6,7 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: OAuth integration record (Square, Fresha, Shopify). Stores encrypted tokens and provider_metadata (webhook IDs, storefront tokens).
 class ProfessionalIntegration extends BaseModel
 {
     use HasUuids;
@@ -14,7 +15,7 @@ class ProfessionalIntegration extends BaseModel
     public const PROVIDER_FRESHA = 'fresha';
     public const PROVIDER_SHOPIFY = 'shopify';
 
-    protected $table = 'professional_integrations';
+    protected $table = 'core.professional_integrations';
 
     public $incrementing = false;
     protected $keyType = 'string';

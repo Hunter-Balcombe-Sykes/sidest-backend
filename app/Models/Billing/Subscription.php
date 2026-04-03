@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Subscription extends BaseModel
 {
-    protected $table = 'subscriptions';
+    protected $table = 'billing.subscriptions';
     public $incrementing = false;
         protected $keyType = 'string';
 

@@ -8,6 +8,7 @@ use App\Services\Cache\SiteCacheService;
 use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Invalidates site cache, refreshes legal templates, and dispatches cache warm job on publish.
 class SiteObserver
 {
     public bool $afterCommit = true;

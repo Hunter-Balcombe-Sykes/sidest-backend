@@ -12,6 +12,7 @@ use App\Models\Core\Site\Block;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
+// V2: Staff manages a professional's custom link blocks (CRUD + reorder).
 class StaffLinkBlockManagementController extends ApiController
 {
     use ResolveCurrentSite;

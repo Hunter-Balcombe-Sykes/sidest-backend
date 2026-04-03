@@ -21,6 +21,7 @@ use Throwable;
  *
  * Dispatched onto the "videos" queue to avoid blocking image workers.
  */
+// V2: Async cleanup of HLS segments and storage artifacts for deleted video media. Queue: videos.
 class DeleteMediaArtifactsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

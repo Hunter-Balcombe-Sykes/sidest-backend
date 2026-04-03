@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+// V2: Staff manages notification email policies (force_on, force_off, default) at global and per-professional level.
 class StaffNotificationEmailPolicyController extends ApiController
 {
     public function indexGlobal(): JsonResponse

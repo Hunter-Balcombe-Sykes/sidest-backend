@@ -9,7 +9,7 @@ class AllSiteData extends BaseModel
 {
     use HasFactory;
 
-    protected $table = 'all_site_data';
+    protected $table = 'site.all_site_data';
     protected $primaryKey = 'site_id';
 
     public $incrementing = false;

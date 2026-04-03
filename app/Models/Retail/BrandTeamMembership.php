@@ -7,11 +7,12 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Brand team role assignment (owner, finance, marketing, analyst, read_only). Powers BrandAccessService capability checks.
 class BrandTeamMembership extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'retail.brand_team_memberships';
+    protected $table = 'brand.brand_team_memberships';
 
     public $incrementing = false;
 

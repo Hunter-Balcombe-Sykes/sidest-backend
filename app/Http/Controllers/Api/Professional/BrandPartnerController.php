@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
 
+// V2: Affiliate connects to/disconnects from brand partners. Simplified to single-brand model in V2.
 class BrandPartnerController extends ApiController
 {
     use NormalizesPerPage;

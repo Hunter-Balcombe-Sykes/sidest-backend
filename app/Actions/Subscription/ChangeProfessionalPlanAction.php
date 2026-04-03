@@ -5,6 +5,7 @@ namespace App\Actions\Subscription;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Validation\ValidationException;
 
+// V2: Changes professional's active subscription plan. Resets cancel_at_period_end on plan change.
 class ChangeProfessionalPlanAction
 {
     /**

@@ -6,11 +6,12 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Brand business details (ABN, industries, affiliate visibility). brand_status gates activation in V2.
 class BrandProfile extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'brand_profiles';
+    protected $table = 'brand.brand_profiles';
 
     public $incrementing = false;
 

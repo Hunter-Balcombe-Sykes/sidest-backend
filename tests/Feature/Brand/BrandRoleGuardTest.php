@@ -2,7 +2,6 @@
 
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
-use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
 use App\Models\Core\Professional\Professional;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Store\SelectionCleanupService;
@@ -17,14 +16,6 @@ function brandGuardRequest(string $professionalType): Request
 
     return $request;
 }
-
-it('blocks non-brand users from brand store endpoints', function () {
-    $controller = new BrandStoreController;
-    $request = brandGuardRequest('barber');
-
-    expect($controller->index($request)->status())->toBe(403);
-    expect($controller->updateSettings($request)->status())->toBe(403);
-});
 
 it('blocks non-brand users from brand affiliate listing endpoint', function () {
     $controller = new BrandAffiliateController;

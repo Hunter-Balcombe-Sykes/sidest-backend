@@ -10,12 +10,11 @@ use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Views\PublicSitePayload;
-use App\Services\Branding\BrandFontResolver;
 use App\Services\Legal\ProfessionalLegalContentService;
-use App\Services\Store\FeaturedProductsPayloadService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
+// V2: Public site payload caching with single-flight locking (prevents thundering herd). Handles 95% of traffic. Simplified in V2 — no more product payload caching.
 class SiteCacheService
 {
     private const MISS_SENTINEL = '__MISS__';
@@ -23,10 +22,7 @@ class SiteCacheService
     /** @var array<string, array<string, string|null>|null> */
     private array $brandPartnerEnrichmentCache = [];
 
-    public function __construct(
-        private readonly FeaturedProductsPayloadService $featuredProductsPayloads,
-        private readonly BrandFontResolver $brandFonts
-    ) {}
+    public function __construct() {}
 
     /**
      * Get public site payload (MOST CRITICAL - 95% of traffic)
@@ -291,7 +287,7 @@ class SiteCacheService
      */
     public function hydrateTypographySettings(array $settings, string $brandProfessionalId): array
     {
-        return $this->brandFonts->hydrateTypographySettings($settings, $brandProfessionalId);
+        return $settings;
     }
 
     /**
@@ -378,8 +374,6 @@ class SiteCacheService
         $partnerSettings = is_array($partnerSite?->settings ?? null) ? $partnerSite->settings : [];
         $design = is_array($partnerSettings['design'] ?? null) ? $partnerSettings['design'] : [];
         $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
-        $fontFileUrl = $this->brandFonts->activeFontUrl($professionalId);
-
         $resolved = [
             'username' => $this->normalizeString($partnerProfessional?->handle ?? null),
             'first_name' => $this->normalizeString($partnerProfessional?->first_name ?? null),
@@ -388,7 +382,7 @@ class SiteCacheService
             'border_radius' => $this->normalizeString($design['border_radius'] ?? $design['borderRadius'] ?? null),
             'border_width' => $this->normalizeString($design['border_width'] ?? $design['borderWidth'] ?? null),
             'general_spacing_padding' => $this->normalizeString($design['general_spacing_padding'] ?? $design['generalSpacingPadding'] ?? null),
-            'font_file_url' => $this->normalizeString($fontFileUrl),
+            'font_file_url' => null,
             'logo_letter_spacing' => $this->normalizeString($typography['logo_letter_spacing'] ?? $typography['logoLetterSpacing'] ?? null),
             'logo_font_size' => $this->normalizeString($typography['logo_font_size'] ?? $typography['logoFontSize'] ?? null),
         ];
@@ -577,10 +571,12 @@ class SiteCacheService
         }
 
         if ($store === null) {
-            $store = $this->featuredProductsPayloads->build(
-                professionalId: $professionalId,
-                logContext: 'public_site_payload'
-            );
+            $store = [
+                'selected_products' => [],
+                'default_commission_rate' => (float) config('comet.store.default_commission_rate', 15),
+                'max_featured_products' => (int) config('comet.store.max_featured_products', 12),
+                'checkout_mode' => 'shopify',
+            ];
         }
 
         $payload['store'] = $store;
@@ -801,9 +797,6 @@ class SiteCacheService
     public function invalidateSite(Site $site): void
     {
         $professionalId = (string) ($site->professional_id ?? '');
-        if ($professionalId !== '') {
-            $this->brandFonts->forget($professionalId);
-        }
 
         $keys = [
             CacheKeyGenerator::publicSitePayload($site->subdomain),

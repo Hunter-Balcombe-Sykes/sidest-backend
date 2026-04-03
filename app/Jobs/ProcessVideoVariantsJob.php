@@ -27,6 +27,7 @@ use Throwable;
  * Worker invocation:
  *   php artisan queue:work redis_video --queue=videos --timeout=3600
  */
+// V2: Transcodes video to MP4 + HLS variants with poster. Feature-flagged. Uses dedicated redis_video connection. Queue: videos.
 class ProcessVideoVariantsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

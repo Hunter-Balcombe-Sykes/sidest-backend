@@ -41,7 +41,7 @@ class MediaVariant extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'media_variants';
+    protected $table = 'site.media_variants';
 
     public $incrementing = false;
     protected $keyType = 'string';

@@ -12,6 +12,7 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Staff manages a professional's customers (view, update, archive, restore, hard delete).
 class StaffCustomerManagementController extends ApiController
 {
     use HandlesSearchQueries;

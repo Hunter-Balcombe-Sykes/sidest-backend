@@ -1,8 +1,5 @@
 <?php
 
-use App\Jobs\RefreshActiveSegmentMembersJob;
-use App\Jobs\SendPromotionEndNotificationsJob;
-use App\Jobs\SendPromotionStartNotificationsJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -88,23 +85,3 @@ Schedule::job(new \App\Jobs\Notifications\SendWeeklyAnalyticsNotificationJob())
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: send-weekly-analytics-notification');
     });
 
-Schedule::job(new RefreshActiveSegmentMembersJob())
-    ->hourly()
-    ->withoutOverlapping()
-    ->onFailure(function (): void {
-        \Illuminate\Support\Facades\Log::error('Scheduled task failed: refresh-active-segment-members');
-    });
-
-Schedule::job(new SendPromotionStartNotificationsJob())
-    ->everyFiveMinutes()
-    ->withoutOverlapping()
-    ->onFailure(function (): void {
-        \Illuminate\Support\Facades\Log::error('Scheduled task failed: send-promotion-start-notifications');
-    });
-
-Schedule::job(new SendPromotionEndNotificationsJob())
-    ->everyFiveMinutes()
-    ->withoutOverlapping()
-    ->onFailure(function (): void {
-        \Illuminate\Support\Facades\Log::error('Scheduled task failed: send-promotion-end-notifications');
-    });

@@ -8,8 +8,6 @@ use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicMarketingPreferenceController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
-use App\Http\Controllers\Api\PublicSite\PublicStoreController;
-
 $publicDomain = config('comet.public_domain');
 
 // Public/Anon
@@ -31,15 +29,6 @@ Route::group([
     Route::post('/booking/availability', [PublicBookingController::class, 'availability'])
         ->middleware('throttle:public-site');
     Route::post('/booking/checkout', [PublicBookingController::class, 'checkout'])
-        ->middleware('throttle:public-site');
-
-    Route::get('/store/featured-products', [PublicStoreController::class, 'featuredProducts'])
-        ->middleware('throttle:public-site');
-    Route::post('/store/checkout-session', [PublicStoreController::class, 'createCheckoutSession'])
-        ->middleware('throttle:public-site');
-    Route::post('/store/stripe-checkout', [PublicStoreController::class, 'createStripeCheckout'])
-        ->middleware('throttle:public-site');
-    Route::post('/store/payment-intent', [PublicStoreController::class, 'createPaymentIntent'])
         ->middleware('throttle:public-site');
 
     // Page View Analytics

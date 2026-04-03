@@ -7,6 +7,7 @@ use App\Models\Analytics\SiteVisit;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 
+// V2: Visit/click stats caching with version-token invalidation for bulk cache busting.
 class AnalyticsCacheService
 {
     public function getVisitStats(string $professionalId, Carbon $startDate, Carbon $endDate): array

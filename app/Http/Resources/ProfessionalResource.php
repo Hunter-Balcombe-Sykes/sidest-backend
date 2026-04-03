@@ -24,7 +24,6 @@ class ProfessionalResource extends JsonResource
             'professional_type' => $this->professional_type,
             'status' => $this->status,
             'onboarding_step' => $this->onboarding_step,
-            'primary_enterprise_id' => $this->primary_enterprise_id,
             'qr_slug' => $this->qr_slug,
             'public_contact_number' => $this->public_contact_number,
             'public_contact_email' => $this->public_contact_email,

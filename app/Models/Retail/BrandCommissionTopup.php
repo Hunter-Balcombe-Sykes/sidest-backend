@@ -7,11 +7,12 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Manual wallet top-up record via Stripe Checkout. Credits brand's commission wallet balance.
 class BrandCommissionTopup extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'retail.brand_commission_topups';
+    protected $table = 'commerce.brand_commission_topups';
 
     public $incrementing = false;
     protected $keyType = 'string';

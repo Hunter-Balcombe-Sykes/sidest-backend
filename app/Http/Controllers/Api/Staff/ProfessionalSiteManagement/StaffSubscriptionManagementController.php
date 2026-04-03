@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
+// V2: Staff manages professional subscriptions (view, change plan, cancel, resume).
 class StaffSubscriptionManagementController extends ApiController
 {
     /**

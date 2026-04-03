@@ -11,6 +11,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
+// V2: Rebuilds site visit/click metrics for a professional's hour via SiteAnalyticsAggregateService. Queue: analytics.
 class RebuildSiteHourlyAggregatesJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

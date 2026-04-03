@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
+// V2: Core. Shopify app install OAuth flow (HMAC validation, token exchange, shop details). Entry point for brand Shopify connection.
 class ShopifyAppOAuthController extends ApiController
 {
     use NormalizesShopDomain;

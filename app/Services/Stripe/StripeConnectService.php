@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
 
+// V2: Core. Stripe Connect Express onboarding, payment method collection, wallet management, and manual top-up checkout sessions. Required for affiliate payout flow.
 class StripeConnectService
 {
     private StripeClient $stripe;

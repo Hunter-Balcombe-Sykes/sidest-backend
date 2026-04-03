@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Jobs\Notifications\SendStaffBroadcastEmailsJob;
 
+// V2: Staff creates global or targeted notifications with optional email broadcast.
 class StaffNotificationController extends ApiController
 {
     /** POST /staff/notifications */

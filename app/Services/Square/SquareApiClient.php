@@ -7,6 +7,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
+// V2: Square Catalog API client for booking services. Handles pagination, category mapping, and automatic token refresh on 401.
 class SquareApiClient
 {
     public function __construct(

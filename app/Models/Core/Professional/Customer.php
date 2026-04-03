@@ -11,7 +11,7 @@ class Customer extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'customers';
+    protected $table = 'core.customers';
 
     public $incrementing = false;
     protected $keyType = 'string';

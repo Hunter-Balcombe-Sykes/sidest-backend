@@ -11,6 +11,7 @@ use App\Services\Store\SelectionCleanupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Brand views and disconnects their connected affiliates. Single-brand constraint means each affiliate has exactly one brand.
 class BrandAffiliateController extends ApiController
 {
     use ResolveCurrentProfessional;

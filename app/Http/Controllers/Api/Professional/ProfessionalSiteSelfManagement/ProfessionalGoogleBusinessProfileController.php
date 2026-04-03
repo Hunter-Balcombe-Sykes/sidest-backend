@@ -9,6 +9,7 @@ use App\Http\Requests\Api\Professional\Site\UpsertGoogleBusinessProfileRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Store and retrieve Google Business Profile settings (place ID, hours, location, contact info).
 class ProfessionalGoogleBusinessProfileController extends ApiController
 {
     use ResolveCurrentProfessional;

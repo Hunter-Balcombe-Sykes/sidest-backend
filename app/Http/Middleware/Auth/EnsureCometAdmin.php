@@ -7,6 +7,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+// V2: Admin-only gate. Requires staff record with role=admin.
 class EnsureCometAdmin
 {
     public function handle(Request $request, Closure $next): Response

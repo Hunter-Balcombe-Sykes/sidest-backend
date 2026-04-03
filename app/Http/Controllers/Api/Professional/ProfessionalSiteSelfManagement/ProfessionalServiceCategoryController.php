@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+// V2: Full CRUD + reorder for service categories. Deleting a category moves its services to uncategorized.
 class ProfessionalServiceCategoryController extends ApiController
 {
     use ResolveCurrentProfessional;

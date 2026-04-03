@@ -14,6 +14,7 @@ use Throwable;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
+// V2: Site visit analytics (visits, clicks, devices, countries, traffic sources). Unrelated to commerce — site identity analytics only.
 class ProfessionalAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;

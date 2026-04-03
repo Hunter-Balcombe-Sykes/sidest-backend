@@ -2,12 +2,10 @@
 
 namespace App\Services\Store;
 
-use App\Models\Core\Enterprise\Enterprise;
-use App\Models\Core\Enterprise\EnterpriseBrandLink;
-use App\Models\Core\Enterprise\ProfessionalEnterpriseMembership;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\BrandTeamMembership;
 
+// V2: Core. Role-based access control for brand operations. 5 roles (owner, finance, marketing, analyst, read_only) with capability-based permission checks.
 class BrandAccessService
 {
     public const ROLE_OWNER = 'owner';
@@ -15,7 +13,6 @@ class BrandAccessService
     public const ROLE_MARKETING = 'marketing';
     public const ROLE_ANALYST = 'analyst';
     public const ROLE_READ_ONLY = 'read_only';
-    public const ROLE_ENTERPRISE_FULL = 'enterprise_full';
 
     public const CAPABILITY_ANALYTICS_NON_FINANCIAL_READ = 'analytics.non_financial.read';
     public const CAPABILITY_ANALYTICS_FINANCIAL_READ = 'analytics.financial.read';
@@ -118,41 +115,6 @@ class BrandAccessService
             $this->grantRole($rolesByBrand, (string) $professional->id, self::ROLE_OWNER);
         }
 
-        $enterpriseIds = ProfessionalEnterpriseMembership::query()
-            ->where('professional_id', $professional->id)
-            ->whereNull('ends_at')
-            ->whereIn('relationship_type', ['owner', 'employee'])
-            ->pluck('enterprise_id')
-            ->filter(static fn ($id): bool => is_string($id) && trim($id) !== '')
-            ->values()
-            ->all();
-
-        if ($enterpriseIds !== []) {
-            $distributorEnterpriseIds = Enterprise::query()
-                ->whereIn('id', $enterpriseIds)
-                ->where('enterprise_type', 'distributor')
-                ->where('status', 'active')
-                ->whereNull('deleted_at')
-                ->pluck('id')
-                ->filter(static fn ($id): bool => is_string($id) && trim($id) !== '')
-                ->values()
-                ->all();
-
-            if ($distributorEnterpriseIds !== []) {
-                $enterpriseBrandIds = EnterpriseBrandLink::query()
-                    ->whereIn('enterprise_id', $distributorEnterpriseIds)
-                    ->where('status', 'active')
-                    ->pluck('brand_professional_id')
-                    ->filter(static fn ($id): bool => is_string($id) && trim($id) !== '')
-                    ->values()
-                    ->all();
-
-                foreach ($enterpriseBrandIds as $enterpriseBrandId) {
-                    $this->grantRole($rolesByBrand, (string) $enterpriseBrandId, self::ROLE_ENTERPRISE_FULL);
-                }
-            }
-        }
-
         $teamMemberships = BrandTeamMembership::query()
             ->where('member_professional_id', $professional->id)
             ->where('status', 'active')
@@ -229,8 +191,7 @@ class BrandAccessService
 
         return match ($role) {
             self::ROLE_OWNER,
-            self::ROLE_FINANCE,
-            self::ROLE_ENTERPRISE_FULL => [
+            self::ROLE_FINANCE => [
                 self::CAPABILITY_ANALYTICS_NON_FINANCIAL_READ,
                 self::CAPABILITY_ANALYTICS_FINANCIAL_READ,
                 self::CAPABILITY_EXPORT_NON_FINANCIAL,

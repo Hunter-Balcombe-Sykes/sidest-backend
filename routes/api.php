@@ -11,10 +11,8 @@ use App\Http\Controllers\Api\PublicSite\PublicWaitlistController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\PublicSite\PublicShopifyStorefrontController;
-use App\Http\Controllers\Api\PublicSite\PublicStoreController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
-use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
@@ -38,18 +36,11 @@ Route::middleware('throttle:webhooks')->group(function () {
     Route::post('/webhooks/stripe-connect', StripeConnectWebhookController::class);
 });
 
-// Shopify webhooks (no auth middleware)
-Route::middleware('throttle:shopify-webhooks')->group(function () {
-    Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class);
-    Route::post('/webhooks/shopify/orders/fallback', [ShopifyOrderWebhookController::class, 'fallback']);
-});
-
 // bootstrap uses ONLY JWT middleware
 Route::middleware(['supabase.jwt', 'throttle:bootstrap'])->post('/bootstrap', [BootstrapController::class, 'bootstrap']);
 
 // Split route files (keeps api.php tidy)
 require __DIR__ . '/api/professional.php';
-require __DIR__ . '/api/enterprise.php';
 require __DIR__ . '/api/staff.php';
 require __DIR__ . '/api/publicSite.php';
 
@@ -75,15 +66,6 @@ Route::post('/public/booking/availability-by-slug', [PublicBookingController::cl
 Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
     ->middleware('throttle:public-site');
 Route::get('/public/shopify/storefront-config', [PublicShopifyStorefrontController::class, 'storefrontConfig'])
-    ->middleware('throttle:public-site');
-
-Route::get('/public/store/featured-products-by-slug', [PublicStoreController::class, 'featuredProducts'])
-    ->middleware('throttle:public-site');
-Route::post('/public/store/checkout-session-by-slug', [PublicStoreController::class, 'createCheckoutSession'])
-    ->middleware('throttle:public-site');
-Route::post('/public/store/stripe-checkout-by-slug', [PublicStoreController::class, 'createStripeCheckout'])
-    ->middleware('throttle:public-site');
-Route::post('/public/store/payment-intent-by-slug', [PublicStoreController::class, 'createPaymentIntent'])
     ->middleware('throttle:public-site');
 
 // Header/site-id based fallback for path-based frontend routing.

@@ -2,6 +2,7 @@
 
 namespace App\Services\Cache;
 
+// V2: Central cache key naming convention. All cache keys across the application flow through this class.
 class CacheKeyGenerator
 {
     public static function publicSite(string $subdomain): string

@@ -11,6 +11,7 @@ use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Invalidates cache, re-evaluates booking visibility, and dispatches Square/Fresha sync on service changes.
 class ServiceObserver
 {
     public bool $afterCommit = true;

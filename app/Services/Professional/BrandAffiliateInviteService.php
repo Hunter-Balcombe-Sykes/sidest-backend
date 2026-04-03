@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use RuntimeException;
 
+// V2: Core onboarding. Affiliate invitation lifecycle — create (single/bulk/CSV), claim, decline. Handles email matching, expiration, and notifications.
 class BrandAffiliateInviteService
 {
     private const BULK_MAX_ROWS = 500;

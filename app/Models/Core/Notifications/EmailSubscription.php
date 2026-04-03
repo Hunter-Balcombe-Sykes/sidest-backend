@@ -12,7 +12,7 @@ class EmailSubscription extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'email_subscriptions';
+    protected $table = 'notifications.email_subscriptions';
 
     public $incrementing = false;
     protected $keyType = 'string';

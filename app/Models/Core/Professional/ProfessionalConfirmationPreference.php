@@ -10,7 +10,7 @@ class ProfessionalConfirmationPreference extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'professional_confirmation_preferences';
+    protected $table = 'core.professional_confirmation_preferences';
 
     public $incrementing = false;
     protected $keyType = 'string';

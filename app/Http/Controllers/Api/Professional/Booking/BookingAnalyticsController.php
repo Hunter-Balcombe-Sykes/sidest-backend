@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
+// V2: Booking analytics (counts, revenue, customers) from Square/Fresha integrations. Unrelated to V2 commerce.
 class BookingAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;

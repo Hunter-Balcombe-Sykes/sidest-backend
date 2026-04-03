@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
+// V2: Manages site section visibility (gallery, services, shop, booking, bio). Account-type restrictions apply.
 class ProfessionalSectionBlockController extends ApiController
 {
     use ResolveCurrentProfessional;

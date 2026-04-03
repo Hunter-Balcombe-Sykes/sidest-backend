@@ -7,6 +7,7 @@ use App\Models\Core\Professional\ProfessionalLegalContent;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Invalidates site cache when legal content (privacy policy, terms) changes.
 class ProfessionalLegalContentObserver
 {
     public bool $afterCommit = true;

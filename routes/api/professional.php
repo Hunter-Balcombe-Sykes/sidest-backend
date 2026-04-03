@@ -27,17 +27,6 @@ use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationC
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
 use App\Http\Controllers\Api\Professional\BrandOnboardingReadinessController;
 use App\Http\Controllers\Api\Professional\BrandProfileController;
-use App\Http\Controllers\Api\Professional\Store\BrandAffiliateDefaultsController;
-use App\Http\Controllers\Api\Professional\Store\BrandAffiliateSettingsController;
-use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateOverrideController;
-use App\Http\Controllers\Api\Professional\Store\BrandProductAffiliateSettingController;
-use App\Http\Controllers\Api\Professional\Store\BrandProductMediaController;
-use App\Http\Controllers\Api\Professional\Store\BrandProductsController;
-use App\Http\Controllers\Api\Professional\Store\BrandAffiliateSegmentController;
-use App\Http\Controllers\Api\Professional\Store\BrandPromotionController;
-use App\Http\Controllers\Api\Professional\Store\BrandStoreController;
-use App\Http\Controllers\Api\Professional\Store\FeaturedProductsController;
-use App\Http\Controllers\Api\Professional\Store\StoreAnalyticsV2Controller;
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
@@ -162,7 +151,6 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
 
         // Image Upload (server-side processing → WebP variants via queue)
         Route::post('/uploads', [ProfessionalUploadController::class, 'upload']);
-        Route::post('/uploads/brand-font', [ProfessionalUploadController::class, 'uploadBrandFont']);
         Route::post('/uploads/brand-logo', [ProfessionalUploadController::class, 'uploadBrandLogo']);
         Route::post('/uploads/brand-placeholder-image', [ProfessionalUploadController::class, 'uploadBrandPlaceholderImage']);
 
@@ -216,96 +204,6 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::post('/shopify/disconnect', [ShopifyIntegrationController::class, 'disconnect']);
         Route::get('/shopify/token', [ShopifyIntegrationController::class, 'token']);
         Route::post('/shopify/webhooks/register', [ShopifyIntegrationController::class, 'registerWebhooks']);
-
-        // Store: Featured Products
-        Route::get('/store/featured-products', [FeaturedProductsController::class, 'index']);
-        Route::get('/store/available-products', [FeaturedProductsController::class, 'availableProducts']);
-        Route::put('/store/featured-products', [FeaturedProductsController::class, 'update']);
-Route::get('/store/brand-analytics/overview', [StoreAnalyticsV2Controller::class, 'brandOverview']);
-        Route::get('/store/brand-analytics/influencers', [StoreAnalyticsV2Controller::class, 'brandInfluencers']);
-        Route::get('/store/brand-analytics/influencers/{professionalId}', [StoreAnalyticsV2Controller::class, 'brandInfluencerDetail'])
-            ->whereUuid('professionalId');
-        Route::get('/store/brand-analytics/products', [StoreAnalyticsV2Controller::class, 'brandProducts']);
-        Route::get('/store/brand-analytics/products/{brandProductId}', [StoreAnalyticsV2Controller::class, 'brandProductDetail'])
-            ->whereUuid('brandProductId');
-        Route::get('/store/brand-analytics/commissions', [StoreAnalyticsV2Controller::class, 'brandCommissions']);
-        Route::get('/store/brand-analytics/timeseries', [StoreAnalyticsV2Controller::class, 'brandTimeseries']);
-
-        Route::get('/store/my-analytics/overview', [StoreAnalyticsV2Controller::class, 'myOverview']);
-        Route::get('/store/my-analytics/products', [StoreAnalyticsV2Controller::class, 'myProducts']);
-        Route::get('/store/my-analytics/products/{brandProductId}', [StoreAnalyticsV2Controller::class, 'myProductDetail'])
-            ->whereUuid('brandProductId');
-        Route::get('/store/my-analytics/commissions', [StoreAnalyticsV2Controller::class, 'myCommissions']);
-        Route::get('/store/my-analytics/customers', [StoreAnalyticsV2Controller::class, 'myCustomers']);
-        Route::get('/store/my-analytics/timeseries', [StoreAnalyticsV2Controller::class, 'myTimeseries']);
-
-        // Store: Brand Settings & Per-Product Settings
-        Route::get('/store/brand-settings', [BrandStoreController::class, 'index']);
-        Route::patch('/store/brand-settings', [BrandStoreController::class, 'updateSettings']);
-        Route::get('/store/brand-products', [BrandProductsController::class, 'index']);
-        Route::patch('/store/brand-products/bulk', [BrandProductsController::class, 'bulkUpdate']);
-        Route::patch('/store/brand-products/{brandProductId}', [BrandProductsController::class, 'update'])
-            ->whereUuid('brandProductId');
-
-        // Store: Affiliate product access overrides (deny / allow)
-        Route::get('/store/affiliate-overrides', [BrandProductAffiliateOverrideController::class, 'index']);
-        Route::put('/store/affiliate-overrides/deny', [BrandProductAffiliateOverrideController::class, 'upsertDeny']);
-        Route::delete('/store/affiliate-overrides/deny', [BrandProductAffiliateOverrideController::class, 'removeDeny']);
-        Route::put('/store/affiliate-overrides/allow', [BrandProductAffiliateOverrideController::class, 'upsertAllow']);
-        Route::delete('/store/affiliate-overrides/allow', [BrandProductAffiliateOverrideController::class, 'removeAllow']);
-
-        // Store: Per-affiliate product pricing settings
-        Route::get('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'index']);
-        Route::put('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'upsert']);
-        Route::delete('/store/affiliate-product-settings', [BrandProductAffiliateSettingController::class, 'remove']);
-
-        // Store: Affiliate custom product media
-        Route::get('/store/products/{brandProductId}/media', [BrandProductMediaController::class, 'index'])
-            ->whereUuid('brandProductId');
-        Route::post('/store/products/{brandProductId}/media', [BrandProductMediaController::class, 'upload'])
-            ->whereUuid('brandProductId');
-        Route::post('/store/products/{brandProductId}/media/reorder', [BrandProductMediaController::class, 'reorder'])
-            ->whereUuid('brandProductId');
-        Route::delete('/store/products/{brandProductId}/media/{mediaId}', [BrandProductMediaController::class, 'destroy'])
-            ->whereUuid('brandProductId')
-            ->whereUuid('mediaId');
-
-        // Store: Brand affiliate defaults (theme + products for new affiliates)
-        Route::get('/store/affiliate-defaults', [BrandAffiliateDefaultsController::class, 'show']);
-        Route::patch('/store/affiliate-defaults', [BrandAffiliateDefaultsController::class, 'update']);
-
-        // Store: Per-affiliate settings (brand-managed)
-        Route::get('/store/affiliate-settings/{affiliateId}', [BrandAffiliateSettingsController::class, 'show'])
-            ->whereUuid('affiliateId');
-        Route::patch('/store/affiliate-settings/{affiliateId}', [BrandAffiliateSettingsController::class, 'update'])
-            ->whereUuid('affiliateId');
-
-        // Store: Affiliate segments (dynamic criteria-based groupings)
-        Route::get('/store/affiliate-segments', [BrandAffiliateSegmentController::class, 'index']);
-        Route::post('/store/affiliate-segments', [BrandAffiliateSegmentController::class, 'store']);
-        Route::get('/store/affiliate-segments/{segmentId}', [BrandAffiliateSegmentController::class, 'show'])
-            ->whereUuid('segmentId');
-        Route::patch('/store/affiliate-segments/{segmentId}', [BrandAffiliateSegmentController::class, 'update'])
-            ->whereUuid('segmentId');
-        Route::delete('/store/affiliate-segments/{segmentId}', [BrandAffiliateSegmentController::class, 'destroy'])
-            ->whereUuid('segmentId');
-        Route::post('/store/affiliate-segments/{segmentId}/refresh', [BrandAffiliateSegmentController::class, 'refresh'])
-            ->whereUuid('segmentId');
-
-        // Store: Promotions (time-bounded commission/discount campaigns)
-        Route::get('/store/promotions', [BrandPromotionController::class, 'index']);
-        Route::post('/store/promotions', [BrandPromotionController::class, 'store']);
-        Route::post('/store/promotions/preview', [BrandPromotionController::class, 'preview']);
-        Route::get('/store/promotions/{promotionId}', [BrandPromotionController::class, 'show'])
-            ->whereUuid('promotionId');
-        Route::patch('/store/promotions/{promotionId}', [BrandPromotionController::class, 'update'])
-            ->whereUuid('promotionId');
-        Route::delete('/store/promotions/{promotionId}', [BrandPromotionController::class, 'destroy'])
-            ->whereUuid('promotionId');
-        Route::post('/store/promotions/{promotionId}/clone', [BrandPromotionController::class, 'clone'])
-            ->whereUuid('promotionId');
-        Route::get('/store/promotions/{promotionId}/analytics', [BrandPromotionController::class, 'analytics'])
-            ->whereUuid('promotionId');
 
         // Brand profile (business fields)
         Route::get('/brand/profile', [BrandProfileController::class, 'show']);

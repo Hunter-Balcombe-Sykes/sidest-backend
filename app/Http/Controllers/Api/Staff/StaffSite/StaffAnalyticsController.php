@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
+// V2: Staff-accessible analytics view for a professional's site (visits, clicks, device breakdown).
 class StaffAnalyticsController extends ApiController
 {
     /**

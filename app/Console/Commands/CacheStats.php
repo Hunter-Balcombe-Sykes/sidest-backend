@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Redis;
 
+// V2: Diagnostic tool. Shows Redis cache hit rate, memory usage, and key counts.
 class CacheStats extends Command
 {
     protected $signature = 'cache:stats';

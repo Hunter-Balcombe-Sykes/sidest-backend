@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
+// V2: Liveness/readiness probe. Checks database and Redis connectivity with response times for deployment health checks.
 class HealthController extends ApiController
 {
     public function check(): JsonResponse

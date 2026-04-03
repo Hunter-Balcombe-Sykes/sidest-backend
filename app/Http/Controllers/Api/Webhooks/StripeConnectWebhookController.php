@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Controller;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
-use App\Services\Store\PublicStripeCheckoutService;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,12 +12,9 @@ use Illuminate\Support\Facades\Log;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\Webhook;
 
+// V2: Core. Processes Stripe Connect events: account updates, checkout completions, transfer status, payment intents. Drives the commission payout lifecycle.
 class StripeConnectWebhookController extends Controller
 {
-    public function __construct(
-        private readonly PublicStripeCheckoutService $stripeCheckout,
-    ) {}
-
     public function __invoke(Request $request): JsonResponse
     {
         $payload = $request->getContent();
@@ -73,21 +69,10 @@ class StripeConnectWebhookController extends Controller
 
     private function handleCheckoutSessionCompleted(object $checkoutSession, string $connectedAccountId): void
     {
-        $purpose = trim((string) ($checkoutSession->metadata?->purpose ?? ''));
-        if ($purpose !== 'public_store_stripe_checkout') {
-            return;
-        }
-
-        try {
-            app(PublicStripeCheckoutService::class)
-                ->finalizeCompletedCheckoutSession($checkoutSession, $connectedAccountId);
-        } catch (\Throwable $e) {
-            Log::error('Stripe checkout completion finalization failed', [
-                'checkout_session_id' => $checkoutSession->id ?? null,
-                'connected_account_id' => $connectedAccountId,
-                'error' => $e->getMessage(),
-            ]);
-        }
+        Log::debug('Stripe checkout session completed (no-op in V2)', [
+            'checkout_session_id' => $checkoutSession->id ?? null,
+            'connected_account_id' => $connectedAccountId,
+        ]);
     }
 
     private function handleAccountUpdated(object $account): void
@@ -152,28 +137,6 @@ class StripeConnectWebhookController extends Controller
 
     private function handlePaymentIntentSucceeded(object $paymentIntent, string $connectedAccountId = ''): void
     {
-        $purpose = $paymentIntent->metadata?->purpose ?? null;
-
-        // Storefront embedded card payment
-        if ($purpose === 'public_store_payment') {
-            try {
-                $this->stripeCheckout->finalizePaymentIntentOrder(
-                    $paymentIntent,
-                    $connectedAccountId ?: null,
-                );
-                Log::info('Storefront payment intent finalized', [
-                    'payment_intent_id' => $paymentIntent->id,
-                    'checkout_session_token' => $paymentIntent->metadata?->checkout_session_token ?? null,
-                ]);
-            } catch (\Throwable $e) {
-                Log::error('Failed to finalize storefront payment intent', [
-                    'payment_intent_id' => $paymentIntent->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-            return;
-        }
-
         // Commission payout payment intent
         $payoutId = $paymentIntent->metadata?->comet_payout_id ?? null;
         if (! $payoutId) {

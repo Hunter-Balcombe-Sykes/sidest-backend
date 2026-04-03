@@ -8,6 +8,7 @@ use App\Models\Core\Professional\BrandAffiliateInvite;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Non-brand professionals view their pending affiliate invitations from brands.
 class AffiliateInviteController extends ApiController
 {
     use ResolveCurrentProfessional;

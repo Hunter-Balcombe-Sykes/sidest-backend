@@ -18,18 +18,17 @@ use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
 use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
-use App\Services\Enterprise\EnterpriseProvisioningService;
 use App\Services\Legal\ProfessionalLegalContentService;
 use App\Services\Professional\AccountTypeDefaultsService;
 
 
 
+// V2: Account signup/update. Creates professional + site, applies type defaults, handles affiliate invite claims and brand partner connections. Entry point for Shopify OAuth signup flow.
 class BootstrapController extends ApiController
 {
     public function bootstrap(
         BootstrapRequest $request,
         ProfessionalLegalContentService $legalContentService,
-        EnterpriseProvisioningService $enterpriseProvisioningService,
         BrandAffiliateInviteService $brandAffiliateInviteService,
         BrandPartnerLinkService $brandPartnerLinks,
         AccountTypeDefaultsService $accountTypeDefaultsService
@@ -63,9 +62,8 @@ class BootstrapController extends ApiController
                 return 'professional';
             };
 
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks, $accountTypeDefaultsService, $resolveProfessionalType) {
+            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $brandAffiliateInviteService, $brandPartnerLinks, $accountTypeDefaultsService, $resolveProfessionalType) {
             $createdProfessional = false;
-            $provisionedEnterprise = null;
 
             $professional = Professional::query()->where('auth_user_id', $uid)->first();
 
@@ -120,10 +118,6 @@ class BootstrapController extends ApiController
                 $professional->qr_slug = $this->generateQrSlug($professional->handle ?? null);
             }
             $professional->save();
-
-            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
-                $provisionedEnterprise = $enterpriseProvisioningService->ensureForProfessional($professional);
-            }
 
             // Add to Comet updates list once (global list). Do NOT overwrite if they already unsubscribed.
             $this->ensureCometUpdatesSubscription($professional->primary_email);
@@ -186,7 +180,6 @@ class BootstrapController extends ApiController
                 return [
                     'professional' => $professional->fresh(),
                     'site' => $site->fresh(),
-                    'enterprise' => $provisionedEnterprise?->fresh(),
                 ];
             });
         } catch (\Exception $e) {

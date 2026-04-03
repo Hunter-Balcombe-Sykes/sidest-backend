@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use App\Services\Cache\SiteCacheService;
 
+// V2: Serves published mini-site data by subdomain (cached, 95% of traffic). Hydrogen storefronts fetch brand config via separate Storefront API endpoint.
 class PublicSiteController extends ApiController
 {
     public function __construct(

@@ -2,19 +2,13 @@
 
 namespace App\Services\Notifications;
 
-use App\Models\Retail\RetailOrder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
+// V2: Publishes booking completion notifications to professional and brand partners. Commission/payout notifications handled by observers instead.
 class CommerceNotificationService
 {
-    /** @var array<int, int> */
-    private const SALES_ORDER_MILESTONES = [1, 5, 10, 25, 50, 100, 250];
-
-    /** @var array<int, int> */
-    private const SALES_REVENUE_MILESTONES_CENTS = [10_000, 50_000, 100_000, 250_000, 500_000, 1_000_000];
-
     /** @var array<int, int> */
     private const BOOKING_COUNT_MILESTONES = [1, 5, 10, 25, 50, 100];
 
@@ -22,87 +16,6 @@ class CommerceNotificationService
     private const BOOKING_REVENUE_MILESTONES_CENTS = [5_000, 10_000, 25_000, 50_000, 100_000, 250_000];
 
     public function __construct(private readonly NotificationPublisher $publisher) {}
-
-    public function notifyStoreOrderById(string $orderId): void
-    {
-        $orderId = trim($orderId);
-        if ($orderId === '') {
-            return;
-        }
-
-        try {
-            $order = RetailOrder::query()->find($orderId);
-            if (! $order instanceof RetailOrder) {
-                return;
-            }
-
-            $this->notifyStoreOrder($order);
-        } catch (\Throwable $e) {
-            Log::warning('Store order notifications failed', [
-                'order_id' => $orderId,
-                'message' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    public function notifyStoreOrder(RetailOrder $order): void
-    {
-        $brandProfessionalId = trim((string) $order->brand_professional_id);
-        $affiliateProfessionalId = trim((string) $order->affiliate_professional_id);
-        if ($brandProfessionalId === '' || $affiliateProfessionalId === '') {
-            return;
-        }
-
-        $ids = collect([$brandProfessionalId, $affiliateProfessionalId])->unique()->values()->all();
-        $professionals = DB::table('core.professionals')
-            ->whereIn('id', $ids)
-            ->get(['id', 'display_name', 'handle'])
-            ->mapWithKeys(fn ($row): array => [
-                (string) $row->id => trim((string) ($row->display_name ?: $row->handle ?: 'Account')),
-            ]);
-
-        $affiliateName = (string) ($professionals[$affiliateProfessionalId] ?? 'Partner');
-        $orderLabel = trim((string) ($order->order_name ?? ''));
-        if ($orderLabel === '') {
-            $shopifyOrderId = trim((string) ($order->shopify_order_id ?? ''));
-            $orderLabel = $shopifyOrderId !== '' ? '#'.$shopifyOrderId : 'Order';
-        }
-
-        $currencyCode = strtoupper(trim((string) ($order->currency_code ?? 'AUD')));
-        if ($currencyCode === '') {
-            $currencyCode = 'AUD';
-        }
-
-        $netCents = max(0, (int) ($order->net_cents ?? 0));
-        $amountLabel = $this->formatMoneyFromCents($netCents, $currencyCode);
-        $ctaForUser = '/account/store?section=analytics&order='.$order->id;
-        $ctaForBrand = '/account/commerce?section=analytics&order='.$order->id;
-
-        $this->publisher->publish(
-            professionalId: $affiliateProfessionalId,
-            frontendType: 'Success',
-            category: 'analytics_milestones',
-            title: 'New sale received',
-            body: "{$orderLabel} generated {$amountLabel} in sales.",
-            dedupeKey: 'store-sale:affiliate:'.$order->id,
-            ctaUrl: $ctaForUser,
-            retentionConfigKey: 'analytics_milestones',
-        );
-
-        $this->publisher->publish(
-            professionalId: $brandProfessionalId,
-            frontendType: 'Info',
-            category: 'analytics_milestones',
-            title: 'New affiliate sale',
-            body: "{$affiliateName} generated {$amountLabel} in sales ({$orderLabel}).",
-            dedupeKey: 'store-sale:brand:'.$order->id,
-            ctaUrl: $ctaForBrand,
-            retentionConfigKey: 'analytics_milestones',
-        );
-
-        $this->notifySalesMilestonesForProfessional($affiliateProfessionalId, false);
-        $this->notifySalesMilestonesForProfessional($brandProfessionalId, true);
-    }
 
     /**
      * @param  array{
@@ -189,53 +102,6 @@ class CommerceNotificationService
                 'professional_id' => $context['professional_id'] ?? null,
                 'message' => $e->getMessage(),
             ]);
-        }
-    }
-
-    private function notifySalesMilestonesForProfessional(string $professionalId, bool $isBrand): void
-    {
-        $professionalId = trim($professionalId);
-        if ($professionalId === '') {
-            return;
-        }
-
-        $column = $isBrand ? 'brand_professional_id' : 'affiliate_professional_id';
-        $totals = DB::table('retail.orders')
-            ->where($column, $professionalId)
-            ->selectRaw('COUNT(*) as orders_count')
-            ->selectRaw('COALESCE(SUM(net_cents), 0) as revenue_cents')
-            ->first();
-
-        $ordersCount = max(0, (int) ($totals->orders_count ?? 0));
-        $revenueCents = max(0, (int) ($totals->revenue_cents ?? 0));
-        $basePath = $isBrand ? '/account/commerce?section=analytics' : '/account/store?section=analytics';
-
-        $orderMilestone = $this->latestReachedThreshold($ordersCount, self::SALES_ORDER_MILESTONES);
-        if ($orderMilestone !== null) {
-            $this->publisher->publish(
-                professionalId: $professionalId,
-                frontendType: 'Success',
-                category: 'analytics_milestones',
-                title: 'Sales milestone reached',
-                body: "You have reached {$orderMilestone} total sales.",
-                dedupeKey: ($isBrand ? 'brand' : 'user').':sales:orders:'.$orderMilestone,
-                ctaUrl: $basePath,
-                retentionConfigKey: 'analytics_milestones',
-            );
-        }
-
-        $revenueMilestoneCents = $this->latestReachedThreshold($revenueCents, self::SALES_REVENUE_MILESTONES_CENTS);
-        if ($revenueMilestoneCents !== null) {
-            $this->publisher->publish(
-                professionalId: $professionalId,
-                frontendType: 'Success',
-                category: 'analytics_milestones',
-                title: 'Revenue milestone reached',
-                body: 'Total sales revenue reached '.$this->formatMoneyFromCents($revenueMilestoneCents, 'AUD').'.',
-                dedupeKey: ($isBrand ? 'brand' : 'user').':sales:revenue:'.$revenueMilestoneCents,
-                ctaUrl: $basePath,
-                retentionConfigKey: 'analytics_milestones',
-            );
         }
     }
 

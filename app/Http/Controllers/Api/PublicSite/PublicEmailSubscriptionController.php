@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use App\Services\Public\PublicSiteResolver;
 
+// V2: Newsletter signup with name inference from email and customer upsert.
 class PublicEmailSubscriptionController extends ApiController
 {
     use HashesClientData;

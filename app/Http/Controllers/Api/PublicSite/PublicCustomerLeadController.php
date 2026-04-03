@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Services\Public\PublicSiteResolver;
 
+// V2: Captures lead form submissions with spam detection (honeypot, timing). Creates/updates customers with marketing subscription handling.
 class PublicCustomerLeadController extends ApiController
 {
     use HashesClientData;

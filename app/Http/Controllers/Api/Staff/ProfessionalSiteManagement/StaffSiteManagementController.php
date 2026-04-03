@@ -9,6 +9,7 @@ use App\Models\Core\Professional\Professional;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Http\JsonResponse;
 
+// V2: Staff updates site settings with force-publish override capability.
 class StaffSiteManagementController extends ApiController
 {
     public function __construct(

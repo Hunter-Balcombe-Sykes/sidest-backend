@@ -7,18 +7,18 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Core. Records commission per order line from Shopify orders/paid webhook. Tracks entry_type, status (pending/approved/reversed), and rate_source.
 class CommissionLedgerEntry extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'retail.commission_ledger_entries';
+    protected $table = 'commerce.commission_ledger_entries';
 
     public $incrementing = false;
     protected $keyType = 'string';
 
     protected $fillable = [
-        'order_id',
-        'order_item_id',
+        'shopify_order_id',
         'brand_professional_id',
         'affiliate_professional_id',
         'entry_type',
@@ -41,16 +41,6 @@ class CommissionLedgerEntry extends BaseModel
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
-
-    public function order(): BelongsTo
-    {
-        return $this->belongsTo(RetailOrder::class, 'order_id');
-    }
-
-    public function orderItem(): BelongsTo
-    {
-        return $this->belongsTo(OrderItem::class, 'order_item_id');
-    }
 
     public function brandProfessional(): BelongsTo
     {

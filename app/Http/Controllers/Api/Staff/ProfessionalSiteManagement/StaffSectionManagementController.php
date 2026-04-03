@@ -12,6 +12,7 @@ use App\Models\Core\Site\Block;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
+// V2: Staff manages section block visibility (gallery, services, shop, booking, bio) with full control.
 class StaffSectionManagementController extends ApiController
 {
     use ResolveCurrentProfessional;

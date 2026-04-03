@@ -13,7 +13,7 @@ class SiteMedia extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'site_media';
+    protected $table = 'site.site_media';
 
     public $incrementing = false;
     protected $keyType = 'string';

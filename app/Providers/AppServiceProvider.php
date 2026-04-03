@@ -162,21 +162,6 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
-        // Enterprise routes
-        RateLimiter::for('enterprise', function (Request $request) use ($throttleEnabled) {
-            if (! $throttleEnabled) {
-                return Limit::none();
-            }
-
-            return Limit::perMinute(120)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
-                ->response(function () {
-                    return response()->json([
-                        'message' => 'Too many requests. Please try again later.',
-                    ], 429);
-                });
-        });
-
         // Webhook endpoints (Square, Fresha, Stripe Connect)
         RateLimiter::for('webhooks', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {

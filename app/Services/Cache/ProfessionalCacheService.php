@@ -2,17 +2,15 @@
 
 namespace App\Services\Cache;
 
-use App\Services\Branding\BrandFontResolver;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
+// V2: Multi-lookup professional caching (by ID, handle, auth_user_id). Defensive validation prevents returning stale data after handle/auth changes.
 class ProfessionalCacheService
 {
-    public function __construct(
-        private readonly BrandFontResolver $brandFonts
-    ) {}
+    public function __construct() {}
 
     /* ---------------------------
      |  ID mapping (fast lookups)
@@ -78,11 +76,7 @@ class ProfessionalCacheService
         $site = $pro->site;
         $siteSettings = [];
         if ($site) {
-            $siteSettingsRaw = is_array($site->settings) ? $site->settings : [];
-            $siteSettings = $this->brandFonts->hydrateTypographySettings(
-                $siteSettingsRaw,
-                (string) $pro->id
-            );
+            $siteSettings = is_array($site->settings) ? $site->settings : [];
         }
 
         return [
@@ -182,7 +176,7 @@ class ProfessionalCacheService
         return Cache::remember(
             CacheKeyGenerator::customerCount($professionalId),
             now()->addMinutes(15),
-            fn () => DB::table('customers')
+            fn () => DB::table('core.customers')
                 ->where('professional_id', $professionalId)
                 ->whereNull('deleted_at')
                 ->count()

@@ -8,11 +8,12 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+// V2: Core. Tracks payout lifecycle (pending → processing → completed/failed). Links brand, affiliate, Stripe transfer, and funding details.
 class CommissionPayout extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'retail.commission_payouts';
+    protected $table = 'commerce.commission_payouts';
 
     public $incrementing = false;
     protected $keyType = 'string';

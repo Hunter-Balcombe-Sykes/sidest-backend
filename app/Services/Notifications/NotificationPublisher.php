@@ -7,6 +7,7 @@ use App\Models\Core\Notifications\Notification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+// V2: Core notification engine. Publishes with deduplication, optional email dispatch, retention policies, and per-professional category overrides.
 class NotificationPublisher
 {
     public const CATEGORIES = [

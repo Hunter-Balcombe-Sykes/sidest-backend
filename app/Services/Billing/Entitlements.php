@@ -5,6 +5,7 @@ namespace App\Services\Billing;
 use App\Models\Billing\Subscription;
 use App\Models\Core\Professional\Professional;
 
+// V2: Subscription tier checks and feature entitlement resolution. Gates premium features by plan level.
 class Entitlements
 {
     public function currentSubscription(Professional $professional): ?Subscription

@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+// V2: Captures waitlist signups with applicant type, industry, team size, and pilot program opt-in.
 class PublicWaitlistController extends ApiController
 {
     use HashesClientData;

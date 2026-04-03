@@ -5,6 +5,7 @@ namespace App\Services\Public;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 
+// V2: Resolves published sites by subdomain with fallback to subdomain aliases. Requires professional active status.
 class PublicSiteResolver
 {
     public function resolvePublishedSite(string $subdomain): ?Site

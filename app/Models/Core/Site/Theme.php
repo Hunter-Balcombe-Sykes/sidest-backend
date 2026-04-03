@@ -11,7 +11,7 @@ class Theme extends BaseModel
 {
     use HasFactory, HasUuids;
 
-    protected $table = 'themes';
+    protected $table = 'site.themes';
 
     public $incrementing = false;
     protected $keyType = 'string';

@@ -6,6 +6,7 @@ use App\Jobs\Notifications\FanOutBrandStatusNotificationJob;
 use App\Models\Core\Professional\BrandProfile;
 use Illuminate\Support\Facades\Log;
 
+// V2: Dispatches affiliate notification fan-out when brand_status changes (active/deactivated).
 class BrandProfileObserver
 {
     public bool $afterCommit = true;

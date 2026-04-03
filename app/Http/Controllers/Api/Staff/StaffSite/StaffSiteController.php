@@ -8,6 +8,7 @@ use App\Models\Views\AllSiteData;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Http\JsonResponse;
 
+// V2: Staff views site data including unpublished sites. Used by internal staff dashboard.
 class StaffSiteController extends ApiController
 {
     public function __construct(

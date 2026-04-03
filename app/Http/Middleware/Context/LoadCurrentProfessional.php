@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
+// V2: Loads authenticated professional into request context via cache. Rejects suspended/missing accounts.
 class LoadCurrentProfessional
 {
     public function __construct(

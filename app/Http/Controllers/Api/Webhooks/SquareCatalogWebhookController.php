@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
+// V2: Square catalog webhook — validates HMAC, deduplicates events, triggers service sync. Booking integration only.
 class SquareCatalogWebhookController extends ApiController
 {
     public function __invoke(Request $request, SquareServiceSyncService $syncService): JsonResponse

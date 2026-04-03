@@ -11,7 +11,7 @@ class Service extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'services';
+    protected $table = 'site.services';
 
     public $incrementing = false;
     protected $keyType = 'string';

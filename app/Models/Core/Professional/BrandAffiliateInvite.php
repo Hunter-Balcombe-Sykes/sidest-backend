@@ -6,11 +6,12 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Invitation token for affiliate onboarding. Tracks status (pending/accepted/declined/expired) and links to claimed professional.
 class BrandAffiliateInvite extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'brand_affiliate_invites';
+    protected $table = 'brand.brand_affiliate_invites';
 
     public $incrementing = false;
     protected $keyType = 'string';

@@ -11,6 +11,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use Illuminate\Support\Str;
 
+// V2: In-app notification listing, mark-as-read, and dismiss for the authenticated professional.
 class NotificationController extends ApiController
 {
     use ResolveCurrentProfessional;

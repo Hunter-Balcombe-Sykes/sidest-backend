@@ -7,10 +7,9 @@ use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
-use App\Models\Retail\BrandStoreSettings;
-use App\Models\Retail\ProfessionalSelection;
 use App\Services\Professional\SectionVisibilityService;
 
+// V2: Applies account-type defaults (influencer, professional, brand, affiliate) to new professionals and their sites. Handles config inheritance and affiliate-specific overlays.
 class AccountTypeDefaultsService
 {
     public function __construct(
@@ -122,19 +121,6 @@ class AccountTypeDefaultsService
             $block->save();
         }
 
-        // 2. Set theme from brand's affiliate default
-        if ($config['use_brand_affiliate_theme'] ?? false) {
-            $brandSettings = BrandStoreSettings::where('professional_id', $brandProfessionalId)->first();
-            if ($brandSettings && $brandSettings->default_affiliate_theme_id) {
-                $site->theme_id = $brandSettings->default_affiliate_theme_id;
-                $site->save();
-            }
-        }
-
-        // 3. Sync product defaults from brand
-        if ($config['use_brand_affiliate_products'] ?? false) {
-            $this->syncBrandAffiliateProducts($professional, $brandProfessionalId);
-        }
     }
 
     private function createDefaultContact(Professional $professional, array $contactData): void
@@ -178,29 +164,4 @@ class AccountTypeDefaultsService
         }
     }
 
-    private function syncBrandAffiliateProducts(Professional $professional, string $brandProfessionalId): void
-    {
-        $brandSettings = BrandStoreSettings::where('professional_id', $brandProfessionalId)->first();
-        if (! $brandSettings) {
-            return;
-        }
-
-        $productIds = $brandSettings->default_affiliate_product_ids;
-        if (empty($productIds)) {
-            return;
-        }
-
-        foreach ($productIds as $sortOrder => $productId) {
-            ProfessionalSelection::query()->firstOrCreate(
-                [
-                    'professional_id'      => $professional->id,
-                    'brand_professional_id' => $brandProfessionalId,
-                    'brand_product_id'      => $productId,
-                ],
-                [
-                    'sort_order' => $sortOrder,
-                ]
-            );
-        }
-    }
 }

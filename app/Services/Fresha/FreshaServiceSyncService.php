@@ -10,6 +10,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
+// V2: Bidirectional service sync between Fresha and Comet. Booking integration — not V2 commerce.
 class FreshaServiceSyncService
 {
     public function __construct(

@@ -8,6 +8,7 @@ use App\Services\Public\PublicSiteResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Marketing email preference management — check status, unsubscribe, and resubscribe via token.
 class PublicMarketingPreferenceController extends ApiController
 {
     /**

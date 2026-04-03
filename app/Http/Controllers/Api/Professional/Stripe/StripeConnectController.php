@@ -9,6 +9,7 @@ use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Stripe Connect Express onboarding, payment methods, commission wallet top-ups, and payout history. Required for the 80/20 affiliate payout split.
 class StripeConnectController extends Controller
 {
     public function __construct(

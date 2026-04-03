@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\HashesClientData;
 use Closure;
 use Illuminate\Http\Request;
 
+// V2: Logs rate-limited lead submissions to analytics.lead_submissions for abuse monitoring.
 class LogLeadRateLimits
 {
     use HashesClientData;

@@ -7,6 +7,7 @@ use App\Models\Core\Site\SiteMedia;
 use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Re-evaluates gallery section visibility when gallery pool images are saved, deleted, or restored.
 class SiteMediaObserver
 {
     public bool $afterCommit = true;
