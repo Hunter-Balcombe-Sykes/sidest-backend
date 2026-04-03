@@ -20,7 +20,7 @@ class NotificationEmailPreferenceController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        $prefs = DB::table('notification_email_preferences')
+        $prefs = DB::table('notifications.notification_email_preferences')
             ->where('professional_id', $pro->id)
             ->get(['category_key', 'enabled'])
             ->keyBy('category_key');
@@ -74,7 +74,7 @@ class NotificationEmailPreferenceController extends ApiController
 
         foreach ($updates as $update) {
             DB::statement(
-                'INSERT INTO notification_email_preferences (id, professional_id, category_key, enabled, created_at, updated_at)
+                'INSERT INTO notifications.notification_email_preferences (id, professional_id, category_key, enabled, created_at, updated_at)
                  VALUES (?, ?, ?, ?, NOW(), NOW())
                  ON CONFLICT (professional_id, category_key)
                  DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()',

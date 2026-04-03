@@ -57,7 +57,7 @@ class UpdateSiteAction
                         }
                     }
 
-                    $conflictInSites = DB::table('sites')
+                    $conflictInSites = DB::table('site.sites')
                         ->whereRaw('lower(subdomain) = ?', [$incoming])
                         ->where('id', '!=', $site->id)
                         ->exists();
@@ -68,7 +68,7 @@ class UpdateSiteAction
                         ]);
                     }
 
-                    $conflictInAliases = DB::table('site_subdomain_aliases')
+                    $conflictInAliases = DB::table('site.site_subdomain_aliases')
                         ->whereRaw('lower(subdomain) = ?', [$incoming])
                         ->exists();
 

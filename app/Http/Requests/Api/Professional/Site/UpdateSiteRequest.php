@@ -95,7 +95,7 @@ class UpdateSiteRequest extends BaseFormRequest
                         return;
                     }
 
-                    $aliasExists = DB::table('site_subdomain_aliases')
+                    $aliasExists = DB::table('site.site_subdomain_aliases')
                         ->whereRaw('lower(subdomain) = ?', [strtolower($value)])
                         ->exists();
 
@@ -110,7 +110,7 @@ class UpdateSiteRequest extends BaseFormRequest
                 'sometimes',
                 'nullable',
                 'uuid',
-                Rule::exists('themes', 'id'),
+                Rule::exists('site.themes', 'id'),
             ],
 
             // Publish

@@ -30,14 +30,17 @@ class BootstrapRequest extends BaseFormRequest
         return [
             'handle' => ['sometimes','nullable','string','max:40'],
             'display_name' => ['required','string','max:80'],
-            'primary_email' => ['required','email','max:255'],
+            'primary_email' => [
+                'required','email','max:255',
+                Rule::unique('core.professionals', 'primary_email')->ignore($existingProfessionalId, 'id'),
+            ],
             'phone' => ['required','string','max:40'],
             'first_name' => ['required','string','max:80'],
             'last_name' => ['nullable','string','max:80'],
             'country_code' => ['nullable','string','max:5'],
             'timezone' => ['nullable','string','max:64'],
             'invite_token' => ['sometimes', 'nullable', 'string', 'max:80'],
-            'brand_partner_professional_id' => ['sometimes', 'nullable', 'uuid', Rule::exists('professionals', 'id')],
+            'brand_partner_professional_id' => ['sometimes', 'nullable', 'uuid', Rule::exists('core.professionals', 'id')],
             'professional_type' => [
                 ...$professionalTypeRules,
                 'string',
@@ -48,7 +51,7 @@ class BootstrapRequest extends BaseFormRequest
                 'nullable',
                 'string',
                 'max:50',
-                Rule::unique('professionals', 'handle_lc')->ignore($existingProfessionalId, 'id'),
+                Rule::unique('core.professionals', 'handle_lc')->ignore($existingProfessionalId, 'id'),
             ],
         ];
     }

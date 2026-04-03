@@ -32,7 +32,7 @@ class StaffUpdateSiteRequest extends BaseFormRequest
                 'nullable',
                 'uuid',
                 // IMPORTANT: using Rule::exists avoids the "connection.table" parsing issue.
-                Rule::exists('themes', 'id'),
+                Rule::exists('site.themes', 'id'),
             ],
 
             'settings' => ['sometimes', 'array'],
@@ -63,7 +63,7 @@ class StaffUpdateSiteRequest extends BaseFormRequest
                         return;
                     }
 
-                    $aliasExists = DB::table('site_subdomain_aliases')
+                    $aliasExists = DB::table('site.site_subdomain_aliases')
                         ->whereRaw('lower(subdomain) = ?', [strtolower($value)])
                         ->exists();
 

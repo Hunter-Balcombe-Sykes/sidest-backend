@@ -27,7 +27,7 @@ class PageviewRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'site_id'       => ['required_without:subdomain', 'uuid', Rule::exists('sites', 'id')],
+            'site_id'       => ['required_without:subdomain', 'uuid', Rule::exists('site.sites', 'id')],
             'subdomain'     => ['required_without:site_id', 'string', 'max:63'],
             'session_id'    => ['nullable', 'uuid'],
             'visitor_id'    => ['nullable', 'uuid'],

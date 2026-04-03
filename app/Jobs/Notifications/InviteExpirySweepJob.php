@@ -23,14 +23,14 @@ class InviteExpirySweepJob implements ShouldQueue
     {
         $now = now();
 
-        $expired = DB::table('brand_affiliate_invites')
+        $expired = DB::table('brand.brand_affiliate_invites')
             ->where('status', 'pending')
             ->where('expires_at', '<', $now)
             ->get(['id', 'brand_professional_id', 'email', 'first_name']);
 
         foreach ($expired as $invite) {
             try {
-                DB::table('brand_affiliate_invites')
+                DB::table('brand.brand_affiliate_invites')
                     ->where('id', $invite->id)
                     ->where('status', 'pending') // guard against concurrent updates
                     ->update(['status' => 'expired', 'updated_at' => $now]);

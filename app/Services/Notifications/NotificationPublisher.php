@@ -50,7 +50,7 @@ class NotificationPublisher
 
         $cta = $this->withDedupeKey($ctaUrl ?? '/account/overview', $dedupeKey);
 
-        $exists = DB::table('notifications')
+        $exists = DB::table('notifications.notifications')
             ->where('professional_id', $professionalId)
             ->where('cta_url', $cta)
             ->exists();
@@ -67,7 +67,7 @@ class NotificationPublisher
 
         $notificationId = (string) Str::uuid();
 
-        DB::table('notifications')->insert([
+        DB::table('notifications.notifications')->insert([
             'id'                     => $notificationId,
             'professional_id'        => $professionalId,
             'type'                   => $type,
@@ -135,7 +135,7 @@ class NotificationPublisher
         }
 
         // Professional preference
-        $preference = DB::table('notification_email_preferences')
+        $preference = DB::table('notifications.notification_email_preferences')
             ->where('professional_id', $professionalId)
             ->where('category_key', $category)
             ->value('enabled');

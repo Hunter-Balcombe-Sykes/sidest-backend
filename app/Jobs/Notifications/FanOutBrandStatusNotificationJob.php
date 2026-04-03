@@ -31,7 +31,7 @@ class FanOutBrandStatusNotificationJob implements ShouldQueue
             ->where('id', $this->brandProfessionalId)
             ->value(DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), 'Brand')"));
 
-        $affiliateIds = DB::table('brand_partner_links')
+        $affiliateIds = DB::table('brand.brand_partner_links')
             ->where('brand_professional_id', $this->brandProfessionalId)
             ->pluck('affiliate_professional_id');
 

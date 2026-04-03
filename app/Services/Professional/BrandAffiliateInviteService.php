@@ -611,7 +611,7 @@ class BrandAffiliateInviteService
         }
 
         if ($notifications !== []) {
-            DB::table('notifications')->insert($notifications);
+            DB::table('notifications.notifications')->insert($notifications);
         }
     }
 

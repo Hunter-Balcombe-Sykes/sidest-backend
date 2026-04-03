@@ -130,8 +130,8 @@ class NotificationController extends ApiController
 
     private function baseQuery(string $professionalId, $now)
     {
-        return DB::table('notifications as n')
-            ->leftJoin('notification_receipts as r', function ($join) use ($professionalId) {
+        return DB::table('notifications.notifications as n')
+            ->leftJoin('notifications.notification_receipts as r', function ($join) use ($professionalId) {
                 $join->on('r.notification_id', '=', 'n.id')
                     ->where('r.professional_id', '=', $professionalId);
             })
