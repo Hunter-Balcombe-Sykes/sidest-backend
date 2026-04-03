@@ -7,6 +7,7 @@ return [
         [
             'https://app.sidest.co',
             'https://sidest.co',
+            'https://hunterbalcombesykes.com',
             'http://localhost:3000',
         ],
         in_array(env('APP_ENV'), ['local', 'development', 'testing']) ? [
