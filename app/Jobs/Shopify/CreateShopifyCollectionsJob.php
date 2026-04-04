@@ -110,7 +110,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             'smart' => true,
             'rules' => [
                 ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'IS_SET', 'condition' => 'true', 'metafield_ref' => 'sidest.commission_override'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'GREATER_THAN', 'condition' => '0', 'metafield_ref' => 'sidest.commission_override'],
             ],
         ],
     ];
@@ -261,6 +261,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             Log::warning('Shopify collection creation had userErrors', [
                 'title' => $def['title'],
                 'errors' => $userErrors,
+                'response_body' => $response->body(),
             ]);
 
             return null;
