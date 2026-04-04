@@ -59,14 +59,13 @@ class RegisterShopifyWebhooksJob implements ShouldQueue
     }
     GRAPHQL;
 
+    // GDPR compliance topics (CUSTOMERS_DATA_REQUEST, CUSTOMERS_REDACT, SHOP_REDACT) cannot be
+    // registered via the GraphQL API — they are handled via shopify.app.toml compliance_topics.
     private const WEBHOOKS = [
         'ORDERS_PAID' => '/api/webhooks/shopify/orders-paid',
         'ORDERS_UPDATED' => '/api/webhooks/shopify/orders-updated',
         'APP_UNINSTALLED' => '/api/webhooks/shopify/app-uninstalled',
         'SHOP_UPDATE' => '/api/webhooks/shopify/shop-update',
-        'CUSTOMERS_DATA_REQUEST' => '/api/webhooks/shopify/gdpr/customers-data-request',
-        'CUSTOMERS_REDACT' => '/api/webhooks/shopify/gdpr/customers-redact',
-        'SHOP_REDACT' => '/api/webhooks/shopify/gdpr/shop-redact',
     ];
 
     public function __construct(
