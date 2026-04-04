@@ -3,7 +3,6 @@
 namespace App\Services\Shopify;
 
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
-use App\Jobs\Shopify\CreateShopifyCollectionsJob;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
@@ -287,8 +286,7 @@ class BrandSignupService
         try {
             RegisterShopifyWebhooksJob::dispatch($integrationId);
             CreateStorefrontAccessTokenJob::dispatch($integrationId);
-            CreateShopifyMetafieldsJob::dispatch($integrationId);
-            CreateShopifyCollectionsJob::dispatch($integrationId);
+            CreateShopifyMetafieldsJob::dispatch($integrationId); // chains → CreateShopifyCollectionsJob
             CreateShopifySalesChannelJob::dispatch($integrationId);
             SyncShopifyBrandLogoJob::dispatch($integrationId);
         } catch (\Throwable $e) {
