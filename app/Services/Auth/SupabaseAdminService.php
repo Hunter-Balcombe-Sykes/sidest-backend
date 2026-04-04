@@ -87,22 +87,43 @@ class SupabaseAdminService
             return null;
         }
 
-        $response = Http::withHeaders($this->headers())
-            ->timeout(10)
-            ->get("{$this->baseUrl}/auth/v1/admin/users", [
-                'filter' => "email eq \"{$email}\"",
-            ]);
+        // Paginate through users to find by email — GoTrue admin API has no direct email filter.
+        $page = 1;
+        $perPage = 50;
+        $users = [];
 
-        if (! $response->successful()) {
-            Log::warning('Supabase admin: failed to look up user by email', [
-                'email' => $email,
-                'status' => $response->status(),
-            ]);
+        while (true) {
+            $response = Http::withHeaders($this->headers())
+                ->timeout(10)
+                ->get("{$this->baseUrl}/auth/v1/admin/users", [
+                    'page' => $page,
+                    'per_page' => $perPage,
+                ]);
 
-            return null;
+            if (! $response->successful()) {
+                Log::warning('Supabase admin: failed to look up user by email', [
+                    'email' => $email,
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            $batch = $response->json('users', []);
+
+            foreach ($batch as $user) {
+                if (strtolower(trim((string) ($user['email'] ?? ''))) === $email) {
+                    $users = [$user];
+                    break 2;
+                }
+            }
+
+            if (count($batch) < $perPage) {
+                break;
+            }
+
+            $page++;
         }
-
-        $users = $response->json('users', []);
 
         if (empty($users)) {
             return null;
