@@ -110,6 +110,12 @@ class BrandSignupService
 
         $authUserId = $supabaseUser['id'];
 
+        // If the user already signed up via the dashboard, link the integration to the existing brand
+        $existingProfessional = Professional::where('auth_user_id', $authUserId)->first();
+        if ($existingProfessional) {
+            return $this->handleExistingBrandConnect($existingProfessional, $shopDomain, $accessToken, $shopData, $scopes);
+        }
+
         $result = DB::transaction(function () use ($shopDomain, $accessToken, $shopEmail, $shopData, $scopes, $authUserId) {
             $shopName = trim((string) Arr::get($shopData, 'name', ''));
             $handle = $this->generateBrandHandle($shopName ?: $shopDomain);
@@ -213,6 +219,67 @@ class BrandSignupService
         ]);
 
         return $result;
+    }
+
+    /**
+     * Brand already exists (signed up via dashboard) — just attach the Shopify integration.
+     */
+    private function handleExistingBrandConnect(
+        Professional $professional,
+        string $shopDomain,
+        string $accessToken,
+        array $shopData,
+        array $scopes,
+    ): BrandSignupResult {
+        $shopId = trim((string) Arr::get($shopData, 'id', ''));
+        $shopCurrency = strtoupper(trim((string) Arr::get($shopData, 'currency', '')));
+
+        $integration = ProfessionalIntegration::create([
+            'professional_id' => (string) $professional->id,
+            'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+            'external_account_id' => $shopDomain,
+            'access_token' => $accessToken,
+            'provider_metadata' => [
+                'shop_domain' => $shopDomain,
+                'shop_id' => $shopId !== '' ? "gid://shopify/Shop/{$shopId}" : null,
+                'shop_currency' => $shopCurrency !== '' ? $shopCurrency : null,
+                'scopes' => $scopes,
+                'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
+                'connected_at' => now()->toIso8601String(),
+                'webhook_registration_state' => 'queued',
+            ],
+        ]);
+
+        // Ensure BrandProfile exists
+        BrandProfile::firstOrCreate(
+            ['professional_id' => (string) $professional->id],
+            ['setup_complete' => false]
+        );
+
+        $site = Site::where('professional_id', $professional->id)->first();
+        $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
+
+        // Auto-fill empty profile fields from Shopify shop data
+        if ($site) {
+            $this->autoFill->fillFromShopData($professional, $site, $brandProfile, $shopData);
+        }
+
+        app(ProfessionalCacheService::class)->invalidateProfessional($professional);
+
+        $this->dispatchInstallJobs((string) $integration->id);
+
+        Log::info('Shopify brand connect (existing account)', [
+            'professional_id' => (string) $professional->id,
+            'shop_domain' => $shopDomain,
+        ]);
+
+        return new BrandSignupResult(
+            professional: $professional,
+            site: $site,
+            brandProfile: $brandProfile,
+            integration: $integration,
+            isReinstall: false,
+        );
     }
 
     private function dispatchInstallJobs(string $integrationId): void
