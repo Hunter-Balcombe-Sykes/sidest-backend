@@ -236,13 +236,29 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             ];
         }
 
+        Log::info('Creating Shopify collection', [
+            'title' => $def['title'],
+            'input' => $input,
+        ]);
+
         $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::COLLECTION_CREATE, [
             'input' => $input,
         ]);
 
+        // Check for GraphQL-level errors (not userErrors)
+        $graphqlErrors = $response->json('errors', []);
+        if (! empty($graphqlErrors)) {
+            Log::warning('Shopify collection creation GraphQL errors', [
+                'title' => $def['title'],
+                'errors' => $graphqlErrors,
+            ]);
+
+            return null;
+        }
+
         $userErrors = $response->json('data.collectionCreate.userErrors', []);
         if (! empty($userErrors)) {
-            Log::warning('Shopify collection creation had errors', [
+            Log::warning('Shopify collection creation had userErrors', [
                 'title' => $def['title'],
                 'errors' => $userErrors,
             ]);
@@ -250,7 +266,14 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             return null;
         }
 
-        return (string) $response->json('data.collectionCreate.collection.handle', '');
+        $handle = (string) $response->json('data.collectionCreate.collection.handle', '');
+
+        Log::info('Shopify collection created', [
+            'title' => $def['title'],
+            'handle' => $handle,
+        ]);
+
+        return $handle;
     }
 
     /**
