@@ -37,19 +37,9 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
     }
     GRAPHQL;
 
-    private const STOREFRONT_TOKENS_QUERY = <<<'GRAPHQL'
-    query {
-      storefrontAccessTokens(first: 10) {
-        edges {
-          node {
-            id
-            title
-            accessToken
-          }
-        }
-      }
-    }
-    GRAPHQL;
+    // storefrontAccessTokens query was removed from GraphQL Admin API in 2025-01.
+    // Use REST API to check for existing tokens.
+    private const STOREFRONT_TOKENS_REST_PATH = '/admin/api/%s/storefront_access_tokens.json';
 
     public function __construct(public string $integrationId)
     {
@@ -106,13 +96,23 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
 
     private function findExistingToken(string $shopDomain, string $accessToken, string $apiVersion): ?string
     {
-        $data = $this->queryShopify($shopDomain, $accessToken, $apiVersion, self::STOREFRONT_TOKENS_QUERY);
-        $edges = Arr::get($data, 'storefrontAccessTokens.edges', []);
+        $url = sprintf("https://{$shopDomain}" . self::STOREFRONT_TOKENS_REST_PATH, $apiVersion);
 
-        foreach ($edges as $edge) {
-            $title = (string) Arr::get($edge, 'node.title', '');
+        $response = Http::timeout(20)
+            ->acceptJson()
+            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
+            ->get($url);
+
+        if (! $response->ok()) {
+            return null;
+        }
+
+        $tokens = $response->json('storefront_access_tokens', []);
+
+        foreach ($tokens as $token) {
+            $title = (string) ($token['title'] ?? '');
             if ($title === 'Side St' || $title === 'Side St Hydrogen') {
-                return (string) Arr::get($edge, 'node.accessToken', '');
+                return (string) ($token['access_token'] ?? '');
             }
         }
 
