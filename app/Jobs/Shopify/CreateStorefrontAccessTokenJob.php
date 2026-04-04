@@ -99,6 +99,7 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
                 'integration_id' => $this->integrationId,
                 'shop_domain' => $shopDomain,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
         }
     }
@@ -149,12 +150,19 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
             ]);
 
         if (! $response->ok()) {
+            Log::error('Shopify Storefront token GraphQL HTTP error', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
             throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
         }
 
         $payload = $response->json() ?? [];
         $errors = Arr::get($payload, 'errors', []);
         if (is_array($errors) && $errors !== []) {
+            Log::error('Shopify Storefront token GraphQL errors', [
+                'errors' => $errors,
+            ]);
             throw new \RuntimeException((string) Arr::get($errors, '0.message', 'Shopify GraphQL error.'));
         }
 
