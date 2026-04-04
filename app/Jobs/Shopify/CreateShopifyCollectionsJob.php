@@ -167,7 +167,12 @@ class CreateShopifyCollectionsJob implements ShouldQueue
                 $this->setMetafields($shopDomain, $accessToken, $apiVersion, $metafieldsToSet);
             }
 
-            $integration->mergeProviderMetadata(['collections_state' => 'registered']);
+            // Also store handles in provider_metadata for the storefront config API
+            $handlesMeta = ['collections_state' => 'registered'];
+            foreach ($metafieldsToSet as $mf) {
+                $handlesMeta[$mf['key']] = $mf['value'];
+            }
+            $integration->mergeProviderMetadata($handlesMeta);
 
             Log::info('Shopify collections created', [
                 'integration_id' => $this->integrationId,
