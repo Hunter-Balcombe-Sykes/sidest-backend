@@ -66,6 +66,15 @@ class CreateShopifyCollectionsJob implements ShouldQueue
     }
     GRAPHQL;
 
+    private const PUBLISHABLE_PUBLISH = <<<'GRAPHQL'
+    mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+      publishablePublish(id: $id, input: $input) {
+        publishable { publishedOnCurrentPublication }
+        userErrors { field message }
+      }
+    }
+    GRAPHQL;
+
     private const METAFIELDS_SET = <<<'GRAPHQL'
     mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
@@ -145,21 +154,29 @@ class CreateShopifyCollectionsJob implements ShouldQueue
 
         try {
             $metafieldsToSet = [];
+            $collectionGids = [];
+            $publicationId = Arr::get($metadata, 'publication_id');
 
             foreach (self::COLLECTIONS as $collectionDef) {
-                $handle = $this->findOrCreateCollection(
+                $result = $this->findOrCreateCollection(
                     $shopDomain, $accessToken, $apiVersion, $collectionDef
                 );
 
-                if ($handle !== null) {
+                if ($result !== null) {
                     $metafieldsToSet[] = [
                         'namespace' => 'sidest',
                         'key' => $collectionDef['metafield_key'],
-                        'value' => $handle,
+                        'value' => $result['handle'],
                         'type' => 'single_line_text_field',
                         'ownerId' => $this->getShopGid($shopDomain, $accessToken, $apiVersion),
                     ];
+                    $collectionGids[] = $result['gid'];
                 }
+            }
+
+            // Publish collections to the app's sales channel so they're visible via Storefront API
+            if ($publicationId && ! empty($collectionGids)) {
+                $this->publishCollections($shopDomain, $accessToken, $apiVersion, $collectionGids, $publicationId);
             }
 
             // Write collection handles to shop metafields
@@ -189,7 +206,10 @@ class CreateShopifyCollectionsJob implements ShouldQueue
         }
     }
 
-    private function findOrCreateCollection(string $shopDomain, string $accessToken, string $apiVersion, array $def): ?string
+    /**
+     * @return array{handle: string, gid: string}|null
+     */
+    private function findOrCreateCollection(string $shopDomain, string $accessToken, string $apiVersion, array $def): ?array
     {
         // Check if collection already exists by title
         $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::COLLECTIONS_QUERY, [
@@ -199,7 +219,10 @@ class CreateShopifyCollectionsJob implements ShouldQueue
 
         $edges = $response->json('data.collections.edges', []);
         if (! empty($edges)) {
-            return (string) Arr::get($edges[0], 'node.handle', '');
+            return [
+                'handle' => (string) Arr::get($edges[0], 'node.handle', ''),
+                'gid' => (string) Arr::get($edges[0], 'node.id', ''),
+            ];
         }
 
         // Create the collection
@@ -272,14 +295,44 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             return null;
         }
 
-        $handle = (string) $response->json('data.collectionCreate.collection.handle', '');
+        $collection = $response->json('data.collectionCreate.collection', []);
+        $handle = (string) ($collection['handle'] ?? '');
+        $gid = (string) ($collection['id'] ?? '');
 
         Log::info('Shopify collection created', [
             'title' => $def['title'],
             'handle' => $handle,
+            'gid' => $gid,
         ]);
 
-        return $handle;
+        return ['handle' => $handle, 'gid' => $gid];
+    }
+
+    /**
+     * Publish collections to the app's sales channel so they're visible via Storefront API.
+     */
+    private function publishCollections(string $shopDomain, string $accessToken, string $apiVersion, array $collectionGids, string $publicationId): void
+    {
+        foreach ($collectionGids as $gid) {
+            $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::PUBLISHABLE_PUBLISH, [
+                'id' => $gid,
+                'input' => [['publicationId' => $publicationId]],
+            ]);
+
+            $userErrors = $response->json('data.publishablePublish.userErrors', []);
+            if (! empty($userErrors)) {
+                Log::warning('Failed to publish collection to sales channel', [
+                    'collection_gid' => $gid,
+                    'publication_id' => $publicationId,
+                    'errors' => $userErrors,
+                ]);
+            }
+        }
+
+        Log::info('Collections published to sales channel', [
+            'count' => count($collectionGids),
+            'publication_id' => $publicationId,
+        ]);
     }
 
     /**
