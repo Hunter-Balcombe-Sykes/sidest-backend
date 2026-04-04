@@ -51,6 +51,21 @@ class CreateShopifyCollectionsJob implements ShouldQueue
     }
     GRAPHQL;
 
+    // Looks up a metafield definition GID by namespace, key, and owner type.
+    private const METAFIELD_DEFINITION_QUERY = <<<'GRAPHQL'
+    query metafieldDefinitions($ownerType: MetafieldOwnerType!, $namespace: String!, $first: Int!) {
+      metafieldDefinitions(ownerType: $ownerType, namespace: $namespace, first: $first) {
+        edges {
+          node {
+            id
+            namespace
+            key
+          }
+        }
+      }
+    }
+    GRAPHQL;
+
     private const METAFIELDS_SET = <<<'GRAPHQL'
     mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
@@ -74,7 +89,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             'metafield_key' => 'active_collection_handle',
             'smart' => true,
             'rules' => [
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'sidest.active:true'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
             ],
         ],
         [
@@ -94,8 +109,8 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             'metafield_key' => 'high_commission_collection_handle',
             'smart' => true,
             'rules' => [
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'sidest.active:true'],
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'IS_SET', 'condition' => 'sidest.commission_override'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'IS_SET', 'condition' => '', 'metafield_ref' => 'sidest.commission_override'],
             ],
         ],
     ];
@@ -186,9 +201,38 @@ class CreateShopifyCollectionsJob implements ShouldQueue
         $input = ['title' => $def['title']];
 
         if ($def['smart'] && ! empty($def['rules'])) {
+            // Resolve metafield definition GIDs for PRODUCT_METAFIELD_DEFINITION rules
+            $resolvedRules = [];
+            foreach ($def['rules'] as $rule) {
+                $graphqlRule = [
+                    'column' => $rule['column'],
+                    'relation' => $rule['relation'],
+                    'condition' => $rule['condition'],
+                ];
+
+                if ($rule['column'] === 'PRODUCT_METAFIELD_DEFINITION' && ! empty($rule['metafield_ref'])) {
+                    $definitionGid = $this->resolveMetafieldDefinitionGid(
+                        $shopDomain, $accessToken, $apiVersion, $rule['metafield_ref']
+                    );
+
+                    if ($definitionGid === null) {
+                        Log::warning('Could not resolve metafield definition GID', [
+                            'title' => $def['title'],
+                            'metafield_ref' => $rule['metafield_ref'],
+                        ]);
+
+                        return null;
+                    }
+
+                    $graphqlRule['conditionObjectId'] = $definitionGid;
+                }
+
+                $resolvedRules[] = $graphqlRule;
+            }
+
             $input['ruleSet'] = [
                 'appliedDisjunctively' => false,
-                'rules' => $def['rules'],
+                'rules' => $resolvedRules,
             ];
         }
 
@@ -207,6 +251,31 @@ class CreateShopifyCollectionsJob implements ShouldQueue
         }
 
         return (string) $response->json('data.collectionCreate.collection.handle', '');
+    }
+
+    /**
+     * Resolve a metafield reference (e.g. "sidest.active") to its Shopify MetafieldDefinition GID.
+     */
+    private function resolveMetafieldDefinitionGid(string $shopDomain, string $accessToken, string $apiVersion, string $metafieldRef): ?string
+    {
+        [$namespace, $key] = explode('.', $metafieldRef, 2);
+
+        $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELD_DEFINITION_QUERY, [
+            'ownerType' => 'PRODUCT',
+            'namespace' => $namespace,
+            'first' => 25,
+        ]);
+
+        $edges = $response->json('data.metafieldDefinitions.edges', []);
+
+        foreach ($edges as $edge) {
+            $node = $edge['node'] ?? [];
+            if (($node['namespace'] ?? '') === $namespace && ($node['key'] ?? '') === $key) {
+                return $node['id'];
+            }
+        }
+
+        return null;
     }
 
     private function setMetafields(string $shopDomain, string $accessToken, string $apiVersion, array $metafields): void
