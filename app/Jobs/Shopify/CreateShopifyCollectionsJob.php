@@ -110,7 +110,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             'smart' => true,
             'rules' => [
                 ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'IS_SET', 'condition' => '', 'metafield_ref' => 'sidest.commission_override'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'IS_SET', 'condition' => 'true', 'metafield_ref' => 'sidest.commission_override'],
             ],
         ],
     ];

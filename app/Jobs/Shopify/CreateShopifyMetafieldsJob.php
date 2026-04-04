@@ -28,6 +28,22 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
           id
           namespace
           key
+          useAsCollectionCondition
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    GRAPHQL;
+
+    private const METAFIELD_DEFINITION_UPDATE = <<<'GRAPHQL'
+    mutation metafieldDefinitionUpdate($definition: MetafieldDefinitionUpdateInput!) {
+      metafieldDefinitionUpdate(definition: $definition) {
+        updatedDefinition {
+          id
+          useAsCollectionCondition
         }
         userErrors {
           field
@@ -45,11 +61,15 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
             id
             namespace
             key
+            useAsCollectionCondition
           }
         }
       }
     }
     GRAPHQL;
+
+    // Keys that are used as automated collection rule conditions
+    private const COLLECTION_CONDITION_KEYS = ['active', 'commission_override'];
 
     private const PRODUCT_DEFINITIONS = [
         [
@@ -117,20 +137,31 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
 
         try {
             // Get existing definitions to avoid duplicates
-            $existingProduct = $this->getExistingKeys($shopDomain, $accessToken, $apiVersion, 'PRODUCT');
-            $existingShop = $this->getExistingKeys($shopDomain, $accessToken, $apiVersion, 'SHOP');
+            $existingProduct = $this->getExistingDefinitions($shopDomain, $accessToken, $apiVersion, 'PRODUCT');
+            $existingShop = $this->getExistingDefinitions($shopDomain, $accessToken, $apiVersion, 'SHOP');
+            $existingProductKeys = array_column($existingProduct, 'key');
+            $existingShopKeys = array_column($existingShop, 'key');
 
             // Create product-level definitions
             foreach (self::PRODUCT_DEFINITIONS as $def) {
-                if (in_array($def['key'], $existingProduct, true)) {
+                $useAsCondition = in_array($def['key'], self::COLLECTION_CONDITION_KEYS, true);
+
+                if (in_array($def['key'], $existingProductKeys, true)) {
+                    // Ensure useAsCollectionCondition is enabled on existing definitions that need it
+                    if ($useAsCondition) {
+                        $existing = Arr::first($existingProduct, fn ($d) => $d['key'] === $def['key']);
+                        if ($existing && ! $existing['useAsCollectionCondition']) {
+                            $this->enableCollectionCondition($shopDomain, $accessToken, $apiVersion, $existing['id']);
+                        }
+                    }
                     continue;
                 }
-                $this->createDefinition($shopDomain, $accessToken, $apiVersion, 'PRODUCT', $def);
+                $this->createDefinition($shopDomain, $accessToken, $apiVersion, 'PRODUCT', $def, $useAsCondition);
             }
 
             // Create shop-level definitions
             foreach (self::SHOP_DEFINITIONS as $def) {
-                if (in_array($def['key'], $existingShop, true)) {
+                if (in_array($def['key'], $existingShopKeys, true)) {
                     continue;
                 }
                 $this->createDefinition($shopDomain, $accessToken, $apiVersion, 'SHOP', $def);
@@ -157,9 +188,9 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
     }
 
     /**
-     * @return string[] Existing metafield keys for the given owner type
+     * @return array<int, array{id: string, key: string, useAsCollectionCondition: bool}>
      */
-    private function getExistingKeys(string $shopDomain, string $accessToken, string $apiVersion, string $ownerType): array
+    private function getExistingDefinitions(string $shopDomain, string $accessToken, string $apiVersion, string $ownerType): array
     {
         $response = Http::withHeaders([
             'X-Shopify-Access-Token' => $accessToken,
@@ -183,12 +214,16 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
         $edges = $response->json('data.metafieldDefinitions.edges', []);
 
         return array_map(
-            static fn (array $edge): string => (string) Arr::get($edge, 'node.key', ''),
+            static fn (array $edge): array => [
+                'id' => (string) Arr::get($edge, 'node.id', ''),
+                'key' => (string) Arr::get($edge, 'node.key', ''),
+                'useAsCollectionCondition' => (bool) Arr::get($edge, 'node.useAsCollectionCondition', false),
+            ],
             is_array($edges) ? $edges : []
         );
     }
 
-    private function createDefinition(string $shopDomain, string $accessToken, string $apiVersion, string $ownerType, array $def): void
+    private function createDefinition(string $shopDomain, string $accessToken, string $apiVersion, string $ownerType, array $def, bool $useAsCollectionCondition = false): void
     {
         $definition = [
             'namespace' => 'sidest',
@@ -201,6 +236,10 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
 
         if (! empty($def['access'])) {
             $definition['access'] = $def['access'];
+        }
+
+        if ($useAsCollectionCondition) {
+            $definition['useAsCollectionCondition'] = true;
         }
 
         $response = Http::withHeaders([
@@ -219,6 +258,36 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
             Log::warning('Shopify metafield definition creation had errors', [
                 'key' => $def['key'],
                 'owner_type' => $ownerType,
+                'errors' => $userErrors,
+            ]);
+        }
+    }
+
+    /**
+     * Enable useAsCollectionCondition on an existing metafield definition.
+     */
+    private function enableCollectionCondition(string $shopDomain, string $accessToken, string $apiVersion, string $definitionId): void
+    {
+        $response = Http::withHeaders([
+            'X-Shopify-Access-Token' => $accessToken,
+            'Content-Type' => 'application/json',
+        ])->timeout($this->timeout)->post(
+            "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
+            [
+                'query' => self::METAFIELD_DEFINITION_UPDATE,
+                'variables' => [
+                    'definition' => [
+                        'id' => $definitionId,
+                        'useAsCollectionCondition' => true,
+                    ],
+                ],
+            ]
+        );
+
+        $userErrors = $response->json('data.metafieldDefinitionUpdate.userErrors', []);
+        if (! empty($userErrors)) {
+            Log::warning('Failed to enable useAsCollectionCondition', [
+                'definition_id' => $definitionId,
                 'errors' => $userErrors,
             ]);
         }
