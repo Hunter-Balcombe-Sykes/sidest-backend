@@ -141,13 +141,15 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
 
     private function queryShopify(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables = []): array
     {
+        $body = ['query' => $query];
+        if (! empty($variables)) {
+            $body['variables'] = $variables;
+        }
+
         $response = Http::timeout(20)
             ->acceptJson()
             ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
-            ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
-                'query' => $query,
-                'variables' => $variables,
-            ]);
+            ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", $body);
 
         if (! $response->ok()) {
             $body = $response->body();
