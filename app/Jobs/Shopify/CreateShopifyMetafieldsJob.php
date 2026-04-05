@@ -4,6 +4,7 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -13,13 +14,25 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates sidest.* metafield definitions on the brand's Shopify store. Idempotent — skips existing definitions.
-class CreateShopifyMetafieldsJob implements ShouldQueue
+class CreateShopifyMetafieldsJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
     public int $timeout = 30;
+
+    public int $uniqueFor = 300;
+
+    public function uniqueId(): string
+    {
+        return $this->integrationId;
+    }
+
+    public function backoff(): array
+    {
+        return [10, 30, 60];
+    }
 
     private const METAFIELD_DEFINITION_CREATE = <<<'GRAPHQL'
     mutation metafieldDefinitionCreate($definition: MetafieldDefinitionInput!) {
@@ -126,7 +139,7 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
         $accessToken = trim((string) $integration->access_token);
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
-        if ($shopDomain === '' || $accessToken === '') {
+        if ($shopDomain === '' || $accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
             $integration->mergeProviderMetadata(['metafield_definitions_state' => 'failed']);
 
             return;
@@ -152,6 +165,8 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
                                 'id' => $existing['id'],
                             ]);
                             $this->deleteDefinition($shopDomain, $accessToken, $apiVersion, $existing['id']);
+                            // Note: delete + create is non-atomic. If create fails after delete,
+                            // the next retry will find the definition missing and recreate it cleanly.
                             // Fall through to create below
                         } else {
                             continue;
@@ -188,8 +203,14 @@ class CreateShopifyMetafieldsJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
 
-            $integration->mergeProviderMetadata(['metafield_definitions_state' => 'failed']);
+            throw $e;
         }
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        $integration = ProfessionalIntegration::find($this->integrationId);
+        $integration?->mergeProviderMetadata(['metafield_definitions_state' => 'failed']);
     }
 
     /**

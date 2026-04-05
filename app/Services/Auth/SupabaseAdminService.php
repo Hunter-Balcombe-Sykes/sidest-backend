@@ -53,8 +53,21 @@ class SupabaseAdminService
             ];
         }
 
-        // User already exists — fetch the existing user
+        // User already exists — try to extract from error response, fall back to paginated search
         if ($response->status() === 422 || $response->status() === 409) {
+            $body = $response->json();
+
+            // GoTrue v2 includes the existing user object in the error response
+            $existingId = $body['user']['id'] ?? null;
+            if ($existingId) {
+                return [
+                    'id' => (string) $existingId,
+                    'email' => (string) ($body['user']['email'] ?? $email),
+                    'created' => false,
+                ];
+            }
+
+            // Fallback: paginated search (legacy GoTrue versions)
             $existing = $this->getUserByEmail($email);
 
             if ($existing !== null) {
@@ -69,7 +82,8 @@ class SupabaseAdminService
         Log::error('Supabase admin: failed to create user', [
             'email' => $email,
             'status' => $response->status(),
-            'body' => $response->body(),
+            'error_code' => $response->json('code'),
+            'error_msg' => $response->json('msg'),
         ]);
 
         throw new RuntimeException('Failed to create Supabase user.');

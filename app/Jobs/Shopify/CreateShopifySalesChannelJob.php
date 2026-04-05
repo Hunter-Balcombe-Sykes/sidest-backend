@@ -4,6 +4,7 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -13,13 +14,25 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates Side St sales channel publication on the brand's Shopify store. Products must be published to this channel to appear on affiliate storefronts.
-class CreateShopifySalesChannelJob implements ShouldQueue
+class CreateShopifySalesChannelJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
     public int $timeout = 30;
+
+    public int $uniqueFor = 300;
+
+    public function uniqueId(): string
+    {
+        return $this->integrationId;
+    }
+
+    public function backoff(): array
+    {
+        return [10, 30, 60];
+    }
 
     private const PUBLICATIONS_QUERY = <<<'GRAPHQL'
     query publications($first: Int!) {
@@ -71,7 +84,7 @@ class CreateShopifySalesChannelJob implements ShouldQueue
         $accessToken = trim((string) $integration->access_token);
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
-        if ($shopDomain === '' || $accessToken === '') {
+        if ($shopDomain === '' || $accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
             $integration->mergeProviderMetadata(['sales_channel_state' => 'failed']);
 
             return;
@@ -137,8 +150,14 @@ class CreateShopifySalesChannelJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
 
-            $integration->mergeProviderMetadata(['sales_channel_state' => 'failed']);
+            throw $e;
         }
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        $integration = ProfessionalIntegration::find($this->integrationId);
+        $integration?->mergeProviderMetadata(['sales_channel_state' => 'failed']);
     }
 
     private function findExistingPublicationId(string $shopDomain, string $accessToken, string $apiVersion): ?string

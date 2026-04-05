@@ -4,6 +4,7 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -13,13 +14,25 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Core. Registers all Shopify webhooks (functional + GDPR) via GraphQL on install. Idempotent — skips already-registered topics.
-class RegisterShopifyWebhooksJob implements ShouldQueue
+class RegisterShopifyWebhooksJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
     public int $timeout = 300;
+
+    public int $uniqueFor = 300;
+
+    public function uniqueId(): string
+    {
+        return $this->integrationId;
+    }
+
+    public function backoff(): array
+    {
+        return [10, 30, 60];
+    }
 
     private const WEBHOOK_SUBSCRIPTION_CREATE = <<<'GRAPHQL'
     mutation webhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
@@ -89,10 +102,10 @@ class RegisterShopifyWebhooksJob implements ShouldQueue
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
         $accessToken = trim((string) $integration->access_token);
 
-        if ($shopDomain === '' || $accessToken === '') {
+        if ($shopDomain === '' || $accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
             $integration->mergeProviderMetadata([
                 'webhooks_state' => 'failed',
-                'webhooks_error' => 'Missing shop domain or access token.',
+                'webhooks_error' => 'Missing or invalid shop domain or access token.',
             ]);
 
             return;

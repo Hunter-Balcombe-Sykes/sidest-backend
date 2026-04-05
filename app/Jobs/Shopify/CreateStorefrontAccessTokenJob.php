@@ -4,6 +4,7 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -13,13 +14,25 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Core. Creates Shopify Storefront API token ("Side St Hydrogen") via GraphQL. Required for Hydrogen storefronts to fetch product data. Matches existing "Side St" tokens for backward compat.
-class CreateStorefrontAccessTokenJob implements ShouldQueue
+class CreateStorefrontAccessTokenJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
     public int $timeout = 30;
+
+    public int $uniqueFor = 300;
+
+    public function uniqueId(): string
+    {
+        return $this->integrationId;
+    }
+
+    public function backoff(): array
+    {
+        return [10, 30, 60];
+    }
 
     private const STOREFRONT_TOKEN_CREATE = <<<'GRAPHQL'
     mutation storefrontAccessTokenCreate($input: StorefrontAccessTokenInput!) {
@@ -61,7 +74,7 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
         $accessToken = trim((string) $integration->access_token);
 
-        if ($shopDomain === '' || $accessToken === '') {
+        if ($shopDomain === '' || $accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
             return;
         }
 
@@ -89,9 +102,18 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
                 'integration_id' => $this->integrationId,
                 'shop_domain' => $shopDomain,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
+
+            throw $e;
         }
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::error('Shopify Storefront API token job permanently failed', [
+            'integration_id' => $this->integrationId,
+            'error' => $e->getMessage(),
+        ]);
     }
 
     private function findExistingToken(string $shopDomain, string $accessToken, string $apiVersion): ?string
@@ -152,8 +174,10 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue
             ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", $body);
 
         if (! $response->ok()) {
-            $body = $response->body();
-            Log::error("Shopify Storefront token HTTP {$response->status()}: {$body}");
+            Log::error('Shopify Storefront token HTTP error', [
+                'integration_id' => $this->integrationId,
+                'status' => $response->status(),
+            ]);
             throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
         }
 

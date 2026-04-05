@@ -113,6 +113,13 @@ class BrandSignupService
         // If the user already signed up via the dashboard, link the integration to the existing brand
         $existingProfessional = Professional::where('auth_user_id', $authUserId)->first();
         if ($existingProfessional) {
+            Log::warning('Shopify OAuth: auto-linking to existing professional by email match', [
+                'professional_id' => (string) $existingProfessional->id,
+                'shop_domain' => $shopDomain,
+                'shop_email' => $shopEmail,
+                'auth_user_id' => $authUserId,
+            ]);
+
             return $this->handleExistingBrandConnect($existingProfessional, $shopDomain, $accessToken, $shopData, $scopes);
         }
 
@@ -234,21 +241,25 @@ class BrandSignupService
         $shopId = trim((string) Arr::get($shopData, 'id', ''));
         $shopCurrency = strtoupper(trim((string) Arr::get($shopData, 'currency', '')));
 
-        $integration = ProfessionalIntegration::create([
-            'professional_id' => (string) $professional->id,
-            'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
-            'external_account_id' => $shopDomain,
-            'access_token' => $accessToken,
-            'provider_metadata' => [
-                'shop_domain' => $shopDomain,
-                'shop_id' => $shopId !== '' ? "gid://shopify/Shop/{$shopId}" : null,
-                'shop_currency' => $shopCurrency !== '' ? $shopCurrency : null,
-                'scopes' => $scopes,
-                'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
-                'connected_at' => now()->toIso8601String(),
-                'webhook_registration_state' => 'queued',
+        $integration = ProfessionalIntegration::updateOrCreate(
+            [
+                'professional_id' => (string) $professional->id,
+                'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
             ],
-        ]);
+            [
+                'external_account_id' => $shopDomain,
+                'access_token' => $accessToken,
+                'provider_metadata' => [
+                    'shop_domain' => $shopDomain,
+                    'shop_id' => $shopId !== '' ? "gid://shopify/Shop/{$shopId}" : null,
+                    'shop_currency' => $shopCurrency !== '' ? $shopCurrency : null,
+                    'scopes' => $scopes,
+                    'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
+                    'connected_at' => now()->toIso8601String(),
+                    'webhook_registration_state' => 'queued',
+                ],
+            ]
+        );
 
         // Ensure BrandProfile exists
         BrandProfile::firstOrCreate(
@@ -284,17 +295,24 @@ class BrandSignupService
 
     private function dispatchInstallJobs(string $integrationId): void
     {
-        try {
-            RegisterShopifyWebhooksJob::dispatch($integrationId);
-            CreateStorefrontAccessTokenJob::dispatch($integrationId);
-            CreateShopifyMetafieldsJob::dispatch($integrationId); // chains → CreateShopifyCollectionsJob
-            CreateShopifySalesChannelJob::dispatch($integrationId);
-            SyncShopifyBrandLogoJob::dispatch($integrationId);
-        } catch (\Throwable $e) {
-            Log::warning('Failed to dispatch Shopify install jobs', [
-                'integration_id' => $integrationId,
-                'message' => $e->getMessage(),
-            ]);
+        $jobs = [
+            RegisterShopifyWebhooksJob::class,
+            CreateStorefrontAccessTokenJob::class,
+            CreateShopifyMetafieldsJob::class, // chains → CreateShopifyCollectionsJob
+            CreateShopifySalesChannelJob::class,
+            SyncShopifyBrandLogoJob::class,
+        ];
+
+        foreach ($jobs as $jobClass) {
+            try {
+                $jobClass::dispatch($integrationId);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to dispatch Shopify install job', [
+                    'integration_id' => $integrationId,
+                    'job' => class_basename($jobClass),
+                    'message' => $e->getMessage(),
+                ]);
+            }
         }
     }
 

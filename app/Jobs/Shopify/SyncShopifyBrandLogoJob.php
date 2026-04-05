@@ -5,6 +5,7 @@ namespace App\Jobs\Shopify;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -14,13 +15,25 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Fetches brand logo from Shopify via GraphQL and writes URL to Site settings. Always overwrites existing logo.
-class SyncShopifyBrandLogoJob implements ShouldQueue
+class SyncShopifyBrandLogoJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
     public int $timeout = 30;
+
+    public int $uniqueFor = 300;
+
+    public function uniqueId(): string
+    {
+        return $this->integrationId;
+    }
+
+    public function backoff(): array
+    {
+        return [10, 30, 60];
+    }
 
     private const SHOP_BRAND_LOGO_QUERY = <<<'GRAPHQL'
     {
@@ -57,7 +70,7 @@ class SyncShopifyBrandLogoJob implements ShouldQueue
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
         $accessToken = trim((string) $integration->access_token);
 
-        if ($shopDomain === '' || $accessToken === '') {
+        if ($shopDomain === '' || $accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
             return;
         }
 
@@ -72,7 +85,7 @@ class SyncShopifyBrandLogoJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
 
-            return;
+            throw $e;
         }
 
         if ($logoUrl === null) {
@@ -94,6 +107,14 @@ class SyncShopifyBrandLogoJob implements ShouldQueue
             'integration_id' => $this->integrationId,
             'shop_domain' => $shopDomain,
             'logo_url' => $logoUrl,
+        ]);
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::error('Shopify brand logo sync permanently failed', [
+            'integration_id' => $this->integrationId,
+            'error' => $e->getMessage(),
         ]);
     }
 

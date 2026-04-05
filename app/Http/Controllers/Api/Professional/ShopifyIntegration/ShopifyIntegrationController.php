@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\Professional\ShopifyIntegration;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-use App\Jobs\Shopify\CreateShopifyCollectionsJob;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
@@ -238,23 +237,28 @@ class ShopifyIntegrationController extends ApiController
             }
         }
 
-        $webhookRegistrationQueued = false;
-        try {
-            RegisterShopifyWebhooksJob::dispatch((string) $integration->id);
-            CreateStorefrontAccessTokenJob::dispatch((string) $integration->id);
-            CreateShopifyMetafieldsJob::dispatch((string) $integration->id);
-            CreateShopifyCollectionsJob::dispatch((string) $integration->id);
-            CreateShopifySalesChannelJob::dispatch((string) $integration->id);
-            SyncShopifyBrandLogoJob::dispatch((string) $integration->id);
-            $webhookRegistrationQueued = true;
-        } catch (\Throwable $e) {
-            Log::warning('Failed to queue Shopify webhook registration job', [
-                'actor_professional_id' => (string) $actorProfessional->id,
-                'brand_professional_id' => $targetBrandId,
-                'integration_id' => (string) $integration->id,
-                'shop_domain' => $shopDomain,
-                'message' => $e->getMessage(),
-            ]);
+        $webhookRegistrationQueued = true;
+        $jobs = [
+            RegisterShopifyWebhooksJob::class,
+            CreateStorefrontAccessTokenJob::class,
+            CreateShopifyMetafieldsJob::class, // chains → CreateShopifyCollectionsJob
+            CreateShopifySalesChannelJob::class,
+            SyncShopifyBrandLogoJob::class,
+        ];
+
+        foreach ($jobs as $jobClass) {
+            try {
+                $jobClass::dispatch((string) $integration->id);
+            } catch (\Throwable $e) {
+                $webhookRegistrationQueued = false;
+                Log::warning('Failed to dispatch Shopify install job', [
+                    'actor_professional_id' => (string) $actorProfessional->id,
+                    'brand_professional_id' => $targetBrandId,
+                    'integration_id' => (string) $integration->id,
+                    'job' => class_basename($jobClass),
+                    'message' => $e->getMessage(),
+                ]);
+            }
         }
 
         return $this->success([

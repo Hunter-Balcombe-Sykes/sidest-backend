@@ -4,6 +4,7 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -13,13 +14,25 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates four Side St collections on the brand's Shopify store and writes handles to shop metafields.
-class CreateShopifyCollectionsJob implements ShouldQueue
+class CreateShopifyCollectionsJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
     public int $timeout = 60;
+
+    public int $uniqueFor = 300;
+
+    public function uniqueId(): string
+    {
+        return $this->integrationId;
+    }
+
+    public function backoff(): array
+    {
+        return [10, 30, 60];
+    }
 
     private const COLLECTION_CREATE = <<<'GRAPHQL'
     mutation collectionCreate($input: CollectionInput!) {
@@ -146,7 +159,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue
         $accessToken = trim((string) $integration->access_token);
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
-        if ($shopDomain === '' || $accessToken === '') {
+        if ($shopDomain === '' || $accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
             $integration->mergeProviderMetadata(['collections_state' => 'failed']);
 
             return;
@@ -157,6 +170,11 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             $collectionGids = [];
             // Publish to Online Store so collections are visible via Storefront API
             $publicationId = $this->findOnlineStorePublicationId($shopDomain, $accessToken, $apiVersion);
+
+            $shopGid = $this->getShopGid($shopDomain, $accessToken, $apiVersion);
+            if ($shopGid === '') {
+                throw new \RuntimeException('Could not resolve Shop GID.');
+            }
 
             foreach (self::COLLECTIONS as $collectionDef) {
                 $result = $this->findOrCreateCollection(
@@ -169,7 +187,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue
                         'key' => $collectionDef['metafield_key'],
                         'value' => $result['handle'],
                         'type' => 'single_line_text_field',
-                        'ownerId' => $this->getShopGid($shopDomain, $accessToken, $apiVersion),
+                        'ownerId' => $shopGid,
                     ];
                     $collectionGids[] = $result['gid'];
                 }
@@ -185,8 +203,19 @@ class CreateShopifyCollectionsJob implements ShouldQueue
                 $this->setMetafields($shopDomain, $accessToken, $apiVersion, $metafieldsToSet);
             }
 
+            // Track partial failures — 'registered' only if all collections succeeded
+            $expectedCount = count(self::COLLECTIONS);
+            $actualCount = count($collectionGids);
+            if ($actualCount === 0) {
+                $collectionsState = 'failed';
+            } elseif ($actualCount < $expectedCount) {
+                $collectionsState = 'partial';
+            } else {
+                $collectionsState = 'registered';
+            }
+
             // Also store handles in provider_metadata for the storefront config API
-            $handlesMeta = ['collections_state' => 'registered'];
+            $handlesMeta = ['collections_state' => $collectionsState];
             foreach ($metafieldsToSet as $mf) {
                 $handlesMeta[$mf['key']] = $mf['value'];
             }
@@ -203,8 +232,14 @@ class CreateShopifyCollectionsJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
 
-            $integration->mergeProviderMetadata(['collections_state' => 'failed']);
+            throw $e;
         }
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        $integration = ProfessionalIntegration::find($this->integrationId);
+        $integration?->mergeProviderMetadata(['collections_state' => 'failed']);
     }
 
     /**
@@ -220,10 +255,20 @@ class CreateShopifyCollectionsJob implements ShouldQueue
 
         $edges = $response->json('data.collections.edges', []);
         if (! empty($edges)) {
-            return [
-                'handle' => (string) Arr::get($edges[0], 'node.handle', ''),
-                'gid' => (string) Arr::get($edges[0], 'node.id', ''),
-            ];
+            $handle = (string) Arr::get($edges[0], 'node.handle', '');
+            $gid = (string) Arr::get($edges[0], 'node.id', '');
+
+            if ($handle === '' || $gid === '') {
+                Log::warning('Existing collection has empty handle or gid', [
+                    'title' => $def['title'],
+                    'handle' => $handle,
+                    'gid' => $gid,
+                ]);
+
+                return null;
+            }
+
+            return ['handle' => $handle, 'gid' => $gid];
         }
 
         // Create the collection
@@ -290,7 +335,6 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             Log::warning('Shopify collection creation had userErrors', [
                 'title' => $def['title'],
                 'errors' => $userErrors,
-                'response_body' => $response->body(),
             ]);
 
             return null;
@@ -299,6 +343,16 @@ class CreateShopifyCollectionsJob implements ShouldQueue
         $collection = $response->json('data.collectionCreate.collection', []);
         $handle = (string) ($collection['handle'] ?? '');
         $gid = (string) ($collection['id'] ?? '');
+
+        if ($handle === '' || $gid === '') {
+            Log::warning('Collection created but handle or gid is empty', [
+                'title' => $def['title'],
+                'handle' => $handle,
+                'gid' => $gid,
+            ]);
+
+            return null;
+        }
 
         Log::info('Shopify collection created', [
             'title' => $def['title'],
@@ -336,11 +390,17 @@ class CreateShopifyCollectionsJob implements ShouldQueue
         ]);
     }
 
+    private array $metafieldDefinitionCache = [];
+
     /**
      * Resolve a metafield reference (e.g. "sidest.active") to its Shopify MetafieldDefinition GID.
      */
     private function resolveMetafieldDefinitionGid(string $shopDomain, string $accessToken, string $apiVersion, string $metafieldRef): ?string
     {
+        if (isset($this->metafieldDefinitionCache[$metafieldRef])) {
+            return $this->metafieldDefinitionCache[$metafieldRef];
+        }
+
         [$namespace, $key] = explode('.', $metafieldRef, 2);
 
         $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELD_DEFINITION_QUERY, [
@@ -351,14 +411,14 @@ class CreateShopifyCollectionsJob implements ShouldQueue
 
         $edges = $response->json('data.metafieldDefinitions.edges', []);
 
+        // Cache all definitions from this namespace
         foreach ($edges as $edge) {
             $node = $edge['node'] ?? [];
-            if (($node['namespace'] ?? '') === $namespace && ($node['key'] ?? '') === $key) {
-                return $node['id'];
-            }
+            $cacheKey = ($node['namespace'] ?? '') . '.' . ($node['key'] ?? '');
+            $this->metafieldDefinitionCache[$cacheKey] = $node['id'] ?? null;
         }
 
-        return null;
+        return $this->metafieldDefinitionCache[$metafieldRef] ?? null;
     }
 
     /**
@@ -379,9 +439,12 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             }
         }
 
-        // Fallback: return first publication
+        // No "Online Store" found — don't fall back to an arbitrary channel (could be POS)
         if (! empty($edges)) {
-            return (string) Arr::get($edges[0], 'node.id', '');
+            Log::warning('Online Store publication not found, skipping collection publishing', [
+                'integration_id' => $this->integrationId,
+                'available_publications' => collect($edges)->pluck('node.name')->toArray(),
+            ]);
         }
 
         return null;
@@ -389,9 +452,17 @@ class CreateShopifyCollectionsJob implements ShouldQueue
 
     private function setMetafields(string $shopDomain, string $accessToken, string $apiVersion, array $metafields): void
     {
-        $this->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELDS_SET, [
+        $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELDS_SET, [
             'metafields' => $metafields,
         ]);
+
+        $userErrors = $response->json('data.metafieldsSet.userErrors', []);
+        if (! empty($userErrors)) {
+            Log::warning('Shopify setMetafields had userErrors', [
+                'integration_id' => $this->integrationId,
+                'errors' => $userErrors,
+            ]);
+        }
     }
 
     private function getShopGid(string $shopDomain, string $accessToken, string $apiVersion): string
@@ -403,7 +474,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue
 
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
-        return Http::withHeaders([
+        $response = Http::withHeaders([
             'X-Shopify-Access-Token' => $accessToken,
             'Content-Type' => 'application/json',
         ])->timeout($this->timeout)->post(
@@ -413,5 +484,11 @@ class CreateShopifyCollectionsJob implements ShouldQueue
                 'variables' => ! empty($variables) ? $variables : null,
             ])
         );
+
+        if (! $response->successful()) {
+            throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
+        }
+
+        return $response;
     }
 }
