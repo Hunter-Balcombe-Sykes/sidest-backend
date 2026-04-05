@@ -155,7 +155,8 @@ class CreateShopifyCollectionsJob implements ShouldQueue
         try {
             $metafieldsToSet = [];
             $collectionGids = [];
-            $publicationId = Arr::get($metadata, 'publication_id');
+            // Publish to Online Store so collections are visible via Storefront API
+            $publicationId = $this->findOnlineStorePublicationId($shopDomain, $accessToken, $apiVersion);
 
             foreach (self::COLLECTIONS as $collectionDef) {
                 $result = $this->findOrCreateCollection(
@@ -355,6 +356,32 @@ class CreateShopifyCollectionsJob implements ShouldQueue
             if (($node['namespace'] ?? '') === $namespace && ($node['key'] ?? '') === $key) {
                 return $node['id'];
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Find the Online Store publication ID so collections can be published to it.
+     */
+    private function findOnlineStorePublicationId(string $shopDomain, string $accessToken, string $apiVersion): ?string
+    {
+        $response = $this->graphql($shopDomain, $accessToken, $apiVersion, '
+            query { publications(first: 20) { edges { node { id name } } } }
+        ', []);
+
+        $edges = $response->json('data.publications.edges', []);
+
+        foreach ($edges as $edge) {
+            $name = strtolower(trim((string) Arr::get($edge, 'node.name', '')));
+            if ($name === 'online store') {
+                return (string) Arr::get($edge, 'node.id', '');
+            }
+        }
+
+        // Fallback: return first publication
+        if (! empty($edges)) {
+            return (string) Arr::get($edges[0], 'node.id', '');
         }
 
         return null;
