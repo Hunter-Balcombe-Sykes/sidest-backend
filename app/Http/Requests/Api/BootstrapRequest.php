@@ -7,6 +7,7 @@ use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Validation\Rule;
 
+// V2: Validates professional onboarding/bootstrap — display name, email, phone, handle generation, and professional type normalization.
 class BootstrapRequest extends BaseFormRequest
 {
     use NormalizesProfessionalType;

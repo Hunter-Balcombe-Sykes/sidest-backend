@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\PublicSite\CustomerLeads;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates public customer lead submissions — requires name, email, and phone with honeypot and timing-based bot protection.
 class PublicCustomerLeadRequest extends BaseFormRequest
 {
 

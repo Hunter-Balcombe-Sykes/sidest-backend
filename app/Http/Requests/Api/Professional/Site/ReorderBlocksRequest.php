@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Site;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates site block reordering — requires an array of UUIDs representing the new display order.
 class ReorderBlocksRequest extends BaseFormRequest
 {
 

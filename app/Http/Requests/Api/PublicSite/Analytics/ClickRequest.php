@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\PublicSite\Analytics;
 use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
+// V2: Validates public click-tracking events — requires a block ID with site identification via UUID or subdomain, plus optional session and UTM fields.
 class ClickRequest extends BaseFormRequest
 {
 

@@ -6,6 +6,7 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Line item linking a commission ledger entry to a payout batch. Records the amount disbursed for each earned commission.
 class CommissionPayoutItem extends BaseModel
 {
     use HasUuids;

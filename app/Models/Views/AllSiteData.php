@@ -5,6 +5,7 @@ namespace App\Models\Views;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+// V2: Read-only database view that denormalizes a site with its theme, blocks, and settings into a single row for efficient dashboard queries.
 class AllSiteData extends BaseModel
 {
     use HasFactory;

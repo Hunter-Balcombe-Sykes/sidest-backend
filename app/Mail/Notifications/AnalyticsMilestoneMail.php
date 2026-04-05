@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends analytics milestone achievement emails using the Notification model for subject and the analytics_milestones template.
 class AnalyticsMilestoneMail extends Mailable
 {
     use Queueable, SerializesModels;

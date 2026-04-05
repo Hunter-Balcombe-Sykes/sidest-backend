@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Concerns;
 
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
+// V2: Formats a LengthAwarePaginator into a standardized array response with data and pagination meta.
 trait ReturnsPaginatedResponse
 {
     protected function paginatedResponse(

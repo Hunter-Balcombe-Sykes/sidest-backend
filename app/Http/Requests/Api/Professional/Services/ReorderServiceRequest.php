@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates service reordering — requires an array of distinct UUIDs representing the new order.
 class ReorderServiceRequest extends BaseFormRequest
 {
 

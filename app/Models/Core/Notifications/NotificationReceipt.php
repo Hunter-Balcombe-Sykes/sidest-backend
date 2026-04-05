@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use App\Models\Core\Professional\Professional;
 
+// V2: Tracks per-professional read and dismissed state for a notification. One receipt per professional per notification.
 class NotificationReceipt extends BaseModel
 {
     use HasUuids;

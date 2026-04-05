@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Concerns;
 
+// V2: Validates Shopify webhook HMAC-SHA256 signatures against primary and fallback secrets for secure webhook ingestion.
 trait ValidatesShopifyWebhookHmac
 {
     protected function isValidShopifyHmac(string $rawBody, string $signature): bool

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Concerns;
 
 use Illuminate\Http\Request;
 
+// V2: Extracts the subdomain from the request host by stripping the configured public domain suffix, with route parameter fallback.
 trait ResolvesSubdomainFromHost
 {
     /**

@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
+// V2: API resource for brand setup wizard status — exposes completion flag, field states, and missing fields.
 class BrandSetupStatusResource extends JsonResource
 {
     /**

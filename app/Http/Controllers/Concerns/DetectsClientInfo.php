@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Concerns;
 
 use Illuminate\Http\Request;
 
+// V2: Detects client country code from CDN headers (Cloudflare, CloudFront, Vercel) and device type from user agent strings.
 trait DetectsClientInfo
 {
     /**

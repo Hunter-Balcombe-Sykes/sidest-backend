@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
+// V2: Orchestrates Shopify OAuth brand signup — handles fresh installs, reinstalls, and existing-account connects with Supabase user creation, site provisioning, and post-install job dispatch.
 class BrandSignupService
 {
     use NormalizesShopDomain;

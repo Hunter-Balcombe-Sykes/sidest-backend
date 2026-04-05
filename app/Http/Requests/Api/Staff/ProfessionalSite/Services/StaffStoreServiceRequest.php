@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Staff\ProfessionalSite\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates creation of a service — requires title and price in cents, with optional category, description, duration, currency, and active status.
 class StaffStoreServiceRequest extends BaseFormRequest
 {
 

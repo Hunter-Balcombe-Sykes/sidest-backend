@@ -5,6 +5,7 @@ namespace App\Rules;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 
+// V2: Validation rule that enforces a maximum word count on string inputs.
 class MaxWords implements ValidationRule
 {
     public function __construct(private int $maxWords) {}

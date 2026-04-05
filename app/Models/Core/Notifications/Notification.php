@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\Core\Professional\Professional;
 
+// V2: In-app notification with typed severity, optional time window, and CTA actions. Can be global (professional_id null) or targeted to one professional.
 class Notification extends BaseModel
 {
     use HasUuids;

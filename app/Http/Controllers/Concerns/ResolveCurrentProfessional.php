@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\Request;
 
+// V2: Extracts the authenticated Professional model from request attributes set by the current.pro middleware.
 trait ResolveCurrentProfessional
 {
     protected function currentProfessional(Request $request): Professional

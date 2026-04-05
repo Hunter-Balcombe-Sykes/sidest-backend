@@ -7,6 +7,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 
+// V2: Value object returned by BrandSignupService containing the professional, site, brand profile, integration, and reinstall flag.
 class BrandSignupResult
 {
     public function __construct(

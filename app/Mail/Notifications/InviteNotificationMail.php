@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends invite notifications (staff invites, affiliate invites) using the Notification model and the invites template.
 class InviteNotificationMail extends Mailable
 {
     use Queueable, SerializesModels;

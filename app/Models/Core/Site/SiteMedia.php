@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+// V2: An uploaded image or video belonging to a site. Tracks processing state (pending/processing/ready/failed) and owns MediaVariant children.
 class SiteMedia extends BaseModel
 {
     use HasUuids, SoftDeletes;

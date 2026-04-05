@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Staff\ProfessionalSite\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates reordering of service categories — requires an ordered array of distinct UUIDs.
 class StaffReorderServiceCategoryRequest extends BaseFormRequest
 {
     public function rules(): array

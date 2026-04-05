@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Staff\ProfessionalSite\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates partial update of a service — all fields optional with PATCH semantics including title, price, category, description, duration, currency, active status, and sort order.
 class StaffUpdateServiceRequest extends BaseFormRequest
 {
 

@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates partial service updates — all fields optional including title, price, category, duration, and sort order.
 class UpdateServiceRequest extends BaseFormRequest
 {
 

@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
+// V2: Bootstraps application-wide rate limiters for public, authenticated, webhook, staff, and internal API routes.
 class AppServiceProvider extends ServiceProvider
 {
     /**

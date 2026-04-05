@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * @property mixed $id
  */
+// V2: A professional's public-facing site. Owns blocks, media, theme reference, and publish state. One site per professional.
 class Site extends BaseModel
 {
     use HasUuids;

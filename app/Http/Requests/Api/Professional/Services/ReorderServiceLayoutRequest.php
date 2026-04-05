@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates full service layout reordering — categories with nested service ID arrays, supporting uncategorized buckets.
 class ReorderServiceLayoutRequest extends BaseFormRequest
 {
     public function rules(): array

@@ -5,6 +5,7 @@ namespace App\Providers;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
 
+// V2: Sets PostgreSQL statement and lock timeouts on the default connection at boot.
 class DatabaseServiceProvider extends ServiceProvider
 {
     /**

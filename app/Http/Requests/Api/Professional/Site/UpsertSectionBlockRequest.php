@@ -7,6 +7,7 @@ use App\Rules\MaxWords;
 use Illuminate\Validation\Rule;
 
 
+// V2: Validates section block upsert — block type from config allowlist, title, publication state, and word-limited text for bio/promo sections.
 class UpsertSectionBlockRequest extends BaseFormRequest
 {
 

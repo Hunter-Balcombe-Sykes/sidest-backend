@@ -6,6 +6,7 @@ use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Stripe-backed subscription linking a professional to a plan. Tracks billing period, trial, cancellation state, and raw provider payload.
 class Subscription extends BaseModel
 {
     protected $table = 'billing.subscriptions';

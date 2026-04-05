@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+// V2: Visual theme definition for sites. Stores a JSON config blob with styling tokens. One theme can be shared across many sites.
 class Theme extends BaseModel
 {
     use HasFactory, HasUuids;

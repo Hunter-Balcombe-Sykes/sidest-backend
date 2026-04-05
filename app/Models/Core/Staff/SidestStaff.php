@@ -6,6 +6,7 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+// V2: Internal Side St staff member. Linked to a Supabase auth user; role-based access for admin operations.
 class SidestStaff extends BaseModel
 {
     use HasFactory, HasUuids;

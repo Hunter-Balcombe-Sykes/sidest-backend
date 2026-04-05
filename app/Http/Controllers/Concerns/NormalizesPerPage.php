@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Concerns;
 
 use Illuminate\Http\Request;
 
+// V2: Clamps the per_page query parameter to a safe range (1..max) with a configurable default for paginated endpoints.
 trait NormalizesPerPage
 {
     protected function normalizePerPage(Request $request, int $default = 25, int $max = 100): int

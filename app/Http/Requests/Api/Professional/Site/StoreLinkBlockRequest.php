@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\Professional\Site;
 use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
+// V2: Validates new link block creation — title, URL, icon key, active state, and settings with allowlist enforcement.
 class StoreLinkBlockRequest extends BaseFormRequest
 {
 

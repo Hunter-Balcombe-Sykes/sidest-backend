@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
+// V2: Server-side Supabase user management via the GoTrue Admin API. Creates users and looks up existing accounts by email.
 class SupabaseAdminService
 {
     private string $baseUrl;

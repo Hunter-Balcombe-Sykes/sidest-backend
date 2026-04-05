@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\PublicSite;
 use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
+// V2: Validates public email subscription — requires an RFC-compliant email and a list key from the allowed public list keys, with optional name.
 class PublicEmailSubscribeRequest extends BaseFormRequest
 {
 

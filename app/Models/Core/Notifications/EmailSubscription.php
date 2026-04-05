@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
+// V2: Marketing email opt-in/out record per professional+email. Source of truth for consent; caches status on Customer for performance.
 class EmailSubscription extends BaseModel
 {
     use HasUuids;

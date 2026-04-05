@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
+// V2: Records clicks on link blocks within a site. Handles block_id/link_block_id column migration gracefully with runtime column resolution.
 class LinkClick extends BaseModel
 {
     use HasUuids;

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+// V2: A single content block (link, section, etc.) on a site. Typed by block_type and block_group, sortable, with a JSON settings bag.
 class Block extends BaseModel
 {
     use HasUuids;

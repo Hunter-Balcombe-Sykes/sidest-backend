@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends integration status notifications (connected, disconnected, sync errors) using the Notification model and the integrations template.
 class IntegrationNotificationMail extends Mailable
 {
     use Queueable, SerializesModels;

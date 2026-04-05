@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Customer;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates partial customer updates — all fields optional with phone sanitization.
 class UpdateCustomerRequest extends BaseFormRequest
 {
     protected function prepareForValidation(): void

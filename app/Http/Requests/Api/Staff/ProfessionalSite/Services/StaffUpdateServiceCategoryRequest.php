@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Staff\ProfessionalSite\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates partial update of a service category — accepts optional title and sort order fields with PATCH semantics.
 class StaffUpdateServiceCategoryRequest extends BaseFormRequest
 {
     public function rules(): array

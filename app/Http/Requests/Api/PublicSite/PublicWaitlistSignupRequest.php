@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\PublicSite;
 use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
+// V2: Validates waitlist signup — requires name, email, phone, applicant type, and industry with conditional fields per type and extensive input normalization.
 class PublicWaitlistSignupRequest extends BaseFormRequest
 {
     protected function prepareForValidation(): void

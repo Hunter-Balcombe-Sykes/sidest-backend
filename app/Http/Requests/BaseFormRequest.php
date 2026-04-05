@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
+// V2: Base form request with shared input sanitization helpers — trim, lowercase, and email normalization.
 abstract class BaseFormRequest extends FormRequest
 {
     public function authorize(): bool

@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+// V2: Sortable grouping for a professional's services. Auto-ordered by sort_order then created_at via a global scope.
 class ServiceCategory extends BaseModel
 {
     use HasUuids, SoftDeletes;

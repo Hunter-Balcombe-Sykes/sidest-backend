@@ -7,6 +7,7 @@ use App\Http\Requests\BaseFormRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
+// V2: Validates staff update of a site — supports theme, subdomain (with uniqueness and reserved-word checks), publish status, and deeply nested design/settings fields with PATCH semantics.
 class StaffUpdateSiteRequest extends BaseFormRequest
 {
 

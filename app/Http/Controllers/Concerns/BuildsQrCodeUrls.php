@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Concerns;
 
 use Illuminate\Http\Request;
 
+// V2: Builds public-facing QR code URLs from a slug, resolving scheme and host from config or request context.
 trait BuildsQrCodeUrls
 {
     /**

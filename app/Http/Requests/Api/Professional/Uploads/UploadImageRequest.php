@@ -6,6 +6,7 @@ use App\Http\Requests\BaseFormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Validation\Rule;
 
+// V2: Validates image or video upload to a pool — enforces one-of constraint, file type/size limits, and video feature flag check.
 class UploadImageRequest extends BaseFormRequest
 {
     public function rules(): array

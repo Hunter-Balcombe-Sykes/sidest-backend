@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Tracks individual page visits to a professional's public site. Captures session, visitor, UTM, device, and geo data for traffic analytics.
 class SiteVisit extends BaseModel
 {
     use HasFactory, HasUuids;

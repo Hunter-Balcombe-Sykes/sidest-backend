@@ -26,6 +26,7 @@ use App\Observers\Core\ServiceObserver;
 use App\Observers\Core\SiteObserver;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 
+// V2: Registers Eloquent model observers for professionals, sites, blocks, services, customers, integrations, commissions, and media.
 class EventServiceProvider extends ServiceProvider
 {
     protected $listen = [

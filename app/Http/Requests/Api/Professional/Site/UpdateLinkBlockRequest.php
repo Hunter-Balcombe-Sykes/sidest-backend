@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\Professional\Site;
 use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
+// V2: Validates partial link block updates — route UUID extraction, optional title/URL/icon, and settings with allowlist enforcement.
 class UpdateLinkBlockRequest extends BaseFormRequest
 {
 

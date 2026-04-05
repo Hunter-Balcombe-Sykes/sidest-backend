@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends commission-related notifications (earned, adjusted, rate changes) using the Notification model and the commissions template.
 class CommissionNotificationMail extends Mailable
 {
     use Queueable, SerializesModels;

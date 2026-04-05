@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Customer;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates new customer creation — name, contact info, source defaulting to manual, and phone sanitization.
 class StoreCustomerRequest extends BaseFormRequest
 {
 

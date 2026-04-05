@@ -37,6 +37,7 @@ use Illuminate\Support\Facades\Storage;
  * @property int|null    $duration_ms
  * @property array|null  $metadata
  */
+// V2: Processed media artifact (WebP image, MP4 video, HLS playlist, poster). Each SiteMedia can have multiple variants at different quality tiers.
 class MediaVariant extends BaseModel
 {
     use HasUuids;

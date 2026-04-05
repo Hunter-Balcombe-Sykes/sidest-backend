@@ -8,6 +8,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use Illuminate\Support\Arr;
 
+// V2: Auto-fills professional, brand profile, and integration fields from Shopify shop data during OAuth onboarding.
 class ShopProfileAutoFillService
 {
     /**

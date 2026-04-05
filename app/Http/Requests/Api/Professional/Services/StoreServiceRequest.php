@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates new service creation — title, price, optional category, description, currency, duration, and active state.
 class StoreServiceRequest extends BaseFormRequest
 {
 

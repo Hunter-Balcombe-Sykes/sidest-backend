@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\PublicSite\Analytics;
 use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
+// V2: Validates public pageview-tracking events — requires site identification via UUID or subdomain, plus optional session, visitor, and UTM fields.
 class PageviewRequest extends BaseFormRequest
 {
 

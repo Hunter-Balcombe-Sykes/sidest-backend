@@ -6,6 +6,7 @@ use App\Http\Requests\BaseFormRequest;
 use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use Illuminate\Validation\Rule;
 
+// V2: Validates staff update of a professional profile — supports display name, contact info, location, professional type, and phone normalization with PATCH semantics.
 class StaffUpdateProfessionalRequest extends BaseFormRequest
 {
     use NormalizesProfessionalType;

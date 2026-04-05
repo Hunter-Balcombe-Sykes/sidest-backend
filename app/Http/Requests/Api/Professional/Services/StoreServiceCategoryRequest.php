@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates new service category creation — title (required) and optional sort order.
 class StoreServiceCategoryRequest extends BaseFormRequest
 {
     public function rules(): array

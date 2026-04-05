@@ -5,6 +5,7 @@ namespace App\Models\Analytics;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+// V2: Tracks lead form submissions on public sites. Records outcome, timing, and visitor fingerprint for conversion analytics.
 class LeadSubmission extends BaseModel
 {
     use HasUuids;

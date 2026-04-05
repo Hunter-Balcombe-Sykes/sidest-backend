@@ -5,6 +5,7 @@ namespace App\Models\Core\Notifications;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
+// V2: User-facing toggle for enabling or disabling email notifications per category. Works alongside NotificationEmailPolicy.
 class NotificationEmailPreference extends BaseModel
 {
     use HasUuids;

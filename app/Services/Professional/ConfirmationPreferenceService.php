@@ -5,6 +5,7 @@ namespace App\Services\Professional;
 use App\Models\Core\Professional\ProfessionalConfirmationPreference;
 use Illuminate\Support\Facades\DB;
 
+// V2: Manages per-professional "skip confirmation" preferences for destructive actions (delete customer, delete media, unselect product).
 class ConfirmationPreferenceService
 {
     public const ACTION_DELETE_CUSTOMER = 'delete_customer';
