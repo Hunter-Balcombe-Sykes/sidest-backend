@@ -7,8 +7,8 @@ use App\Models\Core\Professional\Professional;
 use App\Services\Stripe\StripeBillingService;
 use Illuminate\Validation\ValidationException;
 
-// V2: Cancels subscription at billing period end. Stripe-managed subs call Stripe API; free plans are rejected.
-class CancelProfessionalSubscriptionAction
+// V2: Resumes a subscription scheduled for cancellation. Clears cancel_at_period_end on both Stripe and local DB.
+class ResumeProfessionalSubscriptionAction
 {
     public function __construct(private StripeBillingService $billing) {}
 
@@ -21,27 +21,34 @@ class CancelProfessionalSubscriptionAction
 
         if (! $subscription) {
             throw ValidationException::withMessages([
-                'subscription' => ['Professional has no active subscription.'],
+                'subscription' => ['No subscription to resume.'],
             ]);
         }
 
         if (! $subscription->isActive()) {
             throw ValidationException::withMessages([
-                'subscription' => ['Subscription is not active.'],
+                'subscription' => ['Subscription is no longer active and cannot be resumed.'],
             ]);
         }
 
-        if ($subscription->isFreeInternal()) {
+        if (! $subscription->cancel_at_period_end) {
             throw ValidationException::withMessages([
-                'subscription' => ['Free subscriptions cannot be canceled.'],
+                'subscription' => ['Subscription is not scheduled for cancellation.'],
             ]);
         }
 
-        // Cancel on Stripe side at period end
-        $this->billing->cancelSubscriptionAtPeriodEnd($subscription->stripe_subscription_id);
+        if ($subscription->current_period_end && $subscription->current_period_end->isPast()) {
+            throw ValidationException::withMessages([
+                'subscription' => ['Subscription period has already ended.'],
+            ]);
+        }
+
+        if ($subscription->isStripeManaged()) {
+            $this->billing->resumeSubscription($subscription->stripe_subscription_id);
+        }
 
         $subscription->update([
-            'cancel_at_period_end' => true,
+            'cancel_at_period_end' => false,
         ]);
 
         return $subscription->fresh();

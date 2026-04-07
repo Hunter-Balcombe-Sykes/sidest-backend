@@ -185,6 +185,8 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::patch('/me/subscription', [SubscriptionController::class, 'update']);
         Route::post('/me/subscription/cancel', [SubscriptionController::class, 'cancel']);
         Route::post('/me/subscription/resume', [SubscriptionController::class, 'resume']);
+        Route::post('/me/subscription/billing-portal', [SubscriptionController::class, 'billingPortal']);
+        Route::get('/me/subscription/preview-change', [SubscriptionController::class, 'previewPlanChange']);
 
         // Square Integration
         Route::get('/square/status', [SquareIntegrationController::class, 'status']);

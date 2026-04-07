@@ -2,46 +2,80 @@
 
 namespace App\Actions\Subscription;
 
+use App\Models\Billing\Plan;
+use App\Models\Billing\Subscription;
 use App\Models\Core\Professional\Professional;
+use App\Services\Stripe\StripeBillingService;
 use Illuminate\Validation\ValidationException;
 
-// V2: Changes professional's active subscription plan. Resets cancel_at_period_end on plan change.
+// V2: Changes professional's subscription plan. Handles free->paid (checkout), paid->paid (Stripe update), and paid->free (cancel + fallback).
 class ChangeProfessionalPlanAction
 {
-    /**
-     * Change the professional's current plan
-     */
-    public function execute(Professional $professional, array $data)
-    {
-        $subscription = $professional->subscription;
+    public function __construct(private StripeBillingService $billing) {}
 
-        if (!$subscription) {
+    /**
+     * Change the professional's current plan.
+     *
+     * @return Subscription|array{checkout_url: string, session_id: string}
+     */
+    public function execute(Professional $professional, array $data): Subscription|array
+    {
+        $subscription = Subscription::query()
+            ->where('professional_id', $professional->id)
+            ->whereNull('ended_at')
+            ->first();
+
+        if (! $subscription) {
             throw ValidationException::withMessages([
                 'subscription' => ['Professional has no active subscription.'],
             ]);
         }
 
-        if (!$subscription->isActive()) {
+        if (! $subscription->isActive() && ! $subscription->isInGracePeriod()) {
             throw ValidationException::withMessages([
                 'subscription' => ['Subscription is not active.'],
             ]);
         }
 
-        $newPlanId = $data['plan_id'];
+        $newPlan = Plan::findOrFail($data['plan_id']);
 
-        if ($subscription->plan_id === $newPlanId) {
+        if ($subscription->plan_id === $newPlan->id) {
             throw ValidationException::withMessages([
                 'plan_id' => ['New plan is the same as current plan.'],
             ]);
         }
 
-        // Update to the new plan
+        // Free -> Paid: need Stripe Checkout (no payment method on file)
+        if ($subscription->isFreeInternal()) {
+            return $this->billing->createCheckoutSession(
+                $professional,
+                $newPlan,
+                $data['success_url'],
+                $data['cancel_url'],
+            );
+        }
+
+        // Paid -> Free: cancel Stripe subscription, webhook handles free fallback
+        if ($newPlan->plan_key === 'free') {
+            $this->billing->cancelSubscriptionImmediately($subscription->stripe_subscription_id);
+
+            // The webhook for customer.subscription.deleted will:
+            // 1. Set ended_at on this subscription
+            // 2. Create a free internal subscription for affiliates
+            return $subscription->fresh();
+        }
+
+        // Paid -> Paid: update the price on the existing Stripe subscription
+        $this->billing->updateSubscriptionPlan(
+            $subscription->stripe_subscription_id,
+            $newPlan,
+        );
+
         $subscription->update([
-            'plan_id' => $newPlanId,
-            // Reset cancel_at_period_end since they're staying
+            'plan_id' => $newPlan->id,
             'cancel_at_period_end' => false,
         ]);
 
-        return $subscription;
+        return $subscription->fresh();
     }
 }

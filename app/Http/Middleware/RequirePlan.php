@@ -14,14 +14,14 @@ class RequirePlan
 
     public function handle(Request $request, Closure $next, string $minPlanKey)
     {
-        /** @var Professional $professional */
-        $professional = $request->user()?->professional ?? null; // adapt to YOUR auth setup
+        /** @var Professional|null $professional */
+        $professional = $request->attributes->get('professional');
 
-        if (!$professional) {
+        if (! $professional instanceof Professional) {
             return response()->json(['message' => 'Professional not found'], 404);
         }
 
-        if (!$this->entitlements->hasPlan($professional, $minPlanKey)) {
+        if (! $this->entitlements->hasPlan($professional, $minPlanKey)) {
             return response()->json([
                 'message' => 'Upgrade required',
                 'required_plan' => $minPlanKey,

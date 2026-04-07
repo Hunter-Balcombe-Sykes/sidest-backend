@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\Webhooks\ShopifyOrdersUpdatedWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyShopUpdateWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
+use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\Shopify\ShopifyAppOAuthController;
@@ -42,6 +43,7 @@ Route::middleware('throttle:webhooks')->group(function () {
     Route::post('/webhooks/fresha', FreshaCatalogWebhookController::class);
     Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
     Route::post('/webhooks/stripe-connect', StripeConnectWebhookController::class);
+    Route::post('/webhooks/stripe', StripeWebhookController::class);
     Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class)
         ->middleware('throttle:shopify-webhooks');
     Route::post('/webhooks/shopify/orders-paid', ShopifyOrderWebhookController::class)

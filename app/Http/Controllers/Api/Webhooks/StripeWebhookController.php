@@ -1,0 +1,286 @@
+<?php
+
+namespace App\Http\Controllers\Api\Webhooks;
+
+use App\Http\Controllers\Controller;
+use App\Models\Billing\Plan;
+use App\Models\Billing\Subscription;
+use App\Models\Billing\WebhookEvent;
+use App\Models\Core\Professional\Professional;
+use App\Services\Notifications\NotificationPublisher;
+use App\Services\Professional\SiteProvisioningService;
+use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Stripe\Exception\SignatureVerificationException;
+use Stripe\Webhook;
+
+// V2: Core. Processes Stripe Billing subscription lifecycle webhooks. Source of truth for subscription state.
+class StripeWebhookController extends Controller
+{
+    public function __invoke(Request $request): JsonResponse
+    {
+        $payload = $request->getContent();
+        $sigHeader = $request->header('Stripe-Signature');
+
+        if (! $sigHeader) {
+            return response()->json(['error' => 'Missing signature'], 400);
+        }
+
+        $secret = config('services.stripe.webhook_secret');
+
+        if (! $secret) {
+            return response()->json(['error' => 'No webhook secret configured'], 400);
+        }
+
+        try {
+            $event = Webhook::constructEvent($payload, $sigHeader, $secret);
+        } catch (SignatureVerificationException) {
+            Log::warning('Stripe billing webhook signature verification failed');
+            return response()->json(['error' => 'Invalid signature'], 400);
+        } catch (\Exception $e) {
+            Log::warning('Stripe billing webhook parse error', ['error' => $e->getMessage()]);
+            return response()->json(['error' => 'Invalid payload'], 400);
+        }
+
+        // Idempotency: skip if already processed
+        if (WebhookEvent::where('stripe_event_id', $event->id)->exists()) {
+            return response()->json(['received' => true]);
+        }
+
+        match ($event->type) {
+            'customer.subscription.created' => $this->handleSubscriptionCreated($event->data->object, $event),
+            'customer.subscription.updated' => $this->handleSubscriptionUpdated($event->data->object, $event),
+            'customer.subscription.deleted' => $this->handleSubscriptionDeleted($event->data->object, $event),
+            'invoice.paid' => $this->handleInvoicePaid($event->data->object, $event),
+            'invoice.payment_failed' => $this->handleInvoicePaymentFailed($event->data->object, $event),
+            default => Log::debug('Unhandled Stripe billing event', ['type' => $event->type]),
+        };
+
+        // Record event for idempotency
+        WebhookEvent::create([
+            'stripe_event_id' => $event->id,
+            'event_type' => $event->type,
+            'payload' => json_decode($payload, true),
+        ]);
+
+        return response()->json(['received' => true]);
+    }
+
+    private function handleSubscriptionCreated(object $subscription, object $event): void
+    {
+        $professionalId = $subscription->metadata?->sidest_professional_id ?? null;
+
+        if (! $professionalId) {
+            Log::warning('Stripe subscription.created missing sidest_professional_id metadata', [
+                'subscription_id' => $subscription->id,
+            ]);
+            return;
+        }
+
+        $professional = Professional::find($professionalId);
+        if (! $professional) {
+            Log::warning('Stripe subscription.created for unknown professional', [
+                'professional_id' => $professionalId,
+            ]);
+            return;
+        }
+
+        $priceId = $subscription->items->data[0]->price->id ?? null;
+        $plan = Plan::where('stripe_price_id', $priceId)->where('is_active', true)->first();
+
+        if (! $plan) {
+            Log::warning('Stripe subscription.created with unknown price', [
+                'price_id' => $priceId,
+                'professional_id' => $professionalId,
+            ]);
+            return;
+        }
+
+        DB::transaction(function () use ($professional, $plan, $subscription, $event) {
+            // End any existing active subscription
+            Subscription::query()
+                ->where('professional_id', $professional->id)
+                ->whereNull('ended_at')
+                ->update(['ended_at' => now()]);
+
+            // Create the new Stripe-managed subscription
+            Subscription::create([
+                'id' => Str::uuid()->toString(),
+                'professional_id' => $professional->id,
+                'plan_id' => $plan->id,
+                'provider' => 'stripe',
+                'stripe_customer_id' => (string) $subscription->customer,
+                'stripe_subscription_id' => (string) $subscription->id,
+                'status' => $this->mapStripeStatus($subscription->status),
+                'current_period_start' => Carbon::createFromTimestamp($subscription->current_period_start),
+                'current_period_end' => Carbon::createFromTimestamp($subscription->current_period_end),
+                'cancel_at_period_end' => $subscription->cancel_at_period_end ?? false,
+                'provider_payload' => json_decode(json_encode($event), true),
+            ]);
+        });
+
+        Log::info('Stripe subscription created', [
+            'professional_id' => $professional->id,
+            'plan_key' => $plan->plan_key,
+            'stripe_subscription_id' => $subscription->id,
+        ]);
+    }
+
+    private function handleSubscriptionUpdated(object $subscription, object $event): void
+    {
+        $localSub = Subscription::where('stripe_subscription_id', $subscription->id)->first();
+
+        if (! $localSub) {
+            Log::debug('Stripe subscription.updated for unknown subscription', [
+                'stripe_subscription_id' => $subscription->id,
+            ]);
+            return;
+        }
+
+        $updates = [
+            'status' => $this->mapStripeStatus($subscription->status),
+            'current_period_start' => Carbon::createFromTimestamp($subscription->current_period_start),
+            'current_period_end' => Carbon::createFromTimestamp($subscription->current_period_end),
+            'cancel_at_period_end' => $subscription->cancel_at_period_end ?? false,
+            'provider_payload' => json_decode(json_encode($event), true),
+        ];
+
+        // Check if price changed (plan upgrade/downgrade)
+        $priceId = $subscription->items->data[0]->price->id ?? null;
+        if ($priceId) {
+            $plan = Plan::where('stripe_price_id', $priceId)->where('is_active', true)->first();
+            if ($plan && $plan->id !== $localSub->plan_id) {
+                $updates['plan_id'] = $plan->id;
+            }
+        }
+
+        $localSub->update($updates);
+
+        Log::info('Stripe subscription updated', [
+            'subscription_id' => $localSub->id,
+            'status' => $updates['status'],
+        ]);
+    }
+
+    private function handleSubscriptionDeleted(object $subscription, object $event): void
+    {
+        $localSub = Subscription::where('stripe_subscription_id', $subscription->id)->first();
+
+        if (! $localSub) {
+            Log::debug('Stripe subscription.deleted for unknown subscription', [
+                'stripe_subscription_id' => $subscription->id,
+            ]);
+            return;
+        }
+
+        $localSub->update([
+            'status' => Subscription::STATUS_CANCELED,
+            'ended_at' => now(),
+            'provider_payload' => json_decode(json_encode($event), true),
+        ]);
+
+        // For affiliates, fall back to free plan. Brands do NOT get a free fallback.
+        $professional = $localSub->professional;
+        if ($professional && $professional->professional_type !== 'brand') {
+            app(SiteProvisioningService::class)->ensureFreeSubscription($professional);
+        }
+
+        Log::info('Stripe subscription deleted', [
+            'subscription_id' => $localSub->id,
+            'professional_id' => $localSub->professional_id,
+            'fallback_to_free' => $professional?->professional_type !== 'brand',
+        ]);
+    }
+
+    private function handleInvoicePaid(object $invoice, object $event): void
+    {
+        $stripeSubId = $invoice->subscription ?? null;
+        if (! $stripeSubId) {
+            return;
+        }
+
+        $localSub = Subscription::where('stripe_subscription_id', $stripeSubId)->first();
+        if (! $localSub) {
+            return;
+        }
+
+        $updates = [
+            'provider_payload' => json_decode(json_encode($event), true),
+        ];
+
+        // Reset to active if was past_due (successful retry)
+        if ($localSub->status === Subscription::STATUS_PAST_DUE) {
+            $updates['status'] = Subscription::STATUS_ACTIVE;
+        }
+
+        // Update period dates from invoice
+        if (isset($invoice->lines->data[0]->period)) {
+            $period = $invoice->lines->data[0]->period;
+            $updates['current_period_start'] = Carbon::createFromTimestamp($period->start);
+            $updates['current_period_end'] = Carbon::createFromTimestamp($period->end);
+        }
+
+        $localSub->update($updates);
+
+        Log::info('Stripe invoice paid', [
+            'subscription_id' => $localSub->id,
+            'status' => $localSub->fresh()->status,
+        ]);
+    }
+
+    private function handleInvoicePaymentFailed(object $invoice, object $event): void
+    {
+        $stripeSubId = $invoice->subscription ?? null;
+        if (! $stripeSubId) {
+            return;
+        }
+
+        $localSub = Subscription::where('stripe_subscription_id', $stripeSubId)->first();
+        if (! $localSub) {
+            return;
+        }
+
+        $localSub->update([
+            'status' => Subscription::STATUS_PAST_DUE,
+            'provider_payload' => json_decode(json_encode($event), true),
+        ]);
+
+        // Notify the professional about the payment failure
+        $professional = $localSub->professional;
+        if ($professional) {
+            app(NotificationPublisher::class)->publish(
+                professionalId: $professional->id,
+                frontendType: 'warning',
+                category: 'subscriptions',
+                title: 'Payment failed',
+                body: 'Your subscription payment could not be processed. Please update your payment method to avoid service interruption.',
+                dedupeKey: 'payment-failed-' . $localSub->id . '-' . now()->format('Y-m-d'),
+                ctaUrl: '/account/billing',
+                primaryActionLabel: 'Update Payment',
+            );
+        }
+
+        Log::warning('Stripe invoice payment failed', [
+            'subscription_id' => $localSub->id,
+            'professional_id' => $localSub->professional_id,
+        ]);
+    }
+
+    private function mapStripeStatus(string $stripeStatus): string
+    {
+        return match ($stripeStatus) {
+            'active' => Subscription::STATUS_ACTIVE,
+            'past_due' => Subscription::STATUS_PAST_DUE,
+            'unpaid' => Subscription::STATUS_UNPAID,
+            'canceled' => Subscription::STATUS_CANCELED,
+            'incomplete' => Subscription::STATUS_INCOMPLETE,
+            'incomplete_expired' => Subscription::STATUS_INCOMPLETE_EXPIRED,
+            'trialing' => Subscription::STATUS_ACTIVE, // we don't use trials — map to active
+            default => $stripeStatus,
+        };
+    }
+}
