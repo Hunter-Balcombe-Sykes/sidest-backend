@@ -37,6 +37,8 @@ class CreateProfessionalSubscriptionAction
 
         $plan = Plan::findOrFail($data['plan_id']);
 
+        $this->validatePlanAuthorization($professional, $plan);
+
         // Free plan: create local subscription immediately
         if ($plan->plan_key === 'free') {
             return Subscription::create([
@@ -60,5 +62,25 @@ class CreateProfessionalSubscriptionAction
             $data['success_url'],
             $data['cancel_url'],
         );
+    }
+
+    private function validatePlanAuthorization(Professional $professional, Plan $plan): void
+    {
+        $type = $professional->professional_type;
+        $key = $plan->plan_key;
+
+        // Brands can only subscribe to 'brands' plan
+        if ($type === 'brand' && $key !== 'brands') {
+            throw ValidationException::withMessages([
+                'plan_id' => ['This plan is not available for brand accounts.'],
+            ]);
+        }
+
+        // Non-brands (affiliates/professionals/influencers) cannot subscribe to 'brands' plan
+        if ($type !== 'brand' && $key === 'brands') {
+            throw ValidationException::withMessages([
+                'plan_id' => ['This plan is only available for brand accounts.'],
+            ]);
+        }
     }
 }

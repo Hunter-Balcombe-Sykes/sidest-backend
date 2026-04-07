@@ -10,14 +10,32 @@ class Entitlements
 {
     private const TIER_RANK = ['free' => 0, 'professional' => 1, 'brands' => 2];
 
+    /** @var array<string, Subscription|null> Per-request cache keyed by professional ID */
+    private array $cache = [];
+
     public function currentSubscription(Professional $professional): ?Subscription
     {
-        return Subscription::query()
-            ->with('plan')
-            ->where('professional_id', $professional->id)
-            ->whereNull('ended_at')
-            ->latest('created_at')
-            ->first();
+        $key = $professional->id;
+
+        if (! array_key_exists($key, $this->cache)) {
+            $this->cache[$key] = Subscription::query()
+                ->with('plan')
+                ->where('professional_id', $professional->id)
+                ->whereNull('ended_at')
+                ->latest('created_at')
+                ->first();
+        }
+
+        return $this->cache[$key];
+    }
+
+    public function clearCache(?string $professionalId = null): void
+    {
+        if ($professionalId) {
+            unset($this->cache[$professionalId]);
+        } else {
+            $this->cache = [];
+        }
     }
 
     public function hasPlan(Professional $professional, string $minPlanKey): bool

@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS billing.webhook_events (
 );
 
 CREATE INDEX idx_webhook_events_type ON billing.webhook_events (event_type);
+CREATE INDEX idx_webhook_events_processed_at ON billing.webhook_events (processed_at);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON billing.webhook_events TO app_backend;
 ALTER TABLE billing.webhook_events ENABLE ROW LEVEL SECURITY;

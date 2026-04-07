@@ -39,6 +39,19 @@ class ChangeProfessionalPlanAction
 
         $newPlan = Plan::findOrFail($data['plan_id']);
 
+        // Enforce plan authorization by professional type
+        $type = $professional->professional_type;
+        if ($type === 'brand' && $newPlan->plan_key !== 'brands' && $newPlan->plan_key !== 'free') {
+            throw ValidationException::withMessages([
+                'plan_id' => ['This plan is not available for brand accounts.'],
+            ]);
+        }
+        if ($type !== 'brand' && $newPlan->plan_key === 'brands') {
+            throw ValidationException::withMessages([
+                'plan_id' => ['This plan is only available for brand accounts.'],
+            ]);
+        }
+
         if ($subscription->plan_id === $newPlan->id) {
             throw ValidationException::withMessages([
                 'plan_id' => ['New plan is the same as current plan.'],

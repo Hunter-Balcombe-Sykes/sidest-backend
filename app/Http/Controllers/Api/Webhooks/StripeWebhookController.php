@@ -46,8 +46,17 @@ class StripeWebhookController extends Controller
             return response()->json(['error' => 'Invalid payload'], 400);
         }
 
-        // Idempotency: skip if already processed
-        if (WebhookEvent::where('stripe_event_id', $event->id)->exists()) {
+        // Idempotency: atomic insert-or-skip using DB unique constraint on stripe_event_id.
+        // This prevents race conditions where two concurrent requests pass an exists() check.
+        $alreadyProcessed = ! DB::table('billing.webhook_events')->insertOrIgnore([
+            'id' => Str::uuid()->toString(),
+            'stripe_event_id' => $event->id,
+            'event_type' => $event->type,
+            'payload' => json_encode(json_decode($payload, true)),
+            'processed_at' => now(),
+        ]);
+
+        if ($alreadyProcessed) {
             return response()->json(['received' => true]);
         }
 
@@ -60,31 +69,28 @@ class StripeWebhookController extends Controller
             default => Log::debug('Unhandled Stripe billing event', ['type' => $event->type]),
         };
 
-        // Record event for idempotency
-        WebhookEvent::create([
-            'stripe_event_id' => $event->id,
-            'event_type' => $event->type,
-            'payload' => json_decode($payload, true),
-        ]);
-
         return response()->json(['received' => true]);
     }
 
     private function handleSubscriptionCreated(object $subscription, object $event): void
     {
-        $professionalId = $subscription->metadata?->sidest_professional_id ?? null;
+        // Resolve professional: prefer stripe_customer_id lookup (tamper-proof),
+        // fall back to metadata (set server-side by StripeBillingService).
+        $stripeCustomerId = (string) ($subscription->customer ?? '');
+        $professional = $stripeCustomerId
+            ? Professional::where('stripe_customer_id', $stripeCustomerId)->first()
+            : null;
 
-        if (! $professionalId) {
-            Log::warning('Stripe subscription.created missing sidest_professional_id metadata', [
-                'subscription_id' => $subscription->id,
-            ]);
-            return;
+        if (! $professional) {
+            $professionalId = $subscription->metadata?->sidest_professional_id ?? null;
+            $professional = $professionalId ? Professional::find($professionalId) : null;
         }
 
-        $professional = Professional::find($professionalId);
         if (! $professional) {
-            Log::warning('Stripe subscription.created for unknown professional', [
-                'professional_id' => $professionalId,
+            Log::warning('Stripe subscription.created: could not resolve professional', [
+                'subscription_id' => $subscription->id,
+                'customer_id' => $stripeCustomerId,
+                'metadata_professional_id' => $subscription->metadata?->sidest_professional_id ?? null,
             ]);
             return;
         }
@@ -93,18 +99,20 @@ class StripeWebhookController extends Controller
         $plan = Plan::where('stripe_price_id', $priceId)->where('is_active', true)->first();
 
         if (! $plan) {
-            Log::warning('Stripe subscription.created with unknown price', [
+            Log::error('Stripe subscription.created with unknown price — customer charged but no local subscription created. Manual reconciliation required.', [
                 'price_id' => $priceId,
-                'professional_id' => $professionalId,
+                'professional_id' => $professional->id,
+                'stripe_subscription_id' => $subscription->id,
             ]);
             return;
         }
 
         DB::transaction(function () use ($professional, $plan, $subscription, $event) {
-            // End any existing active subscription
+            // End any existing active subscription (lockForUpdate prevents deadlocks)
             Subscription::query()
                 ->where('professional_id', $professional->id)
                 ->whereNull('ended_at')
+                ->lockForUpdate()
                 ->update(['ended_at' => now()]);
 
             // Create the new Stripe-managed subscription
