@@ -115,4 +115,9 @@ class CacheKeyGenerator
         return "analytics:booking:{$professionalId}:{$from}:{$to}:{$groupBy}";
     }
 
+    public static function brandActiveCatalog(string $brandProfessionalId): string
+    {
+        return "brand:{$brandProfessionalId}:catalog:active";
+    }
+
 }

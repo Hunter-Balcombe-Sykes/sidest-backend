@@ -133,6 +133,21 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        // Affiliate selection write operations (create, delete, reorder)
+        RateLimiter::for('affiliate-writes', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(60)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many selection changes. Please try again later.',
+                    ], 429);
+                });
+        });
+
         // Authenticated professional routes
         RateLimiter::for('authenticated', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {

@@ -30,6 +30,7 @@ use App\Http\Controllers\Api\Professional\BrandProfileController;
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
+use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
@@ -230,6 +231,17 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::post('/stripe/topups/checkout', [StripeConnectController::class, 'createTopUpCheckoutSession']);
         Route::post('/stripe/topups/confirm', [StripeConnectController::class, 'confirmTopUpCheckoutSession']);
         Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
+
+        // Affiliate Product Selections
+        Route::get('/affiliate/products', [AffiliateProductController::class, 'index']);
+        Route::get('/affiliate/selections/stale', [AffiliateProductController::class, 'stale']);
+        Route::post('/affiliate/selections', [AffiliateProductController::class, 'store'])
+            ->middleware('throttle:affiliate-writes');
+        Route::delete('/affiliate/selections/{gid}', [AffiliateProductController::class, 'destroy'])
+            ->middleware('throttle:affiliate-writes')
+            ->where('gid', '.*');
+        Route::patch('/affiliate/selections/reorder', [AffiliateProductController::class, 'reorder'])
+            ->middleware('throttle:affiliate-writes');
 
         // Fresha Integration
         Route::get('/fresha/status', [FreshaIntegrationController::class, 'status']);
