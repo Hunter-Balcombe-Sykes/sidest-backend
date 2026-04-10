@@ -120,4 +120,14 @@ class CacheKeyGenerator
         return "brand:{$brandProfessionalId}:catalog:active";
     }
 
+    public static function brandAdminCatalog(string $brandProfessionalId): string
+    {
+        return "brand:{$brandProfessionalId}:catalog:admin";
+    }
+
+    public static function brandCollectionGid(string $brandProfessionalId, string $handle): string
+    {
+        return "brand:{$brandProfessionalId}:collection_gid:{$handle}";
+    }
+
 }

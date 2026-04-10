@@ -31,6 +31,9 @@ use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;
+use App\Http\Controllers\Api\Professional\Store\BrandCatalogController;
+use App\Http\Controllers\Api\Professional\Store\BrandCollectionController;
+use App\Http\Controllers\Api\Professional\Store\BrandStoreSettingsController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
@@ -215,6 +218,36 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         // Brand setup wizard
         Route::get('/brand/setup/status', [BrandSetupController::class, 'setupStatus']);
         Route::post('/brand/setup/complete', [BrandSetupController::class, 'completeSetup']);
+
+        // Brand Catalog Management
+        Route::get('/brand/catalog', [BrandCatalogController::class, 'index']);
+        Route::patch('/brand/catalog/{productGid}/metafields', [BrandCatalogController::class, 'updateMetafields'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('productGid', '.*');
+        Route::patch('/brand/catalog/{productGid}/active', [BrandCatalogController::class, 'toggleActive'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('productGid', '.*');
+        Route::patch('/brand/catalog/{productGid}/commission', [BrandCatalogController::class, 'updateCommission'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('productGid', '.*');
+        Route::patch('/brand/catalog/{productGid}/discount', [BrandCatalogController::class, 'updateDiscount'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('productGid', '.*');
+
+        // Brand Store Settings
+        Route::get('/brand/store-settings', [BrandStoreSettingsController::class, 'show']);
+        Route::patch('/brand/store-settings', [BrandStoreSettingsController::class, 'update'])
+            ->middleware('throttle:brand-catalog-writes');
+
+        // Brand Collection Management (manual collections only)
+        Route::get('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'index'])
+            ->where('collectionType', 'default|favourites');
+        Route::post('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'addProducts'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('collectionType', 'default|favourites');
+        Route::delete('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'removeProducts'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('collectionType', 'default|favourites');
 
         // Stripe Connect & Payouts
         Route::get('/stripe/status', [StripeConnectController::class, 'status']);

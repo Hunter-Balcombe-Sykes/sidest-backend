@@ -148,6 +148,21 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        // Brand catalog write operations (metafield updates, collection management)
+        RateLimiter::for('brand-catalog-writes', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(30)
+                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many catalog changes. Please try again later.',
+                    ], 429);
+                });
+        });
+
         // Authenticated professional routes
         RateLimiter::for('authenticated', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {
