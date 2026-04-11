@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\PublicSite\PublicBrandAffiliateInviteController;
+use App\Http\Controllers\Api\PublicSite\PublicOpenInviteController;
 use App\Http\Controllers\Api\PublicSite\PublicSignupAvailabilityController;
 use App\Http\Controllers\Api\PublicSite\PublicWaitlistController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
@@ -108,6 +109,9 @@ Route::post('/public/signup/availability', [PublicSignupAvailabilityController::
 Route::post('/public/waitlist', [PublicWaitlistController::class, 'store'])
     ->middleware('throttle:waitlist');
 Route::get('/public/brand-affiliate-invites/{token}', [PublicBrandAffiliateInviteController::class, 'show'])
+    ->middleware('throttle:public-site');
+Route::get('/public/join/{handle}', [PublicOpenInviteController::class, 'show'])
+    ->where('handle', '[A-Za-z0-9][A-Za-z0-9_-]*')
     ->middleware('throttle:public-site');
 
 Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])

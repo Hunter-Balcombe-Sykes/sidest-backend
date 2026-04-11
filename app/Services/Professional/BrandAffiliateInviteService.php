@@ -222,6 +222,52 @@ class BrandAffiliateInviteService
         return $this->expireInviteIfNeeded($invite)->fresh(['brandProfessional', 'claimedProfessional']);
     }
 
+    public function claimOpenInvite(Professional $brandProfessional, Professional $affiliate): BrandAffiliateInvite
+    {
+        return DB::transaction(function () use ($brandProfessional, $affiliate): BrandAffiliateInvite {
+            if (mb_strtolower(trim((string) $affiliate->professional_type)) === 'brand') {
+                throw new RuntimeException('Brand accounts cannot claim open invites.');
+            }
+
+            $brandProfile = $brandProfessional->brandProfile;
+            $brandStatus = $brandProfile?->brand_status ?? 'deactivated';
+            if ($brandStatus === 'deactivated') {
+                throw new RuntimeException('This brand is not currently accepting new connections.');
+            }
+
+            $affiliateId = (string) $affiliate->id;
+            $brandId = (string) $brandProfessional->id;
+
+            if ($this->brandPartnerLinks->isConnected($affiliateId, $brandId)) {
+                throw new RuntimeException('You are already connected to this brand.');
+            }
+
+            $site = Site::query()
+                ->where('professional_id', $affiliate->id)
+                ->first();
+            if (! $site) {
+                throw new RuntimeException('Your site could not be found. Please complete account setup first.');
+            }
+
+            $this->brandPartnerLinks->connectBrandToAffiliate($affiliateId, $brandId);
+
+            $invite = new BrandAffiliateInvite([
+                'brand_professional_id' => $brandId,
+                'token' => $this->generateUniqueToken(),
+                'status' => 'accepted',
+                'invite_type' => 'generic',
+                'email' => null,
+                'email_lc' => null,
+                'claimed_professional_id' => $affiliate->id,
+                'accepted_at' => now(),
+                'expires_at' => null,
+            ]);
+            $invite->save();
+
+            return $invite->fresh(['brandProfessional', 'claimedProfessional']);
+        });
+    }
+
     public function claimInvite(BrandAffiliateInvite $invite, Professional $professional): BrandAffiliateInvite
     {
         return DB::transaction(function () use ($invite, $professional): BrandAffiliateInvite {

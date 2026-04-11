@@ -42,6 +42,7 @@ class BootstrapRequest extends BaseFormRequest
             'timezone' => ['nullable','string','max:64'],
             'invite_token' => ['sometimes', 'nullable', 'string', 'max:80'],
             'brand_partner_professional_id' => ['sometimes', 'nullable', 'uuid', Rule::exists('professionals', 'id')],
+            'join_brand_handle' => ['sometimes', 'nullable', 'string', 'max:50'],
             'professional_type' => [
                 ...$professionalTypeRules,
                 'string',
@@ -93,6 +94,12 @@ class BootstrapRequest extends BaseFormRequest
         if ($this->exists('brand_partner_professional_id')) {
             $merge['brand_partner_professional_id'] = is_string($this->brand_partner_professional_id)
                 ? trim($this->brand_partner_professional_id)
+                : null;
+        }
+
+        if ($this->exists('join_brand_handle')) {
+            $merge['join_brand_handle'] = is_string($this->join_brand_handle)
+                ? strtolower(trim($this->join_brand_handle))
                 : null;
         }
 

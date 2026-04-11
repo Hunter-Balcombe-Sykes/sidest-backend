@@ -172,6 +172,27 @@ class BootstrapController extends ApiController
                     $brandPartnerLinks->promoteBrandToPrimary($affiliateId, $brandId);
                     $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
                     $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, $brandId);
+                } elseif (is_string($data['join_brand_handle'] ?? null) && trim((string) $data['join_brand_handle']) !== '') {
+                    $joinBrand = Professional::query()
+                        ->where('handle_lc', strtolower(trim((string) $data['join_brand_handle'])))
+                        ->where('professional_type', 'brand')
+                        ->with('brandProfile')
+                        ->first();
+
+                    if ($joinBrand) {
+                        $joinBrandStatus = $joinBrand->brandProfile?->brand_status ?? 'deactivated';
+
+                        if ($joinBrandStatus !== 'deactivated') {
+                            $affiliateId = (string) $professional->id;
+                            $brandId = (string) $joinBrand->id;
+
+                            if (! $brandPartnerLinks->isConnected($affiliateId, $brandId)) {
+                                $brandAffiliateInviteService->claimOpenInvite($joinBrand, $professional);
+                                $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
+                                $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, $brandId);
+                            }
+                        }
+                    }
                 }
 
             app(ProfessionalCacheService::class)->invalidateProfessional($professional);
