@@ -9,6 +9,9 @@ use App\Http\Requests\Api\Professional\Store\StoreSelectionRequest;
 use App\Http\Resources\AffiliateProductResource;
 use App\Http\Resources\AffiliateProductSelectionResource;
 use App\Models\Commerce\AffiliateProductSelection;
+use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteMedia;
+use App\Services\Media\ImageVariantService;
 use App\Services\Store\AffiliateProductCatalogService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -166,6 +169,24 @@ class AffiliateProductController extends ApiController
         }
 
         $selection->delete();
+
+        // Clean up custom product photos for the deselected product
+        $site = Site::where('professional_id', $pro->id)->first();
+        if ($site) {
+            $orphanedPhotos = SiteMedia::query()
+                ->where('site_id', $site->id)
+                ->where('pool', SiteMedia::POOL_PRODUCT)
+                ->where('product_gid', $gid)
+                ->get();
+
+            if ($orphanedPhotos->isNotEmpty()) {
+                $imageService = app(ImageVariantService::class);
+                foreach ($orphanedPhotos as $photo) {
+                    $imageService->deleteVariants($photo->id, $photo->path);
+                    $photo->delete();
+                }
+            }
+        }
 
         return $this->success(['deleted' => true]);
     }

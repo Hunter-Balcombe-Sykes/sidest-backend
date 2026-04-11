@@ -51,6 +51,8 @@ class BrandStoreSettingsController extends ApiController
             'accent_color' => Arr::get($metadata, 'accent_color'),
             'theme_variant' => Arr::get($metadata, 'theme_variant'),
             'product_image_ratio' => Arr::get($metadata, 'product_image_ratio'),
+            'custom_photos_enabled' => Arr::get($metadata, 'custom_photos_enabled', true),
+            'custom_photo_position' => Arr::get($metadata, 'custom_photo_position', 'after'),
         ]));
     }
 
@@ -112,6 +114,14 @@ class BrandStoreSettingsController extends ApiController
                 $metadataUpdates['product_image_ratio'] = $val;
             }
 
+            // Custom photo settings (provider_metadata only, not Shopify metafields)
+            if (array_key_exists('custom_photos_enabled', $validated)) {
+                $metadataUpdates['custom_photos_enabled'] = (bool) $validated['custom_photos_enabled'];
+            }
+            if (array_key_exists('custom_photo_position', $validated)) {
+                $metadataUpdates['custom_photo_position'] = $validated['custom_photo_position'];
+            }
+
             if (! empty($shopMetafields)) {
                 $result = $this->catalogService->setShopMetafields($integration, $shopMetafields);
 
@@ -142,6 +152,8 @@ class BrandStoreSettingsController extends ApiController
             'accent_color' => Arr::get($freshMetadata, 'accent_color'),
             'theme_variant' => Arr::get($freshMetadata, 'theme_variant'),
             'product_image_ratio' => Arr::get($freshMetadata, 'product_image_ratio'),
+            'custom_photos_enabled' => Arr::get($freshMetadata, 'custom_photos_enabled', true),
+            'custom_photo_position' => Arr::get($freshMetadata, 'custom_photo_position', 'after'),
         ]));
     }
 }

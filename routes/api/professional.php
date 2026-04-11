@@ -33,6 +33,7 @@ use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;
+use App\Http\Controllers\Api\Professional\Store\AffiliateProductPhotoController;
 use App\Http\Controllers\Api\Professional\Store\BrandCatalogController;
 use App\Http\Controllers\Api\Professional\Store\BrandCollectionController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreSettingsController;
@@ -52,6 +53,8 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::patch('/me', [ProfessionalController::class, 'update']);
         Route::get('/brand-affiliates', [BrandAffiliateController::class, 'index']);
         Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect'])
+            ->whereUuid('affiliate');
+        Route::patch('/brand-affiliates/{affiliate}/custom-photos', [BrandAffiliateController::class, 'updateCustomPhotos'])
             ->whereUuid('affiliate');
         Route::get('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'index']);
         Route::post('/brand-affiliate-invites/availability', [BrandAffiliateInviteController::class, 'availability']);
@@ -289,6 +292,20 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
             ->middleware('throttle:affiliate-writes')
             ->where('gid', '.*');
         Route::patch('/affiliate/selections/reorder', [AffiliateProductController::class, 'reorder'])
+            ->middleware('throttle:affiliate-writes');
+
+        // Affiliate Custom Product Photos
+        Route::get('/affiliate/products/{gid}/photos', [AffiliateProductPhotoController::class, 'index'])
+            ->where('gid', '.*');
+        Route::post('/affiliate/products/{gid}/photos', [AffiliateProductPhotoController::class, 'upload'])
+            ->where('gid', '.*')
+            ->middleware('throttle:affiliate-writes');
+        Route::delete('/affiliate/products/{gid}/photos/{media}', [AffiliateProductPhotoController::class, 'destroy'])
+            ->where('gid', '.*')
+            ->whereUuid('media')
+            ->middleware('throttle:affiliate-writes');
+        Route::patch('/affiliate/products/{gid}/photos/reorder', [AffiliateProductPhotoController::class, 'reorder'])
+            ->where('gid', '.*')
             ->middleware('throttle:affiliate-writes');
 
         // Fresha Integration

@@ -20,10 +20,12 @@ class BrandPartnerLink extends BaseModel
         'affiliate_professional_id',
         'brand_professional_id',
         'slot',
+        'custom_photos_enabled',
     ];
 
     protected $casts = [
         'slot' => 'integer',
+        'custom_photos_enabled' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

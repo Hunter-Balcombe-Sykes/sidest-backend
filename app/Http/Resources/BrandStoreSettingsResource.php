@@ -15,6 +15,8 @@ class BrandStoreSettingsResource extends JsonResource
             'accent_color' => $this->resource['accent_color'] ?? null,
             'theme_variant' => $this->resource['theme_variant'] ?? null,
             'product_image_ratio' => $this->resource['product_image_ratio'] ?? null,
+            'custom_photos_enabled' => $this->resource['custom_photos_enabled'] ?? true,
+            'custom_photo_position' => $this->resource['custom_photo_position'] ?? 'after',
         ];
     }
 }

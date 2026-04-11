@@ -66,6 +66,8 @@ class HydrogenBrandConfigController extends ApiController
             'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'sidest-default-products'),
             'favourites_collection_handle' => Arr::get($metadata, 'favourites_collection_handle', 'sidest-brand-favourites'),
             'high_commission_collection_handle' => Arr::get($metadata, 'high_commission_collection_handle', 'sidest-high-commission'),
+            'custom_photos_enabled' => (bool) Arr::get($metadata, 'custom_photos_enabled', true),
+            'custom_photo_position' => Arr::get($metadata, 'custom_photo_position', 'after'),
             'fallback_gallery' => $this->getFallbackGallery($site),
         ]);
     }

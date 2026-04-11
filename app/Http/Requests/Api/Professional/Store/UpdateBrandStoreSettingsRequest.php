@@ -18,6 +18,8 @@ class UpdateBrandStoreSettingsRequest extends BaseFormRequest
             'accent_color' => ['sometimes', 'nullable', 'string', 'max:20', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'theme_variant' => ['sometimes', 'nullable', 'string', 'max:50'],
             'product_image_ratio' => ['sometimes', 'nullable', 'string', 'in:1/1,4/5'],
+            'custom_photos_enabled' => ['sometimes', 'boolean'],
+            'custom_photo_position' => ['sometimes', 'string', 'in:before,after,mixed'],
         ];
     }
 

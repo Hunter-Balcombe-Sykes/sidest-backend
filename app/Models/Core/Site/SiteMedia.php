@@ -53,6 +53,7 @@ class SiteMedia extends BaseModel
         'original_size_bytes',
         'duration_ms',
         'poster_path',
+        'product_gid',
     ];
 
     protected $casts = [
