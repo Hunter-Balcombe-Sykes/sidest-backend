@@ -3,7 +3,7 @@
     "laravel-boost": {
       "command": "/Users/joshuahunter/Library/Application Support/Herd/bin/php84",
       "args": [
-        "/Users/joshuahunter/Herd/Side Street/Comet-Development/artisan",
+        "/Users/joshuahunter/Herd/Side Street/backend/artisan",
         "boost:mcp"
       ]
     },
@@ -13,8 +13,12 @@
         "/Applications/Herd.app/Contents/Resources/herd-mcp.phar"
       ],
       "env": {
-        "SITE_PATH": "/Users/joshuahunter/Herd/Side Street/Comet-Development"
+        "SITE_PATH": "/Users/joshuahunter/Herd/Side Street/backend"
       }
+    },
+    "nightwatch": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://nightwatch.laravel.com/mcp"]
     }
   }
 }

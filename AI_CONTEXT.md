@@ -498,6 +498,11 @@ When another AI reads this file, it should:
 | 2026-04-03 | Hydrogen internal API | Server-to-server endpoints for brand config, affiliate lookup, and affiliate products |
 | 2026-04-03 | Brand signup auto-fill | ShopProfileAutoFillService populates brand profile from Shopify shop data during OAuth |
 | 2026-04-03 | Renamed Comet → Side St | Full codebase rename across config, routes, middleware, models |
+| 2026-04-11 | Shopify OAuth defers account creation | Shop owner email (e.g., CEO) was being used as login. Now caches credentials with encrypted setup token (1hr TTL); brand enters own email in setup wizard |
+| 2026-04-11 | Design tokens in `site.settings.design` | Design belongs to the brand, not the Shopify integration. Persists across disconnect/reconnect. Only Shopify-specific data in `provider_metadata` |
+| 2026-04-11 | All images through WebP variant pipeline | Consistent CDN delivery. Brand logo/placeholder were previously stored raw — now all go through SiteMedia → R2 → ProcessImageVariantsJob → MediaVariant |
+| 2026-04-11 | Open invite links for all active brands | `/join/{handle}` works if brand exists and is active. No toggle needed — `affiliate_visibility` controls directory listing, not link access |
+| 2026-04-11 | Custom product photos: two-level toggle | Global brand setting (default: true) → per-affiliate override (nullable, inherits when null). Per-product rejected as over-complex |
 
 ---
 
