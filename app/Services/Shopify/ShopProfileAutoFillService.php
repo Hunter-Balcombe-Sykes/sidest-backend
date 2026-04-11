@@ -38,7 +38,6 @@ class ShopProfileAutoFillService
     {
         $professional->display_name = $this->str($shopData, 'name') ?: $professional->display_name;
         $professional->first_name = $this->str($shopData, 'name') ?: $professional->first_name;
-        $professional->primary_email = $this->str($shopData, 'email') ?: $professional->primary_email;
         $professional->phone = $this->str($shopData, 'phone') ?: $professional->phone;
 
         $professional->location_street_address = $this->str($shopData, 'address1') ?: $professional->location_street_address;

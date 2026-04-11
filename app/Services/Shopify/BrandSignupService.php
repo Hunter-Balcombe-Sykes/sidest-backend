@@ -136,7 +136,7 @@ class BrandSignupService
                 'status' => 'active',
                 'onboarding_step' => 0,
                 'qr_slug' => $this->siteProvisioning->generateQrSlug($handle),
-                'primary_email' => $shopEmail,
+                'primary_email' => null,
                 'first_name' => $shopName ?: '',
                 'last_name' => null,
                 'phone' => null,
