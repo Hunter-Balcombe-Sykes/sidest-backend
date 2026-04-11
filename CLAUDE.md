@@ -17,6 +17,7 @@ For API endpoint reference, read `docs/api.md`.
 | Jobs | Laravel Horizon (Redis-backed), separate `redis_video` connection for video processing |
 | Frontend | Vite 7, Tailwind CSS 4 (minimal — mostly API backend) |
 | Testing | Pest 4 + PHPUnit, Mockery, SQLite in-memory for tests |
+| Monitoring | Laravel Nightwatch (exceptions, slow routes/jobs/commands/tasks) |
 | Integrations | Shopify, Square, Fresha, Stripe |
 
 ## Architecture Rules
@@ -82,6 +83,7 @@ php artisan tinker # Interactive REPL
 
 ### Execute Autonomously
 - When given a bug: just fix it. Read logs, trace errors, resolve without hand-holding.
+- **Check Nightwatch** when diagnosing bugs or performance issues — use it to find exceptions, slow routes, slow jobs, and stack traces before diving into code.
 - Use subagents to keep the main context window clean — offload research and exploration.
 - One task per subagent for focused execution.
 - Go fix failing tests without being told how.
@@ -89,6 +91,7 @@ php artisan tinker # Interactive REPL
 ### Verify Before Done
 - Never mark a task complete without proving it works.
 - Run `composer test` to verify changes pass.
+- After fixing bugs, check Nightwatch to confirm the issue is resolved and no new issues surfaced.
 - Ask yourself: "Would a staff engineer approve this?"
 
 ### Learn Continuously
