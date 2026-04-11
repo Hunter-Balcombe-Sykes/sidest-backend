@@ -3,6 +3,7 @@
 namespace App\Jobs\Shopify;
 
 use App\Models\Retail\CommissionLedgerEntry;
+use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\QueryException;
@@ -66,6 +67,10 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
             ->where('entry_type', 'accrual')
             ->where('status', 'approved')
             ->update(['status' => 'reversed', 'updated_at' => now()]);
+
+        if ($reversed > 0) {
+            $this->notifyAffiliatesOfRefund($orderId, $accruals, fullRefund: true);
+        }
 
         Log::info('Shopify order fully refunded/cancelled — commissions reversed.', [
             'professional_id' => $this->professionalId,
@@ -167,10 +172,47 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
             }
         }
 
+        if ($reversalsCreated > 0) {
+            $this->notifyAffiliatesOfRefund($orderId, $accruals, fullRefund: false);
+        }
+
         Log::info('Shopify order partially refunded — reversal entries created.', [
             'professional_id' => $this->professionalId,
             'order_id' => $orderId,
             'reversals_created' => $reversalsCreated,
         ]);
+    }
+
+    private function notifyAffiliatesOfRefund(string $orderId, $accruals, bool $fullRefund): void
+    {
+        $publisher = app(NotificationPublisher::class);
+
+        $affiliateIds = $accruals
+            ->pluck('affiliate_professional_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        foreach ($affiliateIds as $affiliateId) {
+            $affiliateAccruals = $accruals->where('affiliate_professional_id', $affiliateId);
+            $totalCents = $affiliateAccruals->sum('amount_cents');
+            $currency = $affiliateAccruals->first()->currency_code ?? 'AUD';
+            $formatted = strtoupper($currency) . ' $' . number_format($totalCents / 100, 2);
+
+            $body = $fullRefund
+                ? "A sale was refunded — your {$formatted} commission has been cancelled."
+                : "A sale was partially refunded — your commission has been adjusted.";
+
+            $publisher->publish(
+                professionalId: (string) $affiliateId,
+                frontendType: 'Warning',
+                category: 'commissions',
+                title: 'Commission ' . ($fullRefund ? 'cancelled' : 'adjusted'),
+                body: $body,
+                dedupeKey: "refund.order.{$orderId}.affiliate.{$affiliateId}",
+                ctaUrl: '/account/commissions',
+                primaryActionLabel: 'View Commissions',
+            );
+        }
     }
 }

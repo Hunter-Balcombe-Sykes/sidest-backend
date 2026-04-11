@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Professional\AffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
+use App\Http\Controllers\Api\Professional\BrandGalleryController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
 use App\Http\Controllers\Api\Professional\OpenInviteController;
 use App\Http\Controllers\Api\Professional\BrandSetupController;
@@ -215,6 +216,16 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         // Brand profile (business fields)
         Route::get('/brand/profile', [BrandProfileController::class, 'show']);
         Route::patch('/brand/profile', [BrandProfileController::class, 'update']);
+
+        // Brand Gallery Fallback
+        Route::get('/brand/gallery', [BrandGalleryController::class, 'index']);
+        Route::post('/brand/gallery', [BrandGalleryController::class, 'upload'])
+            ->middleware('throttle:brand-catalog-writes');
+        Route::delete('/brand/gallery/{media}', [BrandGalleryController::class, 'destroy'])
+            ->whereUuid('media')
+            ->middleware('throttle:brand-catalog-writes');
+        Route::patch('/brand/gallery/reorder', [BrandGalleryController::class, 'reorder'])
+            ->middleware('throttle:brand-catalog-writes');
 
         // Brand onboarding readiness
         Route::get('/brand/onboarding-readiness', [BrandOnboardingReadinessController::class, 'show']);

@@ -22,6 +22,7 @@ class SiteMedia extends BaseModel
     public const POOL_GALLERY  = 'gallery';
     public const POOL_CONTENT  = 'content';
     public const POOL_PRODUCT  = 'product';
+    public const POOL_BRAND_GALLERY = 'brand_gallery';
 
     public const MEDIA_TYPE_IMAGE = 'image';
     public const MEDIA_TYPE_VIDEO = 'video';

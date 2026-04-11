@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteMedia;
 use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -65,6 +66,30 @@ class HydrogenBrandConfigController extends ApiController
             'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'sidest-default-products'),
             'favourites_collection_handle' => Arr::get($metadata, 'favourites_collection_handle', 'sidest-brand-favourites'),
             'high_commission_collection_handle' => Arr::get($metadata, 'high_commission_collection_handle', 'sidest-high-commission'),
+            'fallback_gallery' => $this->getFallbackGallery($site),
         ]);
+    }
+
+    private function getFallbackGallery(?Site $site): array
+    {
+        if (! $site) {
+            return [];
+        }
+
+        return SiteMedia::query()
+            ->where('site_id', $site->id)
+            ->where('pool', SiteMedia::POOL_BRAND_GALLERY)
+            ->where('is_active', true)
+            ->where('processing_state', SiteMedia::PROCESSING_STATE_READY)
+            ->with('mediaVariants')
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn (SiteMedia $media) => [
+                'url' => $media->variantUrls()['optimized'] ?? null,
+                'alt_text' => $media->alt_text,
+            ])
+            ->filter(fn (array $item) => $item['url'] !== null)
+            ->values()
+            ->all();
     }
 }

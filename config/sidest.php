@@ -134,6 +134,7 @@ return [
         'gallery' => ['max' => (int) env('SIDEST_GALLERY_IMAGE_MAX', 5)],
         'content' => ['max' => (int) env('SIDEST_CONTENT_IMAGE_MAX', 5)],
         'product' => ['max' => (int) env('SIDEST_PRODUCT_IMAGE_MAX', 5)],
+        'brand_gallery' => ['max' => (int) env('SIDEST_BRAND_GALLERY_IMAGE_MAX', 5)],
     ],
 
     /*

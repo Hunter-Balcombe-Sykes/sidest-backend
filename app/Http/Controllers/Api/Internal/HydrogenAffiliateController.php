@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteMedia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -59,10 +61,38 @@ class HydrogenAffiliateController extends ApiController
             return $this->error('Affiliate not found.', 404);
         }
 
+        $affiliateSite = Site::where('professional_id', $affiliate->id)->first();
+        $gallery = $this->getAffiliateGallery($affiliateSite);
+
         return $this->success([
             'affiliate_id' => (string) $affiliate->id,
             'name' => $affiliate->display_name,
             'slug' => $affiliate->handle,
+            'has_gallery' => ! empty($gallery),
+            'gallery' => $gallery,
         ]);
+    }
+
+    private function getAffiliateGallery(?Site $site): array
+    {
+        if (! $site) {
+            return [];
+        }
+
+        return SiteMedia::query()
+            ->where('site_id', $site->id)
+            ->where('pool', SiteMedia::POOL_GALLERY)
+            ->where('is_active', true)
+            ->where('processing_state', SiteMedia::PROCESSING_STATE_READY)
+            ->with('mediaVariants')
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn (SiteMedia $media) => [
+                'url' => $media->variantUrls()['optimized'] ?? null,
+                'alt_text' => $media->alt_text,
+            ])
+            ->filter(fn (array $item) => $item['url'] !== null)
+            ->values()
+            ->all();
     }
 }

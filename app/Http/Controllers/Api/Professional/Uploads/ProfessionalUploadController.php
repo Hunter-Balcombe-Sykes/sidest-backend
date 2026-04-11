@@ -409,25 +409,7 @@ class ProfessionalUploadController extends ApiController
             return $this->error('Brand logo uploads are only available for brand accounts.', 403);
         }
 
-        $file = $request->file('logo');
-        $extension = strtolower((string) $file->getClientOriginalExtension());
-        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
-        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'brand-logo');
-        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
-        $path = "images/{$pro->id}/design/logo/{$safeBaseName}_{$hash}.{$extension}";
-        $mediaDisk = $this->mediaService->resolvedDiskName();
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
-        $disk = Storage::disk($mediaDisk);
-
-        $disk->put($path, file_get_contents($file->getRealPath()), 'public');
-
-        return $this->success([
-            'path' => $path,
-            'url' => $disk->url($path),
-            'name' => $file->getClientOriginalName(),
-            'disk' => $mediaDisk,
-            'site_id' => $site->id,
-        ], 201);
+        return $this->storeBrandDesignImage($pro, $site, $request->file('logo'), 'logo');
     }
 
     /**
@@ -443,24 +425,62 @@ class ProfessionalUploadController extends ApiController
             return $this->error('Placeholder image uploads are only available for brand accounts.', 403);
         }
 
-        $file = $request->file('image');
-        $extension = strtolower((string) $file->getClientOriginalExtension());
-        $originalName = pathinfo((string) $file->getClientOriginalName(), PATHINFO_FILENAME);
-        $safeBaseName = Str::slug($originalName !== '' ? $originalName : 'placeholder-image');
-        $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
-        $path = "images/{$pro->id}/design/placeholders/{$safeBaseName}_{$hash}.{$extension}";
-        $mediaDisk = $this->mediaService->resolvedDiskName();
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
-        $disk = Storage::disk($mediaDisk);
+        return $this->storeBrandDesignImage($pro, $site, $request->file('image'), 'placeholder');
+    }
 
-        $disk->put($path, file_get_contents($file->getRealPath()), 'public');
+    private function storeBrandDesignImage(
+        \App\Models\Core\Professional\Professional $pro,
+        \App\Models\Core\Site\Site $site,
+        \Illuminate\Http\UploadedFile $file,
+        string $label,
+    ): JsonResponse {
+        $media = SiteMedia::create([
+            'site_id' => $site->id,
+            'pool' => SiteMedia::POOL_CONTENT,
+            'path' => '',
+            'alt_text' => $label,
+            'sort_order' => 0,
+            'is_active' => true,
+            'media_type' => SiteMedia::MEDIA_TYPE_IMAGE,
+            'processing_state' => SiteMedia::PROCESSING_STATE_PENDING,
+            'original_mime' => $file->getMimeType(),
+            'original_size_bytes' => $file->getSize(),
+        ]);
+
+        $basePath = "images/{$pro->id}/{$media->id}";
+
+        try {
+            $originalPath = $this->mediaService->storeOriginal($file, $basePath);
+        } catch (\Exception $e) {
+            Log::error("Brand {$label} upload: failed to store original", [
+                'media_id' => $media->id,
+                'error' => $e->getMessage(),
+            ]);
+            $media->delete();
+            return $this->error('Failed to store file.', 500);
+        }
+
+        $media->update(['path' => $originalPath]);
+
+        $this->dispatchImageJob($media->id, $originalPath, $basePath);
+
+        app(SiteCacheService::class)->invalidateSite($site);
+
+        $media->refresh();
+        $media->load('mediaVariants');
+        $isReady = $media->processing_state === SiteMedia::PROCESSING_STATE_READY;
+        $variants = $isReady ? $media->variantUrls() : [];
+        $mediaDisk = $this->mediaService->resolvedDiskName();
 
         return $this->success([
-            'path' => $path,
-            'url' => $disk->url($path),
+            'path' => $originalPath,
+            'url' => $variants['optimized'] ?? Storage::disk($mediaDisk)->url($originalPath),
             'name' => $file->getClientOriginalName(),
             'disk' => $mediaDisk,
             'site_id' => $site->id,
+            'media_id' => $media->id,
+            'variants' => $variants,
+            'processing_state' => $media->processing_state,
         ], 201);
     }
 
