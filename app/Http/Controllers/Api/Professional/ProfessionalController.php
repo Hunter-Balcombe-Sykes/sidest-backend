@@ -117,7 +117,6 @@ class ProfessionalController extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $previousProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
-
         DB::transaction(function () use ($professional, $request, $previousProfessionalType): void {
             $professional->fill($request->validated());
             $professional->save();

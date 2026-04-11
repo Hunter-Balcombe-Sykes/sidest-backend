@@ -63,7 +63,8 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::post('/brand-affiliate-invites/{token}/decline', [BrandAffiliateInviteController::class, 'decline']);
         Route::get('/affiliate-invites', [AffiliateInviteController::class, 'index']);
         Route::post('/join/{handle}', [OpenInviteController::class, 'claim'])
-            ->where('handle', '[A-Za-z0-9][A-Za-z0-9_-]*');
+            ->where('handle', '[A-Za-z0-9][A-Za-z0-9_-]*')
+            ->middleware('throttle:affiliate-writes');
         Route::get('/brand-partners', [BrandPartnerController::class, 'index']);
         Route::post('/brand-partners/{brandProfessionalId}/connect', [BrandPartnerController::class, 'connect'])
             ->whereUuid('brandProfessionalId');

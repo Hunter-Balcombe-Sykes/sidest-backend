@@ -13,10 +13,15 @@ use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Professional\AccountTypeDefaultsService;
 use App\Services\Professional\SiteProvisioningService;
+use App\Services\Shopify\BrandSignupService;
+use App\Services\Shopify\ShopifySetupTokenService;
+use App\Services\Shopify\ShopProfileAutoFillService;
+use Illuminate\Support\Arr;
 
 
 
@@ -195,6 +200,45 @@ class BootstrapController extends ApiController
                     }
                 }
 
+            // Shopify setup token: create integration from cached OAuth credentials
+            $shopifyIntegrationId = null;
+            $shopifySetupToken = is_string($data['shopify_setup_token'] ?? null) ? trim((string) $data['shopify_setup_token']) : '';
+            if ($shopifySetupToken !== '') {
+                // Peek first — consume only after transaction succeeds (prevents token loss on rollback)
+                $shopifyData = app(ShopifySetupTokenService::class)->peek($shopifySetupToken);
+                if ($shopifyData === null) {
+                    throw new RuntimeException('Shopify setup session is invalid or expired. Please reinstall the app from Shopify.');
+                }
+
+                $shopDomain = $shopifyData['shop_domain'];
+                $shopId = trim((string) Arr::get($shopifyData['shop_data'], 'id', ''));
+                $shopCurrency = strtoupper(trim((string) Arr::get($shopifyData['shop_data'], 'currency', '')));
+
+                $integration = ProfessionalIntegration::create([
+                    'professional_id' => (string) $professional->id,
+                    'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+                    'external_account_id' => $shopDomain,
+                    'access_token' => $shopifyData['access_token'],
+                    'provider_metadata' => [
+                        'shop_domain' => $shopDomain,
+                        'shop_id' => $shopId !== '' ? "gid://shopify/Shop/{$shopId}" : null,
+                        'shop_currency' => $shopCurrency !== '' ? $shopCurrency : null,
+                        'scopes' => $shopifyData['scopes'],
+                        'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
+                        'connected_at' => now()->toIso8601String(),
+                        'webhook_registration_state' => 'queued',
+                    ],
+                ]);
+
+                $shopifyIntegrationId = (string) $integration->id;
+
+                // Auto-fill profile from Shopify shop data (address, phone, etc. — not email)
+                $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
+                app(ShopProfileAutoFillService::class)->fillFromShopData(
+                    $professional, $site, $brandProfile, $shopifyData['shop_data']
+                );
+            }
+
             app(ProfessionalCacheService::class)->invalidateProfessional($professional);
 
             // Ensure the professional has a subscription – seed the free plan if none exists
@@ -207,6 +251,7 @@ class BootstrapController extends ApiController
                 return [
                     'professional' => $professional->fresh(),
                     'site' => $site->fresh(),
+                    'shopify_integration_id' => $shopifyIntegrationId,
                 ];
             });
         } catch (\Exception $e) {
@@ -216,6 +261,18 @@ class BootstrapController extends ApiController
             ]);
             throw $e;
         }
+
+        // Consume Shopify setup token AFTER transaction succeeds (prevents token loss on rollback)
+        if (is_string($result['shopify_integration_id'] ?? null)) {
+            $shopifySetupToken = trim((string) ($data['shopify_setup_token'] ?? ''));
+            if ($shopifySetupToken !== '') {
+                app(ShopifySetupTokenService::class)->consume($shopifySetupToken);
+            }
+            app(BrandSignupService::class)->dispatchInstallJobs($result['shopify_integration_id']);
+        }
+
+        // Strip internal ID before returning
+        unset($result['shopify_integration_id']);
 
         return $this->success($result);
     }

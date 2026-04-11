@@ -4,26 +4,27 @@ namespace App\Http\Controllers\Api\Shopify;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
+use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Services\Auth\SupabaseAdminService;
 use App\Services\Shopify\BrandSignupService;
+use App\Services\Shopify\ShopifySetupTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-// V2: Core. Shopify app install OAuth flow (HMAC validation, token exchange, shop details). Creates brand account on install.
 class ShopifyAppOAuthController extends ApiController
 {
     use NormalizesShopDomain;
 
     public function __construct(
         private readonly BrandSignupService $brandSignup,
+        private readonly ShopifySetupTokenService $setupTokens,
     ) {}
 
-    /**
-     * Step 1 — Shopify hits this URL when the merchant clicks install.
-     * We validate the request and redirect to Shopify's OAuth consent screen.
-     */
     public function install(Request $request): RedirectResponse|JsonResponse
     {
         $shop = $this->normalizeShopDomain((string) $request->query('shop', ''));
@@ -41,7 +42,6 @@ class ShopifyAppOAuthController extends ApiController
         $redirectUri = rtrim((string) config('app.url'), '/') . '/api/shopify/callback';
         $nonce = bin2hex(random_bytes(16));
 
-        // Store nonce in cache for 10 minutes to validate on callback
         cache()->put("shopify_oauth_nonce_{$shop}", $nonce, now()->addMinutes(10));
 
         $authUrl = "https://{$shop}/admin/oauth/authorize?"
@@ -55,11 +55,6 @@ class ShopifyAppOAuthController extends ApiController
         return redirect()->away($authUrl);
     }
 
-    /**
-     * Step 2 — Shopify redirects back here with a code after the merchant approves.
-     * We exchange the code for an access token, create the brand account, and redirect
-     * to the embedded app.
-     */
     public function callback(Request $request): RedirectResponse|JsonResponse
     {
         $shop = $this->normalizeShopDomain((string) $request->query('shop', ''));
@@ -71,20 +66,17 @@ class ShopifyAppOAuthController extends ApiController
             return $this->error('Missing required OAuth parameters.', 400);
         }
 
-        // Validate HMAC
         if (! $this->isValidHmac($request->query(), (string) config('services.shopify.api_secret'))) {
             Log::warning('Shopify OAuth: invalid HMAC', ['shop' => $shop]);
             return $this->error('Invalid HMAC signature.', 400);
         }
 
-        // Validate nonce
         $expectedNonce = cache()->pull("shopify_oauth_nonce_{$shop}");
         if ($expectedNonce === null || ! hash_equals($expectedNonce, $state)) {
             Log::warning('Shopify OAuth: invalid nonce', ['shop' => $shop]);
             return $this->error('Invalid state parameter.', 400);
         }
 
-        // Exchange code for access token
         $tokenResponse = Http::post("https://{$shop}/admin/oauth/access_token", [
             'client_id' => config('services.shopify.api_key'),
             'client_secret' => config('services.shopify.api_secret'),
@@ -106,7 +98,6 @@ class ShopifyAppOAuthController extends ApiController
             return $this->error('Empty access token received from Shopify.', 502);
         }
 
-        // Fetch full shop details
         $shopResponse = Http::withHeaders([
             'X-Shopify-Access-Token' => $accessToken,
         ])->get("https://{$shop}/admin/api/" . config('services.shopify.api_version') . "/shop.json");
@@ -116,33 +107,98 @@ class ShopifyAppOAuthController extends ApiController
             $shopData = (array) ($shopResponse->json('shop') ?? []);
         }
 
-        // Create brand account (or handle reinstall)
-        try {
-            $result = $this->brandSignup->handleOAuthCallback($shop, $accessToken, $shopData, $scopes);
-        } catch (\Throwable $e) {
-            Log::error('Shopify OAuth: brand signup failed', [
-                'shop' => $shop,
-                'error' => $e->getMessage(),
-            ]);
-            return $this->error('Failed to create brand account.', 500);
-        }
-
-        Log::info('Shopify OAuth callback successful', [
-            'shop' => $shop,
-            'professional_id' => (string) $result->professional->id,
-            'is_reinstall' => $result->isReinstall,
-        ]);
-
-        // Build redirect to embedded app
+        $shopEmail = strtolower(trim((string) Arr::get($shopData, 'email', '')));
         $shopHandle = str_replace('.myshopify.com', '', $shop);
         $appHandle = (string) config('services.shopify.app_handle', 'side-st');
         $basePath = "https://admin.shopify.com/store/{$shopHandle}/apps/{$appHandle}";
 
-        if ($result->isReinstall) {
-            return redirect()->away($basePath);
+        try {
+            // Path A: Reinstall — existing integration for this shop domain
+            $existingIntegration = ProfessionalIntegration::query()
+                ->where('shopify_shop_domain', $shop)
+                ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+                ->first();
+
+            if ($existingIntegration) {
+                $result = $this->brandSignup->handleReinstall($existingIntegration, $accessToken, $shopData, $scopes);
+
+                Log::info('Shopify OAuth: reinstall', [
+                    'professional_id' => (string) $result->professional->id,
+                    'shop_domain' => $shop,
+                ]);
+
+                return redirect()->away($basePath);
+            }
+
+            // Path B: Existing account — shop email matches a Supabase user with a Professional
+            if ($shopEmail !== '') {
+                $supabaseUser = app(SupabaseAdminService::class)->getUserByEmail($shopEmail);
+
+                if ($supabaseUser !== null) {
+                    $existingProfessional = Professional::where('auth_user_id', $supabaseUser['id'])->first();
+
+                    if ($existingProfessional) {
+                        $result = $this->brandSignup->handleExistingBrandConnect(
+                            $existingProfessional, $shop, $accessToken, $shopData, $scopes
+                        );
+
+                        Log::info('Shopify OAuth: existing account connect', [
+                            'professional_id' => (string) $result->professional->id,
+                            'shop_domain' => $shop,
+                        ]);
+
+                        return redirect()->away($basePath);
+                    }
+                }
+            }
+
+            // Path C: Fresh install — cache credentials and redirect to setup wizard
+            $setupToken = $this->setupTokens->create($shop, $accessToken, $shopData, $scopes, $shopEmail);
+
+            Log::info('Shopify OAuth: fresh install, redirecting to setup', [
+                'shop_domain' => $shop,
+            ]);
+
+            return redirect()->away("{$basePath}/setup?shopify_setup_token={$setupToken}");
+        } catch (\Throwable $e) {
+            Log::error('Shopify OAuth: callback failed', [
+                'shop' => $shop,
+                'error' => $e->getMessage(),
+            ]);
+            return $this->error('Failed to process Shopify app installation.', 500);
+        }
+    }
+
+    public function setupPrefill(Request $request): JsonResponse
+    {
+        $token = trim((string) $request->query('token', ''));
+
+        if ($token === '') {
+            return $this->error('Missing token.', 400);
         }
 
-        return redirect()->away("{$basePath}/setup");
+        $data = $this->setupTokens->peek($token);
+
+        if ($data === null) {
+            return $this->error('Setup session not found or expired.', 404);
+        }
+
+        $shopData = $data['shop_data'] ?? [];
+
+        return $this->success([
+            'shop_name' => trim((string) Arr::get($shopData, 'name', '')),
+            'shop_domain' => $data['shop_domain'] ?? '',
+            'phone' => trim((string) Arr::get($shopData, 'phone', '')),
+            'address' => [
+                'address1' => trim((string) Arr::get($shopData, 'address1', '')),
+                'city' => trim((string) Arr::get($shopData, 'city', '')),
+                'province' => trim((string) Arr::get($shopData, 'province', '')),
+                'zip' => trim((string) Arr::get($shopData, 'zip', '')),
+                'country' => trim((string) Arr::get($shopData, 'country_name', '')),
+            ],
+            'country_code' => trim((string) Arr::get($shopData, 'country_code', '')),
+            'timezone' => trim((string) Arr::get($shopData, 'iana_timezone', '')),
+        ]);
     }
 
     private function isValidShopDomain(string $shop): bool
@@ -150,9 +206,6 @@ class ShopifyAppOAuthController extends ApiController
         return (bool) preg_match('/^[a-zA-Z0-9\-]+\.myshopify\.com$/', $shop);
     }
 
-    /**
-     * Validates the HMAC signature Shopify sends with OAuth callbacks.
-     */
     private function isValidHmac(array $params, string $secret): bool
     {
         $actual = (string) ($params['hmac'] ?? '');

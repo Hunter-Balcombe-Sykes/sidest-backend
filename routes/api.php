@@ -35,6 +35,7 @@ Route::get('/ping', fn () => response()->json(['pong' => true]));
 Route::middleware('throttle:60,1')->group(function () {
     Route::get('/shopify/install', [ShopifyAppOAuthController::class, 'install']);
     Route::get('/shopify/callback', [ShopifyAppOAuthController::class, 'callback']);
+    Route::get('/shopify/setup-prefill', [ShopifyAppOAuthController::class, 'setupPrefill']);
 });
 
 // Webhooks (no auth middleware — signature validated in controller)

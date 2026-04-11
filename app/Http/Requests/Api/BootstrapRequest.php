@@ -43,6 +43,7 @@ class BootstrapRequest extends BaseFormRequest
             'invite_token' => ['sometimes', 'nullable', 'string', 'max:80'],
             'brand_partner_professional_id' => ['sometimes', 'nullable', 'uuid', Rule::exists('professionals', 'id')],
             'join_brand_handle' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'shopify_setup_token' => ['sometimes', 'nullable', 'string', 'size:64', 'regex:/^[a-f0-9]{64}$/'],
             'professional_type' => [
                 ...$professionalTypeRules,
                 'string',
@@ -100,6 +101,12 @@ class BootstrapRequest extends BaseFormRequest
         if ($this->exists('join_brand_handle')) {
             $merge['join_brand_handle'] = is_string($this->join_brand_handle)
                 ? strtolower(trim($this->join_brand_handle))
+                : null;
+        }
+
+        if ($this->exists('shopify_setup_token')) {
+            $merge['shopify_setup_token'] = is_string($this->shopify_setup_token)
+                ? trim($this->shopify_setup_token)
                 : null;
         }
 
