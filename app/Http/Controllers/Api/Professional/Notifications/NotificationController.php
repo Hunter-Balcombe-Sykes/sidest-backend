@@ -19,7 +19,7 @@ class NotificationController extends ApiController
     /**
      * GET /me/notifications
      * Returns notifications targeted to the current pro + broadcasts.
-     * Read/dismiss state is stored per-user in core.notification_receipts.
+     * Read/dismiss state is stored per-user in notifications.notification_receipts.
      */
     public function index(Request $request): JsonResponse
     {
@@ -98,7 +98,7 @@ class NotificationController extends ApiController
         $updates = implode(', ', array_map(fn($c) => "{$c} = EXCLUDED.{$c}", $cols));
 
         $sql = "
-        INSERT INTO core.notification_receipts (id, notification_id, professional_id, ".implode(', ', $cols).", created_at, updated_at)
+        INSERT INTO notifications.notification_receipts (id, notification_id, professional_id, ".implode(', ', $cols).", created_at, updated_at)
         VALUES (?, ?, ?, {$placeholders}, NOW(), NOW())
         ON CONFLICT (notification_id, professional_id)
         DO UPDATE SET {$updates}, updated_at = NOW()
