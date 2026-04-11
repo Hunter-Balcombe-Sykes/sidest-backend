@@ -50,6 +50,10 @@ class HydrogenBrandConfigController extends ApiController
 
         $siteSettings = is_array($site?->settings) ? $site->settings : [];
 
+        $design = is_array(Arr::get($siteSettings, 'design')) ? Arr::get($siteSettings, 'design') : [];
+        $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
+        $media = is_array($design['media'] ?? null) ? $design['media'] : [];
+
         return $this->success([
             'brand_professional_id' => (string) $professional->id,
             'brand_name' => $professional->display_name,
@@ -58,16 +62,31 @@ class HydrogenBrandConfigController extends ApiController
             'storefront_access_token' => Arr::get($metadata, 'storefront_access_token'),
             'default_commission_rate' => $storeSettings ? (float) $storeSettings->default_commission_rate : 15.0,
             'currency_code' => Arr::get($metadata, 'shop_currency', 'AUD'),
-            'theme_variant' => Arr::get($metadata, 'theme_variant'),
-            'accent_color' => Arr::get($metadata, 'accent_color'),
-            'product_image_ratio' => Arr::get($metadata, 'product_image_ratio'),
-            'brand_logo_url' => Arr::get($siteSettings, 'design.media.brand_logo_url'),
             'active_collection_handle' => Arr::get($metadata, 'active_collection_handle', 'sidest-active-products'),
             'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'sidest-default-products'),
             'favourites_collection_handle' => Arr::get($metadata, 'favourites_collection_handle', 'sidest-brand-favourites'),
             'high_commission_collection_handle' => Arr::get($metadata, 'high_commission_collection_handle', 'sidest-high-commission'),
             'custom_photos_enabled' => (bool) Arr::get($metadata, 'custom_photos_enabled', true),
-            'custom_photo_position' => Arr::get($metadata, 'custom_photo_position', 'after'),
+            'design' => [
+                'accent_color' => $design['accent_color'] ?? null,
+                'dark_color' => $design['dark_color'] ?? null,
+                'white_color' => $design['white_color'] ?? null,
+                'border_color' => $design['border_color'] ?? null,
+                'primary_color' => $design['primary_color'] ?? null,
+                'secondary_color' => $design['secondary_color'] ?? null,
+                'background_color' => $design['background_color'] ?? null,
+                'text_color' => $design['text_color'] ?? null,
+                'button_background' => $design['button_background'] ?? null,
+                'button_text_color' => $design['button_text_color'] ?? null,
+                'border_radius' => $design['border_radius'] ?? null,
+                'border_width' => $design['border_width'] ?? null,
+                'theme_variant' => $design['theme_variant'] ?? null,
+                'product_image_ratio' => $design['product_image_ratio'] ?? null,
+                'custom_photo_position' => $design['custom_photo_position'] ?? 'after',
+                'heading_font' => $typography['heading_font'] ?? null,
+                'body_font' => $typography['body_font'] ?? null,
+                'brand_logo_url' => is_string($media['brand_logo_url'] ?? null) ? $media['brand_logo_url'] : null,
+            ],
             'fallback_gallery' => $this->getFallbackGallery($site),
         ]);
     }

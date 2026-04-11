@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api\Professional\Store;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\Store\UpdateBrandStoreSettingsRequest;
 use App\Http\Resources\BrandStoreSettingsResource;
+use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
@@ -15,16 +17,12 @@ use Illuminate\Support\Arr;
 class BrandStoreSettingsController extends ApiController
 {
     use ResolveCurrentProfessional;
+    use ResolveCurrentSite;
 
     public function __construct(
         private readonly BrandCatalogService $catalogService
     ) {}
 
-    /**
-     * GET /brand/store-settings
-     *
-     * Returns the brand's store settings (local DB + Shopify visual settings from provider_metadata).
-     */
     public function show(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
@@ -35,32 +33,29 @@ class BrandStoreSettingsController extends ApiController
 
         $storeSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
 
-        // Visual settings come from provider_metadata (cached there by the update flow)
-        $metadata = [];
+        $pro->loadMissing('site');
+        $site = $pro->site;
+        $siteSettings = is_array($site?->settings) ? $site->settings : [];
+        $design = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
 
+        $metadata = [];
         try {
             $resolved = $this->catalogService->resolveBrandIntegration($pro);
             $metadata = $resolved['metadata'];
         } catch (\Throwable $e) {
-            // Integration may not exist yet — return defaults
         }
 
         return $this->success(new BrandStoreSettingsResource([
             'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
             'payout_hold_days' => $storeSettings?->payout_hold_days,
-            'accent_color' => Arr::get($metadata, 'accent_color'),
-            'theme_variant' => Arr::get($metadata, 'theme_variant'),
-            'product_image_ratio' => Arr::get($metadata, 'product_image_ratio'),
+            'accent_color' => $design['accent_color'] ?? null,
+            'theme_variant' => $design['theme_variant'] ?? null,
+            'product_image_ratio' => $design['product_image_ratio'] ?? null,
             'custom_photos_enabled' => Arr::get($metadata, 'custom_photos_enabled', true),
-            'custom_photo_position' => Arr::get($metadata, 'custom_photo_position', 'after'),
+            'custom_photo_position' => $design['custom_photo_position'] ?? 'after',
         ]));
     }
 
-    /**
-     * PATCH /brand/store-settings
-     *
-     * Update store settings: dual write to local DB + Shopify shop metafields + provider_metadata.
-     */
     public function update(UpdateBrandStoreSettingsRequest $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
@@ -71,7 +66,7 @@ class BrandStoreSettingsController extends ApiController
 
         $validated = $request->validated();
 
-        // 1. Local DB write for commission rate and payout hold days
+        // 1. Local DB write for commission rate
         $dbFields = [];
         if (array_key_exists('default_commission_rate', $validated)) {
             $dbFields['default_commission_rate'] = $validated['default_commission_rate'];
@@ -84,7 +79,32 @@ class BrandStoreSettingsController extends ApiController
             );
         }
 
-        // 2. Shopify metafield write + provider_metadata cache
+        // 2. Write visual settings to site.settings.design
+        $pro->loadMissing('site');
+        $site = $pro->site;
+
+        $designFields = ['accent_color', 'theme_variant', 'product_image_ratio', 'custom_photo_position'];
+        $designUpdates = [];
+        foreach ($designFields as $field) {
+            if (array_key_exists($field, $validated)) {
+                $designUpdates[$field] = $validated[$field];
+            }
+        }
+
+        if (! empty($designUpdates) && $site) {
+            $settings = is_array($site->settings) ? $site->settings : [];
+            $design = is_array($settings['design'] ?? null) ? $settings['design'] : [];
+
+            foreach ($designUpdates as $key => $value) {
+                $design[$key] = $value;
+            }
+
+            $settings['design'] = $design;
+            $site->settings = $settings;
+            $site->save();
+        }
+
+        // 3. Shopify metafield sync (accent_color, theme_variant, product_image_ratio still synced to Shopify)
         try {
             $resolved = $this->catalogService->resolveBrandIntegration($pro);
             $integration = $resolved['integration'];
@@ -97,29 +117,20 @@ class BrandStoreSettingsController extends ApiController
             }
 
             if (array_key_exists('accent_color', $validated)) {
-                $val = $validated['accent_color'] ?? '';
-                $shopMetafields[] = ['key' => 'accent_color', 'value' => $val, 'type' => 'single_line_text_field'];
-                $metadataUpdates['accent_color'] = $val;
+                $shopMetafields[] = ['key' => 'accent_color', 'value' => $validated['accent_color'] ?? '', 'type' => 'single_line_text_field'];
             }
 
             if (array_key_exists('theme_variant', $validated)) {
-                $val = $validated['theme_variant'] ?? '';
-                $shopMetafields[] = ['key' => 'theme_variant', 'value' => $val, 'type' => 'single_line_text_field'];
-                $metadataUpdates['theme_variant'] = $val;
+                $shopMetafields[] = ['key' => 'theme_variant', 'value' => $validated['theme_variant'] ?? '', 'type' => 'single_line_text_field'];
             }
 
             if (array_key_exists('product_image_ratio', $validated)) {
-                $val = $validated['product_image_ratio'] ?? '';
-                $shopMetafields[] = ['key' => 'product_image_ratio', 'value' => $val, 'type' => 'single_line_text_field'];
-                $metadataUpdates['product_image_ratio'] = $val;
+                $shopMetafields[] = ['key' => 'product_image_ratio', 'value' => $validated['product_image_ratio'] ?? '', 'type' => 'single_line_text_field'];
             }
 
-            // Custom photo settings (provider_metadata only, not Shopify metafields)
+            // custom_photos_enabled stays in provider_metadata (feature toggle, not design)
             if (array_key_exists('custom_photos_enabled', $validated)) {
                 $metadataUpdates['custom_photos_enabled'] = (bool) $validated['custom_photos_enabled'];
-            }
-            if (array_key_exists('custom_photo_position', $validated)) {
-                $metadataUpdates['custom_photo_position'] = $validated['custom_photo_position'];
             }
 
             if (! empty($shopMetafields)) {
@@ -127,12 +138,10 @@ class BrandStoreSettingsController extends ApiController
 
                 if (! $result['success']) {
                     $msg = $result['userErrors'][0]['message'] ?? 'Failed to update Shopify settings.';
-
                     return $this->error($msg, 422);
                 }
             }
 
-            // 3. Update provider_metadata so HydrogenBrandConfigController reads them without hitting Shopify
             if (! empty($metadataUpdates)) {
                 $integration->mergeProviderMetadata($metadataUpdates);
             }
@@ -144,16 +153,18 @@ class BrandStoreSettingsController extends ApiController
 
         // Return fresh state
         $storeSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
+        $freshSiteSettings = is_array($site?->fresh()?->settings) ? $site->fresh()->settings : [];
+        $freshDesign = is_array($freshSiteSettings['design'] ?? null) ? $freshSiteSettings['design'] : [];
         $freshMetadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
 
         return $this->success(new BrandStoreSettingsResource([
             'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
             'payout_hold_days' => $storeSettings?->payout_hold_days,
-            'accent_color' => Arr::get($freshMetadata, 'accent_color'),
-            'theme_variant' => Arr::get($freshMetadata, 'theme_variant'),
-            'product_image_ratio' => Arr::get($freshMetadata, 'product_image_ratio'),
+            'accent_color' => $freshDesign['accent_color'] ?? null,
+            'theme_variant' => $freshDesign['theme_variant'] ?? null,
+            'product_image_ratio' => $freshDesign['product_image_ratio'] ?? null,
             'custom_photos_enabled' => Arr::get($freshMetadata, 'custom_photos_enabled', true),
-            'custom_photo_position' => Arr::get($freshMetadata, 'custom_photo_position', 'after'),
+            'custom_photo_position' => $freshDesign['custom_photo_position'] ?? 'after',
         ]));
     }
 }

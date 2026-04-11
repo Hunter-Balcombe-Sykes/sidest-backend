@@ -1712,7 +1712,7 @@ Build `app/account/storefront/` — the page where affiliates manage which produ
 
 ---
 
-#### Share Link Generation (Brand + Affiliate)
+#### Share Link Generation (Brand + Affiliate) — Frontend only (Type 1), Backend TBD (Type 2)
 **Assigned:** Frontend Dev + Backend Dev
 **Release Batch:** Beta 3
 **Segments:** Next Frontend, Laravel, Hydrogen
@@ -1861,7 +1861,7 @@ The "Active Products" and "High Commission Products" collections are managed aut
 
 ---
 
-#### Backend — Shop Metafields API Proxy
+#### Backend — Shop Metafields API Proxy ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Beta 3
 **Segments:** Laravel
@@ -1876,7 +1876,7 @@ These are called from the embedded app (authenticated via Shopify session token)
 
 ---
 
-#### Backend — Affiliate Product Selection Endpoints
+#### Backend — Affiliate Product Selection Endpoints ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Beta 3
 **Segments:** Laravel, Supabase
@@ -1892,7 +1892,7 @@ Create the endpoints the affiliate product selection UI calls.
 
 ---
 
-#### Backend — Affiliate Invite, Slug Generation, and Open Link
+#### Backend — Affiliate Invite, Slug Generation, and Open Link ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Beta 3
 **Segments:** Laravel, Supabase
@@ -2150,7 +2150,7 @@ Brands set how many days commission is held before it releases to affiliates. Th
 
 ---
 
-#### Backend — Webhook shop/update Handler
+#### Backend — Webhook shop/update Handler ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Beta 3
 **Segments:** Laravel, Supabase
@@ -2171,7 +2171,7 @@ This keeps the Side St brand profile in sync with Shopify without requiring the 
 
 ---
 
-#### Backend — Webhook orders/updated (Refund Handler)
+#### Backend — Webhook orders/updated (Refund Handler) ✅ DONE
 **Assigned:** Backend Dev
 **Release Batch:** Beta 3
 **Segments:** Laravel, Supabase
@@ -2388,7 +2388,7 @@ Build or verify `app/account/contacts/` — the existing V1 contacts page can be
 
 ---
 
-#### Brand Design — Shopify Sync + Sitepage Overrides
+#### Brand Design — Shopify Sync + Sitepage Overrides ✅ PARTIAL (Overrides done, CSS sync not built)
 **Assigned:** Hunter
 **Release Batch:** Beta 3
 **Segments:** Laravel, Shopify App, Next Frontend, Hydrogen
@@ -2452,7 +2452,7 @@ Implement the backend endpoint and sync logic that powers the "Re-sync from Shop
 
 ---
 
-#### Brand Media — Gallery Fallback Upload
+#### Brand Media — Gallery Fallback Upload ✅ DONE (Backend)
 **Assigned:** Frontend Dev + Backend Dev
 **Release Batch:** Beta 3
 **Segments:** Next Frontend, Laravel, Supabase

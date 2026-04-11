@@ -31,9 +31,21 @@ This document is the single source of truth for backend so the frontend can buil
 
 ## 0) Recent Backend Changes (Commit Log Snapshot)
 
-Snapshot date: **April 3, 2026**.
+Snapshot date: **April 11, 2026**.
 
-### Unreleased (working tree)
+### April 11, 2026
+
+- Add generic/open invite links: `GET /public/join/{handle}` (brand preview), `POST /join/{handle}` (authenticated claim), `join_brand_handle` param on bootstrap for auto-claim on signup. Each claim creates an auditable `BrandAffiliateInvite` with `invite_type=generic`.
+- Deferred Shopify account creation: OAuth callback no longer creates Supabase user or account. Caches credentials with encrypted setup token (1hr TTL), redirects to setup wizard. Brand enters their own email, frontend creates Supabase user, bootstrap consumes token and creates integration. Reinstall and existing-account-connect paths unchanged.
+- Add `GET /api/shopify/setup-prefill?token={token}` — returns non-sensitive shop data for setup wizard prefill.
+- Add brand gallery fallback: `GET/POST/DELETE/PATCH /brand/gallery` — brands upload up to 5 fallback images shown when affiliates haven't uploaded their own. Reuses SiteMedia + R2 + WebP processing pipeline with new `brand_gallery` pool.
+- Add affiliate custom product photos: `GET/POST/DELETE/PATCH /affiliate/products/{gid}/photos` — affiliates upload up to 3 custom lifestyle photos per product. Two-level permission system (global brand toggle + per-affiliate override). Hydrogen endpoint returns photos grouped by product GID with configurable placement (before/after/mixed).
+- Brand logo and placeholder uploads now go through WebP variant processing pipeline (previously stored raw).
+- Add refund notifications: affiliates notified when commissions are cancelled (full refund) or adjusted (partial refund) via `NotificationPublisher`.
+- Consolidate design tokens to `site.settings.design`: moved `accent_color`, `theme_variant`, `product_image_ratio`, `custom_photo_position` from `provider_metadata` to `site.settings.design`. Added new tokens: `background_color`, `text_color`, `button_background`, `button_text_color`, `primary_color`, `secondary_color`, `typography.heading_font`, `typography.body_font`. Hydrogen brand config endpoint now returns a single `design` object.
+- Fix `notification_receipts` schema prefix: raw SQL INSERT was using `core.notification_receipts` instead of `notifications.notification_receipts`.
+
+### Pre-April 11 (working tree)
 
 - Add video upload support (`POST /api/uploads` with `video` field); FFmpeg-based MP4 + HLS transcoding on dedicated `redis_video` queue; feature-flagged via `SIDEST_VIDEO_UPLOADS_ENABLED`.
 - Extend `core.site_images` with `media_type`, `processing_state`, `processing_error`, `duration_ms`, `poster_path`, `original_mime`, `original_size_bytes`.
