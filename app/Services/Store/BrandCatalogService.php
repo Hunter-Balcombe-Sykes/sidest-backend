@@ -104,6 +104,10 @@ query collectionProducts($id: ID!, $first: Int!, $after: String) {
           title
           handle
           featuredImage { url altText }
+          priceRange {
+            minVariantPrice { amount currencyCode }
+            maxVariantPrice { amount currencyCode }
+          }
         }
         cursor
       }
@@ -336,6 +340,10 @@ GRAPHQL;
                     'title' => $node['title'] ?? '',
                     'handle' => $node['handle'] ?? '',
                     'featured_image' => $node['featuredImage'] ?? null,
+                    'price_range' => [
+                        'min' => Arr::get($node, 'priceRange.minVariantPrice'),
+                        'max' => Arr::get($node, 'priceRange.maxVariantPrice'),
+                    ],
                 ];
             }
 

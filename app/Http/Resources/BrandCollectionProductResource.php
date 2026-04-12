@@ -14,6 +14,7 @@ class BrandCollectionProductResource extends JsonResource
             'title' => $this->resource['title'] ?? '',
             'handle' => $this->resource['handle'] ?? '',
             'featured_image' => $this->resource['featured_image'] ?? null,
+            'price_range' => $this->resource['price_range'] ?? null,
         ];
     }
 }
