@@ -8,6 +8,7 @@ use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
 use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
 use App\Jobs\Shopify\SyncShopifyBrandLogoJob;
+use App\Jobs\Shopify\SyncShopifyThemeTokensJob;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -130,6 +131,7 @@ class BrandSignupService
             CreateShopifyMetafieldsJob::class,
             CreateShopifySalesChannelJob::class,
             SyncShopifyBrandLogoJob::class,
+            SyncShopifyThemeTokensJob::class,
         ];
 
         foreach ($jobs as $jobClass) {

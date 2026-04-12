@@ -115,6 +115,7 @@ class CreateShopifyMetafieldsJob implements ShouldQueue, ShouldBeUnique
         ['key' => 'favourites_collection_handle', 'name' => 'Side St Favourites Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of Brand Favourites manual collection'],
         ['key' => 'high_commission_collection_handle', 'name' => 'Side St High Commission Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of High Commission Products smart collection'],
         ['key' => 'setup_complete', 'name' => 'Side St Setup Complete', 'type' => 'boolean', 'description' => 'Whether brand has completed the setup wizard'],
+        ['key' => 'theme_tokens', 'name' => 'Side St Theme Tokens', 'type' => 'json', 'description' => 'Extracted CSS design tokens from the brand storefront theme'],
     ];
 
     public function __construct(

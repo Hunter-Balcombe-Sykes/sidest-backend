@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductPhotoController;
 use App\Http\Controllers\Api\Professional\Store\BrandCatalogController;
 use App\Http\Controllers\Api\Professional\Store\BrandCollectionController;
+use App\Http\Controllers\Api\Professional\Store\BrandDesignController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreSettingsController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
@@ -256,6 +257,16 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::get('/brand/store-settings', [BrandStoreSettingsController::class, 'show']);
         Route::patch('/brand/store-settings', [BrandStoreSettingsController::class, 'update'])
             ->middleware('throttle:brand-catalog-writes');
+
+        // Brand Design (Shopify theme sync + sitepage overrides)
+        Route::get('/brand/design', [BrandDesignController::class, 'show']);
+        Route::post('/brand/design/resync', [BrandDesignController::class, 'resync'])
+            ->middleware('throttle:brand-catalog-writes');
+        Route::patch('/brand/design/overrides', [BrandDesignController::class, 'updateOverrides'])
+            ->middleware('throttle:brand-catalog-writes');
+        Route::delete('/brand/design/overrides/{token}', [BrandDesignController::class, 'resetOverride'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('token', '[a-z_]+');
 
         // Brand Collection Management (manual collections only)
         Route::get('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'index'])

@@ -130,4 +130,9 @@ class CacheKeyGenerator
         return "brand:{$brandProfessionalId}:collection_gid:{$handle}";
     }
 
+    public static function brandDesignConfig(string $brandProfessionalId): string
+    {
+        return "brand:{$brandProfessionalId}:design";
+    }
+
 }
