@@ -268,9 +268,9 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
             ->middleware('throttle:brand-catalog-writes')
             ->where('token', '[a-z_]+');
 
-        // Brand Collection Management (manual collections only)
+        // Brand Collection Management
         Route::get('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'index'])
-            ->where('collectionType', 'default|favourites');
+            ->where('collectionType', 'active|default|favourites');
         Route::post('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'addProducts'])
             ->middleware('throttle:brand-catalog-writes')
             ->where('collectionType', 'default|favourites');

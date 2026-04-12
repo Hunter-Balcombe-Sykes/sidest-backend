@@ -16,6 +16,7 @@ class BrandCollectionController extends ApiController
     use ResolveCurrentProfessional;
 
     private const COLLECTION_TYPE_MAP = [
+        'active' => 'active_collection_handle',
         'default' => 'default_collection_handle',
         'favourites' => 'favourites_collection_handle',
     ];
