@@ -52,7 +52,7 @@ class BrandCatalogController extends ApiController
      * GET /brand/catalog/all
      *
      * Returns ALL products from the Shopify store (active, draft, archived)
-     * without metafield dependencies. Lightweight query for catalog browsing.
+     * Includes sidest.* metafields (commission, discount, active).
      */
     public function all(Request $request): JsonResponse
     {
@@ -71,7 +71,7 @@ class BrandCatalogController extends ApiController
         }
 
         return $this->success([
-            'products' => BrandCollectionProductResource::collection(collect($products)),
+            'products' => BrandCatalogProductResource::collection(collect($products)),
         ]);
     }
 

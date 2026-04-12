@@ -34,6 +34,9 @@ query allProducts($first: Int!, $after: String) {
           minVariantPrice { amount currencyCode }
           maxVariantPrice { amount currencyCode }
         }
+        metafield_active: metafield(namespace: "sidest", key: "active") { value }
+        metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
+        metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
       }
       cursor
     }
@@ -627,6 +630,10 @@ GRAPHQL;
                     $node = $edge['node'] ?? [];
                     $cursor = $edge['cursor'] ?? null;
 
+                    $activeVal = Arr::get($node, 'metafield_active.value');
+                    $commissionVal = Arr::get($node, 'metafield_commission.value');
+                    $discountVal = Arr::get($node, 'metafield_discount.value');
+
                     $products[] = [
                         'gid' => $node['id'] ?? '',
                         'title' => $node['title'] ?? '',
@@ -636,6 +643,11 @@ GRAPHQL;
                         'price_range' => [
                             'min' => Arr::get($node, 'priceRange.minVariantPrice'),
                             'max' => Arr::get($node, 'priceRange.maxVariantPrice'),
+                        ],
+                        'metafields' => [
+                            'active' => $activeVal !== null ? filter_var($activeVal, FILTER_VALIDATE_BOOLEAN) : null,
+                            'commission_override' => $commissionVal !== null ? (float) $commissionVal : null,
+                            'affiliate_discount_pct' => $discountVal !== null ? (float) $discountVal : null,
                         ],
                     ];
                 }
