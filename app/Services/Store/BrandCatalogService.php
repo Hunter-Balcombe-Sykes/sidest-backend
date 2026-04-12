@@ -199,20 +199,7 @@ GRAPHQL;
      */
     public function fetchAllProducts(Professional $brand): array
     {
-        $cacheKey = CacheKeyGenerator::brandAdminCatalog((string) $brand->id) . ':all';
-
-        return Cache::remember($cacheKey, now()->addMinutes(self::CATALOG_CACHE_TTL_MINUTES), function () use ($brand, $cacheKey) {
-            $products = $this->queryAllProducts($brand);
-
-            if (empty($products)) {
-                Log::warning('All-products query returned empty — skipping cache.', [
-                    'brand_id' => (string) $brand->id,
-                ]);
-                Cache::forget($cacheKey);
-            }
-
-            return $products;
-        });
+        return $this->queryAllProducts($brand);
     }
 
     /**
@@ -222,21 +209,7 @@ GRAPHQL;
      */
     public function fetchBrandCatalog(Professional $brand): array
     {
-        $cacheKey = CacheKeyGenerator::brandAdminCatalog((string) $brand->id);
-
-        return Cache::remember($cacheKey, now()->addMinutes(self::CATALOG_CACHE_TTL_MINUTES), function () use ($brand, $cacheKey) {
-            $products = $this->queryAdminCatalog($brand);
-
-            // Don't cache empty results — they may indicate a transient Shopify API failure
-            if (empty($products)) {
-                Log::warning('Brand catalog query returned empty — skipping cache.', [
-                    'brand_id' => (string) $brand->id,
-                ]);
-                Cache::forget($cacheKey);
-            }
-
-            return $products;
-        });
+        return $this->queryAdminCatalog($brand);
     }
 
     /**
