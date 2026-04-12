@@ -178,8 +178,18 @@ GRAPHQL;
     {
         $cacheKey = CacheKeyGenerator::brandAdminCatalog((string) $brand->id);
 
-        return Cache::remember($cacheKey, now()->addMinutes(self::CATALOG_CACHE_TTL_MINUTES), function () use ($brand) {
-            return $this->queryAdminCatalog($brand);
+        return Cache::remember($cacheKey, now()->addMinutes(self::CATALOG_CACHE_TTL_MINUTES), function () use ($brand, $cacheKey) {
+            $products = $this->queryAdminCatalog($brand);
+
+            // Don't cache empty results — they may indicate a transient Shopify API failure
+            if (empty($products)) {
+                Log::warning('Brand catalog query returned empty — skipping cache.', [
+                    'brand_id' => (string) $brand->id,
+                ]);
+                Cache::forget($cacheKey);
+            }
+
+            return $products;
         });
     }
 
@@ -490,8 +500,20 @@ GRAPHQL;
                 $response = $this->graphql($shopDomain, $accessToken, self::PRODUCTS_WITH_METAFIELDS, $variables);
                 $data = $response->json();
 
+                // Log GraphQL errors if present
+                if (! empty($data['errors'])) {
+                    Log::error('Shopify catalog GraphQL errors.', [
+                        'brand_id' => (string) $brand->id,
+                        'errors' => $data['errors'],
+                    ]);
+                }
+
                 $edges = Arr::get($data, 'data.products.edges', []);
                 if (! is_array($edges)) {
+                    Log::warning('Shopify catalog returned no edges.', [
+                        'brand_id' => (string) $brand->id,
+                        'response_keys' => array_keys($data ?? []),
+                    ]);
                     break;
                 }
 
