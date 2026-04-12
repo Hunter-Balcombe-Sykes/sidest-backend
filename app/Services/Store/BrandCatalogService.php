@@ -20,6 +20,28 @@ class BrandCatalogService
 
     // --- GraphQL Queries & Mutations ---
 
+    private const ALL_PRODUCTS = <<<'GRAPHQL'
+query allProducts($first: Int!, $after: String) {
+  products(first: $first, after: $after) {
+    edges {
+      node {
+        id
+        title
+        handle
+        status
+        featuredImage { url altText }
+        priceRange {
+          minVariantPrice { amount currencyCode }
+          maxVariantPrice { amount currencyCode }
+        }
+      }
+      cursor
+    }
+    pageInfo { hasNextPage }
+  }
+}
+GRAPHQL;
+
     private const PRODUCTS_WITH_METAFIELDS = <<<'GRAPHQL'
 query products($first: Int!, $after: String) {
   products(first: $first, after: $after) {
@@ -167,6 +189,30 @@ GRAPHQL;
             'access_token' => $accessToken,
             'metadata' => $metadata,
         ];
+    }
+
+    /**
+     * Fetch ALL products from the brand's Shopify store (no metafield dependencies).
+     * Uses a lightweight query that only needs basic product read access.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchAllProducts(Professional $brand): array
+    {
+        $cacheKey = CacheKeyGenerator::brandAdminCatalog((string) $brand->id) . ':all';
+
+        return Cache::remember($cacheKey, now()->addMinutes(self::CATALOG_CACHE_TTL_MINUTES), function () use ($brand, $cacheKey) {
+            $products = $this->queryAllProducts($brand);
+
+            if (empty($products)) {
+                Log::warning('All-products query returned empty — skipping cache.', [
+                    'brand_id' => (string) $brand->id,
+                ]);
+                Cache::forget($cacheKey);
+            }
+
+            return $products;
+        });
     }
 
     /**
@@ -558,6 +604,72 @@ GRAPHQL;
                 $hasNextPage = Arr::get($data, 'data.products.pageInfo.hasNextPage', false);
             } catch (\Throwable $e) {
                 Log::error('Failed to fetch brand admin catalog.', [
+                    'brand_id' => (string) $brand->id,
+                    'error' => $e->getMessage(),
+                ]);
+                break;
+            }
+        } while ($hasNextPage && $cursor !== null);
+
+        return $products;
+    }
+
+    /**
+     * Query Admin API for all products without metafield dependencies.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function queryAllProducts(Professional $brand): array
+    {
+        $resolved = $this->resolveBrandIntegration($brand);
+        $shopDomain = $resolved['shop_domain'];
+        $accessToken = $resolved['access_token'];
+
+        $products = [];
+        $cursor = null;
+
+        do {
+            $variables = ['first' => self::PRODUCTS_PER_PAGE];
+            if ($cursor !== null) {
+                $variables['after'] = $cursor;
+            }
+
+            try {
+                $response = $this->graphql($shopDomain, $accessToken, self::ALL_PRODUCTS, $variables);
+                $data = $response->json();
+
+                if (! empty($data['errors'])) {
+                    Log::error('Shopify all-products GraphQL errors.', [
+                        'brand_id' => (string) $brand->id,
+                        'errors' => $data['errors'],
+                    ]);
+                }
+
+                $edges = Arr::get($data, 'data.products.edges', []);
+                if (! is_array($edges)) {
+                    break;
+                }
+
+                foreach ($edges as $edge) {
+                    $node = $edge['node'] ?? [];
+                    $cursor = $edge['cursor'] ?? null;
+
+                    $products[] = [
+                        'gid' => $node['id'] ?? '',
+                        'title' => $node['title'] ?? '',
+                        'handle' => $node['handle'] ?? '',
+                        'status' => $node['status'] ?? 'ACTIVE',
+                        'featured_image' => $node['featuredImage'] ?? null,
+                        'price_range' => [
+                            'min' => Arr::get($node, 'priceRange.minVariantPrice'),
+                            'max' => Arr::get($node, 'priceRange.maxVariantPrice'),
+                        ],
+                    ];
+                }
+
+                $hasNextPage = Arr::get($data, 'data.products.pageInfo.hasNextPage', false);
+            } catch (\Throwable $e) {
+                Log::error('Failed to fetch all products.', [
                     'brand_id' => (string) $brand->id,
                     'error' => $e->getMessage(),
                 ]);

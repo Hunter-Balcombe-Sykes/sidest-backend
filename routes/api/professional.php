@@ -240,6 +240,7 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
 
         // Brand Catalog Management
         Route::get('/brand/catalog', [BrandCatalogController::class, 'index']);
+        Route::get('/brand/catalog/all', [BrandCatalogController::class, 'all']);
         Route::patch('/brand/catalog/{productGid}/metafields', [BrandCatalogController::class, 'updateMetafields'])
             ->middleware('throttle:brand-catalog-writes')
             ->where('productGid', '.*');

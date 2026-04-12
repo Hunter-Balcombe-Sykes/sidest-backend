@@ -9,6 +9,7 @@ use App\Http\Requests\Api\Professional\Store\UpdateProductCommissionRequest;
 use App\Http\Requests\Api\Professional\Store\UpdateProductDiscountRequest;
 use App\Http\Requests\Api\Professional\Store\UpdateProductMetafieldsRequest;
 use App\Http\Resources\BrandCatalogProductResource;
+use App\Http\Resources\BrandCollectionProductResource;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -44,6 +45,33 @@ class BrandCatalogController extends ApiController
 
         return $this->success([
             'products' => BrandCatalogProductResource::collection(collect($products)),
+        ]);
+    }
+
+    /**
+     * GET /brand/catalog/all
+     *
+     * Returns ALL products from the Shopify store (active, draft, archived)
+     * without metafield dependencies. Lightweight query for catalog browsing.
+     */
+    public function all(Request $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+
+        if (! $pro->isBrand()) {
+            return $this->error('This endpoint is only available for brand accounts.', 403);
+        }
+
+        try {
+            $products = $this->catalogService->fetchAllProducts($pro);
+        } catch (\RuntimeException $e) {
+            return $this->error($e->getMessage(), $e->getCode() ?: 500);
+        } catch (\Throwable $e) {
+            return $this->error('Unable to reach Shopify. Please try again.', 502);
+        }
+
+        return $this->success([
+            'products' => BrandCollectionProductResource::collection(collect($products)),
         ]);
     }
 
