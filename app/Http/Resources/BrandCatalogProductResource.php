@@ -14,7 +14,9 @@ class BrandCatalogProductResource extends JsonResource
             'title' => $this->resource['title'] ?? '',
             'handle' => $this->resource['handle'] ?? '',
             'status' => $this->resource['status'] ?? 'ACTIVE',
+            'description' => $this->resource['description'] ?? '',
             'featured_image' => $this->resource['featured_image'] ?? null,
+            'images' => $this->resource['images'] ?? [],
             'price_range' => $this->resource['price_range'] ?? null,
             'variants' => $this->resource['variants'] ?? [],
             'metafields' => [

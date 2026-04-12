@@ -29,7 +29,9 @@ query allProducts($first: Int!, $after: String) {
         title
         handle
         status
+        description
         featuredImage { url altText }
+        images(first: 10) { edges { node { url altText } } }
         priceRange {
           minVariantPrice { amount currencyCode }
           maxVariantPrice { amount currencyCode }
@@ -634,12 +636,21 @@ GRAPHQL;
                     $commissionVal = Arr::get($node, 'metafield_commission.value');
                     $discountVal = Arr::get($node, 'metafield_discount.value');
 
+                    // Map product images from GraphQL edges
+                    $images = array_map(
+                        fn ($imgEdge) => $imgEdge['node'] ?? null,
+                        Arr::get($node, 'images.edges', [])
+                    );
+                    $images = array_values(array_filter($images));
+
                     $products[] = [
                         'gid' => $node['id'] ?? '',
                         'title' => $node['title'] ?? '',
                         'handle' => $node['handle'] ?? '',
                         'status' => $node['status'] ?? 'ACTIVE',
+                        'description' => $node['description'] ?? '',
                         'featured_image' => $node['featuredImage'] ?? null,
+                        'images' => $images,
                         'price_range' => [
                             'min' => Arr::get($node, 'priceRange.minVariantPrice'),
                             'max' => Arr::get($node, 'priceRange.maxVariantPrice'),
