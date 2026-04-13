@@ -2,6 +2,7 @@
 
 namespace App\Services\Professional;
 
+use App\Jobs\Store\SeedAffiliateDefaultSelectionsJob;
 use App\Models\Core\Professional\BrandPartnerLink;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -69,6 +70,10 @@ class BrandPartnerLinkService
                 'brand_professional_id' => $brandProfessionalId,
                 'slot' => $slot,
             ]);
+
+            // Seed default product selections after the transaction commits
+            SeedAffiliateDefaultSelectionsJob::dispatch($affiliateProfessionalId, $brandProfessionalId)
+                ->afterCommit();
 
             return $link;
         });

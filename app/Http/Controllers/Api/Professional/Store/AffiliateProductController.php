@@ -231,4 +231,32 @@ class AffiliateProductController extends ApiController
 
         return $this->success(['ok' => true]);
     }
+
+    /**
+     * POST /affiliate/selections/reset-to-defaults
+     *
+     * Clears the affiliate's current selections and reseeds from the brand's default collection.
+     */
+    public function resetToDefaults(Request $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+
+        if ($pro->isBrand()) {
+            return $this->error('Brand accounts cannot manage product selections.', 403);
+        }
+
+        try {
+            $resolved = $this->catalogService->resolveAffiliateBrandIntegration($pro);
+        } catch (\RuntimeException $e) {
+            return $this->error($e->getMessage(), $e->getCode() ?: 500);
+        }
+
+        try {
+            $this->catalogService->seedDefaultSelections($pro, $resolved['brand_professional_id'], clearExisting: true);
+        } catch (\Throwable $e) {
+            return $this->error('Unable to reset selections. Please try again.', 502);
+        }
+
+        return $this->success(['reset' => true]);
+    }
 }

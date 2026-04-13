@@ -305,6 +305,8 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
             ->where('gid', '.*');
         Route::patch('/affiliate/selections/reorder', [AffiliateProductController::class, 'reorder'])
             ->middleware('throttle:affiliate-writes');
+        Route::post('/affiliate/selections/reset-to-defaults', [AffiliateProductController::class, 'resetToDefaults'])
+            ->middleware('throttle:affiliate-writes');
 
         // Affiliate Custom Product Photos
         Route::get('/affiliate/products/{gid}/photos', [AffiliateProductPhotoController::class, 'index'])

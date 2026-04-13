@@ -116,6 +116,60 @@ GRAPHQL;
     }
 
     /**
+     * Seed the affiliate's product selections from the brand's default collection.
+     * Existing selections are preserved; only missing defaults are added.
+     * Called when an affiliate connects to a brand, and on explicit reset requests.
+     *
+     * @param  bool  $clearExisting  If true, clear all existing selections before seeding
+     */
+    public function seedDefaultSelections(Professional $affiliate, string $brandProfessionalId, bool $clearExisting = false): void
+    {
+        $integration = ProfessionalIntegration::query()
+            ->where('professional_id', $brandProfessionalId)
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->first();
+
+        if (! $integration) {
+            return;
+        }
+
+        $defaultGids = $this->fetchCollectionGids($integration, 'default_collection_handle');
+
+        if (empty($defaultGids)) {
+            return;
+        }
+
+        if ($clearExisting) {
+            AffiliateProductSelection::query()
+                ->where('affiliate_professional_id', $affiliate->id)
+                ->delete();
+        }
+
+        // Get already-selected GIDs so we don't create duplicates
+        $existingGids = AffiliateProductSelection::query()
+            ->where('affiliate_professional_id', $affiliate->id)
+            ->pluck('shopify_product_gid')
+            ->all();
+
+        $maxSort = AffiliateProductSelection::query()
+            ->where('affiliate_professional_id', $affiliate->id)
+            ->max('sort_order') ?? -1;
+
+        foreach ($defaultGids as $gid) {
+            if (in_array($gid, $existingGids, true)) {
+                continue;
+            }
+
+            $maxSort++;
+            AffiliateProductSelection::create([
+                'affiliate_professional_id' => $affiliate->id,
+                'shopify_product_gid' => $gid,
+                'sort_order' => $maxSort,
+            ]);
+        }
+    }
+
+    /**
      * Return the brand's catalog with the affiliate's selection state and metafield data merged in.
      *
      * @return array{products: array, brand_professional_id: string, default_commission_rate: float}
