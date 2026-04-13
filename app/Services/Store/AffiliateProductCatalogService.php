@@ -6,17 +6,13 @@ use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
-use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AffiliateProductCatalogService
 {
-    private const CATALOG_CACHE_TTL_MINUTES = 15;
-
     private const STOREFRONT_PRODUCTS_PER_PAGE = 50;
 
     private const COLLECTION_PRODUCTS_QUERY = <<<'GRAPHQL'
@@ -112,11 +108,7 @@ GRAPHQL;
      */
     public function fetchActiveCatalog(string $brandProfessionalId): array
     {
-        $cacheKey = CacheKeyGenerator::brandActiveCatalog($brandProfessionalId);
-
-        return Cache::remember($cacheKey, now()->addMinutes(self::CATALOG_CACHE_TTL_MINUTES), function () use ($brandProfessionalId) {
-            return $this->queryStorefrontCatalog($brandProfessionalId);
-        });
+        return $this->queryStorefrontCatalog($brandProfessionalId);
     }
 
     /**
