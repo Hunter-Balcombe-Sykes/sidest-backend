@@ -10,9 +10,11 @@ use App\Http\Requests\Api\Professional\Store\UpdateProductDiscountRequest;
 use App\Http\Requests\Api\Professional\Store\UpdateProductMetafieldsRequest;
 use App\Http\Resources\BrandCatalogProductResource;
 use App\Http\Resources\BrandCollectionProductResource;
+use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class BrandCatalogController extends ApiController
 {
@@ -146,6 +148,11 @@ class BrandCatalogController extends ApiController
             }
         }
 
+        // Bust affiliate catalog cache if active status changed
+        if (array_key_exists('active', $validated)) {
+            Cache::forget(CacheKeyGenerator::brandActiveCatalog((string) $pro->id));
+        }
+
         return $this->success(['updated' => true]);
     }
 
@@ -182,6 +189,9 @@ class BrandCatalogController extends ApiController
         } catch (\Throwable $e) {
             return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
+
+        // Bust the affiliate catalog cache so partners see the change immediately
+        Cache::forget(CacheKeyGenerator::brandActiveCatalog((string) $pro->id));
 
         return $this->success(['active' => (bool) $request->validated()['active']]);
     }
