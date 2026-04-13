@@ -274,10 +274,10 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
             ->where('collectionType', 'active|default|favourites');
         Route::post('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'addProducts'])
             ->middleware('throttle:brand-catalog-writes')
-            ->where('collectionType', 'default|favourites');
+            ->where('collectionType', 'active|default|favourites');
         Route::delete('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'removeProducts'])
             ->middleware('throttle:brand-catalog-writes')
-            ->where('collectionType', 'default|favourites');
+            ->where('collectionType', 'active|default|favourites');
 
         // Stripe Connect & Payouts
         Route::get('/stripe/status', [StripeConnectController::class, 'status']);
