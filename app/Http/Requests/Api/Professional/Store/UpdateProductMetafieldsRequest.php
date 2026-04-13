@@ -12,6 +12,7 @@ class UpdateProductMetafieldsRequest extends BaseFormRequest
             'active' => ['sometimes', 'boolean'],
             'commission_override' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'affiliate_discount_pct' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'custom_photos_enabled' => ['sometimes', 'nullable', 'boolean'],
         ];
     }
 }

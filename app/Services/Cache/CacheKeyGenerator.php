@@ -135,4 +135,9 @@ class CacheKeyGenerator
         return "brand:{$brandProfessionalId}:design";
     }
 
+    public static function brandProductCustomPhotos(string $brandProfessionalId, string $productGid): string
+    {
+        return "brand:{$brandProfessionalId}:product:{$productGid}:custom_photos";
+    }
+
 }

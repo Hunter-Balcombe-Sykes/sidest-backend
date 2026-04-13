@@ -16,6 +16,8 @@ class BrandCatalogService
 
     private const COLLECTION_GID_CACHE_TTL_MINUTES = 60;
 
+    private const PRODUCT_CUSTOM_PHOTOS_TTL_SECONDS = 60;
+
     private const PRODUCTS_PER_PAGE = 50;
 
     // --- GraphQL Queries & Mutations ---
@@ -39,6 +41,7 @@ query allProducts($first: Int!, $after: String) {
         metafield_active: metafield(namespace: "sidest", key: "active") { value }
         metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
         metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
+        metafield_custom_photos: metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
       }
       cursor
     }
@@ -77,10 +80,19 @@ query products($first: Int!, $after: String) {
         metafield_active: metafield(namespace: "sidest", key: "active") { value }
         metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
         metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
+        metafield_custom_photos: metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
       }
       cursor
     }
     pageInfo { hasNextPage }
+  }
+}
+GRAPHQL;
+
+    private const PRODUCT_CUSTOM_PHOTOS_QUERY = <<<'GRAPHQL'
+query productCustomPhotos($productId: ID!) {
+  product(id: $productId) {
+    metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
   }
 }
 GRAPHQL;
@@ -218,6 +230,57 @@ GRAPHQL;
     }
 
     /**
+     * Fetch the per-product custom_photos_enabled metafield with a short cache.
+     * Returns true/false if set, null if not set on the product.
+     */
+    public function fetchProductCustomPhotosMetafield(ProfessionalIntegration $integration, string $productGid): ?bool
+    {
+        // Cache as string sentinel so "unset" cases still benefit from the TTL
+        // (Cache::remember treats a cached null as a miss and re-runs the closure).
+        $cacheKey = CacheKeyGenerator::brandProductCustomPhotos((string) $integration->professional_id, $productGid);
+        $cached = Cache::get($cacheKey);
+
+        if ($cached !== null) {
+            return match ($cached) {
+                'true' => true,
+                'false' => false,
+                default => null,
+            };
+        }
+
+        $resolved = $this->resolveCredentials($integration);
+
+        try {
+            $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::PRODUCT_CUSTOM_PHOTOS_QUERY, [
+                'productId' => $productGid,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to fetch product custom_photos_enabled metafield.', [
+                'brand_id' => (string) $integration->professional_id,
+                'product_gid' => $productGid,
+                'error' => $e->getMessage(),
+            ]);
+
+            Cache::put($cacheKey, 'unset', now()->addSeconds(self::PRODUCT_CUSTOM_PHOTOS_TTL_SECONDS));
+
+            return null;
+        }
+
+        $value = Arr::get($response->json(), 'data.product.metafield.value');
+
+        if ($value === null) {
+            Cache::put($cacheKey, 'unset', now()->addSeconds(self::PRODUCT_CUSTOM_PHOTOS_TTL_SECONDS));
+
+            return null;
+        }
+
+        $bool = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+        Cache::put($cacheKey, $bool ? 'true' : 'false', now()->addSeconds(self::PRODUCT_CUSTOM_PHOTOS_TTL_SECONDS));
+
+        return $bool;
+    }
+
+    /**
      * Set metafield values on a product.
      *
      * @param  array  $metafields  e.g. [['key' => 'active', 'value' => 'true', 'type' => 'boolean'], ...]
@@ -243,7 +306,7 @@ GRAPHQL;
         $userErrors = Arr::get($data, 'data.metafieldsSet.userErrors', []);
 
         // Bust caches
-        $this->bustCatalogCaches($integration, $metafields);
+        $this->bustCatalogCaches($integration, $metafields, $productGid);
 
         return [
             'success' => empty($userErrors),
@@ -279,6 +342,10 @@ GRAPHQL;
 
         // Bust caches
         Cache::forget(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
+
+        if ($key === 'custom_photos_enabled') {
+            Cache::forget(CacheKeyGenerator::brandProductCustomPhotos((string) $integration->professional_id, $productGid));
+        }
 
         return empty($userErrors);
     }
@@ -486,17 +553,23 @@ GRAPHQL;
     /**
      * Bust relevant caches after a metafield write.
      */
-    private function bustCatalogCaches(ProfessionalIntegration $integration, array $metafields): void
+    private function bustCatalogCaches(ProfessionalIntegration $integration, array $metafields, ?string $productGid = null): void
     {
         $brandId = (string) $integration->professional_id;
 
         // Always bust the admin catalog cache
         Cache::forget(CacheKeyGenerator::brandAdminCatalog($brandId));
 
-        // If 'active' was changed, also bust the affiliate-facing catalog cache
         $touchedKeys = array_column($metafields, 'key');
+
+        // If 'active' was changed, also bust the affiliate-facing catalog cache
         if (in_array('active', $touchedKeys, true)) {
             Cache::forget(CacheKeyGenerator::brandActiveCatalog($brandId));
+        }
+
+        // If per-product custom_photos_enabled was changed, bust the targeted lookup cache
+        if ($productGid !== null && in_array('custom_photos_enabled', $touchedKeys, true)) {
+            Cache::forget(CacheKeyGenerator::brandProductCustomPhotos($brandId, $productGid));
         }
     }
 
@@ -559,6 +632,7 @@ GRAPHQL;
                     $activeVal = Arr::get($node, 'metafield_active.value');
                     $commissionVal = Arr::get($node, 'metafield_commission.value');
                     $discountVal = Arr::get($node, 'metafield_discount.value');
+                    $customPhotosVal = Arr::get($node, 'metafield_custom_photos.value');
 
                     $products[] = [
                         'gid' => $node['id'] ?? '',
@@ -575,6 +649,7 @@ GRAPHQL;
                             'active' => $activeVal !== null ? filter_var($activeVal, FILTER_VALIDATE_BOOLEAN) : null,
                             'commission_override' => $commissionVal !== null ? (float) $commissionVal : null,
                             'affiliate_discount_pct' => $discountVal !== null ? (float) $discountVal : null,
+                            'custom_photos_enabled' => $customPhotosVal !== null ? filter_var($customPhotosVal, FILTER_VALIDATE_BOOLEAN) : null,
                         ],
                     ];
                 }
@@ -635,6 +710,7 @@ GRAPHQL;
                     $activeVal = Arr::get($node, 'metafield_active.value');
                     $commissionVal = Arr::get($node, 'metafield_commission.value');
                     $discountVal = Arr::get($node, 'metafield_discount.value');
+                    $customPhotosVal = Arr::get($node, 'metafield_custom_photos.value');
 
                     // Map product images from GraphQL edges
                     $images = array_map(
@@ -659,6 +735,7 @@ GRAPHQL;
                             'active' => $activeVal !== null ? filter_var($activeVal, FILTER_VALIDATE_BOOLEAN) : null,
                             'commission_override' => $commissionVal !== null ? (float) $commissionVal : null,
                             'affiliate_discount_pct' => $discountVal !== null ? (float) $discountVal : null,
+                            'custom_photos_enabled' => $customPhotosVal !== null ? filter_var($customPhotosVal, FILTER_VALIDATE_BOOLEAN) : null,
                         ],
                     ];
                 }

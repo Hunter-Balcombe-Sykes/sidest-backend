@@ -9,7 +9,6 @@ use App\Http\Requests\Api\Professional\Store\UpdateProductCommissionRequest;
 use App\Http\Requests\Api\Professional\Store\UpdateProductDiscountRequest;
 use App\Http\Requests\Api\Professional\Store\UpdateProductMetafieldsRequest;
 use App\Http\Resources\BrandCatalogProductResource;
-use App\Http\Resources\BrandCollectionProductResource;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -127,6 +126,18 @@ class BrandCatalogController extends ApiController
                 }
             } else {
                 $metafieldsToSet[] = ['key' => 'affiliate_discount_pct', 'value' => (string) $validated['affiliate_discount_pct'], 'type' => 'number_decimal'];
+            }
+        }
+
+        if (array_key_exists('custom_photos_enabled', $validated)) {
+            if ($validated['custom_photos_enabled'] === null) {
+                try {
+                    $this->catalogService->deleteProductMetafield($integration, $productGid, 'custom_photos_enabled');
+                } catch (\Throwable $e) {
+                    return $this->error('Unable to reach Shopify. Please try again.', 502);
+                }
+            } else {
+                $metafieldsToSet[] = ['key' => 'custom_photos_enabled', 'value' => $validated['custom_photos_enabled'] ? 'true' : 'false', 'type' => 'boolean'];
             }
         }
 

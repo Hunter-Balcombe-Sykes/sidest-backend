@@ -107,8 +107,8 @@ class AffiliateProductPhotoController extends ApiController
             return $this->error($e->getMessage(), $e->getCode() ?: 500);
         }
 
-        if (! $this->permissions->isAllowed($resolved['brand_professional_id'], (string) $pro->id)) {
-            return $this->error('Custom product photos are not enabled for your account.', 403);
+        if (! $this->permissions->isAllowed($resolved['brand_professional_id'], (string) $pro->id, $gid)) {
+            return $this->error('Custom product photos are not enabled for this product.', 403);
         }
 
         $pro->loadMissing('site');

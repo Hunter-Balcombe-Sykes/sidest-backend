@@ -180,7 +180,7 @@ it('returns 422 for invalid product GID format on toggle active', function () {
 // --- Form request validation ---
 
 it('validates toggle active request requires boolean', function () {
-    $request = new ToggleProductActiveRequest();
+    $request = new ToggleProductActiveRequest;
     $rules = $request->rules();
 
     expect($rules['active'])->toContain('required');
@@ -188,18 +188,19 @@ it('validates toggle active request requires boolean', function () {
 });
 
 it('validates commission request allows nullable numeric', function () {
-    $request = new UpdateProductCommissionRequest();
+    $request = new UpdateProductCommissionRequest;
     $rules = $request->rules();
 
     expect($rules['commission_override'])->toContain('nullable');
     expect($rules['commission_override'])->toContain('numeric');
 });
 
-it('validates metafields request allows all three fields', function () {
-    $request = new UpdateProductMetafieldsRequest();
+it('validates metafields request allows all four fields', function () {
+    $request = new UpdateProductMetafieldsRequest;
     $rules = $request->rules();
 
     expect($rules)->toHaveKey('active');
     expect($rules)->toHaveKey('commission_override');
     expect($rules)->toHaveKey('affiliate_discount_pct');
+    expect($rules)->toHaveKey('custom_photos_enabled');
 });

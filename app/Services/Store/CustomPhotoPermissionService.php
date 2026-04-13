@@ -8,7 +8,11 @@ use Illuminate\Support\Arr;
 
 class CustomPhotoPermissionService
 {
-    public function isAllowed(string $brandProfessionalId, string $affiliateProfessionalId): bool
+    public function __construct(
+        private readonly BrandCatalogService $catalogService,
+    ) {}
+
+    public function isAllowed(string $brandProfessionalId, string $affiliateProfessionalId, ?string $productGid = null): bool
     {
         // Level 1: Per-affiliate override (wins if set)
         $link = BrandPartnerLink::query()
@@ -24,8 +28,28 @@ class CustomPhotoPermissionService
             return (bool) $link->custom_photos_enabled;
         }
 
-        // Level 2: Global brand setting
-        return $this->getGlobalSetting($brandProfessionalId);
+        // Load integration once for both per-product and global checks
+        $integration = ProfessionalIntegration::query()
+            ->where('professional_id', $brandProfessionalId)
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->first();
+
+        // Level 2: Per-product setting (wins over global when set)
+        if ($productGid !== null && $integration !== null) {
+            $productSetting = $this->catalogService->fetchProductCustomPhotosMetafield($integration, $productGid);
+            if ($productSetting !== null) {
+                return $productSetting;
+            }
+        }
+
+        // Level 3: Global brand setting (defaults to true when no integration)
+        if ($integration === null) {
+            return true;
+        }
+
+        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+
+        return (bool) Arr::get($metadata, 'custom_photos_enabled', true);
     }
 
     public function getGlobalSetting(string $brandProfessionalId): bool
