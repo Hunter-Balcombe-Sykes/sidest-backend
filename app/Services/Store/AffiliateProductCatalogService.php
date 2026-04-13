@@ -6,6 +6,7 @@ use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -13,6 +14,9 @@ use Illuminate\Support\Facades\Log;
 
 class AffiliateProductCatalogService
 {
+    public function __construct(
+        private readonly BrandCatalogService $brandCatalogService
+    ) {}
     private const STOREFRONT_PRODUCTS_PER_PAGE = 50;
 
     private const COLLECTION_PRODUCTS_QUERY = <<<'GRAPHQL'
@@ -112,28 +116,49 @@ GRAPHQL;
     }
 
     /**
-     * Return the brand's catalog with the affiliate's selection state merged in.
+     * Return the brand's catalog with the affiliate's selection state and metafield data merged in.
      *
-     * @return array{products: array, brand_professional_id: string}
+     * @return array{products: array, brand_professional_id: string, default_commission_rate: float}
      */
     public function getCatalogWithSelections(Professional $affiliate): array
     {
         $resolved = $this->resolveAffiliateBrandIntegration($affiliate);
         $brandId = $resolved['brand_professional_id'];
 
+        $integration = $resolved['integration'];
         $catalog = $this->fetchActiveCatalog($brandId);
+
+        // Fetch brand product metafields (commission, discount) via Admin API
+        $metafieldMap = $this->fetchBrandMetafieldMap($brandId);
+
+        // Fetch favourites collection membership for filter support
+        $favouritesGids = $this->fetchCollectionGids($integration, 'favourites_collection_handle');
+
+        // Look up the brand's default commission rate from store settings
+        $storeSettings = BrandStoreSettings::where('professional_id', $brandId)->first();
+        $defaultCommissionRate = $storeSettings
+            ? (float) $storeSettings->default_commission_rate
+            : (float) config('sidest.store.default_commission_rate', 15);
 
         $selections = AffiliateProductSelection::query()
             ->where('affiliate_professional_id', $affiliate->id)
             ->get()
             ->keyBy('shopify_product_gid');
 
-        $products = array_map(function (array $product) use ($selections) {
+        $products = array_map(function (array $product) use ($selections, $metafieldMap, $favouritesGids) {
             $gid = $product['gid'] ?? '';
             $selection = $selections->get($gid);
 
             $product['selected'] = $selection !== null;
             $product['sort_order'] = $selection?->sort_order;
+
+            // Merge metafield data from Admin API
+            $meta = $metafieldMap[$gid] ?? [];
+            $product['commission_override'] = $meta['commission_override'] ?? null;
+            $product['affiliate_discount_pct'] = $meta['affiliate_discount_pct'] ?? null;
+
+            // Collection membership flags
+            $product['in_favourites'] = in_array($gid, $favouritesGids, true);
 
             return $product;
         }, $catalog);
@@ -141,6 +166,7 @@ GRAPHQL;
         return [
             'products' => $products,
             'brand_professional_id' => $brandId,
+            'default_commission_rate' => $defaultCommissionRate,
         ];
     }
 
@@ -168,6 +194,83 @@ GRAPHQL;
         $catalog = $this->fetchActiveCatalog($brandProfessionalId);
 
         return collect($catalog)->contains('gid', $productGid);
+    }
+
+    /**
+     * Fetch product GIDs from a brand collection (e.g. favourites) using the Admin API.
+     *
+     * @param  string  $metadataKey  The key in provider_metadata for the collection handle
+     * @return array<int, string>  List of product GIDs in the collection
+     */
+    private function fetchCollectionGids(ProfessionalIntegration $integration, string $metadataKey): array
+    {
+        try {
+            $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+            $handle = trim((string) Arr::get($metadata, $metadataKey, ''));
+
+            if ($handle === '') {
+                return [];
+            }
+
+            $collectionGid = $this->brandCatalogService->resolveCollectionGid($integration, $handle);
+
+            if (! $collectionGid) {
+                return [];
+            }
+
+            $products = $this->brandCatalogService->fetchCollectionProducts($integration, $collectionGid);
+
+            return array_map(fn (array $p) => $p['gid'] ?? '', $products);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to fetch collection GIDs for affiliate catalog.', [
+                'metadata_key' => $metadataKey,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    /**
+     * Fetch metafield data (commission_override, affiliate_discount_pct) for the brand's products
+     * via the Admin API. Returns a map keyed by product GID.
+     *
+     * @return array<string, array{commission_override: float|null, affiliate_discount_pct: float|null}>
+     */
+    private function fetchBrandMetafieldMap(string $brandProfessionalId): array
+    {
+        try {
+            $brand = Professional::find($brandProfessionalId);
+
+            if (! $brand) {
+                return [];
+            }
+
+            $products = $this->brandCatalogService->fetchBrandCatalog($brand);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to fetch brand metafields for affiliate catalog.', [
+                'brand_professional_id' => $brandProfessionalId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
+
+        $map = [];
+        foreach ($products as $product) {
+            $gid = $product['gid'] ?? '';
+            if ($gid === '') {
+                continue;
+            }
+
+            $metafields = $product['metafields'] ?? [];
+            $map[$gid] = [
+                'commission_override' => isset($metafields['commission_override']) ? (float) $metafields['commission_override'] : null,
+                'affiliate_discount_pct' => isset($metafields['affiliate_discount_pct']) ? (float) $metafields['affiliate_discount_pct'] : null,
+            ];
+        }
+
+        return $map;
     }
 
     /**

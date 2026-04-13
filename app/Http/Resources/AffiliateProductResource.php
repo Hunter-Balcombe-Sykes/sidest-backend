@@ -19,6 +19,9 @@ class AffiliateProductResource extends JsonResource
             'variants' => $this->resource['variants'] ?? [],
             'selected' => (bool) ($this->resource['selected'] ?? false),
             'sort_order' => $this->resource['sort_order'] ?? null,
+            'commission_override' => $this->resource['commission_override'] ?? null,
+            'affiliate_discount_pct' => $this->resource['affiliate_discount_pct'] ?? null,
+            'in_favourites' => (bool) ($this->resource['in_favourites'] ?? false),
         ];
     }
 }

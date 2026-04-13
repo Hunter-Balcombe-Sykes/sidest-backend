@@ -50,6 +50,7 @@ class AffiliateProductController extends ApiController
         return $this->success([
             'products' => AffiliateProductResource::collection(collect($result['products'])),
             'brand_professional_id' => $result['brand_professional_id'],
+            'default_commission_rate' => $result['default_commission_rate'] ?? 15,
         ]);
     }
 
