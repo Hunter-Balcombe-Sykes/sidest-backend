@@ -32,6 +32,7 @@ This document is the single source of truth for backend so the frontend can buil
 ## Companion Docs
 
 - **[docs/brand-catalog-v2.md](./brand-catalog-v2.md)** — full conceptual guide to the v2 brand catalog (`sidest.*` Shopify metafield model, variant gating, brand → affiliate inheritance, Hydrogen integration). Read this before working on anything brand-catalog or product-variant related.
+- **[docs/social-links.md](./social-links.md)** — full conceptual guide to the social link platform registry (8 platforms, handle/URL normalization, security model, frontend integration). Read this before working on link blocks, the affiliate dashboard's social picker, or adding a new social platform.
 
 ## 0) Recent Backend Changes (Commit Log Snapshot)
 
@@ -40,6 +41,7 @@ Snapshot date: **April 14, 2026**.
 ### April 14, 2026
 
 - Add brand-controlled variant gating: new `sidest.enabled_variant_gids` JSON metafield restricts which Shopify product variants are offered to affiliates. Empty/missing = all variants enabled (auto-tracks new Shopify variants); non-empty = only those variants offered. Picking one variant = "standalone product" mode. Hydrogen receives an `enabled_variants` map for storefront enforcement. **See [docs/brand-catalog-v2.md](./brand-catalog-v2.md) for the full conceptual model, scenario table, and frontend integration guide.**
+- Add social link platform registry: link blocks now distinguish "social" from "custom" links via a config-driven registry (`config('sidest.social_platforms')`) covering 8 platforms (Instagram, Facebook, LinkedIn, YouTube, TikTok, X, Spotify, SoundCloud). Affiliates can paste either a handle or full URL — backend normalizes either to a canonical https URL with strict ASCII-only handle validation and host allowlist enforcement. New `GET /api/public/config/social-platforms` exposes the registry to frontends. New `sidest:backfill-social-links` artisan command tags existing link blocks with `settings.platform`/`settings.handle`. Zero schema changes — platform identity lives in `settings` JSONB. **See [docs/social-links.md](./social-links.md) for the full conceptual model, security checklist, and frontend integration guide.**
 
 ### April 11, 2026
 
@@ -1445,12 +1447,44 @@ All routes below require: Authorization header AND a professional profile (curre
 ### `GET /api/analytics`
 
 - Purpose: analytics summary for the logged-in professional
-- Query: days=30 or from=YYYY-MM-DD&to=YYYY-MM-DD Response (200): { "range": { "from": "2026-01-01", "to": "2026-01-30" }, "totals": { "visits": 0, "unique_visitors": 0, "clicks": 0, "unique_clickers": 0, "ctr_percent": 0 }, "charts": { "visits_by_day": [], "clicks_by_day": [] }, "top_links": [] } Links (Link blocks)
-- GET /api/links
-- POST /api/links
-- PATCH /api/links/{block}
-- DELETE /api/links/{block}
-- POST /api/links/reorder Store/Update body: { "title": "Book now", "url": "https://booking.example.com", "icon_key": "calendar", "is_active": true, "settings": { "open_in_new_tab": true } } Common status codes: 200, 201, 401, 403, 404, 422 Sections (Section blocks)
+- Query: days=30 or from=YYYY-MM-DD&to=YYYY-MM-DD Response (200): { "range": { "from": "2026-01-01", "to": "2026-01-30" }, "totals": { "visits": 0, "unique_visitors": 0, "clicks": 0, "unique_clickers": 0, "ctr_percent": 0 }, "charts": { "visits_by_day": [], "clicks_by_day": [] }, "top_links": [] }
+
+#### Links (Link blocks)
+
+> **Full conceptual guide:** [docs/social-links.md](./social-links.md)
+>
+> Covers the platform registry, normalization rules, frontend integration expectations, and security considerations.
+
+- `GET /api/links`
+- `POST /api/links`
+- `PATCH /api/links/{block}`
+- `DELETE /api/links/{block}`
+- `POST /api/links/reorder`
+- `GET /api/public/config/social-platforms` (public, no auth — returns the list of supported social platforms with display name, icon key, and placeholder)
+
+**Two write modes** on POST/PATCH (the presence of `platform` is the discriminator):
+
+**Social mode** — accepts either a handle or a URL; backend normalizes either to a canonical https URL and tags `settings.platform`/`settings.handle`:
+```json
+{ "platform": "instagram", "handle": "joshhunter" }
+```
+or
+```json
+{ "platform": "instagram", "url": "https://instagram.com/joshhunter" }
+```
+
+**Custom mode** — legacy contract, requires `title` and `url`:
+```json
+{ "title": "Book now", "url": "https://booking.example.com", "icon_key": "calendar", "is_active": true, "settings": { "open_in_new_tab": true } }
+```
+
+Custom-mode URLs are restricted to `http`/`https` schemes only — `javascript:`, `data:`, `file:`, `ftp:` are rejected with 422.
+
+Supported social platform keys: `instagram`, `facebook`, `linkedin`, `youtube`, `tiktok`, `x`, `spotify`, `soundcloud`. See [docs/social-links.md](./social-links.md) for handle formats, host allowlists, and the full conceptual model.
+
+Common status codes: 200, 201, 401, 403, 404, 422
+
+#### Sections (Section blocks)
 
 Allowed section block types are defined in config: `gallery`, `services`, `shop`, `booking`, `barbershop_info`
 

@@ -10,14 +10,33 @@ use App\Http\Requests\Api\Professional\Site\StoreLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
+use App\Services\Site\SocialLinkNormalizer;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-// V2: CRUD + reorder for custom link blocks on the professional's mini-site.
+
+/**
+ * V2: CRUD + reorder for link blocks on the professional's mini-site.
+ *
+ * Supports two write modes (see docs/social-links.md):
+ *   - **Social mode**: client sends `platform` + (`handle` OR `url`). The
+ *     SocialLinkNormalizer validates and rebuilds a canonical https URL; the
+ *     controller stores `settings.platform` and `settings.handle` as soft tags.
+ *   - **Custom mode**: client sends `title` + `url` (legacy contract preserved).
+ *     No platform binding, free-form icon_key.
+ *
+ * Authorization: every CRUD action checks `block->professional_id === current pro`.
+ * This is the TOCTOU defense — must not be removed during refactors.
+ */
 class ProfessionalLinkBlockController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+
+    public function __construct(
+        private readonly SocialLinkNormalizer $normalizer
+    ) {}
 
     private function authorizeCustomLinks(Professional $pro): void
     {
@@ -45,7 +64,16 @@ class ProfessionalLinkBlockController extends ApiController
 
         $data = $request->validated();
 
-        $linkBlock = DB::transaction(function () use ($pro, $site, $data) {
+        // Social vs custom mode discriminator. Social mode delegates to the
+        // normalizer to rebuild a canonical URL and tag settings.platform/handle.
+        // Custom mode preserves the legacy field-by-field contract.
+        try {
+            $blockFields = $this->buildBlockFields($data);
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        $linkBlock = DB::transaction(function () use ($pro, $site, $blockFields, $data) {
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-links:{$site->id}"]);
 
             $maxSort = Block::query()
@@ -55,16 +83,12 @@ class ProfessionalLinkBlockController extends ApiController
 
             $maxSort = is_null($maxSort) ? -1 : (int) $maxSort;
 
-            $linkBlock = new Block([
+            $linkBlock = new Block(array_merge($blockFields, [
                 'block_group' => 'links',
                 'block_type'  => 'link',
-                'title'       => $data['title'],
-                'url'         => $data['url'],
-                'icon_key'    => $data['icon_key'] ?? null,
                 'sort_order'  => $maxSort + 1,
                 'is_active'   => $data['is_active'] ?? true,
-                'settings'    => $data['settings'] ?? [],
-            ]);
+            ]));
 
             $linkBlock->professional_id = $pro->id;
             $linkBlock->site_id = $site->id;
@@ -80,6 +104,10 @@ class ProfessionalLinkBlockController extends ApiController
         $pro = $this->currentProfessional($request);
         $this->authorizeCustomLinks($pro);
 
+        // TOCTOU defense: never trust route model binding alone. Verify the
+        // block belongs to the current professional and is the right type.
+        // Removing this check would let any authenticated user PATCH any
+        // link block by guessing the UUID.
         abort_unless(
             $linkBlock->professional_id === $pro->id &&
             $linkBlock->block_group === 'links' &&
@@ -90,10 +118,86 @@ class ProfessionalLinkBlockController extends ApiController
         $data = $request->validated();
         unset($data['id']);
 
-        $linkBlock->fill($data);
+        // If the request switches into social mode (or stays in social mode with
+        // a new handle/url), re-normalize. Otherwise fall through to the legacy
+        // partial-update path that just fills whatever fields were sent.
+        if (! empty($data['platform'])) {
+            try {
+                $normalized = $this->buildBlockFields($data);
+            } catch (InvalidArgumentException $e) {
+                return $this->error($e->getMessage(), 422);
+            }
+
+            // Merge normalized social fields, preserving any other fields the
+            // user happened to send (e.g. is_active toggle alongside).
+            $linkBlock->fill(array_merge(
+                array_intersect_key($data, array_flip(['is_active'])),
+                $normalized
+            ));
+        } else {
+            // Strip the social-mode-only keys before fill — they're not Block columns.
+            unset($data['platform'], $data['handle']);
+            $linkBlock->fill($data);
+        }
+
         $linkBlock->save();
 
         return $this->success(['block' => $linkBlock->fresh()]);
+    }
+
+    /**
+     * Translate a validated request payload into the Block column values to
+     * persist. Handles the social/custom mode split centrally so store() and
+     * update() share one source of truth.
+     *
+     * Social mode produces:
+     *   - url       = canonical https URL from the normalizer
+     *   - icon_key  = registry's icon_key for the platform
+     *   - title     = user-supplied OR the platform's display_name
+     *   - settings  = user settings + {platform, handle} soft tags
+     *
+     * Custom mode is pass-through.
+     *
+     * @param  array<string, mixed>  $data  Validated request payload
+     * @return array<string, mixed>  Block fillable fields
+     *
+     * @throws InvalidArgumentException When social-mode normalization fails (caller maps to 422)
+     */
+    private function buildBlockFields(array $data): array
+    {
+        $platform = $data['platform'] ?? null;
+
+        if ($platform !== null && $platform !== '') {
+            $normalized = $this->normalizer->normalize(
+                $platform,
+                $data['handle'] ?? null,
+                $data['url'] ?? null
+            );
+
+            // Tag settings.platform + settings.handle so the frontend can
+            // re-render the edit form in social mode and so analytics can
+            // group by platform later (slow but works without a column).
+            $settings = is_array($data['settings'] ?? null) ? $data['settings'] : [];
+            $settings['platform'] = $normalized['platform_key'];
+            if ($normalized['handle'] !== null) {
+                $settings['handle'] = $normalized['handle'];
+            }
+
+            return [
+                'title' => ($data['title'] ?? '') !== '' ? $data['title'] : $normalized['display_name'],
+                'url' => $normalized['url'],
+                'icon_key' => $normalized['icon_key'],
+                'settings' => $settings,
+            ];
+        }
+
+        // Custom mode: pass through.
+        return [
+            'title' => $data['title'] ?? null,
+            'url' => $data['url'] ?? null,
+            'icon_key' => $data['icon_key'] ?? null,
+            'settings' => $data['settings'] ?? [],
+        ];
     }
 
     public function destroy(DestroyLinkBlockRequest $request, Block $linkBlock)

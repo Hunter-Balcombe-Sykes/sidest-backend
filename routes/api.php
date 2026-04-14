@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
+use App\Http\Controllers\Api\PublicSite\PublicConfigController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
@@ -95,6 +96,11 @@ Route::post('/public/booking/availability-by-slug', [PublicBookingController::cl
 Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
     ->middleware('throttle:public-site');
 Route::get('/public/shopify/storefront-config', [PublicShopifyStorefrontController::class, 'storefrontConfig'])
+    ->middleware('throttle:public-site');
+
+// Static frontend config (social platform registry, etc). Aggressively cacheable.
+// See docs/social-links.md for the social platforms contract.
+Route::get('/public/config/social-platforms', [PublicConfigController::class, 'socialPlatforms'])
     ->middleware('throttle:public-site');
 
 // Header/site-id based fallback for path-based frontend routing.

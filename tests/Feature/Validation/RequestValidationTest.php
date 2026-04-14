@@ -8,7 +8,9 @@ use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
 use App\Http\Requests\Api\PublicSite\CustomerLeads\PublicCustomerLeadRequest;
 use App\Http\Requests\Api\PublicSite\PublicSiteShowRequest;
 use App\Http\Requests\Api\PublicSite\PublicWaitlistSignupRequest;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 it('rejects missing bootstrap fields', function () {
     $validator = Validator::make([], (new BootstrapRequest())->rules());
@@ -101,29 +103,55 @@ it('rejects invalid public site subdomain', function () {
 });
 
 it('rejects invalid link block store payload', function () {
+    // After the social-link contract refactor, "url is required for custom mode"
+    // and the scheme allowlist live in withValidator() (cross-field), not rules().
+    // We have to invoke the full Form Request pipeline to exercise both.
     $payload = [
         'title' => str_repeat('a', 81),
-        'url' => 'not-a-url',
+        'url' => 'javascript:alert(1)',
     ];
 
-    $validator = Validator::make($payload, (new StoreLinkBlockRequest())->rules());
+    $request = Request::create('/api/test', 'POST', $payload);
+    $formRequest = StoreLinkBlockRequest::createFrom($request);
+    $formRequest->setContainer(app())->setRedirector(app('redirect'));
 
-    expect($validator->fails())->toBeTrue();
-    expect($validator->errors()->has('title'))->toBeTrue();
-    expect($validator->errors()->has('url'))->toBeTrue();
+    try {
+        $formRequest->validateResolved();
+        $errors = collect();
+    } catch (ValidationException $e) {
+        $errors = collect($e->errors());
+    }
+
+    expect($errors->has('title'))->toBeTrue();
+    expect($errors->has('url'))->toBeTrue();
 });
 
 it('rejects invalid link block update payload', function () {
+    // Update request: invalid UUID + disallowed scheme. Both rules + cross-field.
     $payload = [
         'id' => 'not-a-uuid',
-        'url' => 'not-a-url',
+        'url' => 'javascript:alert(1)',
     ];
 
-    $validator = Validator::make($payload, (new UpdateLinkBlockRequest())->rules());
+    $request = Request::create('/api/test', 'PATCH', $payload);
+    $request->setRouteResolver(function () {
+        $route = new Illuminate\Routing\Route(['PATCH'], '/api/test', []);
+        $route->parameters = ['linkBlock' => 'not-a-uuid'];
 
-    expect($validator->fails())->toBeTrue();
-    expect($validator->errors()->has('id'))->toBeTrue();
-    expect($validator->errors()->has('url'))->toBeTrue();
+        return $route;
+    });
+    $formRequest = UpdateLinkBlockRequest::createFrom($request);
+    $formRequest->setContainer(app())->setRedirector(app('redirect'));
+
+    try {
+        $formRequest->validateResolved();
+        $errors = collect();
+    } catch (ValidationException $e) {
+        $errors = collect($e->errors());
+    }
+
+    expect($errors->has('id'))->toBeTrue();
+    expect($errors->has('url'))->toBeTrue();
 });
 
 it('rejects invalid reorder blocks payload', function () {

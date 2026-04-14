@@ -11,18 +11,24 @@ return [
         'auth', 'docs', 'status', 'comet',
     ],
     'link_block_icon_keys' => [
+        // Functional / custom-link icons
         'scissors',
         'calendar',
         'map',
         'phone',
-        'instagram',
-        'facebook',
-        'tiktok',
-        'youtube',
         'website',
         'link',
         'email',
         'whatsapp',
+        // Social platform icons (mirrored in social_platforms registry below)
+        'instagram',
+        'facebook',
+        'linkedin',
+        'youtube',
+        'tiktok',
+        'x',
+        'spotify',
+        'soundcloud',
     ],
     'link_block_settings_keys' => [
         'open_in_new_tab',
@@ -31,6 +37,116 @@ return [
         'rel_ugc',
         'highlight',
         'note',
+        // Social link tagging — set by SocialLinkNormalizer when a brand-controlled
+        // platform is selected. Soft tag in JSONB rather than a column; promote to
+        // a real column (Option B) only when query-ability matters. See docs/social-links.md.
+        'platform',
+        'handle',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Social platform registry
+    |--------------------------------------------------------------------------
+    |
+    | Single source of truth for the social platforms surfaced in the link block
+    | UI. Each entry tells the system how to validate, normalize, and render
+    | links for one platform. The frontend reads a sanitised version of this
+    | registry via GET /api/public/config/social-platforms and uses it to drive
+    | the platform picker, input affordance, and display labels.
+    |
+    | Adding a new platform = one entry here + one icon_key above. No frontend
+    | deploy needed — clients pick it up on next bootstrap.
+    |
+    | Security notes:
+    | - All `handle_pattern` regexes are ASCII-only ([a-zA-Z0-9...]) to prevent
+    |   Cyrillic/Greek homoglyph impersonation attacks.
+    | - All `url_template` values are https:// — even http:// inputs get upgraded
+    |   to https when the canonical URL is rebuilt.
+    | - All quantifiers are bounded ({1,30} etc.) and non-nested → ReDoS-safe.
+    | - `host_allowlist` is plain ASCII; punycoded IDN hosts won't match, which
+    |   blocks a class of phishing attacks where a lookalike domain is registered.
+    | - `handle_pattern`, `host_allowlist`, and `url_path_extractor` are stripped
+    |   from the public registry response — they are server-side only.
+    |
+    | See docs/social-links.md for the full conceptual model.
+    */
+    'social_platforms' => [
+        'instagram' => [
+            'display_name'       => 'Instagram',
+            'icon_key'           => 'instagram',
+            'placeholder'        => '@yourname',
+            'handle_pattern'     => '/^[a-zA-Z0-9._]{1,30}$/',
+            'url_template'       => 'https://instagram.com/{handle}',
+            'host_allowlist'     => ['instagram.com', 'www.instagram.com'],
+            'url_path_extractor' => '#^/([a-zA-Z0-9._]{1,30})/?$#',
+        ],
+        'facebook' => [
+            'display_name'       => 'Facebook',
+            'icon_key'           => 'facebook',
+            'placeholder'        => 'yourname',
+            'handle_pattern'     => '/^[a-zA-Z0-9.]{5,50}$/',
+            'url_template'       => 'https://facebook.com/{handle}',
+            'host_allowlist'     => ['facebook.com', 'www.facebook.com', 'fb.com', 'm.facebook.com'],
+            'url_path_extractor' => '#^/([a-zA-Z0-9.]{5,50})/?$#',
+        ],
+        'linkedin' => [
+            'display_name'       => 'LinkedIn',
+            'icon_key'           => 'linkedin',
+            'placeholder'        => 'yourname',
+            'handle_pattern'     => '/^[a-zA-Z0-9-]{3,100}$/',
+            'url_template'       => 'https://linkedin.com/in/{handle}',
+            'host_allowlist'     => ['linkedin.com', 'www.linkedin.com'],
+            // Matches both /in/{handle} (personal) and /company/{handle} (company pages)
+            'url_path_extractor' => '#^/(?:in|company)/([a-zA-Z0-9-]{3,100})/?$#',
+        ],
+        'youtube' => [
+            'display_name'       => 'YouTube',
+            'icon_key'           => 'youtube',
+            'placeholder'        => '@yourname',
+            'handle_pattern'     => '/^[a-zA-Z0-9._-]{3,30}$/',
+            'url_template'       => 'https://youtube.com/@{handle}',
+            'host_allowlist'     => ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'],
+            'url_path_extractor' => '#^/@([a-zA-Z0-9._-]{3,30})/?$#',
+        ],
+        'tiktok' => [
+            'display_name'       => 'TikTok',
+            'icon_key'           => 'tiktok',
+            'placeholder'        => '@yourname',
+            'handle_pattern'     => '/^[a-zA-Z0-9._]{2,24}$/',
+            'url_template'       => 'https://tiktok.com/@{handle}',
+            'host_allowlist'     => ['tiktok.com', 'www.tiktok.com', 'vm.tiktok.com'],
+            'url_path_extractor' => '#^/@([a-zA-Z0-9._]{2,24})/?$#',
+        ],
+        'x' => [
+            'display_name'       => 'X',
+            'icon_key'           => 'x',
+            'placeholder'        => '@yourname',
+            // X handles are limited to 15 chars (Twitter legacy constraint)
+            'handle_pattern'     => '/^[a-zA-Z0-9_]{1,15}$/',
+            'url_template'       => 'https://x.com/{handle}',
+            'host_allowlist'     => ['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com', 'mobile.twitter.com'],
+            'url_path_extractor' => '#^/([a-zA-Z0-9_]{1,15})/?$#',
+        ],
+        'spotify' => [
+            'display_name'       => 'Spotify',
+            'icon_key'           => 'spotify',
+            'placeholder'        => 'yourname',
+            'handle_pattern'     => '/^[a-zA-Z0-9._-]{3,40}$/',
+            'url_template'       => 'https://open.spotify.com/user/{handle}',
+            'host_allowlist'     => ['open.spotify.com', 'spotify.com'],
+            // Matches /user/{handle} (profiles) and /artist/{id} (artist pages)
+            'url_path_extractor' => '#^/(?:user|artist)/([a-zA-Z0-9._-]{3,40})/?$#',
+        ],
+        'soundcloud' => [
+            'display_name'       => 'SoundCloud',
+            'icon_key'           => 'soundcloud',
+            'placeholder'        => 'yourname',
+            'handle_pattern'     => '/^[a-zA-Z0-9_-]{3,40}$/',
+            'url_template'       => 'https://soundcloud.com/{handle}',
+            'host_allowlist'     => ['soundcloud.com', 'www.soundcloud.com'],
+            'url_path_extractor' => '#^/([a-zA-Z0-9_-]{3,40})/?$#',
+        ],
     ],
 
     'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
