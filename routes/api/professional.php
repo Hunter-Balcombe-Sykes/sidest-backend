@@ -1,18 +1,20 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\AffiliateInviteController;
+use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
 use App\Http\Controllers\Api\Professional\BrandGalleryController;
+use App\Http\Controllers\Api\Professional\BrandOnboardingReadinessController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
-use App\Http\Controllers\Api\Professional\OpenInviteController;
+use App\Http\Controllers\Api\Professional\BrandProfileController;
 use App\Http\Controllers\Api\Professional\BrandSetupController;
-use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
 use App\Http\Controllers\Api\Professional\ConfirmationPreferenceController;
 use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
 use App\Http\Controllers\Api\Professional\Notifications\NotificationController;
 use App\Http\Controllers\Api\Professional\Notifications\NotificationEmailPreferenceController;
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
+use App\Http\Controllers\Api\Professional\OpenInviteController;
 use App\Http\Controllers\Api\Professional\PlanController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
 use App\Http\Controllers\Api\Professional\ProfessionalController;
@@ -27,17 +29,16 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalThemeController;
 use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
-use App\Http\Controllers\Api\Professional\BrandOnboardingReadinessController;
-use App\Http\Controllers\Api\Professional\BrandProfileController;
-use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
-use App\Http\Controllers\Api\Professional\SubscriptionController;
-use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductPhotoController;
 use App\Http\Controllers\Api\Professional\Store\BrandCatalogController;
 use App\Http\Controllers\Api\Professional\Store\BrandCollectionController;
 use App\Http\Controllers\Api\Professional\Store\BrandDesignController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreSettingsController;
+use App\Http\Controllers\Api\Professional\Store\ShopifyResyncController;
+use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
+use App\Http\Controllers\Api\Professional\SubscriptionController;
+use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use Illuminate\Support\Facades\Route;
 
@@ -262,6 +263,11 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         // Brand Design (Shopify theme sync + sitepage overrides)
         Route::get('/brand/design', [BrandDesignController::class, 'show']);
         Route::post('/brand/design/resync', [BrandDesignController::class, 'resync'])
+            ->middleware('throttle:brand-catalog-writes');
+
+        // Full Shopify data resync (profile + brand fields + logo + theme tokens). Per-integration
+        // rate limit is enforced inside the controller (1 per 60s); shared throttle is just a safety net.
+        Route::post('/store/shopify/resync', ShopifyResyncController::class)
             ->middleware('throttle:brand-catalog-writes');
         Route::patch('/brand/design/overrides', [BrandDesignController::class, 'updateOverrides'])
             ->middleware('throttle:brand-catalog-writes');
