@@ -15,6 +15,7 @@ class Customer extends BaseModel
     protected $table = 'core.customers';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $hidden = [
@@ -22,6 +23,7 @@ class Customer extends BaseModel
     ];
 
     protected $fillable = [
+        'professional_id',
         'email',
         'phone',
         'full_name',
@@ -68,6 +70,7 @@ class Customer extends BaseModel
     {
         if (empty($this->email)) {
             $this->marketing_opt_in_cached = null;
+
             return;
         }
 
