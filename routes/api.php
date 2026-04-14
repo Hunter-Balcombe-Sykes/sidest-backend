@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateController;
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateProductsController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandConfigController;
+use App\Http\Controllers\Api\Internal\HydrogenDeploymentController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandDesignController;
 use App\Http\Controllers\Api\Webhooks\ShopifyAppUninstalledWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyGdprWebhookController;
@@ -128,6 +129,7 @@ Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])
 // Internal Hydrogen endpoints (server-to-server, API key auth)
 Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('internal/hydrogen')->group(function () {
     Route::get('/brand-config', [HydrogenBrandConfigController::class, 'show']);
+    Route::get('/deployment-targets', [HydrogenDeploymentController::class, 'targets']);
     Route::get('/brand-design/{slug}', [HydrogenBrandDesignController::class, 'show'])
         ->where('slug', '[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}');
     Route::get('/affiliate', [HydrogenAffiliateController::class, 'show']);
