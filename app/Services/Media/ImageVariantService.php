@@ -4,7 +4,6 @@ namespace App\Services\Media;
 
 use App\Models\Core\MediaVariant;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -205,88 +204,6 @@ class ImageVariantService
         $path = "{$basePath}/original_{$hash}.{$ext}";
 
         $this->disk()->put($path, file_get_contents($file->getRealPath()), 'public');
-
-        return $path;
-    }
-
-    /**
-     * Download a remote image into memory and return its bytes + sniffed metadata.
-     *
-     * Caller is responsible for restricting the URL host when SSRF is a concern —
-     * this helper only enforces scheme, size, and content-type. Currently used by
-     * background sync jobs that pull brand assets from vetted third-party CDNs.
-     *
-     * @return array{bytes: string, size: int, mime: string, ext: string, sha256: string}
-     */
-    public function downloadRemoteImage(
-        string $url,
-        int $maxBytes = 5_242_880,
-        int $timeoutSeconds = 20,
-    ): array {
-        $parsed = parse_url($url);
-        if (! is_array($parsed)) {
-            throw new \RuntimeException('Invalid image URL.');
-        }
-
-        $scheme = strtolower((string) ($parsed['scheme'] ?? ''));
-        if ($scheme !== 'https') {
-            throw new \RuntimeException('Remote image URL must use https.');
-        }
-
-        $response = Http::timeout($timeoutSeconds)->get($url);
-
-        if (! $response->ok()) {
-            throw new \RuntimeException("Image fetch failed (HTTP {$response->status()}).");
-        }
-
-        $bytes = $response->body();
-        $size  = strlen($bytes);
-
-        if ($size === 0) {
-            throw new \RuntimeException('Remote image response body is empty.');
-        }
-        if ($size > $maxBytes) {
-            throw new \RuntimeException("Remote image exceeds maximum size ({$size} > {$maxBytes} bytes).");
-        }
-
-        // Sniff the mime from the bytes rather than trusting response headers,
-        // so a spoofed Content-Type can't slip non-image content into the pipeline.
-        $finfo = new \finfo(FILEINFO_MIME_TYPE);
-        $mime  = (string) ($finfo->buffer($bytes) ?: '');
-
-        $ext = match ($mime) {
-            'image/jpeg' => 'jpg',
-            'image/png'  => 'png',
-            'image/webp' => 'webp',
-            default      => throw new \RuntimeException("Unsupported remote image type: {$mime}"),
-        };
-
-        return [
-            'bytes'  => $bytes,
-            'size'   => $size,
-            'mime'   => $mime,
-            'ext'    => $ext,
-            'sha256' => hash('sha256', $bytes),
-        ];
-    }
-
-    /**
-     * Persist raw image bytes to the media disk using the same content-hashed
-     * filename scheme as {@see storeOriginal()}. Kept as a sibling so both entry
-     * points (UploadedFile and in-memory bytes) share a stable path convention.
-     *
-     * Returns the storage path of the original.
-     */
-    public function storeOriginalBytes(
-        string $bytes,
-        string $basePath,
-        string $ext,
-        string $sha256,
-    ): string {
-        $hash = substr($sha256, 0, 16);
-        $path = "{$basePath}/original_{$hash}.{$ext}";
-
-        $this->disk()->put($path, $bytes, 'public');
 
         return $path;
     }
