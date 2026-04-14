@@ -7,17 +7,19 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 // V2: Response shape for POST /store/shopify/resync. Only exposes field names + counts + a timestamp —
 //     never leaks the snapshot contents, access tokens, or shop identifiers.
+//
+// Trust contract: ShopifyDataResyncService::resync() is typed to return {fields_updated: string[],
+// fields_preserved: string[], jobs_dispatched: string[], last_resynced_at: string} — no defensive
+// re-casting needed here.
 class ShopifyResyncResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $data = is_array($this->resource) ? $this->resource : [];
-
         return [
-            'fields_updated' => is_array($data['fields_updated'] ?? null) ? array_values($data['fields_updated']) : [],
-            'fields_preserved' => is_array($data['fields_preserved'] ?? null) ? array_values($data['fields_preserved']) : [],
-            'jobs_dispatched' => is_array($data['jobs_dispatched'] ?? null) ? array_values($data['jobs_dispatched']) : [],
-            'last_resynced_at' => $data['last_resynced_at'] ?? null,
+            'fields_updated' => $this->resource['fields_updated'],
+            'fields_preserved' => $this->resource['fields_preserved'],
+            'jobs_dispatched' => $this->resource['jobs_dispatched'],
+            'last_resynced_at' => $this->resource['last_resynced_at'],
         ];
     }
 }

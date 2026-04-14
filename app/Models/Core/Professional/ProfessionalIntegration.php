@@ -5,7 +5,6 @@ namespace App\Models\Core\Professional;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\DB;
 
 // V2: OAuth integration record (Square, Fresha, Shopify). Stores encrypted tokens and provider_metadata (webhook IDs, storefront tokens).
 class ProfessionalIntegration extends BaseModel
@@ -64,18 +63,37 @@ class ProfessionalIntegration extends BaseModel
 
     /**
      * Atomically merge keys into provider_metadata without overwriting
-     * keys written by other concurrent jobs. Uses PostgreSQL jsonb || operator.
+     * keys written by other concurrent jobs.
+     *
+     * Production (pgsql): uses the jsonb `||` merge operator so the update
+     * is a single atomic statement even under concurrent writes from
+     * webhooks / onboarding jobs / storefront token creation.
+     *
+     * Tests (sqlite, via the pgsql→sqlite redirect in TestCase): falls back
+     * to a refresh + PHP-side array merge + save. Loss of atomicity is
+     * acceptable because the test suite is single-process.
      */
     public function mergeProviderMetadata(array $data): void
     {
-        $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $connection = $this->getConnection();
 
-        DB::update(
-            "UPDATE {$this->getTable()} SET provider_metadata = COALESCE(provider_metadata, '{}'::jsonb) || ?::jsonb, updated_at = ? WHERE id = ?",
-            [$json, now(), $this->id]
-        );
+        if ($connection->getDriverName() === 'pgsql') {
+            $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
-        // Refresh in-memory state so callers see the merged result
+            $connection->update(
+                "UPDATE {$this->getTable()} SET provider_metadata = COALESCE(provider_metadata, '{}'::jsonb) || ?::jsonb, updated_at = ? WHERE id = ?",
+                [$json, now(), $this->id]
+            );
+
+            $this->refresh();
+
+            return;
+        }
+
+        // SQLite fallback: non-atomic but safe in single-process test runs.
         $this->refresh();
+        $current = is_array($this->provider_metadata) ? $this->provider_metadata : [];
+        $this->provider_metadata = array_merge($current, $data);
+        $this->save();
     }
 }

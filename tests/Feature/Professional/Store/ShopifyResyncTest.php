@@ -411,6 +411,128 @@ it('returns 502 when Shopify API fails', function () {
     expect($response->status())->toBe(502);
 });
 
+it('returns 409 when the integration has an empty access_token', function () {
+    // Seed a brand row.
+    $brandId = 'brand-no-token';
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => $brandId,
+        'handle' => 'notoken',
+        'handle_lc' => 'notoken',
+        'display_name' => 'No Token',
+        'professional_type' => 'brand',
+        'status' => 'active',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    // Create through the model so the 'encrypted' cast wraps the empty string properly.
+    // The controller's 409 guard runs `trim((string) $integration->access_token) === ''`, which
+    // fires once the model decrypts the stored blank back into ''.
+    $integration = new ProfessionalIntegration([
+        'professional_id' => $brandId,
+        'provider' => 'shopify',
+        'external_account_id' => 'notoken.myshopify.com',
+        'access_token' => '',
+        'provider_metadata' => ['shop_domain' => 'notoken.myshopify.com'],
+    ]);
+    $integration->id = 'int-no-token';
+    $integration->save();
+
+    $pro = new Professional(['professional_type' => 'brand', 'status' => 'active']);
+    $pro->id = $brandId;
+
+    $controller = app(ShopifyResyncController::class);
+    $response = $controller(makeResyncRequest('brand', $pro));
+
+    expect($response->status())->toBe(409);
+
+    $body = json_encode($response->getData(true));
+    // Shouldn't leak token-related internals.
+    expect($body)->not->toContain('access_token');
+    expect($body)->not->toContain('shpat_');
+});
+
+it('preserves sibling provider_metadata keys across a resync (concurrency regression)', function () {
+    Bus::fake([
+        SyncShopifyBrandLogoJob::class,
+        SyncShopifyThemeTokensJob::class,
+    ]);
+    Http::fake([
+        '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
+    ]);
+
+    // Seed a matching snapshot so every Shopify-sourced field gets cleanly updated.
+    [, , $integration] = createResyncBrand(buildMatchingSnapshot());
+
+    // Add sibling keys that the resync must NOT touch — these simulate data written
+    // by webhook registration / storefront token creation / sales-channel jobs.
+    $integration->refresh();
+    $meta = $integration->provider_metadata;
+    $meta['storefront_access_token'] = 'tok_existing';
+    $meta['webhooks_state'] = 'registered';
+    $meta['publication_id'] = '999';
+    $integration->provider_metadata = $meta;
+    $integration->save();
+
+    $service = app(ShopifyDataResyncService::class);
+    $result = $service->resync($integration);
+
+    $integration->refresh();
+    $fresh = $integration->provider_metadata;
+
+    // Sibling keys must survive the resync's metadata writes.
+    expect($fresh['storefront_access_token'])->toBe('tok_existing');
+    expect($fresh['webhooks_state'])->toBe('registered');
+    expect($fresh['publication_id'])->toBe('999');
+
+    // And the resync must still have written its own keys.
+    expect($fresh['shopify_shop_snapshot']['display_name'])->toBe('Fresh Brand Name');
+    expect($fresh['last_resynced_at'])->toBe($result['last_resynced_at']);
+    expect($fresh['shop_currency'])->toBe('AUD');
+});
+
+it('rolls back multi-model writes when a post-API save fails', function () {
+    Bus::fake([
+        SyncShopifyBrandLogoJob::class,
+        SyncShopifyThemeTokensJob::class,
+    ]);
+    Http::fake([
+        '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
+    ]);
+
+    [$brand, , $integration] = createResyncBrand(buildMatchingSnapshot());
+
+    // Swap in a fake autofill that mutates the Professional then throws mid-transaction.
+    // The DB::transaction in ShopifyDataResyncService should roll the mutation back.
+    app()->bind(ShopProfileAutoFillService::class, function () use ($brand) {
+        return new class($brand->id) extends ShopProfileAutoFillService
+        {
+            public function __construct(private string $brandId) {}
+
+            public function resyncFromShopData(ProfessionalIntegration $integration, array $shopData): array
+            {
+                $pro = Professional::find($this->brandId);
+                $pro->display_name = 'Half-Written Name';
+                $pro->save();
+
+                throw new RuntimeException('simulated mid-resync failure');
+            }
+        };
+    });
+
+    $service = app(ShopifyDataResyncService::class);
+    expect(fn () => $service->resync($integration))->toThrow(RuntimeException::class);
+
+    // The in-transaction professional mutation must have rolled back.
+    $brand->refresh();
+    expect($brand->display_name)->toBe('Original Name');
+
+    // And no jobs should have been dispatched (they are inside the transaction too).
+    Bus::assertNotDispatched(SyncShopifyBrandLogoJob::class);
+    Bus::assertNotDispatched(SyncShopifyThemeTokensJob::class);
+});
+
 it('does not leak access tokens or snapshot contents in the response', function () {
     Bus::fake();
     Http::fake([

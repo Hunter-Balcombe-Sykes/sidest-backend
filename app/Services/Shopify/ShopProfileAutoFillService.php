@@ -98,6 +98,11 @@ class ShopProfileAutoFillService
         $professionalDirty = false;
         $brandProfileDirty = false;
 
+        // Keys that need to be merged back into provider_metadata at the end.
+        // Only snapshot + (optionally) currency — all other sibling keys must
+        // be preserved via the atomic jsonb merge in mergeProviderMetadata().
+        $metadataMerge = [];
+
         foreach (self::FIELD_MAP as $field) {
             $freshValue = $this->freshValueForField($field, $shopData);
             $currentValue = $this->currentValueForField($field, $professional, $brandProfile, $metadata);
@@ -114,7 +119,7 @@ class ShopProfileAutoFillService
                 if ($freshValue === null || $freshValue === '') {
                     continue;
                 }
-                $this->applyFreshValue($field, $freshValue, $professional, $brandProfile, $metadata, $professionalDirty, $brandProfileDirty);
+                $this->applyFreshValue($field, $freshValue, $professional, $brandProfile, $metadataMerge, $professionalDirty, $brandProfileDirty);
                 $updated[] = $field['snapshot_key'];
 
                 continue;
@@ -131,7 +136,7 @@ class ShopProfileAutoFillService
             }
 
             // Shopify-owned field. Apply the new value even if empty — Shopify cleared it.
-            $this->applyFreshValue($field, $freshValue, $professional, $brandProfile, $metadata, $professionalDirty, $brandProfileDirty);
+            $this->applyFreshValue($field, $freshValue, $professional, $brandProfile, $metadataMerge, $professionalDirty, $brandProfileDirty);
             $updated[] = $field['snapshot_key'];
         }
 
@@ -143,17 +148,12 @@ class ShopProfileAutoFillService
             $brandProfile->save();
         }
 
-        // Merge the fresh snapshot + any currency change into the in-memory metadata,
-        // then write a single UPDATE for the integration. We reload metadata first so any
-        // sibling keys written by concurrent jobs (webhook/storefront/sales-channel) survive.
-        $integration->refresh();
-        $currentMetadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-        $currentMetadata['shopify_shop_snapshot'] = $this->buildSnapshot($shopData);
-        if (array_key_exists('shop_currency', $metadata)) {
-            $currentMetadata['shop_currency'] = $metadata['shop_currency'];
-        }
-        $integration->provider_metadata = $currentMetadata;
-        $integration->save();
+        // Write the fresh snapshot (+ any shop_currency change) atomically into provider_metadata.
+        // mergeProviderMetadata uses a jsonb || merge on pgsql so sibling keys written by concurrent
+        // jobs (webhook registration / storefront token / sales channel) survive even if they landed
+        // during the Shopify API call window.
+        $metadataMerge['shopify_shop_snapshot'] = $this->buildSnapshot($shopData);
+        $integration->mergeProviderMetadata($metadataMerge);
 
         return [
             'updated' => $updated,
@@ -202,10 +202,10 @@ class ShopProfileAutoFillService
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
 
+        // Only set if not already recorded — same idempotency rule, but use atomic merge so we
+        // don't clobber sibling keys written by concurrent onboarding jobs.
         if (($metadata['shop_currency'] ?? '') === '') {
-            $metadata['shop_currency'] = $currency;
-            $integration->provider_metadata = $metadata;
-            $integration->save();
+            $integration->mergeProviderMetadata(['shop_currency' => $currency]);
         }
     }
 
@@ -252,14 +252,15 @@ class ShopProfileAutoFillService
 
     /**
      * Apply a fresh Shopify value to the correct target + mark the dirty flag for batched save.
-     * The $metadata array is mutated in place so the caller can pass it into mergeProviderMetadata.
+     * For integration-target fields (currently just shop_currency), the value is added to
+     * $metadataMerge which the caller passes to mergeProviderMetadata() for atomic writing.
      */
     private function applyFreshValue(
         array $field,
         string $freshValue,
         Professional $professional,
         ?BrandProfile $brandProfile,
-        array &$metadata,
+        array &$metadataMerge,
         bool &$professionalDirty,
         bool &$brandProfileDirty,
     ): void {
@@ -280,8 +281,8 @@ class ShopProfileAutoFillService
             return;
         }
 
-        // integration
-        $metadata[$field['column']] = $freshValue !== '' ? $freshValue : null;
+        // integration → delta goes into the merge payload
+        $metadataMerge[$field['column']] = $freshValue !== '' ? $freshValue : null;
     }
 
     /**
@@ -316,15 +317,14 @@ class ShopProfileAutoFillService
 
     /**
      * Persist the snapshot into provider_metadata without clobbering sibling keys.
-     * Refreshes first so any concurrent writes (e.g. webhook registration) are not overwritten.
+     * Uses the atomic jsonb merge so concurrent webhook / storefront / sales-channel
+     * writes during signup cannot be overwritten.
      */
     private function writeSnapshot(ProfessionalIntegration $integration, array $shopData): void
     {
-        $integration->refresh();
-        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-        $metadata['shopify_shop_snapshot'] = $this->buildSnapshot($shopData);
-        $integration->provider_metadata = $metadata;
-        $integration->save();
+        $integration->mergeProviderMetadata([
+            'shopify_shop_snapshot' => $this->buildSnapshot($shopData),
+        ]);
     }
 
     private function str(array $data, string $key): string

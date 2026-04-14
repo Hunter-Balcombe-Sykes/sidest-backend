@@ -266,7 +266,10 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
             ->middleware('throttle:brand-catalog-writes');
 
         // Full Shopify data resync (profile + brand fields + logo + theme tokens). Per-integration
-        // rate limit is enforced inside the controller (1 per 60s); shared throttle is just a safety net.
+        // rate limit is enforced inside the controller (1 per 60s) — that is the primary gate.
+        // The shared `brand-catalog-writes` throttle is reused as a secondary safety net; if its
+        // definition ever tightens for catalog endpoints this route will inherit the change, which
+        // is acceptable because the controller already caps resync traffic more aggressively.
         Route::post('/store/shopify/resync', ShopifyResyncController::class)
             ->middleware('throttle:brand-catalog-writes');
         Route::patch('/brand/design/overrides', [BrandDesignController::class, 'updateOverrides'])

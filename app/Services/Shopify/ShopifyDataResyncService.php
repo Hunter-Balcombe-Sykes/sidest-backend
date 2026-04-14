@@ -6,6 +6,7 @@ use App\Jobs\Shopify\SyncShopifyBrandLogoJob;
 use App\Jobs\Shopify\SyncShopifyThemeTokensJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -37,25 +38,30 @@ class ShopifyDataResyncService
             throw new RuntimeException('Shopify integration is missing a valid shop domain or access token.');
         }
 
-        // Fetch first. If Shopify errors, we never touch the DB — no partial state.
+        // Fetch BEFORE the transaction — Shopify Admin API calls take ~200ms and would hold
+        // row locks on professionals / brand_profiles / integrations the whole time if inside.
         $shopData = $this->fetchShopData($shopDomain, $accessToken);
 
-        $diff = $this->autoFill->resyncFromShopData($integration, $shopData);
-
-        // Re-pull logo and design tokens from Shopify. Both jobs are idempotent + queued.
         $integrationId = (string) $integration->id;
-        SyncShopifyBrandLogoJob::dispatch($integrationId);
-        SyncShopifyThemeTokensJob::dispatch($integrationId);
-
-        // Record the resync timestamp. autoFill->resyncFromShopData already refreshed +
-        // saved the integration; we do one more read-modify-write for the timestamp so it
-        // lives alongside the new snapshot in provider_metadata.
         $lastResyncedAt = now()->toIso8601String();
-        $integration->refresh();
-        $freshMetadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-        $freshMetadata['last_resynced_at'] = $lastResyncedAt;
-        $integration->provider_metadata = $freshMetadata;
-        $integration->save();
+
+        // Post-API writes go in one transaction so partial failures roll back cleanly:
+        //   - diff-merge into Professional / BrandProfile / ProfessionalIntegration
+        //   - last_resynced_at stamp on integration metadata
+        //   - logo + theme token job dispatches (Laravel queues defer until commit inside txn)
+        $diff = DB::connection('pgsql')->transaction(function () use ($integration, $integrationId, $shopData, $lastResyncedAt) {
+            $diff = $this->autoFill->resyncFromShopData($integration, $shopData);
+
+            // Atomic merge so sibling keys (webhook_ids, storefront_access_token, etc.) survive.
+            $integration->mergeProviderMetadata(['last_resynced_at' => $lastResyncedAt]);
+
+            // Dispatched inside the transaction on purpose — queues hold them until commit,
+            // so a rollback prevents orphaned logo/theme jobs from firing.
+            SyncShopifyBrandLogoJob::dispatch($integrationId);
+            SyncShopifyThemeTokensJob::dispatch($integrationId);
+
+            return $diff;
+        });
 
         Log::info('Shopify data resync completed.', [
             'integration_id' => $integrationId,
