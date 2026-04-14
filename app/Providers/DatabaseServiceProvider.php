@@ -21,6 +21,15 @@ class DatabaseServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Skip the eager PDO setup when running tests. The default connection
+        // is still 'pgsql' in test contexts (so models extending BaseModel work),
+        // but `php artisan config:clear` runs before phpunit.xml's DB_CONNECTION=sqlite
+        // override, which would otherwise force a real Supabase TCP connect during
+        // the composer-test preflight and fail in any sandbox without DNS.
+        if ($this->app->runningUnitTests()) {
+            return;
+        }
+
         // Set PostgreSQL timeouts ONCE per connection, not per query
         $connectionName = config('database.default');
 
