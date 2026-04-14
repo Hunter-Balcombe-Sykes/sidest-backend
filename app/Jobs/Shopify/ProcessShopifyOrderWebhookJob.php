@@ -48,6 +48,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 'order_id' => $orderId,
                 'brand_professional_id' => $this->brandProfessionalId,
             ]);
+
             return;
         }
 
@@ -61,6 +62,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 'order_id' => $orderId,
                 'affiliate_slug' => $affiliateSlug,
             ]);
+
             return;
         }
 
@@ -76,6 +78,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 'affiliate_id' => (string) $affiliate->id,
                 'brand_professional_id' => $this->brandProfessionalId,
             ]);
+
             return;
         }
 
@@ -159,11 +162,13 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
 
     /**
      * Upsert the buyer into the affiliate's contacts list and, if the cart
-     * carried a `sidest_marketing_opt_in` attribute, add them to the affiliate's
-     * marketing subscribers.
+     * carried a truthy `sidest_marketing_opt_in` attribute, add them to the
+     * affiliate's marketing subscribers.
      *
-     * Reads the customer identity from the order payload — falls back from
-     * billing_address.name to customer.first_name + last_name per the V2 plan.
+     * Name resolution priority (matches the commit message): try
+     * billing_address.name first (Shopify populates this with the full name
+     * as entered at checkout), then fall back to customer.first_name +
+     * customer.last_name from the Shopify customer record.
      *
      * @param  array<int, array<string, mixed>>|mixed  $noteAttributes
      */
@@ -182,28 +187,32 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             return;
         }
 
+        // Name: prefer billing_address.name, then fall back to customer first/last.
         $billingName = trim((string) Arr::get($billingAddress, 'name', ''));
         $firstName = trim((string) Arr::get($customer, 'first_name', ''));
         $lastName = trim((string) Arr::get($customer, 'last_name', ''));
-        $fullName = $billingName !== '' ? $billingName : trim($firstName . ' ' . $lastName);
+        $fullName = $billingName !== '' ? $billingName : trim($firstName.' '.$lastName);
         $fullName = $fullName !== '' ? $fullName : null;
 
-        $phone = trim((string) Arr::get($billingAddress, 'phone', ''));
-        $phone = $phone !== '' ? $phone : null;
+        $marketingConsent = $this->parseMarketingOptInAttribute($noteAttributes);
 
+        // ContactCaptureService normalizes phone/full_name null-or-empty — we
+        // can pass raw values through without pre-guarding.
         $contactCapture->captureContact($affiliateId, [
             'email' => $email,
             'full_name' => $fullName,
-            'phone' => $phone,
+            'phone' => (string) Arr::get($billingAddress, 'phone', ''),
             'source' => 'shopify_order',
             'external_id' => $orderId !== '' ? $orderId : null,
+            // Only override the service default when the shopper EXPLICITLY opted out.
+            // Missing attribute -> null -> service default (true). Explicit "true" is
+            // also null here because captureMarketingSubscription() handles it below.
+            'marketing_opt_in' => $marketingConsent === false ? false : null,
         ]);
 
-        // Marketing opt-in is optional — Hydrogen sets `sidest_marketing_opt_in: true` only
-        // when the shopper ticks the subscribe box at checkout. Missing or falsy means
-        // "capture the contact but do NOT add to marketing list".
-        $marketingOptIn = strtolower($this->extractCartAttribute($noteAttributes, 'sidest_marketing_opt_in'));
-        if (in_array($marketingOptIn, ['true', '1', 'yes'], true)) {
+        // Truthy consent -> add them to the marketing list. Missing/falsy: the
+        // contact is still captured above, just not subscribed for email blasts.
+        if ($marketingConsent === true) {
             $contactCapture->captureMarketingSubscription(
                 $affiliateId,
                 $email,
@@ -211,6 +220,37 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 'shopify_order',
             );
         }
+    }
+
+    /**
+     * Parse the `sidest_marketing_opt_in` cart attribute into an explicit
+     * tri-state: true (explicit opt-in), false (explicit opt-out), or null
+     * (attribute missing / unrecognized value — let the schema default apply).
+     *
+     * Hydrogen is the only documented producer of this attribute. Recognized
+     * values (case-insensitive):
+     *   truthy:  'true' | '1' | 'yes'
+     *   falsy:   'false' | '0' | 'no'
+     *
+     * Any other string is treated as "missing" so a typo doesn't silently
+     * flip consent to false.
+     *
+     * @param  array<int, array<string, mixed>>|mixed  $noteAttributes
+     */
+    private function parseMarketingOptInAttribute(mixed $noteAttributes): ?bool
+    {
+        $raw = strtolower($this->extractCartAttribute($noteAttributes, 'sidest_marketing_opt_in'));
+        if ($raw === '') {
+            return null;
+        }
+        if (in_array($raw, ['true', '1', 'yes'], true)) {
+            return true;
+        }
+        if (in_array($raw, ['false', '0', 'no'], true)) {
+            return false;
+        }
+
+        return null;
     }
 
     /**

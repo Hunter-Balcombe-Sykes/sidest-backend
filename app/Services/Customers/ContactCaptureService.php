@@ -5,6 +5,7 @@ namespace App\Services\Customers;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Professional\Customer;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -37,7 +38,24 @@ class ContactCaptureService
      * the first capture point to see a given email wins — a customer who books
      * first then buys keeps source='square_booking'.
      *
-     * @param  array{email:string, full_name?:?string, phone?:?string, source:string, external_id?:?string}  $data
+     * full_name preservation: we only overwrite the stored full_name when the
+     * incoming value is MORE substantial than the existing one (existing is
+     * null/empty, or incoming is strictly longer). This protects affiliate
+     * manual cleanups like "JOHN DOE" → "John Doe" from being clobbered by the
+     * next raw order payload.
+     *
+     * Marketing consent: defaults to opted-in on NEW rows (matching the
+     * core.customers schema default of true). Callers can force opt-out by
+     * passing `marketing_opt_in => false`, used by the Shopify webhook path
+     * when the cart carries a falsy sidest_marketing_opt_in attribute. On
+     * EXISTING rows this flag is left alone — the EmailSubscription saved
+     * hook is the source of truth for consent changes over time.
+     *
+     * Phone/email/name inputs may be any of: string, empty string, whitespace,
+     * or null — the service normalizes everything, so callers can pass raw
+     * payload values without guarding.
+     *
+     * @param  array{email:string, full_name?:?string, phone?:?string, source:string, external_id?:?string, marketing_opt_in?:?bool}  $data
      */
     public function captureContact(string $professionalId, array $data): ?Customer
     {
@@ -47,15 +65,16 @@ class ContactCaptureService
                 return null;
             }
 
-            $fullName = trim((string) ($data['full_name'] ?? ''));
-            $fullName = $fullName !== '' ? $fullName : null;
-
-            $phone = trim((string) ($data['phone'] ?? ''));
-            $phone = $phone !== '' ? $phone : null;
+            $fullName = $this->normalizeNullable($data['full_name'] ?? null);
+            $phone = $this->normalizeNullable($data['phone'] ?? null);
 
             $source = trim((string) ($data['source'] ?? ''));
-            $externalId = isset($data['external_id']) ? trim((string) $data['external_id']) : '';
-            $externalId = $externalId !== '' ? $externalId : null;
+            $externalId = $this->normalizeNullable($data['external_id'] ?? null);
+
+            // Default: implicitly opted in unless the caller explicitly passed false.
+            $marketingOptIn = array_key_exists('marketing_opt_in', $data) && $data['marketing_opt_in'] !== null
+                ? (bool) $data['marketing_opt_in']
+                : true;
 
             $existing = Customer::query()
                 ->withTrashed()
@@ -67,7 +86,11 @@ class ContactCaptureService
                 if ($existing->trashed()) {
                     $existing->restore();
                 }
-                if ($fullName !== null) {
+                // Only accept a new full_name if it's more substantial than what's
+                // already stored — prevents raw order payloads from reverting
+                // affiliate-curated edits ("John Doe" staying, not being clobbered
+                // by "JOHN DOE").
+                if ($fullName !== null && $this->isMoreSubstantial($fullName, $existing->full_name)) {
                     $existing->full_name = $fullName;
                 }
                 // First capture wins — only fill source on rows that don't have one.
@@ -83,27 +106,18 @@ class ContactCaptureService
                 return $existing;
             }
 
-            $attributes = [
-                'professional_id' => $professionalId,
-                'full_name' => $fullName,
-                'email' => $email,
-                'phone' => $phone,
-                'source' => $source !== '' ? $source : null,
-                'external_id' => $externalId,
-                // Customers default to opted-out; captureMarketingSubscription() flips this via the EmailSubscription saved hook.
-                'marketing_opt_in_cached' => false,
-            ];
-
+            // professional_id isn't in Customer::$fillable (matches existing
+            // app convention — see AccountTypeDefaultsService), so we assign
+            // it after construction rather than via mass-assignment.
             try {
-                return Customer::query()->create($attributes);
+                return $this->createCustomerRow($professionalId, $fullName, $email, $phone, $source, $externalId, $marketingOptIn);
             } catch (QueryException $e) {
                 if ($e->getCode() !== '23505') {
                     throw $e;
                 }
-                // Phone collides with another contact on the same affiliate — retry without phone.
-                $attributes['phone'] = null;
 
-                return Customer::query()->create($attributes);
+                // Phone collides with another contact on the same affiliate — retry without phone.
+                return $this->createCustomerRow($professionalId, $fullName, $email, null, $source, $externalId, $marketingOptIn);
             }
         } catch (Throwable $e) {
             Log::warning('Contact capture failed', [
@@ -117,12 +131,76 @@ class ContactCaptureService
     }
 
     /**
+     * Create a Customer row with the given data. `professional_id` is set
+     * directly (not via fillable) to match the rest of the app.
+     */
+    private function createCustomerRow(
+        string $professionalId,
+        ?string $fullName,
+        string $email,
+        ?string $phone,
+        string $source,
+        ?string $externalId,
+        bool $marketingOptIn,
+    ): Customer {
+        $customer = new Customer([
+            'full_name' => $fullName,
+            'email' => $email,
+            'phone' => $phone,
+            'source' => $source !== '' ? $source : null,
+            'external_id' => $externalId,
+            'marketing_opt_in_cached' => $marketingOptIn,
+        ]);
+        $customer->professional_id = $professionalId;
+        $customer->save();
+
+        return $customer;
+    }
+
+    /**
+     * Trim and null-normalize a nullable string input. Returns null for
+     * null/empty/whitespace; returns the trimmed string otherwise.
+     */
+    private function normalizeNullable(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $trimmed = trim((string) $value);
+
+        return $trimmed !== '' ? $trimmed : null;
+    }
+
+    /**
+     * A replacement full_name is "more substantial" when the existing value is
+     * empty OR the incoming value is strictly longer (a longer string usually
+     * means more complete data — "John" < "John Doe" < "John Q. Doe"). Equal or
+     * shorter incoming values are treated as no-ops to preserve manual edits.
+     */
+    private function isMoreSubstantial(string $incoming, ?string $existing): bool
+    {
+        $existingTrimmed = trim((string) $existing);
+        if ($existingTrimmed === '') {
+            return true;
+        }
+
+        return mb_strlen($incoming) > mb_strlen($existingTrimmed);
+    }
+
+    /**
      * Upsert a marketing list subscription for the given affiliate + email.
      *
      * Creates an EmailSubscription row (list_key='marketing') if none exists, or
      * reactivates an existing one via markSubscribed(). The EmailSubscription
      * `saved` hook syncs the marketing_opt_in_cached flag on the matching
      * Customer row, so callers should run captureContact() first.
+     *
+     * Race handling: the unique index is (professional_id, list_key, email_lc).
+     * If two concurrent captures for the same email both miss the SELECT and
+     * both try to INSERT, Postgres raises 23505 on the loser. We re-fetch the
+     * row the winner just created and re-apply the loser's intended state to
+     * it (so a late opt-in doesn't lose to an earlier unsubscribe row). The
+     * whole upsert runs inside a transaction so the re-apply is atomic.
      *
      * @param  array{ip_hash?:?string, user_agent?:?string}  $consentMeta
      */
@@ -138,7 +216,55 @@ class ContactCaptureService
             return;
         }
 
+        $consent = [
+            'source' => $consentSource,
+            'ip_hash' => $consentMeta['ip_hash'] ?? null,
+            'user_agent' => $consentMeta['user_agent'] ?? null,
+        ];
+
         try {
+            $this->upsertMarketingSubscription($professionalId, $email, $fullName, $consent);
+        } catch (QueryException $e) {
+            // 23505 = another request beat us to the INSERT. Re-fetch and make
+            // sure the surviving row reflects the state we wanted (subscribed).
+            if ($e->getCode() === '23505') {
+                try {
+                    $this->reconcileRacedSubscription($professionalId, $email, $fullName, $consent);
+                } catch (Throwable $reconcileError) {
+                    Log::warning('Marketing subscription reconcile after race failed', [
+                        'professional_id' => $professionalId,
+                        'message' => $reconcileError->getMessage(),
+                    ]);
+                }
+
+                return;
+            }
+
+            Log::warning('Marketing subscription capture failed', [
+                'professional_id' => $professionalId,
+                'message' => $e->getMessage(),
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('Marketing subscription capture failed', [
+                'professional_id' => $professionalId,
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Do the SELECT-then-INSERT/UPDATE inside a transaction so our re-fetch
+     * on collision sees a consistent view.
+     *
+     * @param  array{source:?string, ip_hash:?string, user_agent:?string}  $consent
+     */
+    private function upsertMarketingSubscription(
+        string $professionalId,
+        string $email,
+        ?string $fullName,
+        array $consent,
+    ): void {
+        DB::connection('pgsql')->transaction(function () use ($professionalId, $email, $fullName, $consent) {
             $sub = EmailSubscription::query()
                 ->where('professional_id', $professionalId)
                 ->where('list_key', 'marketing')
@@ -163,27 +289,51 @@ class ContactCaptureService
                 }
             }
 
-            $sub->markSubscribed([
-                'source' => $consentSource,
-                'ip_hash' => $consentMeta['ip_hash'] ?? null,
-                'user_agent' => $consentMeta['user_agent'] ?? null,
-            ]);
-
+            $sub->markSubscribed($consent);
             $sub->save();
-        } catch (QueryException $e) {
-            // 23505 = another request won the race; fine to ignore.
-            if ($e->getCode() !== '23505') {
-                Log::warning('Marketing subscription capture failed', [
-                    'professional_id' => $professionalId,
-                    'message' => $e->getMessage(),
-                ]);
+        });
+    }
+
+    /**
+     * Re-fetch the row the race winner created and ensure it reflects the
+     * subscribed state we were trying to write. No-ops if the winner already
+     * wrote the same state; otherwise updates in place.
+     *
+     * @param  array{source:?string, ip_hash:?string, user_agent:?string}  $consent
+     */
+    private function reconcileRacedSubscription(
+        string $professionalId,
+        string $email,
+        ?string $fullName,
+        array $consent,
+    ): void {
+        DB::connection('pgsql')->transaction(function () use ($professionalId, $email, $fullName, $consent) {
+            $sub = EmailSubscription::query()
+                ->where('professional_id', $professionalId)
+                ->where('list_key', 'marketing')
+                ->where('email_lc', $email)
+                ->first();
+
+            if (! $sub) {
+                // Vanishingly unlikely — the row that collided with us somehow
+                // disappeared before we could fetch it. Nothing to reconcile.
+                return;
             }
-        } catch (Throwable $e) {
-            Log::warning('Marketing subscription capture failed', [
-                'professional_id' => $professionalId,
-                'message' => $e->getMessage(),
-            ]);
-        }
+
+            $needsUpdate = $sub->status !== 'subscribed';
+
+            if ($fullName !== null && $fullName !== '' && $sub->full_name !== $fullName) {
+                $sub->full_name = $fullName;
+                $needsUpdate = true;
+            }
+
+            if (! $needsUpdate) {
+                return;
+            }
+
+            $sub->markSubscribed($consent);
+            $sub->save();
+        });
     }
 
     /**

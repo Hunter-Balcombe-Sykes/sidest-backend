@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
-use App\Jobs\Analytics\RebuildBookingDailyAggregatesJob;
-use App\Jobs\Analytics\RebuildBookingHourlyAggregatesJob;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
+use App\Jobs\Analytics\RebuildBookingDailyAggregatesJob;
+use App\Jobs\Analytics\RebuildBookingHourlyAggregatesJob;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
@@ -20,7 +20,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
 // V2: Public booking flow (config, services, availability, checkout via Square). Booking integration — unrelated to V2 commerce.
@@ -46,6 +45,7 @@ class PublicBookingController extends ApiController
                 'professional_id' => $professional?->id,
                 'message' => $e->getMessage(),
             ]);
+
             return $this->error('Booking integration credentials could not be read. Please reconnect your booking integration.', 409);
         }
 
@@ -55,7 +55,8 @@ class PublicBookingController extends ApiController
                 'professional_id' => $professional?->id,
                 'message' => $e->getMessage(),
             ]);
-            return $this->error(ucfirst($context) . ' temporarily unavailable. Please try again shortly.', 502);
+
+            return $this->error(ucfirst($context).' temporarily unavailable. Please try again shortly.', 502);
         }
 
         Log::warning("Public {$context} failed unexpectedly", [
@@ -63,6 +64,7 @@ class PublicBookingController extends ApiController
             'professional_id' => $professional?->id,
             'message' => $e->getMessage(),
         ]);
+
         return $this->error(sprintf('%s currently unavailable. (%s)', ucfirst($context), $this->diagnosticCode($e)), 409);
     }
 
@@ -269,7 +271,7 @@ class PublicBookingController extends ApiController
 
             $customerNoteParts = array_values(array_filter([
                 trim((string) ($validated['customer']['note'] ?? '')),
-                'Preferred payment method: ' . $preferredPaymentMethod,
+                'Preferred payment method: '.$preferredPaymentMethod,
             ]));
 
             $bookingResponse = $this->squareApiClient->request($professional, 'POST', '/v2/bookings', [], [
@@ -331,7 +333,7 @@ class PublicBookingController extends ApiController
                 // Revert booking if payment fails so customers are not left with unpaid confirmed bookings.
                 if ($bookingId !== '' && $bookingVersion > 0) {
                     try {
-                        $this->squareApiClient->request($professional, 'POST', '/v2/bookings/' . $bookingId . '/cancel', [], [
+                        $this->squareApiClient->request($professional, 'POST', '/v2/bookings/'.$bookingId.'/cancel', [], [
                             'booking_version' => $bookingVersion,
                         ]);
                     } catch (\Throwable) {
@@ -487,7 +489,6 @@ class PublicBookingController extends ApiController
     }
 
     /**
-     * @param  string|null  $locationId
      * @return array{id:string,name:string,country:string,currency:string,status:string}
      */
     private function resolveLocation(Professional $professional, ?string $locationId): array
@@ -615,7 +616,9 @@ class PublicBookingController extends ApiController
     /**
      * Upsert a local CRM contact after successful public booking checkout.
      * Delegates to ContactCaptureService, which is non-blocking: booking success
-     * never fails if contact sync fails.
+     * never fails if contact sync fails. The service handles all
+     * null/empty/whitespace normalization for phone and full_name, and
+     * defaults marketing_opt_in to true (implicit consent on booking).
      *
      * @param  array<string, mixed>  $customerData
      */
@@ -623,11 +626,11 @@ class PublicBookingController extends ApiController
     {
         $firstName = trim((string) ($customerData['firstName'] ?? ''));
         $lastName = trim((string) ($customerData['lastName'] ?? ''));
-        $fullName = trim($firstName . ' ' . $lastName);
+        $fullName = trim($firstName.' '.$lastName);
 
         $this->contactCapture->captureContact((string) $professional->id, [
             'email' => (string) ($customerData['email'] ?? ''),
-            'full_name' => $fullName !== '' ? $fullName : null,
+            'full_name' => $fullName,
             'phone' => (string) ($customerData['phone'] ?? ''),
             'source' => 'square_booking',
         ]);
