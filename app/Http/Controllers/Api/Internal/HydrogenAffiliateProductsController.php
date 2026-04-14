@@ -16,7 +16,20 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
-// V2: Internal endpoint for Hydrogen loaders. Returns ordered product GIDs for an affiliate, or brand default collection as fallback.
+/**
+ * V2: Internal endpoint for Hydrogen loaders. Returns ordered product GIDs for an
+ * affiliate (or the brand's default collection as a fallback), plus the metadata
+ * Hydrogen needs to render and enforce brand-controlled rules:
+ *
+ *   - custom_photos: per-product affiliate-uploaded lifestyle photos
+ *   - custom_photo_position: where to place them in the product gallery
+ *   - enabled_variants: brand-restricted variant subset (sparse map; absent key = no restriction)
+ *
+ * Hydrogen fetches product detail directly from Shopify Storefront API; this endpoint
+ * tells it WHICH products to show and WHICH variants/photos are allowed for each.
+ *
+ * Full contract: docs/brand-catalog-v2.md §4.3
+ */
 class HydrogenAffiliateProductsController extends ApiController
 {
     public function show(Request $request): JsonResponse
@@ -62,6 +75,10 @@ class HydrogenAffiliateProductsController extends ApiController
                 ? $this->getCustomPhotos($affiliateId, $selections)
                 : [];
 
+            // Sparse map: only includes products that have an active variant restriction.
+            // Hydrogen treats an absent key as "no restriction → offer all variants".
+            // Triggers a Shopify Admin API call per Hydrogen catalog fetch (~200ms);
+            // add Redis caching here if it shows up in monitoring.
             $enabledVariants = $integration
                 ? app(BrandCatalogService::class)->fetchEnabledVariantsMap($integration, $selections)
                 : [];

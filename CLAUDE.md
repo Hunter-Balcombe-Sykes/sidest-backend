@@ -74,6 +74,18 @@ php artisan tinker # Interactive REPL
 - Tests: `tests/Feature/{domain}/` for integration, `tests/Unit/` for isolated logic
 - Write Pest tests for new features and bug fixes
 
+### Commenting
+
+Comment enough that a reader (Tobias, frontend Claude, future-you) can understand a file without tracing every call. **Not extensive — purposeful.**
+
+- **Always comment**: non-obvious WHY (a constraint, a Shopify quirk, an ordering requirement, a workaround), the contract a method enforces, the meaning of "magic" defaults (e.g. `null = all enabled`), and the shape of complex JSON/array structures.
+- **Brief docblocks** on public service methods and controller actions: 1-3 lines explaining purpose + return shape. Use `@return array{...}` shape annotations for complex returns.
+- **Inline comments** above non-trivial blocks (filtering, validation, cache busting) — one short line saying *why*, not *what*.
+- **Avoid**: paragraph-long essays, comments that just restate the next line, decorative banners, TODO graveyards.
+- **Test files**: descriptive `it(...)` names are usually enough — only comment when setup is non-obvious.
+
+When in doubt, ask: "if I deleted this comment, would a new dev have to read 3 other files to understand?" If yes, keep it.
+
 ## Workflow
 
 ### Plan First
@@ -110,5 +122,5 @@ php artisan tinker # Interactive REPL
 - Create Laravel migration files (use `supabase/migrations/` with raw SQL)
 - Modify `.env` directly — reference `.env.example` for available keys
 - Return raw Eloquent models from API endpoints (use Resource classes)
-- Add docstrings, comments, or type annotations to code you didn't change
 - Over-engineer simple fixes — three similar lines > a premature abstraction
+- Drown files in comments — see "Commenting" above for the bar

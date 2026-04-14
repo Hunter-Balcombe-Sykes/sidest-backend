@@ -77,7 +77,12 @@ class BrandCatalogController extends ApiController
     /**
      * PATCH /brand/catalog/{productGid}/metafields
      *
-     * Batch update active, commission_override, and affiliate_discount_pct on one product.
+     * Bulk update any combination of sidest.* metafields on one product in a single
+     * Shopify GraphQL call. All fields are optional — only the keys present in the
+     * request are touched. Sending null (or [] for arrays) deletes the metafield,
+     * which restores the dynamic default for that setting.
+     *
+     * Full conceptual model + scenario table: docs/brand-catalog-v2.md
      */
     public function updateMetafields(UpdateProductMetafieldsRequest $request, string $productGid): JsonResponse
     {
@@ -141,10 +146,15 @@ class BrandCatalogController extends ApiController
             }
         }
 
+        // Variant gating: brands restrict which variants of a product affiliates may sell.
+        // Null/empty deletes the metafield (dynamic default = all variants enabled, including
+        // any variants the brand later adds in Shopify). A non-empty array freezes the list.
+        // Strict validation guarantees the saved metafield never references a GID that doesn't
+        // belong to this product — prevents typos, stale data, and hand-crafted API calls
+        // from polluting Shopify.
         if (array_key_exists('enabled_variant_gids', $validated)) {
             $submitted = $validated['enabled_variant_gids'];
 
-            // Null or empty array → clear restriction (default: all variants offered).
             if ($submitted === null || $submitted === []) {
                 try {
                     $this->catalogService->deleteProductMetafield($integration, $productGid, 'enabled_variant_gids');
@@ -152,6 +162,9 @@ class BrandCatalogController extends ApiController
                     return $this->error('Unable to reach Shopify. Please try again.', 502);
                 }
             } else {
+                // Fetch the product's actual variants from Shopify so we can validate
+                // every submitted GID belongs to this product. One extra GraphQL call
+                // per variant-gating write — acceptable because writes are infrequent.
                 try {
                     $productVariantGids = $this->catalogService->fetchProductVariantGids($integration, $productGid);
                 } catch (\Throwable $e) {

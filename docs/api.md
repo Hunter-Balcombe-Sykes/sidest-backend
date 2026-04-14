@@ -29,9 +29,17 @@ This document is the single source of truth for backend so the frontend can buil
 - Backend env var checklist
 - Known implementation gotchas
 
+## Companion Docs
+
+- **[docs/brand-catalog-v2.md](./brand-catalog-v2.md)** — full conceptual guide to the v2 brand catalog (`sidest.*` Shopify metafield model, variant gating, brand → affiliate inheritance, Hydrogen integration). Read this before working on anything brand-catalog or product-variant related.
+
 ## 0) Recent Backend Changes (Commit Log Snapshot)
 
-Snapshot date: **April 11, 2026**.
+Snapshot date: **April 14, 2026**.
+
+### April 14, 2026
+
+- Add brand-controlled variant gating: new `sidest.enabled_variant_gids` JSON metafield restricts which Shopify product variants are offered to affiliates. Empty/missing = all variants enabled (auto-tracks new Shopify variants); non-empty = only those variants offered. Picking one variant = "standalone product" mode. Hydrogen receives an `enabled_variants` map for storefront enforcement. **See [docs/brand-catalog-v2.md](./brand-catalog-v2.md) for the full conceptual model, scenario table, and frontend integration guide.**
 
 ### April 11, 2026
 
@@ -1541,6 +1549,78 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
 
 <!-- V1 Store sections removed: Brand/Distributor Catalog Management, Affiliate Access Overrides, Per-Affiliate Product Pricing Settings.
      Products live in Shopify; commission rates in Shopify metafields. No local brand_products table. -->
+
+### Store: Brand Catalog Management (v2)
+
+> **Full conceptual guide:** [docs/brand-catalog-v2.md](./brand-catalog-v2.md)
+>
+> Covers the `sidest.*` metafield model, brand → affiliate inheritance, the variant gating scenario table, frontend integration expectations for the brand dashboard and Hydrogen storefront, and implementation pointers.
+
+Brand-controlled product configuration (active flag, commission, discount, custom photos, variant restrictions) lives in Shopify product metafields under the `sidest.*` namespace. There is no local mirror of the brand catalog.
+
+#### `GET /api/brand/catalog`
+- Purpose: full Shopify product catalog with `sidest.*` metafields merged in. Used by the brand dashboard catalog UI.
+- Auth: Required (brand-type professional)
+- Response (200): `{ "products": [{ "gid", "title", "handle", "status", "featured_image", "price_range", "variants": [...], "metafields": { "active", "commission_override", "affiliate_discount_pct", "custom_photos_enabled", "enabled_variant_gids" } }] }`
+- Common status codes: 200, 401, 403, 422, 502
+
+#### `GET /api/brand/catalog/all`
+- Purpose: same shape as above but includes draft and archived products.
+- Auth: Required (brand-type professional)
+- Common status codes: 200, 401, 403, 422, 502
+
+#### `PATCH /api/brand/catalog/{productGid}/metafields`
+- Purpose: bulk update any combination of `sidest.*` metafields on one product in a single Shopify GraphQL call.
+- Auth: Required (brand-type professional)
+- Throttle: `brand-catalog-writes`
+- Request body (all fields optional):
+  - `active`: boolean
+  - `commission_override`: nullable numeric (0-100). `null` deletes the override.
+  - `affiliate_discount_pct`: nullable numeric (0-100). `null` deletes the override.
+  - `custom_photos_enabled`: nullable boolean. `null` deletes the per-product override (falls through to brand-level setting).
+  - `enabled_variant_gids`: nullable array of variant GIDs (e.g. `["gid://shopify/ProductVariant/123"]`). `null` or `[]` **deletes** the metafield, restoring the dynamic default (all variants enabled, including any new variants added in Shopify later). Strict validation: every submitted GID must belong to that product's variants — invalid GIDs return 422 with no partial write.
+- Response (200): `{ "updated": true }`
+- Common status codes: 200, 401, 403, 422, 502
+
+#### `PATCH /api/brand/catalog/{productGid}/active`
+- Purpose: shortcut for toggling `sidest.active` only. Prefer the bulk `metafields` endpoint for any UI editing multiple settings at once.
+- Auth: Required (brand-type professional)
+- Throttle: `brand-catalog-writes`
+- Request body: `{ "active": true }`
+- Response (200): `{ "active": true }`
+- Common status codes: 200, 401, 403, 422, 502
+
+#### `PATCH /api/brand/catalog/{productGid}/commission`
+- Purpose: shortcut for `sidest.commission_override` only.
+- Auth: Required (brand-type professional)
+- Throttle: `brand-catalog-writes`
+- Request body: `{ "commission_override": 25.0 }` (or `null` to clear)
+- Response (200): `{ "commission_override": 25.0 }`
+- Common status codes: 200, 401, 403, 422, 502
+
+#### `PATCH /api/brand/catalog/{productGid}/discount`
+- Purpose: shortcut for `sidest.affiliate_discount_pct` only.
+- Auth: Required (brand-type professional)
+- Throttle: `brand-catalog-writes`
+- Request body: `{ "affiliate_discount_pct": 10.0 }` (or `null` to clear)
+- Response (200): `{ "affiliate_discount_pct": 10.0 }`
+- Common status codes: 200, 401, 403, 422, 502
+
+#### Hydrogen internal endpoint
+
+`GET /api/internal/hydrogen/affiliate-products?affiliate_id={uuid}` returns:
+
+```json
+{
+  "gids": ["gid://shopify/Product/111"],
+  "source": "affiliate_selections",
+  "custom_photo_position": "after",
+  "custom_photos": { "gid://shopify/Product/111": [{ "url": "...", "alt_text": "..." }] },
+  "enabled_variants": { "gid://shopify/Product/111": ["gid://shopify/ProductVariant/123"] }
+}
+```
+
+`enabled_variants` keys are **only present** when a product has an active variant restriction. Absent key = no restriction = storefront should offer all variants. See [docs/brand-catalog-v2.md §4.3](./brand-catalog-v2.md) for the full contract.
 
 ### Store: Brand Settings
 

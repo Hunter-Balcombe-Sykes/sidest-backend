@@ -211,7 +211,11 @@ GRAPHQL;
             $product['commission_override'] = $meta['commission_override'] ?? null;
             $product['affiliate_discount_pct'] = $meta['affiliate_discount_pct'] ?? null;
 
-            // Restrict variants to the brand's allowed set when one is configured.
+            // Server-side variant filter: when the brand has set sidest.enabled_variant_gids,
+            // hide every other variant from the affiliate entirely. This is the only gate
+            // on the affiliate-facing path — there is no client-side filtering. Missing or
+            // empty restriction = pass all variants through (dynamic default; auto-tracks
+            // any new variants the brand later adds in Shopify).
             $enabledVariants = $meta['enabled_variant_gids'] ?? null;
             if (is_array($enabledVariants) && ! empty($enabledVariants)) {
                 $allowed = array_flip($enabledVariants);

@@ -304,9 +304,14 @@ GRAPHQL;
     }
 
     /**
-     * Fetch the full set of variant GIDs for a single product (write-path validation).
+     * Fetch the full set of variant GIDs for a single product. Used by the write path
+     * to verify a brand-submitted enabled_variant_gids list only contains GIDs that
+     * actually belong to this product. One GraphQL call regardless of catalog size.
      *
-     * @return array<int, string>
+     * Limited to the first 100 variants — the realistic per-product cap. Raise the
+     * limit here if a brand ever ships a product with more than 100 variants.
+     *
+     * @return array<int, string>  Variant GID strings, e.g. ["gid://shopify/ProductVariant/1", ...]
      */
     public function fetchProductVariantGids(ProfessionalIntegration $integration, string $productGid): array
     {
@@ -329,11 +334,16 @@ GRAPHQL;
     }
 
     /**
-     * Fetch the enabled_variant_gids metafield for a list of product GIDs in one call.
-     * Returns a map keyed by product GID. Products with no restriction are omitted.
+     * Fetch the enabled_variant_gids metafield for many products in one GraphQL call,
+     * used by the Hydrogen storefront to filter variant pickers and enforce restrictions
+     * at the cart layer.
+     *
+     * Returns a sparse map: a product GID is present **only when** it has a non-empty
+     * restriction. Absent key = no restriction = storefront should offer all variants.
+     * This contract lets Hydrogen treat the map as an opt-in override, not a denylist.
      *
      * @param  array<int, string>  $productGids
-     * @return array<string, array<int, string>>
+     * @return array<string, array<int, string>>  Map of product GID → allowed variant GIDs
      */
     public function fetchEnabledVariantsMap(ProfessionalIntegration $integration, array $productGids): array
     {
@@ -380,9 +390,9 @@ GRAPHQL;
     }
 
     /**
-     * Decode the enabled_variant_gids metafield value (stored as JSON string).
-     * Returns null when the metafield is unset, empty array when explicitly empty,
-     * or the decoded list of variant GIDs.
+     * Decode the enabled_variant_gids metafield value (Shopify stores JSON metafields
+     * as JSON-encoded strings). Returns null for unset / malformed values so callers
+     * can apply the dynamic-default rule (null = all variants enabled).
      *
      * @return array<int, string>|null
      */
