@@ -16,15 +16,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 beforeEach(function () {
-    $sqlite = config('database.connections.sqlite');
-    config([
-        'database.default' => 'sqlite',
-        'database.connections.pgsql' => array_merge($sqlite, ['database' => ':memory:']),
-    ]);
-
-    DB::purge('pgsql');
-    DB::reconnect('pgsql');
-
+    // TestCase::setUp already redirects 'pgsql' to in-memory SQLite and sets
+    // it as the default connection, so we don't need to redefine it here.
     $conn = DB::connection('pgsql');
 
     foreach (['core', 'site', 'brand', 'notifications'] as $schema) {
@@ -120,6 +113,21 @@ beforeEach(function () {
         expires_at TEXT,
         created_at TEXT,
         updated_at TEXT
+    )');
+
+    // ProfessionalIntegration is queried by ProfessionalSetupService and
+    // related onboarding flows when an affiliate connects to a brand. Without
+    // it, the connection-creating tests fail with "no such table".
+    $conn->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        access_token TEXT NULL,
+        provider_metadata TEXT NULL,
+        status TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL,
+        deleted_at TEXT NULL
     )');
 })->group('open-invite');
 

@@ -12,10 +12,10 @@ use Illuminate\Validation\ValidationException;
 beforeEach(function () {
     setupCoreSchema();
 
-    DB::table('site_subdomain_aliases')->delete();
-    DB::table('public_site_payload')->delete();
-    DB::table('sites')->delete();
-    DB::table('professionals')->delete();
+    DB::table('site.site_subdomain_aliases')->delete();
+    DB::table('site.public_site_payload')->delete();
+    DB::table('site.sites')->delete();
+    DB::table('core.professionals')->delete();
 })->group('subdomain');
 
 it('prevents professionals from changing subdomain within 30 days', function () {
@@ -24,12 +24,12 @@ it('prevents professionals from changing subdomain within 30 days', function () 
     $proId = (string) Str::uuid();
     $siteId = (string) Str::uuid();
 
-    DB::table('professionals')->insert([
+    DB::table('core.professionals')->insert([
         'id' => $proId,
         'display_name' => 'Test Pro',
     ]);
 
-    DB::table('sites')->insert([
+    DB::table('site.sites')->insert([
         'id' => $siteId,
         'professional_id' => $proId,
         'subdomain' => 'old',
@@ -50,12 +50,12 @@ it('stores old subdomain as alias after a valid change', function () {
     $proId = (string) Str::uuid();
     $siteId = (string) Str::uuid();
 
-    DB::table('professionals')->insert([
+    DB::table('core.professionals')->insert([
         'id' => $proId,
         'display_name' => 'Test Pro',
     ]);
 
-    DB::table('sites')->insert([
+    DB::table('site.sites')->insert([
         'id' => $siteId,
         'professional_id' => $proId,
         'subdomain' => 'old',
@@ -71,7 +71,7 @@ it('stores old subdomain as alias after a valid change', function () {
     expect($site->subdomain)->toBe('new');
     expect($site->subdomain_changed_at->toDateString())->toBe('2025-01-15');
 
-    $alias = DB::table('site_subdomain_aliases')
+    $alias = DB::table('site.site_subdomain_aliases')
         ->where('site_id', $siteId)
         ->first();
 
@@ -88,26 +88,26 @@ it('redirects old subdomain to new site host', function () {
     $siteId = (string) Str::uuid();
     $aliasId = (string) Str::uuid();
 
-    DB::table('professionals')->insert([
+    DB::table('core.professionals')->insert([
         'id' => $proId,
         'display_name' => 'Test Pro',
     ]);
 
-    DB::table('sites')->insert([
+    DB::table('site.sites')->insert([
         'id' => $siteId,
         'professional_id' => $proId,
         'subdomain' => 'new',
         'is_published' => 1,
     ]);
 
-    DB::table('site_subdomain_aliases')->insert([
+    DB::table('site.site_subdomain_aliases')->insert([
         'id' => $aliasId,
         'site_id' => $siteId,
         'subdomain' => 'old',
         'created_at' => now()->toDateTimeString(),
     ]);
 
-    DB::table('public_site_payload')->insert([
+    DB::table('site.public_site_payload')->insert([
         'site_id' => $siteId,
         'subdomain' => 'new',
         'payload' => json_encode(['site' => ['id' => $siteId]]),
@@ -121,38 +121,69 @@ it('redirects old subdomain to new site host', function () {
 
 function setupCoreSchema(): void
 {
-    $driver = DB::getDriverName();
+    // Run all schema setup on the 'pgsql' connection explicitly. Models in
+    // this project extend BaseModel which forces $connection = 'pgsql', so
+    // any tables we create on a different connection are invisible to them
+    // — even though both connections may resolve to the same SQLite driver.
+    $conn = DB::connection('pgsql');
+    $driver = $conn->getDriverName();
 
     if ($driver === 'sqlite') {
+        // SQLite doesn't have schemas; fake them via ATTACH DATABASE so
+        // models that reference 'core.professionals' / 'site.public_site_payload'
+        // resolve correctly.
         try {
-            DB::statement("ATTACH DATABASE ':memory:' AS core");
+            $conn->statement("ATTACH DATABASE ':memory:' AS core");
         } catch (\Throwable $e) {
             // Ignore if already attached.
         }
 
-        DB::statement('CREATE TABLE IF NOT EXISTS core.professionals (
+        try {
+            $conn->statement("ATTACH DATABASE ':memory:' AS site");
+        } catch (\Throwable $e) {
+            // Ignore if already attached.
+        }
+
+        // Permissive professionals table — only the columns this test (and
+        // soft-delete scopes added by Eloquent) need. Everything nullable
+        // because we don't care about prod constraints in tests.
+        $conn->statement('CREATE TABLE IF NOT EXISTS core.professionals (
             id TEXT PRIMARY KEY,
-            display_name TEXT NULL
+            display_name TEXT NULL,
+            handle TEXT NULL,
+            handle_lc TEXT NULL,
+            professional_type TEXT NULL,
+            status TEXT NULL,
+            deleted_at TEXT NULL,
+            created_at TEXT NULL,
+            updated_at TEXT NULL
         )');
 
-        DB::statement('CREATE TABLE IF NOT EXISTS core.sites (
+        // Sites live under site.sites in production (Site model: $table = 'site.sites').
+        // Add deleted_at for soft-delete scope compatibility.
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.sites (
             id TEXT PRIMARY KEY,
             professional_id TEXT NULL,
             subdomain TEXT NULL,
             subdomain_changed_at TEXT NULL,
             is_published INTEGER NULL,
+            settings TEXT NULL,
+            deleted_at TEXT NULL,
             created_at TEXT NULL,
             updated_at TEXT NULL
         )');
 
-        DB::statement('CREATE TABLE IF NOT EXISTS core.site_subdomain_aliases (
+        // site_subdomain_aliases lives under the 'site' schema in production.
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.site_subdomain_aliases (
             id TEXT PRIMARY KEY,
             site_id TEXT NOT NULL,
             subdomain TEXT NOT NULL,
             created_at TEXT NOT NULL
         )');
 
-        DB::statement('CREATE TABLE IF NOT EXISTS core.public_site_payload (
+        // The PublicSitePayload view lives under the 'site' schema in production;
+        // mirror it as a plain table here so the model's table reference resolves.
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.public_site_payload (
             site_id TEXT PRIMARY KEY,
             subdomain TEXT NULL,
             payload TEXT NULL

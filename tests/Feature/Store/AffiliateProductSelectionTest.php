@@ -219,19 +219,16 @@ it('returns 422 for invalid GID format on delete', function () {
     expect($response->getData(true)['message'])->toContain('Invalid product GID');
 });
 
-it('returns 404 when deleting non-existent selection', function () {
-    // Mock the AffiliateProductSelection query to return null without DB
+it('returns 422 when deleting with invalid GID format', function () {
+    // The test name was previously "returns 404 when deleting non-existent
+    // selection" but the test only ever exercises the GID-format validation
+    // path (it passes 'not-a-gid' which gets rejected before the query runs).
+    // Renamed to match what's actually being tested.
     $service = app(AffiliateProductCatalogService::class);
     $controller = new AffiliateProductController($service);
 
     $pro = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'influencer', 'status' => 'active']);
 
-    // Mock the query builder to avoid DB hit
-    $mock = Mockery::mock('alias:' . AffiliateProductSelection::class);
-    $mock->shouldReceive('query->where->where->first')->andReturn(null);
-
-    // Instead of hitting DB, test the controller logic by checking the GID validation first
-    // then test with a GID that passes validation but won't be found
     $response = $controller->destroy(makeAffiliateRequest('DELETE', [], $pro), 'not-a-gid');
 
     expect($response->status())->toBe(422);

@@ -4,16 +4,11 @@ use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
-    config()->set('database.connections.pgsql', [
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-        'prefix' => '',
-        'foreign_key_constraints' => true,
-    ]);
-    DB::purge('pgsql');
-    DB::reconnect('pgsql');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS professional_confirmation_preferences (
+    // TestCase::setUp redirects 'pgsql' to in-memory SQLite already.
+    // Just attach the 'core' schema and create the table under it so the
+    // model's $table = 'core.professional_confirmation_preferences' resolves.
+    attachTestSchemas();
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.professional_confirmation_preferences (
         id TEXT PRIMARY KEY,
         professional_id TEXT NOT NULL,
         action_key TEXT NOT NULL,

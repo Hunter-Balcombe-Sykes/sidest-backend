@@ -202,62 +202,17 @@ it('throws when storage listing fails during video cleanup', function () {
 
 function bootstrapMediaJobsSchema(): void
 {
-    $sqlite = config('database.connections.sqlite');
-
-    config([
-        'database.default' => 'sqlite',
-        'database.connections.pgsql' => array_merge($sqlite, ['database' => ':memory:']),
-    ]);
-
-    DB::purge('pgsql');
-    DB::reconnect('pgsql');
-
-    $db = DB::connection('pgsql');
-
-    $db->statement('CREATE TABLE IF NOT EXISTS site_media (
-        id TEXT PRIMARY KEY,
-        site_id TEXT NULL,
-        pool TEXT NOT NULL,
-        path TEXT NOT NULL,
-        alt_text TEXT NULL,
-        sort_order INTEGER NOT NULL DEFAULT 0,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        media_type TEXT NOT NULL DEFAULT \'image\',
-        processing_state TEXT NOT NULL DEFAULT \'pending\',
-        original_mime TEXT NULL,
-        original_size_bytes INTEGER NULL,
-        duration_ms INTEGER NULL,
-        poster_path TEXT NULL,
-        processing_error TEXT NULL,
-        deleted_at TEXT NULL,
-        created_at TEXT NULL,
-        updated_at TEXT NULL
-    )');
-
-    $db->statement('CREATE TABLE IF NOT EXISTS media_variants (
-        id TEXT PRIMARY KEY,
-        media_id TEXT NOT NULL,
-        variant_key TEXT NOT NULL,
-        artifact_type TEXT NOT NULL,
-        disk TEXT NULL,
-        path TEXT NOT NULL,
-        mime TEXT NULL,
-        width INTEGER NULL,
-        height INTEGER NULL,
-        bitrate_kbps INTEGER NULL,
-        file_size_bytes INTEGER NULL,
-        duration_ms INTEGER NULL,
-        metadata TEXT NULL,
-        created_at TEXT NULL,
-        updated_at TEXT NULL
-    )');
+    // Models reference 'site.site_media' / 'site.media_variants' (with schema
+    // prefix). The shared helper in tests/Pest.php attaches the 'site' schema
+    // and creates both tables with the production column set.
+    setupMediaTables();
 }
 
 function seedSiteImageRow(string $mediaType): string
 {
     $id = (string) Str::uuid();
 
-    DB::connection('pgsql')->table('site_media')->insert([
+    DB::connection('pgsql')->table('site.site_media')->insert([
         'id' => $id,
         'site_id' => (string) Str::uuid(),
         'pool' => 'gallery',

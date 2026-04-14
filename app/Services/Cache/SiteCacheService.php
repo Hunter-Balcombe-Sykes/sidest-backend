@@ -146,6 +146,13 @@ class SiteCacheService
                 'sections' => $sections,
                 'blocks' => $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks),
                 'legal' => $payload['legal'] ?? null,
+                // Preserve the store sub-object from the source payload so that
+                // withStorePayload() below can lift selected_products + commission
+                // settings out of payload.store. Without this, the rebuilt $data
+                // has no 'store' key and withStorePayload falls through to empty
+                // defaults — the front-end would see no featured products even
+                // though the view row contains them.
+                'store' => $payload['store'] ?? null,
             ];
             $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
             $data = $this->safeWithStorePayload($data, (string) ($row->professional_id ?? ''), $subdomain);

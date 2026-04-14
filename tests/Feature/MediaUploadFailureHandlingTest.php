@@ -63,7 +63,9 @@ it('dispatches video cleanup with directory base path when deleting media', func
     $controller = new ProfessionalUploadController($mediaService);
     $siteImage = SiteMedia::query()->findOrFail($mediaId);
 
-    $response = $controller->destroy($siteImage);
+    // Controller signature was changed to (Request, SiteMedia) — test was
+    // calling it with the legacy single-arg form.
+    $response = $controller->destroy($request, $siteImage);
 
     expect($response->getStatusCode())->toBe(200);
 
@@ -126,56 +128,12 @@ it('returns 503 and soft-deletes media when video dispatch fails', function () {
 
 function bootstrapMediaUploadFailureSchema(): void
 {
-    $sqlite = config('database.connections.sqlite');
-
-    config([
-        'database.default' => 'sqlite',
-        'database.connections.pgsql' => array_merge($sqlite, ['database' => ':memory:']),
-    ]);
-
-    DB::purge('pgsql');
-    DB::reconnect('pgsql');
-
-    $db = DB::connection('pgsql');
-
-    $db->statement('CREATE TABLE IF NOT EXISTS professionals (
-        id TEXT PRIMARY KEY,
-        professional_type TEXT NULL,
-        display_name TEXT NULL,
-        deleted_at TEXT NULL,
-        created_at TEXT NULL,
-        updated_at TEXT NULL
-    )');
-
-    $db->statement('CREATE TABLE IF NOT EXISTS sites (
-        id TEXT PRIMARY KEY,
-        professional_id TEXT NOT NULL,
-        subdomain TEXT NULL,
-        is_published INTEGER NULL,
-        settings TEXT NULL,
-        created_at TEXT NULL,
-        updated_at TEXT NULL
-    )');
-
-    $db->statement('CREATE TABLE IF NOT EXISTS site_media (
-        id TEXT PRIMARY KEY,
-        site_id TEXT NOT NULL,
-        pool TEXT NOT NULL,
-        path TEXT NOT NULL,
-        alt_text TEXT NULL,
-        sort_order INTEGER NOT NULL DEFAULT 0,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        media_type TEXT NOT NULL DEFAULT \'image\',
-        processing_state TEXT NOT NULL DEFAULT \'pending\',
-        original_mime TEXT NULL,
-        original_size_bytes INTEGER NULL,
-        duration_ms INTEGER NULL,
-        poster_path TEXT NULL,
-        processing_error TEXT NULL,
-        deleted_at TEXT NULL,
-        created_at TEXT NULL,
-        updated_at TEXT NULL
-    )');
+    // Models reference schema-qualified tables (core.professionals, site.sites,
+    // site.site_media). The shared helpers in tests/Pest.php attach the right
+    // schemas and create tables under them.
+    setupProfessionalsTable();
+    setupSitesTable();
+    setupMediaTables();
 }
 
 /**
@@ -186,7 +144,7 @@ function createProfessionalAndSiteForMediaUploadTests(): array
     $professionalId = (string) Str::uuid();
     $siteId = (string) Str::uuid();
 
-    DB::connection('pgsql')->table('professionals')->insert([
+    DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $professionalId,
         'professional_type' => 'professional',
         'display_name' => 'Test Professional',
@@ -194,7 +152,7 @@ function createProfessionalAndSiteForMediaUploadTests(): array
         'updated_at' => now()->toDateTimeString(),
     ]);
 
-    DB::connection('pgsql')->table('sites')->insert([
+    DB::connection('pgsql')->table('site.sites')->insert([
         'id' => $siteId,
         'professional_id' => $professionalId,
         'subdomain' => 'test-pro',

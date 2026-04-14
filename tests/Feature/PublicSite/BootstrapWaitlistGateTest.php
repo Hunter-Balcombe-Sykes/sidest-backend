@@ -9,22 +9,11 @@ use App\Services\Professional\SiteProvisioningService;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
-    $sqlite = config('database.connections.sqlite');
+    config(['sidest.waitlist.enabled' => true]);
 
-    config([
-        'database.default' => 'sqlite',
-        'database.connections.pgsql' => array_merge($sqlite, ['database' => ':memory:']),
-        'sidest.waitlist.enabled' => true,
-    ]);
-
-    DB::purge('pgsql');
-    DB::reconnect('pgsql');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS professionals (
-        id TEXT PRIMARY KEY,
-        auth_user_id TEXT NOT NULL,
-        deleted_at TEXT NULL
-    )');
+    // TestCase::setUp redirects 'pgsql' to in-memory SQLite. Use the shared
+    // helper to attach 'core' and create core.professionals.
+    setupProfessionalsTable();
 })->group('bootstrap-waitlist-gate');
 
 it('blocks bootstrap for new users when waitlist mode is enabled', function () {
@@ -44,7 +33,7 @@ it('blocks bootstrap for new users when waitlist mode is enabled', function () {
 });
 
 it('detects existing professionals by supabase auth user id', function () {
-    DB::connection('pgsql')->table('professionals')->insert([
+    DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => '00000000-0000-0000-0000-000000000001',
         'auth_user_id' => 'existing-user-uid',
     ]);
