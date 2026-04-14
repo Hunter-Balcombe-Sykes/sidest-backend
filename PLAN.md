@@ -2135,18 +2135,17 @@ Affiliates have a 30-day grace period after signup to connect their Stripe accou
 
 Brands set how many days commission is held before it releases to affiliates. This is a per-brand financial setting stored in the Side St DB.
 
-**Where it lives:** `payout_hold_days` column on the brand's settings record in Side St DB (not a Shopify metafield — this is a financial/legal setting Side St controls). Default: 14 days.
+**Where it lives:** `payout_hold_days` column on `retail.brand_store_settings` in Side St DB (not a Shopify metafield — this is a financial/legal setting Side St controls). Column is `DEFAULT NULL`; when unset, brands fall back to `SIDEST_STORE_PAYOUT_HOLD_DAYS` (system default: 7 days).
 
 **Frontend (`app/account/payments/` or `app/shopify-admin/settings/`):**
-- Number input: "Commission hold period (days)"
+- Dropdown: "Commission hold period" with three fixed options — 7 / 14 / 28 days
 - Show explanation: "Commissions are held for this many days after a sale before releasing to affiliates. This gives you time to process refunds."
-- Minimum: 7 days. Maximum: 60 days.
-- Calls `PATCH /api/brand/payout-settings` on save
+- Calls `PATCH /api/brand/store-settings` on save (payout hold is bundled alongside other brand store settings — no dedicated payout-settings endpoint)
 
 **Backend:**
-- `PATCH /api/brand/payout-settings` — accepts `{ payout_hold_days: number }`, validates min 7 / max 60, saves to DB
-- `GET /api/brand/payout-settings` — returns current hold period so the frontend can display it
-- The payout cron job already reads `payout_hold_days` from this record — no changes needed to the cron job itself
+- `PATCH /api/brand/store-settings` — accepts `payout_hold_days` alongside other fields; validation is `in:7,14,28` (see `UpdateBrandStoreSettingsRequest`)
+- `GET /api/brand/store-settings` — returns the current hold period on the response
+- `CommissionPayoutService` reads `payout_hold_days` per brand from `retail.brand_store_settings` on each cron run — no changes needed to the cron job itself
 
 ---
 
