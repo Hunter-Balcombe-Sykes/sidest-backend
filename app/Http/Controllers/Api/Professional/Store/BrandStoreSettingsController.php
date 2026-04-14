@@ -128,58 +128,81 @@ class BrandStoreSettingsController extends ApiController
             $site->save();
         }
 
-        // 3. Shopify metafield sync (accent_color, theme_variant, product_image_ratio still synced to Shopify)
-        try {
-            $resolved = $this->catalogService->resolveBrandIntegration($pro);
-            $integration = $resolved['integration'];
+        // 3. Shopify metafield sync — only when a Shopify-backed field is being updated.
+        // Oxygen credentials are DB-only, so skip the Shopify block entirely for those patches
+        // to avoid requiring an active Shopify integration.
+        $shopifyFields = ['default_commission_rate', 'accent_color', 'theme_variant', 'product_image_ratio', 'custom_photos_enabled'];
+        $needsShopifySync = (bool) array_intersect(array_keys($validated), $shopifyFields);
 
-            $shopMetafields = [];
-            $metadataUpdates = [];
+        $freshMetadata = [];
+        $integration = null;
 
-            if (array_key_exists('default_commission_rate', $validated)) {
-                $shopMetafields[] = ['key' => 'default_commission_rate', 'value' => (string) $validated['default_commission_rate'], 'type' => 'number_decimal'];
-            }
+        if ($needsShopifySync) {
+            try {
+                $resolved = $this->catalogService->resolveBrandIntegration($pro);
+                $integration = $resolved['integration'];
 
-            if (array_key_exists('accent_color', $validated)) {
-                $shopMetafields[] = ['key' => 'accent_color', 'value' => $validated['accent_color'] ?? '', 'type' => 'single_line_text_field'];
-            }
+                $shopMetafields = [];
+                $metadataUpdates = [];
 
-            if (array_key_exists('theme_variant', $validated)) {
-                $shopMetafields[] = ['key' => 'theme_variant', 'value' => $validated['theme_variant'] ?? '', 'type' => 'single_line_text_field'];
-            }
-
-            if (array_key_exists('product_image_ratio', $validated)) {
-                $shopMetafields[] = ['key' => 'product_image_ratio', 'value' => $validated['product_image_ratio'] ?? '', 'type' => 'single_line_text_field'];
-            }
-
-            // custom_photos_enabled stays in provider_metadata (feature toggle, not design)
-            if (array_key_exists('custom_photos_enabled', $validated)) {
-                $metadataUpdates['custom_photos_enabled'] = (bool) $validated['custom_photos_enabled'];
-            }
-
-            if (! empty($shopMetafields)) {
-                $result = $this->catalogService->setShopMetafields($integration, $shopMetafields);
-
-                if (! $result['success']) {
-                    $msg = $result['userErrors'][0]['message'] ?? 'Failed to update Shopify settings.';
-                    return $this->error($msg, 422);
+                if (array_key_exists('default_commission_rate', $validated)) {
+                    $shopMetafields[] = ['key' => 'default_commission_rate', 'value' => (string) $validated['default_commission_rate'], 'type' => 'number_decimal'];
                 }
-            }
 
-            if (! empty($metadataUpdates)) {
-                $integration->mergeProviderMetadata($metadataUpdates);
+                if (array_key_exists('accent_color', $validated)) {
+                    $shopMetafields[] = ['key' => 'accent_color', 'value' => $validated['accent_color'] ?? '', 'type' => 'single_line_text_field'];
+                }
+
+                if (array_key_exists('theme_variant', $validated)) {
+                    $shopMetafields[] = ['key' => 'theme_variant', 'value' => $validated['theme_variant'] ?? '', 'type' => 'single_line_text_field'];
+                }
+
+                if (array_key_exists('product_image_ratio', $validated)) {
+                    $shopMetafields[] = ['key' => 'product_image_ratio', 'value' => $validated['product_image_ratio'] ?? '', 'type' => 'single_line_text_field'];
+                }
+
+                // custom_photos_enabled stays in provider_metadata (feature toggle, not design)
+                if (array_key_exists('custom_photos_enabled', $validated)) {
+                    $metadataUpdates['custom_photos_enabled'] = (bool) $validated['custom_photos_enabled'];
+                }
+
+                if (! empty($shopMetafields)) {
+                    $result = $this->catalogService->setShopMetafields($integration, $shopMetafields);
+
+                    if (! $result['success']) {
+                        $msg = $result['userErrors'][0]['message'] ?? 'Failed to update Shopify settings.';
+                        return $this->error($msg, 422);
+                    }
+                }
+
+                if (! empty($metadataUpdates)) {
+                    $integration->mergeProviderMetadata($metadataUpdates);
+                }
+
+                $freshMetadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+            } catch (\RuntimeException $e) {
+                return $this->error($e->getMessage(), $e->getCode() ?: 502);
+            } catch (\Throwable $e) {
+                return $this->error('Unable to reach Shopify. Please try again.', 502);
             }
-        } catch (\RuntimeException $e) {
-            return $this->error($e->getMessage(), $e->getCode() ?: 502);
-        } catch (\Throwable $e) {
-            return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
 
         // Return fresh state
         $storeSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
         $freshSiteSettings = is_array($site?->fresh()?->settings) ? $site->fresh()->settings : [];
         $freshDesign = is_array($freshSiteSettings['design'] ?? null) ? $freshSiteSettings['design'] : [];
-        $freshMetadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+
+        // When Shopify sync ran, use fresh metadata from integration; otherwise fall back to stored metadata
+        if ($needsShopifySync && $integration) {
+            $freshMetadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+        } else {
+            try {
+                $resolved = $this->catalogService->resolveBrandIntegration($pro);
+                $freshMetadata = is_array($resolved['integration']->provider_metadata) ? $resolved['integration']->provider_metadata : [];
+            } catch (\Throwable) {
+                $freshMetadata = [];
+            }
+        }
 
         return $this->success(new BrandStoreSettingsResource([
             'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
