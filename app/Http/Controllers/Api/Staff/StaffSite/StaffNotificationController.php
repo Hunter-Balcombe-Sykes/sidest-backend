@@ -36,10 +36,13 @@ class StaffNotificationController extends ApiController
         // Staff broadcasts have no semantic category to key retention against (the
         // sidest.notification_retention_days map uses keys like 'invite' / 'brand_status',
         // not frontend severity labels), so default to the map's 'default' lifetime when
-        // the caller hasn't explicitly set ends_at.
+        // the caller hasn't explicitly set ends_at. A null default is intentional —
+        // it means "keep until manually ended/dismissed", so leave ends_at unset.
         if (empty($data['ends_at'])) {
             $days = config('sidest.notification_retention_days.default', 30);
-            $data['ends_at'] = now()->addDays((int) $days);
+            if ($days !== null) {
+                $data['ends_at'] = now()->addDays((int) $days);
+            }
         }
 
         $notification = Notification::query()->create($data);
