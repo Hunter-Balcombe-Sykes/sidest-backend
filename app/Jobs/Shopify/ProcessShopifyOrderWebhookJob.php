@@ -6,6 +6,7 @@ use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionLedgerEntry;
+use App\Services\Customers\ContactCaptureService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\QueryException;
@@ -15,7 +16,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
-// V2: Processes a Shopify orders/paid webhook — identifies affiliate, calculates commission, creates ledger entries.
+// V2: Processes a Shopify orders/paid webhook — identifies affiliate, calculates commission, creates ledger entries, and captures the customer as an affiliate contact.
 class ProcessShopifyOrderWebhookJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -31,7 +32,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
         $this->onQueue('integrations');
     }
 
-    public function handle(): void
+    public function handle(ContactCaptureService $contactCapture): void
     {
         $orderId = (string) Arr::get($this->orderPayload, 'id', '');
         $noteAttributes = Arr::get($this->orderPayload, 'note_attributes', []);
@@ -143,12 +144,73 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             }
         }
 
+        // Capture the buyer as an affiliate contact (Beta 3 — Contacts — Automatic Customer Capture).
+        // Non-blocking: any failure inside the service is logged and swallowed so it can never
+        // fail commission processing above.
+        $this->captureAffiliateContact($contactCapture, (string) $affiliate->id, $noteAttributes, $orderId);
+
         Log::info('Shopify order webhook processed', [
             'order_id' => $orderId,
             'brand_professional_id' => $this->brandProfessionalId,
             'affiliate_id' => (string) $affiliate->id,
             'entries_created' => $entriesCreated,
         ]);
+    }
+
+    /**
+     * Upsert the buyer into the affiliate's contacts list and, if the cart
+     * carried a `sidest_marketing_opt_in` attribute, add them to the affiliate's
+     * marketing subscribers.
+     *
+     * Reads the customer identity from the order payload — falls back from
+     * billing_address.name to customer.first_name + last_name per the V2 plan.
+     *
+     * @param  array<int, array<string, mixed>>|mixed  $noteAttributes
+     */
+    private function captureAffiliateContact(
+        ContactCaptureService $contactCapture,
+        string $affiliateId,
+        mixed $noteAttributes,
+        string $orderId,
+    ): void {
+        $customer = Arr::get($this->orderPayload, 'customer', []);
+        $billingAddress = Arr::get($this->orderPayload, 'billing_address', []);
+
+        $email = trim((string) Arr::get($customer, 'email', ''));
+        if ($email === '') {
+            // Shopify guest checkouts or POS orders without a customer — nothing to capture.
+            return;
+        }
+
+        $billingName = trim((string) Arr::get($billingAddress, 'name', ''));
+        $firstName = trim((string) Arr::get($customer, 'first_name', ''));
+        $lastName = trim((string) Arr::get($customer, 'last_name', ''));
+        $fullName = $billingName !== '' ? $billingName : trim($firstName . ' ' . $lastName);
+        $fullName = $fullName !== '' ? $fullName : null;
+
+        $phone = trim((string) Arr::get($billingAddress, 'phone', ''));
+        $phone = $phone !== '' ? $phone : null;
+
+        $contactCapture->captureContact($affiliateId, [
+            'email' => $email,
+            'full_name' => $fullName,
+            'phone' => $phone,
+            'source' => 'shopify_order',
+            'external_id' => $orderId !== '' ? $orderId : null,
+        ]);
+
+        // Marketing opt-in is optional — Hydrogen sets `sidest_marketing_opt_in: true` only
+        // when the shopper ticks the subscribe box at checkout. Missing or falsy means
+        // "capture the contact but do NOT add to marketing list".
+        $marketingOptIn = strtolower($this->extractCartAttribute($noteAttributes, 'sidest_marketing_opt_in'));
+        if (in_array($marketingOptIn, ['true', '1', 'yes'], true)) {
+            $contactCapture->captureMarketingSubscription(
+                $affiliateId,
+                $email,
+                $fullName,
+                'shopify_order',
+            );
+        }
     }
 
     /**
