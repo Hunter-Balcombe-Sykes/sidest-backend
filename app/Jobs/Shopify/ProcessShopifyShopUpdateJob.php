@@ -15,7 +15,8 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
-// V2: Processes shop/update webhooks — re-syncs brand profile fields and dispatches logo sync.
+// Processes shop/update webhooks — re-syncs brand profile fields and triggers
+// a throttled brand-design refresh (logos, colours, enums, slogan).
 class ProcessShopifyShopUpdateJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -60,11 +61,13 @@ class ProcessShopifyShopUpdateJob implements ShouldQueue
             $integration,
         );
 
-        // Re-sync logo via GraphQL (always overwrites), throttled to once per hour per integration
+        // Re-sync the full brand-design shape (logos, colours, enums, slogan).
+        // Throttled to once per hour per integration so a chatty shop/update
+        // webhook stream can't pummel Shopify with brand-design fetches.
         if ($integration) {
-            $cacheKey = "shopify:logo_sync:{$integration->id}";
+            $cacheKey = "shopify:brand_design_sync:{$integration->id}";
             if (Cache::add($cacheKey, true, now()->addHour())) {
-                SyncShopifyBrandLogoJob::dispatch((string) $integration->id);
+                SyncShopifyBrandDesignJob::dispatch((string) $integration->id);
             }
         }
 

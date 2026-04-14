@@ -7,8 +7,7 @@ use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
 use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
-use App\Jobs\Shopify\SyncShopifyBrandLogoJob;
-use App\Jobs\Shopify\SyncShopifyThemeTokensJob;
+use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -130,8 +129,8 @@ class BrandSignupService
             CreateStorefrontAccessTokenJob::class,
             CreateShopifyMetafieldsJob::class,
             CreateShopifySalesChannelJob::class,
-            SyncShopifyBrandLogoJob::class,
-            SyncShopifyThemeTokensJob::class,
+            // Unified brand-design sync: logos, colours, enums, slogan in one job.
+            SyncShopifyBrandDesignJob::class,
         ];
 
         foreach ($jobs as $jobClass) {

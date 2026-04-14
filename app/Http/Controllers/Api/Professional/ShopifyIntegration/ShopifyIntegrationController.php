@@ -9,7 +9,7 @@ use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
-use App\Jobs\Shopify\SyncShopifyBrandLogoJob;
+use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -243,7 +243,8 @@ class ShopifyIntegrationController extends ApiController
             CreateStorefrontAccessTokenJob::class,
             CreateShopifyMetafieldsJob::class, // chains → CreateShopifyCollectionsJob
             CreateShopifySalesChannelJob::class,
-            SyncShopifyBrandLogoJob::class,
+            // Unified brand-design sync: logos, colours, enums, slogan in one job.
+            SyncShopifyBrandDesignJob::class,
         ];
 
         foreach ($jobs as $jobClass) {

@@ -71,8 +71,9 @@ class BrandPartnerController extends ApiController
         ]);
     }
 
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, BrandPartnerLinkService $brandPartnerLinks): JsonResponse
     {
+        $professional = $this->currentProfessional($request);
         $perPage = $this->normalizePerPage($request, 25, 100);
 
         $page = Professional::query()
@@ -85,32 +86,31 @@ class BrandPartnerController extends ApiController
             ->appends($request->query());
 
         $brands = $page->getCollection()
-            ->map(function (Professional $professional): array {
-                $siteSettings = is_array($professional->site?->settings ?? null) ? $professional->site->settings : [];
-                $designSettings = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
-                $mediaSettings = is_array($designSettings['media'] ?? null) ? $designSettings['media'] : [];
+            ->map(fn (Professional $p): array => $this->brandToArray($p))
+            ->keyBy('id');
 
-                return [
-                    'id' => $professional->id,
-                    'display_name' => $professional->display_name,
-                    'handle' => $professional->handle,
-                    'subdomain' => $professional->site?->subdomain,
-                    'brand_logo_url' => is_string($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'] ?? null)
-                        ? ($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'])
-                        : null,
-                    'brand_color' => is_string($designSettings['dark_color'] ?? $designSettings['darkColor'] ?? null)
-                        ? ($designSettings['dark_color'] ?? $designSettings['darkColor'])
-                        : null,
-                    'brand_contrast_color' => is_string($designSettings['white_color'] ?? $designSettings['whiteColor'] ?? null)
-                        ? ($designSettings['white_color'] ?? $designSettings['whiteColor'])
-                        : null,
-                ];
-            })
-            ->values()
-            ->all();
+        // Always include brands the caller is already connected to, regardless of visibility,
+        // so the frontend can display their logo and name on the settings card.
+        $connectedIds = $brandPartnerLinks->getLinksForAffiliate((string) $professional->id)
+            ->pluck('brand_professional_id')
+            ->map(fn ($id): string => (string) $id)
+            ->unique()
+            ->diff($brands->keys())
+            ->values();
+
+        if ($connectedIds->isNotEmpty()) {
+            Professional::query()
+                ->whereIn('id', $connectedIds->all())
+                ->where('professional_type', 'brand')
+                ->with('site')
+                ->get()
+                ->each(function (Professional $p) use ($brands): void {
+                    $brands->put((string) $p->id, $this->brandToArray($p));
+                });
+        }
 
         $payload = $this->paginatedResponse($page, 'brands');
-        $payload['brands'] = $brands;
+        $payload['brands'] = $brands->values()->all();
 
         return $this->success($payload);
     }
@@ -194,6 +194,29 @@ class BrandPartnerController extends ApiController
             'disconnected' => true,
             'brand_professional_id' => $brandProfessionalId,
         ]);
+    }
+
+    private function brandToArray(Professional $professional): array
+    {
+        $siteSettings = is_array($professional->site?->settings ?? null) ? $professional->site->settings : [];
+        $designSettings = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
+        $mediaSettings = is_array($designSettings['media'] ?? null) ? $designSettings['media'] : [];
+
+        return [
+            'id' => $professional->id,
+            'display_name' => $professional->display_name,
+            'handle' => $professional->handle,
+            'subdomain' => $professional->site?->subdomain,
+            'brand_logo_url' => is_string($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'] ?? null)
+                ? ($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'])
+                : null,
+            'brand_color' => is_string($designSettings['dark_color'] ?? $designSettings['darkColor'] ?? null)
+                ? ($designSettings['dark_color'] ?? $designSettings['darkColor'])
+                : null,
+            'brand_contrast_color' => is_string($designSettings['white_color'] ?? $designSettings['whiteColor'] ?? null)
+                ? ($designSettings['white_color'] ?? $designSettings['whiteColor'])
+                : null,
+        ];
     }
 
     private function syncSiteBrandPartnerSettings(

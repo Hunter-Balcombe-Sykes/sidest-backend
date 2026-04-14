@@ -21,6 +21,7 @@ class CommissionLedgerEntryObserver
             }
 
             $this->notifyEarned($entry);
+            $this->notifyBrandSale($entry);
         } catch (\Throwable $e) {
             Log::warning('CommissionLedgerEntry created notification failed', [
                 'entry_id' => $entry->id,
@@ -89,6 +90,29 @@ class CommissionLedgerEntryObserver
             title: 'Commission reversed',
             body: "A commission of {$amount} has been reversed.",
             dedupeKey: "commission.reversed.{$entry->id}",
+            ctaUrl: '/account/store?section=analytics',
+            retentionConfigKey: 'commission',
+        );
+    }
+
+    // V2: Notifies the brand when an affiliate sale generates commission.
+    private function notifyBrandSale(CommissionLedgerEntry $entry): void
+    {
+        $brandId = trim((string) ($entry->brand_professional_id ?? ''));
+        if ($brandId === '') {
+            return;
+        }
+
+        $amount = $this->formatMoney((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
+        $affiliateName = $entry->affiliateProfessional?->display_name ?? 'An affiliate';
+
+        $this->publisher->publish(
+            professionalId: $brandId,
+            frontendType: 'Success',
+            category: 'commissions',
+            title: 'Affiliate sale',
+            body: "{$affiliateName} generated a sale — {$amount} commission accrued.",
+            dedupeKey: "commission.brand_sale.{$entry->id}",
             ctaUrl: '/account/store?section=analytics',
             retentionConfigKey: 'commission',
         );

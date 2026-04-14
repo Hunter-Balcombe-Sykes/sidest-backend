@@ -260,7 +260,9 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::patch('/brand/store-settings', [BrandStoreSettingsController::class, 'update'])
             ->middleware('throttle:brand-catalog-writes');
 
-        // Brand Design (Shopify theme sync + sitepage overrides)
+        // Brand Design. The unified shape lives in site.settings.design and is
+        // edited via the standard /site update endpoint — this controller only
+        // exposes a read of the resolved shape and a manual Shopify re-sync.
         Route::get('/brand/design', [BrandDesignController::class, 'show']);
         Route::post('/brand/design/resync', [BrandDesignController::class, 'resync'])
             ->middleware('throttle:brand-catalog-writes');
@@ -272,11 +274,6 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         // is acceptable because the controller already caps resync traffic more aggressively.
         Route::post('/store/shopify/resync', ShopifyResyncController::class)
             ->middleware('throttle:brand-catalog-writes');
-        Route::patch('/brand/design/overrides', [BrandDesignController::class, 'updateOverrides'])
-            ->middleware('throttle:brand-catalog-writes');
-        Route::delete('/brand/design/overrides/{token}', [BrandDesignController::class, 'resetOverride'])
-            ->middleware('throttle:brand-catalog-writes')
-            ->where('token', '[a-z_]+');
 
         // Brand Collection Management
         Route::get('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'index'])

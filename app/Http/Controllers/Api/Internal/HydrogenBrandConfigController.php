@@ -67,6 +67,7 @@ class HydrogenBrandConfigController extends ApiController
             'favourites_collection_handle' => Arr::get($metadata, 'favourites_collection_handle', 'sidest-brand-favourites'),
             'high_commission_collection_handle' => Arr::get($metadata, 'high_commission_collection_handle', 'sidest-high-commission'),
             'custom_photos_enabled' => (bool) Arr::get($metadata, 'custom_photos_enabled', true),
+            'theme_id' => $storeSettings ? (int) $storeSettings->theme_id : 1,
             'design' => [
                 'accent_color' => $design['accent_color'] ?? null,
                 'dark_color' => $design['dark_color'] ?? null,
