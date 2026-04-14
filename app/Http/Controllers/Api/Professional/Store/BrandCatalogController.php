@@ -141,6 +141,42 @@ class BrandCatalogController extends ApiController
             }
         }
 
+        if (array_key_exists('enabled_variant_gids', $validated)) {
+            $submitted = $validated['enabled_variant_gids'];
+
+            // Null or empty array → clear restriction (default: all variants offered).
+            if ($submitted === null || $submitted === []) {
+                try {
+                    $this->catalogService->deleteProductMetafield($integration, $productGid, 'enabled_variant_gids');
+                } catch (\Throwable $e) {
+                    return $this->error('Unable to reach Shopify. Please try again.', 502);
+                }
+            } else {
+                try {
+                    $productVariantGids = $this->catalogService->fetchProductVariantGids($integration, $productGid);
+                } catch (\Throwable $e) {
+                    return $this->error('Unable to reach Shopify. Please try again.', 502);
+                }
+
+                if (empty($productVariantGids)) {
+                    return $this->error('Product has no variants to restrict.', 422);
+                }
+
+                $allowed = array_flip($productVariantGids);
+                $invalid = array_values(array_filter($submitted, fn (string $gid) => ! isset($allowed[$gid])));
+
+                if (! empty($invalid)) {
+                    return $this->error('One or more variant GIDs do not belong to this product.', 422);
+                }
+
+                $metafieldsToSet[] = [
+                    'key' => 'enabled_variant_gids',
+                    'value' => json_encode(array_values($submitted)),
+                    'type' => 'json',
+                ];
+            }
+        }
+
         if (! empty($metafieldsToSet)) {
             try {
                 $result = $this->catalogService->setProductMetafields($integration, $productGid, $metafieldsToSet);

@@ -211,6 +211,16 @@ GRAPHQL;
             $product['commission_override'] = $meta['commission_override'] ?? null;
             $product['affiliate_discount_pct'] = $meta['affiliate_discount_pct'] ?? null;
 
+            // Restrict variants to the brand's allowed set when one is configured.
+            $enabledVariants = $meta['enabled_variant_gids'] ?? null;
+            if (is_array($enabledVariants) && ! empty($enabledVariants)) {
+                $allowed = array_flip($enabledVariants);
+                $product['variants'] = array_values(array_filter(
+                    $product['variants'] ?? [],
+                    fn (array $variant) => isset($allowed[$variant['gid'] ?? ''])
+                ));
+            }
+
             // Collection membership flags
             $product['in_favourites'] = in_array($gid, $favouritesGids, true);
 
@@ -321,6 +331,7 @@ GRAPHQL;
             $map[$gid] = [
                 'commission_override' => isset($metafields['commission_override']) ? (float) $metafields['commission_override'] : null,
                 'affiliate_discount_pct' => isset($metafields['affiliate_discount_pct']) ? (float) $metafields['affiliate_discount_pct'] : null,
+                'enabled_variant_gids' => $metafields['enabled_variant_gids'] ?? null,
             ];
         }
 

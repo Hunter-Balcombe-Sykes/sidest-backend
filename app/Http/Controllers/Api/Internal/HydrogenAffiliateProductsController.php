@@ -8,6 +8,7 @@ use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
+use App\Services\Store\BrandCatalogService;
 use App\Services\Store\CustomPhotoPermissionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -61,11 +62,16 @@ class HydrogenAffiliateProductsController extends ApiController
                 ? $this->getCustomPhotos($affiliateId, $selections)
                 : [];
 
+            $enabledVariants = $integration
+                ? app(BrandCatalogService::class)->fetchEnabledVariantsMap($integration, $selections)
+                : [];
+
             return $this->success([
                 'gids' => $selections,
                 'source' => 'affiliate_selections',
                 'custom_photo_position' => $permissions->getPhotoPosition($brandId),
                 'custom_photos' => $customPhotos,
+                'enabled_variants' => $enabledVariants,
             ]);
         }
 
