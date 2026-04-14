@@ -22,11 +22,17 @@ class BrandStoreSettings extends Model
         'professional_id',
         'default_commission_rate',
         'payout_hold_days',
+        'theme_id',
+        'oxygen_deployment_token',
+        'oxygen_storefront_id',
     ];
 
     protected $casts = [
-        'default_commission_rate' => 'decimal:2',
-        'payout_hold_days'        => 'integer',
+        'default_commission_rate'  => 'decimal:2',
+        'payout_hold_days'         => 'integer',
+        'theme_id'                 => 'integer',
+        // Encrypted at-rest using APP_KEY (AES-256-CBC via Laravel's encrypter)
+        'oxygen_deployment_token'  => 'encrypted',
     ];
 
     /**

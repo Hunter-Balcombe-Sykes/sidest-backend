@@ -47,12 +47,16 @@ class BrandStoreSettingsController extends ApiController
 
         return $this->success(new BrandStoreSettingsResource([
             'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
-            'payout_hold_days' => $storeSettings?->payout_hold_days,
-            'accent_color' => $design['accent_color'] ?? null,
-            'theme_variant' => $design['theme_variant'] ?? null,
-            'product_image_ratio' => $design['product_image_ratio'] ?? null,
-            'custom_photos_enabled' => Arr::get($metadata, 'custom_photos_enabled', true),
-            'custom_photo_position' => $design['custom_photo_position'] ?? 'after',
+            'payout_hold_days'        => $storeSettings?->payout_hold_days,
+            'accent_color'            => $design['accent_color'] ?? null,
+            'theme_variant'           => $design['theme_variant'] ?? null,
+            'product_image_ratio'     => $design['product_image_ratio'] ?? null,
+            'custom_photos_enabled'   => Arr::get($metadata, 'custom_photos_enabled', true),
+            'custom_photo_position'   => $design['custom_photo_position'] ?? 'after',
+            'theme_id'                => $storeSettings?->theme_id ?? 1,
+            // Token is never returned; only expose whether one has been saved
+            'oxygen_token_set'        => ! empty($storeSettings?->oxygen_deployment_token),
+            'oxygen_storefront_id'    => $storeSettings?->oxygen_storefront_id,
         ]));
     }
 
@@ -66,10 +70,23 @@ class BrandStoreSettingsController extends ApiController
 
         $validated = $request->validated();
 
-        // 1. Local DB write for commission rate
+        // 1. Local DB write for commission rate, payout hold days, and theme selection
         $dbFields = [];
         if (array_key_exists('default_commission_rate', $validated)) {
             $dbFields['default_commission_rate'] = $validated['default_commission_rate'];
+        }
+        if (array_key_exists('payout_hold_days', $validated)) {
+            $dbFields['payout_hold_days'] = (int) $validated['payout_hold_days'];
+        }
+        if (array_key_exists('theme_id', $validated)) {
+            $dbFields['theme_id'] = (int) $validated['theme_id'];
+        }
+        // Oxygen credentials — token encrypted by model cast; blank string clears it
+        if (array_key_exists('oxygen_deployment_token', $validated)) {
+            $dbFields['oxygen_deployment_token'] = $validated['oxygen_deployment_token'] ?: null;
+        }
+        if (array_key_exists('oxygen_storefront_id', $validated)) {
+            $dbFields['oxygen_storefront_id'] = $validated['oxygen_storefront_id'] ?: null;
         }
 
         if (! empty($dbFields)) {
@@ -83,12 +100,19 @@ class BrandStoreSettingsController extends ApiController
         $pro->loadMissing('site');
         $site = $pro->site;
 
+        // theme_id is also written to site.settings.design.default_theme so the
+        // account data pipeline can read it without a separate store-settings fetch.
         $designFields = ['accent_color', 'theme_variant', 'product_image_ratio', 'custom_photo_position'];
         $designUpdates = [];
         foreach ($designFields as $field) {
             if (array_key_exists($field, $validated)) {
                 $designUpdates[$field] = $validated[$field];
             }
+        }
+
+        // Mirror theme_id into site.settings.design.default_theme for account data pipeline
+        if (array_key_exists('theme_id', $validated)) {
+            $designUpdates['default_theme'] = (int) $validated['theme_id'];
         }
 
         if (! empty($designUpdates) && $site) {
@@ -159,12 +183,15 @@ class BrandStoreSettingsController extends ApiController
 
         return $this->success(new BrandStoreSettingsResource([
             'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
-            'payout_hold_days' => $storeSettings?->payout_hold_days,
-            'accent_color' => $freshDesign['accent_color'] ?? null,
-            'theme_variant' => $freshDesign['theme_variant'] ?? null,
-            'product_image_ratio' => $freshDesign['product_image_ratio'] ?? null,
-            'custom_photos_enabled' => Arr::get($freshMetadata, 'custom_photos_enabled', true),
-            'custom_photo_position' => $freshDesign['custom_photo_position'] ?? 'after',
+            'payout_hold_days'        => $storeSettings?->payout_hold_days,
+            'accent_color'            => $freshDesign['accent_color'] ?? null,
+            'theme_variant'           => $freshDesign['theme_variant'] ?? null,
+            'product_image_ratio'     => $freshDesign['product_image_ratio'] ?? null,
+            'custom_photos_enabled'   => Arr::get($freshMetadata, 'custom_photos_enabled', true),
+            'custom_photo_position'   => $freshDesign['custom_photo_position'] ?? 'after',
+            'theme_id'                => $storeSettings?->theme_id ?? 1,
+            'oxygen_token_set'        => ! empty($storeSettings?->oxygen_deployment_token),
+            'oxygen_storefront_id'    => $storeSettings?->oxygen_storefront_id,
         ]));
     }
 }
