@@ -23,6 +23,9 @@ class SiteMedia extends BaseModel
     public const POOL_CONTENT  = 'content';
     public const POOL_PRODUCT  = 'product';
     public const POOL_BRAND_GALLERY = 'brand_gallery';
+    // Singleton brand design assets (logo, placeholder). No ordering semantics —
+    // the per-pool sort_order unique index excludes this pool deliberately.
+    public const POOL_DESIGN   = 'design';
 
     public const MEDIA_TYPE_IMAGE = 'image';
     public const MEDIA_TYPE_VIDEO = 'video';

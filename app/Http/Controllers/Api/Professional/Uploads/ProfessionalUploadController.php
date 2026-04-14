@@ -434,18 +434,33 @@ class ProfessionalUploadController extends ApiController
         \Illuminate\Http\UploadedFile $file,
         string $label,
     ): JsonResponse {
-        $media = SiteMedia::create([
-            'site_id' => $site->id,
-            'pool' => SiteMedia::POOL_CONTENT,
-            'path' => '',
-            'alt_text' => $label,
-            'sort_order' => 0,
-            'is_active' => true,
-            'media_type' => SiteMedia::MEDIA_TYPE_IMAGE,
-            'processing_state' => SiteMedia::PROCESSING_STATE_PENDING,
-            'original_mime' => $file->getMimeType(),
-            'original_size_bytes' => $file->getSize(),
-        ]);
+        // Brand design assets (logo, placeholder) are singleton scratchpad rows
+        // for the image variant pipeline — the actual URL is persisted into
+        // site.settings.design.media by a separate request. Soft-delete any
+        // prior active row with the same label so re-uploads don't accumulate
+        // orphans and don't trip the design-pool singleton index.
+        $media = DB::transaction(function () use ($site, $label, $file) {
+            SiteMedia::query()
+                ->where('site_id', $site->id)
+                ->where('pool', SiteMedia::POOL_DESIGN)
+                ->where('alt_text', $label)
+                ->whereNull('deleted_at')
+                ->get()
+                ->each(fn (SiteMedia $existing) => $existing->delete());
+
+            return SiteMedia::create([
+                'site_id' => $site->id,
+                'pool' => SiteMedia::POOL_DESIGN,
+                'path' => '',
+                'alt_text' => $label,
+                'sort_order' => 0,
+                'is_active' => true,
+                'media_type' => SiteMedia::MEDIA_TYPE_IMAGE,
+                'processing_state' => SiteMedia::PROCESSING_STATE_PENDING,
+                'original_mime' => $file->getMimeType(),
+                'original_size_bytes' => $file->getSize(),
+            ]);
+        });
 
         $basePath = "images/{$pro->id}/{$media->id}";
 
