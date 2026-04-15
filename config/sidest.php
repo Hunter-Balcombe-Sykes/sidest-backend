@@ -372,7 +372,7 @@ return [
         'checkout_session_ttl_minutes' => (int) env('SIDEST_STORE_CHECKOUT_SESSION_TTL_MINUTES', 120),
         'payout_hold_days' => (int) env('SIDEST_STORE_PAYOUT_HOLD_DAYS', 7),
         'min_payout_hold_days' => 7,
-        'platform_fee_percent' => (float) env('SIDEST_STORE_PLATFORM_FEE_PERCENT', 3),
+        'platform_fee_percent' => (float) env('SIDEST_STORE_PLATFORM_FEE_PERCENT', 20),
     ],
 
     'form_timing' => [

@@ -41,7 +41,7 @@
 | Commission rates | Per-product in local settings tables + per-affiliate overrides | Shopify product metafields (`sidest.commission_override`) |
 | Affiliate scope | Multi-brand (up to 4 brands) | Single-brand constraint |
 | Storefronts | Laravel-rendered mini-site | Hydrogen on Shopify Oxygen (per-brand deployment) |
-| Payments | Internal ledger, manual bank transfer | Stripe Connect (auto 80/20 split, 30-day hold) |
+| Payments | Internal ledger, manual bank transfer | Stripe Connect (80/20 split, brand-selectable 7/14/28-day hold) |
 | Promotions | Time-bounded campaigns with segment targeting | Removed entirely |
 | Segments | Dynamic affiliate groupings | Removed entirely |
 
