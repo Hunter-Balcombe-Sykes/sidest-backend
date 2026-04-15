@@ -101,7 +101,7 @@ class CommissionPayoutObserver
                 'Payout failed',
                 'The brand account associated with this commission is no longer available. Please contact support.',
             ],
-            'transfer_failed', 'prefunded_transfer_failed' => [
+            'transfer_failed' => [
                 'Payout failed',
                 'A system error prevented the transfer. Our team has been notified and will resolve it shortly.',
             ],
