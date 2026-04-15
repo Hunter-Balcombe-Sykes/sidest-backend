@@ -174,3 +174,54 @@ it('generates an optimized variant file under the target_kb ceiling', function (
 
     @unlink($fixture);
 });
+
+it('throws UnprocessableImageException when pixel count exceeds the guard', function () {
+    $service = new ImageVariantService();
+    $imageId = seedVariantTestMediaRow();
+    // 6000 × 5000 = 30 MP, above the 24 MP default ceiling.
+    $fixture = makeVariantFixture(6000, 5000, 'jpeg');
+
+    try {
+        $service->processVariants(
+            originalTmpPath: $fixture,
+            imageId: $imageId,
+            basePath: "images/test/{$imageId}",
+        );
+        throw new \RuntimeException('Expected UnprocessableImageException was not thrown');
+    } catch (\App\Services\Media\UnprocessableImageException $e) {
+        expect($e->getMessage())->toContain('exceed safe processing limit');
+        expect($e->getMessage())->toContain('6000');
+        expect($e->getMessage())->toContain('5000');
+    } finally {
+        @unlink($fixture);
+    }
+
+    // No MediaVariant rows should have been created.
+    $variantCount = DB::connection('pgsql')
+        ->table('site.media_variants')
+        ->where('media_id', $imageId)
+        ->count();
+    expect($variantCount)->toBe(0);
+});
+
+it('respects the SIDEST_IMAGE_MAX_PIXELS env override', function () {
+    config(['sidest.image_max_pixels' => 1_000_000]); // 1 MP
+
+    $service = new ImageVariantService();
+    $imageId = seedVariantTestMediaRow();
+    // 1200 × 1200 = 1.44 MP, above the configured 1 MP ceiling.
+    $fixture = makeVariantFixture(1200, 1200, 'jpeg');
+
+    try {
+        $service->processVariants(
+            originalTmpPath: $fixture,
+            imageId: $imageId,
+            basePath: "images/test/{$imageId}",
+        );
+        throw new \RuntimeException('Expected UnprocessableImageException was not thrown');
+    } catch (\App\Services\Media\UnprocessableImageException $e) {
+        expect($e->getMessage())->toContain('1000000');
+    } finally {
+        @unlink($fixture);
+    }
+});

@@ -332,12 +332,35 @@ class ImageVariantService
 
     /**
      * Load an image file into a GD resource regardless of source format.
+     *
+     * Refuses images whose pixel count exceeds sidest.image_max_pixels by
+     * throwing UnprocessableImageException BEFORE any bitmap memory is
+     * allocated. This is the defense against image-bomb uploads — a tiny
+     * JPEG/PNG file can decode to a huge bitmap (4 bytes per pixel), which
+     * the worker cannot survive even with the canvas caps applied.
+     *
+     * The getimagesize() call reads only the file header (a few KB), not
+     * the pixel data, so the guard is effectively free.
      */
     private function loadImage(string $path): \GdImage|false
     {
         $info = @getimagesize($path);
         if (!$info) {
             return false;
+        }
+
+        $width  = (int) $info[0];
+        $height = (int) $info[1];
+        $maxPixels = (int) config('sidest.image_max_pixels', 24_000_000);
+
+        if ($width * $height > $maxPixels) {
+            throw new UnprocessableImageException(sprintf(
+                'Image dimensions exceed safe processing limit (%d x %d = %d pixels, max %d).',
+                $width,
+                $height,
+                $width * $height,
+                $maxPixels,
+            ));
         }
 
         return match ($info[2]) {

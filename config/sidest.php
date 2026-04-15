@@ -300,6 +300,22 @@ return [
 
     /*
     |----------------------------------------------------------------------
+    | Image decode ceiling — pixel count, not file size
+    |----------------------------------------------------------------------
+    | Refuses to decode any uploaded image whose width × height exceeds
+    | this many pixels, BEFORE any bitmap memory is allocated. This is
+    | the defense against image-bomb uploads (tiny file, huge resolution)
+    | and against legitimate ultra-high-resolution sources that would
+    | blow worker memory_limit.
+    |
+    | Default is 24 MP — above typical phone sensors (12-16 MP), below
+    | flagship 48 MP sensors. Conservative for a 256 MB worker memory_limit;
+    | can be raised to ~50 MP when workers have more headroom.
+    */
+    'image_max_pixels' => (int) env('SIDEST_IMAGE_MAX_PIXELS', 24_000_000), // 24 MP
+
+    /*
+    |----------------------------------------------------------------------
     | Video uploads – feature flag + processing config
     |----------------------------------------------------------------------
     | Set SIDEST_VIDEO_UPLOADS_ENABLED=true only after dedicated video
