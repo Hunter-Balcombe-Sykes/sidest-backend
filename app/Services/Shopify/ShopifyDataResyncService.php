@@ -2,8 +2,7 @@
 
 namespace App\Services\Shopify;
 
-use App\Jobs\Shopify\SyncShopifyBrandLogoJob;
-use App\Jobs\Shopify\SyncShopifyThemeTokensJob;
+use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -12,8 +11,8 @@ use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 // V2: On-demand Shopify data refresh. Pulls fresh shop.json, diff-merges profile/brand fields via
-//     ShopProfileAutoFillService::resyncFromShopData (preserving user edits), and re-dispatches logo +
-//     theme token sync jobs. Used by the Brand "Resync from Shopify" button in settings.
+//     ShopProfileAutoFillService::resyncFromShopData (preserving user edits), and re-dispatches the
+//     unified brand-design sync job. Used by the Brand "Resync from Shopify" button in settings.
 class ShopifyDataResyncService
 {
     public function __construct(
@@ -48,7 +47,7 @@ class ShopifyDataResyncService
         // Post-API writes go in one transaction so partial failures roll back cleanly:
         //   - diff-merge into Professional / BrandProfile / ProfessionalIntegration
         //   - last_resynced_at stamp on integration metadata
-        //   - logo + theme token job dispatches (Laravel queues defer until commit inside txn)
+        //   - unified brand-design job dispatch (Laravel queues defer until commit inside txn)
         $diff = DB::connection('pgsql')->transaction(function () use ($integration, $integrationId, $shopData, $lastResyncedAt) {
             $diff = $this->autoFill->resyncFromShopData($integration, $shopData);
 
@@ -56,9 +55,8 @@ class ShopifyDataResyncService
             $integration->mergeProviderMetadata(['last_resynced_at' => $lastResyncedAt]);
 
             // Dispatched inside the transaction on purpose — queues hold them until commit,
-            // so a rollback prevents orphaned logo/theme jobs from firing.
-            SyncShopifyBrandLogoJob::dispatch($integrationId);
-            SyncShopifyThemeTokensJob::dispatch($integrationId);
+            // so a rollback prevents an orphaned brand-design job from firing.
+            SyncShopifyBrandDesignJob::dispatch($integrationId);
 
             return $diff;
         });
@@ -73,7 +71,7 @@ class ShopifyDataResyncService
         return [
             'fields_updated' => $diff['updated'],
             'fields_preserved' => $diff['preserved'],
-            'jobs_dispatched' => ['logo', 'theme_tokens'],
+            'jobs_dispatched' => ['brand_design'],
             'last_resynced_at' => $lastResyncedAt,
         ];
     }

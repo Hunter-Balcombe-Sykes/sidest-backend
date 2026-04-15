@@ -1,8 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Store\ShopifyResyncController;
-use App\Jobs\Shopify\SyncShopifyBrandLogoJob;
-use App\Jobs\Shopify\SyncShopifyThemeTokensJob;
+use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -300,11 +299,8 @@ it('fills empty fields from Shopify when there is no prior snapshot', function (
 
 // ---------- ShopifyDataResyncService integration tests ----------
 
-it('dispatches logo and theme jobs and records last_resynced_at', function () {
-    Bus::fake([
-        SyncShopifyBrandLogoJob::class,
-        SyncShopifyThemeTokensJob::class,
-    ]);
+it('dispatches the unified brand-design job and records last_resynced_at', function () {
+    Bus::fake([SyncShopifyBrandDesignJob::class]);
 
     Http::fake([
         '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
@@ -315,10 +311,9 @@ it('dispatches logo and theme jobs and records last_resynced_at', function () {
     $service = app(ShopifyDataResyncService::class);
     $result = $service->resync($integration);
 
-    Bus::assertDispatched(SyncShopifyBrandLogoJob::class);
-    Bus::assertDispatched(SyncShopifyThemeTokensJob::class);
+    Bus::assertDispatched(SyncShopifyBrandDesignJob::class);
 
-    expect($result['jobs_dispatched'])->toBe(['logo', 'theme_tokens']);
+    expect($result['jobs_dispatched'])->toBe(['brand_design']);
     expect($result['last_resynced_at'])->toBeString();
 
     $integration->refresh();
@@ -336,8 +331,7 @@ it('throws when Shopify API call fails so DB is never partially written', functi
     $service = app(ShopifyDataResyncService::class);
     expect(fn () => $service->resync($integration))->toThrow(RuntimeException::class);
 
-    Bus::assertNotDispatched(SyncShopifyBrandLogoJob::class);
-    Bus::assertNotDispatched(SyncShopifyThemeTokensJob::class);
+    Bus::assertNotDispatched(SyncShopifyBrandDesignJob::class);
 
     // DB was untouched.
     $brand->refresh();
@@ -454,10 +448,7 @@ it('returns 409 when the integration has an empty access_token', function () {
 });
 
 it('preserves sibling provider_metadata keys across a resync (concurrency regression)', function () {
-    Bus::fake([
-        SyncShopifyBrandLogoJob::class,
-        SyncShopifyThemeTokensJob::class,
-    ]);
+    Bus::fake([SyncShopifyBrandDesignJob::class]);
     Http::fake([
         '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
     ]);
@@ -493,10 +484,7 @@ it('preserves sibling provider_metadata keys across a resync (concurrency regres
 });
 
 it('rolls back multi-model writes when a post-API save fails', function () {
-    Bus::fake([
-        SyncShopifyBrandLogoJob::class,
-        SyncShopifyThemeTokensJob::class,
-    ]);
+    Bus::fake([SyncShopifyBrandDesignJob::class]);
     Http::fake([
         '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
     ]);
@@ -528,9 +516,8 @@ it('rolls back multi-model writes when a post-API save fails', function () {
     $brand->refresh();
     expect($brand->display_name)->toBe('Original Name');
 
-    // And no jobs should have been dispatched (they are inside the transaction too).
-    Bus::assertNotDispatched(SyncShopifyBrandLogoJob::class);
-    Bus::assertNotDispatched(SyncShopifyThemeTokensJob::class);
+    // And no job should have been dispatched (it sits inside the transaction too).
+    Bus::assertNotDispatched(SyncShopifyBrandDesignJob::class);
 });
 
 it('does not leak access tokens or snapshot contents in the response', function () {
