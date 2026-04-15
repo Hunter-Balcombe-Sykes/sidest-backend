@@ -8,6 +8,4 @@ namespace App\Services\Media;
  * ProcessImageVariantsJob recognises this class and skips the retry path,
  * marking the SiteMedia row as failed on the first attempt.
  */
-class UnprocessableImageException extends \RuntimeException
-{
-}
+class UnprocessableImageException extends \RuntimeException {}

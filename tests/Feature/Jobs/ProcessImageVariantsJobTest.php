@@ -39,6 +39,7 @@ function seedJobTestMediaRow(): string
         'created_at' => now()->toDateTimeString(),
         'updated_at' => now()->toDateTimeString(),
     ]);
+
     return $id;
 }
 
@@ -50,8 +51,8 @@ it('marks the SiteMedia row as ready on successful processing', function () {
     $service = Mockery::mock(ImageVariantService::class);
     $service->shouldReceive('resolvedDiskName')->once()->andReturn('local');
     $service->shouldReceive('processVariants')->once()->andReturn([
-        'optimized' => new \stdClass(),
-        'maximized' => new \stdClass(),
+        'optimized' => new \stdClass,
+        'maximized' => new \stdClass,
     ]);
 
     $job = new ProcessImageVariantsJob($originalPath, $imageId, "images/test/{$imageId}");

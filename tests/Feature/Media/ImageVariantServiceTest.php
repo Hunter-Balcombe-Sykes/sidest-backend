@@ -45,7 +45,7 @@ function makeVariantFixture(int $width, int $height, string $format = 'jpeg'): s
     $path = tempnam(sys_get_temp_dir(), 'sidest_variant_test_');
     match ($format) {
         'jpeg' => imagejpeg($img, $path, 90),
-        'png'  => imagepng($img, $path),
+        'png' => imagepng($img, $path),
         'webp' => imagewebp($img, $path, 90),
     };
     imagedestroy($img);
@@ -68,11 +68,12 @@ function seedVariantTestMediaRow(): string
         'created_at' => now()->toDateTimeString(),
         'updated_at' => now()->toDateTimeString(),
     ]);
+
     return $id;
 }
 
 it('generates optimized and maximized variants for a normal-sized image', function () {
-    $service = new ImageVariantService();
+    $service = new ImageVariantService;
     $imageId = seedVariantTestMediaRow();
     $fixture = makeVariantFixture(1000, 1000, 'jpeg');
 
@@ -92,7 +93,7 @@ it('generates optimized and maximized variants for a normal-sized image', functi
 });
 
 it('downscales variants when source exceeds the cap', function () {
-    $service = new ImageVariantService();
+    $service = new ImageVariantService;
     $imageId = seedVariantTestMediaRow();
     $fixture = makeVariantFixture(6000, 4000, 'jpeg');
 
@@ -115,7 +116,7 @@ it('downscales variants when source exceeds the cap', function () {
 });
 
 it('preserves aspect ratio for portrait images', function () {
-    $service = new ImageVariantService();
+    $service = new ImageVariantService;
     $imageId = seedVariantTestMediaRow();
     $fixture = makeVariantFixture(3000, 4000, 'jpeg');
 
@@ -137,7 +138,7 @@ it('preserves aspect ratio for portrait images', function () {
 });
 
 it('leaves small images untouched when under both caps', function () {
-    $service = new ImageVariantService();
+    $service = new ImageVariantService;
     $imageId = seedVariantTestMediaRow();
     $fixture = makeVariantFixture(800, 600, 'jpeg');
 
@@ -157,7 +158,7 @@ it('leaves small images untouched when under both caps', function () {
 });
 
 it('generates an optimized variant file under the target_kb ceiling', function () {
-    $service = new ImageVariantService();
+    $service = new ImageVariantService;
     $imageId = seedVariantTestMediaRow();
     $fixture = makeVariantFixture(2000, 2000, 'jpeg');
 
@@ -176,7 +177,7 @@ it('generates an optimized variant file under the target_kb ceiling', function (
 });
 
 it('throws UnprocessableImageException when pixel count exceeds the guard', function () {
-    $service = new ImageVariantService();
+    $service = new ImageVariantService;
     $imageId = seedVariantTestMediaRow();
     // 6000 × 5000 = 30 MP, above the 24 MP default ceiling.
     $fixture = makeVariantFixture(6000, 5000, 'jpeg');
@@ -207,7 +208,7 @@ it('throws UnprocessableImageException when pixel count exceeds the guard', func
 it('respects the SIDEST_IMAGE_MAX_PIXELS env override', function () {
     config(['sidest.image_max_pixels' => 1_000_000]); // 1 MP
 
-    $service = new ImageVariantService();
+    $service = new ImageVariantService;
     $imageId = seedVariantTestMediaRow();
     // 1200 × 1200 = 1.44 MP, above the configured 1 MP ceiling.
     $fixture = makeVariantFixture(1200, 1200, 'jpeg');
