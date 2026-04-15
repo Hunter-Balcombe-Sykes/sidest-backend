@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Media\ImageVariantService;
+use App\Services\Media\UnprocessableImageException;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -111,6 +112,19 @@ class ProcessImageVariantsJob implements ShouldQueue
                 ]);
 
             Log::info('ProcessImageVariantsJob: completed.', ['image_id' => $this->imageId]);
+        } catch (UnprocessableImageException $e) {
+            // Permanent validation failure (e.g. pixel-count guard rejection).
+            // Retrying cannot succeed, so mark failed immediately and skip the
+            // retry machinery that $tries = 3 would otherwise trigger.
+            Log::warning('ProcessImageVariantsJob: unprocessable image, failing without retry.', [
+                'image_id' => $this->imageId,
+                'error'    => $e->getMessage(),
+            ]);
+
+            $this->markFailed($e->getMessage());
+            $this->fail($e);
+
+            return;
         } catch (Throwable $e) {
             Log::error('ProcessImageVariantsJob: variant generation failed.', [
                 'image_id'  => $this->imageId,
