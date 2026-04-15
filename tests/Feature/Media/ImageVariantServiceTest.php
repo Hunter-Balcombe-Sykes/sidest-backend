@@ -27,14 +27,9 @@ beforeEach(function () {
 
     if (! is_dir($testRoot)) {
         mkdir($testRoot, 0777, true);
-    } else {
-        // Clean between tests so content-hashed paths don't accumulate.
-        foreach (glob($testRoot . '/**/*', GLOB_BRACE) as $f) {
-            if (is_file($f)) {
-                @unlink($f);
-            }
-        }
     }
+    // No cross-test cleanup needed — each test seeds a fresh UUID, so
+    // content-hashed output paths never collide across runs.
 });
 
 /**

@@ -308,6 +308,8 @@ class ImageVariantService
             return $definitions;
         }
 
+        // NOTE: this fallback MUST mirror config/sidest.php image_variants exactly.
+        // It runs only when config is empty (sparse test environments).
         return [
             'optimized' => [
                 'format'      => 'webp',
