@@ -1,0 +1,344 @@
+<?php
+
+namespace App\Services\Shopify;
+
+use App\Models\Core\Professional\ProfessionalIntegration;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Http;
+
+// Imports the brand-design shape from Shopify for a single integration.
+//
+// Two sources are combined:
+//   1. Shop Brand API (GraphQL `shop.brand`) — colours, logos, slogan. These
+//      are merchant-set brand values (Settings → Brand in Shopify admin) and
+//      are theme-agnostic.
+//   2. Active theme's `config/settings_data.json` (Asset API) — radius,
+//      border thickness, and section spacing. These are pixel values that we
+//      bucket into our three design enums (square|rounded|pill, etc.) so every
+//      Sidest theme can map them to its own concrete values.
+//
+// Values that Shopify has no answer for are returned as null; callers are
+// expected to preserve any existing user edits for those fields (leave-if-absent).
+class BrandDesignImporter
+{
+    // Enum buckets. These thresholds intentionally match the design brief —
+    // change them here and the whole app follows.
+    //
+    // Radius:    0-4 = square,    5-16 = rounded,    17+ = pill
+    // Thickness: 0-1 = hairline,  2-3  = standard,   4+  = bold
+    // Spacing:   0-32 = tight,    33-64 = default,   65+ = spacious
+    private const RADIUS_ROUNDED_MIN = 5;
+
+    private const RADIUS_PILL_MIN = 17;
+
+    private const THICKNESS_STANDARD_MIN = 2;
+
+    private const THICKNESS_BOLD_MIN = 4;
+
+    private const SPACING_DEFAULT_MIN = 33;
+
+    private const SPACING_SPACIOUS_MIN = 65;
+
+    // Per-theme hints for where each pixel value lives in settings_data.json.
+    // Lookups walk this list in order and take the first numeric value found.
+    // Unknown themes fall through to `generic`.
+    private const THEME_HINTS = [
+        'horizon' => [
+            'radius' => ['buttons_radius', 'inputs_radius', 'variant_pills_radius', 'radius'],
+            'thickness' => ['buttons_border_thickness', 'inputs_border_thickness', 'border_thickness'],
+            'spacing' => ['spacing_sections', 'sections_spacing', 'section_spacing'],
+        ],
+        'dawn' => [
+            'radius' => ['buttons_radius', 'inputs_radius', 'variant_pills_radius'],
+            'thickness' => ['buttons_border_thickness', 'inputs_border_thickness'],
+            'spacing' => ['spacing_sections', 'page_width'],
+        ],
+        'prestige' => [
+            'radius' => ['button_border_radius', 'buttons_radius', 'input_border_radius'],
+            'thickness' => ['button_border_width', 'input_border_width'],
+            'spacing' => ['section_vertical_spacing', 'section_spacing'],
+        ],
+        'impact' => [
+            'radius' => ['buttons_radius', 'radius'],
+            'thickness' => ['buttons_border_thickness', 'border_thickness'],
+            'spacing' => ['section_spacing', 'sections_spacing'],
+        ],
+        'impulse' => [
+            'radius' => ['buttons_radius', 'radius'],
+            'thickness' => ['buttons_border_thickness'],
+            'spacing' => ['section_spacing'],
+        ],
+        // Catch-all for themes we haven't explicitly mapped.
+        'generic' => [
+            'radius' => ['buttons_radius', 'button_border_radius', 'radius', 'border_radius'],
+            'thickness' => ['buttons_border_thickness', 'button_border_width', 'border_thickness', 'border_width'],
+            'spacing' => ['spacing_sections', 'section_spacing', 'sections_spacing'],
+        ],
+    ];
+
+    private const SHOP_BRAND_QUERY = <<<'GRAPHQL'
+    {
+      shop {
+        id
+        myshopifyDomain
+        brand {
+          slogan
+          logo { image { url } }
+          squareLogo { image { url } }
+          colors {
+            primary   { background foreground }
+            secondary { background foreground }
+          }
+        }
+      }
+    }
+    GRAPHQL;
+
+    private const THEMES_QUERY = <<<'GRAPHQL'
+    {
+      themes(first: 20, roles: [MAIN]) {
+        nodes {
+          id
+          name
+          role
+        }
+      }
+    }
+    GRAPHQL;
+
+    /**
+     * Pull the full brand-design shape from Shopify. Returns null for fields
+     * Shopify cannot answer for — callers should preserve existing user values
+     * in those slots.
+     *
+     * @return array{
+     *     colors: array{background: ?string, text: ?string, accent: ?string, border: ?string},
+     *     corner_radius: ?string,
+     *     border_thickness: ?string,
+     *     section_spacing: ?string,
+     *     logo: array{full_url: ?string, square_url: ?string},
+     *     slogan: ?string,
+     *     shop_gid: ?string
+     * }
+     */
+    public function import(ProfessionalIntegration $integration): array
+    {
+        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+        $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
+        $accessToken = trim((string) $integration->access_token);
+        $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
+
+        if ($shopDomain === '' || $accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
+            throw new \RuntimeException('Invalid Shopify credentials on integration.');
+        }
+
+        $brand = $this->fetchBrand($shopDomain, $accessToken, $apiVersion);
+        $themeSettings = $this->fetchActiveThemeSettings($shopDomain, $accessToken, $apiVersion);
+
+        $themeName = strtolower((string) ($themeSettings['_theme_name'] ?? ''));
+        $settings = is_array($themeSettings['current'] ?? null) ? $themeSettings['current'] : [];
+
+        return [
+            'colors' => [
+                // Shop Brand API's "primary" colour pair is the brand's base —
+                // background + foreground. Use them for page background/text.
+                'background' => Arr::get($brand, 'colors.primary.0.background'),
+                'text' => Arr::get($brand, 'colors.primary.0.foreground'),
+                // The "secondary" pair backs accents (buttons, links). The
+                // background half is what merchants see as their accent swatch.
+                'accent' => Arr::get($brand, 'colors.secondary.0.background'),
+                // Border colour has no Brand API equivalent.
+                'border' => null,
+            ],
+            'corner_radius' => $this->bucketRadius($this->resolvePx($settings, $themeName, 'radius')),
+            'border_thickness' => $this->bucketThickness($this->resolvePx($settings, $themeName, 'thickness')),
+            'section_spacing' => $this->bucketSpacing($this->resolvePx($settings, $themeName, 'spacing')),
+            'logo' => [
+                'full_url' => Arr::get($brand, 'logo.image.url'),
+                'square_url' => Arr::get($brand, 'squareLogo.image.url'),
+            ],
+            'slogan' => Arr::get($brand, 'slogan'),
+            'shop_gid' => Arr::get($brand, 'shop_gid'),
+        ];
+    }
+
+    /**
+     * @return array{slogan: ?string, logo: array, squareLogo: array, colors: array, shop_gid: ?string}
+     */
+    private function fetchBrand(string $shopDomain, string $accessToken, string $apiVersion): array
+    {
+        $endpoint = "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json";
+
+        $response = Http::timeout(20)
+            ->acceptJson()
+            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
+            ->post($endpoint, ['query' => self::SHOP_BRAND_QUERY]);
+
+        if (! $response->ok()) {
+            throw new \RuntimeException("Shopify brand fetch failed (HTTP {$response->status()}).");
+        }
+
+        $errors = $response->json('errors', []);
+        if (is_array($errors) && $errors !== []) {
+            $message = (string) Arr::get($errors, '0.message', 'Shopify GraphQL returned errors.');
+            throw new \RuntimeException($message);
+        }
+
+        return [
+            'slogan' => $response->json('data.shop.brand.slogan'),
+            'logo' => $response->json('data.shop.brand.logo') ?? [],
+            'squareLogo' => $response->json('data.shop.brand.squareLogo') ?? [],
+            'colors' => $response->json('data.shop.brand.colors') ?? [],
+            'shop_gid' => $response->json('data.shop.id'),
+        ];
+    }
+
+    /**
+     * Fetch and parse the active theme's settings_data.json. Returns both the
+     * theme's display name (for per-theme mapping) and the resolved settings.
+     *
+     * @return array{_theme_name: ?string, current: array<string, mixed>}
+     */
+    private function fetchActiveThemeSettings(string $shopDomain, string $accessToken, string $apiVersion): array
+    {
+        // Step 1 — find the MAIN (active) theme ID and name via GraphQL.
+        $gqlEndpoint = "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json";
+
+        $themesResponse = Http::timeout(20)
+            ->acceptJson()
+            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
+            ->post($gqlEndpoint, ['query' => self::THEMES_QUERY]);
+
+        if (! $themesResponse->ok()) {
+            return ['_theme_name' => null, 'current' => []];
+        }
+
+        $nodes = $themesResponse->json('data.themes.nodes', []) ?? [];
+        $main = collect($nodes)->first(fn ($t) => strtoupper((string) Arr::get($t, 'role', '')) === 'MAIN');
+
+        if (! is_array($main)) {
+            return ['_theme_name' => null, 'current' => []];
+        }
+
+        $themeName = (string) Arr::get($main, 'name', '');
+        $themeGid = (string) Arr::get($main, 'id', '');
+
+        // GIDs look like gid://shopify/OnlineStoreTheme/12345. The Asset REST
+        // endpoint wants the numeric ID.
+        if (! preg_match('#/(\d+)$#', $themeGid, $matches)) {
+            return ['_theme_name' => $themeName, 'current' => []];
+        }
+
+        $themeId = $matches[1];
+
+        // Step 2 — fetch settings_data.json via the Asset REST endpoint.
+        // The response body contains a `asset.value` string of JSON.
+        $assetEndpoint = "https://{$shopDomain}/admin/api/{$apiVersion}/themes/{$themeId}/assets.json";
+
+        $assetResponse = Http::timeout(20)
+            ->acceptJson()
+            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
+            ->get($assetEndpoint, ['asset[key]' => 'config/settings_data.json']);
+
+        if (! $assetResponse->ok()) {
+            return ['_theme_name' => $themeName, 'current' => []];
+        }
+
+        $raw = (string) $assetResponse->json('asset.value', '');
+        $decoded = json_decode($raw, true);
+
+        if (! is_array($decoded)) {
+            return ['_theme_name' => $themeName, 'current' => []];
+        }
+
+        // settings_data.json stores the active preset under `current`, which
+        // is either an object (live settings) or a string (preset name → look
+        // it up in `presets`).
+        $current = $decoded['current'] ?? [];
+        if (is_string($current)) {
+            $current = Arr::get($decoded, "presets.{$current}", []);
+        }
+
+        return [
+            '_theme_name' => $themeName,
+            'current' => is_array($current) ? $current : [],
+        ];
+    }
+
+    /**
+     * Walk this theme's hint list for a design dimension and return the first
+     * numeric value found. Falls back to the `generic` hint list for themes we
+     * haven't explicitly mapped.
+     */
+    private function resolvePx(array $settings, string $themeName, string $dimension): ?int
+    {
+        $hintsKey = $this->matchThemeHints($themeName);
+        $keys = self::THEME_HINTS[$hintsKey][$dimension] ?? [];
+
+        foreach ($keys as $key) {
+            $value = $settings[$key] ?? null;
+            if (is_numeric($value)) {
+                return (int) round((float) $value);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Map a Shopify theme display name to one of our hint buckets. Shopify
+     * themes ship as e.g. "Dawn", "Horizon 1.0.0" — substring match keeps us
+     * forgiving of versioning.
+     */
+    private function matchThemeHints(string $themeName): string
+    {
+        $name = strtolower($themeName);
+
+        foreach (['horizon', 'dawn', 'prestige', 'impact', 'impulse'] as $key) {
+            if (str_contains($name, $key)) {
+                return $key;
+            }
+        }
+
+        return 'generic';
+    }
+
+    private function bucketRadius(?int $px): ?string
+    {
+        if ($px === null) {
+            return null;
+        }
+
+        return match (true) {
+            $px >= self::RADIUS_PILL_MIN => 'pill',
+            $px >= self::RADIUS_ROUNDED_MIN => 'rounded',
+            default => 'square',
+        };
+    }
+
+    private function bucketThickness(?int $px): ?string
+    {
+        if ($px === null) {
+            return null;
+        }
+
+        return match (true) {
+            $px >= self::THICKNESS_BOLD_MIN => 'bold',
+            $px >= self::THICKNESS_STANDARD_MIN => 'standard',
+            default => 'hairline',
+        };
+    }
+
+    private function bucketSpacing(?int $px): ?string
+    {
+        if ($px === null) {
+            return null;
+        }
+
+        return match (true) {
+            $px >= self::SPACING_SPACIOUS_MIN => 'spacious',
+            $px >= self::SPACING_DEFAULT_MIN => 'default',
+            default => 'tight',
+        };
+    }
+}
