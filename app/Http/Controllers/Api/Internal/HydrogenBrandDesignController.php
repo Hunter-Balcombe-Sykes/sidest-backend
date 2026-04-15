@@ -8,6 +8,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Media\BrandDesignMediaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -20,6 +21,10 @@ use Illuminate\Support\Facades\Cache;
 class HydrogenBrandDesignController extends ApiController
 {
     private const CACHE_TTL_SECONDS = 300;
+
+    public function __construct(
+        private readonly BrandDesignMediaService $brandDesign,
+    ) {}
 
     public function show(Request $request, string $slug): JsonResponse
     {
@@ -61,7 +66,7 @@ class HydrogenBrandDesignController extends ApiController
      *     logo: array{full_url: ?string, square_url: ?string},
      *     slogan: ?string,
      *     font_family: ?string,
-     *     placeholder_sitepage_images: array<int, array{url: string, name: ?string, path: ?string}>,
+     *     placeholders: array<int, array{url: string, alt_text: ?string}>,
      *     fallback_gallery: array<int, array{url: ?string, alt_text: ?string}>
      * }
      */
@@ -72,8 +77,6 @@ class HydrogenBrandDesignController extends ApiController
         $design = is_array($settings['design'] ?? null) ? $settings['design'] : [];
 
         $colors = is_array($design['colors'] ?? null) ? $design['colors'] : [];
-        $logo = is_array($design['logo'] ?? null) ? $design['logo'] : [];
-        $media = is_array($design['media'] ?? null) ? $design['media'] : [];
 
         // shop_domain still lives on provider_metadata — the one field we read
         // from there, purely so the Hydrogen layer can key on it when needed.
@@ -82,6 +85,13 @@ class HydrogenBrandDesignController extends ApiController
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->first();
         $metadata = is_array($integration?->provider_metadata) ? $integration->provider_metadata : [];
+
+        // Logo + placeholders live in site_media (pool=design, purpose=...).
+        // The service resolves variant URLs into the canonical service shape;
+        // the Hydrogen response keeps only the fields Hydrogen renders.
+        $designMedia = $site
+            ? $this->brandDesign->listDesignMedia((string) $site->id)
+            : ['logo' => ['full_url' => null, 'square_url' => null], 'placeholders' => []];
 
         return [
             'brand_professional_id' => (string) $professional->id,
@@ -97,52 +107,23 @@ class HydrogenBrandDesignController extends ApiController
             'corner_radius' => $design['corner_radius'] ?? null,
             'border_thickness' => $design['border_thickness'] ?? null,
             'section_spacing' => $design['section_spacing'] ?? null,
-            'logo' => [
-                'full_url' => $logo['full_url'] ?? null,
-                'square_url' => $logo['square_url'] ?? null,
-            ],
+            'logo' => $designMedia['logo'],
             'slogan' => $design['slogan'] ?? null,
             'font_family' => is_string($design['font_family'] ?? null) && $design['font_family'] !== ''
                 ? $design['font_family']
                 : null,
-            // Brand-uploaded placeholder images used by affiliate sitepages when
-            // the affiliate hasn't supplied their own gallery yet. Stored at
-            // settings.design.media.placeholder_sitepage_images — a flat list of
-            // {name, path, url}. Only entries with a url are returned.
-            'placeholder_sitepage_images' => $this->extractPlaceholderImages($media),
+            // Hydrogen-facing shape: just the fields Hydrogen renders. The
+            // service-returned id and sort_order are intentionally omitted —
+            // Hydrogen doesn't manage these rows, only displays them.
+            'placeholders' => array_map(
+                fn (array $item) => [
+                    'url' => $item['url'],
+                    'alt_text' => $item['alt_text'],
+                ],
+                $designMedia['placeholders']
+            ),
             'fallback_gallery' => $this->getFallbackGallery($site),
         ];
-    }
-
-    /**
-     * Normalise the placeholder sitepage images stored on site.settings.design.media.
-     *
-     * @param  array<string, mixed>  $media
-     * @return array<int, array{url: string, name: ?string, path: ?string}>
-     */
-    private function extractPlaceholderImages(array $media): array
-    {
-        $raw = is_array($media['placeholder_sitepage_images'] ?? null)
-            ? $media['placeholder_sitepage_images']
-            : [];
-
-        $out = [];
-        foreach ($raw as $item) {
-            if (! is_array($item)) {
-                continue;
-            }
-            $url = is_string($item['url'] ?? null) ? $item['url'] : null;
-            if (! $url) {
-                continue;
-            }
-            $out[] = [
-                'url' => $url,
-                'name' => is_string($item['name'] ?? null) ? $item['name'] : null,
-                'path' => is_string($item['path'] ?? null) ? $item['path'] : null,
-            ];
-        }
-
-        return $out;
     }
 
     /**

@@ -5,6 +5,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 // These tests exercise the surface behaviour of the unified brand-design
@@ -26,7 +27,7 @@ function makeBrandDesignRequest(string $method = 'GET', array $params = [], ?str
 }
 
 it('returns 403 when non-brand tries to view design', function () {
-    $controller = new BrandDesignController();
+    $controller = app(BrandDesignController::class);
     $response = $controller->show(makeBrandDesignRequest('GET', [], 'influencer'));
 
     expect($response->status())->toBe(403);
@@ -34,21 +35,17 @@ it('returns 403 when non-brand tries to view design', function () {
 });
 
 it('returns 403 when non-brand tries to resync design', function () {
-    $controller = new BrandDesignController();
+    $controller = app(BrandDesignController::class);
     $response = $controller->resync(makeBrandDesignRequest('POST', [], 'influencer'));
 
     expect($response->status())->toBe(403);
 });
 
-it('returns logo urls from the unified design shape on show', function () {
+it('returns logo urls + placeholders from site_media on show', function () {
     setupProfessionalsTable();
     setupSitesTable();
+    setupMediaTables();
 
-    // BrandDesignController::show queries professional_integrations to
-    // determine shopify_connected — create the table so the query doesn't fail.
-    // attachTestSchemas() (called by setupProfessionalsTable) already ATTACHes
-    // the 'core' schema as an in-memory SQLite database, so we can CREATE TABLE
-    // directly under core.* without needing a separate ATTACH step.
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
         id TEXT PRIMARY KEY,
         professional_id TEXT NOT NULL,
@@ -64,8 +61,6 @@ it('returns logo urls from the unified design shape on show', function () {
     $brandId = (string) Str::uuid();
     $siteId  = (string) Str::uuid();
     $now     = now()->toDateTimeString();
-    $fullUrl = 'https://cdn.example.com/images/full-logo.webp';
-    $sqUrl   = 'https://cdn.example.com/images/square-logo.webp';
 
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id'              => $brandId,
@@ -79,18 +74,13 @@ it('returns logo urls from the unified design shape on show', function () {
         'updated_at'      => $now,
     ]);
 
-    // Seed the unified design shape — mirrors what the
-    // unify_brand_design_storage migration does for existing rows.
+    // Settings hold tokens (colors, font, enums) only — logo lives in site_media.
     DB::connection('pgsql')->table('site.sites')->insert([
         'id'              => $siteId,
         'professional_id' => $brandId,
         'subdomain'       => 'designlogotest',
         'settings'        => json_encode([
             'design' => [
-                'logo' => [
-                    'full_url'   => $fullUrl,
-                    'square_url' => $sqUrl,
-                ],
                 'colors' => [
                     'background' => '#ffffff',
                     'text'       => '#000000',
@@ -107,22 +97,67 @@ it('returns logo urls from the unified design shape on show', function () {
         'updated_at'      => $now,
     ]);
 
+    // Seed two logo rows + two placeholder rows in site_media, plus matching
+    // media_variants so listDesignMedia returns non-null URLs.
+    $logoFullId = (string) Str::uuid();
+    $logoSquareId = (string) Str::uuid();
+    $placeholderAId = (string) Str::uuid();
+    $placeholderBId = (string) Str::uuid();
+
+    foreach ([
+        [$logoFullId, 'logo_full', 0],
+        [$logoSquareId, 'logo_square', 0],
+        [$placeholderAId, 'placeholder', 0],
+        [$placeholderBId, 'placeholder', 1],
+    ] as [$id, $purpose, $sortOrder]) {
+        DB::connection('pgsql')->table('site.site_media')->insert([
+            'id' => $id,
+            'site_id' => $siteId,
+            'pool' => 'design',
+            'purpose' => $purpose,
+            'path' => "images/{$brandId}/{$id}/original.png",
+            'alt_text' => $purpose === 'placeholder' ? "{$id}.png" : null,
+            'sort_order' => $sortOrder,
+            'is_active' => 1,
+            'media_type' => 'image',
+            'processing_state' => 'ready',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        DB::connection('pgsql')->table('site.media_variants')->insert([
+            'id' => (string) Str::uuid(),
+            'media_id' => $id,
+            'variant_key' => 'optimized',
+            'artifact_type' => 'webp',
+            'disk' => 'media',
+            'path' => "images/{$brandId}/{$id}/optimized.webp",
+            'mime' => 'image/webp',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
+
+    Storage::fake('media');
+
     $brand = Professional::query()->findOrFail($brandId);
     $brand->setRelation('site', Site::query()->findOrFail($siteId));
 
     $request = Request::create('/api/brand/design', 'GET');
     $request->attributes->set('professional', $brand);
 
-    $controller = new BrandDesignController();
+    $controller = app(BrandDesignController::class);
     $response   = $controller->show($request);
     $data       = $response->getData(true);
 
-    // The response is wrapped in a JsonResource { data: {...} } envelope.
     $payload = $data['data'] ?? $data;
 
     expect($response->status())->toBe(200);
-    expect($payload['logo']['full_url'])->toBe($fullUrl);
-    expect($payload['logo']['square_url'])->toBe($sqUrl);
+    expect($payload['logo']['full_url'])->not->toBeNull();
+    expect($payload['logo']['square_url'])->not->toBeNull();
     expect($payload['colors']['background'])->toBe('#ffffff');
     expect($payload['font_family'])->toBe('helvetica_neue');
+    expect($payload['placeholders'])->toHaveCount(2);
+    expect($payload['placeholders'][0]['sort_order'])->toBe(0);
+    expect($payload['placeholders'][1]['sort_order'])->toBe(1);
 });

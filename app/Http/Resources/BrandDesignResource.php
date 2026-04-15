@@ -5,10 +5,10 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-// Brand Design API response. Mirrors the unified shape stored at
-// site.settings.design — colours, three normalised enum buckets
-// (corner_radius / border_thickness / section_spacing), logo URLs and the
-// brand slogan. `shopify_connected` gates the "Re-sync from Shopify" button.
+// Brand Design API response. Mirrors the unified shape returned by
+// BrandDesignController::show — colours, three normalised enum buckets
+// (corner_radius / border_thickness / section_spacing), logo URLs, slogan,
+// font, the placeholder list, and shopify_connected.
 //
 // @response {
 //   colors: { background, text, accent, border },          hex|null
@@ -18,6 +18,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 //   logo: { full_url, square_url },                        url|null
 //   slogan: string|null,
 //   font_family: string,                                    enum slug — always set (default applied upstream)
+//   placeholders: [{ id, alt_text, url, sort_order }],
 //   shopify_connected: bool
 // }
 class BrandDesignResource extends JsonResource
@@ -26,6 +27,7 @@ class BrandDesignResource extends JsonResource
     {
         $colors = is_array($this->resource['colors'] ?? null) ? $this->resource['colors'] : [];
         $logo = is_array($this->resource['logo'] ?? null) ? $this->resource['logo'] : [];
+        $placeholders = is_array($this->resource['placeholders'] ?? null) ? $this->resource['placeholders'] : [];
 
         return [
             'colors' => [
@@ -43,6 +45,15 @@ class BrandDesignResource extends JsonResource
             ],
             'slogan' => $this->resource['slogan'] ?? null,
             'font_family' => $this->resource['font_family'] ?? null,
+            'placeholders' => array_map(
+                fn (array $p) => [
+                    'id' => $p['id'] ?? null,
+                    'alt_text' => $p['alt_text'] ?? null,
+                    'url' => $p['url'] ?? null,
+                    'sort_order' => isset($p['sort_order']) ? (int) $p['sort_order'] : 0,
+                ],
+                $placeholders
+            ),
             'shopify_connected' => (bool) ($this->resource['shopify_connected'] ?? false),
         ];
     }

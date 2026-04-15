@@ -124,20 +124,10 @@ class UpdateSiteAction
             Arr::forget($incoming, 'design.typography.font_file_url');
             $merged = array_replace_recursive($existing, $incoming);
 
-            // Indexed lists under settings must be replaced wholesale, not merged.
-            // array_replace_recursive merges by key, so sending a shortened list
-            // leaves stale trailing entries in the DB (e.g. deleting a placeholder
-            // image in the UI would "come back" on refresh because its index was
-            // preserved from $existing). Explicitly overwrite these keys with the
-            // incoming value whenever the client provided one.
-            $listKeys = [
-                'design.media.placeholder_sitepage_images',
-            ];
-            foreach ($listKeys as $listKey) {
-                if (Arr::has($incoming, $listKey)) {
-                    Arr::set($merged, $listKey, Arr::get($incoming, $listKey));
-                }
-            }
+            // Indexed list special-casing was historically needed for
+            // settings.design.media.placeholder_sitepage_images, which has
+            // since moved to site.site_media. No remaining indexed lists live
+            // under settings, so the recursive merge is sufficient.
 
             $data['settings'] = $merged;
         }

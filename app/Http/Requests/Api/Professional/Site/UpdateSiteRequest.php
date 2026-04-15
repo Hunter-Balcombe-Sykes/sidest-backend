@@ -67,10 +67,8 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.design.media.brand_logo_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'settings.design.media.brand_logo_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
             'settings.design.media.brand_logo_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
-            'settings.design.media.placeholder_sitepage_images' => ['sometimes', 'array', 'max:5'],
-            'settings.design.media.placeholder_sitepage_images.*.name' => ['required_with:settings.design.media.placeholder_sitepage_images', 'string', 'max:255'],
-            'settings.design.media.placeholder_sitepage_images.*.path' => ['required_with:settings.design.media.placeholder_sitepage_images', 'string', 'max:2048'],
-            'settings.design.media.placeholder_sitepage_images.*.url' => ['required_with:settings.design.media.placeholder_sitepage_images', 'url', 'max:2048'],
+            'settings.design.media.placeholder_sitepage_images' => ['prohibited'],
+            'settings.design.media.placeholder_sitepage_images.*' => ['prohibited'],
 
             // --- New unified brand-design shape ---
             // Populated by the Shopify sync job (SyncShopifyBrandDesignJob) and, later,
@@ -93,9 +91,9 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.design.section_spacing' => ['sometimes', 'nullable', 'string', Rule::in(['tight', 'default', 'spacious'])],
             // Logos are downloaded from Shopify into our own storage so the URLs
             // are stable even if Shopify CDN tokens rotate.
-            'settings.design.logo' => ['sometimes', 'array'],
-            'settings.design.logo.full_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
-            'settings.design.logo.square_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+            'settings.design.logo' => ['prohibited'],
+            'settings.design.logo.full_url' => ['prohibited'],
+            'settings.design.logo.square_url' => ['prohibited'],
             'settings.design.slogan' => ['sometimes', 'nullable', 'string', 'max:200'],
             // Font picker. Not Shopify-synced — purely a Sidest-side choice
             // from a fixed shortlist. Keep this in sync with lib/design/fonts.ts
@@ -226,6 +224,11 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.design.border_thickness.in' => 'Border thickness must be one of: hairline, default, bold.',
             'settings.design.section_spacing.in' => 'Section spacing must be one of: tight, default, spacious.',
             'settings.design.font_family.in' => 'Font must be one of: neue_haas_grotesk, helvetica_neue, forma_djr, nb_architekt, swiss_721.',
+            'settings.design.media.placeholder_sitepage_images.prohibited' => 'Use /api/uploads/brand-placeholder-image and the brand-placeholder-images management endpoints.',
+            'settings.design.media.placeholder_sitepage_images.*.prohibited' => 'Use /api/uploads/brand-placeholder-image and the brand-placeholder-images management endpoints.',
+            'settings.design.logo.prohibited' => 'Use /api/uploads/brand-logo (managed by site_media).',
+            'settings.design.logo.full_url.prohibited' => 'Use /api/uploads/brand-logo (managed by site_media).',
+            'settings.design.logo.square_url.prohibited' => 'Use /api/uploads/brand-logo (managed by site_media).',
         ];
     }
 }

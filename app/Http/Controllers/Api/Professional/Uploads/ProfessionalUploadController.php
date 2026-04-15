@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional\Uploads;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
+use App\Http\Requests\Api\Professional\Uploads\ReorderBrandPlaceholdersRequest;
 use App\Http\Requests\Api\Professional\Uploads\ReorderPoolImagesRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadBrandLogoRequest;
 use App\Http\Requests\Api\Professional\Uploads\UploadBrandPlaceholderImageRequest;
@@ -14,6 +15,7 @@ use App\Jobs\ProcessImageVariantsJob;
 use App\Jobs\ProcessVideoVariantsJob;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
+use App\Services\Media\BrandDesignMediaService;
 use App\Services\Media\ImageVariantService;
 use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Http\JsonResponse;
@@ -32,6 +34,7 @@ class ProfessionalUploadController extends ApiController
 
     public function __construct(
         private readonly ImageVariantService $mediaService,
+        private readonly BrandDesignMediaService $brandDesign,
     ) {}
 
     /**
@@ -409,7 +412,10 @@ class ProfessionalUploadController extends ApiController
             return $this->error('Brand logo uploads are only available for brand accounts.', 403);
         }
 
-        return $this->storeBrandDesignImage($pro, $site, $request->file('logo'), 'logo');
+        $variant = $request->validated('variant') ?? 'full';
+        $label = $variant === 'square' ? 'logo_square' : 'logo_full';
+
+        return $this->storeBrandDesignImage($pro, $site, $request->file('logo'), $label);
     }
 
     /**
@@ -428,72 +434,110 @@ class ProfessionalUploadController extends ApiController
         return $this->storeBrandDesignImage($pro, $site, $request->file('image'), 'placeholder');
     }
 
+    /**
+     * GET /api/uploads/brand-placeholder-images
+     *
+     * Returns the active placeholder list for the brand's site, ordered by
+     * sort_order. Each item: { id, alt_text, url, sort_order }.
+     */
+    public function listBrandPlaceholders(Request $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return $this->error('Placeholder image listing is only available for brand accounts.', 403);
+        }
+
+        $payload = $this->brandDesign->listDesignMedia($site->id);
+
+        return $this->success(['placeholders' => $payload['placeholders']]);
+    }
+
+    /**
+     * DELETE /api/uploads/brand-placeholder-images/{media}
+     *
+     * Soft-deletes a placeholder and repacks the remaining sort_order so the
+     * list has no gaps.
+     */
+    public function destroyBrandPlaceholder(Request $request, string $media): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return $this->error('Placeholder management is only available for brand accounts.', 403);
+        }
+
+        $this->brandDesign->deletePlaceholder($site, $media);
+
+        return $this->success(['deleted' => true]);
+    }
+
+    /**
+     * POST /api/uploads/brand-placeholder-images/reorder
+     *
+     * Body: { ordered_ids: [uuid, uuid, ...] }. The list must contain every
+     * active placeholder id for the site — extras or missing rows return 422.
+     */
+    public function reorderBrandPlaceholders(ReorderBrandPlaceholdersRequest $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return $this->error('Placeholder management is only available for brand accounts.', 403);
+        }
+
+        $orderedIds = $request->validated('ordered_ids') ?? [];
+        $this->brandDesign->reorderPlaceholders($site, $orderedIds);
+
+        return $this->success(['reordered' => true]);
+    }
+
     private function storeBrandDesignImage(
         \App\Models\Core\Professional\Professional $pro,
         \App\Models\Core\Site\Site $site,
         \Illuminate\Http\UploadedFile $file,
         string $label,
     ): JsonResponse {
-        // Brand design assets (logo, placeholder) are singleton scratchpad rows
-        // for the image variant pipeline — the actual URL is persisted into
-        // site.settings.design.media by a separate request. Soft-delete any
-        // prior active row with the same label so re-uploads don't accumulate
-        // orphans and don't trip the design-pool singleton index.
-        $media = DB::transaction(function () use ($site, $label, $file) {
-            SiteMedia::query()
-                ->where('site_id', $site->id)
-                ->where('pool', SiteMedia::POOL_DESIGN)
-                ->where('alt_text', $label)
-                ->whereNull('deleted_at')
-                ->get()
-                ->each(fn (SiteMedia $existing) => $existing->delete());
-
-            return SiteMedia::create([
-                'site_id' => $site->id,
-                'pool' => SiteMedia::POOL_DESIGN,
-                'path' => '',
-                'alt_text' => $label,
-                'sort_order' => 0,
-                'is_active' => true,
-                'media_type' => SiteMedia::MEDIA_TYPE_IMAGE,
-                'processing_state' => SiteMedia::PROCESSING_STATE_PENDING,
-                'original_mime' => $file->getMimeType(),
-                'original_size_bytes' => $file->getSize(),
-            ]);
-        });
-
-        $basePath = "images/{$pro->id}/{$media->id}";
-
+        // $label is one of: 'logo_full', 'logo_square', or 'placeholder'.
+        // The brand-logo and brand-placeholder routes both funnel through here
+        // so BrandDesignMediaService is the only writer.
         try {
-            $originalPath = $this->mediaService->storeOriginal($file, $basePath);
-        } catch (\Exception $e) {
-            Log::error("Brand {$label} upload: failed to store original", [
-                'media_id' => $media->id,
+            $media = match ($label) {
+                'logo_full' => $this->brandDesign->upsertLogoFromUploadedFile($site, $pro->id, $file, 'full'),
+                'logo_square' => $this->brandDesign->upsertLogoFromUploadedFile($site, $pro->id, $file, 'square'),
+                'placeholder' => $this->brandDesign->addPlaceholder($site, $pro->id, $file),
+                default => throw new \InvalidArgumentException("Unknown brand design label: {$label}"),
+            };
+        } catch (\App\Services\Media\PlaceholderLimitExceededException $e) {
+            return $this->error($e->getMessage(), 422);
+        } catch (\Throwable $e) {
+            Log::error("Brand {$label} upload failed.", [
+                'site_id' => $site->id,
                 'error' => $e->getMessage(),
             ]);
-            $media->delete();
-            return $this->error('Failed to store file.', 500);
+            return $this->error('Failed to upload brand design asset.', 500);
         }
 
-        $media->update(['path' => $originalPath]);
-
-        $this->dispatchImageJob($media->id, $originalPath, $basePath);
-
-        app(SiteCacheService::class)->invalidateSite($site);
-
-        $media->refresh();
         $media->load('mediaVariants');
         $isReady = $media->processing_state === SiteMedia::PROCESSING_STATE_READY;
         $variants = $isReady ? $media->variantUrls() : [];
         $mediaDisk = $this->mediaService->resolvedDiskName();
 
         return $this->success([
-            'path' => $originalPath,
-            'url' => $variants['optimized'] ?? Storage::disk($mediaDisk)->url($originalPath),
+            'path' => $media->path,
+            'url' => $variants['optimized'] ?? Storage::disk($mediaDisk)->url($media->path),
             'name' => $file->getClientOriginalName(),
             'disk' => $mediaDisk,
             'site_id' => $site->id,
             'media_id' => $media->id,
+            'media_purpose' => $media->purpose,
+            'sort_order' => (int) $media->sort_order,
             'variants' => $variants,
             'processing_state' => $media->processing_state,
         ], 201);

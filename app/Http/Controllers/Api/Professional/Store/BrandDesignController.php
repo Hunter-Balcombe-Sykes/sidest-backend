@@ -8,6 +8,7 @@ use App\Http\Resources\BrandDesignResource;
 use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
+use App\Services\Media\BrandDesignMediaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -29,6 +30,10 @@ class BrandDesignController extends ApiController
     private const DEFAULT_CORNER_RADIUS = 'default';
     private const DEFAULT_BORDER_THICKNESS = 'default';
     private const DEFAULT_SECTION_SPACING = 'default';
+
+    public function __construct(
+        private readonly BrandDesignMediaService $brandDesign,
+    ) {}
 
     /**
      * Return the current resolved brand-design shape for the authenticated brand.
@@ -57,7 +62,13 @@ class BrandDesignController extends ApiController
         $design = is_array($settings['design'] ?? null) ? $settings['design'] : [];
 
         $colors = is_array($design['colors'] ?? null) ? $design['colors'] : [];
-        $logo = is_array($design['logo'] ?? null) ? $design['logo'] : [];
+
+        // Logo + placeholders live in site_media (pool=design, purpose=...).
+        // listDesignMedia resolves processed variant URLs and returns both in
+        // one query, so the dashboard gets the full design state in one call.
+        $designMedia = $site
+            ? $this->brandDesign->listDesignMedia((string) $site->id)
+            : ['logo' => ['full_url' => null, 'square_url' => null], 'placeholders' => []];
 
         return $this->success(new BrandDesignResource([
             'colors' => [
@@ -77,16 +88,14 @@ class BrandDesignController extends ApiController
             'section_spacing' => is_string($design['section_spacing'] ?? null) && $design['section_spacing'] !== ''
                 ? $design['section_spacing']
                 : self::DEFAULT_SECTION_SPACING,
-            'logo' => [
-                'full_url' => $logo['full_url'] ?? null,
-                'square_url' => $logo['square_url'] ?? null,
-            ],
+            'logo' => $designMedia['logo'],
             'slogan' => $design['slogan'] ?? null,
             // Fall back to the default for any brand whose row predates the
             // seed migration or who explicitly cleared their selection.
             'font_family' => is_string($design['font_family'] ?? null) && $design['font_family'] !== ''
                 ? $design['font_family']
                 : self::DEFAULT_FONT_FAMILY,
+            'placeholders' => $designMedia['placeholders'],
             'shopify_connected' => $this->brandIntegration($pro->id) !== null,
         ]));
     }

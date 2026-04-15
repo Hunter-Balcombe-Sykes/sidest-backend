@@ -164,6 +164,10 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::post('/uploads', [ProfessionalUploadController::class, 'upload']);
         Route::post('/uploads/brand-logo', [ProfessionalUploadController::class, 'uploadBrandLogo']);
         Route::post('/uploads/brand-placeholder-image', [ProfessionalUploadController::class, 'uploadBrandPlaceholderImage']);
+        Route::get('/uploads/brand-placeholder-images', [ProfessionalUploadController::class, 'listBrandPlaceholders']);
+        Route::post('/uploads/brand-placeholder-images/reorder', [ProfessionalUploadController::class, 'reorderBrandPlaceholders']);
+        Route::delete('/uploads/brand-placeholder-images/{media}', [ProfessionalUploadController::class, 'destroyBrandPlaceholder'])
+            ->whereUuid('media');
 
         // Image Management (pool-based: gallery / content)
         Route::get('/images', [ProfessionalUploadController::class, 'index']);

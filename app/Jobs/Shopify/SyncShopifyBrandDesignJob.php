@@ -4,7 +4,9 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Media\BrandDesignMediaService;
 use App\Services\Shopify\BrandDesignImporter;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -71,7 +73,7 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
         return [10, 30, 60];
     }
 
-    public function handle(BrandDesignImporter $importer): void
+    public function handle(BrandDesignImporter $importer, BrandDesignMediaService $brandDesign): void
     {
         $integration = ProfessionalIntegration::query()
             ->where('id', $this->integrationId)
@@ -104,24 +106,30 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
             throw $e;
         }
 
-        // Download logos to our own storage so we don't depend on Shopify CDN
-        // tokens. Failures are non-fatal — we fall back to the source URL.
-        $logoFullUrl = $this->mirrorLogo(
+        // Download logos and persist via BrandDesignMediaService — the same
+        // service the dashboard upload path uses. Failures are non-fatal:
+        // a missing logo just means the existing site_media row stays intact.
+        $this->persistLogoFromShopify(
+            $brandDesign,
+            $site,
             (string) $integration->professional_id,
             'full',
             is_string($imported['logo']['full_url'] ?? null) ? $imported['logo']['full_url'] : null,
         );
-        $logoSquareUrl = $this->mirrorLogo(
+        $this->persistLogoFromShopify(
+            $brandDesign,
+            $site,
             (string) $integration->professional_id,
             'square',
             is_string($imported['logo']['square_url'] ?? null) ? $imported['logo']['square_url'] : null,
         );
 
-        // Merge into site.settings.design with leave-if-absent semantics.
+        // Merge non-media design tokens into site.settings.design with
+        // leave-if-absent semantics. Logo is intentionally NOT in this merge —
+        // it lives in site_media now.
         $settings = is_array($site->settings) ? $site->settings : [];
         $design = is_array($settings['design'] ?? null) ? $settings['design'] : [];
         $existingColors = is_array($design['colors'] ?? null) ? $design['colors'] : [];
-        $existingLogo = is_array($design['logo'] ?? null) ? $design['logo'] : [];
 
         $design['colors'] = [
             'background' => $imported['colors']['background'] ?? ($existingColors['background'] ?? null),
@@ -132,11 +140,12 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
         $design['corner_radius'] = $imported['corner_radius'] ?? ($design['corner_radius'] ?? null);
         $design['border_thickness'] = $imported['border_thickness'] ?? ($design['border_thickness'] ?? null);
         $design['section_spacing'] = $imported['section_spacing'] ?? ($design['section_spacing'] ?? null);
-        $design['logo'] = [
-            'full_url' => $logoFullUrl ?? ($existingLogo['full_url'] ?? null),
-            'square_url' => $logoSquareUrl ?? ($existingLogo['square_url'] ?? null),
-        ];
         $design['slogan'] = $imported['slogan'] ?? ($design['slogan'] ?? null);
+
+        // Strip the legacy logo subtree if any older row still has it. The
+        // backfill migration cleans existing rows; this keeps us idempotent
+        // for any row that gets re-synced before the migration runs.
+        unset($design['logo']);
 
         $settings['design'] = $design;
         $site->settings = $settings;
@@ -179,15 +188,20 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * Download a logo from the given Shopify CDN URL and mirror it onto our
-     * media disk. Returns the public URL of the mirrored copy, or null if the
-     * source URL was missing / the mirror failed (caller is expected to fall
-     * back to the existing stored value in that case).
+     * Download the logo bytes from Shopify CDN and hand them to
+     * BrandDesignMediaService for persistence + variant generation. A null
+     * sourceUrl or any HTTP failure is silently ignored — the existing
+     * site_media row (if any) stays intact.
      */
-    private function mirrorLogo(string $professionalId, string $variant, ?string $sourceUrl): ?string
-    {
+    private function persistLogoFromShopify(
+        BrandDesignMediaService $brandDesign,
+        Site $site,
+        string $professionalId,
+        string $variant,
+        ?string $sourceUrl,
+    ): void {
         if (! is_string($sourceUrl) || $sourceUrl === '' || ! str_starts_with($sourceUrl, 'https://')) {
-            return null;
+            return;
         }
 
         try {
@@ -196,68 +210,24 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
                 ->get($sourceUrl);
 
             if (! $response->ok()) {
-                return null;
+                return;
             }
 
             $bytes = $response->body();
             if ($bytes === '') {
-                return null;
+                return;
             }
 
-            // Content hash in the filename means two consecutive syncs of the
-            // same logo overwrite the same file — no orphaned junk piles up.
-            $ext = $this->extensionFromContentType((string) $response->header('Content-Type')) ?? 'png';
-            $hash = substr(hash('sha256', $bytes), 0, 16);
-            $path = "brand-design/{$professionalId}/logo_{$variant}_{$hash}.{$ext}";
+            $mime = (string) $response->header('Content-Type') ?: 'image/png';
 
-            $disk = Storage::disk($this->mediaDiskName());
-            $disk->put($path, $bytes, 'public');
-
-            $url = $disk->url($path);
-
-            return is_string($url) && $url !== '' ? $url : null;
+            $brandDesign->upsertLogoFromBytes($site, $professionalId, $bytes, $mime, $variant);
         } catch (\Throwable $e) {
-            Log::warning('Failed to mirror brand logo from Shopify CDN.', [
+            Log::warning('Failed to persist Shopify-mirrored brand logo.', [
                 'integration_id' => $this->integrationId,
                 'variant' => $variant,
                 'error' => $e->getMessage(),
             ]);
-
-            return null;
         }
-    }
-
-    private function extensionFromContentType(string $contentType): ?string
-    {
-        $type = strtolower(trim(explode(';', $contentType)[0] ?? ''));
-
-        return match ($type) {
-            'image/png' => 'png',
-            'image/jpeg', 'image/jpg' => 'jpg',
-            'image/webp' => 'webp',
-            'image/svg+xml' => 'svg',
-            'image/gif' => 'gif',
-            default => null,
-        };
-    }
-
-    private function mediaDiskName(): string
-    {
-        // Prefer an explicit media disk if configured; otherwise fall back to
-        // the app's default filesystem. Mirrors the resolution ImageVariantService does.
-        $configured = (string) config('sidest.media_disk', 'media');
-        $default = (string) config('filesystems.default', 'local');
-
-        if ($configured !== 'media') {
-            return $configured;
-        }
-
-        $defaultConfig = config("filesystems.disks.{$default}");
-        if (is_array($defaultConfig) && ($defaultConfig['driver'] ?? null) === 's3') {
-            return $default;
-        }
-
-        return $configured;
     }
 
     private function writeBrandDesignMetafield(ProfessionalIntegration $integration, string $shopGid, array $value): void

@@ -121,7 +121,9 @@ function makeMockedUploadController(): ProfessionalUploadController
         ->andReturnUsing(fn ($file, $basePath) => "{$basePath}/original.png");
     $mediaService->shouldReceive('resolvedDiskName')->andReturn('media');
 
-    return new ProfessionalUploadController($mediaService);
+    $brandDesign = new \App\Services\Media\BrandDesignMediaService($mediaService);
+
+    return new ProfessionalUploadController($mediaService, $brandDesign);
 }
 
 it('stores a brand logo in the design pool', function () {
@@ -139,7 +141,7 @@ it('stores a brand logo in the design pool', function () {
 
     expect($rows)->toHaveCount(1);
     expect($rows->first()->pool)->toBe(SiteMedia::POOL_DESIGN);
-    expect($rows->first()->alt_text)->toBe('logo');
+    expect($rows->first()->purpose)->toBe(SiteMedia::PURPOSE_LOGO_FULL);
 });
 
 it('replaces the previous logo on re-upload instead of crashing', function () {
@@ -157,7 +159,7 @@ it('replaces the previous logo on re-upload instead of crashing', function () {
     $activeLogos = SiteMedia::query()
         ->where('site_id', $site->id)
         ->where('pool', SiteMedia::POOL_DESIGN)
-        ->where('alt_text', 'logo')
+        ->where('purpose', SiteMedia::PURPOSE_LOGO_FULL)
         ->whereNull('deleted_at')
         ->get();
 
@@ -167,7 +169,7 @@ it('replaces the previous logo on re-upload instead of crashing', function () {
     $allLogos = SiteMedia::withTrashed()
         ->where('site_id', $site->id)
         ->where('pool', SiteMedia::POOL_DESIGN)
-        ->where('alt_text', 'logo')
+        ->where('purpose', SiteMedia::PURPOSE_LOGO_FULL)
         ->get();
 
     expect($allLogos)->toHaveCount(2);
@@ -192,8 +194,8 @@ it('allows uploading both a logo and a placeholder for the same site', function 
         ->get();
 
     expect($designRows)->toHaveCount(2);
-    expect($designRows->pluck('alt_text')->sort()->values()->all())
-        ->toBe(['logo', 'placeholder']);
+    expect($designRows->pluck('purpose')->sort()->values()->all())
+        ->toBe([SiteMedia::PURPOSE_LOGO_FULL, SiteMedia::PURPOSE_PLACEHOLDER]);
 });
 
 it('uploads a brand logo even when a content-pool image already occupies sort_order 0', function () {

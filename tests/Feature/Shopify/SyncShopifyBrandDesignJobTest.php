@@ -3,6 +3,7 @@
 use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteMedia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -26,6 +27,7 @@ beforeEach(function () {
     }
 
     setupSitesTable();
+    setupMediaTables();
 
     $conn->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
         id TEXT PRIMARY KEY,
@@ -147,7 +149,7 @@ function fakeBrandDesignJobShopify(?array $brandColors = null): void
     ]);
 }
 
-it('writes the full brand design shape into site.settings.design end-to-end', function () {
+it('writes brand design enums into site.settings.design and logos into site_media end-to-end', function () {
     $integration = seedBrandDesignJobFixtures();
     fakeBrandDesignJobShopify();
 
@@ -156,16 +158,28 @@ it('writes the full brand design shape into site.settings.design end-to-end', fu
     $site = Site::query()->where('professional_id', 'pro-bdjob-1')->first();
     $design = $site->settings['design'] ?? [];
 
+    // Enums + colours still live on settings.design — those aren't media.
     expect($design['colors']['background'])->toBe('#ababab');
     expect($design['colors']['text'])->toBe('#121212');
     expect($design['colors']['accent'])->toBe('#cd00ef');
     expect($design['colors']['border'])->toBeNull();
     expect($design['corner_radius'])->toBe('default');
     expect($design['slogan'])->toBe('Job test slogan');
-    expect($design['logo']['full_url'])->not->toBeNull();
-    expect($design['logo']['square_url'])->not->toBeNull();
-    expect($design['logo']['full_url'])->toContain('logo_full_');
-    expect($design['logo']['square_url'])->toContain('logo_square_');
+
+    // Logos now live in site.site_media as pool=design / purpose=logo_full|logo_square.
+    // The job no longer writes settings.design.logo — that key shouldn't exist.
+    expect(array_key_exists('logo', $design))->toBeFalse();
+
+    $logoRows = SiteMedia::query()
+        ->where('site_id', $site->id)
+        ->where('pool', SiteMedia::POOL_DESIGN)
+        ->whereIn('purpose', [SiteMedia::PURPOSE_LOGO_FULL, SiteMedia::PURPOSE_LOGO_SQUARE])
+        ->whereNull('deleted_at')
+        ->get();
+
+    expect($logoRows)->toHaveCount(2);
+    expect($logoRows->pluck('purpose')->sort()->values()->all())
+        ->toBe([SiteMedia::PURPOSE_LOGO_FULL, SiteMedia::PURPOSE_LOGO_SQUARE]);
 });
 
 it('preserves an existing user accent colour when Shopify has no accent', function () {

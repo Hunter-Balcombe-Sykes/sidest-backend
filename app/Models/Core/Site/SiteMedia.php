@@ -27,6 +27,13 @@ class SiteMedia extends BaseModel
     // the per-pool sort_order unique index excludes this pool deliberately.
     public const POOL_DESIGN   = 'design';
 
+    // Brand-design slot discriminator inside POOL_DESIGN. Replaces the old
+    // alt_text='logo'|'placeholder' string match — alt_text is now reserved
+    // for accessibility text. Set to NULL for non-design rows.
+    public const PURPOSE_LOGO_FULL   = 'logo_full';
+    public const PURPOSE_LOGO_SQUARE = 'logo_square';
+    public const PURPOSE_PLACEHOLDER = 'placeholder';
+
     public const MEDIA_TYPE_IMAGE = 'image';
     public const MEDIA_TYPE_VIDEO = 'video';
 
@@ -47,6 +54,7 @@ class SiteMedia extends BaseModel
         'pool',
         'path',
         'alt_text',
+        'purpose',
         'sort_order',
         'is_active',
         'media_type',

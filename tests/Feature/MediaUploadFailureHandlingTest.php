@@ -60,7 +60,7 @@ it('dispatches video cleanup with directory base path when deleting media', func
     app()->instance('request', $request);
 
     $mediaService = Mockery::mock(ImageVariantService::class);
-    $controller = new ProfessionalUploadController($mediaService);
+    $controller = new ProfessionalUploadController($mediaService, new \App\Services\Media\BrandDesignMediaService($mediaService));
     $siteImage = SiteMedia::query()->findOrFail($mediaId);
 
     // Controller signature was changed to (Request, SiteMedia) — test was
@@ -112,7 +112,7 @@ it('returns 503 and soft-deletes media when video dispatch fails', function () {
     $mediaService = Mockery::mock(ImageVariantService::class);
     $mediaService->shouldReceive('resolvedDiskName')->andReturn('local');
 
-    $controller = new ProfessionalUploadController($mediaService);
+    $controller = new ProfessionalUploadController($mediaService, new \App\Services\Media\BrandDesignMediaService($mediaService));
     $response = $controller->upload($request);
 
     expect($response->getStatusCode())->toBe(503);
