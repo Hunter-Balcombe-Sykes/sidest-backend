@@ -85,8 +85,11 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.design.colors.border' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             // 3-bucket enums normalise noisy theme pixel values into coherent design
             // buckets that each Sidest theme design can map to its own concrete values.
-            'settings.design.corner_radius' => ['sometimes', 'nullable', 'string', Rule::in(['square', 'rounded', 'pill'])],
-            'settings.design.border_thickness' => ['sometimes', 'nullable', 'string', Rule::in(['hairline', 'standard', 'bold'])],
+            // Enum values mirror the dashboard dropdown labels (lowercased): the
+            // middle value is `default` for every bucket so the storage layer
+            // and the UI speak the same vocabulary.
+            'settings.design.corner_radius' => ['sometimes', 'nullable', 'string', Rule::in(['square', 'default', 'pill'])],
+            'settings.design.border_thickness' => ['sometimes', 'nullable', 'string', Rule::in(['hairline', 'default', 'bold'])],
             'settings.design.section_spacing' => ['sometimes', 'nullable', 'string', Rule::in(['tight', 'default', 'spacious'])],
             // Logos are downloaded from Shopify into our own storage so the URLs
             // are stable even if Shopify CDN tokens rotate.
@@ -219,8 +222,8 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.design.colors.text.regex' => 'The text color must be a valid hex color.',
             'settings.design.colors.accent.regex' => 'The accent color must be a valid hex color.',
             'settings.design.colors.border.regex' => 'The border color must be a valid hex color.',
-            'settings.design.corner_radius.in' => 'Corner radius must be one of: square, rounded, pill.',
-            'settings.design.border_thickness.in' => 'Border thickness must be one of: hairline, standard, bold.',
+            'settings.design.corner_radius.in' => 'Corner radius must be one of: square, default, pill.',
+            'settings.design.border_thickness.in' => 'Border thickness must be one of: hairline, default, bold.',
             'settings.design.section_spacing.in' => 'Section spacing must be one of: tight, default, spacious.',
             'settings.design.font_family.in' => 'Font must be one of: neue_haas_grotesk, helvetica_neue, forma_djr, nb_architekt, swiss_721.',
         ];

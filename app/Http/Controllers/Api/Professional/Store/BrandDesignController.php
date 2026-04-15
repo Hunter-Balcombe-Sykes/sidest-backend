@@ -26,8 +26,8 @@ class BrandDesignController extends ApiController
     // difference between "default by convention" and "explicitly default" is
     // preserved at the DB layer.
     private const DEFAULT_FONT_FAMILY = 'helvetica_neue';
-    private const DEFAULT_CORNER_RADIUS = 'rounded';
-    private const DEFAULT_BORDER_THICKNESS = 'standard';
+    private const DEFAULT_CORNER_RADIUS = 'default';
+    private const DEFAULT_BORDER_THICKNESS = 'default';
     private const DEFAULT_SECTION_SPACING = 'default';
 
     /**
@@ -35,8 +35,8 @@ class BrandDesignController extends ApiController
      *
      * @return JsonResponse {
      *     colors: { background, text, accent, border },
-     *     corner_radius: 'square'|'rounded'|'pill',          (default applied upstream)
-     *     border_thickness: 'hairline'|'standard'|'bold',    (default applied upstream)
+     *     corner_radius: 'square'|'default'|'pill',          (default applied upstream)
+     *     border_thickness: 'hairline'|'default'|'bold',     (default applied upstream)
      *     section_spacing: 'tight'|'default'|'spacious',     (default applied upstream)
      *     logo: { full_url, square_url },
      *     slogan: string|null,

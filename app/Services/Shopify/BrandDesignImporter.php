@@ -311,7 +311,7 @@ class BrandDesignImporter
 
         return match (true) {
             $px >= self::RADIUS_PILL_MIN => 'pill',
-            $px >= self::RADIUS_ROUNDED_MIN => 'rounded',
+            $px >= self::RADIUS_ROUNDED_MIN => 'default',
             default => 'square',
         };
     }
@@ -324,7 +324,7 @@ class BrandDesignImporter
 
         return match (true) {
             $px >= self::THICKNESS_BOLD_MIN => 'bold',
-            $px >= self::THICKNESS_STANDARD_MIN => 'standard',
+            $px >= self::THICKNESS_STANDARD_MIN => 'default',
             default => 'hairline',
         };
     }

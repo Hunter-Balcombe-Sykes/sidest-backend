@@ -12,8 +12,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 //
 // @response {
 //   colors: { background, text, accent, border },          hex|null
-//   corner_radius: 'square'|'rounded'|'pill',          (default 'rounded' applied upstream)
-//   border_thickness: 'hairline'|'standard'|'bold',    (default 'standard' applied upstream)
+//   corner_radius: 'square'|'default'|'pill',          (default 'default' applied upstream)
+//   border_thickness: 'hairline'|'default'|'bold',     (default 'default' applied upstream)
 //   section_spacing: 'tight'|'default'|'spacious',     (default 'default' applied upstream)
 //   logo: { full_url, square_url },                        url|null
 //   slogan: string|null,
