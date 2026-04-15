@@ -8,8 +8,14 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use Illuminate\Support\Arr;
 
-// V2: Auto-fills professional, brand profile, and integration fields from Shopify shop data during OAuth onboarding,
-//     and handles on-demand resyncs that preserve manually edited fields via a stored snapshot.
+// Auto-fills professional, brand profile, and integration fields from Shopify shop data
+// during OAuth onboarding, and handles on-demand resyncs.
+//
+// Resync semantics (Option B — Shopify as source of truth):
+//   For each Shopify-sourced field, if Shopify returns a non-empty value, the local
+//   value is overwritten. If Shopify returns empty or omits the field, the local
+//   value is preserved. Manual edits in Sidest are NOT protected — a brand that
+//   wants to keep a custom display_name should edit it in Shopify, not locally.
 class ShopProfileAutoFillService
 {
     /**
@@ -18,31 +24,27 @@ class ShopProfileAutoFillService
      * Each entry:
      *   - 'shopify' = key on the shop.json payload
      *   - 'target'  = one of 'professional', 'brand_profile', 'integration'
-     *   - 'column'  = column or metadata key on the target
-     *   - 'snapshot_key' = the logical field name recorded in the snapshot + returned to callers
-     *
-     * Kept as a constant so fillFromShopData(), resyncFromShopData(), and the snapshot writer
-     * stay in lockstep — the snapshot is only meaningful if it covers exactly what we auto-fill.
+     *   - 'column'  = column (or metadata key, for integration target) on the target.
+     *                  Also used as the logical field name in the resync response.
      */
     private const FIELD_MAP = [
-        ['shopify' => 'name', 'target' => 'professional', 'column' => 'display_name', 'snapshot_key' => 'display_name'],
-        ['shopify' => 'email', 'target' => 'professional', 'column' => 'primary_email', 'snapshot_key' => 'primary_email'],
-        ['shopify' => 'phone', 'target' => 'professional', 'column' => 'phone', 'snapshot_key' => 'phone'],
-        ['shopify' => 'address1', 'target' => 'professional', 'column' => 'location_street_address', 'snapshot_key' => 'location_street_address'],
-        ['shopify' => 'city', 'target' => 'professional', 'column' => 'location_city', 'snapshot_key' => 'location_city'],
-        ['shopify' => 'province', 'target' => 'professional', 'column' => 'location_state', 'snapshot_key' => 'location_state'],
-        ['shopify' => 'zip', 'target' => 'professional', 'column' => 'location_postcode', 'snapshot_key' => 'location_postcode'],
-        ['shopify' => 'country_name', 'target' => 'professional', 'column' => 'location_country', 'snapshot_key' => 'location_country'],
-        ['shopify' => 'country_code', 'target' => 'professional', 'column' => 'country_code', 'snapshot_key' => 'country_code'],
-        ['shopify' => 'iana_timezone', 'target' => 'professional', 'column' => 'timezone', 'snapshot_key' => 'timezone'],
-        ['shopify' => 'domain', 'target' => 'brand_profile', 'column' => 'business_website', 'snapshot_key' => 'business_website'],
-        ['shopify' => 'currency', 'target' => 'integration', 'column' => 'shop_currency', 'snapshot_key' => 'shop_currency'],
+        ['shopify' => 'name', 'target' => 'professional', 'column' => 'display_name'],
+        ['shopify' => 'email', 'target' => 'professional', 'column' => 'primary_email'],
+        ['shopify' => 'phone', 'target' => 'professional', 'column' => 'phone'],
+        ['shopify' => 'address1', 'target' => 'professional', 'column' => 'location_street_address'],
+        ['shopify' => 'city', 'target' => 'professional', 'column' => 'location_city'],
+        ['shopify' => 'province', 'target' => 'professional', 'column' => 'location_state'],
+        ['shopify' => 'zip', 'target' => 'professional', 'column' => 'location_postcode'],
+        ['shopify' => 'country_name', 'target' => 'professional', 'column' => 'location_country'],
+        ['shopify' => 'country_code', 'target' => 'professional', 'column' => 'country_code'],
+        ['shopify' => 'iana_timezone', 'target' => 'professional', 'column' => 'timezone'],
+        ['shopify' => 'domain', 'target' => 'brand_profile', 'column' => 'business_website'],
+        ['shopify' => 'currency', 'target' => 'integration', 'column' => 'shop_currency'],
     ];
 
     /**
      * Fill Professional, Site, and BrandProfile fields from a Shopify shop object (signup path).
-     * Writes a full snapshot of all 12 Shopify-sourced fields into the integration's provider_metadata
-     * so future resyncs have a baseline to compare against.
+     * Only fills fields that are currently empty — never overwrites existing values.
      *
      * @param  array  $shopData  The `shop` object from Shopify's Admin API shop.json response
      */
@@ -62,34 +64,19 @@ class ShopProfileAutoFillService
         if ($brandProfile !== null) {
             $brandProfile->save();
         }
-
-        // Always record the snapshot at signup, even for fields we didn't apply (because they were
-        // already populated). The snapshot is "what Shopify last told us" — a baseline for later diffs.
-        if ($integration !== null) {
-            $this->writeSnapshot($integration, $shopData);
-        }
     }
 
     /**
-     * Resync Shopify-sourced fields, preserving any values the user has manually edited.
+     * Resync Shopify-sourced fields. For each field in FIELD_MAP:
+     *   - If Shopify returns a non-empty value → overwrite local.
+     *   - If Shopify returns empty/missing → preserve local.
      *
-     * Comparison model: if the current DB value equals the last snapshot value, the field is still
-     * considered Shopify-sourced and gets overwritten with the fresh value. If it differs, the user
-     * has edited it and we leave it alone. Missing snapshot (legacy integrations) is treated conservatively:
-     * any non-empty DB value is assumed user-edited and preserved.
-     *
-     * After field-level diffs, the snapshot is always overwritten with the fresh Shopify data so the
-     * next resync has the latest baseline.
+     * No comparison against prior state; no "manual edit" detection.
      *
      * @return array{updated: string[], preserved: string[]}
      */
     public function resyncFromShopData(ProfessionalIntegration $integration, array $shopData): array
     {
-        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-        $previousSnapshot = is_array($metadata['shopify_shop_snapshot'] ?? null)
-            ? $metadata['shopify_shop_snapshot']
-            : null;
-
         $professional = Professional::findOrFail($integration->professional_id);
         $brandProfile = BrandProfile::where('professional_id', $integration->professional_id)->first();
 
@@ -98,49 +85,24 @@ class ShopProfileAutoFillService
         $professionalDirty = false;
         $brandProfileDirty = false;
 
-        // Keys that need to be merged back into provider_metadata at the end.
-        // Only snapshot + (optionally) currency — all other sibling keys must
-        // be preserved via the atomic jsonb merge in mergeProviderMetadata().
+        // Integration-target field writes (currently just shop_currency) go through
+        // mergeProviderMetadata so sibling keys (webhook ids, storefront tokens, etc.)
+        // written by concurrent jobs survive this update.
         $metadataMerge = [];
 
         foreach (self::FIELD_MAP as $field) {
             $freshValue = $this->freshValueForField($field, $shopData);
-            $currentValue = $this->currentValueForField($field, $professional, $brandProfile, $metadata);
-            $previousSnapshotValue = $previousSnapshot[$field['snapshot_key']] ?? null;
 
-            // No snapshot baseline: be conservative. If the user has anything there, keep it.
-            if ($previousSnapshot === null) {
-                if ($currentValue !== null && $currentValue !== '') {
-                    $preserved[] = $field['snapshot_key'];
-
-                    continue;
-                }
-                // DB is empty — safe to fill from Shopify (if Shopify has a value).
-                if ($freshValue === null || $freshValue === '') {
-                    continue;
-                }
-                $this->applyFreshValue($field, $freshValue, $professional, $brandProfile, $metadataMerge, $professionalDirty, $brandProfileDirty);
-                $updated[] = $field['snapshot_key'];
+            if ($freshValue === '') {
+                $preserved[] = $field['column'];
 
                 continue;
             }
 
-            // Snapshot exists: Shopify owns the field only if the DB hasn't diverged from what
-            // Shopify previously told us.
-            $userEdited = ! $this->valuesMatch($currentValue, $previousSnapshotValue);
-
-            if ($userEdited) {
-                $preserved[] = $field['snapshot_key'];
-
-                continue;
-            }
-
-            // Shopify-owned field. Apply the new value even if empty — Shopify cleared it.
             $this->applyFreshValue($field, $freshValue, $professional, $brandProfile, $metadataMerge, $professionalDirty, $brandProfileDirty);
-            $updated[] = $field['snapshot_key'];
+            $updated[] = $field['column'];
         }
 
-        // Batch one UPDATE per model.
         if ($professionalDirty) {
             $professional->save();
         }
@@ -148,12 +110,9 @@ class ShopProfileAutoFillService
             $brandProfile->save();
         }
 
-        // Write the fresh snapshot (+ any shop_currency change) atomically into provider_metadata.
-        // mergeProviderMetadata uses a jsonb || merge on pgsql so sibling keys written by concurrent
-        // jobs (webhook registration / storefront token / sales channel) survive even if they landed
-        // during the Shopify API call window.
-        $metadataMerge['shopify_shop_snapshot'] = $this->buildSnapshot($shopData);
-        $integration->mergeProviderMetadata($metadataMerge);
+        if ($metadataMerge !== []) {
+            $integration->mergeProviderMetadata($metadataMerge);
+        }
 
         return [
             'updated' => $updated,
@@ -210,7 +169,7 @@ class ShopProfileAutoFillService
     }
 
     /**
-     * Normalize a Shopify shop field to its stored form (what we'd persist into the DB).
+     * Normalize a Shopify shop field to its stored form.
      * Country code and currency are upper-cased; everything else is trimmed as-is.
      */
     private function freshValueForField(array $field, array $shopData): string
@@ -225,35 +184,9 @@ class ShopProfileAutoFillService
     }
 
     /**
-     * Read the current value off whichever target the field lives on.
-     */
-    private function currentValueForField(array $field, Professional $professional, ?BrandProfile $brandProfile, array $metadata): ?string
-    {
-        if ($field['target'] === 'professional') {
-            $value = $professional->{$field['column']};
-
-            return $value === null ? null : (string) $value;
-        }
-
-        if ($field['target'] === 'brand_profile') {
-            if ($brandProfile === null) {
-                return null;
-            }
-            $value = $brandProfile->{$field['column']};
-
-            return $value === null ? null : (string) $value;
-        }
-
-        // integration → provider_metadata['shop_currency']
-        $value = $metadata[$field['column']] ?? null;
-
-        return $value === null ? null : (string) $value;
-    }
-
-    /**
-     * Apply a fresh Shopify value to the correct target + mark the dirty flag for batched save.
-     * For integration-target fields (currently just shop_currency), the value is added to
-     * $metadataMerge which the caller passes to mergeProviderMetadata() for atomic writing.
+     * Apply a non-empty fresh Shopify value to the correct target + mark the dirty flag
+     * for batched save. For integration-target fields (currently just shop_currency),
+     * the value is added to $metadataMerge which the caller passes to mergeProviderMetadata().
      */
     private function applyFreshValue(
         array $field,
@@ -265,7 +198,7 @@ class ShopProfileAutoFillService
         bool &$brandProfileDirty,
     ): void {
         if ($field['target'] === 'professional') {
-            $professional->{$field['column']} = $freshValue !== '' ? $freshValue : null;
+            $professional->{$field['column']} = $freshValue;
             $professionalDirty = true;
 
             return;
@@ -275,56 +208,13 @@ class ShopProfileAutoFillService
             if ($brandProfile === null) {
                 return;
             }
-            $brandProfile->{$field['column']} = $freshValue !== '' ? $freshValue : null;
+            $brandProfile->{$field['column']} = $freshValue;
             $brandProfileDirty = true;
 
             return;
         }
 
-        // integration → delta goes into the merge payload
-        $metadataMerge[$field['column']] = $freshValue !== '' ? $freshValue : null;
-    }
-
-    /**
-     * Loose equality for comparing current DB values to previous snapshot values. Both sides are
-     * coerced to trimmed strings; null and '' are treated as equivalent (both "no value").
-     */
-    private function valuesMatch(?string $current, mixed $previous): bool
-    {
-        $left = trim((string) ($current ?? ''));
-        $right = is_scalar($previous) ? trim((string) $previous) : '';
-
-        return $left === $right;
-    }
-
-    /**
-     * Build a fresh snapshot of all 12 fields from raw Shopify shop data.
-     * Values are normalized exactly the same way we'd persist them.
-     *
-     * @return array<string, string|null>
-     */
-    private function buildSnapshot(array $shopData): array
-    {
-        $snapshot = [];
-
-        foreach (self::FIELD_MAP as $field) {
-            $value = $this->freshValueForField($field, $shopData);
-            $snapshot[$field['snapshot_key']] = $value === '' ? null : $value;
-        }
-
-        return $snapshot;
-    }
-
-    /**
-     * Persist the snapshot into provider_metadata without clobbering sibling keys.
-     * Uses the atomic jsonb merge so concurrent webhook / storefront / sales-channel
-     * writes during signup cannot be overwritten.
-     */
-    private function writeSnapshot(ProfessionalIntegration $integration, array $shopData): void
-    {
-        $integration->mergeProviderMetadata([
-            'shopify_shop_snapshot' => $this->buildSnapshot($shopData),
-        ]);
+        $metadataMerge[$field['column']] = $freshValue;
     }
 
     private function str(array $data, string $key): string

@@ -77,6 +77,7 @@ beforeEach(function () {
     RateLimiter::clear('shopify-resync:int-resync-1');
 })->group('shopify-resync');
 
+// Fake shop.json payload. Override individual keys to test empty-field behavior.
 function resyncFakeShopPayload(array $overrides = []): array
 {
     return array_merge([
@@ -96,11 +97,9 @@ function resyncFakeShopPayload(array $overrides = []): array
     ], $overrides);
 }
 
-/**
- * Create a brand + empty brand_profile + integration and return all three.
- * The integration is created via the Eloquent model so access_token encryption casts fire.
- */
-function createResyncBrand(?array $snapshot = null, array $professionalAttrs = [], array $brandAttrs = []): array
+// Seed a brand + brand_profile + integration. Accepts overrides on the
+// Professional row so tests can simulate manually-edited DB state.
+function createResyncBrand(array $professionalAttrs = [], array $brandAttrs = [], array $integrationMetadata = []): array
 {
     $brandId = 'brand-resync-1';
     $now = now()->toDateTimeString();
@@ -134,13 +133,10 @@ function createResyncBrand(?array $snapshot = null, array $professionalAttrs = [
         'updated_at' => $now,
     ], $brandAttrs));
 
-    $metadata = [
+    $metadata = array_merge([
         'shop_domain' => 'resyncbrand.myshopify.com',
         'shop_currency' => 'USD',
-    ];
-    if ($snapshot !== null) {
-        $metadata['shopify_shop_snapshot'] = $snapshot;
-    }
+    ], $integrationMetadata);
 
     $integration = new ProfessionalIntegration([
         'professional_id' => $brandId,
@@ -158,26 +154,6 @@ function createResyncBrand(?array $snapshot = null, array $professionalAttrs = [
     return [$brand, $brandProfile, $integration];
 }
 
-function buildMatchingSnapshot(): array
-{
-    // A snapshot whose values exactly match what createResyncBrand() seeded into the DB —
-    // so on resync, every field is treated as "Shopify-owned" and therefore updateable.
-    return [
-        'display_name' => 'Original Name',
-        'primary_email' => 'original@example.com',
-        'phone' => '+61411111111',
-        'location_street_address' => '1 Original Rd',
-        'location_city' => 'Melbourne',
-        'location_state' => 'VIC',
-        'location_postcode' => '3000',
-        'location_country' => 'Australia',
-        'country_code' => 'AU',
-        'timezone' => 'Australia/Melbourne',
-        'business_website' => 'original.example.com',
-        'shop_currency' => 'USD',
-    ];
-}
-
 function makeResyncRequest(string $type = 'brand', ?Professional $pro = null): Request
 {
     if ($pro === null) {
@@ -185,7 +161,6 @@ function makeResyncRequest(string $type = 'brand', ?Professional $pro = null): R
             'professional_type' => $type,
             'status' => 'active',
         ]);
-        // id is not fillable on Professional; set it directly so $pro->id works.
         $pro->id = 'brand-resync-1';
     }
 
@@ -196,15 +171,30 @@ function makeResyncRequest(string $type = 'brand', ?Professional $pro = null): R
 }
 
 // ---------- ShopProfileAutoFillService::resyncFromShopData unit tests ----------
+// Option B: Shopify wins when it has a value; local is preserved only when
+// Shopify returns empty. No "was this manually edited" check — local DB is
+// treated as a cache, Shopify is the source of truth.
 
-it('updates Shopify-sourced fields when DB matches snapshot', function () {
-    [$brand, $brandProfile, $integration] = createResyncBrand(buildMatchingSnapshot());
+it('overwrites all Shopify-sourced fields when Shopify has values', function () {
+    [$brand, $brandProfile, $integration] = createResyncBrand();
 
     $service = app(ShopProfileAutoFillService::class);
     $result = $service->resyncFromShopData($integration, resyncFakeShopPayload());
 
-    // Every field was "clean" (equal to snapshot) → all got updated.
-    expect($result['updated'])->toContain('display_name', 'primary_email', 'phone', 'business_website', 'shop_currency');
+    expect($result['updated'])->toContain(
+        'display_name',
+        'primary_email',
+        'phone',
+        'location_street_address',
+        'location_city',
+        'location_state',
+        'location_postcode',
+        'location_country',
+        'country_code',
+        'timezone',
+        'business_website',
+        'shop_currency',
+    );
     expect($result['preserved'])->toBeEmpty();
 
     $brand->refresh();
@@ -212,89 +202,104 @@ it('updates Shopify-sourced fields when DB matches snapshot', function () {
     expect($brand->primary_email)->toBe('fresh@shop.example');
     expect($brand->phone)->toBe('+61400000000');
     expect($brand->location_city)->toBe('Sydney');
+    expect($brand->country_code)->toBe('AU');
 
     $brandProfile->refresh();
     expect($brandProfile->business_website)->toBe('freshbrand.myshopify.com');
 
     $integration->refresh();
-    $metadata = $integration->provider_metadata;
-    expect($metadata['shop_currency'])->toBe('AUD');
+    expect($integration->provider_metadata['shop_currency'])->toBe('AUD');
 });
 
-it('preserves manually edited fields when DB differs from snapshot', function () {
-    $snapshot = buildMatchingSnapshot();
-    // Change only display_name in the DB — user edited it. Snapshot still has the original.
-    [$brand, $brandProfile, $integration] = createResyncBrand($snapshot, [
+it('overwrites a manually edited field — local edits do not block Shopify resync', function () {
+    // Core Option B behavior: local value differs from what Shopify will
+    // return, and resync still overwrites. This is the whole point of the change.
+    [$brand, , $integration] = createResyncBrand([
         'display_name' => 'User Edited Name',
+        'phone' => '+61499999999',
     ]);
 
     $service = app(ShopProfileAutoFillService::class);
     $result = $service->resyncFromShopData($integration, resyncFakeShopPayload());
 
-    expect($result['preserved'])->toContain('display_name');
-    expect($result['updated'])->not->toContain('display_name');
+    expect($result['updated'])->toContain('display_name', 'phone');
+    expect($result['preserved'])->not->toContain('display_name');
+    expect($result['preserved'])->not->toContain('phone');
 
     $brand->refresh();
-    expect($brand->display_name)->toBe('User Edited Name');
-    // Untouched fields should still sync.
+    expect($brand->display_name)->toBe('Fresh Brand Name');
     expect($brand->phone)->toBe('+61400000000');
 });
 
-it('writes a fresh snapshot even when all fields were preserved', function () {
-    $snapshot = buildMatchingSnapshot();
-    // Make every professional field diverge from snapshot → all preserved.
-    [, , $integration] = createResyncBrand($snapshot, [
-        'display_name' => 'X',
-        'primary_email' => 'x@x.x',
-        'phone' => 'x',
-        'location_street_address' => 'x',
-        'location_city' => 'x',
-        'location_state' => 'x',
-        'location_postcode' => 'x',
-        'location_country' => 'x',
-        'country_code' => 'XX',
-        'timezone' => 'X',
-    ], [
-        'business_website' => 'user.edited.site',
-    ]);
+it('preserves a field when Shopify returns empty string', function () {
+    // Shopify has no phone set. Local phone must survive.
+    [$brand, , $integration] = createResyncBrand();
 
     $service = app(ShopProfileAutoFillService::class);
-    $result = $service->resyncFromShopData($integration, resyncFakeShopPayload());
+    $result = $service->resyncFromShopData($integration, resyncFakeShopPayload(['phone' => '']));
 
-    expect($result['updated'])->not->toContain('display_name');
+    expect($result['preserved'])->toContain('phone');
+    expect($result['updated'])->not->toContain('phone');
 
-    $integration->refresh();
-    $newSnapshot = $integration->provider_metadata['shopify_shop_snapshot'];
-    expect($newSnapshot['display_name'])->toBe('Fresh Brand Name');
-    expect($newSnapshot['business_website'])->toBe('freshbrand.myshopify.com');
-    expect($newSnapshot['shop_currency'])->toBe('AUD');
+    $brand->refresh();
+    expect($brand->phone)->toBe('+61411111111');
 });
 
-it('handles integrations with no prior snapshot by conservatively preserving non-empty fields', function () {
-    [$brand, $brandProfile, $integration] = createResyncBrand(null);
+it('preserves a field when Shopify omits it entirely (missing key)', function () {
+    [$brand, , $integration] = createResyncBrand();
+
+    // Remove `city` from the payload entirely — not just empty-string.
+    $payload = resyncFakeShopPayload();
+    unset($payload['city']);
 
     $service = app(ShopProfileAutoFillService::class);
-    $result = $service->resyncFromShopData($integration, resyncFakeShopPayload());
+    $result = $service->resyncFromShopData($integration, $payload);
 
-    // Every seeded DB value was non-empty → conservatively preserved.
-    expect($result['preserved'])->toContain('display_name', 'primary_email', 'phone', 'business_website');
-    expect($result['updated'])->toBeEmpty();
+    expect($result['preserved'])->toContain('location_city');
 
-    // But a snapshot is still written, so the next resync has a baseline.
-    $integration->refresh();
-    expect($integration->provider_metadata['shopify_shop_snapshot']['display_name'])->toBe('Fresh Brand Name');
+    $brand->refresh();
+    expect($brand->location_city)->toBe('Melbourne');
 });
 
-it('fills empty fields from Shopify when there is no prior snapshot', function () {
-    // No snapshot + DB has empty phone → phone should be filled.
-    [$brand, , $integration] = createResyncBrand(null, ['phone' => null]);
+it('fills a previously empty DB field from Shopify', function () {
+    [$brand, , $integration] = createResyncBrand(['phone' => null]);
 
     $service = app(ShopProfileAutoFillService::class);
     $result = $service->resyncFromShopData($integration, resyncFakeShopPayload());
 
     expect($result['updated'])->toContain('phone');
+
     $brand->refresh();
     expect($brand->phone)->toBe('+61400000000');
+});
+
+it('preserves shop_currency when Shopify returns empty currency', function () {
+    // shop_currency lives in provider_metadata, not a DB column. Same rule applies.
+    [, , $integration] = createResyncBrand();
+
+    $service = app(ShopProfileAutoFillService::class);
+    $result = $service->resyncFromShopData($integration, resyncFakeShopPayload(['currency' => '']));
+
+    expect($result['preserved'])->toContain('shop_currency');
+
+    $integration->refresh();
+    expect($integration->provider_metadata['shop_currency'])->toBe('USD');
+});
+
+it('normalizes currency and country_code to uppercase', function () {
+    [$brand, , $integration] = createResyncBrand();
+
+    $service = app(ShopProfileAutoFillService::class);
+    $service->resyncFromShopData($integration, resyncFakeShopPayload([
+        'currency' => 'aud',
+        'country_code' => 'au',
+    ]));
+
+    $brand->refresh();
+    expect($brand->country_code)->toBe('AU');
+
+    $integration->refresh();
+    expect($integration->provider_metadata['shop_currency'])->toBe('AUD');
 });
 
 // ---------- ShopifyDataResyncService integration tests ----------
@@ -306,7 +311,7 @@ it('dispatches the unified brand-design job and records last_resynced_at', funct
         '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
     ]);
 
-    [$brand, , $integration] = createResyncBrand(buildMatchingSnapshot());
+    [, , $integration] = createResyncBrand();
 
     $service = app(ShopifyDataResyncService::class);
     $result = $service->resync($integration);
@@ -321,21 +326,86 @@ it('dispatches the unified brand-design job and records last_resynced_at', funct
 });
 
 it('throws when Shopify API call fails so DB is never partially written', function () {
-    Bus::fake();
+    Bus::fake([SyncShopifyBrandDesignJob::class]);
     Http::fake([
         '*/admin/api/*/shop.json' => Http::response('boom', 503),
     ]);
 
-    [$brand, , $integration] = createResyncBrand(buildMatchingSnapshot());
+    [$brand, , $integration] = createResyncBrand();
 
     $service = app(ShopifyDataResyncService::class);
     expect(fn () => $service->resync($integration))->toThrow(RuntimeException::class);
 
     Bus::assertNotDispatched(SyncShopifyBrandDesignJob::class);
 
-    // DB was untouched.
     $brand->refresh();
     expect($brand->display_name)->toBe('Original Name');
+});
+
+it('preserves sibling provider_metadata keys across a resync (concurrency regression)', function () {
+    Bus::fake([SyncShopifyBrandDesignJob::class]);
+    Http::fake([
+        '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
+    ]);
+
+    [, , $integration] = createResyncBrand();
+
+    // Sibling keys written by parallel onboarding jobs — must survive the resync.
+    $integration->refresh();
+    $meta = $integration->provider_metadata;
+    $meta['storefront_access_token'] = 'tok_existing';
+    $meta['webhooks_state'] = 'registered';
+    $meta['publication_id'] = '999';
+    $integration->provider_metadata = $meta;
+    $integration->save();
+
+    $service = app(ShopifyDataResyncService::class);
+    $result = $service->resync($integration);
+
+    $integration->refresh();
+    $fresh = $integration->provider_metadata;
+
+    expect($fresh['storefront_access_token'])->toBe('tok_existing');
+    expect($fresh['webhooks_state'])->toBe('registered');
+    expect($fresh['publication_id'])->toBe('999');
+
+    expect($fresh['last_resynced_at'])->toBe($result['last_resynced_at']);
+    expect($fresh['shop_currency'])->toBe('AUD');
+});
+
+it('rolls back multi-model writes when a post-API save fails', function () {
+    Bus::fake([SyncShopifyBrandDesignJob::class]);
+    Http::fake([
+        '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
+    ]);
+
+    [$brand, , $integration] = createResyncBrand();
+
+    // Fake autofill that mutates the Professional and then throws mid-transaction.
+    // The DB::transaction in ShopifyDataResyncService should roll the mutation back.
+    app()->bind(ShopProfileAutoFillService::class, function () use ($brand) {
+        return new class($brand->id) extends ShopProfileAutoFillService
+        {
+            public function __construct(private string $brandId) {}
+
+            public function resyncFromShopData(ProfessionalIntegration $integration, array $shopData): array
+            {
+                $pro = Professional::find($this->brandId);
+                $pro->display_name = 'Half-Written Name';
+                $pro->save();
+
+                throw new RuntimeException('simulated mid-resync failure');
+            }
+        };
+    });
+
+    $service = app(ShopifyDataResyncService::class);
+    expect(fn () => $service->resync($integration))->toThrow(RuntimeException::class);
+
+    $brand->refresh();
+    expect($brand->display_name)->toBe('Original Name');
+
+    Bus::assertNotDispatched(SyncShopifyBrandDesignJob::class);
 });
 
 // ---------- ShopifyResyncController HTTP-layer tests ----------
@@ -348,7 +418,6 @@ it('rejects non-brand users with 403', function () {
 });
 
 it('returns 404 when the brand has no Shopify integration', function () {
-    // Seed just a brand row, no integration.
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => 'brand-no-integration',
         'handle' => 'noint',
@@ -378,15 +447,13 @@ it('rate limits to 1 request per 60 seconds per integration', function () {
         '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
     ]);
 
-    [, , $integration] = createResyncBrand(buildMatchingSnapshot());
+    [, , $integration] = createResyncBrand();
 
     $controller = app(ShopifyResyncController::class);
 
-    // First call succeeds
     $first = $controller(makeResyncRequest());
     expect($first->status())->toBe(200);
 
-    // Second call immediately after is rate-limited
     $second = $controller(makeResyncRequest());
     expect($second->status())->toBe(429);
     expect($second->headers->get('Retry-After'))->not->toBeNull();
@@ -397,7 +464,7 @@ it('returns 502 when Shopify API fails', function () {
         '*/admin/api/*/shop.json' => Http::response('boom', 503),
     ]);
 
-    [, , $integration] = createResyncBrand(buildMatchingSnapshot());
+    [, , $integration] = createResyncBrand();
 
     $controller = app(ShopifyResyncController::class);
     $response = $controller(makeResyncRequest());
@@ -406,7 +473,6 @@ it('returns 502 when Shopify API fails', function () {
 });
 
 it('returns 409 when the integration has an empty access_token', function () {
-    // Seed a brand row.
     $brandId = 'brand-no-token';
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('core.professionals')->insert([
@@ -420,9 +486,8 @@ it('returns 409 when the integration has an empty access_token', function () {
         'updated_at' => $now,
     ]);
 
-    // Create through the model so the 'encrypted' cast wraps the empty string properly.
-    // The controller's 409 guard runs `trim((string) $integration->access_token) === ''`, which
-    // fires once the model decrypts the stored blank back into ''.
+    // Empty token must go through the model so the encrypted cast wraps it.
+    // The controller's 409 guard decrypts and checks for ''.
     $integration = new ProfessionalIntegration([
         'professional_id' => $brandId,
         'provider' => 'shopify',
@@ -442,91 +507,17 @@ it('returns 409 when the integration has an empty access_token', function () {
     expect($response->status())->toBe(409);
 
     $body = json_encode($response->getData(true));
-    // Shouldn't leak token-related internals.
     expect($body)->not->toContain('access_token');
     expect($body)->not->toContain('shpat_');
 });
 
-it('preserves sibling provider_metadata keys across a resync (concurrency regression)', function () {
-    Bus::fake([SyncShopifyBrandDesignJob::class]);
-    Http::fake([
-        '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
-    ]);
-
-    // Seed a matching snapshot so every Shopify-sourced field gets cleanly updated.
-    [, , $integration] = createResyncBrand(buildMatchingSnapshot());
-
-    // Add sibling keys that the resync must NOT touch — these simulate data written
-    // by webhook registration / storefront token creation / sales-channel jobs.
-    $integration->refresh();
-    $meta = $integration->provider_metadata;
-    $meta['storefront_access_token'] = 'tok_existing';
-    $meta['webhooks_state'] = 'registered';
-    $meta['publication_id'] = '999';
-    $integration->provider_metadata = $meta;
-    $integration->save();
-
-    $service = app(ShopifyDataResyncService::class);
-    $result = $service->resync($integration);
-
-    $integration->refresh();
-    $fresh = $integration->provider_metadata;
-
-    // Sibling keys must survive the resync's metadata writes.
-    expect($fresh['storefront_access_token'])->toBe('tok_existing');
-    expect($fresh['webhooks_state'])->toBe('registered');
-    expect($fresh['publication_id'])->toBe('999');
-
-    // And the resync must still have written its own keys.
-    expect($fresh['shopify_shop_snapshot']['display_name'])->toBe('Fresh Brand Name');
-    expect($fresh['last_resynced_at'])->toBe($result['last_resynced_at']);
-    expect($fresh['shop_currency'])->toBe('AUD');
-});
-
-it('rolls back multi-model writes when a post-API save fails', function () {
-    Bus::fake([SyncShopifyBrandDesignJob::class]);
-    Http::fake([
-        '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
-    ]);
-
-    [$brand, , $integration] = createResyncBrand(buildMatchingSnapshot());
-
-    // Swap in a fake autofill that mutates the Professional then throws mid-transaction.
-    // The DB::transaction in ShopifyDataResyncService should roll the mutation back.
-    app()->bind(ShopProfileAutoFillService::class, function () use ($brand) {
-        return new class($brand->id) extends ShopProfileAutoFillService
-        {
-            public function __construct(private string $brandId) {}
-
-            public function resyncFromShopData(ProfessionalIntegration $integration, array $shopData): array
-            {
-                $pro = Professional::find($this->brandId);
-                $pro->display_name = 'Half-Written Name';
-                $pro->save();
-
-                throw new RuntimeException('simulated mid-resync failure');
-            }
-        };
-    });
-
-    $service = app(ShopifyDataResyncService::class);
-    expect(fn () => $service->resync($integration))->toThrow(RuntimeException::class);
-
-    // The in-transaction professional mutation must have rolled back.
-    $brand->refresh();
-    expect($brand->display_name)->toBe('Original Name');
-
-    // And no job should have been dispatched (it sits inside the transaction too).
-    Bus::assertNotDispatched(SyncShopifyBrandDesignJob::class);
-});
-
-it('does not leak access tokens or snapshot contents in the response', function () {
+it('does not leak access tokens or shop domain in the response', function () {
     Bus::fake();
     Http::fake([
         '*/admin/api/*/shop.json' => Http::response(['shop' => resyncFakeShopPayload()], 200),
     ]);
 
-    [, , $integration] = createResyncBrand(buildMatchingSnapshot());
+    [, , $integration] = createResyncBrand();
 
     $controller = app(ShopifyResyncController::class);
     $response = $controller(makeResyncRequest());
@@ -535,7 +526,6 @@ it('does not leak access tokens or snapshot contents in the response', function 
     $json = json_encode($body);
 
     expect($body)->toHaveKeys(['fields_updated', 'fields_preserved', 'jobs_dispatched', 'last_resynced_at']);
-    expect($body)->not->toHaveKey('shopify_shop_snapshot');
     expect($json)->not->toContain('shpat_test_token');
     expect($json)->not->toContain('resyncbrand.myshopify.com');
 });
