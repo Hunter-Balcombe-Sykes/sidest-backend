@@ -41,7 +41,10 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
 
     public int $timeout = 120;
 
-    public int $uniqueFor = 300;
+    // Worst-case execution = tries * timeout = 360s. Hold the unique lock
+    // longer than that so a stuck-then-retried run can never race another
+    // copy of itself against the same site.settings.design write.
+    public int $uniqueFor = 600;
 
     private const METAFIELDS_SET_MUTATION = <<<'GRAPHQL'
     mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
