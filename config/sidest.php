@@ -256,29 +256,43 @@ return [
 
     /*
     |----------------------------------------------------------------------
-    | Image processing – dual full-resolution variants
+    | Image variants configuration
     |----------------------------------------------------------------------
-    | Every upload generates two WebP variants:
-    | - optimized: adaptive quality target (~500KB by default)
-    | - maximized: highest quality full-resolution WebP
+    | - optimized: adaptive quality targeting ~500KB, capped at 2400px
+    |   long edge. Serves in-page rendering and gallery thumbnails.
+    | - maximized: higher quality cap at 4000px long edge. Serves hero
+    |   images and 3x retina hi-DPI displays.
     |
-    | preserve_resolution = keep original dimensions (no resize cap).
-    | quality             = preferred WebP quality ceiling (1-100).
-    | min_quality         = lowest allowed quality while targeting size.
-    | target_kb           = target max file size in kilobytes.
+    | width / height = pixel caps applied via 'inside' fit — never upscales,
+    |                  preserves aspect ratio, caps the long edge to the
+    |                  smaller of the two dimensions. Equal w/h = long-edge cap.
+    | fit            = 'inside' (fit within bounds, no crop) or 'cover' (crop).
+    | quality        = preferred WebP quality ceiling (1-100). 92 is visually
+    |                  indistinguishable from 100 and ~30% smaller.
+    | min_quality    = lowest allowed quality while targeting size.
+    | target_kb      = target max file size in kilobytes (triggers binary-search
+    |                  quality targeting when set).
+    |
+    | NOTE: the preserve_resolution flag is still honoured when explicitly set
+    | on a variant definition, but is no longer the default. Originals are
+    | always stored in full via storeOriginal() — variants are for delivery.
     */
     'image_variants' => [
         'optimized' => [
-            'format' => 'webp',
-            'preserve_resolution' => true,
-            'quality' => (int) env('SIDEST_IMAGE_QUALITY', 92),
+            'format'      => 'webp',
+            'width'       => 2400,
+            'height'      => 2400,
+            'fit'         => 'inside',
+            'quality'     => (int) env('SIDEST_IMAGE_QUALITY', 92),
             'min_quality' => (int) env('SIDEST_IMAGE_MIN_QUALITY', 60),
-            'target_kb' => (int) env('SIDEST_IMAGE_TARGET_KB', 500),
+            'target_kb'   => (int) env('SIDEST_IMAGE_TARGET_KB', 500),
         ],
         'maximized' => [
-            'format' => 'webp',
-            'preserve_resolution' => true,
-            'quality' => (int) env('SIDEST_IMAGE_MAXIMIZED_QUALITY', 100),
+            'format'  => 'webp',
+            'width'   => 4000,
+            'height'  => 4000,
+            'fit'     => 'inside',
+            'quality' => (int) env('SIDEST_IMAGE_MAXIMIZED_QUALITY', 92),
         ],
     ],
 

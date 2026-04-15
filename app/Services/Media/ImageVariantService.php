@@ -76,11 +76,11 @@ class ImageVariantService
                 $fit        = (string) ($def['fit'] ?? 'inside');
 
                 $preserveResolution = filter_var(
-                    $def['preserve_resolution'] ?? true,
+                    $def['preserve_resolution'] ?? false,
                     FILTER_VALIDATE_BOOLEAN,
                     FILTER_NULL_ON_FAILURE,
                 );
-                $preserveResolution = $preserveResolution ?? true;
+                $preserveResolution = $preserveResolution ?? false;
 
                 if ($preserveResolution) {
                     [$cropX, $cropY, $cropW, $cropH, $dstW, $dstH] = [0, 0, $sourceWidth, $sourceHeight, $sourceWidth, $sourceHeight];
@@ -310,16 +310,20 @@ class ImageVariantService
 
         return [
             'optimized' => [
-                'format' => 'webp',
-                'preserve_resolution' => true,
-                'quality' => 92,
+                'format'      => 'webp',
+                'width'       => 2400,
+                'height'      => 2400,
+                'fit'         => 'inside',
+                'quality'     => 92,
                 'min_quality' => 60,
-                'target_kb' => 500,
+                'target_kb'   => 500,
             ],
             'maximized' => [
-                'format' => 'webp',
-                'preserve_resolution' => true,
-                'quality' => 100,
+                'format'  => 'webp',
+                'width'   => 4000,
+                'height'  => 4000,
+                'fit'     => 'inside',
+                'quality' => 92,
             ],
         ];
     }

@@ -1,0 +1,181 @@
+<?php
+
+/** @phpstan-ignore-all */
+
+use App\Models\Core\Site\SiteMedia;
+use App\Services\Media\ImageVariantService;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+
+beforeEach(function () {
+    setupMediaTables();
+
+    // Large GD fixtures (e.g. 6000x4000 = ~96 MB raw) exceed the default 128 MB
+    // test limit. Unlock memory for this suite — image processing is memory-heavy
+    // by nature and must be tested at realistic resolutions.
+    ini_set('memory_limit', '-1');
+
+    // Use a real local disk rooted in a unique test directory, mirroring the
+    // pattern in tests/Unit/MediaJobReliabilityTest.php. Keeps filesystem state
+    // inspectable and avoids Storage::fake() quirks around the media disk.
+    $testRoot = storage_path('framework/testing/disks/image-variant-service');
+    config([
+        'sidest.media_disk' => 'local',
+        'filesystems.disks.local.root' => $testRoot,
+    ]);
+
+    if (! is_dir($testRoot)) {
+        mkdir($testRoot, 0777, true);
+    } else {
+        // Clean between tests so content-hashed paths don't accumulate.
+        foreach (glob($testRoot . '/**/*', GLOB_BRACE) as $f) {
+            if (is_file($f)) {
+                @unlink($f);
+            }
+        }
+    }
+});
+
+/**
+ * Create a solid-color JPEG/PNG/WebP fixture at the requested dimensions.
+ * Returns the absolute path to the temp file.
+ */
+function makeVariantFixture(int $width, int $height, string $format = 'jpeg'): string
+{
+    $img = imagecreatetruecolor($width, $height);
+    $bg = imagecolorallocate($img, 200, 150, 100);
+    imagefilledrectangle($img, 0, 0, $width, $height, $bg);
+
+    $path = tempnam(sys_get_temp_dir(), 'sidest_variant_test_');
+    match ($format) {
+        'jpeg' => imagejpeg($img, $path, 90),
+        'png'  => imagepng($img, $path),
+        'webp' => imagewebp($img, $path, 90),
+    };
+    imagedestroy($img);
+
+    return $path;
+}
+
+function seedVariantTestMediaRow(): string
+{
+    $id = (string) Str::uuid();
+    DB::connection('pgsql')->table('site.site_media')->insert([
+        'id' => $id,
+        'site_id' => (string) Str::uuid(),
+        'pool' => 'gallery',
+        'path' => '',
+        'sort_order' => 0,
+        'is_active' => true,
+        'media_type' => SiteMedia::MEDIA_TYPE_IMAGE,
+        'processing_state' => SiteMedia::PROCESSING_STATE_PROCESSING,
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
+    return $id;
+}
+
+it('generates optimized and maximized variants for a normal-sized image', function () {
+    $service = new ImageVariantService();
+    $imageId = seedVariantTestMediaRow();
+    $fixture = makeVariantFixture(1000, 1000, 'jpeg');
+
+    $variants = $service->processVariants(
+        originalTmpPath: $fixture,
+        imageId: $imageId,
+        basePath: "images/test/{$imageId}",
+    );
+
+    expect($variants)->toHaveKeys(['optimized', 'maximized']);
+    expect($variants['optimized']->path)->toStartWith("images/test/{$imageId}/optimized_");
+    expect($variants['maximized']->path)->toStartWith("images/test/{$imageId}/maximized_");
+    expect(Storage::disk('local')->exists($variants['optimized']->path))->toBeTrue();
+    expect(Storage::disk('local')->exists($variants['maximized']->path))->toBeTrue();
+
+    @unlink($fixture);
+});
+
+it('downscales variants when source exceeds the cap', function () {
+    $service = new ImageVariantService();
+    $imageId = seedVariantTestMediaRow();
+    $fixture = makeVariantFixture(6000, 4000, 'jpeg');
+
+    $variants = $service->processVariants(
+        originalTmpPath: $fixture,
+        imageId: $imageId,
+        basePath: "images/test/{$imageId}",
+    );
+
+    // optimized cap = 2400 long edge. 6000x4000 → ratio 0.4 → 2400x1600.
+    expect($variants['optimized']->width)->toBe(2400);
+    expect($variants['optimized']->height)->toBe(1600);
+
+    // maximized cap = 4000 long edge. 6000x4000 → ratio 0.667 → 4000x2666 (rounded).
+    expect($variants['maximized']->width)->toBe(4000);
+    expect($variants['maximized']->height)->toBeGreaterThanOrEqual(2666);
+    expect($variants['maximized']->height)->toBeLessThanOrEqual(2667);
+
+    @unlink($fixture);
+});
+
+it('preserves aspect ratio for portrait images', function () {
+    $service = new ImageVariantService();
+    $imageId = seedVariantTestMediaRow();
+    $fixture = makeVariantFixture(3000, 4000, 'jpeg');
+
+    $variants = $service->processVariants(
+        originalTmpPath: $fixture,
+        imageId: $imageId,
+        basePath: "images/test/{$imageId}",
+    );
+
+    // optimized: 3000x4000 → ratio min(2400/3000, 2400/4000, 1) = 0.6 → 1800x2400
+    expect($variants['optimized']->width)->toBe(1800);
+    expect($variants['optimized']->height)->toBe(2400);
+
+    // maximized: 3000x4000 → ratio min(4000/3000, 4000/4000, 1) = 1 → 3000x4000 (unchanged)
+    expect($variants['maximized']->width)->toBe(3000);
+    expect($variants['maximized']->height)->toBe(4000);
+
+    @unlink($fixture);
+});
+
+it('leaves small images untouched when under both caps', function () {
+    $service = new ImageVariantService();
+    $imageId = seedVariantTestMediaRow();
+    $fixture = makeVariantFixture(800, 600, 'jpeg');
+
+    $variants = $service->processVariants(
+        originalTmpPath: $fixture,
+        imageId: $imageId,
+        basePath: "images/test/{$imageId}",
+    );
+
+    // min(2400/800, 2400/600, 1) = 1 → no upscale
+    expect($variants['optimized']->width)->toBe(800);
+    expect($variants['optimized']->height)->toBe(600);
+    expect($variants['maximized']->width)->toBe(800);
+    expect($variants['maximized']->height)->toBe(600);
+
+    @unlink($fixture);
+});
+
+it('generates an optimized variant file under the target_kb ceiling', function () {
+    $service = new ImageVariantService();
+    $imageId = seedVariantTestMediaRow();
+    $fixture = makeVariantFixture(2000, 2000, 'jpeg');
+
+    $variants = $service->processVariants(
+        originalTmpPath: $fixture,
+        imageId: $imageId,
+        basePath: "images/test/{$imageId}",
+    );
+
+    $targetBytes = 500 * 1024;
+    // Small solid-colour fixtures encode well under 500KB — this asserts the
+    // binary-search quality path stayed wired up, not that targeting is tight.
+    expect($variants['optimized']->file_size_bytes)->toBeLessThanOrEqual($targetBytes);
+
+    @unlink($fixture);
+});
