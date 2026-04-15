@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\Storage;
 class ImageVariantService
 {
     /* ------------------------------------------------------------------ */
-    /*  Public API                                                         */
+    /*  Public API */
     /* ------------------------------------------------------------------ */
 
     /**
@@ -30,9 +30,9 @@ class ImageVariantService
      * on the media disk, and persist ImageVariant rows for the given image.
      *
      * @param  string  $originalTmpPath  Absolute path to the temp original.
-     * @param  string  $imageId          UUID of the SiteMedia row.
-     * @param  string  $basePath         e.g. "images/<proId>/<imageId>"
-     * @return array<string, MediaVariant>  keyed by variant name
+     * @param  string  $imageId  UUID of the SiteMedia row.
+     * @param  string  $basePath  e.g. "images/<proId>/<imageId>"
+     * @return array<string, MediaVariant> keyed by variant name
      */
     public function processVariants(
         string $originalTmpPath,
@@ -40,11 +40,11 @@ class ImageVariantService
         string $basePath,
     ): array {
         // Ensure GD extension is available with WebP support
-        if (!extension_loaded('gd')) {
+        if (! extension_loaded('gd')) {
             throw new \RuntimeException('GD extension is not loaded. Cannot process image variants.');
         }
-        
-        if (!function_exists('imagewebp')) {
+
+        if (! function_exists('imagewebp')) {
             throw new \RuntimeException('GD WebP support is not available. Cannot generate WebP variants.');
         }
 
@@ -53,27 +53,27 @@ class ImageVariantService
             'base_path' => $basePath,
         ]);
 
-        $disk        = $this->disk();
+        $disk = $this->disk();
         $definitions = $this->variantDefinitions();
 
         $sourceImage = $this->loadImage($originalTmpPath);
 
-        if (!$sourceImage) {
+        if (! $sourceImage) {
             throw new \RuntimeException('Failed to create GD image from the uploaded file.');
         }
 
-        $sourceWidth  = imagesx($sourceImage);
+        $sourceWidth = imagesx($sourceImage);
         $sourceHeight = imagesy($sourceImage);
 
         $created = [];
 
         try {
             foreach ($definitions as $variantName => $def) {
-                $quality    = max(1, min(100, (int) ($def['quality'] ?? 92)));
+                $quality = max(1, min(100, (int) ($def['quality'] ?? 92)));
                 $minQuality = max(1, min($quality, (int) ($def['min_quality'] ?? 60)));
-                $targetKb   = max(0, (int) ($def['target_kb'] ?? 0));
+                $targetKb = max(0, (int) ($def['target_kb'] ?? 0));
                 $targetBytes = $targetKb > 0 ? ($targetKb * 1024) : null;
-                $fit        = (string) ($def['fit'] ?? 'inside');
+                $fit = (string) ($def['fit'] ?? 'inside');
 
                 $preserveResolution = filter_var(
                     $def['preserve_resolution'] ?? false,
@@ -106,7 +106,7 @@ class ImageVariantService
 
                 // --- Encode to WebP ---
                 $tmpFile = tempnam(sys_get_temp_dir(), 'sidest_img_');
-                if (!is_string($tmpFile) || $tmpFile === '') {
+                if (! is_string($tmpFile) || $tmpFile === '') {
                     throw new \RuntimeException('Failed to create temp file for WebP encoding.');
                 }
 
@@ -140,7 +140,7 @@ class ImageVariantService
                     }
 
                     $hash = hash_file('sha256', $tmpFile);
-                    if (!is_string($hash)) {
+                    if (! is_string($hash)) {
                         throw new \RuntimeException('Failed to hash encoded WebP variant.');
                     }
                     $hash = substr($hash, 0, 16);
@@ -158,18 +158,18 @@ class ImageVariantService
                     // --- Upsert DB row ---
                     $variant = MediaVariant::updateOrCreate(
                         [
-                            'media_id'      => $imageId,
-                            'variant_key'   => $variantName,
+                            'media_id' => $imageId,
+                            'variant_key' => $variantName,
                             'artifact_type' => 'webp',
                         ],
                         [
-                            'disk'            => $this->diskName(),
-                            'path'            => $storagePath,
-                            'mime'            => 'image/webp',
-                            'width'           => $dstW,
-                            'height'          => $dstH,
+                            'disk' => $this->diskName(),
+                            'path' => $storagePath,
+                            'mime' => 'image/webp',
+                            'width' => $dstW,
+                            'height' => $dstH,
                             'file_size_bytes' => $fileBytes,
-                            'content_hash'    => $hash,
+                            'content_hash' => $hash,
                         ],
                     );
 
@@ -199,7 +199,7 @@ class ImageVariantService
      */
     public function storeOriginal(UploadedFile $file, string $basePath): string
     {
-        $ext  = $file->getClientOriginalExtension() ?: 'jpg';
+        $ext = $file->getClientOriginalExtension() ?: 'jpg';
         $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
         $path = "{$basePath}/original_{$hash}.{$ext}";
 
@@ -253,7 +253,7 @@ class ImageVariantService
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Internal helpers                                                    */
+    /*  Internal helpers */
     /* ------------------------------------------------------------------ */
 
     private function diskName(): string
@@ -312,19 +312,19 @@ class ImageVariantService
         // It runs only when config is empty (sparse test environments).
         return [
             'optimized' => [
-                'format'      => 'webp',
-                'width'       => 2400,
-                'height'      => 2400,
-                'fit'         => 'inside',
-                'quality'     => 92,
+                'format' => 'webp',
+                'width' => 2400,
+                'height' => 2400,
+                'fit' => 'inside',
+                'quality' => 92,
                 'min_quality' => 60,
-                'target_kb'   => 500,
+                'target_kb' => 500,
             ],
             'maximized' => [
-                'format'  => 'webp',
-                'width'   => 4000,
-                'height'  => 4000,
-                'fit'     => 'inside',
+                'format' => 'webp',
+                'width' => 4000,
+                'height' => 4000,
+                'fit' => 'inside',
                 'quality' => 92,
             ],
         ];
@@ -345,11 +345,11 @@ class ImageVariantService
     private function loadImage(string $path): \GdImage|false
     {
         $info = @getimagesize($path);
-        if (!$info) {
+        if (! $info) {
             return false;
         }
 
-        $width  = (int) $info[0];
+        $width = (int) $info[0];
         $height = (int) $info[1];
         $maxPixels = (int) config('sidest.image_max_pixels', 24_000_000);
 
@@ -365,9 +365,9 @@ class ImageVariantService
 
         return match ($info[2]) {
             IMAGETYPE_JPEG => @imagecreatefromjpeg($path),
-            IMAGETYPE_PNG  => @imagecreatefrompng($path),
+            IMAGETYPE_PNG => @imagecreatefrompng($path),
             IMAGETYPE_WEBP => @imagecreatefromwebp($path),
-            default        => false,
+            default => false,
         };
     }
 
@@ -413,6 +413,7 @@ class ImageVariantService
             if ($size <= $targetBytes) {
                 $bestQuality = $mid;
                 $lower = $mid + 1;
+
                 continue;
             }
 
@@ -421,6 +422,7 @@ class ImageVariantService
 
         if ($bestQuality !== null) {
             $this->encodeWebp($image, $tmpFile, $bestQuality);
+
             return $bestQuality;
         }
 
@@ -461,8 +463,8 @@ class ImageVariantService
 
         // "inside" – fit within bounds, no crop, never upscale
         $ratio = min($maxW / $srcW, $maxH / $srcH, 1);
-        $dstW  = (int) round($srcW * $ratio);
-        $dstH  = (int) round($srcH * $ratio);
+        $dstW = (int) round($srcW * $ratio);
+        $dstH = (int) round($srcH * $ratio);
 
         return [0, 0, $srcW, $srcH, $dstW, $dstH];
     }
