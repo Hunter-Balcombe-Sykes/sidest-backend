@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Core\Site\SiteMedia;
+use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
 use App\Services\Media\UnprocessableImageException;
 use Illuminate\Bus\Queueable;
@@ -110,6 +111,14 @@ class ProcessImageVariantsJob implements ShouldQueue
                     'processing_state' => SiteMedia::PROCESSING_STATE_READY,
                     'processing_error' => null,
                 ]);
+
+            // If this was a brand design asset, bust the Hydrogen brand-design
+            // cache so the compressed variants replace the pre-processing URL
+            // (listDesignMedia filters on processing_state=ready, so the
+            // payload changes the moment this row flips to ready).
+            if ($siteMedia->pool === SiteMedia::POOL_DESIGN && $siteMedia->site_id) {
+                app(SiteCacheService::class)->forgetBrandDesign((string) $siteMedia->site_id);
+            }
 
             Log::info('ProcessImageVariantsJob: completed.', ['image_id' => $this->imageId]);
         } catch (UnprocessableImageException $e) {

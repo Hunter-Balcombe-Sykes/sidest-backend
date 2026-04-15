@@ -15,12 +15,16 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 
 // Internal endpoint that gives Hydrogen the resolved brand-design shape for a
-// brand. Reads from the unified source of truth (site.settings.design) — the
-// old provider_metadata.theme_tokens / sitepage_overrides storage was retired.
-// Cached for 5 minutes; busted by SyncShopifyBrandDesignJob and by site updates.
+// brand. Reads tokens from site.settings.design and media from site_media
+// (pool=design). Cached for 5 seconds at the controller boundary so dashboard
+// saves surface on Hydrogen within its staleWhileRevalidate window; every
+// write path explicitly busts via SiteCacheService::forgetBrandDesign.
 class HydrogenBrandDesignController extends ApiController
 {
-    private const CACHE_TTL_SECONDS = 300;
+    // 5s matches Hydrogen's Oxygen fetch staleWhileRevalidate window, so the
+    // worst-case propagation without an explicit bust is ~5s. With write-path
+    // invalidation firing, the stale window is effectively zero.
+    private const CACHE_TTL_SECONDS = 5;
 
     public function __construct(
         private readonly BrandDesignMediaService $brandDesign,
@@ -42,10 +46,17 @@ class HydrogenBrandDesignController extends ApiController
             return $this->error('Brand not found or inactive.', 404);
         }
 
+        // Site lookup happens outside the cache closure so the cache key is
+        // site-scoped (the invalidation helper only needs the site id). Brands
+        // without a site still go through the cache so repeated 404-shaped
+        // responses don't hammer the DB.
+        $site = Site::where('professional_id', $professional->id)->first();
+        $cacheKey = CacheKeyGenerator::hydrogenBrandDesign((string) ($site?->id ?? "nosite:{$professional->id}"));
+
         $payload = Cache::remember(
-            CacheKeyGenerator::brandDesignConfig((string) $professional->id),
+            $cacheKey,
             self::CACHE_TTL_SECONDS,
-            fn () => $this->buildDesignPayload($professional)
+            fn () => $this->buildDesignPayload($professional, $site)
         );
 
         return $this->success($payload);
@@ -70,9 +81,8 @@ class HydrogenBrandDesignController extends ApiController
      *     fallback_gallery: array<int, array{url: ?string, alt_text: ?string}>
      * }
      */
-    private function buildDesignPayload(Professional $professional): array
+    private function buildDesignPayload(Professional $professional, ?Site $site): array
     {
-        $site = Site::where('professional_id', $professional->id)->first();
         $settings = is_array($site?->settings) ? $site->settings : [];
         $design = is_array($settings['design'] ?? null) ? $settings['design'] : [];
 

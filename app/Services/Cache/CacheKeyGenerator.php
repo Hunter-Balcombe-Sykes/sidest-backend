@@ -130,9 +130,15 @@ class CacheKeyGenerator
         return "brand:{$brandProfessionalId}:collection_gid:{$handle}";
     }
 
-    public static function brandDesignConfig(string $brandProfessionalId): string
+    // Hydrogen brand-design response cache. Keyed by site_id (not professional)
+    // so BrandDesignMediaService can bust with just the site handle. The `v1`
+    // segment lets us bust every entry at once by bumping to v2 if the payload
+    // shape changes. TTL is intentionally tight (5s) so Hydrogen sees dashboard
+    // saves within its staleWhileRevalidate window — invalidation keeps the
+    // stale window near zero in practice.
+    public static function hydrogenBrandDesign(string $siteId): string
     {
-        return "brand:{$brandProfessionalId}:design";
+        return "hydrogen:brand-design:v1:{$siteId}";
     }
 
     public static function brandProductCustomPhotos(string $brandProfessionalId, string $productGid): string

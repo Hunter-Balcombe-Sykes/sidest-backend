@@ -5,6 +5,7 @@ namespace App\Actions\Site;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Core\Site\Theme;
+use App\Services\Cache\SiteCacheService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Arr;
@@ -162,6 +163,12 @@ class UpdateSiteAction
             }
             throw $e;
         }
+
+        // Bust the Hydrogen brand-design cache so dashboard saves surface
+        // inside Hydrogen's 5s staleWhileRevalidate window. Deferred until
+        // commit so a rolled-back transaction doesn't wipe a warm cache.
+        $siteId = (string) $site->id;
+        DB::afterCommit(fn () => app(SiteCacheService::class)->forgetBrandDesign($siteId));
 
         return $site->fresh();
         });

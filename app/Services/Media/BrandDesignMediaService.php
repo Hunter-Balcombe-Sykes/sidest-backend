@@ -374,7 +374,12 @@ class BrandDesignMediaService
     private function invalidateSiteCache(Site $site): void
     {
         try {
-            app(SiteCacheService::class)->invalidateSite($site);
+            $siteCache = app(SiteCacheService::class);
+            $siteCache->invalidateSite($site);
+            // Also bust the Hydrogen brand-design cache so dashboard saves
+            // (logo, placeholder upload/delete/reorder) surface on Hydrogen
+            // inside its 5s staleWhileRevalidate window.
+            $siteCache->forgetBrandDesign((string) $site->id);
         } catch (Throwable $e) {
             Log::warning('BrandDesignMediaService: cache invalidation failed.', [
                 'site_id' => $site->id,

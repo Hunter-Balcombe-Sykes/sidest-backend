@@ -4,8 +4,7 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
-use App\Models\Core\Site\SiteMedia;
-use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\SiteCacheService;
 use App\Services\Media\BrandDesignMediaService;
 use App\Services\Shopify\BrandDesignImporter;
 use Illuminate\Bus\Queueable;
@@ -15,10 +14,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 
 // Unified brand-design importer. Replaces the old pair of
 // SyncShopifyThemeTokensJob + SyncShopifyBrandLogoJob.
@@ -171,7 +168,11 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
             }
         }
 
-        Cache::forget(CacheKeyGenerator::brandDesignConfig((string) $integration->professional_id));
+        // Bust the Hydrogen brand-design cache. The logo uploads above already
+        // busted via BrandDesignMediaService::invalidateSiteCache, but the
+        // site.settings.design writes (colors / enums / slogan) don't route
+        // through that service, so this catches them.
+        app(SiteCacheService::class)->forgetBrandDesign((string) $site->id);
 
         Log::info('Brand design synced.', [
             'integration_id' => $this->integrationId,

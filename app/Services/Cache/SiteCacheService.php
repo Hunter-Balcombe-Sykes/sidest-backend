@@ -748,6 +748,19 @@ class SiteCacheService
     }
 
     /**
+     * Bust the Hydrogen brand-design cache for a site. Call from every write
+     * path that touches design tokens or design media (logo, placeholders).
+     *
+     * Why explicit per-action: the stale window is 5s, so a forgotten bust
+     * isn't catastrophic — but the user sees their own saves on Hydrogen
+     * immediately only when every write path fires this.
+     */
+    public function forgetBrandDesign(string $siteId): void
+    {
+        Cache::forget(CacheKeyGenerator::hydrogenBrandDesign($siteId));
+    }
+
+    /**
      * Invalidate all cache keys for a site
      */
     public function invalidateSite(Site $site): void
