@@ -28,6 +28,11 @@
 --   section_spacing                             enum: tight | default | spacious
 --   logo.{full_url, square_url}                 URLs to our own storage
 --   slogan                                      short string
+--
+-- Note: every UPDATE is guarded by `jsonb_typeof(settings) = 'object'`. An
+-- earlier revision of this migration didn't include that guard and blew up on
+-- rows where `settings` had somehow become a JSON array — the sibling
+-- migration 20260414160416_fix_design_array_to_object repairs those rows.
 
 BEGIN;
 
@@ -41,7 +46,7 @@ BEGIN;
 -- legacy CSS-length keys remain untouched for the current UI.
 UPDATE site.sites
 SET settings = jsonb_set(
-    COALESCE(settings, '{}'::jsonb),
+    settings,
     '{design}',
     COALESCE(settings->'design', '{}'::jsonb) || jsonb_build_object(
         'colors', jsonb_build_object(
@@ -61,7 +66,8 @@ SET settings = jsonb_set(
     ),
     true
 )
-WHERE settings IS NOT NULL;
+WHERE settings IS NOT NULL
+  AND jsonb_typeof(settings) = 'object';
 
 -- Step 2 — For brands with a Shopify integration, overlay Shopify-imported
 -- colour values on top of any NULL slots in site.settings.design.colors.
@@ -94,7 +100,8 @@ SET settings = jsonb_set(
 FROM core.professional_integrations pi
 WHERE pi.professional_id = s.professional_id
   AND pi.provider = 'shopify'
-  AND pi.provider_metadata ? 'theme_tokens';
+  AND pi.provider_metadata ? 'theme_tokens'
+  AND jsonb_typeof(s.settings) = 'object';
 
 -- Step 3 — Strip deprecated subtrees from provider_metadata on Shopify rows.
 -- After this, theme design lives exclusively in site.settings.design.

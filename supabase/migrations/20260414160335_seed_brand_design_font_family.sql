@@ -8,6 +8,11 @@
 -- BrandDesignController::DEFAULT_FONT_FAMILY), so this migration is belt-and-
 -- braces — making the stored value explicit keeps the DB consistent with what
 -- every API surface returns.
+--
+-- Note: guarded by `jsonb_typeof(settings) = 'object'` for the same reason as
+-- the sibling design-unification migration — a small number of rows had
+-- `settings` stored as a JSON array, which this guard skips and which
+-- 20260414160416_fix_design_array_to_object repairs.
 
 BEGIN;
 
@@ -23,6 +28,7 @@ SET settings = jsonb_set(
     true
 )
 WHERE settings IS NOT NULL
+  AND jsonb_typeof(settings) = 'object'
   AND (
       settings->'design'->>'font_family' IS NULL
       OR settings->'design'->>'font_family' = ''
@@ -44,6 +50,7 @@ SET settings = jsonb_set(
     true
 )
 WHERE settings IS NOT NULL
+  AND jsonb_typeof(settings) = 'object'
   AND settings->'design'->'typography' IS NOT NULL;
 
 COMMIT;
