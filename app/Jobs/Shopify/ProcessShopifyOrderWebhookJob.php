@@ -14,6 +14,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
 // V2: Processes a Shopify orders/paid webhook — identifies affiliate, calculates commission, creates ledger entries, and captures the customer as an affiliate contact.
@@ -151,6 +152,16 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
         // Non-blocking: any failure inside the service is logged and swallowed so it can never
         // fail commission processing above.
         $this->captureAffiliateContact($contactCapture, (string) $affiliate->id, $noteAttributes, $orderId);
+
+        // Rebuild commerce daily aggregates so dashboards and weekly notifications
+        // reflect this order. Non-blocking — queued on the analytics worker.
+        if ($entriesCreated > 0) {
+            \App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob::dispatch(
+                $this->brandProfessionalId,
+                (string) $affiliate->id,
+                Carbon::parse($occurredAt)->toDateString()
+            );
+        }
 
         Log::info('Shopify order webhook processed', [
             'order_id' => $orderId,

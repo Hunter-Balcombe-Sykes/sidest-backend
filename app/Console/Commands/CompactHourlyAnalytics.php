@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\Analytics\RebuildBookingDailyAggregatesJob;
+use App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob;
 use App\Jobs\Analytics\RebuildSiteDailyAggregatesJob;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -39,19 +40,39 @@ class CompactHourlyAnalytics extends Command
         $staleBrandDays = DB::table('analytics.brand_metrics_hourly')
             ->where('hour_start', '<', $cutoff)
             ->selectRaw('brand_professional_id')
-            ->selectRaw("(hour_start AT TIME ZONE timezone)::date as day")
+            ->selectRaw('(hour_start AT TIME ZONE timezone)::date as day')
             ->groupBy('brand_professional_id', 'day')
             ->get();
 
         $staleAffiliateDays = DB::table('analytics.professional_metrics_hourly')
             ->where('hour_start', '<', $cutoff)
             ->selectRaw('affiliate_professional_id')
-            ->selectRaw("(hour_start AT TIME ZONE timezone)::date as day")
+            ->selectRaw('(hour_start AT TIME ZONE timezone)::date as day')
             ->groupBy('affiliate_professional_id', 'day')
             ->get();
 
         $this->line("Commerce brand-day rebuild keys: {$staleBrandDays->count()}");
         $this->line("Commerce affiliate-day rebuild keys: {$staleAffiliateDays->count()}");
+
+        // Dispatch commerce daily rebuilds for stale brand+day pairs.
+        // Queries the ledger to find brand+affiliate pairs for each day.
+        if (! $dryRun) {
+            foreach ($staleBrandDays as $row) {
+                $affiliateIds = DB::table('commerce.commission_ledger_entries')
+                    ->where('brand_professional_id', $row->brand_professional_id)
+                    ->whereRaw('occurred_at::date = ?', [$row->day])
+                    ->distinct()
+                    ->pluck('affiliate_professional_id');
+
+                foreach ($affiliateIds as $affiliateId) {
+                    RebuildCommerceDailyAggregatesJob::dispatch(
+                        (string) $row->brand_professional_id,
+                        (string) $affiliateId,
+                        (string) $row->day
+                    );
+                }
+            }
+        }
 
         $brandRows = DB::table('analytics.brand_metrics_hourly')
             ->where('hour_start', '<', $cutoff);
@@ -74,7 +95,7 @@ class CompactHourlyAnalytics extends Command
         $staleDays = DB::table('analytics.site_metrics_hourly')
             ->where('hour_start', '<', $cutoff)
             ->selectRaw('professional_id')
-            ->selectRaw("(hour_start AT TIME ZONE timezone)::date as day")
+            ->selectRaw('(hour_start AT TIME ZONE timezone)::date as day')
             ->groupBy('professional_id', 'day')
             ->get();
 
@@ -102,7 +123,7 @@ class CompactHourlyAnalytics extends Command
         $staleDays = DB::table('analytics.booking_metrics_hourly')
             ->where('hour_start', '<', $cutoff)
             ->selectRaw('professional_id')
-            ->selectRaw("(hour_start AT TIME ZONE timezone)::date as day")
+            ->selectRaw('(hour_start AT TIME ZONE timezone)::date as day')
             ->groupBy('professional_id', 'day')
             ->get();
 
