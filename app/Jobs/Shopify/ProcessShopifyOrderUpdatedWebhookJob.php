@@ -58,6 +58,10 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
         } else {
             $this->handleFullRefund($orderId, $accruals);
         }
+
+        // Rebuild commerce daily aggregates so refunded_cents and commission_reversed_cents
+        // are reflected in dashboards and weekly notifications.
+        $this->dispatchCommerceRebuilds($accruals);
     }
 
     private function handleFullRefund(string $orderId, $accruals): void
@@ -183,6 +187,21 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
         ]);
     }
 
+    private function dispatchCommerceRebuilds($accruals): void
+    {
+        $pairs = $accruals
+            ->groupBy(fn ($e) => $e->brand_professional_id.'|'.$e->affiliate_professional_id);
+
+        foreach ($pairs as $entries) {
+            $entry = $entries->first();
+            \App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob::dispatch(
+                (string) $entry->brand_professional_id,
+                (string) $entry->affiliate_professional_id,
+                $entry->occurred_at->toDateString()
+            );
+        }
+    }
+
     private function notifyAffiliatesOfRefund(string $orderId, $accruals, bool $fullRefund): void
     {
         $publisher = app(NotificationPublisher::class);
@@ -197,17 +216,17 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
             $affiliateAccruals = $accruals->where('affiliate_professional_id', $affiliateId);
             $totalCents = $affiliateAccruals->sum('amount_cents');
             $currency = $affiliateAccruals->first()->currency_code ?? 'AUD';
-            $formatted = strtoupper($currency) . ' $' . number_format($totalCents / 100, 2);
+            $formatted = strtoupper($currency).' $'.number_format($totalCents / 100, 2);
 
             $body = $fullRefund
                 ? "A sale was refunded — your {$formatted} commission has been cancelled."
-                : "A sale was partially refunded — your commission has been adjusted.";
+                : 'A sale was partially refunded — your commission has been adjusted.';
 
             $publisher->publish(
                 professionalId: (string) $affiliateId,
                 frontendType: 'Warning',
                 category: 'commissions',
-                title: 'Commission ' . ($fullRefund ? 'cancelled' : 'adjusted'),
+                title: 'Commission '.($fullRefund ? 'cancelled' : 'adjusted'),
                 body: $body,
                 dedupeKey: "refund.order.{$orderId}.affiliate.{$affiliateId}",
                 ctaUrl: '/account/commissions',

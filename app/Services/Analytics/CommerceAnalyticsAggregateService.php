@@ -52,21 +52,27 @@ class CommerceAnalyticsAggregateService
                 return;
             }
 
-            $inserts = $rows->map(fn ($row) => [
-                'day' => $day,
-                'affiliate_professional_id' => $affiliateProfessionalId,
-                'currency_code' => (string) $row->currency_code,
-                'timezone' => $timezone,
-                'orders_count' => (int) $row->orders_count,
-                'gross_cents' => (int) $row->gross_cents,
-                'refunded_cents' => 0,
-                'returned_cents' => 0,
-                'net_cents' => (int) $row->gross_cents,
-                'commission_accrued_cents' => (int) $row->commission_accrued_cents,
-                'commission_reversed_cents' => (int) $row->commission_reversed_cents,
-                'commission_paid_cents' => 0,
-                'updated_at' => $now,
-            ])->all();
+            $inserts = $rows->map(function ($row) use ($affiliateProfessionalId, $day, $timezone, $utcFrom, $utcTo, $now) {
+                $gross = (int) $row->gross_cents;
+                $refunded = (int) $row->refunded_cents;
+                $paidCents = $this->queryPaidCommission($affiliateProfessionalId, (string) $row->currency_code, $utcFrom, $utcTo);
+
+                return [
+                    'day' => $day,
+                    'affiliate_professional_id' => $affiliateProfessionalId,
+                    'currency_code' => (string) $row->currency_code,
+                    'timezone' => $timezone,
+                    'orders_count' => (int) $row->orders_count,
+                    'gross_cents' => $gross,
+                    'refunded_cents' => $refunded,
+                    'returned_cents' => 0,
+                    'net_cents' => $gross - $refunded,
+                    'commission_accrued_cents' => (int) $row->commission_accrued_cents,
+                    'commission_reversed_cents' => (int) $row->commission_reversed_cents,
+                    'commission_paid_cents' => $paidCents,
+                    'updated_at' => $now,
+                ];
+            })->all();
 
             DB::table('analytics.professional_metrics_daily')->insert($inserts);
         });
@@ -100,18 +106,23 @@ class CommerceAnalyticsAggregateService
                 return;
             }
 
-            $inserts = $rows->map(fn ($row) => [
-                'day' => $day,
-                'brand_professional_id' => $brandProfessionalId,
-                'currency_code' => (string) $row->currency_code,
-                'timezone' => $timezone,
-                'orders_count' => (int) $row->orders_count,
-                'gross_cents' => (int) $row->gross_cents,
-                'refunded_cents' => 0,
-                'returned_cents' => 0,
-                'net_cents' => (int) $row->gross_cents,
-                'updated_at' => $now,
-            ])->all();
+            $inserts = $rows->map(function ($row) use ($day, $brandProfessionalId, $timezone, $now) {
+                $gross = (int) $row->gross_cents;
+                $refunded = (int) $row->refunded_cents;
+
+                return [
+                    'day' => $day,
+                    'brand_professional_id' => $brandProfessionalId,
+                    'currency_code' => (string) $row->currency_code,
+                    'timezone' => $timezone,
+                    'orders_count' => (int) $row->orders_count,
+                    'gross_cents' => $gross,
+                    'refunded_cents' => $refunded,
+                    'returned_cents' => 0,
+                    'net_cents' => $gross - $refunded,
+                    'updated_at' => $now,
+                ];
+            })->all();
 
             DB::table('analytics.brand_metrics_daily')->insert($inserts);
         });
@@ -147,23 +158,30 @@ class CommerceAnalyticsAggregateService
                 return;
             }
 
-            $inserts = $rows->map(fn ($row) => [
-                'day' => $day,
-                'brand_professional_id' => $brandProfessionalId,
-                'affiliate_professional_id' => $affiliateProfessionalId,
-                'currency_code' => (string) $row->currency_code,
-                'timezone' => $timezone,
-                'orders_count' => (int) $row->orders_count,
-                'gross_cents' => (int) $row->gross_cents,
-                'refunded_cents' => 0,
-                'returned_cents' => 0,
-                'net_cents' => (int) $row->gross_cents,
-                'commission_accrued_cents' => (int) $row->commission_accrued_cents,
-                'commission_reversed_cents' => (int) $row->commission_reversed_cents,
-                'commission_net_cents' => (int) $row->commission_accrued_cents - (int) $row->commission_reversed_cents,
-                'customers_count' => 0,
-                'updated_at' => $now,
-            ])->all();
+            $customersCount = $this->queryCustomersCount($affiliateProfessionalId, $utcFrom, $utcTo);
+
+            $inserts = $rows->map(function ($row) use ($brandProfessionalId, $affiliateProfessionalId, $day, $timezone, $customersCount, $now) {
+                $gross = (int) $row->gross_cents;
+                $refunded = (int) $row->refunded_cents;
+
+                return [
+                    'day' => $day,
+                    'brand_professional_id' => $brandProfessionalId,
+                    'affiliate_professional_id' => $affiliateProfessionalId,
+                    'currency_code' => (string) $row->currency_code,
+                    'timezone' => $timezone,
+                    'orders_count' => (int) $row->orders_count,
+                    'gross_cents' => $gross,
+                    'refunded_cents' => $refunded,
+                    'returned_cents' => 0,
+                    'net_cents' => $gross - $refunded,
+                    'commission_accrued_cents' => (int) $row->commission_accrued_cents,
+                    'commission_reversed_cents' => (int) $row->commission_reversed_cents,
+                    'commission_net_cents' => (int) $row->commission_accrued_cents - (int) $row->commission_reversed_cents,
+                    'customers_count' => $customersCount,
+                    'updated_at' => $now,
+                ];
+            })->all();
 
             DB::table('analytics.brand_affiliate_daily')->insert($inserts);
         });
@@ -229,8 +247,36 @@ class CommerceAnalyticsAggregateService
     }
 
     /**
+     * Sum commission_paid_cents from completed payouts for an affiliate + day.
+     */
+    private function queryPaidCommission(string $affiliateProfessionalId, string $currencyCode, Carbon $utcFrom, Carbon $utcTo): int
+    {
+        return (int) DB::table('commerce.commission_payouts')
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('currency_code', $currencyCode)
+            ->where('status', 'completed')
+            ->where('processed_at', '>=', $utcFrom)
+            ->where('processed_at', '<', $utcTo)
+            ->sum('net_payout_cents');
+    }
+
+    /**
+     * Count distinct customers for an affiliate on a given day.
+     * Uses the contacts table populated by the Shopify order webhook.
+     */
+    private function queryCustomersCount(string $affiliateProfessionalId, Carbon $utcFrom, Carbon $utcTo): int
+    {
+        return (int) DB::table('core.customers')
+            ->where('professional_id', $affiliateProfessionalId)
+            ->where('created_at', '>=', $utcFrom)
+            ->where('created_at', '<', $utcTo)
+            ->count();
+    }
+
+    /**
      * Base query for aggregating ledger entries into order/revenue/commission metrics.
      * Gross cents are reconstructed from calculation_metadata (line_price * quantity).
+     * Refunded cents are calculated from reversal entries (refund_subtotal in metadata).
      */
     private function queryLedger(Carbon $utcFrom, Carbon $utcTo): \Illuminate\Database\Query\Builder
     {
@@ -241,9 +287,10 @@ class CommerceAnalyticsAggregateService
             ->select([
                 'currency_code',
                 DB::raw('COUNT(DISTINCT shopify_order_id) as orders_count'),
-                DB::raw("COALESCE(SUM(ROUND((calculation_metadata->>'line_price')::numeric * (calculation_metadata->>'quantity')::integer * 100)), 0) as gross_cents"),
+                DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'accrual' THEN ROUND((calculation_metadata->>'line_price')::numeric * (calculation_metadata->>'quantity')::integer * 100) ELSE 0 END), 0) as gross_cents"),
+                DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'reversal' THEN ROUND((calculation_metadata->>'refund_subtotal')::numeric * 100) ELSE 0 END), 0) as refunded_cents"),
                 DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'accrual' THEN amount_cents ELSE 0 END), 0) as commission_accrued_cents"),
-                DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'reversal' THEN amount_cents ELSE 0 END), 0) as commission_reversed_cents"),
+                DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'reversal' THEN ABS(amount_cents) ELSE 0 END), 0) as commission_reversed_cents"),
             ]);
     }
 

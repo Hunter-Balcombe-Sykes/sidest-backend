@@ -16,8 +16,11 @@ use Stripe\StripeClient;
 class CommissionPayoutService
 {
     private StripeClient $stripe;
+
     private float $platformFeePercent;
+
     private int $systemHoldDays;
+
     private int $minHoldDays;
 
     public function __construct()
@@ -60,11 +63,13 @@ class CommissionPayoutService
                 if ($result === true) {
                     $stats['batches_processed']++;
                     $stats['total_cents'] += $pendingPayout->net_payout_cents;
+
                     continue;
                 }
 
                 if ($result === null) {
                     $stats['batches_pending_funding']++;
+
                     continue;
                 }
 
@@ -132,11 +137,13 @@ class CommissionPayoutService
                     if ($result === true) {
                         $stats['batches_processed']++;
                         $stats['total_cents'] += $payout->net_payout_cents;
+
                         continue;
                     }
 
                     if ($result === null) {
                         $stats['batches_pending_funding']++;
+
                         continue;
                     }
 
@@ -288,11 +295,13 @@ class CommissionPayoutService
             // During grace period or within void window: hold this batch so the
             // void service can handle it on its own schedule. Don't fail permanently.
             $this->markPendingFunding($payout, 'affiliate_not_connected', 'Affiliate Stripe Connect account is not active — holding for grace period');
+
             return null;
         }
 
         if (! $brand) {
             $this->failPayout($payout, 'brand_missing', 'Brand account was not found.');
+
             return false;
         }
 
@@ -304,6 +313,7 @@ class CommissionPayoutService
                 'brand_payment_method_missing',
                 'No payment method on file. Please add a card in your Stripe settings.',
             );
+
             return null;
         }
 
@@ -356,6 +366,7 @@ class CommissionPayoutService
                         $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
                     }
                     $this->markPendingFunding($payout, 'charge_requires_action', 'Card charge requires authentication.');
+
                     return null;
                 }
 
@@ -371,6 +382,7 @@ class CommissionPayoutService
                     $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
                 }
                 $this->markPendingFunding($payout, 'charge_failed', $e->getMessage());
+
                 return null;
             }
         } else {
@@ -419,6 +431,13 @@ class CommissionPayoutService
                 'currency' => $payout->currency_code,
             ]);
 
+            // Rebuild commerce aggregates so commission_paid_cents is reflected
+            \App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob::dispatch(
+                (string) $payout->brand_professional_id,
+                (string) $payout->affiliate_professional_id,
+                now()->toDateString()
+            );
+
             return true;
         } catch (ApiErrorException $e) {
             // Transfer failed — refund wallet debit if used
@@ -429,6 +448,7 @@ class CommissionPayoutService
             }
 
             $this->failPayout($payout, 'transfer_failed', $e->getMessage());
+
             return false;
         }
     }
@@ -568,14 +588,14 @@ class CommissionPayoutService
     {
         $asBrand = CommissionPayout::query()
             ->where('brand_professional_id', $professional->id)
-            ->selectRaw("status, COUNT(*) as count, SUM(gross_commission_cents) as total_cents")
+            ->selectRaw('status, COUNT(*) as count, SUM(gross_commission_cents) as total_cents')
             ->groupBy('status')
             ->get()
             ->keyBy('status');
 
         $asAffiliate = CommissionPayout::query()
             ->where('affiliate_professional_id', $professional->id)
-            ->selectRaw("status, COUNT(*) as count, SUM(net_payout_cents) as total_cents")
+            ->selectRaw('status, COUNT(*) as count, SUM(net_payout_cents) as total_cents')
             ->groupBy('status')
             ->get()
             ->keyBy('status');
