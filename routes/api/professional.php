@@ -163,6 +163,7 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         // Image Upload (server-side processing → WebP variants via queue)
         Route::post('/uploads', [ProfessionalUploadController::class, 'upload']);
         Route::post('/uploads/brand-logo', [ProfessionalUploadController::class, 'uploadBrandLogo']);
+        Route::delete('/uploads/brand-logo', [ProfessionalUploadController::class, 'destroyBrandLogo']);
         Route::post('/uploads/brand-placeholder-image', [ProfessionalUploadController::class, 'uploadBrandPlaceholderImage']);
         Route::get('/uploads/brand-placeholder-images', [ProfessionalUploadController::class, 'listBrandPlaceholders']);
         Route::post('/uploads/brand-placeholder-images/reorder', [ProfessionalUploadController::class, 'reorderBrandPlaceholders']);

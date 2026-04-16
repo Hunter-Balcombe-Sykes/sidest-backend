@@ -174,6 +174,57 @@ it('reorders placeholders by the supplied id list', function () {
     expect($rows->pluck('id')->all())->toBe([$c->id, $a->id, $b->id]);
 });
 
+it('soft-deletes a logo by variant', function () {
+    $site = makeBrandSite();
+    $service = makeServiceWithFakeImageVariant();
+
+    $service->upsertLogoFromUploadedFile($site, $site->professional_id, makeFakeUpload('full.png'), 'full');
+
+    $service->deleteLogo($site, 'full');
+
+    $active = SiteMedia::query()
+        ->where('site_id', $site->id)
+        ->where('purpose', SiteMedia::PURPOSE_LOGO_FULL)
+        ->whereNull('deleted_at')
+        ->count();
+
+    expect($active)->toBe(0);
+
+    // Row is soft-deleted, not hard-deleted.
+    $trashed = SiteMedia::withTrashed()
+        ->where('site_id', $site->id)
+        ->where('purpose', SiteMedia::PURPOSE_LOGO_FULL)
+        ->count();
+
+    expect($trashed)->toBe(1);
+});
+
+it('returns 404 when deleting a logo that does not exist', function () {
+    $site = makeBrandSite();
+    $service = makeServiceWithFakeImageVariant();
+
+    $service->deleteLogo($site, 'full');
+})->throws(\Symfony\Component\HttpKernel\Exception\HttpException::class, 'Logo not found.');
+
+it('deletes logo_square without affecting logo_full', function () {
+    $site = makeBrandSite();
+    $service = makeServiceWithFakeImageVariant();
+
+    $service->upsertLogoFromUploadedFile($site, $site->professional_id, makeFakeUpload('full.png'), 'full');
+    $service->upsertLogoFromUploadedFile($site, $site->professional_id, makeFakeUpload('square.png'), 'square');
+
+    $service->deleteLogo($site, 'square');
+
+    $remaining = SiteMedia::query()
+        ->where('site_id', $site->id)
+        ->where('pool', SiteMedia::POOL_DESIGN)
+        ->whereNull('deleted_at')
+        ->get();
+
+    expect($remaining)->toHaveCount(1);
+    expect($remaining->first()->purpose)->toBe(SiteMedia::PURPOSE_LOGO_FULL);
+});
+
 it('lists design media in the shape readers expect', function () {
     $site = makeBrandSite();
     $service = makeServiceWithFakeImageVariant();

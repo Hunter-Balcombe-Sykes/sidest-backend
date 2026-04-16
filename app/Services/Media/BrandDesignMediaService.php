@@ -235,6 +235,30 @@ class BrandDesignMediaService
     }
 
     /**
+     * Soft-delete a logo row by variant (full or square). No-ops if no active
+     * row exists for the given purpose.
+     */
+    public function deleteLogo(Site $site, string $variant): void
+    {
+        $purpose = $this->purposeForLogoVariant($variant);
+
+        $row = SiteMedia::query()
+            ->where('site_id', $site->id)
+            ->where('pool', SiteMedia::POOL_DESIGN)
+            ->where('purpose', $purpose)
+            ->whereNull('deleted_at')
+            ->first();
+
+        if (! $row) {
+            abort(404, 'Logo not found.');
+        }
+
+        $row->delete();
+
+        $this->invalidateSiteCache($site);
+    }
+
+    /**
      * Resolve all brand design media for a site into the shape that every reader
      * (HydrogenBrandDesignController, BrandDesignController, SiteCacheService)
      * consumes. Only ready rows are returned — pending/failed rows are skipped.

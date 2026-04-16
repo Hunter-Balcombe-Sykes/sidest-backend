@@ -156,6 +156,10 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     private function markFailed(string $reason): void
     {
+        // Fetch before update so we have site_id for cache bust regardless of
+        // update outcome (row may be soft-deleted by a concurrent delete).
+        $siteMedia = SiteMedia::withTrashed()->where('id', $this->imageId)->first();
+
         $updated = SiteMedia::query()
             ->where('id', $this->imageId)
             ->whereNull('deleted_at')
@@ -165,12 +169,25 @@ class ProcessImageVariantsJob implements ShouldQueue
             ]);
 
         if ($updated === 0) {
-            $siteMedia = SiteMedia::withTrashed()->where('id', $this->imageId)->first();
             Log::info('ProcessImageVariantsJob: failed-state update skipped.', [
                 'image_id'         => $this->imageId,
                 'row_exists'       => $siteMedia !== null,
                 'is_soft_deleted'  => $siteMedia?->trashed() ?? false,
             ]);
+        }
+
+        // Mirror the success-path cache bust (line 119-121): Hydrogen's
+        // listDesignMedia filters on ready, so a failed design row changes
+        // the payload shape — bust so the dashboard sees it immediately.
+        if ($siteMedia?->pool === SiteMedia::POOL_DESIGN && $siteMedia->site_id) {
+            try {
+                app(SiteCacheService::class)->forgetBrandDesign((string) $siteMedia->site_id);
+            } catch (Throwable $e) {
+                Log::warning('ProcessImageVariantsJob: failed-state cache bust failed.', [
+                    'image_id' => $this->imageId,
+                    'error'    => $e->getMessage(),
+                ]);
+            }
         }
     }
 }

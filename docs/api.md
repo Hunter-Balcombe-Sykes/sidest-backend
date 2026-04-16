@@ -1878,6 +1878,57 @@ Gallery-pool images can also be accessed / managed via the legacy gallery routes
 - `POST /api/gallery/reorder` — reorder gallery images; body: `{ "ids": ["uuid1", "uuid2", ...] }`
 - `DELETE /api/gallery/{image}` — delete a gallery image and its variants
 
+### Brand Design Media (logos & placeholders)
+
+Brand-scoped endpoints for managing design assets (logos and placeholder images). All assets go through the WebP variant processing pipeline and bust the Hydrogen brand-design cache on mutation.
+
+#### `POST /api/uploads/brand-logo`
+
+- Auth: Required (brand professional)
+- Content-Type: `multipart/form-data`
+- Request body:
+  - `logo` (required): JPEG, PNG, or WebP; max 5 MB
+  - `variant` (optional): `full` or `square` — default `full`
+- Upsert semantics: soft-deletes any prior active row with the same purpose
+- Response (201): `{ path, url, media_id, media_purpose, variants, processing_state }`
+
+#### `DELETE /api/uploads/brand-logo?variant=full|square`
+
+- Auth: Required (brand professional)
+- Query param: `variant` (required): `full` or `square`
+- Soft-deletes the matching logo row + cache bust
+- Response (200): `{ "deleted": true }`
+- Common status codes: 200, 401, 403, 404, 422
+
+#### `POST /api/uploads/brand-placeholder-image`
+
+- Auth: Required (brand professional)
+- Content-Type: `multipart/form-data`
+- Request body:
+  - `image` (required): JPEG, PNG, or WebP; max 5 MB
+- Max 5 active placeholders per site (422 if exceeded)
+- Response (201): `{ path, url, media_id, media_purpose, sort_order, variants, processing_state }`
+
+#### `GET /api/uploads/brand-placeholder-images`
+
+- Auth: Required (brand professional)
+- Response (200): `{ "placeholders": [{ id, alt_text, url, sort_order }, ...] }`
+
+#### `POST /api/uploads/brand-placeholder-images/reorder`
+
+- Auth: Required (brand professional)
+- Request body:
+  - `ids` (required): array of UUIDs — must contain every active placeholder id
+- Response (200): `{ "reordered": true }`
+- Common status codes: 200, 401, 403, 422
+
+#### `DELETE /api/uploads/brand-placeholder-images/{media}`
+
+- Auth: Required (brand professional)
+- Soft-deletes the placeholder and repacks remaining sort_order (no gaps)
+- Response (200): `{ "deleted": true }`
+- Common status codes: 200, 401, 403, 404
+
 ### Shopify Integration
 
 Shopify integration is brand-scoped and used for canonical order attribution/analytics ingestion.

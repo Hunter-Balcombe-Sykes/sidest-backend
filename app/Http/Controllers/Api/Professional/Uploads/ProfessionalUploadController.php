@@ -419,6 +419,31 @@ class ProfessionalUploadController extends ApiController
     }
 
     /**
+     * DELETE /api/uploads/brand-logo?variant=full|square
+     *
+     * Soft-deletes the matching logo row and busts the Hydrogen cache.
+     */
+    public function destroyBrandLogo(Request $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        if (($pro->professional_type ?? null) !== 'brand') {
+            return $this->error('Brand logo management is only available for brand accounts.', 403);
+        }
+
+        $variant = $request->query('variant');
+        if (! in_array($variant, ['full', 'square'], true)) {
+            return $this->error('Variant must be "full" or "square".', 422);
+        }
+
+        $this->brandDesign->deleteLogo($site, $variant);
+
+        return $this->success(['deleted' => true]);
+    }
+
+    /**
      * POST /api/uploads/brand-placeholder-image  { image: <image> }
      */
     public function uploadBrandPlaceholderImage(UploadBrandPlaceholderImageRequest $request): JsonResponse
@@ -479,8 +504,8 @@ class ProfessionalUploadController extends ApiController
     /**
      * POST /api/uploads/brand-placeholder-images/reorder
      *
-     * Body: { ordered_ids: [uuid, uuid, ...] }. The list must contain every
-     * active placeholder id for the site — extras or missing rows return 422.
+     * Body: { ids: [uuid, uuid, ...] }. The list must contain every active
+     * placeholder id for the site — extras or missing rows return 422.
      */
     public function reorderBrandPlaceholders(ReorderBrandPlaceholdersRequest $request): JsonResponse
     {
@@ -492,7 +517,7 @@ class ProfessionalUploadController extends ApiController
             return $this->error('Placeholder management is only available for brand accounts.', 403);
         }
 
-        $orderedIds = $request->validated('ordered_ids') ?? [];
+        $orderedIds = $request->validated('ids') ?? [];
         $this->brandDesign->reorderPlaceholders($site, $orderedIds);
 
         return $this->success(['reordered' => true]);

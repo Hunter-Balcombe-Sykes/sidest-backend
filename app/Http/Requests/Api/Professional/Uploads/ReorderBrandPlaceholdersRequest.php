@@ -12,8 +12,8 @@ class ReorderBrandPlaceholdersRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'ordered_ids' => ['required', 'array', 'min:1', 'max:5'],
-            'ordered_ids.*' => ['required', 'string', 'uuid'],
+            'ids' => ['required', 'array', 'min:1', 'max:5'],
+            'ids.*' => ['required', 'string', 'uuid'],
         ];
     }
 }
