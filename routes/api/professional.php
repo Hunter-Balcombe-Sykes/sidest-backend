@@ -117,6 +117,7 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
             ->whereUuid('category')
             ->withTrashed();
         Route::post('/services/reorder-layout', [ProfessionalServiceController::class, 'reorderLayout']);
+        Route::patch('/booking/settings', [ProfessionalSiteController::class, 'updateBookingSettings']);
         Route::get('/booking/my-analytics/overview', [BookingAnalyticsController::class, 'myOverview']);
 
         // View Analytics

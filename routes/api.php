@@ -133,6 +133,7 @@ Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('inter
     Route::get('/brand-design/{slug}', [HydrogenBrandDesignController::class, 'show'])
         ->where('slug', '[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}');
     Route::get('/affiliate', [HydrogenAffiliateController::class, 'show']);
+    Route::get('/affiliate-services', [HydrogenAffiliateController::class, 'services']);
     Route::get('/affiliate-products', [HydrogenAffiliateProductsController::class, 'show']);
 });
 

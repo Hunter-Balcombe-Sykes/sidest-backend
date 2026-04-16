@@ -70,6 +70,38 @@ class PublicBookingController extends ApiController
 
     public function config(Request $request): JsonResponse
     {
+        // Resolve site and professional without requiring Square (manual mode needs this too).
+        $subdomain = $this->resolveSiteSubdomain($request);
+        if (! $subdomain) {
+            return $this->error('Missing site identifier.', 400);
+        }
+
+        $site = $this->siteResolver->resolvePublishedSite($subdomain);
+        if (! $site) {
+            return $this->error('Site not found.', 404);
+        }
+
+        $professional = Professional::query()->find($site->professional_id);
+        if (! $professional) {
+            return $this->error('Booking is not available for this site.', 409);
+        }
+
+        $settings = is_array($site->settings) ? $site->settings : [];
+        $bookingMode = strtolower((string) ($settings['booking_mode'] ?? ''));
+        $isSmartMode = (bool) ($settings['services_auto_sync_enabled'] ?? false) || $bookingMode === 'smart';
+
+        // Manual mode: return the external booking URL instead of Square config
+        if (! $isSmartMode) {
+            $manualUrl = trim((string) ($settings['manual_booking_url'] ?? ''));
+
+            return $this->success([
+                'booking_enabled' => $manualUrl !== '',
+                'booking_mode' => 'manual',
+                'manual_booking_url' => $manualUrl !== '' ? $manualUrl : null,
+            ]);
+        }
+
+        // Smart mode: resolve Square context and return Square config
         try {
             [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
             if ($errorResponse) {
@@ -88,6 +120,7 @@ class PublicBookingController extends ApiController
 
         return $this->success([
             'booking_enabled' => true,
+            'booking_mode' => 'smart',
             'application_id' => $applicationId,
             'location' => $location,
         ]);
