@@ -22,6 +22,21 @@ class BookingAnalyticsController extends ApiController
     {
         $professional = $this->currentProfessional($request);
         $professionalId = (string) $professional->id;
+
+        // Booking analytics are only available in smart mode — manual mode
+        // affiliates don't route payments through Square via Side St.
+        $site = $professional->site;
+        $siteSettings = is_array($site?->settings) ? $site->settings : [];
+        $bookingMode = strtolower((string) ($siteSettings['booking_mode'] ?? ''));
+        $isSmartMode = $bookingMode === 'smart' || (bool) ($siteSettings['services_auto_sync_enabled'] ?? false);
+
+        if (! $isSmartMode) {
+            return $this->success([
+                'smart_mode_required' => true,
+                'message' => 'Enable smart mode to view and collect booking analytics.',
+            ]);
+        }
+
         $timezone = trim((string) ($professional->timezone ?? '')) ?: 'UTC';
 
         $filters = $this->resolveFilters($request);
