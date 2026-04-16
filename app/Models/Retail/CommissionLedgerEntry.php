@@ -31,6 +31,8 @@ class CommissionLedgerEntry extends BaseModel
         'calculation_metadata',
         'occurred_at',
         'payout_id',
+        'voided_at',
+        'void_reason',
     ];
 
     protected $casts = [
@@ -38,6 +40,7 @@ class CommissionLedgerEntry extends BaseModel
         'commission_rate' => 'float',
         'calculation_metadata' => 'array',
         'occurred_at' => 'datetime',
+        'voided_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

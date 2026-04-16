@@ -1,0 +1,312 @@
+<?php
+
+namespace App\Services\Stripe;
+
+use App\Models\Core\Professional\Professional;
+use App\Models\Retail\CommissionLedgerEntry;
+use App\Services\Notifications\NotificationPublisher;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+
+/**
+ * Handles voiding commissions for affiliates who haven't connected Stripe.
+ *
+ * Two phases run on the daily cron:
+ * 1. processVoidableCommissions() — void entries past their 30-day window
+ * 2. sendGracePeriodWarnings() — nudge affiliates to connect Stripe
+ *
+ * Called from ProcessCommissionPayoutsJob after normal payout processing.
+ */
+class CommissionVoidService
+{
+    private int $voidWindowDays;
+    private int $gracePeriodDays;
+
+    public function __construct(private readonly NotificationPublisher $publisher)
+    {
+        $this->voidWindowDays = (int) config('sidest.store.commission_void_window_days', 30);
+        $this->gracePeriodDays = (int) config('sidest.store.grace_period_days', 30);
+    }
+
+    /**
+     * Find and void all pending commissions past their void window
+     * for affiliates without active Stripe accounts.
+     *
+     * @return array{voided_count: int, voided_cents: int}
+     */
+    public function processVoidableCommissions(): array
+    {
+        $cutoff = now()->subDays($this->voidWindowDays);
+        $stats = ['voided_count' => 0, 'voided_cents' => 0];
+
+        // Chunk to avoid OOM on large result sets. Each entry is voided with
+        // an optimistic lock so a concurrent flush won't be overwritten.
+        CommissionLedgerEntry::query()
+            ->whereNull('payout_id')
+            ->where('entry_type', 'accrual')
+            ->where('status', 'pending')
+            ->where('created_at', '<=', $cutoff)
+            ->whereHas('affiliateProfessional', function ($q) {
+                $q->where('stripe_connect_status', '!=', 'active');
+            })
+            ->chunkById(500, function ($entries) use (&$stats) {
+                foreach ($entries as $entry) {
+                    try {
+                        if ($this->voidEntry($entry, 'no_stripe_connected')) {
+                            $stats['voided_count']++;
+                            $stats['voided_cents'] += $entry->amount_cents;
+                        }
+                    } catch (\Throwable $e) {
+                        Log::error('Failed to void commission entry', [
+                            'entry_id' => $entry->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            });
+
+        if ($stats['voided_count'] > 0) {
+            Log::info('Commission void processing complete', $stats);
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Void a single commission entry. Uses an optimistic lock (WHERE status = pending)
+     * so a concurrent flush-to-approved from a Stripe webhook can't be overwritten.
+     *
+     * @return bool True if the entry was voided, false if it was already claimed.
+     */
+    public function voidEntry(CommissionLedgerEntry $entry, string $reason): bool
+    {
+        $updated = CommissionLedgerEntry::query()
+            ->where('id', $entry->id)
+            ->where('status', 'pending')
+            ->whereNull('payout_id')
+            ->update([
+                'status' => 'voided',
+                'voided_at' => now(),
+                'void_reason' => $reason,
+            ]);
+
+        if ($updated === 0) {
+            Log::info('Skipped voiding commission — status changed concurrently', [
+                'entry_id' => $entry->id,
+            ]);
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Send warning notifications to affiliates approaching void deadlines.
+     *
+     * Grace period warnings (day 20 and day 28 after signup):
+     *   Sent to affiliates still within their grace period who haven't connected.
+     *
+     * Per-commission warnings (5 days before void window expires):
+     *   Sent to post-grace affiliates for each commission about to void.
+     *
+     * @return array{warnings_sent: int}
+     */
+    public function sendGracePeriodWarnings(): array
+    {
+        $stats = ['warnings_sent' => 0];
+
+        $stats['warnings_sent'] += $this->sendSignupWarnings();
+        $stats['warnings_sent'] += $this->sendPerCommissionWarnings();
+
+        return $stats;
+    }
+
+    /**
+     * Day 20 and day 28 warnings for affiliates in their initial grace period.
+     */
+    private function sendSignupWarnings(): int
+    {
+        $sent = 0;
+
+        // Collect affiliates in both warning windows (day 20 and day 28) then
+        // batch-load their pending commission totals to avoid N+1 queries.
+        $warningWindows = [
+            'day20' => [
+                'range' => [now()->addDays(9)->startOfDay(), now()->addDays(11)->endOfDay()],
+                'title' => 'Connect Stripe — 10 days left',
+                'body' => 'Connect your Stripe account within 10 days or your %s in pending earnings will be forfeited.',
+            ],
+            'day28' => [
+                'range' => [now()->addDays(1)->startOfDay(), now()->addDays(3)->endOfDay()],
+                'title' => 'Connect Stripe — 2 days left',
+                'body' => '2 days left — connect Stripe now or your %s in pending earnings will be forfeited.',
+            ],
+        ];
+
+        foreach ($warningWindows as $key => $window) {
+            Professional::query()
+                ->whereIn('professional_type', ['influencer', 'professional'])
+                ->where('stripe_connect_status', '!=', 'active')
+                ->whereNotNull('stripe_grace_period_ends_at')
+                ->where('stripe_grace_period_ends_at', '>', now())
+                ->whereBetween('stripe_grace_period_ends_at', $window['range'])
+                ->chunkById(200, function ($affiliates) use (&$sent, $key, $window) {
+                    // Batch-load pending amounts for the chunk to avoid N+1
+                    $pendingAmounts = $this->getPendingCommissionCentsBatch(
+                        $affiliates->pluck('id')->all()
+                    );
+
+                    foreach ($affiliates as $affiliate) {
+                        $amount = $pendingAmounts[$affiliate->id] ?? 0;
+                        if ($amount <= 0) {
+                            continue;
+                        }
+
+                        $this->publisher->publish(
+                            professionalId: $affiliate->id,
+                            frontendType: 'Warning',
+                            category: 'commissions',
+                            title: $window['title'],
+                            body: sprintf($window['body'], $this->formatMoney($amount, 'AUD')),
+                            dedupeKey: "stripe_warning.{$key}.{$affiliate->id}",
+                            ctaUrl: '/account/settings?section=stripe',
+                            retentionConfigKey: 'commission',
+                        );
+                        $sent++;
+                    }
+                });
+        }
+
+        return $sent;
+    }
+
+    /**
+     * Per-commission warning: 5 days before each commission's void window.
+     * For affiliates who are past their initial grace period.
+     */
+    private function sendPerCommissionWarnings(): int
+    {
+        $sent = 0;
+        $warningCutoff = now()->addDays(5);
+        $voidWindowDays = $this->voidWindowDays;
+
+        // Chunk to avoid OOM on large result sets.
+        CommissionLedgerEntry::query()
+            ->whereNull('payout_id')
+            ->where('entry_type', 'accrual')
+            ->where('status', 'pending')
+            ->where('created_at', '<=', $warningCutoff->copy()->subDays($voidWindowDays))
+            ->whereHas('affiliateProfessional', function ($q) {
+                $q->where('stripe_connect_status', '!=', 'active')
+                  ->where(function ($q2) {
+                      $q2->whereNull('stripe_grace_period_ends_at')
+                         ->orWhere('stripe_grace_period_ends_at', '<=', now());
+                  });
+            })
+            ->with('affiliateProfessional:id,display_name')
+            ->chunkById(500, function ($entries) use (&$sent, $voidWindowDays) {
+                foreach ($entries as $entry) {
+                    $voidDate = $entry->created_at->addDays($voidWindowDays);
+                    $daysLeft = (int) now()->diffInDays($voidDate, false);
+
+                    if ($daysLeft < 0 || $daysLeft > 5) {
+                        continue;
+                    }
+
+                    $this->publisher->publish(
+                        professionalId: $entry->affiliate_professional_id,
+                        frontendType: 'Warning',
+                        category: 'commissions',
+                        title: 'Commission expiring soon',
+                        body: sprintf(
+                            'Connect Stripe within %d days or your %s commission from %s will be forfeited.',
+                            $daysLeft,
+                            $this->formatMoney($entry->amount_cents, $entry->currency_code),
+                            $entry->occurred_at->format('M j'),
+                        ),
+                        dedupeKey: "stripe_warning.commission.{$entry->id}",
+                        ctaUrl: '/account/settings?section=stripe',
+                        retentionConfigKey: 'commission',
+                    );
+                    $sent++;
+                }
+            });
+
+        return $sent;
+    }
+
+    /**
+     * Flush eligible held commissions when an affiliate connects Stripe.
+     * Called from the webhook handler when status transitions to 'active'.
+     *
+     * Finds all pending commissions for this affiliate where the void window
+     * hasn't expired, then marks them approved so the normal payout cron
+     * picks them up.
+     *
+     * @return int Number of commissions flushed to approved
+     */
+    public function flushHeldCommissions(Professional $affiliate): int
+    {
+        $count = CommissionLedgerEntry::query()
+            ->whereNull('payout_id')
+            ->where('entry_type', 'accrual')
+            ->where('status', 'pending')
+            ->where('affiliate_professional_id', $affiliate->id)
+            ->where('created_at', '>', now()->subDays($this->voidWindowDays))
+            ->update(['status' => 'approved']);
+
+        if ($count > 0) {
+            Log::info('Flushed held commissions on Stripe connect', [
+                'affiliate_id' => $affiliate->id,
+                'count' => $count,
+            ]);
+        }
+
+        return $count;
+    }
+
+    /**
+     * Check if an affiliate is within their grace period (Stripe not yet required).
+     */
+    public function isInGracePeriod(Professional $affiliate): bool
+    {
+        return $affiliate->stripe_grace_period_ends_at !== null
+            && $affiliate->stripe_grace_period_ends_at->isFuture();
+    }
+
+    /**
+     * Batch-load pending commission totals for multiple affiliates in one query.
+     *
+     * @param  string[]  $affiliateIds
+     * @return array<string, int> affiliate_id => total_pending_cents
+     */
+    private function getPendingCommissionCentsBatch(array $affiliateIds): array
+    {
+        if ($affiliateIds === []) {
+            return [];
+        }
+
+        return CommissionLedgerEntry::query()
+            ->whereNull('payout_id')
+            ->where('entry_type', 'accrual')
+            ->where('status', 'pending')
+            ->whereIn('affiliate_professional_id', $affiliateIds)
+            ->groupBy('affiliate_professional_id')
+            ->pluck(\Illuminate\Support\Facades\DB::raw('SUM(amount_cents)'), 'affiliate_professional_id')
+            ->map(fn ($v) => (int) $v)
+            ->all();
+    }
+
+    private function formatMoney(int $cents, string $currencyCode): string
+    {
+        $prefix = match (strtoupper($currencyCode)) {
+            'USD'   => '$',
+            'GBP'   => '£',
+            'EUR'   => '€',
+            'AUD'   => 'A$',
+            default => strtoupper($currencyCode) . ' ',
+        };
+
+        return $prefix . number_format($cents / 100, 2, '.', ',');
+    }
+}

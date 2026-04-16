@@ -80,12 +80,14 @@ class Professional extends BaseModel
         'stripe_commission_funding_mode',
         'stripe_manual_balance_cents',
         'stripe_manual_balance_currency',
+        'stripe_grace_period_ends_at',
 
     ];
 
     protected $casts = [
         'onboarding_step' => 'integer',
         'stripe_manual_balance_cents' => 'integer',
+        'stripe_grace_period_ends_at' => 'datetime',
         'created_at'      => 'datetime',
         'updated_at'      => 'datetime',
         'deleted_at'      => 'datetime',

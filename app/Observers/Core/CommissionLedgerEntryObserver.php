@@ -44,6 +44,11 @@ class CommissionLedgerEntryObserver
 
             if ($entry->status === 'reversed') {
                 $this->notifyReversed($entry);
+                return;
+            }
+
+            if ($entry->status === 'voided') {
+                $this->notifyVoided($entry);
             }
         } catch (\Throwable $e) {
             Log::warning('CommissionLedgerEntry updated notification failed', [
@@ -91,6 +96,27 @@ class CommissionLedgerEntryObserver
             body: "A commission of {$amount} has been reversed.",
             dedupeKey: "commission.reversed.{$entry->id}",
             ctaUrl: '/account/store?section=analytics',
+            retentionConfigKey: 'commission',
+        );
+    }
+
+    private function notifyVoided(CommissionLedgerEntry $entry): void
+    {
+        $affiliateId = trim((string) ($entry->affiliate_professional_id ?? ''));
+        if ($affiliateId === '') {
+            return;
+        }
+
+        $amount = $this->formatMoney((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
+
+        $this->publisher->publish(
+            professionalId: $affiliateId,
+            frontendType: 'Warning',
+            category: 'commissions',
+            title: 'Commission forfeited',
+            body: "A commission of {$amount} has been forfeited because your Stripe account was not connected in time.",
+            dedupeKey: "commission.voided.{$entry->id}",
+            ctaUrl: '/account/settings?section=stripe',
             retentionConfigKey: 'commission',
         );
     }

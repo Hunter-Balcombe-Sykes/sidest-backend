@@ -285,8 +285,10 @@ class CommissionPayoutService
         $affiliate = Professional::find($payout->affiliate_professional_id);
 
         if (! $affiliate?->stripe_connect_account_id || $affiliate->stripe_connect_status !== 'active') {
-            $this->failPayout($payout, 'affiliate_not_connected', 'Affiliate Stripe Connect account is not active');
-            return false;
+            // During grace period or within void window: hold this batch so the
+            // void service can handle it on its own schedule. Don't fail permanently.
+            $this->markPendingFunding($payout, 'affiliate_not_connected', 'Affiliate Stripe Connect account is not active — holding for grace period');
+            return null;
         }
 
         if (! $brand) {

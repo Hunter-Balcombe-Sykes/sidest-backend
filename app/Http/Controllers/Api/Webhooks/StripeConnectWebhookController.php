@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Controller;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
+use App\Services\Stripe\CommissionVoidService;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -107,6 +108,19 @@ class StripeConnectWebhookController extends Controller
                 'old_status' => $oldStatus,
                 'new_status' => $status,
             ]);
+
+            // When an affiliate transitions to 'active', flush any held commissions
+            // so they enter the normal payout pipeline immediately.
+            if ($status === 'active' && $oldStatus !== 'active') {
+                try {
+                    app(CommissionVoidService::class)->flushHeldCommissions($professional);
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to flush held commissions on Stripe connect', [
+                        'professional_id' => $professional->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
     }
 

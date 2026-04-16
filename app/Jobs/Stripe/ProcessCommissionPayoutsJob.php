@@ -3,6 +3,7 @@
 namespace App\Jobs\Stripe;
 
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -38,15 +39,27 @@ class ProcessCommissionPayoutsJob implements ShouldQueue
         return [60, 180];
     }
 
-    public function handle(CommissionPayoutService $service): void
+    public function handle(CommissionPayoutService $payoutService, CommissionVoidService $voidService): void
     {
         Log::info('Starting commission payout processing', [
             'attempt' => $this->attempts(),
         ]);
 
-        $stats = $service->processEligiblePayouts();
+        $payoutStats = $payoutService->processEligiblePayouts();
+        Log::info('Commission payout processing complete', $payoutStats);
 
-        Log::info('Commission payout processing complete', $stats);
+        // Void commissions past their window for unconnected affiliates
+        $voidStats = $voidService->processVoidableCommissions();
+
+        // Send warning notifications to affiliates approaching deadlines
+        $warningStats = $voidService->sendGracePeriodWarnings();
+
+        if ($voidStats['voided_count'] > 0 || $warningStats['warnings_sent'] > 0) {
+            Log::info('Commission void/warning processing complete', [
+                ...$voidStats,
+                ...$warningStats,
+            ]);
+        }
     }
 
     public function failed(\Throwable $e): void
