@@ -60,7 +60,11 @@ Customer buys product → Shopify native checkout
     ↓
 orders/paid webhook → commission ledger entry created
     ↓
-Daily payout job → Stripe Connect transfer (80/20 split)
+Daily payout job (tries=3, 60s/180s backoff) → Stripe Connect transfer (80/20 split: 20% platform fee, 80% to affiliate)
+    ↓
+CommissionPayoutObserver → context-aware notifications to affiliate + brand
+    ↓
+Stuck failed batches → POST /staff/commission-payouts/{payout}/retry (staff admin)
 ```
 
 ### Key Assumptions
@@ -258,10 +262,20 @@ Shopify orders/paid webhook → ShopifyOrderWebhookController
   → ProcessShopifyOrderWebhookJob
   → CommissionLedgerEntry created (status: approved, rate from metafields)
   → CommissionLedgerEntryObserver → notification to affiliate
-  → ProcessCommissionPayoutsJob (daily cron)
-    → CommissionPayoutService (hybrid: wallet balance first, card for shortfall)
-    → Stripe Connect transfer (80% to affiliate, 20% platform fee)
-  → CommissionPayoutObserver → notification on failure
+  → ProcessCommissionPayoutsJob (daily cron, tries=3, 60s/180s backoff)
+    → CommissionPayoutService
+        → Phase 1: retry any 'pending' batches from prior runs
+        → Phase 2: create new batches per brand with brand-selected hold
+          window (7/14/28 days, stored on brand_store_settings.payout_hold_days)
+        → processPayoutBatch: hybrid funding (wallet first, card for shortfall)
+        → Stripe Connect transfer (80/20 split: 20% platform fee, 80% to affiliate)
+  → CommissionPayoutObserver → context-aware notifications:
+        - completed: affiliate "Payout sent"
+        - failed (affiliate_not_connected): affiliate "Stripe Connect setup required"
+        - pending (charge_failed / charge_requires_action / brand_payment_method_missing):
+          brand "Payment method required" + affiliate "Payout delayed"
+  → Staff manual retry for stuck 'failed' batches:
+        POST /staff/commission-payouts/{payout}/retry
 
 Shopify orders/updated webhook → ShopifyOrdersUpdatedWebhookController
   → ProcessShopifyOrderUpdatedWebhookJob

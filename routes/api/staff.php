@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionPayoutController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffLinkBlockManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSectionManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffProfessionalController;
@@ -159,4 +160,10 @@ Route::prefix('staff')
     Route::patch('/notification-email-policies', [StaffNotificationEmailPolicyController::class, 'updateGlobal']);
     Route::get('/professionals/{professional}/notification-email-policies', [StaffNotificationEmailPolicyController::class, 'indexProfessional']);
     Route::patch('/professionals/{professional}/notification-email-policies', [StaffNotificationEmailPolicyController::class, 'updateProfessional']);
+
+    // Commission payout admin — manually retry stuck failed batches. Top-level
+    // because a payout has both a brand and an affiliate; scoping to one
+    // professional would be misleading.
+    Route::post('/commission-payouts/{payout}/retry', [StaffCommissionPayoutController::class, 'retry'])
+        ->whereUuid('payout');
 });

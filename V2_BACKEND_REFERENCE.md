@@ -75,7 +75,8 @@
 | `BrandProfileController` | Brand updates business profile (ABN, industries, affiliate visibility). Used by embedded app wizard. |
 | `BrandOnboardingReadinessController` | Returns brand setup checklist (images, Shopify connected, Stripe connected). Gates brand activation. |
 | `ShopifyIntegrationController` | Shopify store connection management. V2: core integration — connects brand to their Shopify store, registers order webhooks, creates Storefront API tokens. |
-| `StripeConnectController` | Stripe Connect Express onboarding, payment methods, commission top-ups, payout history. V2: required for affiliate payouts (80/20 split). |
+| `StripeConnectController` | Stripe Connect Express onboarding (soft-disconnect preserves account_id), payment methods, commission top-ups, payout history. V2: required for affiliate payouts (80/20 split). |
+| `StaffCommissionPayoutController` | Staff-admin manual retry for stuck commission payout batches. `POST /staff/commission-payouts/{payout}/retry`. Only `failed` / `pending` batches are retryable. |
 | `SubscriptionController` | Manages professional subscription lifecycle (create, change plan, cancel, resume). Billing foundation. |
 | `ProfessionalAnalyticsController` | Site visit analytics (visits, clicks, devices, countries, sources). Survives V2 unchanged. |
 | `BookingAnalyticsController` | Booking analytics (counts, revenue, customers). Unrelated to commerce — serves Square/Fresha booking data. |
@@ -345,7 +346,7 @@
 | `BrandAffiliateInviteObserver` | Publishes invite notifications (received, accepted, declined). |
 | `BrandProfileObserver` | Dispatches affiliate notification fan-out when brand status changes. |
 | `CommissionLedgerEntryObserver` | **V2 core.** Publishes commission earned/reversed notifications to affiliates. |
-| `CommissionPayoutObserver` | **V2 core.** Publishes payout failed/action-required notifications. |
+| `CommissionPayoutObserver` | **V2 core.** Publishes context-aware payout notifications — completed (affiliate), failed (context-aware affiliate message per failure_code), pending/delayed (both brand action-required and affiliate visibility). |
 
 ---
 
@@ -475,10 +476,15 @@ BrandAffiliateInviteController@store (brand sends invite)
 Shopify orders/paid webhook
   → CommissionLedgerEntry created (status: approved, amount from metafields)
   → CommissionLedgerEntryObserver → notification to affiliate
-  → ProcessCommissionPayoutsJob (daily cron)
+  → ProcessCommissionPayoutsJob (daily cron, tries=3, 60s/180s backoff)
     → CommissionPayoutService (hybrid funding: wallet + card)
-    → Stripe Connect transfer (80% to affiliate, 20% platform fee)
-  → CommissionPayoutObserver → notification on failure
+      → Per-brand hold window from brand_store_settings.payout_hold_days (7/14/28)
+      → Phase 1 sweeps any previously-pending batches before creating new ones
+    → Stripe Connect transfer (80/20 split: 20% platform fee, 80% to affiliate)
+  → CommissionPayoutObserver → context-aware notifications (completed, failed,
+    pending/delayed) to affiliate + brand
+  → Staff manual retry for stuck failed batches:
+    POST /staff/commission-payouts/{payout}/retry
 ```
 
 ### 4. Storefront Data

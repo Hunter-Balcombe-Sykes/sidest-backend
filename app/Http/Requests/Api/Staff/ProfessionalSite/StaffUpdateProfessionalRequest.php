@@ -25,7 +25,9 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
             'public_contact_number' => ['sometimes', 'nullable', 'string', 'max:50'],
             'public_contact_email' => ['sometimes', 'nullable', 'email', 'max:255'],
 
-            'country_code'  => ['sometimes', 'nullable', 'string', 'min:2', 'max:3'],
+            // ISO 3166-1 alpha-2 only. Normalised to upper-case in
+            // prepareForValidation before this rule runs.
+            'country_code'  => ['sometimes', 'nullable', 'string', 'size:2', 'regex:/^[A-Z]{2}$/'],
             'timezone'      => ['sometimes', 'nullable', 'string', 'max:64'],
             'professional_type' => [
                 'sometimes',
@@ -75,6 +77,16 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
         if ($this->has('professional_type')) {
             $professionalType = $this->input('professional_type');
             $merge['professional_type'] = $this->normalizeProfessionalTypeInput($professionalType);
+        }
+
+        // Upper-case country_code if supplied so the ISO alpha-2 validator
+        // accepts lower-case input from older clients.
+        if ($this->has('country_code')) {
+            $cc = $this->input('country_code');
+            if (is_string($cc)) {
+                $cc = strtoupper(trim($cc));
+                $merge['country_code'] = $cc === '' ? null : $cc;
+            }
         }
 
         if ($merge) {
