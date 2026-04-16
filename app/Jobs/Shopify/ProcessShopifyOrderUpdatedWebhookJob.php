@@ -194,6 +194,11 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
         foreach ($pairs as $entries) {
             $entry = $entries->first();
+
+            if (! $entry->occurred_at) {
+                continue;
+            }
+
             \App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob::dispatch(
                 (string) $entry->brand_professional_id,
                 (string) $entry->affiliate_professional_id,

@@ -287,8 +287,8 @@ class CommerceAnalyticsAggregateService
             ->select([
                 'currency_code',
                 DB::raw('COUNT(DISTINCT shopify_order_id) as orders_count'),
-                DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'accrual' THEN ROUND((calculation_metadata->>'line_price')::numeric * (calculation_metadata->>'quantity')::integer * 100) ELSE 0 END), 0) as gross_cents"),
-                DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'reversal' THEN ROUND((calculation_metadata->>'refund_subtotal')::numeric * 100) ELSE 0 END), 0) as refunded_cents"),
+                DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'accrual' THEN ROUND(COALESCE(calculation_metadata->>'line_price', '0')::numeric * COALESCE(calculation_metadata->>'quantity', '0')::integer * 100) ELSE 0 END), 0) as gross_cents"),
+                DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'reversal' THEN ROUND(COALESCE(calculation_metadata->>'refund_subtotal', '0')::numeric * 100) ELSE 0 END), 0) as refunded_cents"),
                 DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'accrual' THEN amount_cents ELSE 0 END), 0) as commission_accrued_cents"),
                 DB::raw("COALESCE(SUM(CASE WHEN entry_type = 'reversal' THEN ABS(amount_cents) ELSE 0 END), 0) as commission_reversed_cents"),
             ]);

@@ -16,11 +16,16 @@ class RebuildCommerceDailyAggregatesJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 2;
+    public int $tries = 3;
 
     public int $timeout = 180;
 
     public int $uniqueFor = 300;
+
+    public function backoff(): array
+    {
+        return [5, 30];
+    }
 
     public function __construct(
         public string $brandProfessionalId,
