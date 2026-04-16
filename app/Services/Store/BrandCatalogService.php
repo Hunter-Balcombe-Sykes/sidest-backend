@@ -42,7 +42,6 @@ query allProducts($first: Int!, $after: String) {
         metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
         metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
         metafield_custom_photos: metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
-        metafield_enabled_variants: metafield(namespace: "sidest", key: "enabled_variant_gids") { value }
       }
       cursor
     }
@@ -68,13 +67,14 @@ query products($first: Int!, $after: String) {
           minVariantPrice { amount currencyCode }
           maxVariantPrice { amount currencyCode }
         }
-        variants(first: 5) {
+        variants(first: 100) {
           edges {
             node {
               id
               title
               availableForSale
               price { amount currencyCode }
+              metafield_enabled: metafield(namespace: "sidest", key: "enabled") { value }
             }
           }
         }
@@ -82,7 +82,6 @@ query products($first: Int!, $after: String) {
         metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
         metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
         metafield_custom_photos: metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
-        metafield_enabled_variants: metafield(namespace: "sidest", key: "enabled_variant_gids") { value }
       }
       cursor
     }
@@ -96,17 +95,6 @@ query productVariantGids($productId: ID!) {
   product(id: $productId) {
     variants(first: 100) {
       edges { node { id } }
-    }
-  }
-}
-GRAPHQL;
-
-    private const PRODUCTS_ENABLED_VARIANTS = <<<'GRAPHQL'
-query productsEnabledVariants($ids: [ID!]!) {
-  nodes(ids: $ids) {
-    ... on Product {
-      id
-      metafield(namespace: "sidest", key: "enabled_variant_gids") { value }
     }
   }
 }
@@ -305,7 +293,7 @@ GRAPHQL;
 
     /**
      * Fetch the full set of variant GIDs for a single product. Used by the write path
-     * to verify a brand-submitted enabled_variant_gids list only contains GIDs that
+     * to verify brand-submitted disabled_variant_gids only contains GIDs that
      * actually belong to this product. One GraphQL call regardless of catalog size.
      *
      * Limited to the first 100 variants — the realistic per-product cap. Raise the
@@ -334,84 +322,49 @@ GRAPHQL;
     }
 
     /**
-     * Fetch the enabled_variant_gids metafield for many products in one GraphQL call,
-     * used by the Hydrogen storefront to filter variant pickers and enforce restrictions
-     * at the cart layer.
+     * Set variant-level sidest.enabled metafields. Writes `false` on disabled variants
+     * and `true` on all others to clear any previous restriction. Uses a single
+     * metafieldsSet mutation (batched at 25 if the product has many variants).
      *
-     * Returns a sparse map: a product GID is present **only when** it has a non-empty
-     * restriction. Absent key = no restriction = storefront should offer all variants.
-     * This contract lets Hydrogen treat the map as an opt-in override, not a denylist.
-     *
-     * @param  array<int, string>  $productGids
-     * @return array<string, array<int, string>>  Map of product GID → allowed variant GIDs
+     * @param  array<int, string>  $allVariantGids      Every variant GID for the product (pre-fetched for validation)
+     * @param  array<int, string>  $disabledVariantGids  Variant GIDs to mark as disabled
+     * @return array{success: bool, userErrors: array}
      */
-    public function fetchEnabledVariantsMap(ProfessionalIntegration $integration, array $productGids): array
+    public function setVariantEnabledStates(ProfessionalIntegration $integration, array $allVariantGids, array $disabledVariantGids = []): array
     {
-        if (empty($productGids)) {
-            return [];
+        if (empty($allVariantGids)) {
+            return ['success' => true, 'userErrors' => []];
         }
 
+        $disabled = array_flip($disabledVariantGids);
         $resolved = $this->resolveCredentials($integration);
 
-        try {
-            $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::PRODUCTS_ENABLED_VARIANTS, [
-                'ids' => array_values($productGids),
+        $metafields = array_map(fn (string $variantGid) => [
+            'namespace' => 'sidest',
+            'key' => 'enabled',
+            'value' => isset($disabled[$variantGid]) ? 'false' : 'true',
+            'type' => 'boolean',
+            'ownerId' => $variantGid,
+        ], $allVariantGids);
+
+        // Shopify limits metafieldsSet to 25 inputs per call
+        foreach (array_chunk($metafields, 25) as $batch) {
+            $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::METAFIELDS_SET, [
+                'metafields' => $batch,
             ]);
-        } catch (\Throwable $e) {
-            Log::warning('Failed to fetch enabled_variant_gids map.', [
-                'brand_id' => (string) $integration->professional_id,
-                'error' => $e->getMessage(),
-            ]);
 
-            return [];
-        }
+            $userErrors = Arr::get($response->json(), 'data.metafieldsSet.userErrors', []);
 
-        $nodes = Arr::get($response->json(), 'data.nodes', []);
-
-        if (! is_array($nodes)) {
-            return [];
-        }
-
-        $map = [];
-        foreach ($nodes as $node) {
-            if (! is_array($node)) {
-                continue;
-            }
-            $gid = $node['id'] ?? null;
-            $value = Arr::get($node, 'metafield.value');
-            $decoded = $this->decodeEnabledVariantGids($value);
-
-            if ($gid !== null && $decoded !== null && ! empty($decoded)) {
-                $map[$gid] = $decoded;
+            if (! empty($userErrors)) {
+                return ['success' => false, 'userErrors' => $userErrors];
             }
         }
 
-        return $map;
-    }
+        // Bust caches — variant state affects both brand and affiliate views
+        Cache::forget(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
+        Cache::forget(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
 
-    /**
-     * Decode the enabled_variant_gids metafield value (Shopify stores JSON metafields
-     * as JSON-encoded strings). Returns null for unset / malformed values so callers
-     * can apply the dynamic-default rule (null = all variants enabled).
-     *
-     * @return array<int, string>|null
-     */
-    private function decodeEnabledVariantGids(?string $value): ?array
-    {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        $decoded = json_decode($value, true);
-
-        if (! is_array($decoded)) {
-            return null;
-        }
-
-        return array_values(array_filter(
-            array_map(fn ($v) => is_string($v) ? $v : null, $decoded),
-            fn ($v) => $v !== null && $v !== ''
-        ));
+        return ['success' => true, 'userErrors' => []];
     }
 
     /**
@@ -755,11 +708,13 @@ GRAPHQL;
                     $variants = [];
                     foreach (Arr::get($node, 'variants.edges', []) as $variantEdge) {
                         $v = $variantEdge['node'] ?? [];
+                        $enabledVal = Arr::get($v, 'metafield_enabled.value');
                         $variants[] = [
                             'gid' => $v['id'] ?? '',
                             'title' => $v['title'] ?? '',
                             'available_for_sale' => $v['availableForSale'] ?? false,
                             'price' => $v['price'] ?? null,
+                            'enabled' => $enabledVal !== null ? filter_var($enabledVal, FILTER_VALIDATE_BOOLEAN) : null,
                         ];
                     }
 
@@ -767,7 +722,6 @@ GRAPHQL;
                     $commissionVal = Arr::get($node, 'metafield_commission.value');
                     $discountVal = Arr::get($node, 'metafield_discount.value');
                     $customPhotosVal = Arr::get($node, 'metafield_custom_photos.value');
-                    $enabledVariantsVal = Arr::get($node, 'metafield_enabled_variants.value');
 
                     $products[] = [
                         'gid' => $node['id'] ?? '',
@@ -785,7 +739,6 @@ GRAPHQL;
                             'commission_override' => $commissionVal !== null ? (float) $commissionVal : null,
                             'affiliate_discount_pct' => $discountVal !== null ? (float) $discountVal : null,
                             'custom_photos_enabled' => $customPhotosVal !== null ? filter_var($customPhotosVal, FILTER_VALIDATE_BOOLEAN) : null,
-                            'enabled_variant_gids' => $this->decodeEnabledVariantGids($enabledVariantsVal),
                         ],
                     ];
                 }
@@ -847,7 +800,6 @@ GRAPHQL;
                     $commissionVal = Arr::get($node, 'metafield_commission.value');
                     $discountVal = Arr::get($node, 'metafield_discount.value');
                     $customPhotosVal = Arr::get($node, 'metafield_custom_photos.value');
-                    $enabledVariantsVal = Arr::get($node, 'metafield_enabled_variants.value');
 
                     // Map product images from GraphQL edges
                     $images = array_map(
@@ -873,7 +825,6 @@ GRAPHQL;
                             'commission_override' => $commissionVal !== null ? (float) $commissionVal : null,
                             'affiliate_discount_pct' => $discountVal !== null ? (float) $discountVal : null,
                             'custom_photos_enabled' => $customPhotosVal !== null ? filter_var($customPhotosVal, FILTER_VALIDATE_BOOLEAN) : null,
-                            'enabled_variant_gids' => $this->decodeEnabledVariantGids($enabledVariantsVal),
                         ],
                     ];
                 }

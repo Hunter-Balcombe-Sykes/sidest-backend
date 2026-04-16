@@ -203,27 +203,35 @@ it('validates metafields request allows all five fields', function () {
     expect($rules)->toHaveKey('commission_override');
     expect($rules)->toHaveKey('affiliate_discount_pct');
     expect($rules)->toHaveKey('custom_photos_enabled');
-    expect($rules)->toHaveKey('enabled_variant_gids');
-    expect($rules['enabled_variant_gids'])->toContain('array');
-    expect($rules)->toHaveKey('enabled_variant_gids.*');
+    expect($rules)->toHaveKey('disabled_variant_gids');
+    expect($rules['disabled_variant_gids'])->toContain('array');
+    expect($rules)->toHaveKey('disabled_variant_gids.*');
 });
 
-// --- Variant gating ---
+// --- Variant gating (variant-level metafields) ---
 
-it('clears enabled_variant_gids metafield when null is submitted', function () {
+it('clears variant restrictions when null is submitted', function () {
     $service = Mockery::mock(BrandCatalogService::class);
     $service->shouldReceive('resolveBrandIntegration')->andReturn([
         'integration' => Mockery::mock(\App\Models\Core\Professional\ProfessionalIntegration::class),
     ]);
-    $service->shouldReceive('deleteProductMetafield')
+    $service->shouldReceive('fetchProductVariantGids')
         ->once()
-        ->with(Mockery::any(), 'gid://shopify/Product/123', 'enabled_variant_gids')
-        ->andReturn(true);
-    $service->shouldNotReceive('setProductMetafields');
+        ->andReturn([
+            'gid://shopify/ProductVariant/1',
+            'gid://shopify/ProductVariant/2',
+        ]);
+    // null disabled list → all variants re-enabled
+    $service->shouldReceive('setVariantEnabledStates')
+        ->once()
+        ->withArgs(function ($integration, $allGids, $disabledGids) {
+            return count($allGids) === 2 && $disabledGids === [];
+        })
+        ->andReturn(['success' => true, 'userErrors' => []]);
 
     $controller = new BrandCatalogController($service);
 
-    $request = makeBrandCatalogRequest('PATCH', ['enabled_variant_gids' => null]);
+    $request = makeBrandCatalogRequest('PATCH', ['disabled_variant_gids' => null]);
     $formRequest = UpdateProductMetafieldsRequest::createFrom($request);
     $formRequest->attributes->set('professional', $request->attributes->get('professional'));
     $formRequest->setContainer(app())->setRedirector(app('redirect'))->validateResolved();
@@ -233,20 +241,27 @@ it('clears enabled_variant_gids metafield when null is submitted', function () {
     expect($response->status())->toBe(200);
 });
 
-it('clears enabled_variant_gids metafield when empty array is submitted', function () {
+it('clears variant restrictions when empty array is submitted', function () {
     $service = Mockery::mock(BrandCatalogService::class);
     $service->shouldReceive('resolveBrandIntegration')->andReturn([
         'integration' => Mockery::mock(\App\Models\Core\Professional\ProfessionalIntegration::class),
     ]);
-    $service->shouldReceive('deleteProductMetafield')
+    $service->shouldReceive('fetchProductVariantGids')
         ->once()
-        ->with(Mockery::any(), 'gid://shopify/Product/123', 'enabled_variant_gids')
-        ->andReturn(true);
-    $service->shouldNotReceive('setProductMetafields');
+        ->andReturn([
+            'gid://shopify/ProductVariant/1',
+            'gid://shopify/ProductVariant/2',
+        ]);
+    $service->shouldReceive('setVariantEnabledStates')
+        ->once()
+        ->withArgs(function ($integration, $allGids, $disabledGids) {
+            return count($allGids) === 2 && $disabledGids === [];
+        })
+        ->andReturn(['success' => true, 'userErrors' => []]);
 
     $controller = new BrandCatalogController($service);
 
-    $request = makeBrandCatalogRequest('PATCH', ['enabled_variant_gids' => []]);
+    $request = makeBrandCatalogRequest('PATCH', ['disabled_variant_gids' => []]);
     $formRequest = UpdateProductMetafieldsRequest::createFrom($request);
     $formRequest->attributes->set('professional', $request->attributes->get('professional'));
     $formRequest->setContainer(app())->setRedirector(app('redirect'))->validateResolved();
@@ -256,7 +271,7 @@ it('clears enabled_variant_gids metafield when empty array is submitted', functi
     expect($response->status())->toBe(200);
 });
 
-it('writes enabled_variant_gids metafield when a valid subset is submitted', function () {
+it('disables specific variants via variant-level metafields', function () {
     $service = Mockery::mock(BrandCatalogService::class);
     $service->shouldReceive('resolveBrandIntegration')->andReturn([
         'integration' => Mockery::mock(\App\Models\Core\Professional\ProfessionalIntegration::class),
@@ -268,21 +283,18 @@ it('writes enabled_variant_gids metafield when a valid subset is submitted', fun
             'gid://shopify/ProductVariant/2',
             'gid://shopify/ProductVariant/3',
         ]);
-    $service->shouldReceive('setProductMetafields')
+    $service->shouldReceive('setVariantEnabledStates')
         ->once()
-        ->withArgs(function ($integration, $gid, $metafields) {
-            return $gid === 'gid://shopify/Product/123'
-                && count($metafields) === 1
-                && $metafields[0]['key'] === 'enabled_variant_gids'
-                && $metafields[0]['type'] === 'json'
-                && json_decode($metafields[0]['value'], true) === ['gid://shopify/ProductVariant/1'];
+        ->withArgs(function ($integration, $allGids, $disabledGids) {
+            return count($allGids) === 3
+                && $disabledGids === ['gid://shopify/ProductVariant/3'];
         })
         ->andReturn(['success' => true, 'userErrors' => []]);
 
     $controller = new BrandCatalogController($service);
 
     $request = makeBrandCatalogRequest('PATCH', [
-        'enabled_variant_gids' => ['gid://shopify/ProductVariant/1'],
+        'disabled_variant_gids' => ['gid://shopify/ProductVariant/3'],
     ]);
     $formRequest = UpdateProductMetafieldsRequest::createFrom($request);
     $formRequest->attributes->set('professional', $request->attributes->get('professional'));
@@ -293,7 +305,7 @@ it('writes enabled_variant_gids metafield when a valid subset is submitted', fun
     expect($response->status())->toBe(200);
 });
 
-it('rejects enabled_variant_gids that do not belong to the product', function () {
+it('rejects disabled_variant_gids that do not belong to the product', function () {
     $service = Mockery::mock(BrandCatalogService::class);
     $service->shouldReceive('resolveBrandIntegration')->andReturn([
         'integration' => Mockery::mock(\App\Models\Core\Professional\ProfessionalIntegration::class),
@@ -301,12 +313,12 @@ it('rejects enabled_variant_gids that do not belong to the product', function ()
     $service->shouldReceive('fetchProductVariantGids')
         ->once()
         ->andReturn(['gid://shopify/ProductVariant/1']);
-    $service->shouldNotReceive('setProductMetafields');
+    $service->shouldNotReceive('setVariantEnabledStates');
 
     $controller = new BrandCatalogController($service);
 
     $request = makeBrandCatalogRequest('PATCH', [
-        'enabled_variant_gids' => ['gid://shopify/ProductVariant/9999'],
+        'disabled_variant_gids' => ['gid://shopify/ProductVariant/9999'],
     ]);
     $formRequest = UpdateProductMetafieldsRequest::createFrom($request);
     $formRequest->attributes->set('professional', $request->attributes->get('professional'));
@@ -318,7 +330,7 @@ it('rejects enabled_variant_gids that do not belong to the product', function ()
     expect($response->getData(true)['message'])->toContain('do not belong');
 });
 
-it('rejects enabled_variant_gids when product has no variants', function () {
+it('rejects disabled_variant_gids when product has no variants', function () {
     $service = Mockery::mock(BrandCatalogService::class);
     $service->shouldReceive('resolveBrandIntegration')->andReturn([
         'integration' => Mockery::mock(\App\Models\Core\Professional\ProfessionalIntegration::class),
@@ -326,11 +338,12 @@ it('rejects enabled_variant_gids when product has no variants', function () {
     $service->shouldReceive('fetchProductVariantGids')
         ->once()
         ->andReturn([]);
+    $service->shouldNotReceive('setVariantEnabledStates');
 
     $controller = new BrandCatalogController($service);
 
     $request = makeBrandCatalogRequest('PATCH', [
-        'enabled_variant_gids' => ['gid://shopify/ProductVariant/1'],
+        'disabled_variant_gids' => ['gid://shopify/ProductVariant/1'],
     ]);
     $formRequest = UpdateProductMetafieldsRequest::createFrom($request);
     $formRequest->attributes->set('professional', $request->attributes->get('professional'));

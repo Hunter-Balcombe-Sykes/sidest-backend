@@ -146,31 +146,21 @@ class BrandCatalogController extends ApiController
             }
         }
 
-        // Variant gating: brands restrict which variants of a product affiliates may sell.
-        // Null/empty deletes the metafield (dynamic default = all variants enabled, including
-        // any variants the brand later adds in Shopify). A non-empty array freezes the list.
-        // Strict validation guarantees the saved metafield never references a GID that doesn't
-        // belong to this product — prevents typos, stale data, and hand-crafted API calls
-        // from polluting Shopify.
-        if (array_key_exists('enabled_variant_gids', $validated)) {
-            $submitted = $validated['enabled_variant_gids'];
+        // Variant gating: brands disable specific variants via per-variant sidest.enabled
+        // metafields (ownerType: PRODUCTVARIANT). Missing metafield = enabled (dynamic
+        // default — new variants auto-appear). Only variants explicitly set to false are
+        // hidden from affiliates and Hydrogen. Hydrogen reads this directly from the
+        // Storefront API (PUBLIC_READ), no Laravel intermediary needed.
+        if (array_key_exists('disabled_variant_gids', $validated)) {
+            $submitted = $validated['disabled_variant_gids'];
 
-            if ($submitted === null || $submitted === []) {
-                try {
-                    $this->catalogService->deleteProductMetafield($integration, $productGid, 'enabled_variant_gids');
-                } catch (\Throwable $e) {
-                    return $this->error('Unable to reach Shopify. Please try again.', 502);
-                }
-            } else {
-                // Fetch the product's actual variants from Shopify so we can validate
-                // every submitted GID belongs to this product. One extra GraphQL call
-                // per variant-gating write — acceptable because writes are infrequent.
-                try {
-                    $productVariantGids = $this->catalogService->fetchProductVariantGids($integration, $productGid);
-                } catch (\Throwable $e) {
-                    return $this->error('Unable to reach Shopify. Please try again.', 502);
-                }
+            try {
+                $productVariantGids = $this->catalogService->fetchProductVariantGids($integration, $productGid);
+            } catch (\Throwable $e) {
+                return $this->error('Unable to reach Shopify. Please try again.', 502);
+            }
 
+            if ($submitted !== null && $submitted !== []) {
                 if (empty($productVariantGids)) {
                     return $this->error('Product has no variants to restrict.', 422);
                 }
@@ -181,12 +171,22 @@ class BrandCatalogController extends ApiController
                 if (! empty($invalid)) {
                     return $this->error('One or more variant GIDs do not belong to this product.', 422);
                 }
+            }
 
-                $metafieldsToSet[] = [
-                    'key' => 'enabled_variant_gids',
-                    'value' => json_encode(array_values($submitted)),
-                    'type' => 'json',
-                ];
+            try {
+                $result = $this->catalogService->setVariantEnabledStates(
+                    $integration,
+                    $productVariantGids,
+                    $submitted ?? []
+                );
+
+                if (! $result['success']) {
+                    $msg = $result['userErrors'][0]['message'] ?? 'Failed to update variant states.';
+
+                    return $this->error($msg, 422);
+                }
+            } catch (\Throwable $e) {
+                return $this->error('Unable to reach Shopify. Please try again.', 502);
             }
         }
 

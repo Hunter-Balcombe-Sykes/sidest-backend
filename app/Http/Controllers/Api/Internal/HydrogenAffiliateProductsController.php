@@ -8,7 +8,6 @@ use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
-use App\Services\Store\BrandCatalogService;
 use App\Services\Store\CustomPhotoPermissionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,18 +16,17 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 /**
- * V2: Internal endpoint for Hydrogen loaders. Returns ordered product GIDs for an
+ * Internal endpoint for Hydrogen loaders. Returns ordered product GIDs for an
  * affiliate (or the brand's default collection as a fallback), plus the metadata
- * Hydrogen needs to render and enforce brand-controlled rules:
+ * Hydrogen needs to render:
  *
  *   - custom_photos: per-product affiliate-uploaded lifestyle photos
  *   - custom_photo_position: where to place them in the product gallery
- *   - enabled_variants: brand-restricted variant subset (sparse map; absent key = no restriction)
  *
- * Hydrogen fetches product detail directly from Shopify Storefront API; this endpoint
- * tells it WHICH products to show and WHICH variants/photos are allowed for each.
- *
- * Full contract: docs/brand-catalog-v2.md §4.3
+ * Variant restrictions (sidest.enabled) are read by Hydrogen directly from the
+ * Storefront API via variant-level metafields with PUBLIC_READ access — no
+ * intermediary needed. This endpoint tells Hydrogen WHICH products and photos
+ * to show; Shopify tells it which variants are enabled.
  */
 class HydrogenAffiliateProductsController extends ApiController
 {
@@ -75,20 +73,11 @@ class HydrogenAffiliateProductsController extends ApiController
                 ? $this->getCustomPhotos($affiliateId, $selections)
                 : [];
 
-            // Sparse map: only includes products that have an active variant restriction.
-            // Hydrogen treats an absent key as "no restriction → offer all variants".
-            // Triggers a Shopify Admin API call per Hydrogen catalog fetch (~200ms);
-            // add Redis caching here if it shows up in monitoring.
-            $enabledVariants = $integration
-                ? app(BrandCatalogService::class)->fetchEnabledVariantsMap($integration, $selections)
-                : [];
-
             return $this->success([
                 'gids' => $selections,
                 'source' => 'affiliate_selections',
                 'custom_photo_position' => $permissions->getPhotoPosition($brandId),
                 'custom_photos' => $customPhotos,
-                'enabled_variants' => $enabledVariants,
             ]);
         }
 

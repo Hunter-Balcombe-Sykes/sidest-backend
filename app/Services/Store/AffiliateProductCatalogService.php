@@ -53,6 +53,7 @@ query collectionProducts($handle: String!, $first: Int!, $after: String) {
                   amount
                   currencyCode
                 }
+                metafield(namespace: "sidest", key: "enabled") { value }
               }
             }
           }
@@ -211,19 +212,14 @@ GRAPHQL;
             $product['commission_override'] = $meta['commission_override'] ?? null;
             $product['affiliate_discount_pct'] = $meta['affiliate_discount_pct'] ?? null;
 
-            // Server-side variant filter: when the brand has set sidest.enabled_variant_gids,
-            // hide every other variant from the affiliate entirely. This is the only gate
-            // on the affiliate-facing path — there is no client-side filtering. Missing or
-            // empty restriction = pass all variants through (dynamic default; auto-tracks
-            // any new variants the brand later adds in Shopify).
-            $enabledVariants = $meta['enabled_variant_gids'] ?? null;
-            if (is_array($enabledVariants) && ! empty($enabledVariants)) {
-                $allowed = array_flip($enabledVariants);
-                $product['variants'] = array_values(array_filter(
-                    $product['variants'] ?? [],
-                    fn (array $variant) => isset($allowed[$variant['gid'] ?? ''])
-                ));
-            }
+            // Server-side variant filter: variants with sidest.enabled=false are hidden.
+            // Missing metafield (null) or true = variant is available (dynamic default).
+            // Hydrogen reads this directly from the Storefront API; this filter ensures
+            // the affiliate dashboard also respects the restriction.
+            $product['variants'] = array_values(array_filter(
+                $product['variants'] ?? [],
+                fn (array $variant) => ($variant['enabled'] ?? null) !== false
+            ));
 
             // Collection membership flags
             $product['in_favourites'] = in_array($gid, $favouritesGids, true);
@@ -335,7 +331,6 @@ GRAPHQL;
             $map[$gid] = [
                 'commission_override' => isset($metafields['commission_override']) ? (float) $metafields['commission_override'] : null,
                 'affiliate_discount_pct' => isset($metafields['affiliate_discount_pct']) ? (float) $metafields['affiliate_discount_pct'] : null,
-                'enabled_variant_gids' => $metafields['enabled_variant_gids'] ?? null,
             ];
         }
 
@@ -425,11 +420,13 @@ GRAPHQL;
                     $variants = [];
                     foreach (Arr::get($node, 'variants.edges', []) as $variantEdge) {
                         $v = $variantEdge['node'] ?? [];
+                        $enabledVal = Arr::get($v, 'metafield.value');
                         $variants[] = [
                             'gid' => $v['id'] ?? '',
                             'title' => $v['title'] ?? '',
                             'available_for_sale' => $v['availableForSale'] ?? false,
                             'price' => $v['price'] ?? null,
+                            'enabled' => $enabledVal !== null ? filter_var($enabledVal, FILTER_VALIDATE_BOOLEAN) : null,
                         ];
                     }
 

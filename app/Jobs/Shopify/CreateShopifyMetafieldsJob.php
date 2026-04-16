@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates sidest.* metafield definitions on the brand's Shopify store. Idempotent — skips existing definitions.
-class CreateShopifyMetafieldsJob implements ShouldQueue, ShouldBeUnique
+class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -105,6 +105,20 @@ class CreateShopifyMetafieldsJob implements ShouldQueue, ShouldBeUnique
         ],
     ];
 
+    // Variant-level definitions — ownerType: PRODUCTVARIANT
+    // sidest.enabled controls per-variant visibility for affiliates and Hydrogen.
+    // Missing metafield = enabled (dynamic default); only "false" hides a variant.
+    // PUBLIC_READ so Hydrogen reads directly from the Storefront API.
+    private const PRODUCT_VARIANT_DEFINITIONS = [
+        [
+            'key' => 'enabled',
+            'name' => 'Side St Variant Enabled',
+            'type' => 'boolean',
+            'description' => 'Whether this variant is available for Side St affiliates (missing = enabled)',
+            'access' => ['storefront' => 'PUBLIC_READ'],
+        ],
+    ];
+
     private const SHOP_DEFINITIONS = [
         ['key' => 'default_commission_rate', 'name' => 'Side St Default Commission Rate', 'type' => 'number_decimal', 'description' => 'Brand-wide default commission %'],
         ['key' => 'accent_color', 'name' => 'Side St Accent Color', 'type' => 'single_line_text_field', 'description' => 'Hex colour for affiliate storefronts'],
@@ -178,6 +192,17 @@ class CreateShopifyMetafieldsJob implements ShouldQueue, ShouldBeUnique
                 }
 
                 $this->createDefinition($shopDomain, $accessToken, $apiVersion, 'PRODUCT', $def, $needsCollectionCondition);
+            }
+
+            // Create variant-level definitions
+            $existingVariant = $this->getExistingDefinitions($shopDomain, $accessToken, $apiVersion, 'PRODUCTVARIANT');
+            $existingVariantKeys = array_column($existingVariant, 'key');
+
+            foreach (self::PRODUCT_VARIANT_DEFINITIONS as $def) {
+                if (in_array($def['key'], $existingVariantKeys, true)) {
+                    continue;
+                }
+                $this->createDefinition($shopDomain, $accessToken, $apiVersion, 'PRODUCTVARIANT', $def);
             }
 
             // Create shop-level definitions
