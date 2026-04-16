@@ -101,16 +101,18 @@ class PublicBookingController extends ApiController
             ]);
         }
 
-        // Smart mode: resolve Square context and return Square config
+        // Smart mode: verify Square integration is connected, then return config
         try {
-            [$site, $professional, $errorResponse] = $this->resolveSquareContext($request);
-            if ($errorResponse) {
-                return $errorResponse;
+            $integration = $professional->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+            $rawToken = trim((string) ($integration?->getRawOriginal('access_token') ?? ''));
+            $merchantId = trim((string) ($integration?->external_account_id ?? ''));
+            if ($rawToken === '' || $merchantId === '') {
+                return $this->error('Booking integration is not connected for this site.', 409);
             }
 
             $location = $this->resolvePrimaryLocation($professional);
         } catch (\Throwable $e) {
-            return $this->handleBookingError($e, $site ?? null, $professional ?? null, 'booking config');
+            return $this->handleBookingError($e, $site, $professional, 'booking config');
         }
 
         $applicationId = trim((string) config('services.square.application_id', ''));
