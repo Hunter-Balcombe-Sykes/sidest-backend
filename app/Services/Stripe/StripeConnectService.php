@@ -20,9 +20,21 @@ class StripeConnectService
 
     /**
      * Create a Stripe Connect Express account for a professional/influencer/brand.
+     *
+     * Requires country_code to be set on the professional. Without it the
+     * account would silently default to 'AU' and Stripe would later reject
+     * the KYC form for non-AU users. Fail fast instead so the frontend can
+     * prompt for country before onboarding.
      */
     public function createConnectAccount(Professional $professional): string
     {
+        if (! is_string($professional->country_code) || trim($professional->country_code) === '') {
+            abort(
+                422,
+                'Cannot create a Stripe Connect account without a country. Please set your country on your profile before connecting Stripe.'
+            );
+        }
+
         $account = $this->stripe->accounts->create([
             'type' => 'express',
             'country' => $this->mapCountryCode($professional->country_code),
@@ -47,6 +59,12 @@ class StripeConnectService
 
     /**
      * Generate an onboarding link for a Connect Express account.
+     *
+     * If the professional previously soft-disconnected (status='disconnected'
+     * but account_id preserved), reset their status to 'onboarding' so the
+     * webhook handler stops skipping updates and the next account.updated
+     * event flows through normally. Stripe KYC is preserved on the account,
+     * so reconnecting is typically a one-click flow.
      */
     public function createOnboardingLink(Professional $professional, string $returnUrl, string $refreshUrl): string
     {
@@ -54,6 +72,8 @@ class StripeConnectService
 
         if (! $accountId) {
             $accountId = $this->createConnectAccount($professional);
+        } elseif ($professional->stripe_connect_status === 'disconnected') {
+            $professional->update(['stripe_connect_status' => 'onboarding']);
         }
 
         $link = $this->stripe->accountLinks->create([
@@ -68,6 +88,11 @@ class StripeConnectService
 
     /**
      * Check the status of a Connect account and sync it locally.
+     *
+     * If the professional is in the locally-disconnected state, we skip the
+     * Stripe round-trip entirely — their account still exists at Stripe and
+     * would return 'active', but the user has explicitly opted out. Let them
+     * stay disconnected until they reconnect via createOnboardingLink.
      */
     public function syncAccountStatus(Professional $professional): array
     {
@@ -76,6 +101,15 @@ class StripeConnectService
         if (! $accountId) {
             return [
                 'status' => 'not_connected',
+                'charges_enabled' => false,
+                'payouts_enabled' => false,
+                'details_submitted' => false,
+            ];
+        }
+
+        if ($professional->stripe_connect_status === 'disconnected') {
+            return [
+                'status' => 'disconnected',
                 'charges_enabled' => false,
                 'payouts_enabled' => false,
                 'details_submitted' => false,
@@ -119,13 +153,23 @@ class StripeConnectService
     }
 
     /**
-     * Disconnect a professional's Stripe Connect account.
+     * Soft-disconnect a professional's Stripe Connect account.
+     *
+     * We preserve the stripe_connect_account_id so reconnection reuses the
+     * existing Express account — no Stripe orphan accumulation, no lost KYC
+     * data for the affiliate, reconnection is a one-click flow. Express
+     * doesn't support a clean "reject/delete" API call for accounts with
+     * history, so this local-flag approach is the canonical pattern.
+     *
+     * The payout service already guards on stripe_connect_status === 'active',
+     * so disconnected affiliates don't receive payouts. The webhook handler
+     * skips account.updated events for disconnected accounts to prevent
+     * late Stripe events from silently re-activating them.
      */
     public function disconnectAccount(Professional $professional): void
     {
         $professional->update([
-            'stripe_connect_account_id' => null,
-            'stripe_connect_status' => 'not_connected',
+            'stripe_connect_status' => 'disconnected',
         ]);
     }
 

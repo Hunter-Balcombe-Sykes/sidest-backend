@@ -84,6 +84,18 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
+        // Respect local disconnect: if the professional has soft-disconnected
+        // the account, ignore incoming Stripe events until they explicitly
+        // reconnect via createOnboardingLink. Prevents a late account.updated
+        // event from silently re-activating a disconnected account.
+        if ($professional->stripe_connect_status === 'disconnected') {
+            Log::debug('Stripe account.updated skipped — account locally disconnected', [
+                'professional_id' => $professional->id,
+                'account_id' => $account->id,
+            ]);
+            return;
+        }
+
         $status = StripeConnectService::determineAccountStatus($account);
 
         if ($professional->stripe_connect_status !== $status) {
