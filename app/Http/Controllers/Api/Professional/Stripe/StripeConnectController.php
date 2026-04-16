@@ -304,6 +304,19 @@ class StripeConnectController extends Controller
     /**
      * GET /stripe/payouts
      * Lists payout history for the professional.
+     *
+     * TODO: expose commission ledger entries as a sibling endpoint so brands
+     * can reconcile "why is this payout $X?" against individual commission
+     * rows. The CommissionLedgerEntry model, commerce.commission_ledger_entries
+     * table, and CommissionPayoutService already exist — the only thing
+     * missing is the HTTP layer (controller method + route + resource + test).
+     * Deferred until a real brand asks; when promoting, decide between:
+     *   a) nested under a specific payout ID (GET /stripe/payouts/{id}/entries)
+     *      — simplest, answers the "reconcile this one payout" question.
+     *   b) a top-level list with filter params (GET /stripe/commissions?
+     *      payout_id=&date_from=&date_to=&status=) — more flexible but more
+     *      surface area to validate.
+     * Option (a) is probably the right first move; (b) can grow from it.
      */
     public function payouts(Request $request): JsonResponse
     {
