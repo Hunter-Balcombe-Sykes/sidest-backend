@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api;
 
+use App\Http\Controllers\Concerns\DetectsClientInfo;
 use App\Http\Requests\BaseFormRequest;
 use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use App\Models\Core\Professional\Professional;
@@ -10,6 +11,7 @@ use Illuminate\Validation\Rule;
 // V2: Validates professional onboarding/bootstrap — display name, email, phone, handle generation, and professional type normalization.
 class BootstrapRequest extends BaseFormRequest
 {
+    use DetectsClientInfo;
     use NormalizesProfessionalType;
 
 
@@ -38,7 +40,12 @@ class BootstrapRequest extends BaseFormRequest
             'phone' => ['required','string','max:40'],
             'first_name' => ['required','string','max:80'],
             'last_name' => ['nullable','string','max:80'],
-            'country_code' => ['nullable','string','max:5'],
+            // ISO 3166-1 alpha-2 only. Lower-case and whitespace are normalised
+            // in prepareForValidation, so by the time we get here the value is
+            // already two upper-case letters. Nullable because the CDN-header
+            // fallback (also in prepareForValidation) handles the common case
+            // where the frontend doesn't explicitly collect country.
+            'country_code' => ['nullable', 'string', 'size:2', 'regex:/^[A-Z]{2}$/'],
             'timezone' => ['nullable','string','max:64'],
             'invite_token' => ['sometimes', 'nullable', 'string', 'max:80'],
             'brand_partner_professional_id' => ['sometimes', 'nullable', 'uuid', Rule::exists('professionals', 'id')],
@@ -108,6 +115,19 @@ class BootstrapRequest extends BaseFormRequest
             $merge['shopify_setup_token'] = is_string($this->shopify_setup_token)
                 ? trim($this->shopify_setup_token)
                 : null;
+        }
+
+        // Resolve country_code: explicit request value first (uppercased),
+        // then CDN header detection (Cloudflare / CloudFront / Vercel). The
+        // fallback keeps non-AU affiliates from silently getting an
+        // Australian Express account at Stripe onboarding time. If neither
+        // source yields a valid ISO alpha-2 code, country_code stays null
+        // and the Stripe createConnectAccount guard will 422 when they try
+        // to connect.
+        $providedCountry = is_string($this->country_code) ? strtoupper(trim($this->country_code)) : '';
+        $resolvedCountry = $providedCountry !== '' ? $providedCountry : $this->detectCountryCode($this);
+        if ($resolvedCountry !== null && $resolvedCountry !== '') {
+            $merge['country_code'] = $resolvedCountry;
         }
 
         $this->merge($merge);
