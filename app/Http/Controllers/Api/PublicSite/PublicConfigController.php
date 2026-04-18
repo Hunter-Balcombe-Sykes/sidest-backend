@@ -38,4 +38,26 @@ class PublicConfigController extends ApiController
             ->json(['platforms' => $this->normalizer->getPublicRegistry()])
             ->header('Cache-Control', 'public, max-age=3600');
     }
+
+    /**
+     * GET /api/public/config/integrations
+     *
+     * Client-safe third-party keys used by the Hydrogen storefront. Each key
+     * here must be HTTP-referrer-restricted (or equivalent) in its provider
+     * so exposing it publicly is safe — any bearer that isn't coming from
+     * an allowlisted domain gets rejected by the provider itself.
+     *
+     * Current consumers:
+     *   - Hydrogen checkout form → Google Places Autocomplete for addresses.
+     *
+     * @return JsonResponse{googleMapsApiKey: string|null}
+     */
+    public function integrations(): JsonResponse
+    {
+        return response()
+            ->json([
+                'googleMapsApiKey' => config('services.google_maps.api_key'),
+            ])
+            ->header('Cache-Control', 'public, max-age=3600');
+    }
 }

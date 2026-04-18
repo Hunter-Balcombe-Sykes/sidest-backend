@@ -104,6 +104,12 @@ Route::get('/public/shopify/storefront-config', [PublicShopifyStorefrontControll
 Route::get('/public/config/social-platforms', [PublicConfigController::class, 'socialPlatforms'])
     ->middleware('throttle:public-site');
 
+// Client-safe third-party integration keys (Google Maps, etc). Consumed by
+// the Hydrogen storefront — provider-side restrictions (HTTP referrer, etc)
+// keep exposure safe.
+Route::get('/public/config/integrations', [PublicConfigController::class, 'integrations'])
+    ->middleware('throttle:public-site');
+
 // Header/site-id based fallback for path-based frontend routing.
 Route::post('/public/analytics/pageviews', [AnalyticsController::class, 'pageview'])
     ->middleware('throttle:analytics');
