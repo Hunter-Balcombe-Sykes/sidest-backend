@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceCatego
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSubscriptionManagementController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAnalyticsController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffMeController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffStatsController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationEmailPolicyController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffSiteController;
@@ -25,6 +26,9 @@ Route::prefix('staff')
 
     // Staff Dashboard
     Route::get('/me', [StaffMeController::class, 'show']);
+
+    // Platform-wide stats
+    Route::get('/stats', [StaffStatsController::class, 'show']);
 
     // Staff can see Site
     Route::get('/sites/{subdomain}', [StaffSiteController::class, 'show'])
