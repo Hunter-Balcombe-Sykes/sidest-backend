@@ -1234,6 +1234,49 @@ All routes below require: Authorization header AND a professional profile (curre
 - Response (200): `{ "uid": "supabase-user-uuid", "professional": { ..., "professional_type": "professional" }, "site": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
 - Common status codes: 200, 401, 403
 
+### Account Deletion
+
+Self-service lifecycle: email-confirmed grace period → 30-day read-only window → hard delete.
+
+#### `POST /api/me/deletion/request`
+
+Initiates deletion. Sends confirmation email (expires 24h). Rate-limited 3/hour.
+
+- `200` — confirmation email sent
+- `409` — already in grace period (body: `deletes_at`)
+- `403` — account is suspended/disabled
+- `422` — unsettled obligations (body: `reasons: ["unpaid_balance", "pending_payouts", "pending_topups"]`)
+- `429` — rate limited
+- `503` — mail send failed (safe to retry)
+
+#### `POST /api/me/deletion/confirm`
+
+Body: `{ "token": "<from email>" }`. Status → `pending_deletion`, Stripe cancel-at-period-end scheduled, integration credentials deleted.
+
+- `200` — body: `deletes_at` ISO timestamp
+- `410` — token expired (>24h since request)
+- `404` — token invalid or no deletion request
+
+#### `POST /api/me/deletion/cancel`
+
+Restores previous status. Exempt from read-only middleware.
+
+- `200` — account reactivated
+- `409` — no pending deletion
+
+#### Read-only enforcement
+
+During grace period, all non-GET/HEAD/OPTIONS requests return:
+
+```json
+HTTP 423 Locked
+{
+  "message": "Account is pending deletion.",
+  "pending_deletion": true,
+  "deletes_at": "2026-05-19T03:20:00Z"
+}
+```
+
 ### `PATCH /api/me`
 
 - Purpose: update professional profile fields
