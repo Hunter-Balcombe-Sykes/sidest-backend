@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliateCont
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCustomerManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffIntegrationController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliateStatusController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandProfileController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffInviteController;
 use Illuminate\Support\Facades\Route;
@@ -197,4 +198,8 @@ Route::prefix('staff')
 
     // Edit brand profile (admin only)
     Route::patch('/professionals/{professional}/brand-profile', [StaffBrandProfileController::class, 'update']);
+
+    // Toggle affiliate status for a brand (admin only)
+    Route::patch('/professionals/{professional}/affiliates/{affiliate}/status', [StaffAffiliateStatusController::class, 'update'])
+        ->whereUuid('affiliate');
 });
