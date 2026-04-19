@@ -215,4 +215,15 @@ Route::prefix('staff')
 
     // Override brand commission rate and payout hold days (admin only)
     Route::patch('/professionals/{professional}/store-settings', [StaffStoreSettingsController::class, 'update']);
+
+    // Manually create or remove brand-affiliate links (admin only)
+    Route::middleware('throttle:30,1')->group(function (): void {
+        Route::post('/professionals/{brand}/affiliates/{affiliate}',
+            [\App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandAffiliateLinkController::class, 'store'])
+            ->whereUuid(['brand', 'affiliate']);
+
+        Route::delete('/professionals/{brand}/affiliates/{affiliate}',
+            [\App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandAffiliateLinkController::class, 'destroy'])
+            ->whereUuid(['brand', 'affiliate']);
+    });
 });
