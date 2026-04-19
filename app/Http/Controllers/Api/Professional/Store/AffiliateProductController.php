@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\Professional\Store;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Requests\Api\Professional\Store\ReorderSelectionsRequest;
-use App\Http\Requests\Api\Professional\Store\StoreSelectionRequest;
 use App\Http\Resources\AffiliateProductResource;
 use App\Http\Resources\AffiliateProductSelectionResource;
 use App\Models\Commerce\AffiliateProductSelection;
@@ -83,9 +82,10 @@ class AffiliateProductController extends ApiController
     /**
      * POST /affiliate/selections
      *
-     * Add a product to the affiliate's selections.
+     * Add a product to the affiliate's selections. Requires brand_professional_id
+     * to scope the selection to a specific brand the affiliate is linked to.
      */
-    public function store(StoreSelectionRequest $request): JsonResponse
+    public function store(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
 
@@ -93,17 +93,24 @@ class AffiliateProductController extends ApiController
             return $this->error('Brand accounts cannot manage product selections.', 403);
         }
 
-        $validated = $request->validated();
+        $validated = $request->validate([
+            'brand_professional_id' => ['required', 'uuid'],
+            'shopify_product_gid' => ['required', 'string', 'max:100', 'regex:/^gid:\/\/shopify\/Product\/\d+$/'],
+            'sort_order' => ['sometimes', 'integer', 'min:0', 'max:999'],
+        ]);
 
-        try {
-            $resolved = $this->catalogService->resolveAffiliateBrandIntegration($pro);
-        } catch (\RuntimeException $e) {
-            return $this->error($e->getMessage(), $e->getCode() ?: 500);
+        $linked = DB::table('brand.brand_partner_links')
+            ->where('affiliate_professional_id', $pro->id)
+            ->where('brand_professional_id', $validated['brand_professional_id'])
+            ->exists();
+
+        if (! $linked) {
+            return $this->error('You are not linked to this brand.', 422);
         }
 
         // Verify product exists in the brand's active catalog
         try {
-            if (! $this->catalogService->isProductInCatalog($resolved['brand_professional_id'], $validated['product_gid'])) {
+            if (! $this->catalogService->isProductInCatalog($validated['brand_professional_id'], $validated['shopify_product_gid'])) {
                 return $this->error('This product is not available for selection.', 422);
             }
         } catch (\Throwable $e) {
@@ -114,6 +121,7 @@ class AffiliateProductController extends ApiController
 
         $currentCount = AffiliateProductSelection::query()
             ->where('affiliate_professional_id', $pro->id)
+            ->where('brand_professional_id', $validated['brand_professional_id'])
             ->count();
 
         if ($currentCount >= $max) {
@@ -126,8 +134,9 @@ class AffiliateProductController extends ApiController
 
                 return AffiliateProductSelection::create([
                     'affiliate_professional_id' => $pro->id,
-                    'shopify_product_gid' => $validated['product_gid'],
-                    'sort_order' => $validated['sort_order'],
+                    'brand_professional_id' => $validated['brand_professional_id'],
+                    'shopify_product_gid' => $validated['shopify_product_gid'],
+                    'sort_order' => $validated['sort_order'] ?? 0,
                 ]);
             });
         } catch (QueryException $e) {
@@ -236,6 +245,7 @@ class AffiliateProductController extends ApiController
      * POST /affiliate/selections/reset-to-defaults
      *
      * Clears the affiliate's current selections and reseeds from the brand's default collection.
+     * Pass brand_professional_id to reset a single brand; omit to reset all linked brands.
      */
     public function resetToDefaults(Request $request): JsonResponse
     {
@@ -245,18 +255,32 @@ class AffiliateProductController extends ApiController
             return $this->error('Brand accounts cannot manage product selections.', 403);
         }
 
-        try {
-            $resolved = $this->catalogService->resolveAffiliateBrandIntegration($pro);
-        } catch (\RuntimeException $e) {
-            return $this->error($e->getMessage(), $e->getCode() ?: 500);
+        $data = $request->validate([
+            'brand_professional_id' => ['sometimes', 'uuid'],
+        ]);
+
+        if (isset($data['brand_professional_id'])) {
+            try {
+                $this->catalogService->seedDefaultSelections($pro, $data['brand_professional_id'], clearExisting: true);
+            } catch (\Throwable $e) {
+                return $this->error('Unable to reset selections. Please try again.', 502);
+            }
+            return $this->success(['reset' => true, 'brand_professional_id' => $data['brand_professional_id']]);
         }
 
-        try {
-            $this->catalogService->seedDefaultSelections($pro, $resolved['brand_professional_id'], clearExisting: true);
-        } catch (\Throwable $e) {
-            return $this->error('Unable to reset selections. Please try again.', 502);
+        // No brand specified — reset across all linked brands.
+        $brandIds = DB::table('brand.brand_partner_links')
+            ->where('affiliate_professional_id', $pro->id)
+            ->pluck('brand_professional_id');
+
+        foreach ($brandIds as $brandId) {
+            try {
+                $this->catalogService->seedDefaultSelections($pro, (string) $brandId, clearExisting: true);
+            } catch (\Throwable $e) {
+                // Log but continue with remaining brands
+            }
         }
 
-        return $this->success(['reset' => true]);
+        return $this->success(['reset' => true, 'brand_count' => $brandIds->count()]);
     }
 }
