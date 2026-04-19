@@ -161,6 +161,11 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 (string) $affiliate->id,
                 Carbon::parse($occurredAt)->toDateString()
             );
+            \App\Jobs\Analytics\RebuildCommerceHourlyAggregatesJob::dispatch(
+                $this->brandProfessionalId,
+                (string) $affiliate->id,
+                Carbon::parse($occurredAt)->utc()->startOfHour()->toIso8601String()
+            );
         }
 
         Log::info('Shopify order webhook processed', [

@@ -204,6 +204,11 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                 (string) $entry->affiliate_professional_id,
                 $entry->occurred_at->toDateString()
             );
+            \App\Jobs\Analytics\RebuildCommerceHourlyAggregatesJob::dispatch(
+                (string) $entry->brand_professional_id,
+                (string) $entry->affiliate_professional_id,
+                $entry->occurred_at->utc()->startOfHour()->toIso8601String()
+            );
         }
     }
 

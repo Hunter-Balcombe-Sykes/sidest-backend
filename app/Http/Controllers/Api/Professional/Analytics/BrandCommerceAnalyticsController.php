@@ -19,11 +19,10 @@ class BrandCommerceAnalyticsController extends ApiController
 
     /**
      * Brand's commerce performance overview.
-     * Returns brand-level totals (brand_metrics_daily), per-affiliate breakdown
-     * (brand_affiliate_daily), and commission status summary (brand_commission_daily).
-     * All three tables are queried and merged into a single cached response.
+     * Brand totals use brand_metrics_hourly for last 24h, brand_metrics_daily for older ranges.
+     * Per-affiliate breakdown and commission summary always use their daily tables (no hourly equivalent).
      *
-     * @return JsonResponse{ data: { range, totals, timeseries, affiliates, commission_summary } }
+     * @return JsonResponse{ data: { range, granularity, totals, timeseries, affiliates, commission_summary } }
      */
     public function overview(Request $request): JsonResponse
     {
@@ -31,40 +30,17 @@ class BrandCommerceAnalyticsController extends ApiController
         $professionalId = (string) $professional->id;
 
         $filters = $this->resolveFilters($request);
-        $from = $filters['from'];
-        $to = $filters['to'];
+        $cacheKey = CacheKeyGenerator::brandCommerceAnalytics($professionalId, $filters['from'], $filters['to']);
 
-        $cacheKey = CacheKeyGenerator::brandCommerceAnalytics($professionalId, $from, $to);
+        return $this->success(Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $filters): array {
+            [$totals, $timeseries, $currencyCode] = $filters['use_hourly']
+                ? $this->buildHourlyTotals($professionalId, $filters)
+                : $this->buildDailyTotals($professionalId, $filters);
 
-        return $this->success(Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $from, $to): array {
-            // Brand-level totals and daily timeseries
-            $brandRows = DB::table('analytics.brand_metrics_daily')
-                ->where('brand_professional_id', $professionalId)
-                ->whereBetween('day', [$from, $to])
-                ->get();
-
-            $currencyCode = $brandRows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
-            $primaryBrand = $brandRows->filter(fn ($r) => $r->currency_code === $currencyCode);
-
-            $totals = [
-                'orders_count' => (int) $primaryBrand->sum('orders_count'),
-                'gross_cents' => (int) $primaryBrand->sum('gross_cents'),
-                'refunded_cents' => (int) $primaryBrand->sum('refunded_cents'),
-                'net_cents' => (int) $primaryBrand->sum('net_cents'),
-                'currency_code' => strtoupper($currencyCode),
-            ];
-
-            $timeseries = $primaryBrand->sortBy('day')->map(fn ($row) => [
-                'bucket' => (string) $row->day,
-                'orders_count' => (int) $row->orders_count,
-                'gross_cents' => (int) $row->gross_cents,
-                'net_cents' => (int) $row->net_cents,
-            ])->values()->all();
-
-            // Per-affiliate breakdown — sum each affiliate's rows across the date range
+            // Per-affiliate breakdown — daily only (no hourly equivalent table)
             $affiliateRows = DB::table('analytics.brand_affiliate_daily')
                 ->where('brand_professional_id', $professionalId)
-                ->whereBetween('day', [$from, $to])
+                ->whereBetween('day', [$filters['from'], $filters['to']])
                 ->get()
                 ->groupBy('affiliate_professional_id');
 
@@ -83,15 +59,13 @@ class BrandCommerceAnalyticsController extends ApiController
                 ];
             })->values()->all();
 
-            // Commission status totals across all affiliates for the date range
+            // Commission summary — daily only
             $commissionRows = DB::table('analytics.brand_commission_daily')
                 ->where('brand_professional_id', $professionalId)
-                ->whereBetween('day', [$from, $to])
+                ->whereBetween('day', [$filters['from'], $filters['to']])
                 ->get()
                 ->groupBy('payout_status');
 
-            // Use the commission rows' own currency rather than the brand metrics currency,
-            // in case brand_metrics_daily is empty but commission data exists.
             $commissionCurrencyCode = $commissionRows->flatten(1)->first()?->currency_code ?? $currencyCode;
 
             $commissionSummary = [
@@ -103,13 +77,73 @@ class BrandCommerceAnalyticsController extends ApiController
             ];
 
             return [
-                'range' => ['from' => $from, 'to' => $to],
+                'range' => ['from' => $filters['from'], 'to' => $filters['to']],
+                'granularity' => $filters['use_hourly'] ? 'hour' : 'day',
                 'totals' => $totals,
                 'timeseries' => $timeseries,
                 'affiliates' => $affiliates,
                 'commission_summary' => $commissionSummary,
             ];
         }));
+    }
+
+    /** @return array{0: array, 1: array, 2: string} [totals, timeseries, currencyCode] */
+    private function buildDailyTotals(string $professionalId, array $filters): array
+    {
+        $rows = DB::table('analytics.brand_metrics_daily')
+            ->where('brand_professional_id', $professionalId)
+            ->whereBetween('day', [$filters['from'], $filters['to']])
+            ->get();
+
+        $currencyCode = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
+        $primary = $rows->filter(fn ($r) => $r->currency_code === $currencyCode);
+
+        $totals = [
+            'orders_count' => (int) $primary->sum('orders_count'),
+            'gross_cents' => (int) $primary->sum('gross_cents'),
+            'refunded_cents' => (int) $primary->sum('refunded_cents'),
+            'net_cents' => (int) $primary->sum('net_cents'),
+            'currency_code' => strtoupper($currencyCode),
+        ];
+
+        $timeseries = $primary->sortBy('day')->map(fn ($row) => [
+            'bucket' => (string) $row->day,
+            'orders_count' => (int) $row->orders_count,
+            'gross_cents' => (int) $row->gross_cents,
+            'net_cents' => (int) $row->net_cents,
+        ])->values()->all();
+
+        return [$totals, $timeseries, $currencyCode];
+    }
+
+    /** @return array{0: array, 1: array, 2: string} [totals, timeseries, currencyCode] */
+    private function buildHourlyTotals(string $professionalId, array $filters): array
+    {
+        $rows = DB::table('analytics.brand_metrics_hourly')
+            ->where('brand_professional_id', $professionalId)
+            ->where('hour_start', '>=', $filters['hourly_from'])
+            ->where('hour_start', '<', $filters['hourly_to'])
+            ->get();
+
+        $currencyCode = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
+        $primary = $rows->filter(fn ($r) => $r->currency_code === $currencyCode);
+
+        $totals = [
+            'orders_count' => (int) $primary->sum('orders_count'),
+            'gross_cents' => (int) $primary->sum('gross_cents'),
+            'refunded_cents' => (int) $primary->sum('refunded_cents'),
+            'net_cents' => (int) $primary->sum('net_cents'),
+            'currency_code' => strtoupper($currencyCode),
+        ];
+
+        $timeseries = $primary->sortBy('hour_start')->map(fn ($row) => [
+            'bucket' => Carbon::parse($row->hour_start)->toIso8601String(),
+            'orders_count' => (int) $row->orders_count,
+            'gross_cents' => (int) $row->gross_cents,
+            'net_cents' => (int) $row->net_cents,
+        ])->values()->all();
+
+        return [$totals, $timeseries, $currencyCode];
     }
 
     private function resolveFilters(Request $request): array
@@ -145,14 +179,32 @@ class BrandCommerceAnalyticsController extends ApiController
                 ]);
             }
 
-            return ['from' => $from->toDateString(), 'to' => $to->toDateString()];
+            return $this->buildFilterContext($from->toDateString(), $to->toDateString());
         }
 
         $days = max(1, min(365, (int) ($validated['days'] ?? 30)));
 
+        return $this->buildFilterContext(
+            now()->subDays($days - 1)->toDateString(),
+            now()->toDateString()
+        );
+    }
+
+    private function buildFilterContext(string $from, string $to): array
+    {
+        $cutoff = now()->utc()->subHours(24)->startOfHour();
+        $fromUtc = Carbon::parse($from)->utc()->startOfDay();
+        $toUtc = Carbon::parse($to)->utc()->endOfDay();
+
+        // Use hourly table when the entire range falls within the last 24h.
+        $useHourly = $fromUtc->gte($cutoff) && $toUtc->lte(now()->utc()->addMinute());
+
         return [
-            'from' => now()->subDays($days - 1)->toDateString(),
-            'to' => now()->toDateString(),
+            'from' => $from,
+            'to' => $to,
+            'use_hourly' => $useHourly,
+            'hourly_from' => $cutoff,
+            'hourly_to' => now()->utc()->addMinute(),
         ];
     }
 }

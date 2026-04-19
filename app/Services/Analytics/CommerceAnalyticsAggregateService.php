@@ -6,7 +6,7 @@ use App\Services\Analytics\Concerns\ResolvesTimezone;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
-// Aggregates commerce metrics (orders, revenue, commissions) from commission_ledger_entries into daily analytics tables.
+// Aggregates commerce metrics (orders, revenue, commissions) from commission_ledger_entries into daily and hourly analytics tables.
 class CommerceAnalyticsAggregateService
 {
     use ResolvesTimezone;
@@ -22,6 +22,110 @@ class CommerceAnalyticsAggregateService
         $this->rebuildBrandMetricsDay($brandProfessionalId, $day);
         $this->rebuildBrandAffiliateDailyDay($brandProfessionalId, $affiliateProfessionalId, $day);
         $this->rebuildBrandCommissionDay($brandProfessionalId, $affiliateProfessionalId, $day);
+    }
+
+    /**
+     * Rebuild both hourly aggregate tables for one brand + affiliate + hour.
+     * Called immediately after a Shopify order webhook fires so the last-24h view is current.
+     */
+    public function rebuildForHour(string $brandProfessionalId, string $affiliateProfessionalId, string $hourStart): void
+    {
+        $this->rebuildProfessionalMetricsHour($affiliateProfessionalId, $hourStart);
+        $this->rebuildBrandMetricsHour($brandProfessionalId, $hourStart);
+    }
+
+    /**
+     * Rebuild analytics.professional_metrics_hourly for one affiliate + UTC hour.
+     * Aggregates across ALL brands the affiliate sells for within that hour.
+     */
+    public function rebuildProfessionalMetricsHour(string $affiliateProfessionalId, string $hourStart): void
+    {
+        $hour = Carbon::parse($hourStart)->utc()->startOfHour();
+        $hourEnd = $hour->copy()->addHour();
+        $timezone = $this->professionalTimezone($affiliateProfessionalId);
+        $now = now();
+
+        DB::transaction(function () use ($affiliateProfessionalId, $hour, $hourEnd, $timezone, $now): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["commerce-rebuild:affiliate-hour:{$affiliateProfessionalId}"]);
+
+            DB::table('analytics.professional_metrics_hourly')
+                ->where('affiliate_professional_id', $affiliateProfessionalId)
+                ->where('hour_start', $hour)
+                ->delete();
+
+            $rows = $this->queryLedger($hour, $hourEnd)
+                ->where('affiliate_professional_id', $affiliateProfessionalId)
+                ->groupBy('currency_code')
+                ->get();
+
+            if ($rows->isEmpty()) {
+                return;
+            }
+
+            $inserts = $rows->map(fn ($row) => [
+                'hour_start' => $hour,
+                'affiliate_professional_id' => $affiliateProfessionalId,
+                'currency_code' => (string) $row->currency_code,
+                'timezone' => $timezone,
+                'orders_count' => (int) $row->orders_count,
+                'gross_cents' => (int) $row->gross_cents,
+                'refunded_cents' => (int) $row->refunded_cents,
+                'returned_cents' => 0,
+                'net_cents' => (int) $row->gross_cents - (int) $row->refunded_cents,
+                'commission_accrued_cents' => (int) $row->commission_accrued_cents,
+                'commission_reversed_cents' => (int) $row->commission_reversed_cents,
+                'commission_paid_cents' => 0, // payouts tracked at daily granularity only
+                'updated_at' => $now,
+            ])->all();
+
+            DB::table('analytics.professional_metrics_hourly')->insert($inserts);
+        });
+    }
+
+    /**
+     * Rebuild analytics.brand_metrics_hourly for one brand + UTC hour.
+     * Aggregates across ALL affiliates for that brand within that hour.
+     */
+    public function rebuildBrandMetricsHour(string $brandProfessionalId, string $hourStart): void
+    {
+        $hour = Carbon::parse($hourStart)->utc()->startOfHour();
+        $hourEnd = $hour->copy()->addHour();
+        $timezone = $this->professionalTimezone($brandProfessionalId);
+        $now = now();
+
+        DB::transaction(function () use ($brandProfessionalId, $hour, $hourEnd, $timezone, $now): void {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["commerce-rebuild:brand-hour:{$brandProfessionalId}"]);
+
+            DB::table('analytics.brand_metrics_hourly')
+                ->where('brand_professional_id', $brandProfessionalId)
+                ->where('hour_start', $hour)
+                ->delete();
+
+            $rows = $this->queryLedger($hour, $hourEnd)
+                ->where('brand_professional_id', $brandProfessionalId)
+                ->groupBy('currency_code')
+                ->get();
+
+            if ($rows->isEmpty()) {
+                return;
+            }
+
+            $inserts = $rows->map(fn ($row) => [
+                'hour_start' => $hour,
+                'brand_professional_id' => $brandProfessionalId,
+                'currency_code' => (string) $row->currency_code,
+                'timezone' => $timezone,
+                'orders_count' => (int) $row->orders_count,
+                'gross_cents' => (int) $row->gross_cents,
+                'refunded_cents' => (int) $row->refunded_cents,
+                'returned_cents' => 0,
+                'net_cents' => (int) $row->gross_cents - (int) $row->refunded_cents,
+                'commission_net_cents' => (int) $row->commission_accrued_cents - (int) $row->commission_reversed_cents,
+                'updated_at' => $now,
+            ])->all();
+
+            DB::table('analytics.brand_metrics_hourly')->insert($inserts);
+        });
     }
 
     /**
