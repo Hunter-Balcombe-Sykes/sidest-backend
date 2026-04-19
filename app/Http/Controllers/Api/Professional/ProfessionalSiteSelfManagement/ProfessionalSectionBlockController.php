@@ -37,15 +37,20 @@ class ProfessionalSectionBlockController extends ApiController
 
         $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
 
+        // Returns both published and drafted sections so the dashboard can
+        // render the Draft → Live toggle for each. The is_enabled filter
+        // used to hide drafts but was always-true for allowed sections
+        // anyway — dropping it is explicit, not behavioural.
         $sections = $pro->sectionBlocks()
             ->where('site_id', $site->id)
             ->whereIn('block_type', $allowedSections)
-            ->where('is_enabled', true)
             ->orderBy('sort_order')
             ->get();
 
         return $this->success([
-            'sections' => $sections->map(fn (Block $section) => $this->serializeSection($section))->values(),
+            'sections' => $sections
+                ->map(fn (Block $section) => $this->serializeSection($section, (string) $pro->id, (string) $site->id))
+                ->values(),
             'allowed_sections' => array_values($allowedSections),
             'unavailable_sections' => $unavailableSections,
         ]);
@@ -228,12 +233,28 @@ class ProfessionalSectionBlockController extends ApiController
         });
     }
 
-    private function serializeSection(Block $section): array
+    private function serializeSection(Block $section, ?string $professionalId = null, ?string $siteId = null): array
     {
         $payload = $section->toArray();
         $isLive = (bool) ($section->is_active ?? false);
         $payload['publication_state'] = $isLive ? 'live' : 'draft';
         $payload['is_live'] = $isLive;
+
+        // Expose the visibility gate state to the frontend so the Publish
+        // button can disable + show its tooltip reason without duplicating
+        // the rule set. Only queried when the ids are provided (the index
+        // action supplies them; upsert/remove reuse this serializer post-
+        // mutation and can skip the check since they already enforced it).
+        if ($professionalId !== null && $siteId !== null) {
+            [$canPublish, $reason] = $this->visibilityService->checkVisibilityRequirements(
+                $professionalId,
+                $siteId,
+                (string) $section->block_type,
+            );
+            $payload['can_publish'] = $canPublish;
+            $payload['requirement_reason'] = $reason;
+        }
+
         return $payload;
     }
 }
