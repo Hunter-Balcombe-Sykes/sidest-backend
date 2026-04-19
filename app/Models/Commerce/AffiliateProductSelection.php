@@ -19,6 +19,7 @@ class AffiliateProductSelection extends BaseModel
 
     protected $fillable = [
         'affiliate_professional_id',
+        'brand_professional_id',
         'shopify_product_gid',
         'sort_order',
     ];
@@ -32,5 +33,10 @@ class AffiliateProductSelection extends BaseModel
     public function affiliateProfessional(): BelongsTo
     {
         return $this->belongsTo(Professional::class, 'affiliate_professional_id');
+    }
+
+    public function brandProfessional(): BelongsTo
+    {
+        return $this->belongsTo(Professional::class, 'brand_professional_id');
     }
 }
