@@ -26,7 +26,7 @@ class AccountDeletionTestCase
 
         $conn = DB::connection('pgsql');
 
-        foreach (['core', 'commerce', 'notifications', 'billing'] as $schema) {
+        foreach (['core', 'commerce', 'notifications', 'billing', 'site'] as $schema) {
             try {
                 $conn->statement("ATTACH DATABASE ':memory:' AS {$schema}");
             } catch (\Throwable) {
@@ -89,6 +89,30 @@ class AccountDeletionTestCase
             status TEXT,
             amount_cents INTEGER,
             created_at TEXT
+        )');
+
+        $conn->statement('CREATE TABLE IF NOT EXISTS core.customers (
+            id TEXT PRIMARY KEY,
+            professional_id TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            deleted_at TEXT
+        )');
+
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.services (
+            id TEXT PRIMARY KEY,
+            professional_id TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            deleted_at TEXT
+        )');
+
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.site_media (
+            id TEXT PRIMARY KEY,
+            professional_id TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            deleted_at TEXT
         )');
 
         $conn->statement('CREATE TABLE IF NOT EXISTS billing.subscriptions (
