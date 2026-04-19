@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Professional\AffiliateInviteController;
 use App\Http\Controllers\Api\Professional\Analytics\AffiliateCommerceAnalyticsController;
+use App\Http\Controllers\Api\Professional\Analytics\BrandCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
@@ -121,6 +122,7 @@ Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
         Route::patch('/booking/settings', [ProfessionalSiteController::class, 'updateBookingSettings']);
         Route::get('/booking/my-analytics/overview', [BookingAnalyticsController::class, 'myOverview']);
         Route::get('/affiliate/commerce-analytics', [AffiliateCommerceAnalyticsController::class, 'overview']);
+        Route::get('/brand/commerce-analytics', [BrandCommerceAnalyticsController::class, 'overview']);
 
         // View Analytics
         Route::get('/analytics', [ProfessionalAnalyticsController::class, 'summary']);
