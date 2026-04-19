@@ -25,7 +25,15 @@ class UpdateLinkBlockRequest extends BaseFormRequest
 {
     protected function prepareForValidation(): void
     {
-        $routeId = $this->route('linkBlock') ?? $this->route('block');
+        // `SubstituteBindings` middleware runs before this FormRequest is
+        // resolved, so `route('linkBlock')` may already be the bound Block
+        // model — not the raw UUID string. Normalise both shapes to the
+        // underlying key so the `uuid` rule gets a plain string.
+        $param = $this->route('linkBlock') ?? $this->route('block');
+        $routeId = is_object($param) && method_exists($param, 'getKey')
+            ? (string) $param->getKey()
+            : $param;
+
         $title = $this->input('title');
         $url = $this->input('url');
         $iconKey = $this->input('icon_key');
