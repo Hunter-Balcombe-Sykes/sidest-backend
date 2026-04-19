@@ -67,8 +67,12 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
                 ->withoutMiddleware([EnforcePendingDeletionReadOnly::class]);
         });
         Route::get('/brand-affiliates', [BrandAffiliateController::class, 'index']);
-        Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect'])
-            ->whereUuid('affiliate');
+        Route::middleware('throttle:30,1')->group(function (): void {
+            Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect'])
+                ->whereUuid('affiliate');
+            Route::delete('/brand-partners/{brandProfessionalId}', [BrandPartnerController::class, 'disconnect'])
+                ->whereUuid('brandProfessionalId');
+        });
         Route::patch('/brand-affiliates/{affiliate}/custom-photos', [BrandAffiliateController::class, 'updateCustomPhotos'])
             ->whereUuid('affiliate');
         Route::get('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'index']);
@@ -88,8 +92,6 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/brand-partners/{brandProfessionalId}/connect', [BrandPartnerController::class, 'connect'])
             ->whereUuid('brandProfessionalId');
         Route::post('/brand-partners/{brandProfessionalId}/promote', [BrandPartnerController::class, 'promote'])
-            ->whereUuid('brandProfessionalId');
-        Route::delete('/brand-partners/{brandProfessionalId}', [BrandPartnerController::class, 'disconnect'])
             ->whereUuid('brandProfessionalId');
 
         // View Site Details
