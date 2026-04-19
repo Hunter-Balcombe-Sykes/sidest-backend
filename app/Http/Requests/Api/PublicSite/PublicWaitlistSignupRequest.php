@@ -5,7 +5,10 @@ namespace App\Http\Requests\Api\PublicSite;
 use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
-// V2: Validates waitlist signup — requires name, email, phone, applicant type, and industry with conditional fields per type and extensive input normalization.
+// V2: Validates waitlist signup. Only email is required — all other fields are optional
+// so the public coming-soon landing can submit an email-only row, while the full
+// multi-step form (when reintroduced) can submit the complete payload. Conditional
+// per-type rules still apply when applicant_type is provided.
 class PublicWaitlistSignupRequest extends BaseFormRequest
 {
     protected function prepareForValidation(): void
@@ -29,14 +32,15 @@ class PublicWaitlistSignupRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:200'],
             'email' => ['required', 'email:rfc', 'max:255'],
-            'phone' => ['required', 'string', 'regex:/^\+?[0-9]{7,20}$/'],
-            'type' => ['required', 'string', Rule::in(array_keys(config('sidest.waitlist.types', [])))],
+            'name' => ['nullable', 'string', 'max:200'],
+            'phone' => ['nullable', 'string', 'regex:/^\+?[0-9]{7,20}$/'],
+            'type' => ['nullable', 'string', Rule::in(array_keys(config('sidest.waitlist.types', [])))],
             'type_other_text' => ['nullable', 'string', 'max:200', 'required_if:type,other', 'prohibited_unless:type,other'],
-            'industry' => ['required', 'string', Rule::in(array_keys(config('sidest.waitlist.industries', [])))],
+            'industry' => ['nullable', 'string', Rule::in(array_keys(config('sidest.waitlist.industries', [])))],
             'industry_other_text' => ['nullable', 'string', 'max:200', 'required_if:industry,other', 'prohibited_unless:industry,other'],
-            'pilot_program_opt_in' => ['required', 'boolean'],
+            'pilot_program_opt_in' => ['nullable', 'boolean'],
+            // Conditional fields still enforced when applicant_type is supplied; absent type means none of these are allowed.
             'number_of_team_members' => ['nullable', 'integer', 'min:0', 'max:1000000', 'required_if:type,brand', 'prohibited_unless:type,brand'],
             'number_of_affiliates_ambassadors' => ['nullable', 'integer', 'min:0', 'max:1000000', 'required_if:type,brand', 'prohibited_unless:type,brand'],
             'is_brand_partner_or_ambassador' => ['nullable', 'boolean', 'required_if:type,influencer', 'required_if:type,professional', 'prohibited_unless:type,influencer,professional'],

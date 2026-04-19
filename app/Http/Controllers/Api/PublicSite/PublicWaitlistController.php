@@ -21,16 +21,18 @@ class PublicWaitlistController extends ApiController
         $email = mb_strtolower(trim((string) $data['email']));
         $submittedAt = now();
 
+        // Email-only signups (e.g. coming-soon landing) leave most fields null; full
+        // waitlist form submissions fill them in. Both paths flow through this payload.
         $payload = [
-            'name' => $data['name'],
+            'name' => $data['name'] ?? null,
             'email' => $email,
             'email_lc' => $email,
-            'phone' => $data['phone'],
-            'applicant_type' => $data['type'],
+            'phone' => $data['phone'] ?? null,
+            'applicant_type' => $data['type'] ?? null,
             'applicant_type_other' => $data['type_other_text'] ?? null,
-            'industry' => $data['industry'],
+            'industry' => $data['industry'] ?? null,
             'industry_other' => $data['industry_other_text'] ?? null,
-            'pilot_program_opt_in' => (bool) $data['pilot_program_opt_in'],
+            'pilot_program_opt_in' => (bool) ($data['pilot_program_opt_in'] ?? false),
             'number_of_team_members' => $data['number_of_team_members'] ?? null,
             'number_of_affiliates_ambassadors' => $data['number_of_affiliates_ambassadors'] ?? null,
             'is_brand_partner_or_ambassador' => $data['is_brand_partner_or_ambassador'] ?? null,
