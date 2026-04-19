@@ -190,4 +190,12 @@ class BrandPartnerLinkService
             }
         }
     }
+
+    public function getLinkForPair(string $affiliateProfessionalId, string $brandProfessionalId): ?BrandPartnerLink
+    {
+        return BrandPartnerLink::query()
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->first();
+    }
 }
