@@ -90,12 +90,16 @@ class BrandCommerceAnalyticsController extends ApiController
                 ->get()
                 ->groupBy('payout_status');
 
+            // Use the commission rows' own currency rather than the brand metrics currency,
+            // in case brand_metrics_daily is empty but commission data exists.
+            $commissionCurrencyCode = $commissionRows->flatten(1)->first()?->currency_code ?? $currencyCode;
+
             $commissionSummary = [
                 'pending_cents' => (int) ($commissionRows->get('pending')?->sum('net_outstanding_cents') ?? 0),
                 'approved_cents' => (int) ($commissionRows->get('approved')?->sum('net_outstanding_cents') ?? 0),
                 'paid_cents' => (int) ($commissionRows->get('paid')?->sum('payout_cents') ?? 0),
                 'reversed_cents' => (int) ($commissionRows->get('reversed')?->sum('reversal_cents') ?? 0),
-                'currency_code' => strtoupper($currencyCode),
+                'currency_code' => strtoupper($commissionCurrencyCode),
             ];
 
             return [
