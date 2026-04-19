@@ -65,6 +65,65 @@ it('rejects request when professional has pending commission payouts', function 
         ->and($result['reasons'])->toContain('pending_payouts');
 });
 
+it('stores hashed token, sets requested_at, and sends confirmation mail', function () {
+    $pro = makeProfessional();
+
+    $service = new AccountDeletionService();
+    $request = Request::create('/', 'POST');
+
+    $result = $service->request($pro, $request);
+
+    expect($result['success'])->toBeTrue()
+        ->and($result['code'])->toBe(200);
+
+    $pro->refresh();
+    expect($pro->deletion_token_hash)->not->toBeNull()
+        ->and(strlen($pro->deletion_token_hash))->toBe(64) // sha256 hex
+        ->and($pro->deletion_requested_at)->not->toBeNull()
+        ->and($pro->status)->toBe('active'); // status does NOT change on request
+
+    Mail::assertSent(\App\Mail\Notifications\AccountDeletionRequestedMail::class, function ($mail) use ($pro) {
+        return $mail->hasTo($pro->primary_email);
+    });
+});
+
+it('writes a requested audit entry on successful request', function () {
+    $pro = makeProfessional();
+    $service = new AccountDeletionService();
+    $request = Request::create('/', 'POST', [], [], [], ['REMOTE_ADDR' => '1.2.3.4', 'HTTP_USER_AGENT' => 'TestAgent']);
+
+    $service->request($pro, $request);
+
+    $audit = DB::connection('pgsql')->table('core.professional_deletion_audit')
+        ->where('professional_id', $pro->id)
+        ->first();
+
+    expect($audit)->not->toBeNull()
+        ->and($audit->event)->toBe('requested')
+        ->and($audit->professional_handle_snapshot)->toBe($pro->handle)
+        ->and($audit->professional_email_snapshot)->toBe($pro->primary_email)
+        ->and($audit->ip_address)->toBe('1.2.3.4')
+        ->and($audit->user_agent)->toBe('TestAgent');
+});
+
+it('rolls back token storage if mail send throws', function () {
+    $pro = makeProfessional();
+
+    Mail::shouldReceive('to')->andThrow(new \RuntimeException('SMTP down'));
+
+    $service = new AccountDeletionService();
+    $request = Request::create('/', 'POST');
+
+    $result = $service->request($pro, $request);
+
+    expect($result['success'])->toBeFalse()
+        ->and($result['code'])->toBe(503);
+
+    $pro->refresh();
+    expect($pro->deletion_token_hash)->toBeNull()
+        ->and($pro->deletion_requested_at)->toBeNull();
+});
+
 it('rejects request when brand has pending topups', function () {
     $pro = makeProfessional();
 
