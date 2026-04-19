@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\Staff\StaffSite\StaffStatsController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationEmailPolicyController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffSiteController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliateController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCustomerManagementController;
 use Illuminate\Support\Facades\Route;
 
@@ -85,6 +86,9 @@ Route::prefix('staff')
 
     // View Subscription
     Route::get('/professionals/{professional}/subscription', [StaffSubscriptionManagementController::class, 'show']);
+
+    // View affiliates linked to a brand
+    Route::get('/professionals/{professional}/affiliates', [StaffAffiliateController::class, 'index']);
 });
 
 // Authorised Staff Admin Editing
