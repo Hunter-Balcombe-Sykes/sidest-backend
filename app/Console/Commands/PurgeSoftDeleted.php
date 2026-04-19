@@ -16,6 +16,7 @@ use Illuminate\Support\Carbon;
 class PurgeSoftDeleted extends Command
 {
     protected $signature = 'sidest:purge-soft-deletes {--days= : Override retention days}';
+
     protected $description = 'Permanently delete soft-deleted rows and pending-deletion professionals older than retention window.';
 
     public function handle(AccountDeletionService $deletionService): int
@@ -53,7 +54,8 @@ class PurgeSoftDeleted extends Command
                 }
             });
 
-        $this->line(class_basename($modelClass) . ": {$count}");
+        $this->line(class_basename($modelClass).": {$count}");
+
         return $count;
     }
 

@@ -52,6 +52,7 @@ class ProfessionalAccountDeletionController extends ApiController
             if (isset($result['reasons'])) {
                 $errors['reasons'] = $result['reasons'];
             }
+
             return $this->error($result['error'] ?? 'Request failed.', $result['code'], $errors);
         }
 

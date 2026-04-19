@@ -49,7 +49,7 @@ class AccountDeletionService
         ]);
 
         $confirmationUrl = rtrim((string) config('app.frontend_url'), '/')
-            . '/account/deletion/confirm?token=' . $rawToken;
+            .'/account/deletion/confirm?token='.$rawToken;
 
         try {
             Mail::to($professional->primary_email)->send(
@@ -106,6 +106,7 @@ class AccountDeletionService
                 'deletion_token_hash' => null,
                 'deletion_requested_at' => null,
             ]);
+
             return ['success' => false, 'code' => 410, 'error' => 'Confirmation token has expired.'];
         }
 
@@ -135,7 +136,7 @@ class AccountDeletionService
 
         $this->cancelStripeAtPeriodEnd($professional);
 
-        $cancelUrl = rtrim((string) config('app.frontend_url'), '/') . '/account/deletion/cancel';
+        $cancelUrl = rtrim((string) config('app.frontend_url'), '/').'/account/deletion/cancel';
 
         try {
             Mail::to($professional->primary_email)->send(
@@ -229,6 +230,7 @@ class AccountDeletionService
                 'metadata' => ['reason' => 'supabase_deletion_failed'],
                 'created_at' => now(),
             ]);
+
             return false;
         }
 
@@ -249,6 +251,7 @@ class AccountDeletionService
                 'metadata' => ['reason' => 'force_delete_failed', 'error' => $e->getMessage()],
                 'created_at' => now(),
             ]);
+
             return false;
         }
 
@@ -281,7 +284,7 @@ class AccountDeletionService
             ->table('commerce.commission_payouts')
             ->where(function ($q) use ($professional) {
                 $q->where('brand_professional_id', $professional->id)
-                  ->orWhere('affiliate_professional_id', $professional->id);
+                    ->orWhere('affiliate_professional_id', $professional->id);
             })
             ->where('status', '!=', 'paid')
             ->exists();
@@ -378,12 +381,13 @@ class AccountDeletionService
             Log::error('Supabase credentials not configured; cannot delete auth user', [
                 'auth_user_id' => $authUserId,
             ]);
+
             return false;
         }
 
         $response = Http::withHeaders([
             'apikey' => $serviceKey,
-            'Authorization' => 'Bearer ' . $serviceKey,
+            'Authorization' => 'Bearer '.$serviceKey,
         ])->delete("{$baseUrl}/auth/v1/admin/users/{$authUserId}");
 
         if ($response->status() === 404) {
@@ -396,6 +400,7 @@ class AccountDeletionService
                 'status' => $response->status(),
                 'body' => $response->body(),
             ]);
+
             return false;
         }
 

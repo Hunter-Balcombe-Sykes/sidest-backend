@@ -15,13 +15,19 @@ class ProfessionalDeletionAuditEntry extends BaseModel
     protected $table = 'core.professional_deletion_audit';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
+
     public $timestamps = false; // only created_at; no updated_at
 
     public const EVENT_REQUESTED = 'requested';
+
     public const EVENT_CONFIRMED = 'confirmed';
+
     public const EVENT_CANCELLED = 'cancelled';
+
     public const EVENT_PURGED = 'purged';
+
     public const EVENT_PURGE_FAILED = 'purge_failed';
 
     protected $fillable = [
