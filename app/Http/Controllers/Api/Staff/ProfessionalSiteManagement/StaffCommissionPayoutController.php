@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 // V2: Staff-admin controls for commission payouts. Today only exposes manual
 // retry — the daily ProcessCommissionPayoutsJob handles normal flow and the
@@ -17,9 +19,30 @@ use Illuminate\Http\Request;
 // Stripe Connect onboarding, etc.).
 class StaffCommissionPayoutController extends ApiController
 {
+    use NormalizesPerPage;
+
     public function __construct(
         private readonly CommissionPayoutService $payoutService,
     ) {}
+
+    /**
+     * GET /staff/commission-payouts
+     *
+     * List all payouts platform-wide. Query params: status (pending|processing|completed|failed|...), per_page (default 25, max 100).
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $perPage = $this->normalizePerPage($request, 25, 100);
+        $status  = $request->query('status');
+
+        $query = DB::table('commerce.commission_payouts')->orderByDesc('created_at');
+
+        if (is_string($status) && $status !== '') {
+            $query->where('status', $status);
+        }
+
+        return $this->paginated($query->paginate($perPage));
+    }
 
     /**
      * POST /staff/commission-payouts/{payout}/retry

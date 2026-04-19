@@ -93,6 +93,9 @@ Route::prefix('staff')
 
     // View commission ledger for a professional (brand or affiliate)
     Route::get('/professionals/{professional}/commissions', [StaffCommissionController::class, 'index']);
+
+    // List all payouts platform-wide
+    Route::get('/commission-payouts', [StaffCommissionPayoutController::class, 'index']);
 });
 
 // Authorised Staff Admin Editing
