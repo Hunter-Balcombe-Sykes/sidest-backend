@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCustomerManag
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffIntegrationController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliateStatusController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandProfileController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionVoidController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffInviteController;
 use Illuminate\Support\Facades\Route;
 
@@ -202,4 +203,8 @@ Route::prefix('staff')
     // Toggle affiliate status for a brand (admin only)
     Route::patch('/professionals/{professional}/affiliates/{affiliate}/status', [StaffAffiliateStatusController::class, 'update'])
         ->whereUuid('affiliate');
+
+    // Manually void a pending commission entry (admin only)
+    Route::post('/commissions/{commission}/void', [StaffCommissionVoidController::class, 'void'])
+        ->whereUuid('commission');
 });
