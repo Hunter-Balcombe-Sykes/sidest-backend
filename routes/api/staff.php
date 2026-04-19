@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliateCont
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCustomerManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffIntegrationController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffInviteController;
 use Illuminate\Support\Facades\Route;
 
 // Authorised Staff Viewing
@@ -100,6 +101,9 @@ Route::prefix('staff')
 
     // View integration status for a professional
     Route::get('/professionals/{professional}/integrations', [StaffIntegrationController::class, 'index']);
+
+    // View invites for a brand
+    Route::get('/professionals/{professional}/invites', [StaffInviteController::class, 'index']);
 });
 
 // Authorised Staff Admin Editing
@@ -185,4 +189,8 @@ Route::prefix('staff')
     // professional would be misleading.
     Route::post('/commission-payouts/{payout}/retry', [StaffCommissionPayoutController::class, 'retry'])
         ->whereUuid('payout');
+
+    // Expire a stuck invite (admin only)
+    Route::delete('/professionals/{professional}/invites/{invite}', [StaffInviteController::class, 'cancel'])
+        ->whereUuid('invite');
 });
