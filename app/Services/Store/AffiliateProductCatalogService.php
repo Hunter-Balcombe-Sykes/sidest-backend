@@ -143,17 +143,20 @@ GRAPHQL;
         if ($clearExisting) {
             AffiliateProductSelection::query()
                 ->where('affiliate_professional_id', $affiliate->id)
+                ->where('brand_professional_id', $brandProfessionalId)
                 ->delete();
         }
 
         // Get already-selected GIDs so we don't create duplicates
         $existingGids = AffiliateProductSelection::query()
             ->where('affiliate_professional_id', $affiliate->id)
+            ->where('brand_professional_id', $brandProfessionalId)
             ->pluck('shopify_product_gid')
             ->all();
 
         $maxSort = AffiliateProductSelection::query()
             ->where('affiliate_professional_id', $affiliate->id)
+            ->where('brand_professional_id', $brandProfessionalId)
             ->max('sort_order') ?? -1;
 
         foreach ($defaultGids as $gid) {
@@ -164,6 +167,7 @@ GRAPHQL;
             $maxSort++;
             AffiliateProductSelection::create([
                 'affiliate_professional_id' => $affiliate->id,
+                'brand_professional_id' => $brandProfessionalId,
                 'shopify_product_gid' => $gid,
                 'sort_order' => $maxSort,
             ]);

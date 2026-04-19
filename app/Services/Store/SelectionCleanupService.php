@@ -30,6 +30,7 @@ class SelectionCleanupService
 
         $deleted = AffiliateProductSelection::query()
             ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('brand_professional_id', $brandProfessionalId)
             ->delete();
 
         if ($deleted > 0) {
