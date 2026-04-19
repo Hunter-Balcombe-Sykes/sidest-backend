@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\AffiliateInviteController;
+use App\Http\Controllers\Api\Professional\ProfessionalAccountDeletionController;
+use App\Http\Middleware\Context\EnforcePendingDeletionReadOnly;
 use App\Http\Controllers\Api\Professional\Analytics\AffiliateCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Analytics\BrandCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
@@ -49,12 +51,21 @@ Route::get('/plans', [PlanController::class, 'index'])
     ->middleware('throttle:plans');
 
 // Authorised Professional Logged In
-Route::middleware(['supabase.jwt', 'current.pro', 'throttle:authenticated'])
+Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly::class, 'throttle:authenticated'])
     ->group(function () {
 
         // Show & Edit Details
         Route::get('/me', [ProfessionalController::class, 'show']);
         Route::patch('/me', [ProfessionalController::class, 'update']);
+
+        // Account Deletion — self-service lifecycle
+        Route::prefix('me/deletion')->group(function () {
+            Route::post('/request', [ProfessionalAccountDeletionController::class, 'request'])
+                ->middleware('throttle:3,60');
+            Route::post('/confirm', [ProfessionalAccountDeletionController::class, 'confirm']);
+            Route::post('/cancel', [ProfessionalAccountDeletionController::class, 'cancel'])
+                ->withoutMiddleware([EnforcePendingDeletionReadOnly::class]);
+        });
         Route::get('/brand-affiliates', [BrandAffiliateController::class, 'index']);
         Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect'])
             ->whereUuid('affiliate');
