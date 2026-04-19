@@ -42,6 +42,7 @@ class Professional extends BaseModel
         'stripe_commission_funding_mode',
         'stripe_manual_balance_cents',
         'stripe_manual_balance_currency',
+        'deletion_token_hash',
     ];
 
     protected $fillable = [
@@ -82,6 +83,11 @@ class Professional extends BaseModel
         'stripe_manual_balance_currency',
         'stripe_grace_period_ends_at',
 
+        // Account deletion lifecycle
+        'deletion_token_hash',
+        'deletion_requested_at',
+        'deletion_confirmed_at',
+        'deletion_previous_status',
     ];
 
     protected $casts = [
@@ -91,6 +97,8 @@ class Professional extends BaseModel
         'created_at'      => 'datetime',
         'updated_at'      => 'datetime',
         'deleted_at'      => 'datetime',
+        'deletion_requested_at' => 'datetime',
+        'deletion_confirmed_at' => 'datetime',
     ];
 
     public function isInfluencer(): bool
