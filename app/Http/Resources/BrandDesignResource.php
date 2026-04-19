@@ -6,12 +6,16 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 // Brand Design API response. Mirrors the unified shape returned by
-// BrandDesignController::show — colours, three normalised enum buckets
-// (corner_radius / border_thickness / section_spacing), logo URLs, slogan,
-// font, the placeholder list, and shopify_connected.
+// BrandDesignController::show — accent colour, theme_mode, three normalised
+// enum buckets (corner_radius / border_thickness / section_spacing), logo
+// URLs, slogan, font, the placeholder list, and shopify_connected.
+//
+// Background / text / border are no longer brand-picked — they're derived from
+// theme_mode in each Sidest theme. Only accent stays user-customisable.
 //
 // @response {
-//   colors: { background, text, accent, border },          hex|null
+//   colors: { accent },                                hex|null
+//   theme_mode: 'light'|'dark',                         (default 'light' applied upstream)
 //   corner_radius: 'square'|'default'|'pill',          (default 'default' applied upstream)
 //   border_thickness: 'hairline'|'default'|'bold',     (default 'default' applied upstream)
 //   section_spacing: 'tight'|'default'|'spacious',     (default 'default' applied upstream)
@@ -31,11 +35,9 @@ class BrandDesignResource extends JsonResource
 
         return [
             'colors' => [
-                'background' => $colors['background'] ?? null,
-                'text' => $colors['text'] ?? null,
                 'accent' => $colors['accent'] ?? null,
-                'border' => $colors['border'] ?? null,
             ],
+            'theme_mode' => $this->resource['theme_mode'] ?? null,
             'corner_radius' => $this->resource['corner_radius'] ?? null,
             'border_thickness' => $this->resource['border_thickness'] ?? null,
             'section_spacing' => $this->resource['section_spacing'] ?? null,

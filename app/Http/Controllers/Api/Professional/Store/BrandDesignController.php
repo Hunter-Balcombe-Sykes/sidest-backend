@@ -30,6 +30,9 @@ class BrandDesignController extends ApiController
     private const DEFAULT_CORNER_RADIUS = 'default';
     private const DEFAULT_BORDER_THICKNESS = 'default';
     private const DEFAULT_SECTION_SPACING = 'default';
+    // Light is the resting default for new brands and any row that predates
+    // the theme_mode migration.
+    private const DEFAULT_THEME_MODE = 'light';
 
     public function __construct(
         private readonly BrandDesignMediaService $brandDesign,
@@ -39,7 +42,8 @@ class BrandDesignController extends ApiController
      * Return the current resolved brand-design shape for the authenticated brand.
      *
      * @return JsonResponse {
-     *     colors: { background, text, accent, border },
+     *     colors: { accent },
+     *     theme_mode: 'light'|'dark',                        (default applied upstream)
      *     corner_radius: 'square'|'default'|'pill',          (default applied upstream)
      *     border_thickness: 'hairline'|'default'|'bold',     (default applied upstream)
      *     section_spacing: 'tight'|'default'|'spacious',     (default applied upstream)
@@ -72,11 +76,14 @@ class BrandDesignController extends ApiController
 
         return $this->success(new BrandDesignResource([
             'colors' => [
-                'background' => $colors['background'] ?? null,
-                'text' => $colors['text'] ?? null,
                 'accent' => $colors['accent'] ?? null,
-                'border' => $colors['border'] ?? null,
             ],
+            // Theme mode replaces the brand-picked background/text/border triple.
+            // Falls back to 'light' the same way the bucket enums fall back to
+            // their middle slot — keeps the UI on a sensible selected option.
+            'theme_mode' => is_string($design['theme_mode'] ?? null) && $design['theme_mode'] !== ''
+                ? $design['theme_mode']
+                : self::DEFAULT_THEME_MODE,
             // Fall back to the "middle" value for any unset bucket so the UI
             // always has a selected option — mirrors the font_family fallback.
             'corner_radius' => is_string($design['corner_radius'] ?? null) && $design['corner_radius'] !== ''

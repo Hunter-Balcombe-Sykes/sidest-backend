@@ -70,7 +70,8 @@ class HydrogenBrandDesignController extends ApiController
      *     brand_handle: string|null,
      *     brand_name: string|null,
      *     shop_domain: string|null,
-     *     colors: array{background: ?string, text: ?string, accent: ?string, border: ?string},
+     *     colors: array{accent: ?string},
+     *     theme_mode: string,
      *     corner_radius: ?string,
      *     border_thickness: ?string,
      *     section_spacing: ?string,
@@ -109,11 +110,13 @@ class HydrogenBrandDesignController extends ApiController
             'brand_name' => $professional->display_name,
             'shop_domain' => Arr::get($metadata, 'shop_domain'),
             'colors' => [
-                'background' => $colors['background'] ?? null,
-                'text' => $colors['text'] ?? null,
                 'accent' => $colors['accent'] ?? null,
-                'border' => $colors['border'] ?? null,
             ],
+            // theme_mode replaces the brand-picked background/text/border triple.
+            // Default to 'light' so Hydrogen never renders an unset surface.
+            'theme_mode' => is_string($design['theme_mode'] ?? null) && $design['theme_mode'] !== ''
+                ? $design['theme_mode']
+                : 'light',
             'corner_radius' => $design['corner_radius'] ?? null,
             'border_thickness' => $design['border_thickness'] ?? null,
             'section_spacing' => $design['section_spacing'] ?? null,

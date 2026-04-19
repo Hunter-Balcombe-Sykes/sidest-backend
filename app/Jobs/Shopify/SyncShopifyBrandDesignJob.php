@@ -128,12 +128,12 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
         $design = is_array($settings['design'] ?? null) ? $settings['design'] : [];
         $existingColors = is_array($design['colors'] ?? null) ? $design['colors'] : [];
 
+        // Only accent stays brand-pickable. Background/text/border are derived
+        // from theme_mode (light|dark) per Sidest theme.
         $design['colors'] = [
-            'background' => $imported['colors']['background'] ?? ($existingColors['background'] ?? null),
-            'text' => $imported['colors']['text'] ?? ($existingColors['text'] ?? null),
             'accent' => $imported['colors']['accent'] ?? ($existingColors['accent'] ?? null),
-            'border' => $imported['colors']['border'] ?? ($existingColors['border'] ?? null),
         ];
+        $design['theme_mode'] = $imported['theme_mode'] ?? ($design['theme_mode'] ?? null);
         $design['corner_radius'] = $imported['corner_radius'] ?? ($design['corner_radius'] ?? null);
         $design['border_thickness'] = $imported['border_thickness'] ?? ($design['border_thickness'] ?? null);
         $design['section_spacing'] = $imported['section_spacing'] ?? ($design['section_spacing'] ?? null);
@@ -154,6 +154,7 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
             try {
                 $this->writeBrandDesignMetafield($integration, (string) $imported['shop_gid'], [
                     'colors' => $design['colors'],
+                    'theme_mode' => $design['theme_mode'],
                     'corner_radius' => $design['corner_radius'],
                     'border_thickness' => $design['border_thickness'],
                     'section_spacing' => $design['section_spacing'],

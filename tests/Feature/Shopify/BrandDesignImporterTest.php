@@ -135,12 +135,12 @@ it('imports the full brand design shape from a populated Shopify response', func
 
     $imported = app(BrandDesignImporter::class)->import($integration);
 
+    // background/text/border are no longer brand-picked — only accent stays.
+    // theme_mode is inferred from the merchant's primary background colour.
     expect($imported['colors'])->toEqual([
-        'background' => '#ffffff',
-        'text' => '#000000',
         'accent' => '#ff0066',
-        'border' => null,
     ]);
+    expect($imported['theme_mode'])->toBe('light'); // primary bg #ffffff → light
     expect($imported['corner_radius'])->toBe('default');
     expect($imported['border_thickness'])->toBe('default');
     expect($imported['section_spacing'])->toBe('spacious');
@@ -244,8 +244,46 @@ it('returns null enums (without throwing) when the asset endpoint fails', functi
     expect($imported['border_thickness'])->toBeNull();
     expect($imported['section_spacing'])->toBeNull();
     // Brand fields still come through despite the asset failure.
-    expect($imported['colors']['background'])->toBe('#ffffff');
+    expect($imported['colors']['accent'])->toBe('#ff0066');
+    expect($imported['theme_mode'])->toBe('light');
     expect($imported['logo']['full_url'])->toBe('https://cdn.shopify.com/s/files/full-logo.png');
+});
+
+it('infers theme_mode dark when the primary background is a dark hue', function () {
+    $integration = makeBrandDesignImporterIntegration();
+
+    Http::fake([
+        'importer.myshopify.com/admin/api/*/graphql.json' => function ($request) {
+            $query = $request->data()['query'] ?? '';
+            if (str_contains($query, 'shop {')) {
+                return Http::response([
+                    'data' => [
+                        'shop' => [
+                            'id' => 'gid://shopify/Shop/12345',
+                            'myshopifyDomain' => 'importer.myshopify.com',
+                            'brand' => [
+                                'slogan' => null,
+                                'logo' => ['image' => ['url' => null]],
+                                'squareLogo' => ['image' => ['url' => null]],
+                                'colors' => [
+                                    'primary' => [['background' => '#0a0a0a', 'foreground' => '#ffffff']],
+                                    'secondary' => [['background' => '#ff0066', 'foreground' => '#ffffff']],
+                                ],
+                            ],
+                        ],
+                    ],
+                ]);
+            }
+            return Http::response(brandDesignFakeThemesResponse('Dawn'));
+        },
+        'importer.myshopify.com/admin/api/*/themes/*/assets.json*' => Http::response(
+            brandDesignFakeAssetResponse([])
+        ),
+    ]);
+
+    $imported = app(BrandDesignImporter::class)->import($integration);
+
+    expect($imported['theme_mode'])->toBe('dark');
 });
 
 it('resolves a settings_data.json preset when current is a string', function () {

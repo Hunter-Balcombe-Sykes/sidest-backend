@@ -112,7 +112,8 @@ class BrandDesignImporter
      * in those slots.
      *
      * @return array{
-     *     colors: array{background: ?string, text: ?string, accent: ?string, border: ?string},
+     *     colors: array{accent: ?string},
+     *     theme_mode: ?string,
      *     corner_radius: ?string,
      *     border_thickness: ?string,
      *     section_spacing: ?string,
@@ -138,18 +139,19 @@ class BrandDesignImporter
         $themeName = strtolower((string) ($themeSettings['_theme_name'] ?? ''));
         $settings = is_array($themeSettings['current'] ?? null) ? $themeSettings['current'] : [];
 
+        // Brand background/text/border are no longer brand-picked — the
+        // dashboard exposes a single light|dark theme_mode instead. Infer the
+        // mode from the merchant's primary background colour: dark hue → dark
+        // mode. Accent stays a free-form hex.
+        $primaryBackground = Arr::get($brand, 'colors.primary.0.background');
+
         return [
             'colors' => [
-                // Shop Brand API's "primary" colour pair is the brand's base —
-                // background + foreground. Use them for page background/text.
-                'background' => Arr::get($brand, 'colors.primary.0.background'),
-                'text' => Arr::get($brand, 'colors.primary.0.foreground'),
                 // The "secondary" pair backs accents (buttons, links). The
                 // background half is what merchants see as their accent swatch.
                 'accent' => Arr::get($brand, 'colors.secondary.0.background'),
-                // Border colour has no Brand API equivalent.
-                'border' => null,
             ],
+            'theme_mode' => $this->inferThemeMode(is_string($primaryBackground) ? $primaryBackground : null),
             'corner_radius' => $this->bucketRadius($this->resolvePx($settings, $themeName, 'radius')),
             'border_thickness' => $this->bucketThickness($this->resolvePx($settings, $themeName, 'thickness')),
             'section_spacing' => $this->bucketSpacing($this->resolvePx($settings, $themeName, 'spacing')),
@@ -340,5 +342,40 @@ class BrandDesignImporter
             $px >= self::SPACING_DEFAULT_MIN => 'default',
             default => 'tight',
         };
+    }
+
+    /**
+     * Pick light/dark from the merchant's primary background colour using WCAG
+     * relative luminance. Returns null when no value is present so callers can
+     * preserve any existing theme_mode the brand picked manually.
+     *
+     * Threshold 0.5 splits the WCAG luminance range into halves — anything
+     * darker than mid-grey reads as "dark mode", anything lighter as "light".
+     */
+    private function inferThemeMode(?string $hex): ?string
+    {
+        if ($hex === null) {
+            return null;
+        }
+
+        $h = ltrim(trim($hex), '#');
+        if (strlen($h) === 3) {
+            $h = $h[0].$h[0].$h[1].$h[1].$h[2].$h[2];
+        }
+        if (! preg_match('/^[0-9a-fA-F]{6}$/', $h)) {
+            return null;
+        }
+
+        // sRGB transfer curve → linear-light, then WCAG luminance.
+        $channel = function (int $byte): float {
+            $v = $byte / 255;
+            return $v <= 0.03928 ? $v / 12.92 : (($v + 0.055) / 1.055) ** 2.4;
+        };
+        $r = $channel((int) hexdec(substr($h, 0, 2)));
+        $g = $channel((int) hexdec(substr($h, 2, 2)));
+        $b = $channel((int) hexdec(substr($h, 4, 2)));
+        $luminance = 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
+
+        return $luminance < 0.5 ? 'dark' : 'light';
     }
 }

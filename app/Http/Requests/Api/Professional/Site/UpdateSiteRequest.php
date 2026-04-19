@@ -36,15 +36,19 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.primary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings.secondary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings.design' => ['sometimes', 'array'],
-            'settings.design.border_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            // Legacy free-key colour aliases (border_color / white_color / dark_color /
+            // background_color / text_color) were retired by the theme_mode migration —
+            // brands no longer pick these individually. accent_color stays writable
+            // until a follow-up move to the unified colors.accent slot.
+            'settings.design.border_color' => ['prohibited'],
             'settings.design.accent_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'settings.design.white_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'settings.design.dark_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.design.white_color' => ['prohibited'],
+            'settings.design.dark_color' => ['prohibited'],
             'settings.design.border_radius' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.border_width' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.general_spacing_padding' => ['sometimes', 'nullable', 'string', 'max:32'],
-            'settings.design.background_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'settings.design.text_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.design.background_color' => ['prohibited'],
+            'settings.design.text_color' => ['prohibited'],
             'settings.design.button_background' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings.design.button_text_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings.design.primary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
@@ -77,18 +81,20 @@ class UpdateSiteRequest extends BaseFormRequest
             // The legacy design.* keys above stay in place until the UI is rebuilt
             // against this shape — drop them in a follow-up migration after that.
             'settings.design.colors' => ['sometimes', 'array'],
-            'settings.design.colors.background' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'settings.design.colors.text' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            // Background / text / border are now derived from theme_mode (light|dark)
+            // — see the 20260419120000 migration. Only accent stays brand-pickable.
+            'settings.design.colors.background' => ['prohibited'],
+            'settings.design.colors.text' => ['prohibited'],
             'settings.design.colors.accent' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'settings.design.colors.border' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            // 3-bucket enums normalise noisy theme pixel values into coherent design
-            // buckets that each Sidest theme design can map to its own concrete values.
+            'settings.design.colors.border' => ['prohibited'],
+            // 3-bucket enums + theme_mode normalise design choices into coherent
+            // tokens that each Sidest theme can map to its own concrete values.
             // Enum values mirror the dashboard dropdown labels (lowercased): the
-            // middle value is `default` for every bucket so the storage layer
-            // and the UI speak the same vocabulary.
+            // middle value is `default` for every 3-bucket; theme_mode is binary.
             'settings.design.corner_radius' => ['sometimes', 'nullable', 'string', Rule::in(['square', 'default', 'pill'])],
             'settings.design.border_thickness' => ['sometimes', 'nullable', 'string', Rule::in(['hairline', 'default', 'bold'])],
             'settings.design.section_spacing' => ['sometimes', 'nullable', 'string', Rule::in(['tight', 'default', 'spacious'])],
+            'settings.design.theme_mode' => ['sometimes', 'nullable', 'string', Rule::in(['light', 'dark'])],
             // Logos are downloaded from Shopify into our own storage so the URLs
             // are stable even if Shopify CDN tokens rotate.
             'settings.design.logo' => ['prohibited'],
@@ -196,12 +202,12 @@ class UpdateSiteRequest extends BaseFormRequest
             'subdomain.min' => 'The subdomain must be at least 3 characters.',
             'subdomain.max' => 'The subdomain cannot exceed 63 characters.',
             'settings.primary_color.regex' => 'The primary color must be a valid hex color (e.g., #000000 or #000).',
-            'settings.design.border_color.regex' => 'The design border color must be a valid hex color.',
+            'settings.design.border_color.prohibited' => 'Border colour is now derived from theme_mode (light|dark).',
             'settings.design.accent_color.regex' => 'The design accent color must be a valid hex color.',
-            'settings.design.white_color.regex' => 'The design white color must be a valid hex color.',
-            'settings.design.dark_color.regex' => 'The design dark color must be a valid hex color.',
-            'settings.design.background_color.regex' => 'The background color must be a valid hex color.',
-            'settings.design.text_color.regex' => 'The text color must be a valid hex color.',
+            'settings.design.white_color.prohibited' => 'Background colour is now derived from theme_mode (light|dark).',
+            'settings.design.dark_color.prohibited' => 'Text colour is now derived from theme_mode (light|dark).',
+            'settings.design.background_color.prohibited' => 'Background colour is now derived from theme_mode (light|dark).',
+            'settings.design.text_color.prohibited' => 'Text colour is now derived from theme_mode (light|dark).',
             'settings.design.button_background.regex' => 'The button background color must be a valid hex color.',
             'settings.design.button_text_color.regex' => 'The button text color must be a valid hex color.',
             'settings.design.primary_color.regex' => 'The primary color must be a valid hex color.',
@@ -216,13 +222,14 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.design.typography.font_file_path.prohibited' => 'Custom font uploads are no longer supported — use settings.design.font_family.',
             'settings.design.typography.font_file_url.prohibited' => 'Custom font uploads are no longer supported — use settings.design.font_family.',
             // New unified shape messages.
-            'settings.design.colors.background.regex' => 'The background color must be a valid hex color (e.g., #FFFFFF).',
-            'settings.design.colors.text.regex' => 'The text color must be a valid hex color.',
+            'settings.design.colors.background.prohibited' => 'Background colour is now derived from theme_mode (light|dark).',
+            'settings.design.colors.text.prohibited' => 'Text colour is now derived from theme_mode (light|dark).',
             'settings.design.colors.accent.regex' => 'The accent color must be a valid hex color.',
-            'settings.design.colors.border.regex' => 'The border color must be a valid hex color.',
+            'settings.design.colors.border.prohibited' => 'Border colour is now derived from theme_mode (light|dark).',
             'settings.design.corner_radius.in' => 'Corner radius must be one of: square, default, pill.',
             'settings.design.border_thickness.in' => 'Border thickness must be one of: hairline, default, bold.',
             'settings.design.section_spacing.in' => 'Section spacing must be one of: tight, default, spacious.',
+            'settings.design.theme_mode.in' => 'Theme mode must be one of: light, dark.',
             'settings.design.font_family.in' => 'Font must be one of: neue_haas_grotesk, helvetica_neue, forma_djr, nb_architekt, swiss_721.',
             'settings.design.media.placeholder_sitepage_images.prohibited' => 'Use /api/uploads/brand-placeholder-image and the brand-placeholder-images management endpoints.',
             'settings.design.media.placeholder_sitepage_images.*.prohibited' => 'Use /api/uploads/brand-placeholder-image and the brand-placeholder-images management endpoints.',
