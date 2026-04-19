@@ -96,7 +96,7 @@ class BootstrapController extends ApiController
                 $professional->auth_user_id = $uid;
             } else {
 
-                if (in_array($professional->status, ['disabled', 'suspended'], true)) {
+                if (in_array($professional->status, ['disabled', 'suspended', 'pending_deletion'], true)) {
                     return $this->error('Account is disabled. Contact support.', 403);
                 }
 
