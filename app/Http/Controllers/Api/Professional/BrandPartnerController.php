@@ -8,9 +8,10 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
-use App\Services\Cache\ProfessionalCacheService;
+use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\BrandPartnerLinkService;
-use App\Services\Store\SelectionCleanupService;
+use App\Services\Professional\BrandPartnerSiteSettingsSync;
+use App\Services\Professional\DTO\DisconnectRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
@@ -25,7 +26,8 @@ class BrandPartnerController extends ApiController
     public function connect(
         Request $request,
         string $brandProfessionalId,
-        BrandPartnerLinkService $brandPartnerLinks
+        BrandPartnerLinkService $brandPartnerLinks,
+        BrandPartnerSiteSettingsSync $sync,
     ): JsonResponse {
         $professional = $this->currentProfessional($request);
 
@@ -61,8 +63,8 @@ class BrandPartnerController extends ApiController
             return $this->error($exception->getMessage(), 422);
         }
 
-        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
-        $this->invalidateAffiliateCaches($site);
+        $sync->sync($site, (string) $professional->id);
+        $sync->invalidateAffiliateCaches($site);
 
         return $this->success([
             'connected' => true,
@@ -118,7 +120,8 @@ class BrandPartnerController extends ApiController
     public function promote(
         Request $request,
         string $brandProfessionalId,
-        BrandPartnerLinkService $brandPartnerLinks
+        BrandPartnerLinkService $brandPartnerLinks,
+        BrandPartnerSiteSettingsSync $sync,
     ): JsonResponse {
         $professional = $this->currentProfessional($request);
 
@@ -136,8 +139,8 @@ class BrandPartnerController extends ApiController
             return $this->error('Brand partner not found in your additional partners.', 404);
         }
 
-        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
-        $this->invalidateAffiliateCaches($site);
+        $sync->sync($site, (string) $professional->id);
+        $sync->invalidateAffiliateCaches($site);
 
         return $this->success([
             'promoted' => true,
@@ -148,8 +151,7 @@ class BrandPartnerController extends ApiController
     public function disconnect(
         Request $request,
         string $brandProfessionalId,
-        BrandPartnerLinkService $brandPartnerLinks,
-        SelectionCleanupService $selectionCleanup
+        BrandPartnerLinkLifecycleService $lifecycle,
     ): JsonResponse {
         $professional = $this->currentProfessional($request);
 
@@ -157,43 +159,36 @@ class BrandPartnerController extends ApiController
             return $this->error('Brand accounts cannot manage brand partner connections.', 403);
         }
 
-        $site = Site::query()->where('professional_id', $professional->id)->first();
-        if (! $site) {
-            return $this->error('Site not found.', 404);
+        $data = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $brand = Professional::query()->whereKey($brandProfessionalId)->first();
+        if (! $brand) {
+            return $this->error('Brand partner not found.', 404);
         }
 
-        $affiliateProfessionalId = (string) $professional->id;
-        $disconnected = $brandPartnerLinks->disconnectBrandFromAffiliate($affiliateProfessionalId, (string) $brandProfessionalId);
+        $result = $lifecycle->disconnect(DisconnectRequest::forAffiliate(
+            brand: $brand,
+            affiliate: $professional,
+            reason: $data['reason'] ?? null,
+        ));
 
-        if (! $disconnected) {
-            $cleanedStaleSettings = $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
-            if (! $this->settingsStillReferenceBrand($site, (string) $brandProfessionalId) && $cleanedStaleSettings) {
-                $this->invalidateAffiliateCaches($site);
-
-                return $this->success([
-                    'disconnected' => true,
-                    'brand_professional_id' => $brandProfessionalId,
-                    'stale_settings_cleaned' => true,
-                ]);
-            }
-
+        if (! $result->disconnected) {
             return $this->error('Brand partner not found in your connections.', 404);
         }
 
-        $selectionCleanup->removeSelectionsForAffiliateBrand(
-            $affiliateProfessionalId,
-            (string) $brandProfessionalId,
-            'Brand connection removed',
-            '{count} selected product(s) were removed because this brand connection ended.'
-        );
-
-        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
-        $this->invalidateAffiliateCaches($site);
-
-        return $this->success([
+        $response = [
             'disconnected' => true,
             'brand_professional_id' => $brandProfessionalId,
-        ]);
+            'selections_removed' => $result->selectionsRemoved,
+        ];
+
+        if ($result->staleSettingsCleaned) {
+            $response['stale_settings_cleaned'] = true;
+        }
+
+        return $this->success($response);
     }
 
     private function brandToArray(Professional $professional): array
@@ -219,86 +214,4 @@ class BrandPartnerController extends ApiController
         ];
     }
 
-    private function syncSiteBrandPartnerSettings(
-        Site $site,
-        BrandPartnerLinkService $brandPartnerLinks,
-        string $affiliateProfessionalId
-    ): bool {
-        $links = $brandPartnerLinks->getLinksForAffiliate($affiliateProfessionalId);
-        $settings = is_array($site->settings) ? $site->settings : [];
-        $originalSettings = $settings;
-
-        $brandPartner = is_array($settings['brand_partner'] ?? null)
-            ? $settings['brand_partner']
-            : [];
-
-        $primaryLink = $links->firstWhere('slot', BrandPartnerLinkService::PRIMARY_SLOT);
-        if ($primaryLink) {
-            $brandPartner['professional_id'] = (string) $primaryLink->brand_professional_id;
-        } else {
-            unset($brandPartner['professional_id'], $brandPartner['professionalId']);
-        }
-
-        $settings['brand_partner'] = $brandPartner;
-        $settings['additional_brand_partners'] = $links
-            ->filter(static fn ($link): bool => (int) $link->slot > BrandPartnerLinkService::PRIMARY_SLOT)
-            ->sortBy('slot')
-            ->map(static fn ($link): array => [
-                'professional_id' => (string) $link->brand_professional_id,
-            ])
-            ->values()
-            ->all();
-
-        if ($settings === $originalSettings) {
-            return false;
-        }
-
-        $site->settings = $settings;
-        $site->save();
-
-        return true;
-    }
-
-    private function settingsStillReferenceBrand(Site $site, string $brandProfessionalId): bool
-    {
-        $settings = is_array($site->settings) ? $site->settings : [];
-        $primaryId = trim((string) (
-            $settings['brand_partner']['professional_id']
-            ?? $settings['brand_partner']['professionalId']
-            ?? ''
-        ));
-
-        if ($primaryId === $brandProfessionalId) {
-            return true;
-        }
-
-        $additional = $settings['additional_brand_partners'] ?? $settings['additionalBrandPartners'] ?? [];
-        if (! is_array($additional)) {
-            return false;
-        }
-
-        foreach ($additional as $entry) {
-            if (! is_array($entry)) {
-                continue;
-            }
-
-            $entryId = trim((string) ($entry['professional_id'] ?? $entry['professionalId'] ?? ''));
-            if ($entryId === $brandProfessionalId) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function invalidateAffiliateCaches(Site $site): void
-    {
-        $site->loadMissing('professional');
-        $professional = $site->professional;
-        if (! $professional) {
-            return;
-        }
-
-        app(ProfessionalCacheService::class)->invalidateProfessional($professional);
-    }
 }
