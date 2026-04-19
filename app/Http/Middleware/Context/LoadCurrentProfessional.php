@@ -44,14 +44,15 @@ class LoadCurrentProfessional
             ], 403);
         }
 
-        if (($professional->status ?? 'active') !== 'active') {
-            Log::info('LoadCurrentProfessional suspended account', [
+        $status = $professional->status ?? 'active';
+        if (! in_array($status, ['active', 'pending_deletion'], true)) {
+            Log::info('LoadCurrentProfessional blocked account', [
                 'uid'   => $uid,
-                'status'=> $professional->status ?? null,
+                'status'=> $status,
             ]);
 
             return response()->json([
-                'message' => 'Your account is suspended.'
+                'message' => 'Your account is not active. Contact support.'
             ], 403);
         }
 
