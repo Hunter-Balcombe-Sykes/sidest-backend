@@ -40,9 +40,9 @@ CREATE TABLE IF NOT EXISTS brand.brand_partner_link_events (
         CHECK (slot_at_event IS NULL OR slot_at_event BETWEEN 0 AND 3)
 );
 
-CREATE INDEX brand_partner_link_events_brand_idx
+CREATE INDEX IF NOT EXISTS brand_partner_link_events_brand_idx
     ON brand.brand_partner_link_events (brand_professional_id, created_at DESC);
-CREATE INDEX brand_partner_link_events_affiliate_idx
+CREATE INDEX IF NOT EXISTS brand_partner_link_events_affiliate_idx
     ON brand.brand_partner_link_events (affiliate_professional_id, created_at DESC);
-CREATE INDEX brand_partner_link_events_pair_idx
+CREATE INDEX IF NOT EXISTS brand_partner_link_events_pair_idx
     ON brand.brand_partner_link_events (affiliate_professional_id, brand_professional_id, created_at DESC);

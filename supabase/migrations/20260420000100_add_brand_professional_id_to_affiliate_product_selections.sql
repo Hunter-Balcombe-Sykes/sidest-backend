@@ -1,7 +1,7 @@
 -- Selections are now scoped per brand so disconnecting one brand doesn't wipe
 -- selections belonging to other brand partners of the same affiliate.
 ALTER TABLE commerce.affiliate_product_selections
-    ADD COLUMN brand_professional_id uuid
+    ADD COLUMN IF NOT EXISTS brand_professional_id uuid
         REFERENCES core.professionals(id) ON DELETE CASCADE;
 
 -- Backfill from brand_partner_links. Pre-beta, each affiliate has at most
@@ -21,5 +21,5 @@ WHERE brand_professional_id IS NULL;
 ALTER TABLE commerce.affiliate_product_selections
     ALTER COLUMN brand_professional_id SET NOT NULL;
 
-CREATE INDEX affiliate_product_selections_brand_idx
+CREATE INDEX IF NOT EXISTS affiliate_product_selections_brand_idx
     ON commerce.affiliate_product_selections (affiliate_professional_id, brand_professional_id);
