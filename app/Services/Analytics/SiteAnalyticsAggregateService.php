@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 class SiteAnalyticsAggregateService
 {
     use ResolvesTimezone;
+
     public function rebuildProfessionalHour(string $professionalId, Carbon|string $hourStart): void
     {
         $professionalId = trim($professionalId);
@@ -37,7 +38,7 @@ class SiteAnalyticsAggregateService
                 ->select([
                     'v.site_id',
                     DB::raw('COUNT(*) as visits_count'),
-                    DB::raw("COUNT(DISTINCT COALESCE(v.visitor_id::text, v.ip_hash)) as unique_visitors"),
+                    DB::raw('COUNT(DISTINCT COALESCE(v.visitor_id::text, v.ip_hash)) as unique_visitors'),
                 ])
                 ->groupBy('v.site_id')
                 ->get();
@@ -49,7 +50,7 @@ class SiteAnalyticsAggregateService
                 ->select([
                     'c.site_id',
                     DB::raw('COUNT(*) as clicks_count'),
-                    DB::raw("COUNT(DISTINCT COALESCE(c.visitor_id::text, c.ip_hash)) as unique_clickers"),
+                    DB::raw('COUNT(DISTINCT COALESCE(c.visitor_id::text, c.ip_hash)) as unique_clickers'),
                 ])
                 ->groupBy('c.site_id')
                 ->get();
@@ -130,7 +131,7 @@ class SiteAnalyticsAggregateService
                 ->select([
                     'v.site_id',
                     DB::raw('COUNT(*) as visits_count'),
-                    DB::raw("COUNT(DISTINCT COALESCE(v.visitor_id::text, v.ip_hash)) as unique_visitors"),
+                    DB::raw('COUNT(DISTINCT COALESCE(v.visitor_id::text, v.ip_hash)) as unique_visitors'),
                 ])
                 ->groupBy('v.site_id')
                 ->get();
@@ -141,7 +142,7 @@ class SiteAnalyticsAggregateService
                 ->select([
                     'c.site_id',
                     DB::raw('COUNT(*) as clicks_count'),
-                    DB::raw("COUNT(DISTINCT COALESCE(c.visitor_id::text, c.ip_hash)) as unique_clickers"),
+                    DB::raw('COUNT(DISTINCT COALESCE(c.visitor_id::text, c.ip_hash)) as unique_clickers'),
                 ])
                 ->groupBy('c.site_id')
                 ->get();
@@ -194,5 +195,4 @@ class SiteAnalyticsAggregateService
             DB::table('analytics.site_metrics_daily')->insert($inserts);
         });
     }
-
 }

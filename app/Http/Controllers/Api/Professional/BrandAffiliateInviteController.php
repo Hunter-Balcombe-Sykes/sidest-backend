@@ -169,8 +169,7 @@ class BrandAffiliateInviteController extends ApiController
         string $token,
         BrandAffiliateInviteService $inviteService,
         BrandPartnerLinkService $brandPartnerLinks
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $professional = $this->currentProfessional($request);
         $invite = $inviteService->findByToken($token);
 

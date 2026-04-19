@@ -45,12 +45,14 @@ class StripeConnectWebhookController extends Controller
                 continue;
             } catch (\Exception $e) {
                 Log::warning('Stripe webhook parse error', ['error' => $e->getMessage()]);
+
                 return response()->json(['error' => 'Invalid payload'], 400);
             }
         }
 
         if (! $event) {
             Log::warning('Stripe webhook signature verification failed for all configured secrets');
+
             return response()->json(['error' => 'Invalid signature'], 400);
         }
 
@@ -82,6 +84,7 @@ class StripeConnectWebhookController extends Controller
 
         if (! $professional) {
             Log::debug('Stripe account.updated for unknown account', ['account_id' => $account->id]);
+
             return;
         }
 
@@ -94,6 +97,7 @@ class StripeConnectWebhookController extends Controller
                 'professional_id' => $professional->id,
                 'account_id' => $account->id,
             ]);
+
             return;
         }
 

@@ -47,16 +47,16 @@ class BrandStoreSettingsController extends ApiController
 
         return $this->success(new BrandStoreSettingsResource([
             'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
-            'payout_hold_days'        => $storeSettings?->payout_hold_days,
-            'accent_color'            => $design['accent_color'] ?? null,
-            'theme_variant'           => $design['theme_variant'] ?? null,
-            'product_image_ratio'     => $design['product_image_ratio'] ?? null,
-            'custom_photos_enabled'   => Arr::get($metadata, 'custom_photos_enabled', true),
-            'custom_photo_position'   => $design['custom_photo_position'] ?? 'after',
-            'theme_id'                => $storeSettings?->theme_id ?? 1,
+            'payout_hold_days' => $storeSettings?->payout_hold_days,
+            'accent_color' => $design['accent_color'] ?? null,
+            'theme_variant' => $design['theme_variant'] ?? null,
+            'product_image_ratio' => $design['product_image_ratio'] ?? null,
+            'custom_photos_enabled' => Arr::get($metadata, 'custom_photos_enabled', true),
+            'custom_photo_position' => $design['custom_photo_position'] ?? 'after',
+            'theme_id' => $storeSettings?->theme_id ?? 1,
             // Token is never returned; only expose whether one has been saved
-            'oxygen_token_set'        => ! empty($storeSettings?->oxygen_deployment_token),
-            'oxygen_storefront_id'    => $storeSettings?->oxygen_storefront_id,
+            'oxygen_token_set' => ! empty($storeSettings?->oxygen_deployment_token),
+            'oxygen_storefront_id' => $storeSettings?->oxygen_storefront_id,
         ]));
     }
 
@@ -171,6 +171,7 @@ class BrandStoreSettingsController extends ApiController
 
                     if (! $result['success']) {
                         $msg = $result['userErrors'][0]['message'] ?? 'Failed to update Shopify settings.';
+
                         return $this->error($msg, 422);
                     }
                 }
@@ -206,15 +207,15 @@ class BrandStoreSettingsController extends ApiController
 
         return $this->success(new BrandStoreSettingsResource([
             'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
-            'payout_hold_days'        => $storeSettings?->payout_hold_days,
-            'accent_color'            => $freshDesign['accent_color'] ?? null,
-            'theme_variant'           => $freshDesign['theme_variant'] ?? null,
-            'product_image_ratio'     => $freshDesign['product_image_ratio'] ?? null,
-            'custom_photos_enabled'   => Arr::get($freshMetadata, 'custom_photos_enabled', true),
-            'custom_photo_position'   => $freshDesign['custom_photo_position'] ?? 'after',
-            'theme_id'                => $storeSettings?->theme_id ?? 1,
-            'oxygen_token_set'        => ! empty($storeSettings?->oxygen_deployment_token),
-            'oxygen_storefront_id'    => $storeSettings?->oxygen_storefront_id,
+            'payout_hold_days' => $storeSettings?->payout_hold_days,
+            'accent_color' => $freshDesign['accent_color'] ?? null,
+            'theme_variant' => $freshDesign['theme_variant'] ?? null,
+            'product_image_ratio' => $freshDesign['product_image_ratio'] ?? null,
+            'custom_photos_enabled' => Arr::get($freshMetadata, 'custom_photos_enabled', true),
+            'custom_photo_position' => $freshDesign['custom_photo_position'] ?? 'after',
+            'theme_id' => $storeSettings?->theme_id ?? 1,
+            'oxygen_token_set' => ! empty($storeSettings?->oxygen_deployment_token),
+            'oxygen_storefront_id' => $storeSettings?->oxygen_storefront_id,
         ]));
     }
 }

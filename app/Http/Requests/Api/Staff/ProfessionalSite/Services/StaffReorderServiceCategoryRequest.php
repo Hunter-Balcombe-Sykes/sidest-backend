@@ -10,7 +10,7 @@ class StaffReorderServiceCategoryRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'ids'   => ['required', 'array', 'min:1'],
+            'ids' => ['required', 'array', 'min:1'],
             'ids.*' => ['required', 'uuid', 'distinct'],
         ];
     }

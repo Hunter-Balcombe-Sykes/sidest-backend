@@ -9,10 +9,10 @@ use App\Models\Billing\Subscription;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -32,6 +32,7 @@ class Professional extends BaseModel
     protected $table = 'core.professionals';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $hidden = [
@@ -94,9 +95,9 @@ class Professional extends BaseModel
         'onboarding_step' => 'integer',
         'stripe_manual_balance_cents' => 'integer',
         'stripe_grace_period_ends_at' => 'datetime',
-        'created_at'      => 'datetime',
-        'updated_at'      => 'datetime',
-        'deleted_at'      => 'datetime',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+        'deleted_at' => 'datetime',
         'deletion_requested_at' => 'datetime',
         'deletion_confirmed_at' => 'datetime',
     ];
@@ -241,5 +242,4 @@ class Professional extends BaseModel
 
         return $query;
     }
-
 }

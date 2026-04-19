@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Controller;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
-use App\Models\Billing\WebhookEvent;
 use App\Models\Core\Professional\Professional;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Professional\SiteProvisioningService;
@@ -40,9 +39,11 @@ class StripeWebhookController extends Controller
             $event = Webhook::constructEvent($payload, $sigHeader, $secret);
         } catch (SignatureVerificationException) {
             Log::warning('Stripe billing webhook signature verification failed');
+
             return response()->json(['error' => 'Invalid signature'], 400);
         } catch (\Exception $e) {
             Log::warning('Stripe billing webhook parse error', ['error' => $e->getMessage()]);
+
             return response()->json(['error' => 'Invalid payload'], 400);
         }
 
@@ -92,6 +93,7 @@ class StripeWebhookController extends Controller
                 'customer_id' => $stripeCustomerId,
                 'metadata_professional_id' => $subscription->metadata?->sidest_professional_id ?? null,
             ]);
+
             return;
         }
 
@@ -104,6 +106,7 @@ class StripeWebhookController extends Controller
                 'professional_id' => $professional->id,
                 'stripe_subscription_id' => $subscription->id,
             ]);
+
             return;
         }
 
@@ -146,6 +149,7 @@ class StripeWebhookController extends Controller
             Log::debug('Stripe subscription.updated for unknown subscription', [
                 'stripe_subscription_id' => $subscription->id,
             ]);
+
             return;
         }
 
@@ -182,6 +186,7 @@ class StripeWebhookController extends Controller
             Log::debug('Stripe subscription.deleted for unknown subscription', [
                 'stripe_subscription_id' => $subscription->id,
             ]);
+
             return;
         }
 
@@ -266,7 +271,7 @@ class StripeWebhookController extends Controller
                 category: 'subscriptions',
                 title: 'Payment failed',
                 body: 'Your subscription payment could not be processed. Please update your payment method to avoid service interruption.',
-                dedupeKey: 'payment-failed-' . $localSub->id . '-' . now()->format('Y-m-d'),
+                dedupeKey: 'payment-failed-'.$localSub->id.'-'.now()->format('Y-m-d'),
                 ctaUrl: '/account/billing',
                 primaryActionLabel: 'Update Payment',
             );

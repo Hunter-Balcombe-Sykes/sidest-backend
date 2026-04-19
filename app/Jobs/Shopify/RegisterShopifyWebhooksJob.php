@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Core. Registers all Shopify webhooks (functional + GDPR) via GraphQL on install. Idempotent — skips already-registered topics.
-class RegisterShopifyWebhooksJob implements ShouldQueue, ShouldBeUnique
+class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 

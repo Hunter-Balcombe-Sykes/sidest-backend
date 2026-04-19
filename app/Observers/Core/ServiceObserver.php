@@ -101,9 +101,9 @@ class ServiceObserver
             );
         } catch (\Throwable $e) {
             Log::warning('Booking section visibility reevaluation failed on service change', [
-                'service_id'      => $service->id,
+                'service_id' => $service->id,
                 'professional_id' => $service->professional_id,
-                'message'         => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }

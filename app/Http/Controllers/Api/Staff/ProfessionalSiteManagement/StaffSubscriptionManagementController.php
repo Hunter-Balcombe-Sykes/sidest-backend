@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
-use App\Actions\Subscription\ChangeProfessionalPlanAction;
 use App\Actions\Subscription\CancelProfessionalSubscriptionAction;
+use App\Actions\Subscription\ChangeProfessionalPlanAction;
 use App\Actions\Subscription\ResumeProfessionalSubscriptionAction;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Resources\SubscriptionResource;
@@ -11,7 +11,6 @@ use App\Models\Billing\Subscription;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 
 // V2: Staff manages professional subscriptions (view, change plan, cancel, resume). Wired to Stripe for paid plans.
 class StaffSubscriptionManagementController extends ApiController

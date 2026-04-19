@@ -49,11 +49,13 @@ class UploadImageRequest extends BaseFormRequest
 
             if ($hasImage && $hasVideo) {
                 $v->errors()->add('image', 'Provide either an image or a video, not both.');
+
                 return;
             }
 
             if (! $hasImage && ! $hasVideo) {
                 $v->errors()->add('image', 'An image or video file is required.');
+
                 return;
             }
 
@@ -76,12 +78,12 @@ class UploadImageRequest extends BaseFormRequest
         $videoMaxMb = round(((int) config('sidest.video_max_upload_size', 512000)) / 1024, 0);
 
         return [
-            'pool.in'      => 'Pool must be "gallery" or "content".',
-            'image.max'    => "Image must be smaller than {$imageMaxMb} MB.",
-            'image.mimes'  => 'Image must be JPEG, PNG, or WebP.',
-            'image.image'  => 'The file must be a valid image.',
-            'video.max'    => "Video must be smaller than {$videoMaxMb} MB.",
-            'video.mimes'  => 'Video must be MP4, MOV, WebM, or AVI.',
+            'pool.in' => 'Pool must be "gallery" or "content".',
+            'image.max' => "Image must be smaller than {$imageMaxMb} MB.",
+            'image.mimes' => 'Image must be JPEG, PNG, or WebP.',
+            'image.image' => 'The file must be a valid image.',
+            'video.max' => "Video must be smaller than {$videoMaxMb} MB.",
+            'video.mimes' => 'Video must be MP4, MOV, WebM, or AVI.',
         ];
     }
 }

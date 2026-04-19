@@ -15,4 +15,3 @@ class SquareApiException extends RuntimeException
         parent::__construct($message, $status);
     }
 }
-

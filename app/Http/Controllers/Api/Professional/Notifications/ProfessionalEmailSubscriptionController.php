@@ -5,8 +5,8 @@ namespace App\Http\Controllers\Api\Professional\Notifications;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\HandlesSearchQueries;
 use App\Http\Controllers\Concerns\NormalizesPerPage;
-use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,8 +17,8 @@ class ProfessionalEmailSubscriptionController extends ApiController
 {
     use HandlesSearchQueries;
     use NormalizesPerPage;
-    use ReturnsPaginatedResponse;
     use ResolveCurrentProfessional;
+    use ReturnsPaginatedResponse;
 
     // GET /api/email-subscribers?list_key=marketing&status=subscribed&search=...
     public function index(Request $request): JsonResponse
@@ -27,7 +27,9 @@ class ProfessionalEmailSubscriptionController extends ApiController
 
         $listKey = $request->query('list_key', 'marketing');
         $listKey = is_string($listKey) ? trim($listKey) : 'marketing';
-        if ($listKey === '') $listKey = 'marketing';
+        if ($listKey === '') {
+            $listKey = 'marketing';
+        }
 
         $status = $request->query('status', 'subscribed'); // subscribed|unsubscribed|all
         $status = is_string($status) ? trim($status) : 'subscribed';
@@ -71,7 +73,9 @@ class ProfessionalEmailSubscriptionController extends ApiController
 
         $listKey = $request->query('list_key', 'marketing');
         $listKey = is_string($listKey) ? trim($listKey) : 'marketing';
-        if ($listKey === '') $listKey = 'marketing';
+        if ($listKey === '') {
+            $listKey = 'marketing';
+        }
 
         $status = $request->query('status', 'subscribed');
         $status = is_string($status) ? trim($status) : 'subscribed';

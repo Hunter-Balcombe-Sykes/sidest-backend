@@ -39,7 +39,7 @@ class StaffCommissionVoidController extends ApiController
             return $this->error('Commission is already attached to a payout batch and cannot be voided.', 422);
         }
 
-        $voided = $this->voidService->voidEntry($commission, 'staff_manual: ' . $data['reason']);
+        $voided = $this->voidService->voidEntry($commission, 'staff_manual: '.$data['reason']);
 
         if (! $voided) {
             return $this->error(
@@ -49,7 +49,7 @@ class StaffCommissionVoidController extends ApiController
         }
 
         return $this->success([
-            'id'     => $commission->id,
+            'id' => $commission->id,
             'voided' => true,
         ]);
     }

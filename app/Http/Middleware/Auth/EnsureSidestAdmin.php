@@ -14,18 +14,18 @@ class EnsureSidestAdmin
     {
         $uid = $request->attributes->get('supabase_uid');
 
-        if (!$uid) {
+        if (! $uid) {
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
         $staff = $request->attributes->get('sidest_staff');
 
         // If EnsureSidestStaff ran before this, we already have the staff record
-        if (!$staff) {
+        if (! $staff) {
             $staff = SidestStaff::query()->where('auth_user_id', $uid)->first();
         }
 
-        if (!$staff || $staff->role !== 'admin') {
+        if (! $staff || $staff->role !== 'admin') {
             return response()->json(['message' => 'Admin access required'], 403);
         }
 

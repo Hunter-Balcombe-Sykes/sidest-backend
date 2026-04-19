@@ -28,7 +28,7 @@ class FreshaIntegrationController extends ApiController
     /**
      * Check if the professional has Fresha connected.
      */
-    private function ensureFreshaConnected(Request $request): JsonResponse|null
+    private function ensureFreshaConnected(Request $request): ?JsonResponse
     {
         $integration = $this->currentFreshaIntegration($request);
         if (! $integration) {
@@ -93,10 +93,10 @@ class FreshaIntegrationController extends ApiController
     public function connect(Request $request, FreshaServiceSyncService $syncService)
     {
         $request->validate([
-            'access_token'  => 'required|string',
+            'access_token' => 'required|string',
             'refresh_token' => 'required|string',
-            'business_id'   => 'required|string',
-            'expires_at'    => 'required|string',
+            'business_id' => 'required|string',
+            'expires_at' => 'required|string',
         ]);
 
         $pro = $this->currentProfessional($request);
@@ -194,7 +194,7 @@ class FreshaIntegrationController extends ApiController
         $integration = $this->currentFreshaIntegration($request);
 
         return $this->success([
-            'connected'  => $integration?->access_token !== null,
+            'connected' => $integration?->access_token !== null,
             'expires_at' => $integration?->expires_at
                 ? $integration->expires_at->toIso8601String()
                 : null,

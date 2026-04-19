@@ -52,16 +52,16 @@ class ProfessionalUploadController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        $pool       = $request->validated('pool');
-        $isVideo    = $request->hasFile('video');
-        $file       = $isVideo ? $request->file('video') : $request->file('image');
-        $mediaType  = $isVideo ? SiteMedia::MEDIA_TYPE_VIDEO : SiteMedia::MEDIA_TYPE_IMAGE;
+        $pool = $request->validated('pool');
+        $isVideo = $request->hasFile('video');
+        $file = $isVideo ? $request->file('video') : $request->file('image');
+        $mediaType = $isVideo ? SiteMedia::MEDIA_TYPE_VIDEO : SiteMedia::MEDIA_TYPE_IMAGE;
 
         Log::info('Media upload started', [
-            'pro_id'       => $pro->id,
-            'site_id'      => $site->id,
-            'pool'         => $pool,
-            'media_type'   => $mediaType,
+            'pro_id' => $pro->id,
+            'site_id' => $site->id,
+            'pool' => $pool,
+            'media_type' => $mediaType,
             'file_size_kb' => $file->getSize() / 1024,
         ]);
 
@@ -76,7 +76,7 @@ class ProfessionalUploadController extends ApiController
 
         if ($activeCount >= $maxItems) {
             return $this->error(
-                ucfirst($pool) . " media limit reached (max {$maxItems}).", 422
+                ucfirst($pool)." media limit reached (max {$maxItems}).", 422
             );
         }
 
@@ -97,21 +97,21 @@ class ProfessionalUploadController extends ApiController
                 ->count();
 
             if ($activeCount >= $maxItems) {
-                abort(422, ucfirst($pool) . " media limit reached (max {$maxItems}).");
+                abort(422, ucfirst($pool)." media limit reached (max {$maxItems}).");
             }
 
             $maxSort = $siteImages->max('sort_order');
 
             $media = SiteMedia::create([
-                'site_id'             => $site->id,
-                'pool'                => $pool,
-                'path'                => '',
-                'alt_text'            => $request->validated('alt_text'),
-                'sort_order'          => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
-                'is_active'           => true,
-                'media_type'          => $mediaType,
-                'processing_state'    => SiteMedia::PROCESSING_STATE_PENDING,
-                'original_mime'       => $file->getMimeType(),
+                'site_id' => $site->id,
+                'pool' => $pool,
+                'path' => '',
+                'alt_text' => $request->validated('alt_text'),
+                'sort_order' => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
+                'is_active' => true,
+                'media_type' => $mediaType,
+                'processing_state' => SiteMedia::PROCESSING_STATE_PENDING,
+                'original_mime' => $file->getMimeType(),
                 'original_size_bytes' => $file->getSize(),
             ]);
 
@@ -129,16 +129,16 @@ class ProfessionalUploadController extends ApiController
             $mediaDisk = $this->mediaService->resolvedDiskName();
 
             Log::info('Storing original to media disk', [
-                'media_id'   => $media->id,
-                'base_path'  => $basePath,
+                'media_id' => $media->id,
+                'base_path' => $basePath,
                 'media_disk' => $mediaDisk,
             ]);
 
             if ($isVideo) {
                 // Stream large video files to avoid loading full content into memory.
-                $ext    = $file->getClientOriginalExtension() ?: 'mp4';
-                $hash   = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
-                $path   = "{$basePath}/original_{$hash}.{$ext}";
+                $ext = $file->getClientOriginalExtension() ?: 'mp4';
+                $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
+                $path = "{$basePath}/original_{$hash}.{$ext}";
                 $stream = fopen($file->getRealPath(), 'rb');
                 Storage::disk($mediaDisk)->put($path, $stream, 'public');
                 if (is_resource($stream)) {
@@ -153,10 +153,11 @@ class ProfessionalUploadController extends ApiController
         } catch (\Exception $e) {
             Log::error('Failed to store original', [
                 'media_id' => $media->id,
-                'error'    => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
             $media->delete();
-            return $this->error('Failed to store file: ' . $e->getMessage(), 500);
+
+            return $this->error('Failed to store file: '.$e->getMessage(), 500);
         }
 
         $media->update(['path' => $originalPath]);
@@ -167,10 +168,10 @@ class ProfessionalUploadController extends ApiController
                 $this->dispatchVideoJob($media->id, $originalPath, $basePath);
             } catch (Throwable $e) {
                 Log::error('Video upload dispatch failed; rolling back media item.', [
-                    'site_id'   => $site->id,
-                    'media_id'  => $media->id,
-                    'pool'      => $pool,
-                    'error'     => $e->getMessage(),
+                    'site_id' => $site->id,
+                    'media_id' => $media->id,
+                    'pool' => $pool,
+                    'error' => $e->getMessage(),
                     'exception' => get_class($e),
                 ]);
 
@@ -179,12 +180,12 @@ class ProfessionalUploadController extends ApiController
                     Storage::disk($mediaDisk)->delete($originalPath);
                 } catch (Throwable $cleanupError) {
                     Log::warning('Failed to cleanup original video after dispatch failure.', [
-                        'site_id'   => $site->id,
-                        'media_id'  => $media->id,
-                        'pool'      => $pool,
-                        'path'      => $originalPath,
+                        'site_id' => $site->id,
+                        'media_id' => $media->id,
+                        'pool' => $pool,
+                        'path' => $originalPath,
                         'media_disk' => $mediaDisk,
-                        'error'     => $cleanupError->getMessage(),
+                        'error' => $cleanupError->getMessage(),
                     ]);
                 }
 
@@ -280,9 +281,9 @@ class ProfessionalUploadController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        $pool      = $request->validated('pool');
+        $pool = $request->validated('pool');
         $mediaType = $request->validated('media_type') ?? SiteMedia::MEDIA_TYPE_IMAGE;
-        $ids       = array_values(array_unique($request->validated('ids') ?? []));
+        $ids = array_values(array_unique($request->validated('ids') ?? []));
 
         DB::transaction(function () use ($site, $pool, $mediaType, $ids) {
             if (DB::getDriverName() === 'pgsql') {
@@ -318,7 +319,7 @@ class ProfessionalUploadController extends ApiController
             $remainingTargetIds = array_values(array_diff($targetIds, $ids));
             $reorderedTargetIds = array_merge($ids, $remainingTargetIds);
 
-            $finalIds        = $siteImages->pluck('id')->all();
+            $finalIds = $siteImages->pluck('id')->all();
             $targetPositions = [];
 
             foreach ($siteImages as $index => $image) {
@@ -396,7 +397,7 @@ class ProfessionalUploadController extends ApiController
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Brand-only upload endpoints                                        */
+    /*  Brand-only upload endpoints */
     /* ------------------------------------------------------------------ */
 
     /**
@@ -546,6 +547,7 @@ class ProfessionalUploadController extends ApiController
                 'site_id' => $site->id,
                 'error' => $e->getMessage(),
             ]);
+
             return $this->error('Failed to upload brand design asset.', 500);
         }
 
@@ -569,13 +571,13 @@ class ProfessionalUploadController extends ApiController
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Private helpers                                                    */
+    /*  Private helpers */
     /* ------------------------------------------------------------------ */
 
     private function dispatchImageJob(string $imageId, string $originalPath, string $basePath): void
     {
-        $queueConnection  = (string) config('queue.default', 'sync');
-        $processInline    = in_array(app()->environment(), ['local', 'testing'], true)
+        $queueConnection = (string) config('queue.default', 'sync');
+        $processInline = in_array(app()->environment(), ['local', 'testing'], true)
             || $queueConnection === 'sync';
 
         if ($processInline) {
@@ -590,6 +592,7 @@ class ProfessionalUploadController extends ApiController
                     'image_id' => $imageId, 'error' => $e->getMessage(),
                 ]);
             }
+
             return;
         }
 
@@ -627,7 +630,7 @@ class ProfessionalUploadController extends ApiController
     private function dispatchVideoJob(string $mediaId, string $originalPath, string $basePath): void
     {
         $queueDefault = (string) config('queue.default', 'sync');
-        $processInline   = in_array(app()->environment(), ['local', 'testing'], true)
+        $processInline = in_array(app()->environment(), ['local', 'testing'], true)
             || $queueDefault === 'sync';
 
         if ($processInline) {
@@ -636,6 +639,7 @@ class ProfessionalUploadController extends ApiController
                 originalPath: $originalPath,
                 basePath: $basePath,
             );
+
             return;
         }
 
@@ -656,27 +660,27 @@ class ProfessionalUploadController extends ApiController
      */
     private function buildMediaPayload(SiteMedia $media, bool $includeVariants = false): array
     {
-        $isVideo     = $media->media_type === SiteMedia::MEDIA_TYPE_VIDEO;
-        $isReady     = $media->processing_state === SiteMedia::PROCESSING_STATE_READY;
+        $isVideo = $media->media_type === SiteMedia::MEDIA_TYPE_VIDEO;
+        $isReady = $media->processing_state === SiteMedia::PROCESSING_STATE_READY;
         $isProcessing = $media->processing_state === SiteMedia::PROCESSING_STATE_PENDING
             || $media->processing_state === SiteMedia::PROCESSING_STATE_PROCESSING;
 
         $payload = [
-            'id'               => $media->id,
-            'pool'             => $media->pool,
-            'alt_text'         => $media->alt_text,
-            'sort_order'       => $media->sort_order,
-            'media_type'       => $media->media_type,
+            'id' => $media->id,
+            'pool' => $media->pool,
+            'alt_text' => $media->alt_text,
+            'sort_order' => $media->sort_order,
+            'media_type' => $media->media_type,
             'processing_state' => $media->processing_state,
-            'processing'       => $isProcessing, // backward-compat boolean
+            'processing' => $isProcessing, // backward-compat boolean
             'processing_error' => $media->processing_error,
-            'created_at'       => $media->created_at,
-            'updated_at'       => $media->updated_at,
+            'created_at' => $media->created_at,
+            'updated_at' => $media->updated_at,
         ];
 
         if ($isVideo) {
             $payload['duration_ms'] = $media->duration_ms;
-            $payload['poster']      = null;
+            $payload['poster'] = null;
         }
 
         if (! $includeVariants) {
@@ -685,13 +689,13 @@ class ProfessionalUploadController extends ApiController
 
         if ($isVideo) {
             if ($isReady) {
-                $mvList   = $media->relationLoaded('mediaVariants')
+                $mvList = $media->relationLoaded('mediaVariants')
                     ? $media->mediaVariants
                     : $media->mediaVariants()->get();
 
                 $variants = [];
-                $streams  = [];
-                $poster   = null;
+                $streams = [];
+                $poster = null;
 
                 foreach ($mvList as $mv) {
                     if ($mv->artifact_type === 'mp4') {
@@ -704,12 +708,12 @@ class ProfessionalUploadController extends ApiController
                 }
 
                 $payload['variants'] = $variants;
-                $payload['streams']  = $streams;
-                $payload['poster']   = $poster;
+                $payload['streams'] = $streams;
+                $payload['poster'] = $poster;
             } else {
                 $payload['variants'] = [];
-                $payload['streams']  = [];
-                $payload['poster']   = null;
+                $payload['streams'] = [];
+                $payload['poster'] = null;
             }
         } else {
             $payload['variants'] = $isReady ? $media->variantUrls() : [];

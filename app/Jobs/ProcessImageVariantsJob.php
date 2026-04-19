@@ -34,8 +34,8 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     /**
      * @param  string  $originalPath  Path of the original on the media disk.
-     * @param  string  $imageId       UUID of the SiteMedia row.
-     * @param  string  $basePath      Directory prefix for variant storage.
+     * @param  string  $imageId  UUID of the SiteMedia row.
+     * @param  string  $basePath  Directory prefix for variant storage.
      */
     public function __construct(
         public readonly string $originalPath,
@@ -48,7 +48,7 @@ class ProcessImageVariantsJob implements ShouldQueue
     public function handle(ImageVariantService $service): void
     {
         Log::info('ProcessImageVariantsJob: starting', [
-            'image_id'      => $this->imageId,
+            'image_id' => $this->imageId,
             'original_path' => $this->originalPath,
         ]);
 
@@ -58,6 +58,7 @@ class ProcessImageVariantsJob implements ShouldQueue
             Log::warning('ProcessImageVariantsJob: SiteMedia row no longer exists, skipping.', [
                 'image_id' => $this->imageId,
             ]);
+
             return;
         }
 
@@ -65,6 +66,7 @@ class ProcessImageVariantsJob implements ShouldQueue
             Log::info('ProcessImageVariantsJob: SiteMedia row is soft-deleted, skipping.', [
                 'image_id' => $this->imageId,
             ]);
+
             return;
         }
 
@@ -77,11 +79,12 @@ class ProcessImageVariantsJob implements ShouldQueue
             ]);
 
         $diskName = $service->resolvedDiskName();
-        $disk     = Storage::disk($diskName);
+        $disk = Storage::disk($diskName);
 
         if (! $disk->exists($this->originalPath)) {
             $this->markFailed('Original file not found on media disk.');
             $this->fail(new \RuntimeException('Original file not found on media disk.'));
+
             return;
         }
 
@@ -127,7 +130,7 @@ class ProcessImageVariantsJob implements ShouldQueue
             // retry machinery that $tries = 3 would otherwise trigger.
             Log::warning('ProcessImageVariantsJob: unprocessable image, failing without retry.', [
                 'image_id' => $this->imageId,
-                'error'    => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
 
             $this->markFailed($e->getMessage());
@@ -136,8 +139,8 @@ class ProcessImageVariantsJob implements ShouldQueue
             return;
         } catch (Throwable $e) {
             Log::error('ProcessImageVariantsJob: variant generation failed.', [
-                'image_id'  => $this->imageId,
-                'error'     => $e->getMessage(),
+                'image_id' => $this->imageId,
+                'error' => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
 
@@ -170,9 +173,9 @@ class ProcessImageVariantsJob implements ShouldQueue
 
         if ($updated === 0) {
             Log::info('ProcessImageVariantsJob: failed-state update skipped.', [
-                'image_id'         => $this->imageId,
-                'row_exists'       => $siteMedia !== null,
-                'is_soft_deleted'  => $siteMedia?->trashed() ?? false,
+                'image_id' => $this->imageId,
+                'row_exists' => $siteMedia !== null,
+                'is_soft_deleted' => $siteMedia?->trashed() ?? false,
             ]);
         }
 
@@ -185,7 +188,7 @@ class ProcessImageVariantsJob implements ShouldQueue
             } catch (Throwable $e) {
                 Log::warning('ProcessImageVariantsJob: failed-state cache bust failed.', [
                     'image_id' => $this->imageId,
-                    'error'    => $e->getMessage(),
+                    'error' => $e->getMessage(),
                 ]);
             }
         }

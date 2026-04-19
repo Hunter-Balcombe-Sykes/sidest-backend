@@ -11,7 +11,9 @@ class NotificationEmailPreference extends BaseModel
     use HasUuids;
 
     protected $table = 'notifications.notification_email_preferences';
+
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -21,7 +23,7 @@ class NotificationEmailPreference extends BaseModel
     ];
 
     protected $casts = [
-        'enabled'    => 'boolean',
+        'enabled' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

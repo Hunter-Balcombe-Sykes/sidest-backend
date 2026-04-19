@@ -10,7 +10,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
 
 // V2: Delta/full catalog sync from Fresha to Side St. Booking integration only. Queue: integrations.
 class SyncFreshaCatalogDeltaJob implements ShouldQueue

@@ -19,7 +19,7 @@ it('returns paginated invites for a brand', function () {
 
     DB::shouldReceive('table')->with('brand.brand_affiliate_invites')->andReturn($mockQuery);
 
-    $controller = new StaffInviteController();
+    $controller = new StaffInviteController;
     $response = $controller->index(Request::create('/', 'GET'), $professional);
     $data = json_decode($response->getContent(), true);
 
@@ -39,7 +39,7 @@ it('filters invites by status when provided', function () {
 
     DB::shouldReceive('table')->with('brand.brand_affiliate_invites')->andReturn($mockQuery);
 
-    $controller = new StaffInviteController();
+    $controller = new StaffInviteController;
     $response = $controller->index(Request::create('/', 'GET', ['status' => 'pending']), $professional);
 
     expect($response->status())->toBe(200);
@@ -53,7 +53,7 @@ it('expires a pending invite', function () {
     $invite->status = 'pending';
     $invite->shouldReceive('save')->once();
 
-    $controller = new StaffInviteController();
+    $controller = new StaffInviteController;
     $response = $controller->cancel(Request::create('/', 'DELETE'), $professional, $invite);
     $data = json_decode($response->getContent(), true);
 
@@ -66,7 +66,7 @@ it('returns 422 when trying to cancel an accepted invite', function () {
 
     $invite = new BrandAffiliateInvite(['id' => (string) Str::uuid(), 'status' => 'accepted']);
 
-    $controller = new StaffInviteController();
+    $controller = new StaffInviteController;
     $response = $controller->cancel(Request::create('/', 'DELETE'), $professional, $invite);
 
     expect($response->status())->toBe(422);
@@ -78,7 +78,7 @@ it('returns success immediately for an already-expired invite', function () {
 
     $invite = new BrandAffiliateInvite(['id' => $inviteId, 'status' => 'expired']);
 
-    $controller = new StaffInviteController();
+    $controller = new StaffInviteController;
     $response = $controller->cancel(Request::create('/', 'DELETE'), $professional, $invite);
     $data = json_decode($response->getContent(), true);
 

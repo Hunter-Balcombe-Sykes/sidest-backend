@@ -44,6 +44,7 @@ class VoidPendingCommissionsForLinkJob implements ShouldQueue
                 'affiliate_id' => $this->affiliateProfessionalId,
                 'brand_id' => $this->brandProfessionalId,
             ]);
+
             return;
         }
 

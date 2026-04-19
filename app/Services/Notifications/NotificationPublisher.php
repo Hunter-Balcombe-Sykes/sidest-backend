@@ -43,7 +43,7 @@ class NotificationPublisher
         }
 
         $title = trim($title);
-        $body  = trim($body);
+        $body = trim($body);
         if ($title === '' || $body === '') {
             return;
         }
@@ -59,30 +59,30 @@ class NotificationPublisher
             return;
         }
 
-        $now  = now();
+        $now = now();
         $type = Notification::normalizeFrontendType($frontendType);
-        $key  = $retentionConfigKey ?? 'default';
+        $key = $retentionConfigKey ?? 'default';
         $days = config("sidest.notification_retention_days.{$key}")
             ?? config('sidest.notification_retention_days.default', 30);
 
         $notificationId = (string) Str::uuid();
 
         DB::table('notifications.notifications')->insert([
-            'id'                     => $notificationId,
-            'professional_id'        => $professionalId,
-            'type'                   => $type,
-            'category'               => $category,
-            'title'                  => $title,
-            'body'                   => $body,
-            'cta_url'                => $cta,
-            'primary_action_label'   => $primaryActionLabel,
+            'id' => $notificationId,
+            'professional_id' => $professionalId,
+            'type' => $type,
+            'category' => $category,
+            'title' => $title,
+            'body' => $body,
+            'cta_url' => $cta,
+            'primary_action_label' => $primaryActionLabel,
             'secondary_action_label' => $secondaryActionLabel,
-            'secondary_action_url'   => $secondaryActionUrl,
-            'severity'               => Notification::severityForFrontendType($type),
-            'starts_at'              => $now,
-            'ends_at'                => $now->copy()->addDays((int) $days),
-            'created_at'             => $now,
-            'updated_at'             => $now,
+            'secondary_action_url' => $secondaryActionUrl,
+            'severity' => Notification::severityForFrontendType($type),
+            'starts_at' => $now,
+            'ends_at' => $now->copy()->addDays((int) $days),
+            'created_at' => $now,
+            'updated_at' => $now,
         ]);
 
         if (config('sidest.notifications.email_enabled', false)) {
@@ -103,7 +103,7 @@ class NotificationPublisher
 
         $join = str_contains($trimmedUrl, '?') ? '&' : '?';
 
-        return $trimmedUrl . $join . 'notif=' . $dedupeKey;
+        return $trimmedUrl.$join.'notif='.$dedupeKey;
     }
 
     public static function resolveEmailEnabled(string $professionalId, string $category): bool

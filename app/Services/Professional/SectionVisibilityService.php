@@ -14,7 +14,7 @@ class SectionVisibilityService
     /**
      * Check if a section type meets its visibility requirements.
      *
-     * @return array{0: bool, 1: ?string}  [canBeVisible, reason]
+     * @return array{0: bool, 1: ?string} [canBeVisible, reason]
      */
     public function checkVisibilityRequirements(
         string $professionalId,
@@ -22,10 +22,10 @@ class SectionVisibilityService
         string $blockType
     ): array {
         return match ($blockType) {
-            'gallery'  => $this->checkGalleryRequirements($siteId),
-            'booking'  => $this->checkBookingRequirements($professionalId),
+            'gallery' => $this->checkGalleryRequirements($siteId),
+            'booking' => $this->checkBookingRequirements($professionalId),
             'services' => $this->checkServicesRequirements($professionalId),
-            default    => [true, null],
+            default => [true, null],
         };
     }
 
@@ -56,9 +56,9 @@ class SectionVisibilityService
         } catch (\Throwable $e) {
             Log::warning('Section is_enabled reevaluation failed', [
                 'professional_id' => $professionalId,
-                'site_id'         => $siteId,
-                'block_type'      => $blockType,
-                'message'         => $e->getMessage(),
+                'site_id' => $siteId,
+                'block_type' => $blockType,
+                'message' => $e->getMessage(),
             ]);
         }
     }

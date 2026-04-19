@@ -27,9 +27,13 @@ class BrandDesignController extends ApiController
     // difference between "default by convention" and "explicitly default" is
     // preserved at the DB layer.
     private const DEFAULT_FONT_FAMILY = 'helvetica_neue';
+
     private const DEFAULT_CORNER_RADIUS = 'default';
+
     private const DEFAULT_BORDER_THICKNESS = 'default';
+
     private const DEFAULT_SECTION_SPACING = 'default';
+
     // Light is the resting default for new brands and any row that predates
     // the theme_mode migration.
     private const DEFAULT_THEME_MODE = 'light';
@@ -42,16 +46,16 @@ class BrandDesignController extends ApiController
      * Return the current resolved brand-design shape for the authenticated brand.
      *
      * @return JsonResponse {
-     *     colors: { accent },
-     *     theme_mode: 'light'|'dark',                        (default applied upstream)
-     *     corner_radius: 'square'|'default'|'pill',          (default applied upstream)
-     *     border_thickness: 'hairline'|'default'|'bold',     (default applied upstream)
-     *     section_spacing: 'tight'|'default'|'spacious',     (default applied upstream)
-     *     logo: { full_url, square_url },
-     *     slogan: string|null,
-     *     font_family: string,
-     *     shopify_connected: bool
-     * }
+     *                      colors: { accent },
+     *                      theme_mode: 'light'|'dark',                        (default applied upstream)
+     *                      corner_radius: 'square'|'default'|'pill',          (default applied upstream)
+     *                      border_thickness: 'hairline'|'default'|'bold',     (default applied upstream)
+     *                      section_spacing: 'tight'|'default'|'spacious',     (default applied upstream)
+     *                      logo: { full_url, square_url },
+     *                      slogan: string|null,
+     *                      font_family: string,
+     *                      shopify_connected: bool
+     *                      }
      */
     public function show(Request $request): JsonResponse
     {

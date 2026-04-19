@@ -168,7 +168,7 @@ beforeEach(function () {
 function makeBrandBootstrapController(): array
 {
     $siteProvisioning = Mockery::mock(SiteProvisioningService::class);
-    $siteProvisioning->shouldReceive('generateQrSlug')->andReturn('qr-' . Str::random(6));
+    $siteProvisioning->shouldReceive('generateQrSlug')->andReturn('qr-'.Str::random(6));
     $siteProvisioning->shouldReceive('subdomainBaseFromHandle')->andReturnUsing(fn ($h) => $h);
     $siteProvisioning->shouldReceive('createSiteWithRetry')->andReturnUsing(function ($proId, $base) {
         $site = new Site([
@@ -178,6 +178,7 @@ function makeBrandBootstrapController(): array
         ]);
         $site->id = (string) Str::uuid();
         $site->save();
+
         return $site;
     });
     $siteProvisioning->shouldReceive('ensureFreeSubscription')->andReturnNull();
@@ -212,8 +213,8 @@ function callBrandBootstrap(
 it('creates a BrandProfile when bootstrapping a brand account', function () {
     [$controller, $accountDefaults] = makeBrandBootstrapController();
 
-    $uid = 'brand-uid-' . Str::random(8);
-    $handle = 'testbrand' . Str::random(4);
+    $uid = 'brand-uid-'.Str::random(8);
+    $handle = 'testbrand'.Str::random(4);
 
     $response = callBrandBootstrap($controller, $accountDefaults, [
         'handle' => $handle,
@@ -238,8 +239,8 @@ it('creates a BrandProfile when bootstrapping a brand account', function () {
 it('does not create a BrandProfile for non-brand types', function () {
     [$controller, $accountDefaults] = makeBrandBootstrapController();
 
-    $uid = 'pro-uid-' . Str::random(8);
-    $handle = 'testpro' . Str::random(4);
+    $uid = 'pro-uid-'.Str::random(8);
+    $handle = 'testpro'.Str::random(4);
 
     $response = callBrandBootstrap($controller, $accountDefaults, [
         'handle' => $handle,

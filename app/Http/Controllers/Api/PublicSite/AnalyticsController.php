@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
-use App\Jobs\Analytics\RebuildSiteHourlyAggregatesJob;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\DetectsClientInfo;
 use App\Http\Controllers\Concerns\HashesClientData;
 use App\Http\Controllers\Concerns\ResolvesSiteFromRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\ClickRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\PageviewRequest;
+use App\Jobs\Analytics\RebuildSiteHourlyAggregatesJob;
 use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
 use App\Models\Core\Site\Block;
@@ -34,29 +34,28 @@ class AnalyticsController extends ApiController
         // Resolve site by ID or subdomain
         $site = $this->resolveSiteFromData($data);
 
-        if (!$site) {
+        if (! $site) {
             return $this->error('Site not found', 404);
         }
 
         // Check if site is published
-        if (!$site->is_published) {
+        if (! $site->is_published) {
             return $this->error('Site not published', 403);
         }
 
-
         // Create pageview record
         $visit = new SiteVisit([
-            'occurred_at'  => now(),
-            'session_id'   => $data['session_id'] ?? null,
-            'visitor_id'   => $data['visitor_id'] ?? null,
-            'ip_hash'      => $this->hashIp($request->ip()),
-            'user_agent'   => $request->userAgent(),
-            'referrer'     => $data['referrer'] ?? $request->headers->get('referer'),
-            'utm_source'   => $data['utm_source'] ?? null,
-            'utm_medium'   => $data['utm_medium'] ?? null,
+            'occurred_at' => now(),
+            'session_id' => $data['session_id'] ?? null,
+            'visitor_id' => $data['visitor_id'] ?? null,
+            'ip_hash' => $this->hashIp($request->ip()),
+            'user_agent' => $request->userAgent(),
+            'referrer' => $data['referrer'] ?? $request->headers->get('referer'),
+            'utm_source' => $data['utm_source'] ?? null,
+            'utm_medium' => $data['utm_medium'] ?? null,
             'utm_campaign' => $data['utm_campaign'] ?? null,
             'country_code' => $this->detectCountryCode($request),
-            'device_type'  => $this->detectDeviceType($request->userAgent()),
+            'device_type' => $this->detectDeviceType($request->userAgent()),
         ]);
         $visit->professional_id = $site->professional_id;
         $visit->site_id = $site->id;
@@ -69,7 +68,8 @@ class AnalyticsController extends ApiController
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);
-        } catch (Throwable) {}
+        } catch (Throwable) {
+        }
 
         return $this->success([
             'message' => 'Pageview recorded',
@@ -84,12 +84,12 @@ class AnalyticsController extends ApiController
         // Resolve site by ID or subdomain
         $site = $this->resolveSiteFromData($data);
 
-        if (!$site) {
+        if (! $site) {
             return $this->error('Site not found', 404);
         }
 
         // Check if site is published
-        if (!$site->is_published) {
+        if (! $site->is_published) {
             return $this->error('Site not published', 403);
         }
 
@@ -98,7 +98,7 @@ class AnalyticsController extends ApiController
             ->where('site_id', $site->id)
             ->first();
 
-        if (!$block) {
+        if (! $block) {
             return $this->error('Block not found or does not belong to this site', 404);
         }
 
@@ -119,26 +119,26 @@ class AnalyticsController extends ApiController
             $blockGroup === 'sections'
             && in_array($blockType, $trackableSectionTypes, true);
 
-        if (!$isTrackableLink && !$isTrackableSection) {
+        if (! $isTrackableLink && ! $isTrackableSection) {
             return $this->error('Block is not trackable for analytics', 422);
         }
 
         // Check if block is active
-        if (!$block->is_active) {
+        if (! $block->is_active) {
             return $this->error('Block is not active', 403);
         }
 
         $click = LinkClick::runForBlockForeignKey(
             function (string $blockColumn) use ($request, $data, $site, $block) {
                 $click = new LinkClick([
-                    'occurred_at'  => now(),
-                    'session_id'   => $data['session_id'] ?? null,
-                    'visitor_id'   => $data['visitor_id'] ?? null,
-                    'ip_hash'      => $this->hashIp($request->ip()),
-                    'user_agent'   => $request->userAgent(),
-                    'referrer'     => $data['referrer'] ?? $request->headers->get('referer'),
-                    'utm_source'   => $data['utm_source'] ?? null,
-                    'utm_medium'   => $data['utm_medium'] ?? null,
+                    'occurred_at' => now(),
+                    'session_id' => $data['session_id'] ?? null,
+                    'visitor_id' => $data['visitor_id'] ?? null,
+                    'ip_hash' => $this->hashIp($request->ip()),
+                    'user_agent' => $request->userAgent(),
+                    'referrer' => $data['referrer'] ?? $request->headers->get('referer'),
+                    'utm_source' => $data['utm_source'] ?? null,
+                    'utm_medium' => $data['utm_medium'] ?? null,
                     'utm_campaign' => $data['utm_campaign'] ?? null,
                 ]);
                 $click->professional_id = $site->professional_id;
@@ -150,7 +150,7 @@ class AnalyticsController extends ApiController
             }
         );
 
-        if (!$click instanceof LinkClick) {
+        if (! $click instanceof LinkClick) {
             return $this->error('Unable to record click due to schema mismatch', 500);
         }
 
@@ -161,7 +161,8 @@ class AnalyticsController extends ApiController
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);
-        } catch (Throwable) {}
+        } catch (Throwable) {
+        }
 
         return $this->success([
             'message' => $isTrackableSection ? 'Section interaction recorded' : 'Click recorded',

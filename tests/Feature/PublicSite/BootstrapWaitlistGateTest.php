@@ -17,7 +17,7 @@ beforeEach(function () {
 })->group('bootstrap-waitlist-gate');
 
 it('blocks bootstrap for new users when waitlist mode is enabled', function () {
-    $controller = new BootstrapController(new SiteProvisioningService());
+    $controller = new BootstrapController(new SiteProvisioningService);
     $request = BootstrapRequest::create('/api/bootstrap', 'POST');
     $request->attributes->set('supabase_uid', 'new-user-uid');
 
@@ -38,7 +38,7 @@ it('detects existing professionals by supabase auth user id', function () {
         'auth_user_id' => 'existing-user-uid',
     ]);
 
-    $controller = new BootstrapController(new SiteProvisioningService());
+    $controller = new BootstrapController(new SiteProvisioningService);
     $method = new ReflectionMethod(BootstrapController::class, 'hasExistingProfessional');
     $method->setAccessible(true);
 

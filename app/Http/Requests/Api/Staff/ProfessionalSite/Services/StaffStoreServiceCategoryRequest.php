@@ -10,7 +10,7 @@ class StaffStoreServiceCategoryRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'title'      => ['required', 'string', 'max:80'],
+            'title' => ['required', 'string', 'max:80'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
         ];
     }

@@ -27,7 +27,7 @@ beforeEach(function () {
 
 function makeStaffSettingsProfessional(): Professional
 {
-    $pro     = new Professional();
+    $pro = new Professional;
     $pro->id = (string) Str::uuid();
 
     return $pro;
@@ -36,14 +36,14 @@ function makeStaffSettingsProfessional(): Professional
 it('returns updated store settings after patch', function () {
     $professional = makeStaffSettingsProfessional();
 
-    $controller = new StaffStoreSettingsController();
-    $request    = Request::create('/', 'PATCH', [
+    $controller = new StaffStoreSettingsController;
+    $request = Request::create('/', 'PATCH', [
         'default_commission_rate' => 20,
-        'payout_hold_days'        => 14,
+        'payout_hold_days' => 14,
     ]);
 
     $response = $controller->update($request, $professional);
-    $data     = json_decode($response->getContent(), true);
+    $data = json_decode($response->getContent(), true);
 
     expect($response->status())->toBe(200)
         ->and($data)->toHaveKeys(['default_commission_rate', 'payout_hold_days'])
@@ -53,11 +53,11 @@ it('returns updated store settings after patch', function () {
 
 it('is idempotent — second patch overwrites first', function () {
     $professional = makeStaffSettingsProfessional();
-    $controller   = new StaffStoreSettingsController();
+    $controller = new StaffStoreSettingsController;
 
     $controller->update(Request::create('/', 'PATCH', ['payout_hold_days' => 14]), $professional);
     $response = $controller->update(Request::create('/', 'PATCH', ['payout_hold_days' => 21]), $professional);
-    $data     = json_decode($response->getContent(), true);
+    $data = json_decode($response->getContent(), true);
 
     expect($response->status())->toBe(200)
         ->and($data['payout_hold_days'])->toBe(21);
@@ -65,8 +65,8 @@ it('is idempotent — second patch overwrites first', function () {
 
 it('returns 422 when no updatable fields provided', function () {
     $professional = makeStaffSettingsProfessional();
-    $controller   = new StaffStoreSettingsController();
-    $request      = Request::create('/', 'PATCH', []);
+    $controller = new StaffStoreSettingsController;
+    $request = Request::create('/', 'PATCH', []);
 
     $response = $controller->update($request, $professional);
 
@@ -75,8 +75,8 @@ it('returns 422 when no updatable fields provided', function () {
 
 it('rejects commission rate below 0', function () {
     $professional = makeStaffSettingsProfessional();
-    $controller   = new StaffStoreSettingsController();
-    $request      = Request::create('/', 'PATCH', ['default_commission_rate' => -1]);
+    $controller = new StaffStoreSettingsController;
+    $request = Request::create('/', 'PATCH', ['default_commission_rate' => -1]);
 
     expect(fn () => $controller->update($request, $professional))
         ->toThrow(\Illuminate\Validation\ValidationException::class);
@@ -84,8 +84,8 @@ it('rejects commission rate below 0', function () {
 
 it('rejects commission rate above 100', function () {
     $professional = makeStaffSettingsProfessional();
-    $controller   = new StaffStoreSettingsController();
-    $request      = Request::create('/', 'PATCH', ['default_commission_rate' => 101]);
+    $controller = new StaffStoreSettingsController;
+    $request = Request::create('/', 'PATCH', ['default_commission_rate' => 101]);
 
     expect(fn () => $controller->update($request, $professional))
         ->toThrow(\Illuminate\Validation\ValidationException::class);
@@ -93,8 +93,8 @@ it('rejects commission rate above 100', function () {
 
 it('rejects payout_hold_days below system minimum of 7', function () {
     $professional = makeStaffSettingsProfessional();
-    $controller   = new StaffStoreSettingsController();
-    $request      = Request::create('/', 'PATCH', ['payout_hold_days' => 1]);
+    $controller = new StaffStoreSettingsController;
+    $request = Request::create('/', 'PATCH', ['payout_hold_days' => 1]);
 
     expect(fn () => $controller->update($request, $professional))
         ->toThrow(\Illuminate\Validation\ValidationException::class);

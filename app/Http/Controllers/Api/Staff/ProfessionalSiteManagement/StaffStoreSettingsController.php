@@ -23,7 +23,7 @@ class StaffStoreSettingsController extends ApiController
 
         $data = $request->validate([
             'default_commission_rate' => ['sometimes', 'numeric', 'min:0', 'max:100'],
-            'payout_hold_days'        => ['sometimes', 'integer', "min:{$minHoldDays}"],
+            'payout_hold_days' => ['sometimes', 'integer', "min:{$minHoldDays}"],
         ]);
 
         if (empty($data)) {
@@ -37,7 +37,7 @@ class StaffStoreSettingsController extends ApiController
 
         return $this->success([
             'default_commission_rate' => (float) $settings->default_commission_rate,
-            'payout_hold_days'        => $settings->payout_hold_days,
+            'payout_hold_days' => $settings->payout_hold_days,
         ]);
     }
 }

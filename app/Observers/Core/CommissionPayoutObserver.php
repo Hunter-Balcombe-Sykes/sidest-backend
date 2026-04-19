@@ -24,6 +24,7 @@ class CommissionPayoutObserver
             // Successful completion — affiliate sees their money landed.
             if ($statusChanged && $payout->status === 'completed') {
                 $this->notifyCompleted($payout);
+
                 return;
             }
 
@@ -32,6 +33,7 @@ class CommissionPayoutObserver
             // transfer errors — support picks those up from the failure log).
             if ($statusChanged && $payout->status === 'failed') {
                 $this->notifyFailed($payout);
+
                 return;
             }
 
@@ -45,18 +47,19 @@ class CommissionPayoutObserver
 
             if ($payout->status === 'pending' && $failureCodeJustSet) {
                 $this->notifyPending($payout);
+
                 return;
             }
         } catch (\Throwable $e) {
             Log::warning('CommissionPayout updated notification failed', [
                 'payout_id' => $payout->id,
-                'message'   => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Notification builders                                              */
+    /*  Notification builders */
     /* ------------------------------------------------------------------ */
 
     private function notifyCompleted(CommissionPayout $payout): void
@@ -176,14 +179,10 @@ class CommissionPayoutObserver
             );
 
             $affiliateBody = match ($code) {
-                'charge_requires_action' =>
-                    "Your {$amountLabel} payout is on hold while the brand authenticates the charge. We'll retry automatically.",
-                'charge_failed' =>
-                    "Your {$amountLabel} payout is delayed — the brand's payment method was declined. We'll retry automatically once they update it.",
-                'brand_payment_method_missing' =>
-                    "Your {$amountLabel} payout is on hold until the brand adds a payment method. We'll retry automatically.",
-                default =>
-                    "Your {$amountLabel} commission payout is temporarily on hold. We'll retry automatically.",
+                'charge_requires_action' => "Your {$amountLabel} payout is on hold while the brand authenticates the charge. We'll retry automatically.",
+                'charge_failed' => "Your {$amountLabel} payout is delayed — the brand's payment method was declined. We'll retry automatically once they update it.",
+                'brand_payment_method_missing' => "Your {$amountLabel} payout is on hold until the brand adds a payment method. We'll retry automatically.",
+                default => "Your {$amountLabel} commission payout is temporarily on hold. We'll retry automatically.",
             };
 
             $this->publisher->publish(

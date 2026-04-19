@@ -24,8 +24,11 @@ class AffiliateProductPhotoController extends ApiController
     use ResolveCurrentSite;
 
     private const POOL = SiteMedia::POOL_PRODUCT;
+
     private const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+
     private const MAX_FILE_KB = 10240;
+
     private const GID_PATTERN = '/^gid:\/\/shopify\/Product\/\d+$/';
 
     public function __construct(
@@ -84,8 +87,8 @@ class AffiliateProductPhotoController extends ApiController
             'image' => [
                 'required',
                 'file',
-                'mimetypes:' . implode(',', self::ALLOWED_MIMES),
-                'max:' . self::MAX_FILE_KB,
+                'mimetypes:'.implode(',', self::ALLOWED_MIMES),
+                'max:'.self::MAX_FILE_KB,
             ],
             'alt_text' => ['nullable', 'string', 'max:255'],
         ]);
@@ -158,6 +161,7 @@ class AffiliateProductPhotoController extends ApiController
                 'error' => $e->getMessage(),
             ]);
             $media->delete();
+
             return $this->error('Failed to store file.', 500);
         }
 

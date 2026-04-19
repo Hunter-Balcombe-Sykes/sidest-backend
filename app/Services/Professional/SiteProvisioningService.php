@@ -23,14 +23,18 @@ class SiteProvisioningService
             for ($i = 1; $i <= 20; $i++) {
                 $candidate = $this->buildCandidate($base, (string) $i);
                 $site = $this->tryCreateSite($professionalId, $candidate);
-                if ($site) return $site;
+                if ($site) {
+                    return $site;
+                }
             }
         } else {
             for ($i = 0; $i < 20; $i++) {
                 $suffix = $i === 0 ? null : (string) $i;
                 $candidate = $this->buildCandidate($base, $suffix);
                 $site = $this->tryCreateSite($professionalId, $candidate);
-                if ($site) return $site;
+                if ($site) {
+                    return $site;
+                }
             }
         }
 
@@ -38,7 +42,9 @@ class SiteProvisioningService
             $rand = Str::lower(Str::random(6));
             $candidate = $this->buildCandidate($base, $rand);
             $site = $this->tryCreateSite($professionalId, $candidate);
-            if ($site) return $site;
+            if ($site) {
+                return $site;
+            }
         }
 
         throw new RuntimeException('Could not allocate a unique subdomain.');
@@ -51,7 +57,7 @@ class SiteProvisioningService
         $v = trim($v, '-');
 
         if ($v === '') {
-            $v = 'user-' . substr(Str::uuid()->toString(), 0, 8);
+            $v = 'user-'.substr(Str::uuid()->toString(), 0, 8);
         }
 
         return $v;
@@ -67,7 +73,7 @@ class SiteProvisioningService
         $maxAttempts = 10;
         for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
             $suffix = Str::lower(Str::random(6));
-            $slug = $base . '-' . $suffix;
+            $slug = $base.'-'.$suffix;
 
             try {
                 if (! Professional::query()->where('qr_slug', $slug)->exists()) {
@@ -102,6 +108,7 @@ class SiteProvisioningService
             \Illuminate\Support\Facades\Log::warning('No active free plan found – skipping subscription seed', [
                 'professional_id' => $professional->id,
             ]);
+
             return;
         }
 
@@ -123,8 +130,9 @@ class SiteProvisioningService
             return $base;
         }
 
-        $base = $this->limitSubdomainBase($base, '-' . $suffix);
-        return $base . '-' . $suffix;
+        $base = $this->limitSubdomainBase($base, '-'.$suffix);
+
+        return $base.'-'.$suffix;
     }
 
     private function limitSubdomainBase(string $base, string $suffixIncludingHyphen): string
@@ -133,6 +141,7 @@ class SiteProvisioningService
         if ($max < 1) {
             return substr($base, 0, 1);
         }
+
         return substr($base, 0, $max);
     }
 

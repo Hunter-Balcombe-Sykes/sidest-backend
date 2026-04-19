@@ -14,7 +14,6 @@ class BootstrapRequest extends BaseFormRequest
     use DetectsClientInfo;
     use NormalizesProfessionalType;
 
-
     public function rules(): array
     {
         $uid = $this->attributes->get('supabase_uid');
@@ -31,22 +30,22 @@ class BootstrapRequest extends BaseFormRequest
             : ['required'];
 
         return [
-            'handle' => ['sometimes','nullable','string','max:40'],
-            'display_name' => ['required','string','max:80'],
+            'handle' => ['sometimes', 'nullable', 'string', 'max:40'],
+            'display_name' => ['required', 'string', 'max:80'],
             'primary_email' => [
-                'required','email','max:255',
+                'required', 'email', 'max:255',
                 Rule::unique('professionals', 'primary_email')->ignore($existingProfessionalId, 'id'),
             ],
-            'phone' => ['required','string','max:40'],
-            'first_name' => ['required','string','max:80'],
-            'last_name' => ['nullable','string','max:80'],
+            'phone' => ['required', 'string', 'max:40'],
+            'first_name' => ['required', 'string', 'max:80'],
+            'last_name' => ['nullable', 'string', 'max:80'],
             // ISO 3166-1 alpha-2 only. Lower-case and whitespace are normalised
             // in prepareForValidation, so by the time we get here the value is
             // already two upper-case letters. Nullable because the CDN-header
             // fallback (also in prepareForValidation) handles the common case
             // where the frontend doesn't explicitly collect country.
             'country_code' => ['nullable', 'string', 'size:2', 'regex:/^[A-Z]{2}$/'],
-            'timezone' => ['nullable','string','max:64'],
+            'timezone' => ['nullable', 'string', 'max:64'],
             'invite_token' => ['sometimes', 'nullable', 'string', 'max:80'],
             'brand_partner_professional_id' => ['sometimes', 'nullable', 'uuid', Rule::exists('professionals', 'id')],
             'join_brand_handle' => ['sometimes', 'nullable', 'string', 'max:50'],
@@ -69,9 +68,9 @@ class BootstrapRequest extends BaseFormRequest
     protected function prepareForValidation(): void
     {
         $this->trimStrings([
-                'handle', 'display_name', 'phone', 'first_name',
-                'last_name', 'country_code', 'timezone', 'professional_type', 'invite_token'
-            ]);
+            'handle', 'display_name', 'phone', 'first_name',
+            'last_name', 'country_code', 'timezone', 'professional_type', 'invite_token',
+        ]);
         $this->sanitizeEmails(['primary_email']);
 
         // For brands: force handle to match display_name
@@ -82,7 +81,7 @@ class BootstrapRequest extends BaseFormRequest
         if ($isBrand) {
             // Brand handle always derived from display_name to prevent duplicate brand names
             $handle = $this->generateHandleFromDisplayName($this->display_name ?? '');
-        } elseif (!is_string($handle) || $handle === '') {
+        } elseif (! is_string($handle) || $handle === '') {
             $handle = $this->generateHandleFromDisplayName($this->display_name ?? '');
         }
 
@@ -133,7 +132,6 @@ class BootstrapRequest extends BaseFormRequest
         $this->merge($merge);
     }
 
-
     private function generateHandleFromDisplayName(string $displayName): string
     {
         // Convert display name to slug (e.g., "Josh's Barbershop" -> "joshs-barbershop")
@@ -147,7 +145,7 @@ class BootstrapRequest extends BaseFormRequest
         $handle = $base;
         $attempt = 1;
         while (Professional::query()->where('handle_lc', strtolower($handle))->exists()) {
-            $handle = $base . $attempt;
+            $handle = $base.$attempt;
             $attempt++;
         }
 

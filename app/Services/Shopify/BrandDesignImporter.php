@@ -369,6 +369,7 @@ class BrandDesignImporter
         // sRGB transfer curve → linear-light, then WCAG luminance.
         $channel = function (int $byte): float {
             $v = $byte / 255;
+
             return $v <= 0.03928 ? $v / 12.92 : (($v + 0.055) / 1.055) ** 2.4;
         };
         $r = $channel((int) hexdec(substr($h, 0, 2)));

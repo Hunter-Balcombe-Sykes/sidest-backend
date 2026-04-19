@@ -112,7 +112,7 @@ class UpdateLinkBlockRequest extends BaseFormRequest
                 if (! empty($extra)) {
                     $validator->errors()->add(
                         'settings',
-                        'The settings field contains unsupported keys: ' . implode(', ', $extra)
+                        'The settings field contains unsupported keys: '.implode(', ', $extra)
                     );
                 }
             }

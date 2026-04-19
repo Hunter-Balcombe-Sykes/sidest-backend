@@ -32,7 +32,7 @@ class BrandProfileObserver
         } catch (\Throwable $e) {
             Log::warning('BrandProfile updated notification dispatch failed', [
                 'brand_profile_id' => $brandProfile->id,
-                'message'          => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }

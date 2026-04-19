@@ -27,13 +27,13 @@ class StaffIntegrationController extends ApiController
             ]);
 
         $integrations = $rows->map(fn (object $row): array => [
-            'id'                      => $row->id,
-            'provider'                => $row->provider,
-            'external_account_id'     => $row->external_account_id,
-            'last_catalog_sync_at'    => $row->last_catalog_sync_at,
+            'id' => $row->id,
+            'provider' => $row->provider,
+            'external_account_id' => $row->external_account_id,
+            'last_catalog_sync_at' => $row->last_catalog_sync_at,
             'last_catalog_sync_error' => $row->last_catalog_sync_error,
-            'expires_at'              => $row->expires_at,
-            'connected_at'            => $row->created_at,
+            'expires_at' => $row->expires_at,
+            'connected_at' => $row->created_at,
         ])->values()->all();
 
         return $this->success(['integrations' => $integrations]);

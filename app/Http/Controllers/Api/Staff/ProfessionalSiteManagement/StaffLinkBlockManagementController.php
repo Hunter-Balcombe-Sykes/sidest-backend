@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Links\StaffReorderLinkRequest;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Links\StaffStoreLinkRequest;
 use App\Http\Requests\Api\Staff\ProfessionalSite\Links\StaffUpdateLinkRequest;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
 use Illuminate\Http\JsonResponse;
@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 class StaffLinkBlockManagementController extends ApiController
 {
     use ResolveCurrentSite;
+
     public function index(Professional $professional): JsonResponse
     {
         return $this->success([
@@ -42,17 +43,18 @@ class StaffLinkBlockManagementController extends ApiController
 
             $block = new Block([
                 'block_group' => 'links',
-                'block_type'  => 'link',
-                'title'       => $data['title'],
-                'url'         => $data['url'],
-                'icon_key'    => $data['icon_key'] ?? null,
-                'sort_order'  => $maxSort + 1,
-                'is_active'   => $data['is_active'] ?? true,
-                'settings'    => $data['settings'] ?? [],
+                'block_type' => 'link',
+                'title' => $data['title'],
+                'url' => $data['url'],
+                'icon_key' => $data['icon_key'] ?? null,
+                'sort_order' => $maxSort + 1,
+                'is_active' => $data['is_active'] ?? true,
+                'settings' => $data['settings'] ?? [],
             ]);
             $block->professional_id = $professional->id;
             $block->site_id = $site->id;
             $block->save();
+
             return $block->fresh();
         });
 
@@ -111,18 +113,18 @@ class StaffLinkBlockManagementController extends ApiController
             $allSet = array_flip($allIds);
 
             foreach ($ids as $id) {
-                if (!isset($allSet[$id])) {
+                if (! isset($allSet[$id])) {
                     abort(403, 'One or more blocks do not belong to professional');
                 }
             }
 
             $remaining = array_values(array_diff($allIds, $ids));
-            $newOrder  = array_merge($ids, $remaining);
-            $offset    = (int) Block::query()
-                    ->where('professional_id', $professional->id)
-                    ->where('site_id', $site->id)
-                    ->where('block_group', 'links')
-                    ->max('sort_order') + 1000;
+            $newOrder = array_merge($ids, $remaining);
+            $offset = (int) Block::query()
+                ->where('professional_id', $professional->id)
+                ->where('site_id', $site->id)
+                ->where('block_group', 'links')
+                ->max('sort_order') + 1000;
 
             foreach ($newOrder as $i => $id) {
                 Block::query()
@@ -147,5 +149,4 @@ class StaffLinkBlockManagementController extends ApiController
 
         return $this->success(['ok' => true]);
     }
-
 }

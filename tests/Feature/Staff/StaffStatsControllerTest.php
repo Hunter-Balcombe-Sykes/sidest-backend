@@ -22,7 +22,7 @@ it('returns correct shape with zero data', function () {
     DB::shouldReceive('table')->with('billing.subscriptions')->andReturn($subQuery);
     DB::shouldReceive('table')->with('commerce.commission_ledger_entries')->andReturn($commQuery);
 
-    $controller = new StaffStatsController();
+    $controller = new StaffStatsController;
     $response = $controller->show(Request::create('/', 'GET'));
     $data = json_decode($response->getContent(), true);
 
@@ -38,8 +38,8 @@ it('sums professional type counts correctly', function () {
     $profQuery->shouldReceive('selectRaw')->andReturnSelf();
     $profQuery->shouldReceive('groupBy')->andReturnSelf();
     $profQuery->shouldReceive('pluck')->andReturn(collect([
-        'brand'        => '3',
-        'influencer'   => '12',
+        'brand' => '3',
+        'influencer' => '12',
         'professional' => '5',
     ]));
 
@@ -55,7 +55,7 @@ it('sums professional type counts correctly', function () {
     DB::shouldReceive('table')->with('billing.subscriptions')->andReturn($subQuery);
     DB::shouldReceive('table')->with('commerce.commission_ledger_entries')->andReturn($commQuery);
 
-    $controller = new StaffStatsController();
+    $controller = new StaffStatsController;
     $response = $controller->show(Request::create('/', 'GET'));
     $data = json_decode($response->getContent(), true);
 

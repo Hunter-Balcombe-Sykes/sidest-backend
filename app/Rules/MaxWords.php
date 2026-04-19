@@ -12,10 +12,14 @@ class MaxWords implements ValidationRule
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        if ($value === null) return;
+        if ($value === null) {
+            return;
+        }
 
         $text = trim((string) $value);
-        if ($text === '') return;
+        if ($text === '') {
+            return;
+        }
 
         // normalize whitespace then count "wordy" tokens
         $text = preg_replace('/\s+/u', ' ', $text) ?? $text;

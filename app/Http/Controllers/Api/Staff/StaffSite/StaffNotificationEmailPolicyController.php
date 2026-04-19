@@ -22,7 +22,7 @@ class StaffNotificationEmailPolicyController extends ApiController
 
         $result = array_map(fn (string $cat): array => [
             'category' => $cat,
-            'mode'     => $policies->get($cat)?->mode ?? 'default',
+            'mode' => $policies->get($cat)?->mode ?? 'default',
         ], NotificationPublisher::CATEGORIES);
 
         return $this->success(['policies' => array_values($result)]);
@@ -52,7 +52,7 @@ class StaffNotificationEmailPolicyController extends ApiController
 
         $result = array_map(fn (string $cat): array => [
             'category' => $cat,
-            'mode'     => $policies->get($cat)?->mode ?? 'default',
+            'mode' => $policies->get($cat)?->mode ?? 'default',
         ], NotificationPublisher::CATEGORIES);
 
         return $this->success(['policies' => array_values($result)]);

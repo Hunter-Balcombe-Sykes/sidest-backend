@@ -265,6 +265,7 @@ class AffiliateProductController extends ApiController
             } catch (\Throwable $e) {
                 return $this->error('Unable to reset selections. Please try again.', 502);
             }
+
             return $this->success(['reset' => true, 'brand_professional_id' => $data['brand_professional_id']]);
         }
 

@@ -8,7 +8,9 @@ use App\Models\BaseModel;
 class WebhookEvent extends BaseModel
 {
     protected $table = 'billing.webhook_events';
+
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

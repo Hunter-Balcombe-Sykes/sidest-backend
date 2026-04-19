@@ -12,7 +12,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 // V2: Rebuilds booking metrics (counts, revenue) for a professional's hour. Booking analytics, not commerce. Queue: analytics.
-class RebuildBookingHourlyAggregatesJob implements ShouldQueue, ShouldBeUnique
+class RebuildBookingHourlyAggregatesJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -53,4 +53,3 @@ class RebuildBookingHourlyAggregatesJob implements ShouldQueue, ShouldBeUnique
         ]);
     }
 }
-

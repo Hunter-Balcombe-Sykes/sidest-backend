@@ -11,7 +11,9 @@ class NotificationEmailPolicy extends BaseModel
     use HasUuids;
 
     protected $table = 'notifications.notification_email_policies';
+
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

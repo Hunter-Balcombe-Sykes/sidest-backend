@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 it('returns 201 with the new link on success', function () {
     $brand = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $staff = (new SidestStaff())->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $link = new BrandPartnerLink([
         'id' => (string) Str::uuid(),
@@ -40,7 +40,7 @@ it('returns 201 with the new link on success', function () {
 it('returns 422 when reason is too short', function () {
     $brand = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $staff = (new SidestStaff())->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldNotReceive('createForStaff');
@@ -56,7 +56,7 @@ it('returns 422 when reason is too short', function () {
 it('returns 409 when link already exists', function () {
     $brand = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $staff = (new SidestStaff())->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('createForStaff')

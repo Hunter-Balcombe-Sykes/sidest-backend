@@ -4,7 +4,7 @@ use App\Services\Site\SocialLinkNormalizer;
 
 function normalizer(): SocialLinkNormalizer
 {
-    return new SocialLinkNormalizer();
+    return new SocialLinkNormalizer;
 }
 
 // --- getPublicRegistry() ---

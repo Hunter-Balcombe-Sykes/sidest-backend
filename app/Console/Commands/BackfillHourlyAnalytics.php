@@ -77,7 +77,7 @@ class BackfillHourlyAnalytics extends Command
     }
 
     /**
-     * @param  Collection<int, string>  $hourBuckets ISO8601 strings
+     * @param  Collection<int, string>  $hourBuckets  ISO8601 strings
      */
     private function backfillCommerce(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
     {
@@ -85,7 +85,7 @@ class BackfillHourlyAnalytics extends Command
     }
 
     /**
-     * @param  Collection<int, string>  $hourBuckets ISO8601 strings
+     * @param  Collection<int, string>  $hourBuckets  ISO8601 strings
      */
     private function backfillSite(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
     {
@@ -114,7 +114,7 @@ class BackfillHourlyAnalytics extends Command
     }
 
     /**
-     * @param  Collection<int, string>  $hourBuckets ISO8601 strings
+     * @param  Collection<int, string>  $hourBuckets  ISO8601 strings
      */
     private function backfillBooking(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
     {

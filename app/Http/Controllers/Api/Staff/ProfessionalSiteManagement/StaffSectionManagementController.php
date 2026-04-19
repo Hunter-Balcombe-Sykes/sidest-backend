@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
+use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Professional\Site\ReorderBlocksRequest;
 use App\Http\Requests\Api\Professional\Site\UpsertSectionBlockRequest;
 use App\Models\Core\Professional\Professional;
@@ -17,6 +17,7 @@ class StaffSectionManagementController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+
     public function index(Professional $professional): JsonResponse
     {
         // Return ALL section blocks (active + inactive) so staff can toggle
@@ -43,24 +44,24 @@ class StaffSectionManagementController extends ApiController
 
             $block = Block::query()->firstOrNew([
                 'professional_id' => $professional->id,
-                'site_id'         => $site->id,
-                'block_group'     => 'sections',
-                'block_type'      => $blockType,
+                'site_id' => $site->id,
+                'block_group' => 'sections',
+                'block_type' => $blockType,
             ]);
 
             if (array_key_exists('is_active', $data)) {
                 $block->is_active = (bool) $data['is_active'];
             }
 
-            if (!$block->exists) {
+            if (! $block->exists) {
                 $maxSort = Block::query()
                     ->where('site_id', $site->id)
                     ->where('block_group', 'sections')
                     ->max('sort_order');
 
                 $block->sort_order = is_null($maxSort) ? 0 : ((int) $maxSort + 1);
-                $block->is_active  = $data['is_active'] ?? true;
-                $block->settings   = $data['settings'] ?? [];
+                $block->is_active = $data['is_active'] ?? true;
+                $block->settings = $data['settings'] ?? [];
             }
 
             // PATCH-style merge settings
@@ -68,11 +69,12 @@ class StaffSectionManagementController extends ApiController
                 $existing = is_array($block->settings) ? $block->settings : [];
                 $incoming = is_array($data['settings']) ? $data['settings'] : [];
                 $block->settings = array_replace_recursive($existing, $incoming);
-            } elseif (!$block->exists) {
+            } elseif (! $block->exists) {
                 $block->settings = [];
             }
 
             $block->save();
+
             return $block->fresh();
         });
 
@@ -114,18 +116,18 @@ class StaffSectionManagementController extends ApiController
             $allSet = array_flip($allIds);
 
             foreach ($ids as $id) {
-                if (!isset($allSet[$id])) {
+                if (! isset($allSet[$id])) {
                     abort(403, 'One or more sections do not belong to this professional');
                 }
             }
 
             $remaining = array_values(array_diff($allIds, $ids));
-            $newOrder  = array_merge($ids, $remaining);
-            $offset    = (int) Block::query()
-                    ->where('professional_id', $professional->id)
-                    ->where('site_id', $site->id)
-                    ->where('block_group', 'sections')
-                    ->max('sort_order') + 1000;
+            $newOrder = array_merge($ids, $remaining);
+            $offset = (int) Block::query()
+                ->where('professional_id', $professional->id)
+                ->where('site_id', $site->id)
+                ->where('block_group', 'sections')
+                ->max('sort_order') + 1000;
 
             foreach ($newOrder as $i => $id) {
                 Block::query()
@@ -149,11 +151,10 @@ class StaffSectionManagementController extends ApiController
         return $this->success(['ok' => true]);
     }
 
-
     public function remove(Professional $professional, string $blockType): JsonResponse
     {
         $site = $professional->site;
-        if (!$site) {
+        if (! $site) {
             return $this->error('Professional has no site.', 422);
         }
 
@@ -164,7 +165,7 @@ class StaffSectionManagementController extends ApiController
             ->where('block_type', $blockType)
             ->first();
 
-        if (!$block) {
+        if (! $block) {
             return $this->success(['ok' => true]);
         }
 
@@ -173,5 +174,4 @@ class StaffSectionManagementController extends ApiController
 
         return $this->success(['ok' => true]);
     }
-
 }

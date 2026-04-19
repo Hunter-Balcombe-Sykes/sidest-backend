@@ -299,7 +299,7 @@ GRAPHQL;
      * Limited to the first 100 variants — the realistic per-product cap. Raise the
      * limit here if a brand ever ships a product with more than 100 variants.
      *
-     * @return array<int, string>  Variant GID strings, e.g. ["gid://shopify/ProductVariant/1", ...]
+     * @return array<int, string> Variant GID strings, e.g. ["gid://shopify/ProductVariant/1", ...]
      */
     public function fetchProductVariantGids(ProfessionalIntegration $integration, string $productGid): array
     {
@@ -326,7 +326,7 @@ GRAPHQL;
      * and `true` on all others to clear any previous restriction. Uses a single
      * metafieldsSet mutation (batched at 25 if the product has many variants).
      *
-     * @param  array<int, string>  $allVariantGids      Every variant GID for the product (pre-fetched for validation)
+     * @param  array<int, string>  $allVariantGids  Every variant GID for the product (pre-fetched for validation)
      * @param  array<int, string>  $disabledVariantGids  Variant GIDs to mark as disabled
      * @return array{success: bool, userErrors: array}
      */

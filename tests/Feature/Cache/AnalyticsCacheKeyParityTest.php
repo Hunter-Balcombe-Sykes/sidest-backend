@@ -14,12 +14,12 @@ beforeEach(function () {
 
 it('invalidateAnalytics bumps the summary version token', function () {
     $professionalId = (string) Str::uuid();
-    $versionKey     = CacheKeyGenerator::analyticsSummaryVersion($professionalId);
+    $versionKey = CacheKeyGenerator::analyticsSummaryVersion($professionalId);
 
     // Version starts at zero / absent.
     expect(Cache::get($versionKey))->toBeNull();
 
-    $service = new AnalyticsCacheService();
+    $service = new AnalyticsCacheService;
     $service->invalidateAnalytics($professionalId);
 
     // After first invalidation the version token must exist and be ≥ 1.
@@ -29,9 +29,9 @@ it('invalidateAnalytics bumps the summary version token', function () {
 
 it('each successive invalidation increments the version token', function () {
     $professionalId = (string) Str::uuid();
-    $versionKey     = CacheKeyGenerator::analyticsSummaryVersion($professionalId);
+    $versionKey = CacheKeyGenerator::analyticsSummaryVersion($professionalId);
 
-    $service = new AnalyticsCacheService();
+    $service = new AnalyticsCacheService;
     $service->invalidateAnalytics($professionalId);
     $v1 = (int) Cache::get($versionKey);
 
@@ -45,7 +45,7 @@ it('invalidation does not affect the version token of a different professional',
     $proA = (string) Str::uuid();
     $proB = (string) Str::uuid();
 
-    $service = new AnalyticsCacheService();
+    $service = new AnalyticsCacheService;
     $service->invalidateAnalytics($proA);
 
     expect(Cache::get(CacheKeyGenerator::analyticsSummaryVersion($proB)))->toBeNull();
@@ -54,11 +54,11 @@ it('invalidation does not affect the version token of a different professional',
 it('analytics summary cache key uses YmdH format matching the controller', function () {
     $professionalId = (string) Str::uuid();
     $from = Carbon::parse('2026-03-01 08:00:00');
-    $to   = Carbon::parse('2026-03-29 23:00:00');
+    $to = Carbon::parse('2026-03-29 23:00:00');
 
     // The key the controller builds (matching ProfessionalAnalyticsController line 78-82):
-    $version        = (int) Cache::get(CacheKeyGenerator::analyticsSummaryVersion($professionalId), 0);
-    $controllerKey  = CacheKeyGenerator::analyticsSummary(
+    $version = (int) Cache::get(CacheKeyGenerator::analyticsSummaryVersion($professionalId), 0);
+    $controllerKey = CacheKeyGenerator::analyticsSummary(
         $professionalId,
         $from->format('YmdH'),
         $to->format('YmdH')
@@ -71,11 +71,11 @@ it('analytics summary cache key uses YmdH format matching the controller', funct
     expect(Cache::get($controllerKey))->toBe(['seeded' => true]);
 
     // After invalidation, the version bumps so this key is unreachable.
-    $service = new AnalyticsCacheService();
+    $service = new AnalyticsCacheService;
     $service->invalidateAnalytics($professionalId);
 
-    $newVersion    = (int) Cache::get(CacheKeyGenerator::analyticsSummaryVersion($professionalId), 0);
-    $newKey        = CacheKeyGenerator::analyticsSummary(
+    $newVersion = (int) Cache::get(CacheKeyGenerator::analyticsSummaryVersion($professionalId), 0);
+    $newKey = CacheKeyGenerator::analyticsSummary(
         $professionalId,
         $from->format('YmdH'),
         $to->format('YmdH')
@@ -87,7 +87,7 @@ it('analytics summary cache key uses YmdH format matching the controller', funct
 
 it('invalidateAnalytics deletes visit stat cache keys for last 90 days', function () {
     $professionalId = (string) Str::uuid();
-    $end   = Carbon::now();
+    $end = Carbon::now();
     $start = $end->copy()->subDays(1)->format('Ymd');
     $endStr = $end->format('Ymd');
 
@@ -97,7 +97,7 @@ it('invalidateAnalytics deletes visit stat cache keys for last 90 days', functio
     Cache::put($visitKey, ['total_visits' => 99], now()->addMinutes(5));
     Cache::put($clickKey, ['total_clicks' => 42], now()->addMinutes(5));
 
-    $service = new AnalyticsCacheService();
+    $service = new AnalyticsCacheService;
     $service->invalidateAnalytics($professionalId);
 
     expect(Cache::has($visitKey))->toBeFalse();

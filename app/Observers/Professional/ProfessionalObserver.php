@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 class ProfessionalObserver
 {
     public bool $afterCommit = true;
+
     public function __construct(
         private ProfessionalCacheService $professionalCache,
     ) {}

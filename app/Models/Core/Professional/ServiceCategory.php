@@ -16,6 +16,7 @@ class ServiceCategory extends BaseModel
     protected $table = 'site.service_categories';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -25,10 +26,10 @@ class ServiceCategory extends BaseModel
     ];
 
     protected $casts = [
-        'sort_order'  => 'integer',
-        'deleted_at'  => 'datetime',
-        'created_at'  => 'datetime',
-        'updated_at'  => 'datetime',
+        'sort_order' => 'integer',
+        'deleted_at' => 'datetime',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo
@@ -47,5 +48,4 @@ class ServiceCategory extends BaseModel
             $q->orderBy('sort_order')->orderBy('created_at');
         });
     }
-
 }

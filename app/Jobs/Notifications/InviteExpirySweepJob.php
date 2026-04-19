@@ -17,6 +17,7 @@ class InviteExpirySweepJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
+
     public int $timeout = 120;
 
     public function handle(NotificationPublisher $publisher): void
@@ -61,7 +62,7 @@ class InviteExpirySweepJob implements ShouldQueue
             } catch (\Throwable $e) {
                 Log::warning('InviteExpirySweepJob failed for invite', [
                     'invite_id' => $invite->id,
-                    'message'   => $e->getMessage(),
+                    'message' => $e->getMessage(),
                 ]);
             }
         }

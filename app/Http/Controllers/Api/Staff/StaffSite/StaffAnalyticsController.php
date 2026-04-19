@@ -45,7 +45,7 @@ class StaffAnalyticsController extends ApiController
                 422,
                 [
                     'from' => $fromParam ? ['Invalid date.'] : [],
-                    'to'   => $toParam ? ['Invalid date.'] : [],
+                    'to' => $toParam ? ['Invalid date.'] : [],
                 ]
             );
         }
@@ -55,7 +55,7 @@ class StaffAnalyticsController extends ApiController
         }
 
         $site = $professional->site;
-        if (!$site) {
+        if (! $site) {
             return $this->error('professional has no site.', 404);
         }
 
@@ -144,27 +144,27 @@ class StaffAnalyticsController extends ApiController
         return $this->success([
             'range' => [
                 'from' => $from->toDateString(),
-                'to'   => $to->toDateString(),
+                'to' => $to->toDateString(),
             ],
             'professional' => [
-                'id'           => $professional->id,
-                'handle'       => $professional->handle,
+                'id' => $professional->id,
+                'handle' => $professional->handle,
                 'display_name' => $professional->display_name,
                 'professional_type' => $professional->professional_type,
             ],
             'site' => [
-                'id'        => $site->id,
+                'id' => $site->id,
                 'subdomain' => $site->subdomain,
                 'published' => (bool) $site->is_published,
             ],
             'totals' => [
-                'visits'          => $totalVisits,
+                'visits' => $totalVisits,
                 'unique_visitors' => (int) ($visitsAgg->unique_visitors ?? 0),
-                'clicks'          => $totalClicks,
+                'clicks' => $totalClicks,
                 'unique_clickers' => (int) ($clicksAgg->unique_clickers ?? 0),
-                'ctr_percent'     => $ctr,
-                'last_visit_at'   => $visitsAgg->last_visit_at ? Carbon::parse($visitsAgg->last_visit_at)->toISOString() : null,
-                'last_click_at'   => $clicksAgg->last_click_at ? Carbon::parse($clicksAgg->last_click_at)->toISOString() : null,
+                'ctr_percent' => $ctr,
+                'last_visit_at' => $visitsAgg->last_visit_at ? Carbon::parse($visitsAgg->last_visit_at)->toISOString() : null,
+                'last_click_at' => $clicksAgg->last_click_at ? Carbon::parse($clicksAgg->last_click_at)->toISOString() : null,
             ],
             'charts' => [
                 'visits_by_day' => $visitsByDay,

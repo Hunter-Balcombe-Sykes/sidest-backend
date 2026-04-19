@@ -6,9 +6,9 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\PublicSite\PublicSiteShowRequest;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
+use App\Services\Cache\SiteCacheService;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use App\Services\Cache\SiteCacheService;
 
 // V2: Serves published mini-site data by subdomain (cached, 95% of traffic). Hydrogen storefronts fetch brand config via separate Storefront API endpoint.
 class PublicSiteController extends ApiController
@@ -38,8 +38,9 @@ class PublicSiteController extends ApiController
                 $canonicalPayload = $this->siteCache->getPublicSitePayload($site->subdomain);
 
                 if ($canonicalPayload) {
-                    $host = $site->subdomain . '.' . config('sidest.public_domain');
-                    $url = $request->getScheme() . '://' . $host . $request->getRequestUri();
+                    $host = $site->subdomain.'.'.config('sidest.public_domain');
+                    $url = $request->getScheme().'://'.$host.$request->getRequestUri();
+
                     return redirect()->to($url, 301);
                 }
             }
@@ -56,7 +57,7 @@ class PublicSiteController extends ApiController
     public function showByHeader(Request $request)
     {
         $subdomain = $request->header('X-Site-Subdomain');
-        if (!$subdomain || !is_string($subdomain)) {
+        if (! $subdomain || ! is_string($subdomain)) {
             return $this->error('Missing X-Site-Subdomain header.', 400);
         }
 

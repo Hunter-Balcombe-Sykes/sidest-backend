@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 it('rejects missing bootstrap fields', function () {
-    $validator = Validator::make([], (new BootstrapRequest())->rules());
+    $validator = Validator::make([], (new BootstrapRequest)->rules());
 
     expect($validator->fails())->toBeTrue();
     expect($validator->errors()->has('display_name'))->toBeTrue();
@@ -30,7 +30,7 @@ it('rejects invalid public customer lead payload', function () {
         'phone' => str_repeat('1', 51),
     ];
 
-    $validator = Validator::make($payload, (new PublicCustomerLeadRequest())->rules());
+    $validator = Validator::make($payload, (new PublicCustomerLeadRequest)->rules());
 
     expect($validator->fails())->toBeTrue();
     expect($validator->errors()->has('full_name'))->toBeTrue();
@@ -48,7 +48,7 @@ it('rejects invalid public waitlist payload', function () {
         'pilot_program_opt_in' => 'not-a-bool',
     ];
 
-    $validator = Validator::make($payload, (new PublicWaitlistSignupRequest())->rules());
+    $validator = Validator::make($payload, (new PublicWaitlistSignupRequest)->rules());
 
     expect($validator->fails())->toBeTrue();
     expect($validator->errors()->has('name'))->toBeTrue();
@@ -69,7 +69,7 @@ it('requires conditional fields for public waitlist payload', function () {
         'pilot_program_opt_in' => true,
     ];
 
-    $brandValidator = Validator::make($brandPayload, (new PublicWaitlistSignupRequest())->rules());
+    $brandValidator = Validator::make($brandPayload, (new PublicWaitlistSignupRequest)->rules());
 
     expect($brandValidator->fails())->toBeTrue();
     expect($brandValidator->errors()->has('number_of_team_members'))->toBeTrue();
@@ -84,7 +84,7 @@ it('requires conditional fields for public waitlist payload', function () {
         'pilot_program_opt_in' => false,
     ];
 
-    $otherValidator = Validator::make($otherPayload, (new PublicWaitlistSignupRequest())->rules());
+    $otherValidator = Validator::make($otherPayload, (new PublicWaitlistSignupRequest)->rules());
 
     expect($otherValidator->fails())->toBeTrue();
     expect($otherValidator->errors()->has('type_other_text'))->toBeTrue();
@@ -96,7 +96,7 @@ it('rejects invalid public site subdomain', function () {
         'subdomain' => 'bad!subdomain',
     ];
 
-    $validator = Validator::make($payload, (new PublicSiteShowRequest())->rules());
+    $validator = Validator::make($payload, (new PublicSiteShowRequest)->rules());
 
     expect($validator->fails())->toBeTrue();
     expect($validator->errors()->has('subdomain'))->toBeTrue();
@@ -159,7 +159,7 @@ it('rejects invalid reorder blocks payload', function () {
         'ids' => ['not-a-uuid'],
     ];
 
-    $validator = Validator::make($payload, (new ReorderBlocksRequest())->rules());
+    $validator = Validator::make($payload, (new ReorderBlocksRequest)->rules());
 
     expect($validator->fails())->toBeTrue();
     expect($validator->errors()->has('ids.0'))->toBeTrue();
@@ -170,7 +170,7 @@ it('rejects invalid destroy link block payload', function () {
         'id' => 'not-a-uuid',
     ];
 
-    $validator = Validator::make($payload, (new DestroyLinkBlockRequest())->rules());
+    $validator = Validator::make($payload, (new DestroyLinkBlockRequest)->rules());
 
     expect($validator->fails())->toBeTrue();
     expect($validator->errors()->has('id'))->toBeTrue();

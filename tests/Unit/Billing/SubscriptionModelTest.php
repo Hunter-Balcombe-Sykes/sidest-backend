@@ -16,7 +16,7 @@ it('has correct grace statuses', function () {
 });
 
 it('reports active for active status with no ended_at', function () {
-    $sub = new Subscription();
+    $sub = new Subscription;
     $sub->status = Subscription::STATUS_ACTIVE;
 
     expect($sub->isActive())->toBeTrue();
@@ -24,28 +24,28 @@ it('reports active for active status with no ended_at', function () {
 });
 
 it('reports not active for non-active status', function () {
-    $sub = new Subscription();
+    $sub = new Subscription;
     $sub->status = Subscription::STATUS_PAST_DUE;
 
     expect($sub->isActive())->toBeFalse();
 });
 
 it('reports grace period for past_due', function () {
-    $sub = new Subscription();
+    $sub = new Subscription;
     $sub->status = Subscription::STATUS_PAST_DUE;
 
     expect($sub->isInGracePeriod())->toBeTrue();
 });
 
 it('reports no grace period for unpaid', function () {
-    $sub = new Subscription();
+    $sub = new Subscription;
     $sub->status = Subscription::STATUS_UNPAID;
 
     expect($sub->isInGracePeriod())->toBeFalse();
 });
 
 it('identifies stripe managed subscriptions', function () {
-    $sub = new Subscription();
+    $sub = new Subscription;
     $sub->provider = 'stripe';
 
     expect($sub->isStripeManaged())->toBeTrue();
@@ -53,7 +53,7 @@ it('identifies stripe managed subscriptions', function () {
 });
 
 it('identifies free internal subscriptions', function () {
-    $sub = new Subscription();
+    $sub = new Subscription;
     $sub->provider = 'internal';
 
     expect($sub->isFreeInternal())->toBeTrue();

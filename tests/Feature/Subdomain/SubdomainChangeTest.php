@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+
 beforeEach(function () {
     setupCoreSchema();
 
@@ -81,8 +82,8 @@ it('stores old subdomain as alias after a valid change', function () {
 
 it('redirects old subdomain to new site host', function () {
     $domain = config('sidest.public_domain');
-    $oldHost = 'old.' . $domain;
-    $newHost = 'new.' . $domain;
+    $oldHost = 'old.'.$domain;
+    $newHost = 'new.'.$domain;
 
     $proId = (string) Str::uuid();
     $siteId = (string) Str::uuid();
@@ -113,10 +114,10 @@ it('redirects old subdomain to new site host', function () {
         'payload' => json_encode(['site' => ['id' => $siteId]]),
     ]);
 
-    $response = $this->get('http://' . $oldHost . '/api/public/site');
+    $response = $this->get('http://'.$oldHost.'/api/public/site');
 
     $response->assertStatus(301);
-    $response->assertRedirect('http://' . $newHost . '/api/public/site');
+    $response->assertRedirect('http://'.$newHost.'/api/public/site');
 });
 
 function setupCoreSchema(): void

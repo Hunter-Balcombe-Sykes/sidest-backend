@@ -12,7 +12,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 // V2: Rebuilds site visit/click daily metrics for a professional. Queue: analytics.
-class RebuildSiteDailyAggregatesJob implements ShouldQueue, ShouldBeUnique
+class RebuildSiteDailyAggregatesJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 

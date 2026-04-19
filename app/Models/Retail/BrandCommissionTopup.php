@@ -15,6 +15,7 @@ class BrandCommissionTopup extends BaseModel
     protected $table = 'commerce.brand_commission_topups';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

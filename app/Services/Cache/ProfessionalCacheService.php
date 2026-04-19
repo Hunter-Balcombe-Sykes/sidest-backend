@@ -51,6 +51,7 @@ class ProfessionalCacheService
             now()->addHour(),
             function () use ($id) {
                 $pro = Professional::query()->with('site')->find($id);
+
                 return $pro ? $this->toPayload($pro) : null;
             }
         );
@@ -67,6 +68,7 @@ class ProfessionalCacheService
     public function getPayloadByAuthId(string $authUserId): ?array
     {
         $id = $this->getIdByAuthId($authUserId);
+
         return $id ? $this->getPayloadById($id) : null;
     }
 

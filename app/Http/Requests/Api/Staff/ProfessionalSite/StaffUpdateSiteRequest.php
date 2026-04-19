@@ -2,16 +2,14 @@
 
 namespace App\Http\Requests\Api\Staff\ProfessionalSite;
 
-use App\Models\Core\Site\Site;
 use App\Http\Requests\BaseFormRequest;
+use App\Models\Core\Site\Site;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 // V2: Validates staff update of a site — supports theme, subdomain (with uniqueness and reserved-word checks), publish status, and deeply nested design/settings fields with PATCH semantics.
 class StaffUpdateSiteRequest extends BaseFormRequest
 {
-
-
     protected function prepareForValidation(): void
     {
         if (is_string($this->subdomain ?? null)) {
@@ -48,7 +46,8 @@ class StaffUpdateSiteRequest extends BaseFormRequest
                 function ($attribute, $value, $fail) use ($currentSiteId) {
                     $reserved = array_map('strtolower', config('sidest.reserved_subdomains', []));
                     if (in_array(strtolower($value), $reserved, true)) {
-                        $fail('The subdomain "' . $value . '" is reserved and cannot be used.');
+                        $fail('The subdomain "'.$value.'" is reserved and cannot be used.');
+
                         return;
                     }
 
@@ -60,6 +59,7 @@ class StaffUpdateSiteRequest extends BaseFormRequest
 
                     if ($exists) {
                         $fail('This subdomain is already taken.');
+
                         return;
                     }
 

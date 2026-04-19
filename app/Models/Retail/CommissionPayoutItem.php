@@ -14,6 +14,7 @@ class CommissionPayoutItem extends BaseModel
     protected $table = 'commerce.commission_payout_items';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     public $timestamps = false;

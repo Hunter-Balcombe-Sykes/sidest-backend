@@ -13,7 +13,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class BrandGalleryController extends ApiController
@@ -22,7 +21,9 @@ class BrandGalleryController extends ApiController
     use ResolveCurrentSite;
 
     private const POOL = SiteMedia::POOL_BRAND_GALLERY;
+
     private const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+
     private const MAX_FILE_KB = 10240; // 10 MB
 
     public function __construct(
@@ -69,8 +70,8 @@ class BrandGalleryController extends ApiController
             'image' => [
                 'required',
                 'file',
-                'mimetypes:' . implode(',', self::ALLOWED_MIMES),
-                'max:' . self::MAX_FILE_KB,
+                'mimetypes:'.implode(',', self::ALLOWED_MIMES),
+                'max:'.self::MAX_FILE_KB,
             ],
             'alt_text' => ['nullable', 'string', 'max:255'],
         ]);
@@ -125,6 +126,7 @@ class BrandGalleryController extends ApiController
                 'error' => $e->getMessage(),
             ]);
             $media->delete();
+
             return $this->error('Failed to store file.', 500);
         }
 

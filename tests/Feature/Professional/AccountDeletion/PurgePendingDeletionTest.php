@@ -18,15 +18,16 @@ function seedPurgeableProfessional(array $overrides = []): Professional
     $data = array_merge([
         'id' => $id,
         'auth_user_id' => $authId,
-        'handle' => 'purge-' . substr($id, 0, 6),
-        'handle_lc' => 'purge-' . substr($id, 0, 6),
+        'handle' => 'purge-'.substr($id, 0, 6),
+        'handle_lc' => 'purge-'.substr($id, 0, 6),
         'display_name' => 'To Purge',
-        'primary_email' => 'purge-' . substr($id, 0, 6) . '@example.com',
+        'primary_email' => 'purge-'.substr($id, 0, 6).'@example.com',
         'status' => 'pending_deletion',
         'deletion_confirmed_at' => now()->subDays(31)->toIso8601String(),
     ], $overrides);
 
     DB::connection('pgsql')->table('core.professionals')->insert($data);
+
     return Professional::query()->where('id', $id)->first();
 }
 
@@ -37,7 +38,7 @@ it('calls Supabase Admin API and hard-deletes professional on success', function
         'test.supabase.co/auth/v1/admin/users/*' => Http::response('', 200),
     ]);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $result = $service->purge($pro);
 
     expect($result)->toBeTrue();
@@ -59,7 +60,7 @@ it('treats Supabase 404 as success and still hard-deletes professional', functio
         'test.supabase.co/auth/v1/admin/users/*' => Http::response(['message' => 'User not found'], 404),
     ]);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $result = $service->purge($pro);
 
     expect($result)->toBeTrue();
@@ -76,7 +77,7 @@ it('skips hard delete and logs purge_failed when Supabase returns 500', function
         'test.supabase.co/auth/v1/admin/users/*' => Http::response(['message' => 'server error'], 500),
     ]);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $result = $service->purge($pro);
 
     expect($result)->toBeFalse();
@@ -99,7 +100,7 @@ it('writes purged audit row with handle + email snapshots', function () {
         'test.supabase.co/auth/v1/admin/users/*' => Http::response('', 200),
     ]);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $service->purge($pro);
 
     $audit = DB::connection('pgsql')->table('core.professional_deletion_audit')

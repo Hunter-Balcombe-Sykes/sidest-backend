@@ -7,15 +7,14 @@ use App\Http\Requests\BaseFormRequest;
 // V2: Validates partial update of a customer record — supports name, email, phone (sanitized to digits+plus), notes, source, and external ID with PATCH semantics.
 class StaffUpdateCustomerRequest extends BaseFormRequest
 {
-
     public function rules(): array
     {
         return [
-            'full_name'   => ['sometimes', 'required', 'string', 'max:255'],
-            'email'       => ['sometimes', 'nullable', 'email', 'max:255'],
-            'phone'       => ['sometimes', 'nullable', 'string', 'max:50'],
-            'notes'       => ['sometimes', 'nullable', 'string'],
-            'source'      => ['sometimes', 'nullable', 'string', 'max:225'],
+            'full_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'email' => ['sometimes', 'nullable', 'email', 'max:255'],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'notes' => ['sometimes', 'nullable', 'string'],
+            'source' => ['sometimes', 'nullable', 'string', 'max:225'],
             'external_id' => ['sometimes', 'nullable', 'string', 'max:255'],
         ];
     }

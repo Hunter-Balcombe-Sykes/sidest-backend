@@ -81,7 +81,7 @@ class BookingAnalyticsController extends ApiController
                     $totals = (clone $rawBase)
                         ->selectRaw('COUNT(*) as bookings_count')
                         ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
-                        ->selectRaw("COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count")
+                        ->selectRaw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count')
                         ->selectRaw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count")
                         ->first();
 
@@ -123,7 +123,7 @@ class BookingAnalyticsController extends ApiController
                     $totals = (clone $rawBase)
                         ->selectRaw('COUNT(*) as bookings_count')
                         ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
-                        ->selectRaw("COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count")
+                        ->selectRaw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count')
                         ->selectRaw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count")
                         ->first();
 
@@ -287,7 +287,7 @@ class BookingAnalyticsController extends ApiController
 
         $hourlyFrom = $from->copy()->utc();
         $hourlyTo = $to->copy()->min(now())->utc();
-        if ($forceHourly && !($filters['explicit_range'] ?? false)) {
+        if ($forceHourly && ! ($filters['explicit_range'] ?? false)) {
             $hourlyTo = now()->utc();
             $hourlyFrom = $hourlyTo->copy()->subHours(24)->startOfHour();
         }

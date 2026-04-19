@@ -78,5 +78,4 @@ class ShopifyOrderWebhookController extends ApiController
 
         return $this->success(['received' => true]);
     }
-
 }

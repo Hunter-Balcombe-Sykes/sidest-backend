@@ -55,6 +55,7 @@ class PublicWaitlistSignupRequest extends BaseFormRequest
         }
 
         $normalized = mb_strtolower(trim($value));
+
         return $normalized !== '' ? $normalized : null;
     }
 
@@ -70,7 +71,7 @@ class PublicWaitlistSignupRequest extends BaseFormRequest
         }
 
         if (str_contains($normalized, '+')) {
-            $normalized = '+' . str_replace('+', '', $normalized);
+            $normalized = '+'.str_replace('+', '', $normalized);
         }
 
         return $normalized;
@@ -129,6 +130,7 @@ class PublicWaitlistSignupRequest extends BaseFormRequest
         }
 
         $normalized = trim($value);
+
         return $normalized !== '' ? $normalized : null;
     }
 
@@ -143,6 +145,7 @@ class PublicWaitlistSignupRequest extends BaseFormRequest
         }
 
         $parsed = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
         return $parsed ?? $value;
     }
 

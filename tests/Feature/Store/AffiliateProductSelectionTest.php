@@ -3,13 +3,10 @@
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;
 use App\Http\Requests\Api\Professional\Store\ReorderSelectionsRequest;
 use App\Http\Requests\Api\Professional\Store\StoreSelectionRequest;
-use App\Models\Commerce\AffiliateProductSelection;
-use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Store\AffiliateProductCatalogService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
 // --- Helpers ---
@@ -81,7 +78,7 @@ function makeServiceWithCatalog(array $catalog): AffiliateProductCatalogService
     $service->shouldReceive('resolveAffiliateBrandIntegration')
         ->andReturn([
             'brand_professional_id' => (string) Str::uuid(),
-            'integration' => new ProfessionalIntegration(),
+            'integration' => new ProfessionalIntegration,
         ]);
 
     $service->shouldReceive('fetchActiveCatalog')
@@ -253,7 +250,7 @@ it('returns stale selections when catalog changes', function () {
 // --- Form Request validation ---
 
 it('validates product_gid format in StoreSelectionRequest', function () {
-    $request = new StoreSelectionRequest();
+    $request = new StoreSelectionRequest;
     $rules = $request->rules();
 
     expect($rules['product_gid'])->toContain('required');
@@ -262,7 +259,7 @@ it('validates product_gid format in StoreSelectionRequest', function () {
 });
 
 it('validates items array in ReorderSelectionsRequest', function () {
-    $request = new ReorderSelectionsRequest();
+    $request = new ReorderSelectionsRequest;
     $rules = $request->rules();
 
     expect($rules['items'])->toContain('required');

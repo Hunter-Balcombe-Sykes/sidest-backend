@@ -17,13 +17,14 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
+
     public int $timeout = 300;
 
     public function handle(NotificationPublisher $publisher): void
     {
-        $yearWeek  = now()->format('o-W'); // ISO year + week number
+        $yearWeek = now()->format('o-W'); // ISO year + week number
         $weekStart = now()->subDays(7)->toDateString();
-        $weekEnd   = now()->subDay()->toDateString();
+        $weekEnd = now()->subDay()->toDateString();
 
         DB::table('core.professionals')
             ->where('status', 'active')
@@ -36,7 +37,7 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
                     } catch (\Throwable $e) {
                         Log::warning('Weekly analytics notification failed', [
                             'professional_id' => $professional->id,
-                            'message'         => $e->getMessage(),
+                            'message' => $e->getMessage(),
                         ]);
                     }
                 }
@@ -56,16 +57,16 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
             ->selectRaw('COALESCE(SUM(orders_count), 0) as orders, COALESCE(SUM(commission_accrued_cents), 0) as commission_cents')
             ->first();
 
-        $orders          = (int) ($metrics->orders ?? 0);
+        $orders = (int) ($metrics->orders ?? 0);
         $commissionCents = (int) ($metrics->commission_cents ?? 0);
 
         if ($orders === 0 && $commissionCents === 0) {
             return;
         }
 
-        $body = "Last 7 days: {$orders} sale" . ($orders !== 1 ? 's' : '');
+        $body = "Last 7 days: {$orders} sale".($orders !== 1 ? 's' : '');
         if ($commissionCents > 0) {
-            $commission = 'A$' . number_format($commissionCents / 100, 2);
+            $commission = 'A$'.number_format($commissionCents / 100, 2);
             $body .= ", {$commission} in commissions";
         }
         $body .= '.';

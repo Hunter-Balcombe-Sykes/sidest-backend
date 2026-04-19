@@ -19,22 +19,23 @@ function makeProfessional(array $overrides = []): Professional
     $data = array_merge([
         'id' => $id,
         'auth_user_id' => (string) Str::uuid(),
-        'handle' => 'test-' . substr($id, 0, 8),
-        'handle_lc' => 'test-' . substr($id, 0, 8),
+        'handle' => 'test-'.substr($id, 0, 8),
+        'handle_lc' => 'test-'.substr($id, 0, 8),
         'display_name' => 'Test Pro',
-        'primary_email' => 'test-' . substr($id, 0, 8) . '@example.com',
+        'primary_email' => 'test-'.substr($id, 0, 8).'@example.com',
         'status' => 'active',
         'stripe_manual_balance_cents' => 0,
     ], $overrides);
 
     DB::connection('pgsql')->table('core.professionals')->insert($data);
+
     return Professional::query()->where('id', $id)->first();
 }
 
 it('rejects request when professional has unpaid balance', function () {
     $pro = makeProfessional(['stripe_manual_balance_cents' => 1000]);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $request = Request::create('/', 'POST');
 
     $result = $service->request($pro, $request);
@@ -56,7 +57,7 @@ it('rejects request when professional has pending commission payouts', function 
         'created_at' => now()->toIso8601String(),
     ]);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $request = Request::create('/', 'POST');
 
     $result = $service->request($pro, $request);
@@ -68,7 +69,7 @@ it('rejects request when professional has pending commission payouts', function 
 it('stores hashed token, sets requested_at, and sends confirmation mail', function () {
     $pro = makeProfessional();
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $request = Request::create('/', 'POST');
 
     $result = $service->request($pro, $request);
@@ -89,7 +90,7 @@ it('stores hashed token, sets requested_at, and sends confirmation mail', functi
 
 it('writes a requested audit entry on successful request', function () {
     $pro = makeProfessional();
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $request = Request::create('/', 'POST', [], [], [], ['REMOTE_ADDR' => '1.2.3.4', 'HTTP_USER_AGENT' => 'TestAgent']);
 
     $service->request($pro, $request);
@@ -111,7 +112,7 @@ it('rolls back token storage if mail send throws', function () {
 
     Mail::shouldReceive('to')->andThrow(new \RuntimeException('SMTP down'));
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $request = Request::create('/', 'POST');
 
     $result = $service->request($pro, $request);
@@ -135,7 +136,7 @@ it('rejects request when brand has pending topups', function () {
         'created_at' => now()->toIso8601String(),
     ]);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $request = Request::create('/', 'POST');
 
     $result = $service->request($pro, $request);

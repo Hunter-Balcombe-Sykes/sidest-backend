@@ -14,6 +14,7 @@ class SiteSubdomainAlias extends BaseModel
     protected $table = 'site.site_subdomain_aliases';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     public $timestamps = false;

@@ -25,7 +25,7 @@ class CommissionLedgerEntryObserver
         } catch (\Throwable $e) {
             Log::warning('CommissionLedgerEntry created notification failed', [
                 'entry_id' => $entry->id,
-                'message'  => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
@@ -39,11 +39,13 @@ class CommissionLedgerEntryObserver
 
             if ($entry->status === 'approved' && $entry->getOriginal('status') !== 'approved') {
                 $this->notifyEarned($entry);
+
                 return;
             }
 
             if ($entry->status === 'reversed') {
                 $this->notifyReversed($entry);
+
                 return;
             }
 
@@ -53,7 +55,7 @@ class CommissionLedgerEntryObserver
         } catch (\Throwable $e) {
             Log::warning('CommissionLedgerEntry updated notification failed', [
                 'entry_id' => $entry->id,
-                'message'  => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
@@ -147,13 +149,13 @@ class CommissionLedgerEntryObserver
     private function formatMoney(int $cents, string $currencyCode): string
     {
         $prefix = match (strtoupper($currencyCode)) {
-            'USD'   => '$',
-            'GBP'   => '£',
-            'EUR'   => '€',
-            'AUD'   => 'A$',
-            default => strtoupper($currencyCode) . ' ',
+            'USD' => '$',
+            'GBP' => '£',
+            'EUR' => '€',
+            'AUD' => 'A$',
+            default => strtoupper($currencyCode).' ',
         };
 
-        return $prefix . number_format($cents / 100, 2, '.', ',');
+        return $prefix.number_format($cents / 100, 2, '.', ',');
     }
 }

@@ -38,8 +38,8 @@ class NotificationEmailPreferenceController extends ApiController
         $result = array_map(function (string $category) use ($prefs, $perProPolicies, $globalPolicies): array {
             $perProMode = $perProPolicies->get($category)?->mode;
             $globalMode = $globalPolicies->get($category)?->mode;
-            $prefRow    = $prefs->get($category);
-            $prefValue  = $prefRow !== null ? (bool) $prefRow->enabled : null;
+            $prefRow = $prefs->get($category);
+            $prefValue = $prefRow !== null ? (bool) $prefRow->enabled : null;
 
             if ($perProMode === 'force_on') {
                 $effective = true;
@@ -56,9 +56,9 @@ class NotificationEmailPreferenceController extends ApiController
             }
 
             return [
-                'category'             => $category,
-                'enabled'              => $effective,
-                'preference_set'       => $prefValue !== null,
+                'category' => $category,
+                'enabled' => $effective,
+                'preference_set' => $prefValue !== null,
                 'overridden_by_policy' => in_array($perProMode, ['force_on', 'force_off'], true)
                     || in_array($globalMode, ['force_on', 'force_off'], true),
             ];
@@ -69,7 +69,7 @@ class NotificationEmailPreferenceController extends ApiController
 
     public function update(UpdateNotificationEmailPreferencesRequest $request): JsonResponse
     {
-        $pro     = $this->currentProfessional($request);
+        $pro = $this->currentProfessional($request);
         $updates = $request->validated()['preferences'];
 
         foreach ($updates as $update) {

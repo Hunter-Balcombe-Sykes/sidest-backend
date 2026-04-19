@@ -18,7 +18,7 @@ it('returns empty affiliates list when brand has no links', function () {
 
     DB::shouldReceive('table')->with('brand.brand_partner_links as bpl')->andReturn($mockQuery);
 
-    $controller = new StaffAffiliateController();
+    $controller = new StaffAffiliateController;
     $response = $controller->index(Request::create('/', 'GET'), $brand);
     $data = json_decode($response->getContent(), true);
 
@@ -30,20 +30,20 @@ it('returns affiliate summary shape', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
 
     $row = (object) [
-        'id'                   => (string) Str::uuid(),
-        'first_name'           => 'Sarah',
-        'last_name'            => 'Jones',
-        'display_name'         => 'Sarah Jones',
-        'handle'               => 'sarah',
-        'professional_type'    => 'influencer',
-        'status'               => 'active',
-        'primary_email'        => 'sarah@example.com',
+        'id' => (string) Str::uuid(),
+        'first_name' => 'Sarah',
+        'last_name' => 'Jones',
+        'display_name' => 'Sarah Jones',
+        'handle' => 'sarah',
+        'professional_type' => 'influencer',
+        'status' => 'active',
+        'primary_email' => 'sarah@example.com',
         'public_contact_email' => null,
-        'phone'                => null,
+        'phone' => null,
         'public_contact_number' => null,
-        'slot'                 => 0,
+        'slot' => 0,
         'custom_photos_enabled' => true,
-        'connected_at'         => now()->toIso8601String(),
+        'connected_at' => now()->toIso8601String(),
     ];
 
     $mockQuery = Mockery::mock();
@@ -55,7 +55,7 @@ it('returns affiliate summary shape', function () {
 
     DB::shouldReceive('table')->with('brand.brand_partner_links as bpl')->andReturn($mockQuery);
 
-    $controller = new StaffAffiliateController();
+    $controller = new StaffAffiliateController;
     $response = $controller->index(Request::create('/', 'GET'), $brand);
     $data = json_decode($response->getContent(), true);
 

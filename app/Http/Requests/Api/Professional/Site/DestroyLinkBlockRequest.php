@@ -7,7 +7,6 @@ use App\Http\Requests\BaseFormRequest;
 // V2: Validates link block deletion — extracts and validates the UUID from the route parameter.
 class DestroyLinkBlockRequest extends BaseFormRequest
 {
-
     protected function prepareForValidation(): void
     {
         // `SubstituteBindings` middleware runs before this FormRequest is

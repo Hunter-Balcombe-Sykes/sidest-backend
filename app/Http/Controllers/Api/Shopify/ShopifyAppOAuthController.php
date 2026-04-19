@@ -39,13 +39,13 @@ class ShopifyAppOAuthController extends ApiController
 
         $apiKey = (string) config('services.shopify.api_key');
         $scopes = (string) config('services.shopify.app_scopes', 'read_products,read_orders,write_orders');
-        $redirectUri = rtrim((string) config('app.url'), '/') . '/api/shopify/callback';
+        $redirectUri = rtrim((string) config('app.url'), '/').'/api/shopify/callback';
         $nonce = bin2hex(random_bytes(16));
 
         cache()->put("shopify_oauth_nonce_{$shop}", $nonce, now()->addMinutes(10));
 
         $authUrl = "https://{$shop}/admin/oauth/authorize?"
-            . http_build_query([
+            .http_build_query([
                 'client_id' => $apiKey,
                 'scope' => $scopes,
                 'redirect_uri' => $redirectUri,
@@ -68,12 +68,14 @@ class ShopifyAppOAuthController extends ApiController
 
         if (! $this->isValidHmac($request->query(), (string) config('services.shopify.api_secret'))) {
             Log::warning('Shopify OAuth: invalid HMAC', ['shop' => $shop]);
+
             return $this->error('Invalid HMAC signature.', 400);
         }
 
         $expectedNonce = cache()->pull("shopify_oauth_nonce_{$shop}");
         if ($expectedNonce === null || ! hash_equals($expectedNonce, $state)) {
             Log::warning('Shopify OAuth: invalid nonce', ['shop' => $shop]);
+
             return $this->error('Invalid state parameter.', 400);
         }
 
@@ -88,6 +90,7 @@ class ShopifyAppOAuthController extends ApiController
                 'shop' => $shop,
                 'status' => $tokenResponse->status(),
             ]);
+
             return $this->error('Failed to exchange OAuth code for access token.', 502);
         }
 
@@ -100,7 +103,7 @@ class ShopifyAppOAuthController extends ApiController
 
         $shopResponse = Http::withHeaders([
             'X-Shopify-Access-Token' => $accessToken,
-        ])->get("https://{$shop}/admin/api/" . config('services.shopify.api_version') . "/shop.json");
+        ])->get("https://{$shop}/admin/api/".config('services.shopify.api_version').'/shop.json');
 
         $shopData = [];
         if ($shopResponse->successful()) {
@@ -165,6 +168,7 @@ class ShopifyAppOAuthController extends ApiController
                 'shop' => $shop,
                 'error' => $e->getMessage(),
             ]);
+
             return $this->error('Failed to process Shopify app installation.', 500);
         }
     }

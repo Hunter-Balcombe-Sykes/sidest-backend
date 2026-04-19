@@ -15,8 +15,8 @@ class StorePlanSubscriptionRequest extends BaseFormRequest
 
         return [
             'plan_id' => ['required', 'string', 'exists:plans,id'],
-            'success_url' => ['required_unless:plan_id,' . $freePlanId, 'nullable', 'url', $this->allowedRedirectRule()],
-            'cancel_url' => ['required_unless:plan_id,' . $freePlanId, 'nullable', 'url', $this->allowedRedirectRule()],
+            'success_url' => ['required_unless:plan_id,'.$freePlanId, 'nullable', 'url', $this->allowedRedirectRule()],
+            'cancel_url' => ['required_unless:plan_id,'.$freePlanId, 'nullable', 'url', $this->allowedRedirectRule()],
         ];
     }
 

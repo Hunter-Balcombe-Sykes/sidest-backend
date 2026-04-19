@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Api\Professional\Notifications;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Core\Notifications\Notification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use Illuminate\Support\Str;
 
 // V2: In-app notification listing, mark-as-read, and dismiss for the authenticated professional.
@@ -16,6 +16,7 @@ class NotificationController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+
     /**
      * GET /me/notifications
      * Returns notifications targeted to the current pro + broadcasts.
@@ -34,7 +35,7 @@ class NotificationController extends ApiController
         $base = $this->baseQuery($pro->id, $now);
 
         $listQuery = clone $base;
-        if (!$includeDismissed) {
+        if (! $includeDismissed) {
             $listQuery->whereNull('r.dismissed_at');
         }
 
@@ -95,10 +96,10 @@ class NotificationController extends ApiController
 
         $cols = array_keys($set);
         $placeholders = implode(', ', array_fill(0, count($cols), '?'));
-        $updates = implode(', ', array_map(fn($c) => "{$c} = EXCLUDED.{$c}", $cols));
+        $updates = implode(', ', array_map(fn ($c) => "{$c} = EXCLUDED.{$c}", $cols));
 
-        $sql = "
-        INSERT INTO notifications.notification_receipts (id, notification_id, professional_id, ".implode(', ', $cols).", created_at, updated_at)
+        $sql = '
+        INSERT INTO notifications.notification_receipts (id, notification_id, professional_id, '.implode(', ', $cols).", created_at, updated_at)
         VALUES (?, ?, ?, {$placeholders}, NOW(), NOW())
         ON CONFLICT (notification_id, professional_id)
         DO UPDATE SET {$updates}, updated_at = NOW()
@@ -126,7 +127,6 @@ class NotificationController extends ApiController
 
         return $this->success(['ok' => true]);
     }
-
 
     private function baseQuery(string $professionalId, $now)
     {

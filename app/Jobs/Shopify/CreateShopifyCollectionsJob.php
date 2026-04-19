@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates four Side St collections on the brand's Shopify store and writes handles to shop metafields.
-class CreateShopifyCollectionsJob implements ShouldQueue, ShouldBeUnique
+class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -414,7 +414,7 @@ class CreateShopifyCollectionsJob implements ShouldQueue, ShouldBeUnique
         // Cache all definitions from this namespace
         foreach ($edges as $edge) {
             $node = $edge['node'] ?? [];
-            $cacheKey = ($node['namespace'] ?? '') . '.' . ($node['key'] ?? '');
+            $cacheKey = ($node['namespace'] ?? '').'.'.($node['key'] ?? '');
             $this->metafieldDefinitionCache[$cacheKey] = $node['id'] ?? null;
         }
 

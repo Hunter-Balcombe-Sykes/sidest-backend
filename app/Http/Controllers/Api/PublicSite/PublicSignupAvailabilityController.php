@@ -53,15 +53,15 @@ class PublicSignupAvailabilityController extends ApiController
 
         return $this->success([
             'email' => [
-                'available' => !$emailExists,
+                'available' => ! $emailExists,
                 'exists' => $emailExists,
             ],
             'phone' => [
-                'available' => !$phoneExists,
+                'available' => ! $phoneExists,
                 'exists' => $phoneExists,
             ],
             'handle_lc' => [
-                'available' => !$handleExists,
+                'available' => ! $handleExists,
                 'exists' => $handleExists,
             ],
             'signups_open' => $signupsOpen,

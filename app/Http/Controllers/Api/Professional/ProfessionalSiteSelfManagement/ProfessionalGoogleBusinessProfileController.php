@@ -59,7 +59,7 @@ class ProfessionalGoogleBusinessProfileController extends ApiController
 
     private function trimOrNull(mixed $value): ?string
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return null;
         }
 
@@ -70,13 +70,13 @@ class ProfessionalGoogleBusinessProfileController extends ApiController
 
     private function normalizeProfile(mixed $raw): ?array
     {
-        if (!is_array($raw)) {
+        if (! is_array($raw)) {
             return null;
         }
 
         $placeId = $this->trimOrNull($raw['place_id'] ?? null);
         $name = $this->trimOrNull($raw['name'] ?? null);
-        if (!$placeId || !$name) {
+        if (! $placeId || ! $name) {
             return null;
         }
 
@@ -99,4 +99,3 @@ class ProfessionalGoogleBusinessProfileController extends ApiController
         ];
     }
 }
-

@@ -2,15 +2,15 @@
 
 namespace App\Http\Controllers\Api\Professional;
 
-use App\Actions\Subscription\CreateProfessionalSubscriptionAction;
-use App\Actions\Subscription\ChangeProfessionalPlanAction;
 use App\Actions\Subscription\CancelProfessionalSubscriptionAction;
+use App\Actions\Subscription\ChangeProfessionalPlanAction;
+use App\Actions\Subscription\CreateProfessionalSubscriptionAction;
 use App\Actions\Subscription\ResumeProfessionalSubscriptionAction;
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Requests\Api\Professional\StorePlanSubscriptionRequest;
 use App\Http\Requests\Api\Professional\UpdatePlanSubscriptionRequest;
 use App\Http\Resources\SubscriptionResource;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Billing\Subscription;
 use App\Services\Stripe\StripeBillingService;
 use Illuminate\Http\Request;

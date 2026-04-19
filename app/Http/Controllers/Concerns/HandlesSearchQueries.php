@@ -12,10 +12,10 @@ trait HandlesSearchQueries
         $search = $request->query($param);
         $search = is_string($search) ? trim($search) : null;
 
-        if (!  $search) {
+        if (! $search) {
             return null;
         }
 
-        return '%' . str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $search) . '%';
+        return '%'.str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $search).'%';
     }
 }

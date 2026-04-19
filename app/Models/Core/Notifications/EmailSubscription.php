@@ -16,6 +16,7 @@ class EmailSubscription extends BaseModel
     protected $table = 'notifications.email_subscriptions';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $hidden = [
@@ -57,9 +58,15 @@ class EmailSubscription extends BaseModel
         $this->subscribed_at = $this->subscribed_at ?? now();
         $this->unsubscribed_at = null;
 
-        if (isset($meta['source'])) $this->consent_source = $meta['source'];
-        if (isset($meta['ip_hash'])) $this->consent_ip_hash = $meta['ip_hash'];
-        if (isset($meta['user_agent'])) $this->consent_user_agent = $meta['user_agent'];
+        if (isset($meta['source'])) {
+            $this->consent_source = $meta['source'];
+        }
+        if (isset($meta['ip_hash'])) {
+            $this->consent_ip_hash = $meta['ip_hash'];
+        }
+        if (isset($meta['user_agent'])) {
+            $this->consent_user_agent = $meta['user_agent'];
+        }
     }
 
     public function markUnsubscribed(): void

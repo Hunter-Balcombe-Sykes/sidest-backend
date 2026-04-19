@@ -41,7 +41,7 @@ class ProfessionalIntegrationObserver
         } catch (\Throwable $e) {
             Log::warning('ProfessionalIntegration created notification failed', [
                 'integration_id' => $integration->id,
-                'message'        => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
 
@@ -71,7 +71,7 @@ class ProfessionalIntegrationObserver
         } catch (\Throwable $e) {
             Log::warning('ProfessionalIntegration deleted notification failed', [
                 'integration_id' => $integration->id,
-                'message'        => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
 
@@ -94,9 +94,9 @@ class ProfessionalIntegrationObserver
             );
         } catch (\Throwable $e) {
             Log::warning('Booking section visibility reevaluation failed on integration change', [
-                'integration_id'  => $integration->id,
+                'integration_id' => $integration->id,
                 'professional_id' => $integration->professional_id,
-                'message'         => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }

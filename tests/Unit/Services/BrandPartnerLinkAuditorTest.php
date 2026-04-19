@@ -1,12 +1,11 @@
 <?php
 
-use App\Models\Core\Professional\BrandPartnerLinkEvent;
 use App\Services\Professional\BrandPartnerLinkAuditor;
 use App\Services\Professional\Enums\DisconnectActor;
 use Illuminate\Support\Str;
 
 it('rejects brand actor with mismatched actor_professional_id', function () {
-    $auditor = new BrandPartnerLinkAuditor();
+    $auditor = new BrandPartnerLinkAuditor;
     $brand = (string) Str::uuid();
     $affiliate = (string) Str::uuid();
     $wrong = (string) Str::uuid();
@@ -27,7 +26,7 @@ it('rejects brand actor with mismatched actor_professional_id', function () {
 });
 
 it('rejects affiliate actor with mismatched actor_professional_id', function () {
-    $auditor = new BrandPartnerLinkAuditor();
+    $auditor = new BrandPartnerLinkAuditor;
     $brand = (string) Str::uuid();
     $affiliate = (string) Str::uuid();
     $wrong = (string) Str::uuid();
@@ -48,7 +47,7 @@ it('rejects affiliate actor with mismatched actor_professional_id', function () 
 });
 
 it('rejects staff actor with null staff_user_id', function () {
-    $auditor = new BrandPartnerLinkAuditor();
+    $auditor = new BrandPartnerLinkAuditor;
     $brand = (string) Str::uuid();
     $affiliate = (string) Str::uuid();
 

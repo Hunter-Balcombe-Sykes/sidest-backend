@@ -9,15 +9,15 @@ use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
 use App\Http\Middleware\RequirePlan;
 use App\Http\Middleware\SecureHeaders;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -40,11 +40,11 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'supabase.jwt' => VerifySupabaseJwt::class,
-            'current.pro'  => LoadCurrentProfessional::class,
-            'staff'        => EnsureSidestStaff::class,
-            'staff.admin'  => EnsureSidestAdmin::class,
-            'lead.log'     => LogLeadRateLimits::class,
-            'plan'         => RequirePlan::class,
+            'current.pro' => LoadCurrentProfessional::class,
+            'staff' => EnsureSidestStaff::class,
+            'staff.admin' => EnsureSidestAdmin::class,
+            'lead.log' => LogLeadRateLimits::class,
+            'plan' => RequirePlan::class,
             'hydrogen.key' => VerifyHydrogenApiKey::class,
         ]);
     })

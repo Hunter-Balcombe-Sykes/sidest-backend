@@ -131,7 +131,7 @@ class SquareCatalogWebhookController extends ApiController
             str_ends_with($requestUrl, '/catalog') ? substr($requestUrl, 0, -8) : null,
             str_ends_with($requestUrl, '/catalog') ? null : rtrim($requestUrl, '/').'/catalog',
             $configuredUrl !== '' && str_ends_with($configuredUrl, '/catalog') ? substr($configuredUrl, 0, -8) : null,
-            $configuredUrl !== '' && !str_ends_with($configuredUrl, '/catalog') ? rtrim($configuredUrl, '/').'/catalog' : null,
+            $configuredUrl !== '' && ! str_ends_with($configuredUrl, '/catalog') ? rtrim($configuredUrl, '/').'/catalog' : null,
         ])));
 
         foreach ($candidateUrls as $notificationUrl) {

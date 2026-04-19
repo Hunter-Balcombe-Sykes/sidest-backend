@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 it('returns 200 with void counts on sync path', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = (new SidestStaff())->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('disconnect')->once()->andReturn(new DisconnectResult(
@@ -42,7 +42,7 @@ it('returns 200 with void counts on sync path', function () {
 it('returns 202 with voided_async:true on async overflow', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = (new SidestStaff())->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('disconnect')->once()->andReturn(new DisconnectResult(
@@ -73,7 +73,7 @@ it('returns 202 with voided_async:true on async overflow', function () {
 it('returns 404 when link does not exist', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = (new SidestStaff())->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('disconnect')->once()->andReturn(new DisconnectResult(
@@ -97,7 +97,7 @@ it('returns 404 when link does not exist', function () {
 it('returns 422 when on_pending_commissions is void but reason is under 20 chars', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = (new SidestStaff())->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldNotReceive('disconnect');

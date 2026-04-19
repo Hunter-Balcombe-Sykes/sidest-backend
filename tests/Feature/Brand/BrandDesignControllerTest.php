@@ -59,42 +59,42 @@ it('returns logo urls + placeholders from site_media on show', function () {
     )');
 
     $brandId = (string) Str::uuid();
-    $siteId  = (string) Str::uuid();
-    $now     = now()->toDateTimeString();
+    $siteId = (string) Str::uuid();
+    $now = now()->toDateTimeString();
 
     DB::connection('pgsql')->table('core.professionals')->insert([
-        'id'              => $brandId,
-        'auth_user_id'    => 'auth-' . Str::random(8),
-        'handle'          => 'designlogotest',
-        'handle_lc'       => 'designlogotest',
-        'display_name'    => 'DesignLogoTest',
+        'id' => $brandId,
+        'auth_user_id' => 'auth-'.Str::random(8),
+        'handle' => 'designlogotest',
+        'handle_lc' => 'designlogotest',
+        'display_name' => 'DesignLogoTest',
         'professional_type' => 'brand',
-        'status'          => 'active',
-        'created_at'      => $now,
-        'updated_at'      => $now,
+        'status' => 'active',
+        'created_at' => $now,
+        'updated_at' => $now,
     ]);
 
     // Settings hold tokens (colors, font, enums) only — logo lives in site_media.
     DB::connection('pgsql')->table('site.sites')->insert([
-        'id'              => $siteId,
+        'id' => $siteId,
         'professional_id' => $brandId,
-        'subdomain'       => 'designlogotest',
-        'settings'        => json_encode([
+        'subdomain' => 'designlogotest',
+        'settings' => json_encode([
             'design' => [
                 'colors' => [
                     'background' => '#ffffff',
-                    'text'       => '#000000',
-                    'accent'     => '#ff0000',
-                    'border'     => null,
+                    'text' => '#000000',
+                    'accent' => '#ff0000',
+                    'border' => null,
                 ],
-                'font_family'      => 'helvetica_neue',
-                'corner_radius'    => 'default',
+                'font_family' => 'helvetica_neue',
+                'corner_radius' => 'default',
                 'border_thickness' => 'default',
-                'section_spacing'  => 'default',
+                'section_spacing' => 'default',
             ],
         ]),
-        'created_at'      => $now,
-        'updated_at'      => $now,
+        'created_at' => $now,
+        'updated_at' => $now,
     ]);
 
     // Seed two logo rows + two placeholder rows in site_media, plus matching
@@ -147,8 +147,8 @@ it('returns logo urls + placeholders from site_media on show', function () {
     $request->attributes->set('professional', $brand);
 
     $controller = app(BrandDesignController::class);
-    $response   = $controller->show($request);
-    $data       = $response->getData(true);
+    $response = $controller->show($request);
+    $data = $response->getData(true);
 
     $payload = $data['data'] ?? $data;
 

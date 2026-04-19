@@ -37,9 +37,9 @@ class ProcessVideoVariantsJob implements ShouldQueue
     public int $backoff = 60;
 
     /**
-     * @param  string  $mediaId       UUID of the SiteMedia row.
+     * @param  string  $mediaId  UUID of the SiteMedia row.
      * @param  string  $originalPath  Storage path of the uploaded original.
-     * @param  string  $basePath      Directory prefix under media disk (videos/{proId}/{mediaId}).
+     * @param  string  $basePath  Directory prefix under media disk (videos/{proId}/{mediaId}).
      */
     public function __construct(
         public readonly string $mediaId,
@@ -53,7 +53,7 @@ class ProcessVideoVariantsJob implements ShouldQueue
     public function handle(VideoVariantService $service): void
     {
         Log::info('ProcessVideoVariantsJob: starting', [
-            'media_id'      => $this->mediaId,
+            'media_id' => $this->mediaId,
             'original_path' => $this->originalPath,
         ]);
 
@@ -63,6 +63,7 @@ class ProcessVideoVariantsJob implements ShouldQueue
             Log::warning('ProcessVideoVariantsJob: SiteMedia row no longer exists, skipping.', [
                 'media_id' => $this->mediaId,
             ]);
+
             return;
         }
 
@@ -70,6 +71,7 @@ class ProcessVideoVariantsJob implements ShouldQueue
             Log::info('ProcessVideoVariantsJob: SiteMedia row is soft-deleted, skipping.', [
                 'media_id' => $this->mediaId,
             ]);
+
             return;
         }
 
@@ -82,11 +84,12 @@ class ProcessVideoVariantsJob implements ShouldQueue
             ]);
 
         $diskName = $service->resolvedDiskName();
-        $disk     = Storage::disk($diskName);
+        $disk = Storage::disk($diskName);
 
         if (! $disk->exists($this->originalPath)) {
             $this->markFailed('Original video file not found on media disk.');
             $this->fail(new \RuntimeException('Original video file not found on media disk.'));
+
             return;
         }
 
@@ -94,8 +97,8 @@ class ProcessVideoVariantsJob implements ShouldQueue
 
         try {
             // Stream the original to a local temp file for FFmpeg processing.
-            $ext      = pathinfo($this->originalPath, PATHINFO_EXTENSION) ?: 'mp4';
-            $localTmp = tempnam(sys_get_temp_dir(), 'sidest_vid_') . '.' . $ext;
+            $ext = pathinfo($this->originalPath, PATHINFO_EXTENSION) ?: 'mp4';
+            $localTmp = tempnam(sys_get_temp_dir(), 'sidest_vid_').'.'.$ext;
 
             $stream = $disk->readStream($this->originalPath);
             if (! $stream) {
@@ -121,8 +124,8 @@ class ProcessVideoVariantsJob implements ShouldQueue
             Log::info('ProcessVideoVariantsJob: completed.', ['media_id' => $this->mediaId]);
         } catch (Throwable $e) {
             Log::error('ProcessVideoVariantsJob: processing failed.', [
-                'media_id'  => $this->mediaId,
-                'error'     => $e->getMessage(),
+                'media_id' => $this->mediaId,
+                'error' => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
 
@@ -152,9 +155,9 @@ class ProcessVideoVariantsJob implements ShouldQueue
         if ($updated === 0) {
             $siteMedia = SiteMedia::withTrashed()->where('id', $this->mediaId)->first();
             Log::info('ProcessVideoVariantsJob: failed-state update skipped.', [
-                'media_id'         => $this->mediaId,
-                'row_exists'       => $siteMedia !== null,
-                'is_soft_deleted'  => $siteMedia?->trashed() ?? false,
+                'media_id' => $this->mediaId,
+                'row_exists' => $siteMedia !== null,
+                'is_soft_deleted' => $siteMedia?->trashed() ?? false,
             ]);
         }
     }

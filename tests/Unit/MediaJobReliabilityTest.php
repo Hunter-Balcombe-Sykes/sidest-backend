@@ -174,7 +174,7 @@ it('normalizes legacy file paths and deletes media artifacts plus db rows', func
         'updated_at' => now()->toDateTimeString(),
     ]);
 
-    $service = new VideoVariantService();
+    $service = new VideoVariantService;
     $service->deleteVariants($mediaId, $originalPath);
 
     expect(Storage::disk('local')->exists($originalPath))->toBeFalse();
@@ -194,7 +194,7 @@ it('throws when storage listing fails during video cleanup', function () {
         ->once()
         ->andReturn($disk);
 
-    $service = new VideoVariantService();
+    $service = new VideoVariantService;
 
     expect(fn () => $service->deleteVariants((string) Str::uuid(), 'videos/test/media/original.mp4'))
         ->toThrow(RuntimeException::class, 'Failed to list video artifacts');

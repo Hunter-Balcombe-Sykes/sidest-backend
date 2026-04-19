@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Redis;
 class CacheStats extends Command
 {
     protected $signature = 'cache:stats';
+
     protected $description = 'Show Redis cache statistics';
 
     public function handle(): int
@@ -41,7 +42,8 @@ class CacheStats extends Command
             $bytes /= 1024;
             $i++;
         }
-        return round($bytes, 2) . ' ' . $units[$i];
+
+        return round($bytes, 2).' '.$units[$i];
     }
 
     private function calculateHitRate(array $info): string
@@ -54,6 +56,6 @@ class CacheStats extends Command
             return 'N/A';
         }
 
-        return round(($hits / $total) * 100, 2) . '%';
+        return round(($hits / $total) * 100, 2).'%';
     }
 }

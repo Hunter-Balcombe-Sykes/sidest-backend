@@ -56,8 +56,8 @@ class SiteMediaObserver
         } catch (\Throwable $e) {
             Log::warning('Gallery section visibility reevaluation failed', [
                 'site_media_id' => $media->id,
-                'site_id'       => $media->site_id,
-                'message'       => $e->getMessage(),
+                'site_id' => $media->site_id,
+                'message' => $e->getMessage(),
             ]);
         }
     }

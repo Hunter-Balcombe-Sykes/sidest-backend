@@ -4,26 +4,24 @@ namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\BootstrapRequest;
-use App\Models\Core\Professional\BrandProfile;
-use App\Models\Core\Professional\Professional;
-use App\Models\Core\Site\Site;
-use App\Services\Cache\ProfessionalCacheService;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use RuntimeException;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
+use App\Models\Core\Professional\BrandProfile;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Core\Site\Site;
+use App\Services\Cache\ProfessionalCacheService;
+use App\Services\Professional\AccountTypeDefaultsService;
 use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
-use App\Services\Professional\AccountTypeDefaultsService;
 use App\Services\Professional\SiteProvisioningService;
 use App\Services\Shopify\BrandSignupService;
 use App\Services\Shopify\ShopifySetupTokenService;
 use App\Services\Shopify\ShopProfileAutoFillService;
 use Illuminate\Support\Arr;
-
-
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 // V2: Account signup/update. Creates professional + site, applies type defaults, handles affiliate invite claims and brand partner connections. Entry point for affiliate/professional signup.
 class BootstrapController extends ApiController
@@ -37,10 +35,9 @@ class BootstrapController extends ApiController
         BrandAffiliateInviteService $brandAffiliateInviteService,
         BrandPartnerLinkService $brandPartnerLinks,
         AccountTypeDefaultsService $accountTypeDefaultsService
-    )
-    {
+    ) {
         $uid = $request->attributes->get('supabase_uid');
-        if (!is_string($uid) || $uid === '') {
+        if (! is_string($uid) || $uid === '') {
             return $this->error('Unauthenticated', 401);
         }
 
@@ -68,100 +65,99 @@ class BootstrapController extends ApiController
             };
 
             $result = DB::transaction(function () use ($uid, $data, $brandAffiliateInviteService, $brandPartnerLinks, $accountTypeDefaultsService, $resolveProfessionalType) {
-            $createdProfessional = false;
+                $createdProfessional = false;
 
-            $professional = Professional::query()->where('auth_user_id', $uid)->first();
+                $professional = Professional::query()->where('auth_user_id', $uid)->first();
 
-            if (!$professional) {
-                $createdProfessional = true;
-                $professional = new Professional([
-                    'handle'          => $data['handle'],
-                    'display_name'    => $data['display_name'],
-                    'bio'             => null,
-                    'country_code'    => $data['country_code'] ?? null,
-                    'timezone'        => $data['timezone'] ?? null,
-                    'professional_type' => $resolveProfessionalType($data['professional_type'] ?? null),
-                    'status'          => 'active',
-                    'onboarding_step' => 0,
-                    'qr_slug'         => $this->siteProvisioning->generateQrSlug($data['handle'] ?? null),
-                    'phone' => $data['phone'] ?? null,
-                    'primary_email'   => $data['primary_email'],
-                    'first_name'      => $data['first_name'] ?? '',
-                    'last_name'       => $data['last_name'] ?? null,
+                if (! $professional) {
+                    $createdProfessional = true;
+                    $professional = new Professional([
+                        'handle' => $data['handle'],
+                        'display_name' => $data['display_name'],
+                        'bio' => null,
+                        'country_code' => $data['country_code'] ?? null,
+                        'timezone' => $data['timezone'] ?? null,
+                        'professional_type' => $resolveProfessionalType($data['professional_type'] ?? null),
+                        'status' => 'active',
+                        'onboarding_step' => 0,
+                        'qr_slug' => $this->siteProvisioning->generateQrSlug($data['handle'] ?? null),
+                        'phone' => $data['phone'] ?? null,
+                        'primary_email' => $data['primary_email'],
+                        'first_name' => $data['first_name'] ?? '',
+                        'last_name' => $data['last_name'] ?? null,
 
-                    'public_contact_number' => null,
-                    'public_contact_email' => null,
-                    'handle_lc' => $data['handle_lc'],
-                ]);
-                $professional->auth_user_id = $uid;
-            } else {
+                        'public_contact_number' => null,
+                        'public_contact_email' => null,
+                        'handle_lc' => $data['handle_lc'],
+                    ]);
+                    $professional->auth_user_id = $uid;
+                } else {
 
-                if (in_array($professional->status, ['disabled', 'suspended', 'pending_deletion'], true)) {
-                    return $this->error('Account is disabled. Contact support.', 403);
+                    if (in_array($professional->status, ['disabled', 'suspended', 'pending_deletion'], true)) {
+                        return $this->error('Account is disabled. Contact support.', 403);
+                    }
+
+                    $fill = [
+                        'handle' => $data['handle'],
+                        'display_name' => $data['display_name'],
+                        'primary_email' => $data['primary_email'],
+                        'phone' => $data['phone'] ?? $professional->phone,
+                        'first_name' => $data['first_name'] ?? $professional->first_name,
+                        'last_name' => $data['last_name'] ?? $professional->last_name,
+                        'country_code' => $data['country_code'] ?? $professional->country_code,
+                        'timezone' => $data['timezone'] ?? $professional->timezone,
+                        'professional_type' => $resolveProfessionalType($data['professional_type'] ?? $professional->professional_type),
+                        'handle_lc' => $data['handle_lc'],
+                    ];
+
+                    if (array_key_exists('phone', $data)) {
+                        $fill['phone'] = $data['phone'];
+                    }
+
+                    $professional->fill($fill);
+                }
+                if (! is_string($professional->qr_slug) || $professional->qr_slug === '') {
+                    $professional->qr_slug = $this->siteProvisioning->generateQrSlug($professional->handle ?? null);
+                }
+                $professional->save();
+
+                // Add to Side St updates list once (global list). Do NOT overwrite if they already unsubscribed.
+                $this->ensureSidestUpdatesSubscription($professional->primary_email);
+
+                $site = Site::query()->where('professional_id', $professional->id)->first();
+
+                if (! $site) {
+                    $base = $this->siteProvisioning->subdomainBaseFromHandle($data['handle']);
+
+                    $site = $this->siteProvisioning->createSiteWithRetry($professional->id, $base);
                 }
 
-                $fill = [
-                    'handle'        => $data['handle'],
-                    'display_name'  => $data['display_name'],
-                    'primary_email' => $data['primary_email'],
-                    'phone'         => $data['phone'] ?? $professional->phone,
-                    'first_name'    => $data['first_name'] ?? $professional->first_name,
-                    'last_name'     => $data['last_name'] ?? $professional->last_name,
-                    'country_code'  => $data['country_code'] ?? $professional->country_code,
-                    'timezone'      => $data['timezone'] ?? $professional->timezone,
-                    'professional_type' => $resolveProfessionalType($data['professional_type'] ?? $professional->professional_type),
-                    'handle_lc' => $data['handle_lc'],
-                ];
+                // Apply account-type defaults for new professionals
+                if ($createdProfessional) {
+                    $accountTypeDefaultsService->applyDefaults($professional, $site);
 
-                if (array_key_exists('phone', $data)) {
-                    $fill['phone'] = $data['phone'];
+                    if ($professional->professional_type === 'brand') {
+                        BrandProfile::firstOrCreate(
+                            ['professional_id' => (string) $professional->id],
+                            ['setup_complete' => false]
+                        );
+                    }
                 }
-
-                $professional->fill($fill);
-            }
-            if (!is_string($professional->qr_slug) || $professional->qr_slug === '') {
-                $professional->qr_slug = $this->siteProvisioning->generateQrSlug($professional->handle ?? null);
-            }
-            $professional->save();
-
-            // Add to Side St updates list once (global list). Do NOT overwrite if they already unsubscribed.
-            $this->ensureSidestUpdatesSubscription($professional->primary_email);
-
-
-            $site = Site::query()->where('professional_id', $professional->id)->first();
-
-            if (!$site) {
-                $base = $this->siteProvisioning->subdomainBaseFromHandle($data['handle']);
-
-                $site = $this->siteProvisioning->createSiteWithRetry($professional->id, $base);
-            }
-
-            // Apply account-type defaults for new professionals
-            if ($createdProfessional) {
-                $accountTypeDefaultsService->applyDefaults($professional, $site);
-
-                if ($professional->professional_type === 'brand') {
-                    BrandProfile::firstOrCreate(
-                        ['professional_id' => (string) $professional->id],
-                        ['setup_complete' => false]
-                    );
-                }
-            }
 
                 if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
                     $invite = $brandAffiliateInviteService->findByToken((string) $data['invite_token']);
                     if (! $invite) {
-                    throw new RuntimeException('Invite not found.');
-                }
+                        throw new RuntimeException('Invite not found.');
+                    }
 
-                $brandAffiliateInviteService->claimInvite($invite, $professional);
-                $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
-                $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, (string) $invite->brand_professional_id);
+                    $brandAffiliateInviteService->claimInvite($invite, $professional);
+                    $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, (string) $invite->brand_professional_id);
                 } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
                     $brandPartnerProfessional = Professional::query()
                         ->whereKey((string) $data['brand_partner_professional_id'])
-                    ->where('professional_type', 'brand')
-                    ->first();
+                        ->where('professional_type', 'brand')
+                        ->first();
 
                     if (! $brandPartnerProfessional) {
                         throw new RuntimeException('Brand partner not found.');
@@ -200,53 +196,53 @@ class BootstrapController extends ApiController
                     }
                 }
 
-            // Shopify setup token: create integration from cached OAuth credentials
-            $shopifyIntegrationId = null;
-            $shopifySetupToken = is_string($data['shopify_setup_token'] ?? null) ? trim((string) $data['shopify_setup_token']) : '';
-            if ($shopifySetupToken !== '') {
-                // Peek first — consume only after transaction succeeds (prevents token loss on rollback)
-                $shopifyData = app(ShopifySetupTokenService::class)->peek($shopifySetupToken);
-                if ($shopifyData === null) {
-                    throw new RuntimeException('Shopify setup session is invalid or expired. Please reinstall the app from Shopify.');
+                // Shopify setup token: create integration from cached OAuth credentials
+                $shopifyIntegrationId = null;
+                $shopifySetupToken = is_string($data['shopify_setup_token'] ?? null) ? trim((string) $data['shopify_setup_token']) : '';
+                if ($shopifySetupToken !== '') {
+                    // Peek first — consume only after transaction succeeds (prevents token loss on rollback)
+                    $shopifyData = app(ShopifySetupTokenService::class)->peek($shopifySetupToken);
+                    if ($shopifyData === null) {
+                        throw new RuntimeException('Shopify setup session is invalid or expired. Please reinstall the app from Shopify.');
+                    }
+
+                    $shopDomain = $shopifyData['shop_domain'];
+                    $shopId = trim((string) Arr::get($shopifyData['shop_data'], 'id', ''));
+                    $shopCurrency = strtoupper(trim((string) Arr::get($shopifyData['shop_data'], 'currency', '')));
+
+                    $integration = ProfessionalIntegration::create([
+                        'professional_id' => (string) $professional->id,
+                        'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+                        'external_account_id' => $shopDomain,
+                        'access_token' => $shopifyData['access_token'],
+                        'provider_metadata' => [
+                            'shop_domain' => $shopDomain,
+                            'shop_id' => $shopId !== '' ? "gid://shopify/Shop/{$shopId}" : null,
+                            'shop_currency' => $shopCurrency !== '' ? $shopCurrency : null,
+                            'scopes' => $shopifyData['scopes'],
+                            'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
+                            'connected_at' => now()->toIso8601String(),
+                            'webhook_registration_state' => 'queued',
+                        ],
+                    ]);
+
+                    $shopifyIntegrationId = (string) $integration->id;
+
+                    // Auto-fill profile from Shopify shop data (address, phone, etc. — not email)
+                    $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
+                    app(ShopProfileAutoFillService::class)->fillFromShopData(
+                        $professional, $site, $brandProfile, $shopifyData['shop_data']
+                    );
                 }
 
-                $shopDomain = $shopifyData['shop_domain'];
-                $shopId = trim((string) Arr::get($shopifyData['shop_data'], 'id', ''));
-                $shopCurrency = strtoupper(trim((string) Arr::get($shopifyData['shop_data'], 'currency', '')));
+                app(ProfessionalCacheService::class)->invalidateProfessional($professional);
 
-                $integration = ProfessionalIntegration::create([
-                    'professional_id' => (string) $professional->id,
-                    'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
-                    'external_account_id' => $shopDomain,
-                    'access_token' => $shopifyData['access_token'],
-                    'provider_metadata' => [
-                        'shop_domain' => $shopDomain,
-                        'shop_id' => $shopId !== '' ? "gid://shopify/Shop/{$shopId}" : null,
-                        'shop_currency' => $shopCurrency !== '' ? $shopCurrency : null,
-                        'scopes' => $shopifyData['scopes'],
-                        'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
-                        'connected_at' => now()->toIso8601String(),
-                        'webhook_registration_state' => 'queued',
-                    ],
-                ]);
+                // Ensure the professional has a subscription – seed the free plan if none exists
+                $this->siteProvisioning->ensureFreeSubscription($professional);
 
-                $shopifyIntegrationId = (string) $integration->id;
-
-                // Auto-fill profile from Shopify shop data (address, phone, etc. — not email)
-                $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
-                app(ShopProfileAutoFillService::class)->fillFromShopData(
-                    $professional, $site, $brandProfile, $shopifyData['shop_data']
-                );
-            }
-
-            app(ProfessionalCacheService::class)->invalidateProfessional($professional);
-
-            // Ensure the professional has a subscription – seed the free plan if none exists
-            $this->siteProvisioning->ensureFreeSubscription($professional);
-
-            if ($createdProfessional) {
-                $this->createWelcomeNotification($professional);
-            }
+                if ($createdProfessional) {
+                    $this->createWelcomeNotification($professional);
+                }
 
                 return [
                     'professional' => $professional->fresh(),
@@ -280,7 +276,9 @@ class BootstrapController extends ApiController
     private function ensureSidestUpdatesSubscription(?string $email): void
     {
         $email = is_string($email) ? strtolower(trim($email)) : '';
-        if ($email === '') return;
+        if ($email === '') {
+            return;
+        }
 
         $listKey = 'sidest_updates';
 

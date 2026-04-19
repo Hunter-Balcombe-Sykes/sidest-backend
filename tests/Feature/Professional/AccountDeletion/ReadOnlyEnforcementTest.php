@@ -17,10 +17,10 @@ function makeProWithStatus(string $status, ?string $confirmedAt = null): Profess
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $id,
         'auth_user_id' => (string) Str::uuid(),
-        'handle' => 'h-' . substr($id, 0, 6),
-        'handle_lc' => 'h-' . substr($id, 0, 6),
+        'handle' => 'h-'.substr($id, 0, 6),
+        'handle_lc' => 'h-'.substr($id, 0, 6),
         'display_name' => 'H',
-        'primary_email' => 'h-' . substr($id, 0, 6) . '@example.com',
+        'primary_email' => 'h-'.substr($id, 0, 6).'@example.com',
         'status' => $status,
         'deletion_confirmed_at' => $confirmedAt,
     ]);
@@ -33,7 +33,7 @@ it('returns 423 on POST when status is pending_deletion', function () {
     $request = Request::create('/api/professional/me', 'POST');
     $request->attributes->set('professional', $pro);
 
-    $middleware = new EnforcePendingDeletionReadOnly();
+    $middleware = new EnforcePendingDeletionReadOnly;
     $response = $middleware->handle($request, fn () => response('ok'));
 
     expect($response->status())->toBe(423);
@@ -47,7 +47,7 @@ it('returns 423 on PATCH when status is pending_deletion', function () {
     $request = Request::create('/api/professional/me', 'PATCH');
     $request->attributes->set('professional', $pro);
 
-    $middleware = new EnforcePendingDeletionReadOnly();
+    $middleware = new EnforcePendingDeletionReadOnly;
     $response = $middleware->handle($request, fn () => response('ok'));
 
     expect($response->status())->toBe(423);
@@ -58,7 +58,7 @@ it('returns 423 on DELETE when status is pending_deletion', function () {
     $request = Request::create('/api/professional/me/services/xyz', 'DELETE');
     $request->attributes->set('professional', $pro);
 
-    $middleware = new EnforcePendingDeletionReadOnly();
+    $middleware = new EnforcePendingDeletionReadOnly;
     $response = $middleware->handle($request, fn () => response('ok'));
 
     expect($response->status())->toBe(423);
@@ -69,7 +69,7 @@ it('passes through GET even when status is pending_deletion', function () {
     $request = Request::create('/api/professional/me', 'GET');
     $request->attributes->set('professional', $pro);
 
-    $middleware = new EnforcePendingDeletionReadOnly();
+    $middleware = new EnforcePendingDeletionReadOnly;
     $response = $middleware->handle($request, fn () => response('ok'));
 
     expect($response->getContent())->toBe('ok');
@@ -80,7 +80,7 @@ it('passes through HEAD even when status is pending_deletion', function () {
     $request = Request::create('/api/professional/me', 'HEAD');
     $request->attributes->set('professional', $pro);
 
-    $middleware = new EnforcePendingDeletionReadOnly();
+    $middleware = new EnforcePendingDeletionReadOnly;
     $response = $middleware->handle($request, fn () => response('ok'));
 
     // HEAD passes through — body stripping is an HTTP kernel concern, not middleware
@@ -92,7 +92,7 @@ it('passes through POST when status is active', function () {
     $request = Request::create('/api/professional/me', 'POST');
     $request->attributes->set('professional', $pro);
 
-    $middleware = new EnforcePendingDeletionReadOnly();
+    $middleware = new EnforcePendingDeletionReadOnly;
     $response = $middleware->handle($request, fn () => response('ok'));
 
     expect($response->getContent())->toBe('ok');
@@ -101,7 +101,7 @@ it('passes through POST when status is active', function () {
 it('passes through when no professional attribute is set', function () {
     $request = Request::create('/api/professional/me', 'POST');
 
-    $middleware = new EnforcePendingDeletionReadOnly();
+    $middleware = new EnforcePendingDeletionReadOnly;
     $response = $middleware->handle($request, fn () => response('ok'));
 
     expect($response->getContent())->toBe('ok');

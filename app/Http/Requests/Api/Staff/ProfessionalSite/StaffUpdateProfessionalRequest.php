@@ -15,20 +15,20 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
     {
         return [
             // profile-ish fields
-            'display_name'  => ['sometimes', 'required', 'string', 'max:255'],
-            'first_name'    => ['sometimes', 'required', 'string', 'max:255'],
-            'last_name'     => ['sometimes', 'nullable', 'string', 'max:255'],
-            'bio'           => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'display_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'first_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'last_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'bio' => ['sometimes', 'nullable', 'string', 'max:2000'],
 
             'primary_email' => ['sometimes', 'required', 'email', 'max:255'],
-            'phone'         => ['sometimes', 'required', 'string', 'max:50'],
+            'phone' => ['sometimes', 'required', 'string', 'max:50'],
             'public_contact_number' => ['sometimes', 'nullable', 'string', 'max:50'],
             'public_contact_email' => ['sometimes', 'nullable', 'email', 'max:255'],
 
             // ISO 3166-1 alpha-2 only. Normalised to upper-case in
             // prepareForValidation before this rule runs.
-            'country_code'  => ['sometimes', 'nullable', 'string', 'size:2', 'regex:/^[A-Z]{2}$/'],
-            'timezone'      => ['sometimes', 'nullable', 'string', 'max:64'],
+            'country_code' => ['sometimes', 'nullable', 'string', 'size:2', 'regex:/^[A-Z]{2}$/'],
+            'timezone' => ['sometimes', 'nullable', 'string', 'max:64'],
             'professional_type' => [
                 'sometimes',
                 'required',
@@ -93,6 +93,7 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
             $this->merge($merge);
         }
     }
+
     private function lowerOrNull($value): ?string
     {
         if ($value === null) {
@@ -107,5 +108,4 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
 
         return mb_strtolower($value);
     }
-
 }

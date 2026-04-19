@@ -23,7 +23,7 @@ class PublicMarketingPreferenceController extends ApiController
         $email = $request->query('email');
         $subdomain = $request->query('subdomain');
 
-        if (!$email || !$subdomain) {
+        if (! $email || ! $subdomain) {
             return $this->error('Missing email or subdomain parameter', 400);
         }
 
@@ -33,7 +33,7 @@ class PublicMarketingPreferenceController extends ApiController
         // Resolve site to professional
         $site = $resolver->resolvePublishedSite($subdomain);
 
-        if (!$site || !$site->professional_id) {
+        if (! $site || ! $site->professional_id) {
             return $this->error('Site not found or not linked to professional', 404);
         }
 
@@ -57,7 +57,7 @@ class PublicMarketingPreferenceController extends ApiController
      */
     public function unsubscribe(Request $request, string $token): JsonResponse
     {
-        if (!$token || strlen($token) < 10) {
+        if (! $token || strlen($token) < 10) {
             return $this->error('Invalid unsubscribe token', 400);
         }
 
@@ -66,7 +66,7 @@ class PublicMarketingPreferenceController extends ApiController
             ->where('list_key', 'marketing')
             ->first();
 
-        if (!$subscription) {
+        if (! $subscription) {
             return $this->error('Unsubscribe token not found or already processed', 404);
         }
 
@@ -86,7 +86,7 @@ class PublicMarketingPreferenceController extends ApiController
      */
     public function resubscribe(Request $request, string $token): JsonResponse
     {
-        if (!$token || strlen($token) < 10) {
+        if (! $token || strlen($token) < 10) {
             return $this->error('Invalid token', 400);
         }
 
@@ -95,7 +95,7 @@ class PublicMarketingPreferenceController extends ApiController
             ->where('list_key', 'marketing')
             ->first();
 
-        if (!$subscription) {
+        if (! $subscription) {
             return $this->error('Token not found', 404);
         }
 

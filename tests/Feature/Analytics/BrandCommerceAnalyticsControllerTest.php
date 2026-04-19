@@ -7,7 +7,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 beforeEach(function () {
-    $this->controller = new BrandCommerceAnalyticsController();
+    $this->controller = new BrandCommerceAnalyticsController;
     $this->professional = new Professional(['id' => (string) Str::uuid(), 'timezone' => 'UTC']);
     Cache::flush();
 });
@@ -19,6 +19,7 @@ function emptyQueryMock(): \Illuminate\Database\Query\Builder
     $mock->shouldReceive('where')->andReturnSelf();
     $mock->shouldReceive('whereBetween')->andReturnSelf();
     $mock->shouldReceive('get')->andReturn(collect());
+
     return $mock;
 }
 

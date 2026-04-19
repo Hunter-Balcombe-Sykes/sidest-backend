@@ -44,16 +44,16 @@ class StaffAffiliateController extends ApiController
             $fullName = trim(implode(' ', array_filter([$row->first_name, $row->last_name])));
 
             return [
-                'id'                    => $row->id,
-                'full_name'             => $fullName ?: ($row->display_name ?? $row->handle ?? 'Unknown'),
-                'handle'                => $row->handle,
-                'professional_type'     => $row->professional_type,
-                'status'                => $row->status,
-                'email'                 => $row->primary_email ?? $row->public_contact_email,
-                'phone'                 => $row->phone ?? $row->public_contact_number,
-                'is_primary'            => (int) $row->slot === 0,
+                'id' => $row->id,
+                'full_name' => $fullName ?: ($row->display_name ?? $row->handle ?? 'Unknown'),
+                'handle' => $row->handle,
+                'professional_type' => $row->professional_type,
+                'status' => $row->status,
+                'email' => $row->primary_email ?? $row->public_contact_email,
+                'phone' => $row->phone ?? $row->public_contact_number,
+                'is_primary' => (int) $row->slot === 0,
                 'custom_photos_enabled' => (bool) $row->custom_photos_enabled,
-                'connected_at'          => $row->connected_at,
+                'connected_at' => $row->connected_at,
             ];
         })->values()->all();
 

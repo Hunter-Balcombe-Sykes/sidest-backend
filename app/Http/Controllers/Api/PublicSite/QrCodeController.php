@@ -22,13 +22,13 @@ class QrCodeController extends ApiController
             ->where('qr_slug', $qr_slug)
             ->first();
 
-        if (!$professional) {
+        if (! $professional) {
             abort(404);
         }
 
         $site = $professional->site;
 
-        if (!$site || !is_string($site->subdomain) || $site->subdomain === '') {
+        if (! $site || ! is_string($site->subdomain) || $site->subdomain === '') {
             abort(404);
         }
 
@@ -38,7 +38,7 @@ class QrCodeController extends ApiController
         }
 
         $scheme = $this->baseScheme($request);
-        $url = $scheme . '://' . $site->subdomain . '.' . $publicDomain;
+        $url = $scheme.'://'.$site->subdomain.'.'.$publicDomain;
 
         return redirect()->to($url, 302);
     }
@@ -49,7 +49,7 @@ class QrCodeController extends ApiController
             ->where('qr_slug', $qr_slug)
             ->first();
 
-        if (!$professional) {
+        if (! $professional) {
             abort(404);
         }
 
@@ -59,7 +59,7 @@ class QrCodeController extends ApiController
             ->setSize(320)
             ->setMargin(10);
 
-        $writer = new SvgWriter();
+        $writer = new SvgWriter;
         $result = $writer->write($qrCode);
 
         return response($result->getString(), 200, [

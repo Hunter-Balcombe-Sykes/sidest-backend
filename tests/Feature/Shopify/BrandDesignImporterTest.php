@@ -274,6 +274,7 @@ it('infers theme_mode dark when the primary background is a dark hue', function 
                     ],
                 ]);
             }
+
             return Http::response(brandDesignFakeThemesResponse('Dawn'));
         },
         'importer.myshopify.com/admin/api/*/themes/*/assets.json*' => Http::response(

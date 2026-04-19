@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
-use App\Models\Retail\BrandStoreSettings;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -34,10 +34,10 @@ class HydrogenDeploymentController extends ApiController
                 ->value('shopify_shop_domain');
 
             return [
-                'shop_domain'              => $integration,
+                'shop_domain' => $integration,
                 // Decrypted by the encrypted cast — never stored in plain text
-                'oxygen_deployment_token'  => $row->oxygen_deployment_token,
-                'oxygen_storefront_id'     => $row->oxygen_storefront_id,
+                'oxygen_deployment_token' => $row->oxygen_deployment_token,
+                'oxygen_storefront_id' => $row->oxygen_storefront_id,
             ];
         })->values();
 

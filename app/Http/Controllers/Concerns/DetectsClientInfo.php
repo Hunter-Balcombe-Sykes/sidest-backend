@@ -14,7 +14,7 @@ trait DetectsClientInfo
     {
         $code =
             $request->header('CF-IPCountry') // Cloudflare
-            ??  $request->header('CloudFront-Viewer-Country') // AWS CloudFront
+            ?? $request->header('CloudFront-Viewer-Country') // AWS CloudFront
             ?? $request->header('X-Vercel-IP-Country'); // Vercel
 
         if (! is_string($code)) {
@@ -33,9 +33,9 @@ trait DetectsClientInfo
     /**
      * Detect devices type from user agent.
      */
-    protected function detectDeviceType(? string $ua): ?string
+    protected function detectDeviceType(?string $ua): ?string
     {
-        if (!$ua) {
+        if (! $ua) {
             return null;
         }
 

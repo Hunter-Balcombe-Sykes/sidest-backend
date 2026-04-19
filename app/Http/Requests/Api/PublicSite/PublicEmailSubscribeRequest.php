@@ -8,11 +8,12 @@ use Illuminate\Validation\Rule;
 // V2: Validates public email subscription — requires an RFC-compliant email and a list key from the allowed public list keys, with optional name.
 class PublicEmailSubscribeRequest extends BaseFormRequest
 {
-
     protected function prepareForValidation(): void
     {
         $listKey = is_string($this->list_key) ? trim($this->list_key) : null;
-        if ($listKey === '') $listKey = null;
+        if ($listKey === '') {
+            $listKey = null;
+        }
 
         $this->merge([
             'email' => is_string($this->email) ? strtolower(trim($this->email)) : $this->email,

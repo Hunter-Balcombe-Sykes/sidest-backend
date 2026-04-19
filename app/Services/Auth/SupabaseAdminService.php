@@ -10,6 +10,7 @@ use RuntimeException;
 class SupabaseAdminService
 {
     private string $baseUrl;
+
     private string $serviceRoleKey;
 
     public function __construct()
@@ -158,7 +159,7 @@ class SupabaseAdminService
     private function headers(): array
     {
         return [
-            'Authorization' => 'Bearer ' . $this->serviceRoleKey,
+            'Authorization' => 'Bearer '.$this->serviceRoleKey,
             'apikey' => $this->serviceRoleKey,
             'Content-Type' => 'application/json',
         ];

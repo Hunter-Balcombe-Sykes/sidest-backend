@@ -28,11 +28,11 @@ class BrandStoreSettings extends Model
     ];
 
     protected $casts = [
-        'default_commission_rate'  => 'decimal:2',
-        'payout_hold_days'         => 'integer',
-        'theme_id'                 => 'integer',
+        'default_commission_rate' => 'decimal:2',
+        'payout_hold_days' => 'integer',
+        'theme_id' => 'integer',
         // Encrypted at-rest using APP_KEY (AES-256-CBC via Laravel's encrypter)
-        'oxygen_deployment_token'  => 'encrypted',
+        'oxygen_deployment_token' => 'encrypted',
     ];
 
     /**

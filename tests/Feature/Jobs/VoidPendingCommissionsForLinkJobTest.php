@@ -1,4 +1,5 @@
 <?php
+
 /** @phpstan-ignore-all */
 
 use App\Jobs\Stripe\VoidPendingCommissionsForLinkJob;
@@ -9,8 +10,8 @@ use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Support\Str;
 
 it('runs the void loop, writes audit completion row, and notifies both parties', function () {
-    $affiliate = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'display_name' => 'Affi']);
-    $brand = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'display_name' => 'Brand']);
+    $affiliate = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'display_name' => 'Affi']);
+    $brand = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'display_name' => 'Brand']);
 
     $voidService = Mockery::mock(CommissionVoidService::class);
     $voidService->shouldReceive('runVoidLoop')

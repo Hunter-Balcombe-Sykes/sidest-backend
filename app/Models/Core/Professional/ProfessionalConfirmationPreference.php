@@ -14,6 +14,7 @@ class ProfessionalConfirmationPreference extends BaseModel
     protected $table = 'core.professional_confirmation_preferences';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

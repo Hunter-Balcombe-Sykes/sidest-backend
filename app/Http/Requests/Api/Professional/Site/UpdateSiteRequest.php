@@ -2,15 +2,14 @@
 
 namespace App\Http\Requests\Api\Professional\Site;
 
-use App\Models\Core\Site\Site;
 use App\Http\Requests\BaseFormRequest;
+use App\Models\Core\Site\Site;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 // V2: Validates site updates — settings (design, colors, typography, media), subdomain uniqueness, theme, and publish readiness checks.
 class UpdateSiteRequest extends BaseFormRequest
 {
-
     protected function prepareForValidation(): void
     {
         if (is_string($this->subdomain ?? null)) {
@@ -134,7 +133,8 @@ class UpdateSiteRequest extends BaseFormRequest
                     // Check reserved words
                     $reserved = array_map('strtolower', config('sidest.reserved_subdomains', []));
                     if (in_array(strtolower($value), $reserved, true)) {
-                        $fail('The subdomain "' . $value . '" is reserved and cannot be used.');
+                        $fail('The subdomain "'.$value.'" is reserved and cannot be used.');
+
                         return;
                     }
 
@@ -147,6 +147,7 @@ class UpdateSiteRequest extends BaseFormRequest
 
                     if ($exists) {
                         $fail('This subdomain is already taken.');
+
                         return;
                     }
 
@@ -180,15 +181,15 @@ class UpdateSiteRequest extends BaseFormRequest
                 $professional = $this->attributes->get('professional');
                 $site = $professional?->site;
 
-                if (!$site) {
+                if (! $site) {
                     $validator->errors()->add('is_published', 'Site not found.');
+
                     return;
                 }
 
                 if (empty($professional->display_name)) {
                     $validator->errors()->add('is_published', 'Cannot publish: professional must have a display name.');
                 }
-
 
             }
         });

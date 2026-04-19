@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandProfile;
+use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
@@ -12,18 +13,17 @@ use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\CommissionPayout;
-use App\Models\Core\Professional\Customer;
-use App\Observers\Core\BrandAffiliateInviteObserver;
-use App\Observers\Core\SiteMediaObserver;
-use App\Observers\Core\BrandProfileObserver;
 use App\Observers\Core\BlockObserver;
+use App\Observers\Core\BrandAffiliateInviteObserver;
+use App\Observers\Core\BrandProfileObserver;
 use App\Observers\Core\CommissionLedgerEntryObserver;
 use App\Observers\Core\CommissionPayoutObserver;
 use App\Observers\Core\CustomerObserver;
 use App\Observers\Core\ProfessionalIntegrationObserver;
-use App\Observers\Professional\ProfessionalObserver;
 use App\Observers\Core\ServiceObserver;
+use App\Observers\Core\SiteMediaObserver;
 use App\Observers\Core\SiteObserver;
+use App\Observers\Professional\ProfessionalObserver;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 
 // V2: Registers Eloquent model observers for professionals, sites, blocks, services, customers, integrations, commissions, and media.

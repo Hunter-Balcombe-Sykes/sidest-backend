@@ -4,7 +4,6 @@ namespace App\Services\Stripe;
 
 use App\Models\Billing\Plan;
 use App\Models\Core\Professional\Professional;
-use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
 
 // V2: Core. Wraps Stripe Billing API calls: customer creation, checkout sessions, subscription management, billing portal, and invoice previews.

@@ -11,9 +11,11 @@ class AllSiteData extends BaseModel
     use HasFactory;
 
     protected $table = 'site.all_site_data';
+
     protected $primaryKey = 'site_id';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     public $timestamps = false;
@@ -22,10 +24,10 @@ class AllSiteData extends BaseModel
     protected $guarded = [];
 
     protected $casts = [
-        'site_settings'   => 'array',
-        'theme_config'    => 'array',
-        'blocks'          => 'array',
-        'is_published'    => 'boolean',
+        'site_settings' => 'array',
+        'theme_config' => 'array',
+        'blocks' => 'array',
+        'is_published' => 'boolean',
         'site_created_at' => 'datetime',
         'site_updated_at' => 'datetime',
     ];

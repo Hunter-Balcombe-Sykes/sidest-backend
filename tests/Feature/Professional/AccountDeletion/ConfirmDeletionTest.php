@@ -21,10 +21,10 @@ function seedRequestedProfessional(string $rawToken = 'a-raw-token-64-chars-long
     $data = array_merge([
         'id' => $id,
         'auth_user_id' => (string) Str::uuid(),
-        'handle' => 'pro-' . substr($id, 0, 6),
-        'handle_lc' => 'pro-' . substr($id, 0, 6),
+        'handle' => 'pro-'.substr($id, 0, 6),
+        'handle_lc' => 'pro-'.substr($id, 0, 6),
         'display_name' => 'Pro',
-        'primary_email' => 'pro-' . substr($id, 0, 6) . '@example.com',
+        'primary_email' => 'pro-'.substr($id, 0, 6).'@example.com',
         'status' => 'active',
         'stripe_manual_balance_cents' => 0,
         'deletion_token_hash' => hash('sha256', $rawToken),
@@ -32,14 +32,15 @@ function seedRequestedProfessional(string $rawToken = 'a-raw-token-64-chars-long
     ], $overrides);
 
     DB::connection('pgsql')->table('core.professionals')->insert($data);
+
     return Professional::query()->where('id', $id)->first();
 }
 
 it('confirms with valid token: flips status, snapshots previous status, nulls token', function () {
-    $rawToken = 'raw-token-' . Str::random(54);
+    $rawToken = 'raw-token-'.Str::random(54);
     $pro = seedRequestedProfessional($rawToken);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $result = $service->confirm($pro, $rawToken, Request::create('/', 'POST'));
 
     expect($result['success'])->toBeTrue()
@@ -56,7 +57,7 @@ it('confirms with valid token: flips status, snapshots previous status, nulls to
 });
 
 it('deletes professional integrations at confirm time (security)', function () {
-    $rawToken = 'raw-token-' . Str::random(54);
+    $rawToken = 'raw-token-'.Str::random(54);
     $pro = seedRequestedProfessional($rawToken);
 
     DB::connection('pgsql')->table('core.professional_integrations')->insert([
@@ -68,7 +69,7 @@ it('deletes professional integrations at confirm time (security)', function () {
         'updated_at' => now()->toIso8601String(),
     ]);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $service->confirm($pro, $rawToken, Request::create('/', 'POST'));
 
     $count = DB::connection('pgsql')->table('core.professional_integrations')
@@ -78,12 +79,12 @@ it('deletes professional integrations at confirm time (security)', function () {
 });
 
 it('rejects with 410 when token is older than 24 hours', function () {
-    $rawToken = 'raw-token-' . Str::random(54);
+    $rawToken = 'raw-token-'.Str::random(54);
     $pro = seedRequestedProfessional($rawToken, [
         'deletion_requested_at' => Carbon::now()->subHours(25)->toIso8601String(),
     ]);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $result = $service->confirm($pro, $rawToken, Request::create('/', 'POST'));
 
     expect($result['success'])->toBeFalse()
@@ -95,10 +96,10 @@ it('rejects with 410 when token is older than 24 hours', function () {
 });
 
 it('rejects with 404 when token does not match', function () {
-    $rawToken = 'raw-token-' . Str::random(54);
+    $rawToken = 'raw-token-'.Str::random(54);
     $pro = seedRequestedProfessional($rawToken);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $result = $service->confirm($pro, 'wrong-token', Request::create('/', 'POST'));
 
     expect($result['success'])->toBeFalse()
@@ -121,7 +122,7 @@ it('rejects with 404 when no deletion request exists', function () {
     ]);
     $pro = Professional::query()->where('id', $id)->first();
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $result = $service->confirm($pro, 'any-token', Request::create('/', 'POST'));
 
     expect($result['success'])->toBeFalse()
@@ -129,10 +130,10 @@ it('rejects with 404 when no deletion request exists', function () {
 });
 
 it('writes confirmed audit event', function () {
-    $rawToken = 'raw-token-' . Str::random(54);
+    $rawToken = 'raw-token-'.Str::random(54);
     $pro = seedRequestedProfessional($rawToken);
 
-    $service = new AccountDeletionService();
+    $service = new AccountDeletionService;
     $service->confirm($pro, $rawToken, Request::create('/', 'POST'));
 
     $audit = DB::connection('pgsql')->table('core.professional_deletion_audit')

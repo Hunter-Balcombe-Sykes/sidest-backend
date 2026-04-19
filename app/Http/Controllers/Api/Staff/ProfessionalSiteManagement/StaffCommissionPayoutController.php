@@ -33,7 +33,7 @@ class StaffCommissionPayoutController extends ApiController
     public function index(Request $request): JsonResponse
     {
         $perPage = $this->normalizePerPage($request, 25, 100);
-        $status  = $request->query('status');
+        $status = $request->query('status');
 
         $query = DB::table('commerce.commission_payouts')->orderByDesc('created_at');
 
@@ -57,16 +57,16 @@ class StaffCommissionPayoutController extends ApiController
      * can see what happened without a second request.
      *
      * @return JsonResponse {
-     *   data: {
-     *     id: string,
-     *     status: 'completed'|'pending'|'failed'|...,
-     *     failure_code: string|null,
-     *     failure_reason: string|null,
-     *     processed_at: string|null,
-     *     net_payout_cents: int,
-     *     currency_code: string
-     *   }
-     * }
+     *                      data: {
+     *                      id: string,
+     *                      status: 'completed'|'pending'|'failed'|...,
+     *                      failure_code: string|null,
+     *                      failure_reason: string|null,
+     *                      processed_at: string|null,
+     *                      net_payout_cents: int,
+     *                      currency_code: string
+     *                      }
+     *                      }
      */
     public function retry(Request $request, CommissionPayout $payout): JsonResponse
     {

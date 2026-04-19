@@ -63,7 +63,7 @@ class FanOutBrandStatusNotificationJob implements ShouldQueue
             } catch (\Throwable $e) {
                 Log::warning('FanOutBrandStatusNotificationJob affiliate notify failed', [
                     'affiliate_id' => $affiliateId,
-                    'message'      => $e->getMessage(),
+                    'message' => $e->getMessage(),
                 ]);
             }
         }

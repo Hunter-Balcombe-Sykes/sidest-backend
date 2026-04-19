@@ -26,6 +26,7 @@ class BrandPartnerSiteSettingsSync
         if ($changed) {
             $site->save();
         }
+
         return $changed;
     }
 
@@ -67,6 +68,7 @@ class BrandPartnerSiteSettingsSync
         }
 
         $site->settings = $settings;
+
         return true;
     }
 

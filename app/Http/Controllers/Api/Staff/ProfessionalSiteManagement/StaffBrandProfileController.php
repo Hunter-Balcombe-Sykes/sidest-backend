@@ -24,13 +24,13 @@ class StaffBrandProfileController extends ApiController
         }
 
         $data = $request->validate([
-            'brand_status'         => ['sometimes', 'nullable', 'string', 'in:pending,active,suspended,rejected'],
+            'brand_status' => ['sometimes', 'nullable', 'string', 'in:pending,active,suspended,rejected'],
             'affiliate_visibility' => ['sometimes', 'nullable', 'string', 'in:public,invite_only'],
-            'setup_complete'       => ['sometimes', 'nullable', 'boolean'],
-            'legal_business_name'  => ['sometimes', 'nullable', 'string', 'max:255'],
-            'abn'                  => ['sometimes', 'nullable', 'string', 'max:20'],
-            'acn'                  => ['sometimes', 'nullable', 'string', 'max:20'],
-            'business_website'     => ['sometimes', 'nullable', 'url', 'max:500'],
+            'setup_complete' => ['sometimes', 'nullable', 'boolean'],
+            'legal_business_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'abn' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'acn' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'business_website' => ['sometimes', 'nullable', 'url', 'max:500'],
         ]);
 
         foreach ($data as $field => $value) {
@@ -40,14 +40,14 @@ class StaffBrandProfileController extends ApiController
 
         return $this->success([
             'brand_profile' => [
-                'id'                   => $profile->id,
-                'brand_status'         => $profile->brand_status,
+                'id' => $profile->id,
+                'brand_status' => $profile->brand_status,
                 'affiliate_visibility' => $profile->affiliate_visibility,
-                'setup_complete'       => (bool) $profile->setup_complete,
-                'legal_business_name'  => $profile->legal_business_name,
-                'abn'                  => $profile->abn,
-                'acn'                  => $profile->acn,
-                'business_website'     => $profile->business_website,
+                'setup_complete' => (bool) $profile->setup_complete,
+                'legal_business_name' => $profile->legal_business_name,
+                'abn' => $profile->abn,
+                'acn' => $profile->acn,
+                'business_website' => $profile->business_website,
             ],
         ]);
     }

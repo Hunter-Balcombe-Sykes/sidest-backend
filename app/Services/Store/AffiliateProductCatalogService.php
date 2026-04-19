@@ -17,6 +17,7 @@ class AffiliateProductCatalogService
     public function __construct(
         private readonly BrandCatalogService $brandCatalogService
     ) {}
+
     private const STOREFRONT_PRODUCTS_PER_PAGE = 50;
 
     private const COLLECTION_PRODUCTS_QUERY = <<<'GRAPHQL'
@@ -268,7 +269,7 @@ GRAPHQL;
      * Fetch product GIDs from a brand collection (e.g. favourites) using the Admin API.
      *
      * @param  string  $metadataKey  The key in provider_metadata for the collection handle
-     * @return array<int, string>  List of product GIDs in the collection
+     * @return array<int, string> List of product GIDs in the collection
      */
     private function fetchCollectionGids(ProfessionalIntegration $integration, string $metadataKey): array
     {

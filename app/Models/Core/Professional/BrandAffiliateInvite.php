@@ -14,6 +14,7 @@ class BrandAffiliateInvite extends BaseModel
     protected $table = 'brand.brand_affiliate_invites';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

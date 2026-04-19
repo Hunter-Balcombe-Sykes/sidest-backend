@@ -15,6 +15,7 @@ class CommissionLedgerEntry extends BaseModel
     protected $table = 'commerce.commission_ledger_entries';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

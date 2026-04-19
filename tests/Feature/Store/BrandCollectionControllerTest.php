@@ -64,7 +64,7 @@ it('lists collection products for brand', function () {
 
     $service->shouldReceive('resolveBrandIntegration')
         ->andReturn([
-            'integration' => new ProfessionalIntegration(),
+            'integration' => new ProfessionalIntegration,
             'shop_domain' => 'test.myshopify.com',
             'access_token' => 'test-token',
             'metadata' => ['default_collection_handle' => 'sidest-default-products'],
@@ -88,7 +88,7 @@ it('lists collection products for brand', function () {
 });
 
 it('validates ManageCollectionProductsRequest requires product GIDs array', function () {
-    $request = new ManageCollectionProductsRequest();
+    $request = new ManageCollectionProductsRequest;
     $rules = $request->rules();
 
     expect($rules['product_gids'])->toContain('required');
@@ -97,7 +97,7 @@ it('validates ManageCollectionProductsRequest requires product GIDs array', func
 });
 
 it('validates ManageCollectionProductsRequest caps at 50 items', function () {
-    $request = new ManageCollectionProductsRequest();
+    $request = new ManageCollectionProductsRequest;
     $rules = $request->rules();
 
     expect($rules['product_gids'])->toContain('max:50');

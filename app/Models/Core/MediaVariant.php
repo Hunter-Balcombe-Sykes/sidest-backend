@@ -23,19 +23,19 @@ use Illuminate\Support\Facades\Storage;
  *   - variant_key='adaptive'   + artifact_type='hls_playlist' → master HLS playlist
  *   - variant_key='poster'     + artifact_type='poster'       → poster JPEG
  *
- * @property string      $id
- * @property string      $media_id          FK → site_media.id
- * @property string      $variant_key       Logical tier: optimized|maximized|adaptive|poster
- * @property string      $artifact_type     Physical format: mp4|hls_playlist|poster
- * @property string      $disk
- * @property string      $path              Storage path (not a public URL)
+ * @property string $id
+ * @property string $media_id FK → site_media.id
+ * @property string $variant_key Logical tier: optimized|maximized|adaptive|poster
+ * @property string $artifact_type Physical format: mp4|hls_playlist|poster
+ * @property string $disk
+ * @property string $path Storage path (not a public URL)
  * @property string|null $mime
- * @property int|null    $width
- * @property int|null    $height
- * @property int|null    $bitrate_kbps
- * @property int|null    $file_size_bytes
- * @property int|null    $duration_ms
- * @property array|null  $metadata
+ * @property int|null $width
+ * @property int|null $height
+ * @property int|null $bitrate_kbps
+ * @property int|null $file_size_bytes
+ * @property int|null $duration_ms
+ * @property array|null $metadata
  */
 // V2: Processed media artifact (WebP image, MP4 video, HLS playlist, poster). Each SiteMedia can have multiple variants at different quality tiers.
 class MediaVariant extends BaseModel
@@ -45,6 +45,7 @@ class MediaVariant extends BaseModel
     protected $table = 'site.media_variants';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -64,16 +65,16 @@ class MediaVariant extends BaseModel
     ];
 
     protected $casts = [
-        'width'          => 'integer',
-        'height'         => 'integer',
-        'bitrate_kbps'   => 'integer',
+        'width' => 'integer',
+        'height' => 'integer',
+        'bitrate_kbps' => 'integer',
         'file_size_bytes' => 'integer',
-        'duration_ms'    => 'integer',
-        'metadata'       => 'array',
+        'duration_ms' => 'integer',
+        'metadata' => 'array',
     ];
 
     /* ------------------------------------------------------------------ */
-    /*  Relationships                                                      */
+    /*  Relationships */
     /* ------------------------------------------------------------------ */
 
     public function media(): BelongsTo
@@ -82,7 +83,7 @@ class MediaVariant extends BaseModel
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Accessors                                                          */
+    /*  Accessors */
     /* ------------------------------------------------------------------ */
 
     /**

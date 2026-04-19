@@ -18,9 +18,9 @@ class UpdateNotificationEmailPoliciesRequest extends FormRequest
         $validCategories = implode(',', NotificationPublisher::CATEGORIES);
 
         return [
-            'policies'            => ['required', 'array', 'min:1'],
-            'policies.*.category' => ['required', 'string', 'in:' . $validCategories],
-            'policies.*.mode'     => ['required', 'string', 'in:default,force_on,force_off'],
+            'policies' => ['required', 'array', 'min:1'],
+            'policies.*.category' => ['required', 'string', 'in:'.$validCategories],
+            'policies.*.mode' => ['required', 'string', 'in:default,force_on,force_off'],
         ];
     }
 }

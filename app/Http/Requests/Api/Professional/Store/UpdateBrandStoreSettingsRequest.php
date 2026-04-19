@@ -21,9 +21,9 @@ class UpdateBrandStoreSettingsRequest extends BaseFormRequest
             'product_image_ratio' => ['sometimes', 'nullable', 'string', 'in:1/1,4/5'],
             'custom_photos_enabled' => ['sometimes', 'boolean'],
             'custom_photo_position' => ['sometimes', 'string', 'in:before,after,mixed'],
-            'theme_id'                => ['sometimes', 'integer', 'in:1,2,3,4,5'],
+            'theme_id' => ['sometimes', 'integer', 'in:1,2,3,4,5'],
             'oxygen_deployment_token' => ['sometimes', 'nullable', 'string', 'max:500'],
-            'oxygen_storefront_id'    => ['sometimes', 'nullable', 'string', 'max:255'],
+            'oxygen_storefront_id' => ['sometimes', 'nullable', 'string', 'max:255'],
         ];
     }
 

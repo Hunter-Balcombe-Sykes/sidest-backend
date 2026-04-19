@@ -45,7 +45,7 @@ class StaffShopifyResyncController extends ApiController
         try {
             $result = $this->resyncService->resync($integration);
         } catch (RuntimeException $e) {
-            return $this->error('Unable to resync from Shopify: ' . $e->getMessage(), 502);
+            return $this->error('Unable to resync from Shopify: '.$e->getMessage(), 502);
         }
 
         return $this->success($result);

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Cache;
 class ShopifySetupTokenService
 {
     private const CACHE_PREFIX = 'shopify_setup:';
+
     private const TTL_MINUTES = 60;
 
     public function create(
@@ -18,7 +19,7 @@ class ShopifySetupTokenService
     ): string {
         $token = bin2hex(random_bytes(32));
 
-        Cache::put(self::CACHE_PREFIX . $token, [
+        Cache::put(self::CACHE_PREFIX.$token, [
             'shop_domain' => $shopDomain,
             'access_token' => encrypt($accessToken),
             'shop_data' => $shopData,
@@ -37,7 +38,7 @@ class ShopifySetupTokenService
             return null;
         }
 
-        $data = Cache::get(self::CACHE_PREFIX . $token);
+        $data = Cache::get(self::CACHE_PREFIX.$token);
         if (! is_array($data)) {
             return null;
         }
@@ -52,7 +53,7 @@ class ShopifySetupTokenService
             return null;
         }
 
-        $data = Cache::pull(self::CACHE_PREFIX . $token);
+        $data = Cache::pull(self::CACHE_PREFIX.$token);
         if (! is_array($data)) {
             return null;
         }

@@ -34,7 +34,7 @@ class AppServiceProvider extends ServiceProvider
         $throttleEnabled = (bool) config('sidest.throttle.enabled', true);
 
         // Public site endpoints (viewing sites, pages)
-        RateLimiter:: for('public-site', function (Request $request) use ($throttleEnabled) {
+        RateLimiter::for('public-site', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {
                 return Limit::none();
             }
@@ -49,7 +49,7 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Analytics endpoints (pageviews, clicks)
-        RateLimiter:: for('analytics', function (Request $request) use ($throttleEnabled) {
+        RateLimiter::for('analytics', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {
                 return Limit::none();
             }

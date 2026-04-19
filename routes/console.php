@@ -22,11 +22,13 @@ Artisan::command('sidest:normalize-professional-types {--dry-run : Show count on
 
     if ((bool) $this->option('dry-run')) {
         $this->info("Would normalize {$count} professional record(s) to professional_type=professional.");
+
         return;
     }
 
     if ($count === 0) {
         $this->info('No professional records required normalization.');
+
         return;
     }
 
@@ -50,7 +52,7 @@ Schedule::command('sidest:prune-notifications', ['--days' => 30])
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-notifications');
     });
 
-Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob())
+Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob)
     ->dailyAt('06:00')
     ->withoutOverlapping()
     ->onFailure(function (): void {
@@ -71,17 +73,16 @@ Schedule::command('sidest:analytics:purge-raw-events')
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: purge-raw-events');
     });
 
-Schedule::job(new \App\Jobs\Notifications\InviteExpirySweepJob())
+Schedule::job(new \App\Jobs\Notifications\InviteExpirySweepJob)
     ->dailyAt('08:00')
     ->withoutOverlapping()
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: invite-expiry-sweep');
     });
 
-Schedule::job(new \App\Jobs\Notifications\SendWeeklyAnalyticsNotificationJob())
+Schedule::job(new \App\Jobs\Notifications\SendWeeklyAnalyticsNotificationJob)
     ->weeklyOn(1, '09:00') // Monday 9 AM UTC
     ->withoutOverlapping()
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: send-weekly-analytics-notification');
     });
-

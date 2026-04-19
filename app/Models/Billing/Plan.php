@@ -8,7 +8,9 @@ use App\Models\BaseModel;
 class Plan extends BaseModel
 {
     protected $table = 'billing.plans';
+
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

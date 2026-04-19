@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Sets sidest.setup_complete = true shop metafield when brand completes the setup wizard.
-class SetShopifySetupCompleteJob implements ShouldQueue, ShouldBeUnique
+class SetShopifySetupCompleteJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 

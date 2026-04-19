@@ -43,7 +43,7 @@ class SquareApiClient
             $cursor = is_string($data['cursor'] ?? null) ? $data['cursor'] : null;
 
             foreach ($objects as $object) {
-                if (!is_array($object)) {
+                if (! is_array($object)) {
                     continue;
                 }
 
@@ -57,6 +57,7 @@ class SquareApiClient
                     $categoryDeleted = (bool) ($object['is_deleted'] ?? false);
                     if ($categoryDeleted) {
                         unset($categoryNamesById[$categoryId]);
+
                         continue;
                     }
 
@@ -87,6 +88,7 @@ class SquareApiClient
                         'item_version' => $itemVersion,
                         'deleted' => true,
                     ];
+
                     continue;
                 }
 
@@ -130,6 +132,7 @@ class SquareApiClient
                             'item_version' => $itemVersion,
                             'deleted' => true,
                         ];
+
                         continue;
                     }
 
@@ -192,6 +195,7 @@ class SquareApiClient
     public function retrieveCatalogObject(Professional $professional, string $objectId): array
     {
         $response = $this->request($professional, 'GET', '/v2/catalog/object/'.$objectId);
+
         return is_array($response['object'] ?? null) ? $response['object'] : [];
     }
 

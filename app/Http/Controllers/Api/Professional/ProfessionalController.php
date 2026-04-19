@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Block;
 use App\Services\Cache\ProfessionalCacheService;
@@ -25,6 +25,7 @@ class ProfessionalController extends ApiController
 
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+
     public function show(ProfessionalShowRequest $request)
     {
         $uid = $request->attributes->get('supabase_uid');
@@ -147,5 +148,4 @@ class ProfessionalController extends ApiController
                 'is_active' => false,
             ]);
     }
-
 }

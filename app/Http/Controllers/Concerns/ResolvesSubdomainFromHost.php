@@ -22,11 +22,11 @@ trait ResolvesSubdomainFromHost
         $host = $request->getHost();
         $publicDomain = config('sidest.public_domain');
 
-        if (! $publicDomain || !str_ends_with($host, $publicDomain)) {
+        if (! $publicDomain || ! str_ends_with($host, $publicDomain)) {
             return null;
         }
 
-        $suffix = '.' . ltrim($publicDomain, '.');
+        $suffix = '.'.ltrim($publicDomain, '.');
         if (! str_ends_with($host, $suffix)) {
             return null;
         }

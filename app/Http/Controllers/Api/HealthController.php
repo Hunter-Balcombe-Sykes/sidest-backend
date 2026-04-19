@@ -52,7 +52,7 @@ class HealthController extends ApiController
 
         try {
             $store = config('cache.default'); // or config('cache.default') depending on your config
-            $key = 'health:cache:' . bin2hex(random_bytes(8));
+            $key = 'health:cache:'.bin2hex(random_bytes(8));
             $value = bin2hex(random_bytes(8));
 
             Cache::put($key, $value, now()->addSeconds(10));

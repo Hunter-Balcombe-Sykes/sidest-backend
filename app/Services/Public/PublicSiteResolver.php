@@ -22,13 +22,17 @@ class PublicSiteResolver
             ->whereRaw('lower(subdomain) = ?', [$subdomain])
             ->first();
 
-        if ($site) return $site;
+        if ($site) {
+            return $site;
+        }
 
         $alias = SiteSubdomainAlias::query()
             ->whereRaw('lower(subdomain) = ?', [$subdomain])
             ->first();
 
-        if (!$alias) return null;
+        if (! $alias) {
+            return null;
+        }
 
         return (clone $siteQuery)
             ->where('id', $alias->site_id)

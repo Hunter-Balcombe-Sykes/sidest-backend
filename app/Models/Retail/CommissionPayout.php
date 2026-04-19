@@ -16,6 +16,7 @@ class CommissionPayout extends BaseModel
     protected $table = 'commerce.commission_payouts';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

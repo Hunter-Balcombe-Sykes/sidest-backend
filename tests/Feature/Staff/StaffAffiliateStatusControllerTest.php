@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 it('returns 404 when affiliate does not belong to the brand', function () {
-    $brand     = new Professional(['id' => (string) Str::uuid()]);
+    $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'status' => 'active']);
 
     $mockQuery = Mockery::mock();
@@ -16,8 +16,8 @@ it('returns 404 when affiliate does not belong to the brand', function () {
 
     DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($mockQuery);
 
-    $controller = new StaffAffiliateStatusController();
-    $request    = Request::create('/', 'PATCH', ['status' => 'suspended']);
+    $controller = new StaffAffiliateStatusController;
+    $request = Request::create('/', 'PATCH', ['status' => 'suspended']);
 
     $response = $controller->update($request, $brand, $affiliate);
 
@@ -25,9 +25,9 @@ it('returns 404 when affiliate does not belong to the brand', function () {
 });
 
 it('suspends an affiliate that belongs to the brand', function () {
-    $brand     = new Professional(['id' => (string) Str::uuid()]);
+    $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = Mockery::mock(Professional::class)->makePartial();
-    $affiliate->id     = (string) Str::uuid();
+    $affiliate->id = (string) Str::uuid();
     $affiliate->status = 'active';
     $affiliate->shouldReceive('save')->once();
     $affiliate->shouldReceive('fresh')->andReturnSelf();
@@ -38,20 +38,20 @@ it('suspends an affiliate that belongs to the brand', function () {
 
     DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($mockQuery);
 
-    $controller = new StaffAffiliateStatusController();
-    $request    = Request::create('/', 'PATCH', ['status' => 'suspended']);
+    $controller = new StaffAffiliateStatusController;
+    $request = Request::create('/', 'PATCH', ['status' => 'suspended']);
 
     $response = $controller->update($request, $brand, $affiliate);
-    $data     = json_decode($response->getContent(), true);
+    $data = json_decode($response->getContent(), true);
 
     expect($response->status())->toBe(200)
         ->and($data)->toHaveKey('professional');
 });
 
 it('reactivates a suspended affiliate', function () {
-    $brand     = new Professional(['id' => (string) Str::uuid()]);
+    $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = Mockery::mock(Professional::class)->makePartial();
-    $affiliate->id     = (string) Str::uuid();
+    $affiliate->id = (string) Str::uuid();
     $affiliate->status = 'suspended';
     $affiliate->shouldReceive('save')->once();
     $affiliate->shouldReceive('fresh')->andReturnSelf();
@@ -62,8 +62,8 @@ it('reactivates a suspended affiliate', function () {
 
     DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($mockQuery);
 
-    $controller = new StaffAffiliateStatusController();
-    $request    = Request::create('/', 'PATCH', ['status' => 'active']);
+    $controller = new StaffAffiliateStatusController;
+    $request = Request::create('/', 'PATCH', ['status' => 'active']);
 
     $response = $controller->update($request, $brand, $affiliate);
 
@@ -71,11 +71,11 @@ it('reactivates a suspended affiliate', function () {
 });
 
 it('rejects invalid status values', function () {
-    $brand     = new Professional(['id' => (string) Str::uuid()]);
+    $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
 
-    $controller = new StaffAffiliateStatusController();
-    $request    = Request::create('/', 'PATCH', ['status' => 'banned']);
+    $controller = new StaffAffiliateStatusController;
+    $request = Request::create('/', 'PATCH', ['status' => 'banned']);
 
     expect(fn () => $controller->update($request, $brand, $affiliate))
         ->toThrow(\Illuminate\Validation\ValidationException::class);

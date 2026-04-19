@@ -36,7 +36,7 @@ class BrandAffiliateInviteObserver
         } catch (\Throwable $e) {
             Log::warning('BrandAffiliateInvite created notification failed', [
                 'invite_id' => $invite->id,
-                'message'   => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
@@ -72,7 +72,7 @@ class BrandAffiliateInviteObserver
                     frontendType: 'Info',
                     category: 'invites',
                     title: 'Invite declined',
-                    body: "Your affiliate invite was declined.",
+                    body: 'Your affiliate invite was declined.',
                     dedupeKey: "invite.declined.{$invite->id}",
                     ctaUrl: '/account/affiliates',
                     retentionConfigKey: 'invite',
@@ -81,7 +81,7 @@ class BrandAffiliateInviteObserver
         } catch (\Throwable $e) {
             Log::warning('BrandAffiliateInvite updated notification failed', [
                 'invite_id' => $invite->id,
-                'message'   => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
@@ -105,7 +105,7 @@ class BrandAffiliateInviteObserver
         }
 
         $firstName = trim((string) ($invite->first_name ?? ''));
-        $email     = trim((string) ($invite->email ?? ''));
+        $email = trim((string) ($invite->email ?? ''));
 
         return $firstName !== '' ? $firstName : ($email !== '' ? $email : 'Someone');
     }

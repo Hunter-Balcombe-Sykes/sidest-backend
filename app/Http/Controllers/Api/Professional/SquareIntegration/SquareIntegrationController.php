@@ -28,7 +28,7 @@ class SquareIntegrationController extends ApiController
     /**
      * Check if the professional has Square connected.
      */
-    private function ensureSquareConnected(Request $request): JsonResponse|null
+    private function ensureSquareConnected(Request $request): ?JsonResponse
     {
         $integration = $this->currentSquareIntegration($request);
         if (! $integration) {
@@ -93,10 +93,10 @@ class SquareIntegrationController extends ApiController
     public function connect(Request $request, SquareServiceSyncService $syncService)
     {
         $request->validate([
-            'access_token'  => 'required|string',
+            'access_token' => 'required|string',
             'refresh_token' => 'required|string',
-            'merchant_id'   => 'required|string',
-            'expires_at'    => 'required|string',
+            'merchant_id' => 'required|string',
+            'expires_at' => 'required|string',
         ]);
 
         $pro = $this->currentProfessional($request);
@@ -148,13 +148,13 @@ class SquareIntegrationController extends ApiController
 
         Log::info('Square connected', [
             'professional_id' => $pro->id,
-            'merchant_id'     => $integration->external_account_id,
+            'merchant_id' => $integration->external_account_id,
         ]);
 
         return $this->success([
-            'connected'   => true,
+            'connected' => true,
             'merchant_id' => $integration->external_account_id,
-            'expires_at'  => $integration->expires_at?->toIso8601String(),
+            'expires_at' => $integration->expires_at?->toIso8601String(),
             'sync_queued' => $syncQueued,
             'sync_fallback_inline' => $syncFallbackInline,
         ]);
@@ -193,7 +193,7 @@ class SquareIntegrationController extends ApiController
         $integration = $this->currentSquareIntegration($request);
 
         return $this->success([
-            'connected'  => $integration?->access_token !== null,
+            'connected' => $integration?->access_token !== null,
             'expires_at' => $integration?->expires_at
                 ? $integration->expires_at->toIso8601String()
                 : null,

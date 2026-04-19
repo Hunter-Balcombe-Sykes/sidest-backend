@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 it('rejects store when affiliate is not linked to the specified brand', function () {
-    $affiliate = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
+    $affiliate = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
     $unlinkedBrandId = (string) Str::uuid();
 
     // Mock the linkage check to return false

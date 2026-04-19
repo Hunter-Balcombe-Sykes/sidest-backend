@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Log;
 class CommissionVoidService
 {
     private int $voidWindowDays;
+
     private int $gracePeriodDays;
 
     public function __construct(private readonly NotificationPublisher $publisher)
@@ -94,6 +95,7 @@ class CommissionVoidService
             Log::info('Skipped voiding commission — status changed concurrently', [
                 'entry_id' => $entry->id,
             ]);
+
             return false;
         }
 
@@ -198,10 +200,10 @@ class CommissionVoidService
             ->where('created_at', '<=', $warningCutoff->copy()->subDays($voidWindowDays))
             ->whereHas('affiliateProfessional', function ($q) {
                 $q->where('stripe_connect_status', '!=', 'active')
-                  ->where(function ($q2) {
-                      $q2->whereNull('stripe_grace_period_ends_at')
-                         ->orWhere('stripe_grace_period_ends_at', '<=', now());
-                  });
+                    ->where(function ($q2) {
+                        $q2->whereNull('stripe_grace_period_ends_at')
+                            ->orWhere('stripe_grace_period_ends_at', '<=', now());
+                    });
             })
             ->with('affiliateProfessional:id,display_name')
             ->chunkById(500, function ($entries) use (&$sent, $voidWindowDays) {
@@ -375,13 +377,13 @@ class CommissionVoidService
     private function formatMoney(int $cents, string $currencyCode): string
     {
         $prefix = match (strtoupper($currencyCode)) {
-            'USD'   => '$',
-            'GBP'   => '£',
-            'EUR'   => '€',
-            'AUD'   => 'A$',
-            default => strtoupper($currencyCode) . ' ',
+            'USD' => '$',
+            'GBP' => '£',
+            'EUR' => '€',
+            'AUD' => 'A$',
+            default => strtoupper($currencyCode).' ',
         };
 
-        return $prefix . number_format($cents / 100, 2, '.', ',');
+        return $prefix.number_format($cents / 100, 2, '.', ',');
     }
 }

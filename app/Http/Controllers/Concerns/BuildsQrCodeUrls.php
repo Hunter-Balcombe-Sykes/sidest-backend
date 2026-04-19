@@ -19,7 +19,7 @@ trait BuildsQrCodeUrls
             ? $publicDomain
             : (parse_url((string) config('app.url', ''), PHP_URL_HOST) ?: $request->getHost());
 
-        return $scheme . '://' . $host . '/p/' . $qrSlug;
+        return $scheme.'://'.$host.'/p/'.$qrSlug;
     }
 
     /**
@@ -30,6 +30,6 @@ trait BuildsQrCodeUrls
         $configured = (string) config('app.url', '');
         $scheme = parse_url($configured, PHP_URL_SCHEME);
 
-        return is_string($scheme) && $scheme !== '' ? $scheme :  $request->getScheme();
+        return is_string($scheme) && $scheme !== '' ? $scheme : $request->getScheme();
     }
 }

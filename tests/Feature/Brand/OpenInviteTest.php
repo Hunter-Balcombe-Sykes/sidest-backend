@@ -4,7 +4,6 @@ use App\Http\Controllers\Api\Professional\OpenInviteController;
 use App\Http\Controllers\Api\PublicSite\PublicOpenInviteController;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandPartnerLink;
-use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
@@ -138,7 +137,7 @@ function createBrand(string $handle = 'testbrand', string $brandStatus = 'active
 
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $brandId,
-        'auth_user_id' => 'auth-' . Str::random(8),
+        'auth_user_id' => 'auth-'.Str::random(8),
         'handle' => $handle,
         'handle_lc' => strtolower($handle),
         'display_name' => ucfirst($handle),
@@ -178,7 +177,7 @@ function createAffiliate(string $handle = 'testaffiliate'): Professional
 
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $affiliateId,
-        'auth_user_id' => 'auth-' . Str::random(8),
+        'auth_user_id' => 'auth-'.Str::random(8),
         'handle' => $handle,
         'handle_lc' => strtolower($handle),
         'display_name' => ucfirst($handle),
@@ -240,7 +239,7 @@ it('returns 404 for non-brand professional', function () {
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => (string) Str::uuid(),
-        'auth_user_id' => 'auth-' . Str::random(8),
+        'auth_user_id' => 'auth-'.Str::random(8),
         'handle' => 'regularpro',
         'handle_lc' => 'regularpro',
         'display_name' => 'Regular Pro',
@@ -427,7 +426,7 @@ it('claimOpenInvite throws when affiliate has no site', function () {
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $affiliateId,
-        'auth_user_id' => 'auth-' . Str::random(8),
+        'auth_user_id' => 'auth-'.Str::random(8),
         'handle' => 'nositeaffiliate',
         'handle_lc' => 'nositeaffiliate',
         'display_name' => 'No Site',

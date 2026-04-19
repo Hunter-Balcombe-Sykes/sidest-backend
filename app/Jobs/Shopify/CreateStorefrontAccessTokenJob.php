@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Core. Creates Shopify Storefront API token ("Side St Hydrogen") via GraphQL. Required for Hydrogen storefronts to fetch product data. Matches existing "Side St" tokens for backward compat.
-class CreateStorefrontAccessTokenJob implements ShouldQueue, ShouldBeUnique
+class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -118,7 +118,7 @@ class CreateStorefrontAccessTokenJob implements ShouldQueue, ShouldBeUnique
 
     private function findExistingToken(string $shopDomain, string $accessToken, string $apiVersion): ?string
     {
-        $url = sprintf("https://{$shopDomain}" . self::STOREFRONT_TOKENS_REST_PATH, $apiVersion);
+        $url = sprintf("https://{$shopDomain}".self::STOREFRONT_TOKENS_REST_PATH, $apiVersion);
 
         $response = Http::timeout(20)
             ->acceptJson()

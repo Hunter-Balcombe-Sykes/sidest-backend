@@ -15,7 +15,7 @@ class EnsureSidestStaff
         // Set by VerifySupabaseJwt middleware
         $uid = $request->attributes->get('supabase_uid');
 
-        if (!$uid) {
+        if (! $uid) {
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
@@ -23,7 +23,7 @@ class EnsureSidestStaff
             ->where('auth_user_id', $uid)
             ->first();
 
-        if (!$staff) {
+        if (! $staff) {
             return response()->json(['message' => 'Staff access required'], 403);
         }
 

@@ -22,7 +22,7 @@ class StaffCommissionController extends ApiController
     public function index(Request $request, Professional $professional): JsonResponse
     {
         $perPage = $this->normalizePerPage($request, 25, 100);
-        $status  = $request->query('status');
+        $status = $request->query('status');
 
         $query = DB::table('commerce.commission_ledger_entries')
             ->where(function ($q) use ($professional): void {

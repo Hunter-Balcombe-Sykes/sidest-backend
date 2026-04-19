@@ -2,8 +2,8 @@
 
 namespace App\Http\Middleware\Logging;
 
-use App\Models\Analytics\LeadSubmission;
 use App\Http\Controllers\Concerns\HashesClientData;
+use App\Models\Analytics\LeadSubmission;
 use Closure;
 use Illuminate\Http\Request;
 
@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 class LogLeadRateLimits
 {
     use HashesClientData;
+
     public function handle(Request $request, Closure $next)
     {
         $response = $next($request);

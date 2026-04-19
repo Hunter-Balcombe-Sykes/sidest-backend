@@ -21,6 +21,7 @@ class Site extends BaseModel
     protected $table = 'site.sites';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -32,10 +33,10 @@ class Site extends BaseModel
 
     protected $casts = [
         'is_published' => 'boolean',
-        'settings'     => 'array',
+        'settings' => 'array',
         'subdomain_changed_at' => 'datetime',
-        'created_at'   => 'datetime',
-        'updated_at'   => 'datetime',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo

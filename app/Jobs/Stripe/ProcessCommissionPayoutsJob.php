@@ -28,6 +28,7 @@ class ProcessCommissionPayoutsJob implements ShouldQueue
     // status not yet updated to 'pending'); that rare case still needs manual
     // intervention and is covered by the failure log + future audit dashboard.
     public int $tries = 3;
+
     public int $timeout = 300;
 
     /**

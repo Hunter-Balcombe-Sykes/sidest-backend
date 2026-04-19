@@ -25,16 +25,16 @@ class StaffStatsController extends ApiController
             ->where('status', 'pending')
             ->sum('amount_cents');
 
-        $brands        = (int) ($typeCounts->get('brand') ?? 0);
-        $influencers   = (int) ($typeCounts->get('influencer') ?? 0);
+        $brands = (int) ($typeCounts->get('brand') ?? 0);
+        $influencers = (int) ($typeCounts->get('influencer') ?? 0);
         $professionals = (int) ($typeCounts->get('professional') ?? 0);
 
         return $this->success([
             'professionals' => [
-                'brands'        => $brands,
-                'influencers'   => $influencers,
+                'brands' => $brands,
+                'influencers' => $influencers,
                 'professionals' => $professionals,
-                'total'         => $brands + $influencers + $professionals,
+                'total' => $brands + $influencers + $professionals,
             ],
             'subscriptions' => [
                 'active_count' => (int) $activeSubscriptions,

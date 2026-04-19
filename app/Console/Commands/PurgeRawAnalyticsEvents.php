@@ -14,14 +14,14 @@ class PurgeRawAnalyticsEvents extends Command
                             {--dry-run : Report row counts without deleting}';
 
     protected $description = 'Delete raw analytics event rows older than the retention window. '
-        . 'Aggregate data is preserved in the hourly/daily tables. '
-        . 'Runs in batches to avoid long-running transactions.';
+        .'Aggregate data is preserved in the hourly/daily tables. '
+        .'Runs in batches to avoid long-running transactions.';
 
     private const BATCH_SIZE = 10_000;
 
     private const TABLES = [
-        'analytics.link_clicks'      => 'occurred_at',
-        'analytics.site_visits'      => 'occurred_at',
+        'analytics.link_clicks' => 'occurred_at',
+        'analytics.site_visits' => 'occurred_at',
         'analytics.lead_submissions' => 'occurred_at',
     ];
 
@@ -61,9 +61,9 @@ class PurgeRawAnalyticsEvents extends Command
         ));
 
         Log::info('sidest:analytics:purge-raw-events completed', [
-            'dry_run'    => $dryRun,
-            'days'       => $days,
-            'cutoff'     => $cutoff->toIso8601String(),
+            'dry_run' => $dryRun,
+            'days' => $days,
+            'cutoff' => $cutoff->toIso8601String(),
             'total_rows' => $totalDeleted,
         ]);
 
@@ -78,7 +78,7 @@ class PurgeRawAnalyticsEvents extends Command
         if ($days < 30) {
             $this->error(sprintf(
                 'Retention window must be at least 30 days (got %d). '
-                . 'Set ANALYTICS_RAW_EVENT_RETENTION_DAYS or pass --days=N.',
+                .'Set ANALYTICS_RAW_EVENT_RETENTION_DAYS or pass --days=N.',
                 $days
             ));
 

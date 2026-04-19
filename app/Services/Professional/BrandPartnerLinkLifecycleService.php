@@ -82,6 +82,7 @@ class BrandPartnerLinkLifecycleService
                 if ($site && $this->sync->settingsStillReferenceBrand($site, $req->brand->id)) {
                     $this->sync->sync($site, $req->affiliate->id);
                     DB::afterCommit(fn () => $this->sync->invalidateAffiliateCaches($site));
+
                     return new DisconnectResult(
                         disconnected: true,
                         voidedCommissionCount: 0,
@@ -90,6 +91,7 @@ class BrandPartnerLinkLifecycleService
                         staleSettingsCleaned: true,
                     );
                 }
+
                 return new DisconnectResult(
                     disconnected: false,
                     voidedCommissionCount: 0,
@@ -104,7 +106,7 @@ class BrandPartnerLinkLifecycleService
             $voidedCents = 0;
 
             if ($req->actor === DisconnectActor::Staff && $req->commissions === CommissionHandling::Void) {
-                $voidReason = 'link_removed_by_staff: ' . ($req->reason ?? '');
+                $voidReason = 'link_removed_by_staff: '.($req->reason ?? '');
                 $voidResult = $this->commissionVoid->voidPendingForAffiliateBrand(
                     $req->affiliate->id,
                     $req->brand->id,
@@ -161,7 +163,7 @@ class BrandPartnerLinkLifecycleService
                     VoidPendingCommissionsForLinkJob::dispatch(
                         affiliateProfessionalId: $req->affiliate->id,
                         brandProfessionalId: $req->brand->id,
-                        reason: 'link_removed_by_staff: ' . ($req->reason ?? ''),
+                        reason: 'link_removed_by_staff: '.($req->reason ?? ''),
                     );
                 });
                 // Skip inline notifications — the async job sends them on completion.

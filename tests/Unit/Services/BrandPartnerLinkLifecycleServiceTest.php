@@ -5,7 +5,6 @@ uses(Tests\TestCase::class);
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
-use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\BrandPartnerLinkAuditor;
 use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\BrandPartnerLinkNotifier;
@@ -18,8 +17,8 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 
 it('createForStaff rejects if brand is not type=brand', function () {
-    $brand = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional', 'status' => 'active']);
-    $affiliate = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional', 'status' => 'active']);
+    $brand = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional', 'status' => 'active']);
+    $affiliate = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional', 'status' => 'active']);
 
     $svc = new BrandPartnerLinkLifecycleService(
         Mockery::mock(BrandPartnerLinkService::class),
@@ -35,8 +34,8 @@ it('createForStaff rejects if brand is not type=brand', function () {
 });
 
 it('createForStaff rejects if affiliate is type=brand', function () {
-    $brand = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand', 'status' => 'active']);
-    $affiliate = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand', 'status' => 'active']);
+    $brand = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand', 'status' => 'active']);
+    $affiliate = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand', 'status' => 'active']);
 
     $svc = new BrandPartnerLinkLifecycleService(
         Mockery::mock(BrandPartnerLinkService::class),
@@ -54,8 +53,8 @@ it('createForStaff rejects if affiliate is type=brand', function () {
 it('createForStaff happy path inserts link, audit row, and syncs site settings', function () {
     setupSitesTable();
 
-    $brand = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand', 'status' => 'active']);
-    $affiliate = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional', 'status' => 'active']);
+    $brand = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand', 'status' => 'active']);
+    $affiliate = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional', 'status' => 'active']);
 
     // Insert a site so the sync path is exercised.
     \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.sites')->insert([
@@ -105,8 +104,8 @@ it('createForStaff happy path inserts link, audit row, and syncs site settings',
 it('disconnect (keep) severs link without voiding pending commissions', function () {
     setupSitesTable();
 
-    $brand = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
-    $affiliate = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
+    $brand = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
+    $affiliate = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
 
     DB::connection('pgsql')->table('site.sites')->insert([
         'id' => (string) Str::uuid(),
@@ -164,8 +163,8 @@ it('disconnect (keep) severs link without voiding pending commissions', function
 it('disconnect (staff void, under cap) voids pending commissions inline', function () {
     setupSitesTable();
 
-    $brand = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
-    $affiliate = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
+    $brand = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
+    $affiliate = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
     $staffId = (string) Str::uuid();
 
     DB::connection('pgsql')->table('site.sites')->insert([
@@ -220,8 +219,8 @@ it('disconnect (staff void, over cap) returns voidedAsync=true and does not void
     setupSitesTable();
     Queue::fake();
 
-    $brand = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
-    $affiliate = (new Professional())->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
+    $brand = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
+    $affiliate = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
     $staffId = (string) Str::uuid();
 
     DB::connection('pgsql')->table('site.sites')->insert([

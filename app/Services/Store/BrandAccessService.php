@@ -9,16 +9,25 @@ use App\Models\Retail\BrandTeamMembership;
 class BrandAccessService
 {
     public const ROLE_OWNER = 'owner';
+
     public const ROLE_FINANCE = 'finance';
+
     public const ROLE_MARKETING = 'marketing';
+
     public const ROLE_ANALYST = 'analyst';
+
     public const ROLE_READ_ONLY = 'read_only';
 
     public const CAPABILITY_ANALYTICS_NON_FINANCIAL_READ = 'analytics.non_financial.read';
+
     public const CAPABILITY_ANALYTICS_FINANCIAL_READ = 'analytics.financial.read';
+
     public const CAPABILITY_EXPORT_NON_FINANCIAL = 'export.non_financial';
+
     public const CAPABILITY_EXPORT_FINANCIAL = 'export.financial';
+
     public const CAPABILITY_STORE_MANAGE = 'store.manage';
+
     public const CAPABILITY_SHOPIFY_MANAGE = 'shopify.manage';
 
     /**

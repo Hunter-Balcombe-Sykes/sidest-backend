@@ -45,4 +45,3 @@ class UpsertGoogleBusinessProfileRequest extends BaseFormRequest
         ];
     }
 }
-

@@ -78,7 +78,7 @@ it('parses csv invite aliases and sends rows to the service', function () {
         implode("\n", [
             'Email Address,First Name,Last Name,Phone Number,Expiry,Notes,Ignored Column',
             'alice@example.com,Alice,Smith,0400,7d,Join us,something',
-            'bob@example.com,Bob,Jones,,,,'
+            'bob@example.com,Bob,Jones,,,,',
         ])
     );
 

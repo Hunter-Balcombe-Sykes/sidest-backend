@@ -10,14 +10,21 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Subscription extends BaseModel
 {
     protected $table = 'billing.subscriptions';
+
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     public const STATUS_ACTIVE = 'active';
+
     public const STATUS_PAST_DUE = 'past_due';
+
     public const STATUS_UNPAID = 'unpaid';
+
     public const STATUS_CANCELED = 'canceled';
+
     public const STATUS_INCOMPLETE = 'incomplete';
+
     public const STATUS_INCOMPLETE_EXPIRED = 'incomplete_expired';
 
     public const GRACE_STATUSES = [self::STATUS_ACTIVE, self::STATUS_PAST_DUE];

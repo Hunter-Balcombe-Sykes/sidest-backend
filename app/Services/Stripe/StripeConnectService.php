@@ -148,6 +148,7 @@ class StripeConnectService
 
         try {
             $link = $this->stripe->accounts->createLoginLink($accountId);
+
             return $link->url;
         } catch (ApiErrorException) {
             return null;
@@ -559,6 +560,7 @@ class StripeConnectService
     private function appendCheckoutSessionParam(string $url, string $param): string
     {
         $separator = str_contains($url, '?') ? '&' : '?';
+
         return $url.$separator.$param.'={CHECKOUT_SESSION_ID}';
     }
 

@@ -20,12 +20,12 @@ class UpdateCustomerRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'full_name'  => ['sometimes', 'required', 'string', 'max:255'],
-            'email'      => ['sometimes', 'nullable', 'email', 'max:255'],
-            'phone'      => ['sometimes', 'nullable', 'string', 'max:50'],
-            'notes'      => ['sometimes', 'nullable', 'string', 'max:5000'],
-            'source'     => ['sometimes', 'nullable', 'string', 'max:225'],
-            'external_id'=> ['sometimes', 'nullable', 'string', 'max:255'],
+            'full_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'email' => ['sometimes', 'nullable', 'email', 'max:255'],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'notes' => ['sometimes', 'nullable', 'string', 'max:5000'],
+            'source' => ['sometimes', 'nullable', 'string', 'max:225'],
+            'external_id' => ['sometimes', 'nullable', 'string', 'max:255'],
             'marketing_opt_in_cached' => ['sometimes', 'nullable', 'boolean'],
         ];
     }

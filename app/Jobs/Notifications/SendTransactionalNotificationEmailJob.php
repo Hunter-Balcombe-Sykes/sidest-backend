@@ -30,6 +30,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
+
     public array $backoff = [30, 120, 300];
 
     public function __construct(
@@ -44,6 +45,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
             Log::debug('Notification email skipped: feature disabled', [
                 'category' => $this->category,
             ]);
+
             return;
         }
 
@@ -52,6 +54,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
                 'category' => $this->category,
                 'professional_id' => $this->professionalId,
             ]);
+
             return;
         }
 
@@ -60,6 +63,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
             Log::warning('Notification email skipped: notification not found', [
                 'notification_id' => $this->notificationId,
             ]);
+
             return;
         }
 
@@ -71,6 +75,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
             Log::warning('Notification email skipped: no email on record', [
                 'professional_id' => $this->professionalId,
             ]);
+
             return;
         }
 
@@ -79,6 +84,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
             Log::warning('Notification email skipped: unrecognised category', [
                 'category' => $this->category,
             ]);
+
             return;
         }
 
@@ -98,18 +104,18 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
     private function buildMailable(Notification $notification): ?\Illuminate\Mail\Mailable
     {
         return match ($this->category) {
-            'invites'              => new InviteNotificationMail($notification),
-            'commissions'          => new CommissionNotificationMail($notification),
-            'payouts'              => new PayoutNotificationMail($notification),
-            'integrations'         => new IntegrationNotificationMail($notification),
-            'analytics_weekly'     => new AnalyticsWeeklyMail($notification),
+            'invites' => new InviteNotificationMail($notification),
+            'commissions' => new CommissionNotificationMail($notification),
+            'payouts' => new PayoutNotificationMail($notification),
+            'integrations' => new IntegrationNotificationMail($notification),
+            'analytics_weekly' => new AnalyticsWeeklyMail($notification),
             'analytics_milestones' => new AnalyticsMilestoneMail($notification),
-            'profile_tasks'        => new ProfileTaskMail($notification),
-            'catalog_changes'      => new CatalogChangeMail($notification),
-            'brand_status'         => new BrandStatusMail($notification),
-            'subscriptions'        => new SubscriptionMail($notification),
-            'brand_links'          => new BrandLinkMail($notification),
-            default                => null,
+            'profile_tasks' => new ProfileTaskMail($notification),
+            'catalog_changes' => new CatalogChangeMail($notification),
+            'brand_status' => new BrandStatusMail($notification),
+            'subscriptions' => new SubscriptionMail($notification),
+            'brand_links' => new BrandLinkMail($notification),
+            default => null,
         };
     }
 }

@@ -29,7 +29,7 @@ class ProfessionalGalleryController extends ApiController
      */
     public function index(): JsonResponse
     {
-        $pro  = $this->currentProfessional(request());
+        $pro = $this->currentProfessional(request());
         $site = $this->currentSite($pro);
 
         $images = SiteMedia::query()
@@ -42,11 +42,11 @@ class ProfessionalGalleryController extends ApiController
             ->get();
 
         $result = $images->map(fn (SiteMedia $img) => [
-            'id'         => $img->id,
-            'pool'       => $img->pool,
-            'alt_text'   => $img->alt_text,
+            'id' => $img->id,
+            'pool' => $img->pool,
+            'alt_text' => $img->alt_text,
             'sort_order' => $img->sort_order,
-            'variants'   => $img->variantUrls(),
+            'variants' => $img->variantUrls(),
             'created_at' => $img->created_at,
             'updated_at' => $img->updated_at,
         ]);
@@ -63,14 +63,14 @@ class ProfessionalGalleryController extends ApiController
     {
         return $this->error(
             'Gallery image creation has moved to POST /api/uploads with pool=gallery. '
-            . 'Upload the image file directly instead of passing bucket/path.',
+            .'Upload the image file directly instead of passing bucket/path.',
             410,
         );
     }
 
     public function reorder(ReorderGalleryImageRequest $request): JsonResponse
     {
-        $pro  = $this->currentProfessional(request());
+        $pro = $this->currentProfessional(request());
         $site = $this->currentSite($pro);
 
         $ids = array_values(array_unique($request->validated()['ids'] ?? []));
@@ -88,13 +88,13 @@ class ProfessionalGalleryController extends ApiController
 
             $allSet = array_flip($allIds);
             foreach ($ids as $id) {
-                if (!isset($allSet[$id])) {
+                if (! isset($allSet[$id])) {
                     abort(403, 'One or more images do not belong to your site.');
                 }
             }
 
             $remaining = array_values(array_diff($allIds, $ids));
-            $newOrder  = array_merge($ids, $remaining);
+            $newOrder = array_merge($ids, $remaining);
 
             foreach ($newOrder as $i => $id) {
                 SiteMedia::query()
@@ -114,7 +114,7 @@ class ProfessionalGalleryController extends ApiController
      */
     public function destroy(Request $request, SiteMedia $image): JsonResponse
     {
-        $pro  = $this->currentProfessional($request);
+        $pro = $this->currentProfessional($request);
         $site = $this->currentSite($pro);
         abort_unless($image->site_id === $site->id, 404);
 

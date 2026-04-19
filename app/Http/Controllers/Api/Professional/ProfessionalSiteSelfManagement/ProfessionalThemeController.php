@@ -4,16 +4,17 @@ namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 
 use App\Actions\Site\UpdateSiteAction;
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Core\Site\Theme;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
 // V2: Lists available site themes and allows selection of active theme for the professional's mini-site.
 class ProfessionalThemeController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+
     public function index()
     {
         $themes = Theme::query()

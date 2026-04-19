@@ -154,7 +154,7 @@ class SocialLinkNormalizer
         $host = strtolower($parsed['host']);
         if (! in_array($host, $config['host_allowlist'], true)) {
             throw new InvalidArgumentException(
-                "That URL doesn't belong to {$config['display_name']}. Expected one of: " . implode(', ', $config['host_allowlist']) . '.'
+                "That URL doesn't belong to {$config['display_name']}. Expected one of: ".implode(', ', $config['host_allowlist']).'.'
             );
         }
 
@@ -170,12 +170,12 @@ class SocialLinkNormalizer
 
         // Lenient deep-link path: rebuild the URL with forced https + the original
         // path/query/fragment. No handle extracted.
-        $rebuilt = 'https://' . $host . $path;
+        $rebuilt = 'https://'.$host.$path;
         if (isset($parsed['query']) && $parsed['query'] !== '') {
-            $rebuilt .= '?' . $parsed['query'];
+            $rebuilt .= '?'.$parsed['query'];
         }
         if (isset($parsed['fragment']) && $parsed['fragment'] !== '') {
-            $rebuilt .= '#' . $parsed['fragment'];
+            $rebuilt .= '#'.$parsed['fragment'];
         }
 
         return [

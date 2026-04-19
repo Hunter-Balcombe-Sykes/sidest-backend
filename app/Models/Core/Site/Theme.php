@@ -15,6 +15,7 @@ class Theme extends BaseModel
     protected $table = 'site.themes';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -26,10 +27,10 @@ class Theme extends BaseModel
     ];
 
     protected $casts = [
-        'config'      => 'array',
-        'is_default'  => 'boolean',
-        'created_at'  => 'datetime',
-        'updated_at'  => 'datetime',
+        'config' => 'array',
+        'is_default' => 'boolean',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function sites(): HasMany

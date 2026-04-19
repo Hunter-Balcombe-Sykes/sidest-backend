@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Analytics\LinkClick;
 use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Http\JsonResponse;
@@ -11,8 +13,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
 // V2: Site visit analytics (visits, clicks, devices, countries, traffic sources). Unrelated to commerce — site identity analytics only.
 class ProfessionalAnalyticsController extends ApiController
@@ -39,22 +39,22 @@ class ProfessionalAnalyticsController extends ApiController
             } elseif ($fromParam || $toParam) {
                 $from = $fromParam
                     ? Carbon::parse($fromParam)->startOfDay()
-                    :  Carbon::now()->subDays($days)->startOfDay();
+                    : Carbon::now()->subDays($days)->startOfDay();
 
                 $to = $toParam
                     ? Carbon::parse($toParam)->endOfDay()
                     : Carbon::now()->endOfDay();
             } else {
                 $to = Carbon::now()->endOfDay();
-                $from = Carbon:: now()->subDays($days)->startOfDay();
+                $from = Carbon::now()->subDays($days)->startOfDay();
             }
         } catch (Throwable $e) {
             return $this->error(
                 'Invalid date range.  Use YYYY-MM-DD for from/to.',
                 422,
                 [
-                    'from' => $fromParam ?  ['Invalid date.'] : [],
-                    'to'   => $toParam ? ['Invalid date.'] :  [],
+                    'from' => $fromParam ? ['Invalid date.'] : [],
+                    'to' => $toParam ? ['Invalid date.'] : [],
                 ]
             );
         }
@@ -64,7 +64,7 @@ class ProfessionalAnalyticsController extends ApiController
         }
 
         $site = $professional->site;
-        if (!$site) {
+        if (! $site) {
             return $this->error('professional has no site.', 404);
         }
 
@@ -99,7 +99,7 @@ class ProfessionalAnalyticsController extends ApiController
                 ->where('professional_id', $professional->id)
                 ->whereBetween('occurred_at', [$from, $to])
                 ->selectRaw('COUNT(*) as total_visits')
-                ->selectRaw("COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_visitors")
+                ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_visitors')
                 ->selectRaw('MAX(occurred_at) as last_visit_at')
                 ->first();
 
@@ -118,7 +118,7 @@ class ProfessionalAnalyticsController extends ApiController
                     ->where('professional_id', $professional->id)
                     ->whereBetween('occurred_at', [$from, $to])
                     ->selectRaw('COUNT(*) as total_clicks')
-                    ->selectRaw("COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_clickers")
+                    ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_clickers')
                     ->selectRaw('MAX(occurred_at) as last_click_at')
                     ->first();
             } catch (Throwable) {
@@ -158,7 +158,7 @@ class ProfessionalAnalyticsController extends ApiController
                 $visitsByDay = DB::table('analytics.site_visits')
                     ->where('professional_id', $professional->id)
                     ->whereBetween('occurred_at', [$from, $to])
-                    ->selectRaw("DATE(occurred_at) as day, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count")
+                    ->selectRaw('DATE(occurred_at) as day, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count')
                     ->groupByRaw('DATE(occurred_at)')
                     ->orderBy('day')
                     ->get();
@@ -167,7 +167,7 @@ class ProfessionalAnalyticsController extends ApiController
                     $clicksByDay = DB::table('analytics.link_clicks')
                         ->where('professional_id', $professional->id)
                         ->whereBetween('occurred_at', [$from, $to])
-                        ->selectRaw("DATE(occurred_at) as day, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count")
+                        ->selectRaw('DATE(occurred_at) as day, COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as count')
                         ->groupByRaw('DATE(occurred_at)')
                         ->orderBy('day')
                         ->get();
@@ -195,8 +195,8 @@ class ProfessionalAnalyticsController extends ApiController
 
             $devices = [
                 'desktop' => (int) ($deviceBreakdownRaw->get('desktop')?->visitors ?? 0),
-                'mobile'  => (int) ($deviceBreakdownRaw->get('mobile')?->visitors ?? 0),
-                'other'   => (int) ($deviceBreakdownRaw->get('other')?->visitors ?? 0),
+                'mobile' => (int) ($deviceBreakdownRaw->get('mobile')?->visitors ?? 0),
+                'other' => (int) ($deviceBreakdownRaw->get('other')?->visitors ?? 0),
             ];
 
             $visitsByDayByDevice = DB::table('analytics.site_visits')
@@ -341,17 +341,17 @@ class ProfessionalAnalyticsController extends ApiController
             return [
                 'range' => [
                     'from' => $from->toDateString(),
-                    'to'   => $to->toDateString(),
+                    'to' => $to->toDateString(),
                 ],
                 'granularity' => $useHourlyBuckets ? 'hour' : 'day',
                 'bucket_timezone' => $useHourlyBuckets ? 'UTC' : $professionalTimezone,
                 'professional' => [
-                    'id'           => $professional->id,
-                    'handle'       => $professional->handle,
+                    'id' => $professional->id,
+                    'handle' => $professional->handle,
                     'display_name' => $professional->display_name,
                 ],
                 'site' => [
-                    'id'        => $site->id,
+                    'id' => $site->id,
                     'subdomain' => $site->subdomain,
                     'published' => (bool) $site->is_published,
                 ],
@@ -361,13 +361,13 @@ class ProfessionalAnalyticsController extends ApiController
                     'referrers' => $referrers,
                 ],
                 'totals' => [
-                    'visits'          => $totalVisits,
-                    'unique_visitors' => (int) ($visitsAgg->unique_visitors ??  0),
-                    'clicks'          => $totalClicks,
+                    'visits' => $totalVisits,
+                    'unique_visitors' => (int) ($visitsAgg->unique_visitors ?? 0),
+                    'clicks' => $totalClicks,
                     'unique_clickers' => (int) ($clicksAgg->unique_clickers ?? 0),
-                    'ctr_percent'     => $ctr,
-                    'last_visit_at'   => $visitsAgg->last_visit_at ?  Carbon::parse($visitsAgg->last_visit_at)->toISOString() : null,
-                    'last_click_at'   => $clicksAgg->last_click_at ? Carbon::parse($clicksAgg->last_click_at)->toISOString() : null,
+                    'ctr_percent' => $ctr,
+                    'last_visit_at' => $visitsAgg->last_visit_at ? Carbon::parse($visitsAgg->last_visit_at)->toISOString() : null,
+                    'last_click_at' => $clicksAgg->last_click_at ? Carbon::parse($clicksAgg->last_click_at)->toISOString() : null,
                 ],
                 'charts' => [
                     'visits_by_day' => $visitsByDay,

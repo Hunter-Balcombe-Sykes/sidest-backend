@@ -7,17 +7,17 @@ class CacheKeyGenerator
 {
     public static function publicSite(string $subdomain): string
     {
-        return "site:public:" . strtolower($subdomain);
+        return 'site:public:'.strtolower($subdomain);
     }
 
     public static function publicSitePayload(string $subdomain): string
     {
-        return "site:payload:" . strtolower($subdomain);
+        return 'site:payload:'.strtolower($subdomain);
     }
 
     public static function professionalByHandle(string $handle): string
     {
-        return "pro:handle:" . strtolower($handle);
+        return 'pro:handle:'.strtolower($handle);
     }
 
     public static function professionalById(string $id): string
@@ -72,7 +72,7 @@ class CacheKeyGenerator
 
     public static function professionalPayloadByHandle(string $handleLc): string
     {
-        return "pro:payload:handle:" . strtolower($handleLc);
+        return 'pro:payload:handle:'.strtolower($handleLc);
     }
 
     public static function professionalPayloadByAuthId(string $authUserId): string
@@ -82,7 +82,7 @@ class CacheKeyGenerator
 
     public static function professionalIdByHandle(string $handleLc): string
     {
-        return "pro:map:handle:" . strtolower($handleLc);
+        return 'pro:map:handle:'.strtolower($handleLc);
     }
 
     public static function professionalIdByAuthId(string $authUserId): string
@@ -155,5 +155,4 @@ class CacheKeyGenerator
     {
         return "brand:{$brandProfessionalId}:product:{$productGid}:custom_photos";
     }
-
 }

@@ -13,7 +13,7 @@ function makeCommissionPaginator(array $items = []): \Illuminate\Pagination\Leng
 
 it('returns paginated commissions for a professional', function () {
     $professional = new Professional([
-        'id'                => (string) Str::uuid(),
+        'id' => (string) Str::uuid(),
         'professional_type' => 'brand',
     ]);
 
@@ -24,7 +24,7 @@ it('returns paginated commissions for a professional', function () {
 
     DB::shouldReceive('table')->with('commerce.commission_ledger_entries')->andReturn($mockQuery);
 
-    $controller = new StaffCommissionController();
+    $controller = new StaffCommissionController;
     $response = $controller->index(Request::create('/', 'GET'), $professional);
     $data = json_decode($response->getContent(), true);
 
@@ -34,7 +34,7 @@ it('returns paginated commissions for a professional', function () {
 
 it('filters commissions by status when provided', function () {
     $professional = new Professional([
-        'id'                => (string) Str::uuid(),
+        'id' => (string) Str::uuid(),
         'professional_type' => 'influencer',
     ]);
 
@@ -45,7 +45,7 @@ it('filters commissions by status when provided', function () {
 
     DB::shouldReceive('table')->with('commerce.commission_ledger_entries')->andReturn($mockQuery);
 
-    $controller = new StaffCommissionController();
+    $controller = new StaffCommissionController;
     $response = $controller->index(Request::create('/', 'GET', ['status' => 'pending']), $professional);
 
     expect($response->status())->toBe(200);

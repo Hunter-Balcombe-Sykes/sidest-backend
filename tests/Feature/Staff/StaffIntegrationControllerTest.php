@@ -15,7 +15,7 @@ it('returns empty integrations when none exist', function () {
 
     DB::shouldReceive('table')->with('core.professional_integrations')->andReturn($mockQuery);
 
-    $controller = new StaffIntegrationController();
+    $controller = new StaffIntegrationController;
     $response = $controller->index(Request::create('/', 'GET'), $professional);
     $data = json_decode($response->getContent(), true);
 
@@ -27,13 +27,13 @@ it('returns integration shape without sensitive fields', function () {
     $professional = new Professional(['id' => (string) Str::uuid()]);
 
     $row = (object) [
-        'id'                      => (string) Str::uuid(),
-        'provider'                => 'shopify',
-        'external_account_id'     => 'mystore.myshopify.com',
-        'last_catalog_sync_at'    => now()->toIso8601String(),
+        'id' => (string) Str::uuid(),
+        'provider' => 'shopify',
+        'external_account_id' => 'mystore.myshopify.com',
+        'last_catalog_sync_at' => now()->toIso8601String(),
         'last_catalog_sync_error' => null,
-        'expires_at'              => null,
-        'created_at'              => now()->toIso8601String(),
+        'expires_at' => null,
+        'created_at' => now()->toIso8601String(),
     ];
 
     $mockQuery = Mockery::mock();
@@ -42,7 +42,7 @@ it('returns integration shape without sensitive fields', function () {
 
     DB::shouldReceive('table')->with('core.professional_integrations')->andReturn($mockQuery);
 
-    $controller = new StaffIntegrationController();
+    $controller = new StaffIntegrationController;
     $response = $controller->index(Request::create('/', 'GET'), $professional);
     $data = json_decode($response->getContent(), true);
 

@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\Professional;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\HandlesSearchQueries;
 use App\Http\Controllers\Concerns\NormalizesPerPage;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Professional\Customer\StoreCustomerRequest;
 use App\Http\Requests\Api\Professional\Customer\UpdateCustomerRequest;
@@ -12,17 +14,16 @@ use App\Models\Core\Professional\Customer;
 use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
 // V2: CRUD for customer contacts. Supports lead capture from public sites and email subscriber management.
 class ProfessionalCustomerController extends ApiController
 {
     use HandlesSearchQueries;
     use NormalizesPerPage;
-    use ReturnsPaginatedResponse;
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+    use ReturnsPaginatedResponse;
+
     public function index(Request $request)
     {
         $pro = $this->currentProfessional($request);
@@ -31,8 +32,8 @@ class ProfessionalCustomerController extends ApiController
         $searchLike = $this->prepareSearchLike($request, 'search');
 
         $includeArchived = $request->boolean('include_archived');
-        $onlyArchived    = $request->boolean('only_archived');
-        $marketingOptIn  = $request->query('marketing_opt_in');  // null, 'true', 'false'
+        $onlyArchived = $request->boolean('only_archived');
+        $marketingOptIn = $request->query('marketing_opt_in');  // null, 'true', 'false'
 
         $query = Customer::query()
             ->where('professional_id', $pro->id)
@@ -111,7 +112,7 @@ class ProfessionalCustomerController extends ApiController
         abort_unless($customer->professional_id === $pro->id, 404);
 
         $includeArchived = $request->boolean('include_archived');
-        if (!$includeArchived && method_exists($customer, 'trashed') && $customer->trashed()) {
+        if (! $includeArchived && method_exists($customer, 'trashed') && $customer->trashed()) {
             abort(404);
         }
 
@@ -123,7 +124,9 @@ class ProfessionalCustomerController extends ApiController
         $pro = $this->currentProfessional($request);
 
         abort_unless($customer->professional_id === $pro->id, 404);
-        if (method_exists($customer, 'trashed') && $customer->trashed()) { abort(404); }
+        if (method_exists($customer, 'trashed') && $customer->trashed()) {
+            abort(404);
+        }
 
         $customer->fill($request->validated());
         $customer->save();
@@ -137,7 +140,7 @@ class ProfessionalCustomerController extends ApiController
         $pro = $this->currentProfessional($request);
         abort_unless($customer->professional_id === $pro->id, 404);
 
-        if (!$customer->trashed()) {
+        if (! $customer->trashed()) {
             $customer->delete(); // soft delete (archive)
         }
 
@@ -150,7 +153,6 @@ class ProfessionalCustomerController extends ApiController
 
         return $this->success(['archived' => true]);
     }
-
 
     // Restore (un-archive)
     public function restore(Request $request, Customer $customer): JsonResponse

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\Site\DestroyLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\IndexLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\ReorderBlocksRequest;
@@ -13,8 +15,6 @@ use App\Models\Core\Site\Block;
 use App\Services\Site\SocialLinkNormalizer;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
 /**
  * V2: CRUD + reorder for link blocks on the professional's mini-site.
@@ -47,6 +47,7 @@ class ProfessionalLinkBlockController extends ApiController
             'Custom links are not available on your account type.'
         );
     }
+
     public function index(IndexLinkBlockRequest $request)
     {
         $pro = $this->currentProfessional($request);
@@ -85,14 +86,15 @@ class ProfessionalLinkBlockController extends ApiController
 
             $linkBlock = new Block(array_merge($blockFields, [
                 'block_group' => 'links',
-                'block_type'  => 'link',
-                'sort_order'  => $maxSort + 1,
-                'is_active'   => $data['is_active'] ?? true,
+                'block_type' => 'link',
+                'sort_order' => $maxSort + 1,
+                'is_active' => $data['is_active'] ?? true,
             ]));
 
             $linkBlock->professional_id = $pro->id;
             $linkBlock->site_id = $site->id;
             $linkBlock->save();
+
             return $linkBlock->fresh();
         });
 
@@ -159,7 +161,7 @@ class ProfessionalLinkBlockController extends ApiController
      * Custom mode is pass-through.
      *
      * @param  array<string, mixed>  $data  Validated request payload
-     * @return array<string, mixed>  Block fillable fields
+     * @return array<string, mixed> Block fillable fields
      *
      * @throws InvalidArgumentException When social-mode normalization fails (caller maps to 422)
      */
@@ -243,18 +245,18 @@ class ProfessionalLinkBlockController extends ApiController
             $allSet = array_flip($allIds);
 
             foreach ($ids as $id) {
-                if (!isset($allSet[$id])) {
+                if (! isset($allSet[$id])) {
                     abort(403, 'One or more blocks do not belong to you');
                 }
             }
 
             $remaining = array_values(array_diff($allIds, $ids));
-            $newOrder  = array_merge($ids, $remaining);
-            $offset    = (int) Block::query()
-                    ->where('professional_id', $pro->id)
-                    ->where('site_id', $site->id)
-                    ->where('block_group', 'links')
-                    ->max('sort_order') + 1000;
+            $newOrder = array_merge($ids, $remaining);
+            $offset = (int) Block::query()
+                ->where('professional_id', $pro->id)
+                ->where('site_id', $site->id)
+                ->where('block_group', 'links')
+                ->max('sort_order') + 1000;
 
             foreach ($newOrder as $i => $id) {
                 Block::query()

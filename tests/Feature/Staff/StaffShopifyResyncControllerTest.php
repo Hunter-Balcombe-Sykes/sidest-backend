@@ -38,7 +38,7 @@ beforeEach(function () {
 
 function makeStaffResyncProfessional(): Professional
 {
-    $pro     = new Professional();
+    $pro = new Professional;
     $pro->id = (string) Str::uuid();
 
     return $pro;
@@ -48,8 +48,8 @@ function makeStaffShopifyIntegration(Professional $professional, string $integra
 {
     $integration = new ProfessionalIntegration([
         'professional_id' => $professional->id,
-        'provider'        => 'shopify',
-        'access_token'    => 'shpat_test',
+        'provider' => 'shopify',
+        'access_token' => 'shpat_test',
         'provider_metadata' => ['shop_domain' => 'test.myshopify.com'],
     ]);
     $integration->id = $integrationId;
@@ -62,7 +62,7 @@ it('returns 404 when professional has no Shopify integration', function () {
     $professional = makeStaffResyncProfessional();
 
     $resyncService = Mockery::mock(ShopifyDataResyncService::class);
-    $controller    = new StaffShopifyResyncController($resyncService);
+    $controller = new StaffShopifyResyncController($resyncService);
 
     $response = $controller->invoke(Request::create('/', 'POST'), $professional);
 
@@ -71,12 +71,12 @@ it('returns 404 when professional has no Shopify integration', function () {
 
 it('returns 429 when rate limit is exceeded', function () {
     $professional = makeStaffResyncProfessional();
-    $integration  = makeStaffShopifyIntegration($professional);
+    $integration = makeStaffShopifyIntegration($professional);
 
     RateLimiter::hit("shopify-resync:{$integration->id}", 60);
 
     $resyncService = Mockery::mock(ShopifyDataResyncService::class);
-    $controller    = new StaffShopifyResyncController($resyncService);
+    $controller = new StaffShopifyResyncController($resyncService);
 
     $response = $controller->invoke(Request::create('/', 'POST'), $professional);
 
@@ -89,9 +89,9 @@ it('returns resync result on success', function () {
     makeStaffShopifyIntegration($professional);
 
     $resyncResult = [
-        'fields_updated'   => ['display_name'],
+        'fields_updated' => ['display_name'],
         'fields_preserved' => [],
-        'jobs_dispatched'  => ['brand_design'],
+        'jobs_dispatched' => ['brand_design'],
         'last_resynced_at' => now()->toIso8601String(),
     ];
 
@@ -99,8 +99,8 @@ it('returns resync result on success', function () {
     $resyncService->shouldReceive('resync')->once()->andReturn($resyncResult);
 
     $controller = new StaffShopifyResyncController($resyncService);
-    $response   = $controller->invoke(Request::create('/', 'POST'), $professional);
-    $data       = json_decode($response->getContent(), true);
+    $response = $controller->invoke(Request::create('/', 'POST'), $professional);
+    $data = json_decode($response->getContent(), true);
 
     expect($response->status())->toBe(200)
         ->and($data)->toHaveKeys(['fields_updated', 'fields_preserved', 'jobs_dispatched', 'last_resynced_at']);
@@ -114,7 +114,7 @@ it('returns 502 when ShopifyDataResyncService throws', function () {
     $resyncService->shouldReceive('resync')->andThrow(new \RuntimeException('Bad token'));
 
     $controller = new StaffShopifyResyncController($resyncService);
-    $response   = $controller->invoke(Request::create('/', 'POST'), $professional);
+    $response = $controller->invoke(Request::create('/', 'POST'), $professional);
 
     expect($response->status())->toBe(502);
 });

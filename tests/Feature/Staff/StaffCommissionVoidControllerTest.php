@@ -8,8 +8,8 @@ use Illuminate\Support\Str;
 
 it('voids a pending commission entry', function () {
     $entry = new CommissionLedgerEntry([
-        'id'        => (string) Str::uuid(),
-        'status'    => 'pending',
+        'id' => (string) Str::uuid(),
+        'status' => 'pending',
         'payout_id' => null,
     ]);
 
@@ -20,10 +20,10 @@ it('voids a pending commission entry', function () {
         ->andReturn(true);
 
     $controller = new StaffCommissionVoidController($voidService);
-    $request    = Request::create('/', 'POST', ['reason' => 'duplicate order']);
+    $request = Request::create('/', 'POST', ['reason' => 'duplicate order']);
 
     $response = $controller->void($request, $entry);
-    $data     = json_decode($response->getContent(), true);
+    $data = json_decode($response->getContent(), true);
 
     expect($response->status())->toBe(200)
         ->and($data['voided'])->toBeTrue()
@@ -32,14 +32,14 @@ it('voids a pending commission entry', function () {
 
 it('returns 422 when entry is not pending', function () {
     $entry = new CommissionLedgerEntry([
-        'id'     => (string) Str::uuid(),
+        'id' => (string) Str::uuid(),
         'status' => 'approved',
     ]);
 
     $voidService = Mockery::mock(CommissionVoidService::class);
 
     $controller = new StaffCommissionVoidController($voidService);
-    $request    = Request::create('/', 'POST', ['reason' => 'test']);
+    $request = Request::create('/', 'POST', ['reason' => 'test']);
 
     $response = $controller->void($request, $entry);
 
@@ -48,15 +48,15 @@ it('returns 422 when entry is not pending', function () {
 
 it('returns 422 when entry already has a payout', function () {
     $entry = new CommissionLedgerEntry([
-        'id'        => (string) Str::uuid(),
-        'status'    => 'pending',
+        'id' => (string) Str::uuid(),
+        'status' => 'pending',
         'payout_id' => (string) Str::uuid(),
     ]);
 
     $voidService = Mockery::mock(CommissionVoidService::class);
 
     $controller = new StaffCommissionVoidController($voidService);
-    $request    = Request::create('/', 'POST', ['reason' => 'test']);
+    $request = Request::create('/', 'POST', ['reason' => 'test']);
 
     $response = $controller->void($request, $entry);
 
@@ -65,8 +65,8 @@ it('returns 422 when entry already has a payout', function () {
 
 it('returns 409 when optimistic lock loses the race', function () {
     $entry = new CommissionLedgerEntry([
-        'id'        => (string) Str::uuid(),
-        'status'    => 'pending',
+        'id' => (string) Str::uuid(),
+        'status' => 'pending',
         'payout_id' => null,
     ]);
 
@@ -74,7 +74,7 @@ it('returns 409 when optimistic lock loses the race', function () {
     $voidService->shouldReceive('voidEntry')->andReturn(false);
 
     $controller = new StaffCommissionVoidController($voidService);
-    $request    = Request::create('/', 'POST', ['reason' => 'test']);
+    $request = Request::create('/', 'POST', ['reason' => 'test']);
 
     $response = $controller->void($request, $entry);
 
@@ -83,14 +83,14 @@ it('returns 409 when optimistic lock loses the race', function () {
 
 it('requires a reason', function () {
     $entry = new CommissionLedgerEntry([
-        'id'        => (string) Str::uuid(),
-        'status'    => 'pending',
+        'id' => (string) Str::uuid(),
+        'status' => 'pending',
         'payout_id' => null,
     ]);
 
     $voidService = Mockery::mock(CommissionVoidService::class);
-    $controller  = new StaffCommissionVoidController($voidService);
-    $request     = Request::create('/', 'POST', []);
+    $controller = new StaffCommissionVoidController($voidService);
+    $request = Request::create('/', 'POST', []);
 
     expect(fn () => $controller->void($request, $entry))
         ->toThrow(\Illuminate\Validation\ValidationException::class);

@@ -13,11 +13,11 @@ trait ResolvesSiteFromRequest
      */
     protected function resolveSiteFromData(array $data): ?Site
     {
-        if (!empty($data['site_id'])) {
+        if (! empty($data['site_id'])) {
             return Site::query()->find($data['site_id']);
         }
 
-        if (!empty($data['subdomain'])) {
+        if (! empty($data['subdomain'])) {
             $subdomain = strtolower($data['subdomain']);
 
             // Try direct match

@@ -17,7 +17,7 @@ class SiteVisibilityController extends ApiController
         $professional = $request->attributes->get('professional');
 
         // Extra safety: if someone ever bypasses middleware, don't allow disabled accounts.
-        if (!$professional || $professional->status !== 'active') {
+        if (! $professional || $professional->status !== 'active') {
             return $this->error('Account is not active.', 403);
         }
 

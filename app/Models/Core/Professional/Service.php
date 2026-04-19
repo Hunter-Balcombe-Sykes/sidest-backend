@@ -15,6 +15,7 @@ class Service extends BaseModel
     protected $table = 'site.services';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

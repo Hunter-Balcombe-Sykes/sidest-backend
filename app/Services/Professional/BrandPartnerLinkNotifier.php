@@ -76,6 +76,7 @@ class BrandPartnerLinkNotifier
         if ($name !== '') {
             return $name;
         }
+
         return (string) ($p->display_name ?? $p->handle ?? 'Partner');
     }
 }

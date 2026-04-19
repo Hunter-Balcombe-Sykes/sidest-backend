@@ -23,7 +23,7 @@ class StaffInviteController extends ApiController
     public function index(Request $request, Professional $professional): JsonResponse
     {
         $perPage = $this->normalizePerPage($request, 25, 100);
-        $status  = $request->query('status');
+        $status = $request->query('status');
 
         $query = DB::table('brand.brand_affiliate_invites')
             ->where('brand_professional_id', $professional->id)

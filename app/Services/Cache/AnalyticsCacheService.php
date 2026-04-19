@@ -12,7 +12,7 @@ class AnalyticsCacheService
 {
     public function getVisitStats(string $professionalId, Carbon $startDate, Carbon $endDate): array
     {
-        $cacheKey = CacheKeyGenerator:: analyticsVisits(
+        $cacheKey = CacheKeyGenerator::analyticsVisits(
             $professionalId,
             $startDate->format('Ymd'),
             $endDate->format('Ymd')

@@ -1,18 +1,18 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-
-use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
+use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicMarketingPreferenceController;
-use App\Http\Controllers\Api\PublicSite\PublicBookingController;
+use App\Http\Controllers\Api\PublicSite\PublicSiteController;
+use Illuminate\Support\Facades\Route;
+
 $publicDomain = config('sidest.public_domain');
 
 // Public/Anon
 Route::group([
-    'domain' => '{subdomain}.' . $publicDomain,
+    'domain' => '{subdomain}.'.$publicDomain,
     'where' => ['subdomain' => '[A-Za-z0-9-]+'],
     'prefix' => 'public',
 ], function () {

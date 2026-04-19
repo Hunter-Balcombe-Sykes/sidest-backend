@@ -1,13 +1,12 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\BrandGalleryController;
-use App\Models\Core\Site\SiteMedia;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
 use Illuminate\Http\Request;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -130,7 +129,7 @@ function createBrandWithSite(string $handle = 'gallbrand'): array
 
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $brandId,
-        'auth_user_id' => 'auth-' . Str::random(8),
+        'auth_user_id' => 'auth-'.Str::random(8),
         'handle' => $handle,
         'handle_lc' => strtolower($handle),
         'display_name' => ucfirst($handle),
@@ -163,7 +162,7 @@ function createNonBrand(string $handle = 'affiliate1'): Professional
 
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $id,
-        'auth_user_id' => 'auth-' . Str::random(8),
+        'auth_user_id' => 'auth-'.Str::random(8),
         'handle' => $handle,
         'handle_lc' => strtolower($handle),
         'display_name' => ucfirst($handle),
@@ -208,6 +207,7 @@ function makeBrandGalleryRequest(Professional $pro, string $method = 'GET', arra
 {
     $request = Request::create('/api/brand/gallery', $method, $params);
     $request->attributes->set('professional', $pro);
+
     return $request;
 }
 

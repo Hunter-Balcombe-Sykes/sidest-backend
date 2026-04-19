@@ -45,7 +45,7 @@ it('returns 403 when non-brand tries to update store settings', function () {
 });
 
 it('validates accent_color format in UpdateBrandStoreSettingsRequest', function () {
-    $request = new UpdateBrandStoreSettingsRequest();
+    $request = new UpdateBrandStoreSettingsRequest;
     $rules = $request->rules();
 
     expect($rules['accent_color'])->toContain('sometimes');
@@ -56,7 +56,7 @@ it('validates accent_color format in UpdateBrandStoreSettingsRequest', function 
 });
 
 it('validates product_image_ratio is constrained to valid values', function () {
-    $request = new UpdateBrandStoreSettingsRequest();
+    $request = new UpdateBrandStoreSettingsRequest;
     $rules = $request->rules();
 
     expect($rules['product_image_ratio'])->toContain('in:1/1,4/5');

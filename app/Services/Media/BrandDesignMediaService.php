@@ -307,7 +307,7 @@ class BrandDesignMediaService
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Internal helpers                                                  */
+    /*  Internal helpers */
     /* ------------------------------------------------------------------ */
 
     private function purposeForLogoVariant(string $variant): string
@@ -366,6 +366,7 @@ class BrandDesignMediaService
                     'error' => $e->getMessage(),
                 ]);
             }
+
             return;
         }
 

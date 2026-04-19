@@ -7,8 +7,8 @@ use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
-use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
+use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
 use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
@@ -68,7 +68,7 @@ class ShopifyIntegrationController extends ApiController
         return [$requestedBrandProfessionalId, null];
     }
 
-    private function ensureShopifyConnected(?ProfessionalIntegration $integration): JsonResponse|null
+    private function ensureShopifyConnected(?ProfessionalIntegration $integration): ?JsonResponse
     {
         if (! $integration || empty($integration->access_token)) {
             return $this->error('Shopify account not connected.', 404);

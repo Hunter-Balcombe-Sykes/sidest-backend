@@ -17,35 +17,46 @@ class SiteMedia extends BaseModel
     protected $table = 'site.site_media';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
-    public const POOL_GALLERY  = 'gallery';
-    public const POOL_CONTENT  = 'content';
-    public const POOL_PRODUCT  = 'product';
+    public const POOL_GALLERY = 'gallery';
+
+    public const POOL_CONTENT = 'content';
+
+    public const POOL_PRODUCT = 'product';
+
     public const POOL_BRAND_GALLERY = 'brand_gallery';
+
     // Singleton brand design assets (logo, placeholder). No ordering semantics —
     // the per-pool sort_order unique index excludes this pool deliberately.
-    public const POOL_DESIGN   = 'design';
+    public const POOL_DESIGN = 'design';
 
     // Brand-design slot discriminator inside POOL_DESIGN. Replaces the old
     // alt_text='logo'|'placeholder' string match — alt_text is now reserved
     // for accessibility text. Set to NULL for non-design rows.
-    public const PURPOSE_LOGO_FULL   = 'logo_full';
+    public const PURPOSE_LOGO_FULL = 'logo_full';
+
     public const PURPOSE_LOGO_SQUARE = 'logo_square';
+
     public const PURPOSE_PLACEHOLDER = 'placeholder';
 
     public const MEDIA_TYPE_IMAGE = 'image';
+
     public const MEDIA_TYPE_VIDEO = 'video';
 
-    public const PROCESSING_STATE_PENDING    = 'pending';
+    public const PROCESSING_STATE_PENDING = 'pending';
+
     public const PROCESSING_STATE_PROCESSING = 'processing';
-    public const PROCESSING_STATE_READY      = 'ready';
-    public const PROCESSING_STATE_FAILED     = 'failed';
+
+    public const PROCESSING_STATE_READY = 'ready';
+
+    public const PROCESSING_STATE_FAILED = 'failed';
 
     protected $attributes = [
-        'is_active'        => true,
-        'pool'             => self::POOL_GALLERY,
-        'media_type'       => self::MEDIA_TYPE_IMAGE,
+        'is_active' => true,
+        'pool' => self::POOL_GALLERY,
+        'media_type' => self::MEDIA_TYPE_IMAGE,
         'processing_state' => self::PROCESSING_STATE_PENDING,
     ];
 
@@ -68,16 +79,16 @@ class SiteMedia extends BaseModel
     ];
 
     protected $casts = [
-        'sort_order'          => 'integer',
-        'is_active'           => 'boolean',
+        'sort_order' => 'integer',
+        'is_active' => 'boolean',
         'original_size_bytes' => 'integer',
-        'duration_ms'         => 'integer',
-        'created_at'          => 'datetime',
-        'updated_at'          => 'datetime',
+        'duration_ms' => 'integer',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     /* ------------------------------------------------------------------ */
-    /*  Relationships                                                      */
+    /*  Relationships */
     /* ------------------------------------------------------------------ */
 
     public function site(): BelongsTo
@@ -91,7 +102,7 @@ class SiteMedia extends BaseModel
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Helpers                                                            */
+    /*  Helpers */
     /* ------------------------------------------------------------------ */
 
     /**

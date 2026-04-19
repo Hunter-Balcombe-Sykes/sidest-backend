@@ -16,7 +16,7 @@ class PublicEmailUnsubscribeController extends ApiController
             ->where('unsubscribe_token', $token)
             ->first();
 
-        if (!$sub) {
+        if (! $sub) {
             return $this->error('Invalid or expired unsubscribe link.', 404);
         }
 

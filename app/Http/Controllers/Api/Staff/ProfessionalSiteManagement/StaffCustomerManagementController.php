@@ -29,7 +29,7 @@ class StaffCustomerManagementController extends ApiController
             ?? $this->prepareSearchLike($request, 'search');
 
         $includeArchived = $request->boolean('include_archived');
-        $onlyArchived    = $request->boolean('only_archived');
+        $onlyArchived = $request->boolean('only_archived');
 
         $query = Customer::query()
             ->where('professional_id', $professional->id)
@@ -66,7 +66,7 @@ class StaffCustomerManagementController extends ApiController
     {
         $includeArchived = $request->boolean('include_archived');
 
-        if (!$includeArchived && $customer->trashed()) {
+        if (! $includeArchived && $customer->trashed()) {
             abort(404);
         }
 
@@ -78,7 +78,9 @@ class StaffCustomerManagementController extends ApiController
      */
     public function update(StaffUpdateCustomerRequest $request, Professional $professional, Customer $customer): JsonResponse
     {
-        if ($customer->trashed()) { abort(404); }
+        if ($customer->trashed()) {
+            abort(404);
+        }
 
         $customer->fill($request->validated());
         $customer->save();
@@ -91,14 +93,18 @@ class StaffCustomerManagementController extends ApiController
      */
     public function destroy(Professional $professional, Customer $customer): JsonResponse
     {
-        if (!$customer->trashed()) { $customer->delete(); }
+        if (! $customer->trashed()) {
+            $customer->delete();
+        }
 
         return $this->success(['archived' => true]);
     }
 
     public function restore(Professional $professional, Customer $customer): JsonResponse
     {
-        if ($customer->trashed()) { $customer->restore(); }
+        if ($customer->trashed()) {
+            $customer->restore();
+        }
 
         return $this->success(['restored' => true, 'customer' => $customer->fresh()]);
     }
@@ -109,5 +115,4 @@ class StaffCustomerManagementController extends ApiController
 
         return $this->success(['deleted' => true]);
     }
-
 }

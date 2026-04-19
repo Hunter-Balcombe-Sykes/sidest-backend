@@ -15,6 +15,7 @@ class AffiliateProductSelection extends BaseModel
     protected $table = 'commerce.affiliate_product_selections';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -25,9 +26,9 @@ class AffiliateProductSelection extends BaseModel
     ];
 
     protected $casts = [
-        'sort_order'  => 'integer',
-        'created_at'  => 'datetime',
-        'updated_at'  => 'datetime',
+        'sort_order' => 'integer',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function affiliateProfessional(): BelongsTo

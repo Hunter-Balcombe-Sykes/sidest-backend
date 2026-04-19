@@ -7,7 +7,6 @@ use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
-use App\Services\Professional\SectionVisibilityService;
 
 // V2: Applies account-type defaults (influencer, professional, brand, affiliate) to new professionals and their sites. Handles config inheritance and affiliate-specific overlays.
 class AccountTypeDefaultsService
@@ -15,6 +14,7 @@ class AccountTypeDefaultsService
     public function __construct(
         private readonly SectionVisibilityService $visibilityService,
     ) {}
+
     /**
      * Resolve the effective config for a professional type, handling inheritance.
      */
@@ -66,15 +66,15 @@ class AccountTypeDefaultsService
             Block::query()->firstOrCreate(
                 [
                     'professional_id' => $professional->id,
-                    'site_id'         => $site->id,
-                    'block_group'     => 'sections',
-                    'block_type'      => $blockType,
+                    'site_id' => $site->id,
+                    'block_group' => 'sections',
+                    'block_type' => $blockType,
                 ],
                 [
-                    'sort_order'  => $sortOrder,
-                    'is_enabled'  => $isEnabled,
-                    'is_active'   => false,
-                    'settings'    => [],
+                    'sort_order' => $sortOrder,
+                    'is_enabled' => $isEnabled,
+                    'is_active' => false,
+                    'settings' => [],
                 ]
             );
         }
@@ -100,13 +100,13 @@ class AccountTypeDefaultsService
         foreach ($autoSections as $blockType) {
             $block = Block::query()->firstOrNew([
                 'professional_id' => $professional->id,
-                'site_id'         => $site->id,
-                'block_group'     => 'sections',
-                'block_type'      => $blockType,
+                'site_id' => $site->id,
+                'block_group' => 'sections',
+                'block_type' => $blockType,
             ]);
 
             $block->is_enabled = true;
-            $block->is_active  = true;
+            $block->is_active = true;
 
             if (! $block->exists) {
                 $maxSort = Block::query()
@@ -115,7 +115,7 @@ class AccountTypeDefaultsService
                     ->max('sort_order');
 
                 $block->sort_order = is_null($maxSort) ? 0 : ((int) $maxSort + 1);
-                $block->settings   = [];
+                $block->settings = [];
             }
 
             $block->save();
@@ -138,9 +138,9 @@ class AccountTypeDefaultsService
         if (! $exists) {
             $customer = new Customer([
                 'full_name' => $contactData['full_name'] ?? null,
-                'email'     => $email,
-                'phone'     => $contactData['phone'] ?? null,
-                'source'    => $contactData['source'] ?? 'system_default',
+                'email' => $email,
+                'phone' => $contactData['phone'] ?? null,
+                'source' => $contactData['source'] ?? 'system_default',
             ]);
             $customer->professional_id = $professional->id;
             $customer->save();
@@ -150,18 +150,17 @@ class AccountTypeDefaultsService
         if ($contactData['subscribed'] ?? false) {
             $sub = EmailSubscription::query()->firstOrNew([
                 'professional_id' => $professional->id,
-                'list_key'        => 'marketing',
-                'email_lc'        => strtolower($email),
+                'list_key' => 'marketing',
+                'email_lc' => strtolower($email),
             ]);
 
             if (! $sub->exists) {
-                $sub->email             = $email;
-                $sub->full_name         = $contactData['full_name'] ?? null;
+                $sub->email = $email;
+                $sub->full_name = $contactData['full_name'] ?? null;
                 $sub->unsubscribe_token = EmailSubscription::newUnsubscribeToken();
                 $sub->markSubscribed(['source' => 'account_default']);
                 $sub->save();
             }
         }
     }
-
 }

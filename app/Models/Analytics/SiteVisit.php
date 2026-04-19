@@ -17,6 +17,7 @@ class SiteVisit extends BaseModel
     protected $table = 'analytics.site_visits';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     // analytics tables don't have updated_at
@@ -38,7 +39,7 @@ class SiteVisit extends BaseModel
 
     protected $casts = [
         'occurred_at' => 'datetime',
-        'created_at'  => 'datetime',
+        'created_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo

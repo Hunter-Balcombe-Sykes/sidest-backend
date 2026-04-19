@@ -10,7 +10,7 @@ it('returns 404 when brand has no brand profile', function () {
     $professional = new Professional(['id' => (string) Str::uuid()]);
     $professional->setRelation('brandProfile', null);
 
-    $controller = new StaffBrandProfileController();
+    $controller = new StaffBrandProfileController;
     $request = Request::create('/', 'PATCH', ['brand_status' => 'active']);
 
     $response = $controller->update($request, $professional);
@@ -22,24 +22,24 @@ it('updates allowed brand profile fields', function () {
     $professional = new Professional(['id' => (string) Str::uuid()]);
 
     $profile = Mockery::mock(BrandProfile::class)->makePartial();
-    $profile->professional_id      = $professional->id;
-    $profile->brand_status         = 'pending';
+    $profile->professional_id = $professional->id;
+    $profile->brand_status = 'pending';
     $profile->affiliate_visibility = 'invite_only';
-    $profile->setup_complete       = false;
-    $profile->legal_business_name  = null;
-    $profile->abn                  = null;
-    $profile->acn                  = null;
-    $profile->business_website     = null;
+    $profile->setup_complete = false;
+    $profile->legal_business_name = null;
+    $profile->abn = null;
+    $profile->acn = null;
+    $profile->business_website = null;
     $profile->shouldReceive('save')->once();
 
     $professional->setRelation('brandProfile', $profile);
 
-    $controller = new StaffBrandProfileController();
+    $controller = new StaffBrandProfileController;
     $request = Request::create('/', 'PATCH', [
-        'brand_status'         => 'active',
+        'brand_status' => 'active',
         'affiliate_visibility' => 'public',
-        'setup_complete'       => true,
-        'legal_business_name'  => 'Cuts & Co Pty Ltd',
+        'setup_complete' => true,
+        'legal_business_name' => 'Cuts & Co Pty Ltd',
     ]);
 
     $response = $controller->update($request, $professional);
@@ -59,7 +59,7 @@ it('rejects unknown brand_status values', function () {
     $profile = new BrandProfile(['professional_id' => $professional->id, 'brand_status' => 'active']);
     $professional->setRelation('brandProfile', $profile);
 
-    $controller = new StaffBrandProfileController();
+    $controller = new StaffBrandProfileController;
     $request = Request::create('/', 'PATCH', ['brand_status' => 'hacked']);
 
     expect(fn () => $controller->update($request, $professional))
@@ -72,7 +72,7 @@ it('rejects invalid business_website', function () {
     $profile = new BrandProfile(['professional_id' => $professional->id]);
     $professional->setRelation('brandProfile', $profile);
 
-    $controller = new StaffBrandProfileController();
+    $controller = new StaffBrandProfileController;
     $request = Request::create('/', 'PATCH', ['business_website' => 'not-a-url']);
 
     expect(fn () => $controller->update($request, $professional))

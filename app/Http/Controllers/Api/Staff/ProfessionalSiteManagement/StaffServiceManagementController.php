@@ -20,8 +20,8 @@ class StaffServiceManagementController extends ApiController
     public function index(Request $request, Professional $professional): JsonResponse
     {
         $includeArchived = $request->boolean('include_archived');
-        $onlyArchived    = $request->boolean('only_archived');
-        $grouped         = $request->boolean('grouped');
+        $onlyArchived = $request->boolean('only_archived');
+        $grouped = $request->boolean('grouped');
 
         $servicesQ = Service::query()
             ->where('professional_id', $professional->id);
@@ -37,7 +37,7 @@ class StaffServiceManagementController extends ApiController
             ->orderBy('created_at')
             ->get();
 
-        if (!$grouped) {
+        if (! $grouped) {
             return $this->success([
                 'services' => $services,
                 'filters' => [
@@ -92,25 +92,25 @@ class StaffServiceManagementController extends ApiController
         $service = DB::transaction(function () use ($professional, $data) {
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["services:{$professional->id}"]);
 
-            if (!array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
+            if (! array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
                 $max = Service::query()
                     ->where('professional_id', $professional->id)
                     ->where('category_id', $data['category_id'] ?? null)
                     ->max('sort_order');
 
-                $data['sort_order'] = is_null($max) ? 0 : ((int)$max + 1);
+                $data['sort_order'] = is_null($max) ? 0 : ((int) $max + 1);
             }
 
             $service = Service::query()->create([
-                'professional_id'   => $professional->id,
-                'category_id'       => $data['category_id'] ?? null,
-                'title'             => $data['title'],
-                'description'       => $data['description'] ?? null,
-                'price_cents'       => $data['price_cents'],
-                'currency_code'     => $data['currency_code'] ?? 'AUD',
-                'duration_minutes'  => $data['duration_minutes'] ?? null,
-                'is_active'         => $data['is_active'] ?? true,
-                'sort_order'        => $data['sort_order'],
+                'professional_id' => $professional->id,
+                'category_id' => $data['category_id'] ?? null,
+                'title' => $data['title'],
+                'description' => $data['description'] ?? null,
+                'price_cents' => $data['price_cents'],
+                'currency_code' => $data['currency_code'] ?? 'AUD',
+                'duration_minutes' => $data['duration_minutes'] ?? null,
+                'is_active' => $data['is_active'] ?? true,
+                'sort_order' => $data['sort_order'],
             ]);
 
             return $service->fresh();
@@ -124,7 +124,7 @@ class StaffServiceManagementController extends ApiController
         abort_unless($service->professional_id === $professional->id, 404);
 
         $includeArchived = $request->boolean('include_archived');
-        if (!$includeArchived && $service->trashed()) {
+        if (! $includeArchived && $service->trashed()) {
             abort(404);
         }
 
@@ -144,13 +144,13 @@ class StaffServiceManagementController extends ApiController
             $this->assertCategoryBelongsToProfessional($professional->id, $data['category_id']);
 
             // If moving categories and no explicit sort_order, place at end of new bucket
-            if (($data['category_id'] ?? null) !== $service->category_id && !array_key_exists('sort_order', $data)) {
+            if (($data['category_id'] ?? null) !== $service->category_id && ! array_key_exists('sort_order', $data)) {
                 $max = Service::query()
                     ->where('professional_id', $professional->id)
                     ->where('category_id', $data['category_id'] ?? null)
                     ->max('sort_order');
 
-                $data['sort_order'] = is_null($max) ? 0 : ((int)$max + 1);
+                $data['sort_order'] = is_null($max) ? 0 : ((int) $max + 1);
             }
         }
 
@@ -189,13 +189,13 @@ class StaffServiceManagementController extends ApiController
             $allSet = array_flip($allIds);
 
             foreach ($ids as $id) {
-                if (!isset($allSet[$id])) {
+                if (! isset($allSet[$id])) {
                     abort(422, 'One or more service IDs are invalid.');
                 }
             }
 
             $remaining = array_values(array_diff($allIds, $ids));
-            $newOrder  = array_merge($ids, $remaining);
+            $newOrder = array_merge($ids, $remaining);
 
             foreach ($newOrder as $i => $id) {
                 Service::query()
@@ -235,14 +235,14 @@ class StaffServiceManagementController extends ApiController
                 $catId = $catBlock['id'] ?? null;
 
                 if ($catId !== null) {
-                    if (!isset($activeCategorySet[$catId])) {
+                    if (! isset($activeCategorySet[$catId])) {
                         abort(422, 'One or more category IDs are invalid.');
                     }
                     $providedCategoryIds[] = $catId;
                 }
 
                 foreach ($catBlock['service_ids'] as $sid) {
-                    if (!isset($activeServiceSet[$sid])) {
+                    if (! isset($activeServiceSet[$sid])) {
                         abort(422, 'One or more service IDs are invalid.');
                     }
                     $providedServiceIds[] = $sid;
@@ -326,7 +326,7 @@ class StaffServiceManagementController extends ApiController
             ->whereNull('deleted_at')
             ->exists();
 
-        if (!$ok) {
+        if (! $ok) {
             abort(422, 'Category is invalid.');
         }
     }

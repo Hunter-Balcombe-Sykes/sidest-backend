@@ -31,9 +31,9 @@ class DeleteMediaArtifactsJob implements ShouldQueue
     public int $backoff = 30;
 
     /**
-     * @param  string  $mediaId   UUID of the (now soft-deleted) SiteMedia row.
+     * @param  string  $mediaId  UUID of the (now soft-deleted) SiteMedia row.
      * @param  string  $basePath  Storage prefix for all video artifacts (videos/{proId}/{mediaId}).
-     * @param  string  $pool      Pool name (for logging context only).
+     * @param  string  $pool  Pool name (for logging context only).
      */
     public function __construct(
         public readonly string $mediaId,
@@ -47,7 +47,7 @@ class DeleteMediaArtifactsJob implements ShouldQueue
     public function handle(VideoVariantService $service): void
     {
         Log::info('DeleteMediaArtifactsJob: starting cleanup', [
-            'media_id'  => $this->mediaId,
+            'media_id' => $this->mediaId,
             'base_path' => $this->basePath,
         ]);
 
@@ -59,10 +59,10 @@ class DeleteMediaArtifactsJob implements ShouldQueue
             ]);
         } catch (\Throwable $e) {
             Log::error('DeleteMediaArtifactsJob: cleanup failed.', [
-                'media_id'  => $this->mediaId,
-                'error'     => $e->getMessage(),
+                'media_id' => $this->mediaId,
+                'error' => $e->getMessage(),
                 'exception' => get_class($e),
-                'attempt'   => $this->attempts(),
+                'attempt' => $this->attempts(),
                 'max_tries' => $this->tries,
             ]);
 
@@ -73,10 +73,10 @@ class DeleteMediaArtifactsJob implements ShouldQueue
     public function failed(Throwable $e): void
     {
         Log::error('DeleteMediaArtifactsJob: cleanup exhausted retries.', [
-            'media_id'  => $this->mediaId,
+            'media_id' => $this->mediaId,
             'base_path' => $this->basePath,
-            'pool'      => $this->pool,
-            'error'     => $e->getMessage(),
+            'pool' => $this->pool,
+            'error' => $e->getMessage(),
             'exception' => get_class($e),
         ]);
     }

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 class BookingAnalyticsAggregateService
 {
     use ResolvesTimezone;
+
     public function rebuildProfessionalHour(string $professionalId, Carbon|string $hourStart): void
     {
         $professionalId = trim($professionalId);
@@ -38,7 +39,7 @@ class BookingAnalyticsAggregateService
                     'e.currency_code',
                     DB::raw('COUNT(*) as bookings_count'),
                     DB::raw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents'),
-                    DB::raw("COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count"),
+                    DB::raw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count'),
                     DB::raw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count"),
                 ])
                 ->groupBy('e.currency_code')
@@ -92,7 +93,7 @@ class BookingAnalyticsAggregateService
                     'e.currency_code',
                     DB::raw('COUNT(*) as bookings_count'),
                     DB::raw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents'),
-                    DB::raw("COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count"),
+                    DB::raw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count'),
                     DB::raw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count"),
                 ])
                 ->groupBy('e.currency_code')
@@ -117,5 +118,4 @@ class BookingAnalyticsAggregateService
             DB::table('analytics.booking_metrics_daily')->insert($inserts);
         });
     }
-
 }

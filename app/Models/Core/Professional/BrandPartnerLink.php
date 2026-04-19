@@ -14,6 +14,7 @@ class BrandPartnerLink extends BaseModel
     protected $table = 'brand.brand_partner_links';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

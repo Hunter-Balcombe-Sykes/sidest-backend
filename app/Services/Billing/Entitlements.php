@@ -43,7 +43,7 @@ class Entitlements
         $sub = $this->currentSubscription($professional);
 
         if (! $sub || ! $sub->isInGracePeriod()) {
-            return ($minPlanKey === 'free');
+            return $minPlanKey === 'free';
         }
 
         $planKey = $sub->plan?->plan_key ?? 'free';

@@ -55,7 +55,7 @@ function createBrandWithSiteForDesignUpload(string $handle = 'designbrand'): arr
 
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $brandId,
-        'auth_user_id' => 'auth-' . Str::random(8),
+        'auth_user_id' => 'auth-'.Str::random(8),
         'handle' => $handle,
         'handle_lc' => strtolower($handle),
         'display_name' => ucfirst($handle),

@@ -8,7 +8,6 @@ use App\Models\Core\Professional\Service;
 use App\Models\Core\Professional\ServiceCategory;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 // V2: Bidirectional service sync between Fresha and Side St. Booking integration — not V2 commerce.
 class FreshaServiceSyncService

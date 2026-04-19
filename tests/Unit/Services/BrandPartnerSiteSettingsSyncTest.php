@@ -5,7 +5,6 @@ use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Professional\BrandPartnerSiteSettingsSync;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 it('sets primary brand and additional brands in site settings from links', function () {

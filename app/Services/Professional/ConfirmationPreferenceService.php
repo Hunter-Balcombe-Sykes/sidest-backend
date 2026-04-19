@@ -9,7 +9,9 @@ use Illuminate\Support\Facades\DB;
 class ConfirmationPreferenceService
 {
     public const ACTION_DELETE_CUSTOMER = 'delete_customer';
+
     public const ACTION_DELETE_MEDIA = 'delete_media';
+
     public const ACTION_UNSELECT_PRODUCT = 'unselect_product';
 
     public const SUPPORTED_ACTIONS = [
@@ -45,7 +47,7 @@ class ConfirmationPreferenceService
     }
 
     /**
-     * @param array<string, bool> $updates
+     * @param  array<string, bool>  $updates
      * @return array{delete_customer: bool, delete_media: bool, unselect_product: bool}
      */
     public function updateForProfessional(string $professionalId, array $updates): array
@@ -91,7 +93,7 @@ class ConfirmationPreferenceService
     }
 
     /**
-     * @param array<string, mixed> $updates
+     * @param  array<string, mixed>  $updates
      * @return array<string, bool>
      */
     private function normalizeUpdates(array $updates): array

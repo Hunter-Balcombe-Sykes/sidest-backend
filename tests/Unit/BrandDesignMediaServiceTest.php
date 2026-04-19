@@ -34,7 +34,7 @@ function makeBrandSite(): Site
     DB::connection('pgsql')->table('site.sites')->insert([
         'id' => $siteId,
         'professional_id' => $proId,
-        'subdomain' => 'test-' . substr($siteId, 0, 8),
+        'subdomain' => 'test-'.substr($siteId, 0, 8),
         'settings' => json_encode([]),
         'created_at' => $now,
         'updated_at' => $now,

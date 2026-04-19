@@ -213,5 +213,4 @@ class BrandPartnerController extends ApiController
                 : null,
         ];
     }
-
 }

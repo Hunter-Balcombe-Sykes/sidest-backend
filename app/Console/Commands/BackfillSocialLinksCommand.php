@@ -96,12 +96,14 @@ class BackfillSocialLinksCommand extends Command
                     // fixing edge cases without touching what's already done.
                     if (isset($settings['platform'])) {
                         $stats['already_tagged']++;
+
                         continue;
                     }
 
                     $platformKey = $iconToPlatform[$block->icon_key] ?? null;
                     if ($platformKey === null) {
                         $stats['errors']++;
+
                         continue;
                     }
 
@@ -117,6 +119,7 @@ class BackfillSocialLinksCommand extends Command
                             'block_id' => (string) $block->id,
                             'platform' => $platformKey,
                         ]);
+
                         continue;
                     }
 

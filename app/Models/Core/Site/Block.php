@@ -20,6 +20,7 @@ class Block extends BaseModel
     protected $table = 'site.blocks';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -37,12 +38,12 @@ class Block extends BaseModel
     ];
 
     protected $casts = [
-        'sort_order'  => 'integer',
-        'is_active'   => 'boolean',
-        'is_enabled'  => 'boolean',
-        'settings'    => 'array',
-        'created_at'  => 'datetime',
-        'updated_at'  => 'datetime',
+        'sort_order' => 'integer',
+        'is_active' => 'boolean',
+        'is_enabled' => 'boolean',
+        'settings' => 'array',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo

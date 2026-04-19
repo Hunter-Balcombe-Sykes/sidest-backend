@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 class BlockObserver
 {
     public bool $afterCommit = true;
+
     public function __construct(
         private SiteCacheService $siteCache
     ) {}

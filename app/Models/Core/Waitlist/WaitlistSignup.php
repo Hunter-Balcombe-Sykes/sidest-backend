@@ -13,6 +13,7 @@ class WaitlistSignup extends BaseModel
     protected $table = 'core.waitlist_signups';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $hidden = [

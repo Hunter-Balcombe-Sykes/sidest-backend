@@ -7,8 +7,6 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
 
 // V2: Manages UI confirmation dialog skip preferences for destructive actions (delete customer, delete media, etc.).
 class ConfirmationPreferenceController extends ApiController

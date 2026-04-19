@@ -23,7 +23,7 @@ class ProfessionalServiceCategoryController extends ApiController
         $pro = $this->currentProfessional($request);
 
         $includeArchived = $request->boolean('include_archived');
-        $onlyArchived    = $request->boolean('only_archived');
+        $onlyArchived = $request->boolean('only_archived');
 
         $q = ServiceCategory::query()
             ->where('professional_id', $pro->id);
@@ -53,12 +53,12 @@ class ProfessionalServiceCategoryController extends ApiController
         $category = DB::transaction(function () use ($pro, $data) {
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["service-categories:{$pro->id}"]);
 
-            if (!array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
+            if (! array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
                 $max = ServiceCategory::query()
                     ->where('professional_id', $pro->id)
                     ->max('sort_order');
 
-                $data['sort_order'] = is_null($max) ? 0 : ((int)$max + 1);
+                $data['sort_order'] = is_null($max) ? 0 : ((int) $max + 1);
             }
 
             $category = ServiceCategory::query()->create([
@@ -81,7 +81,7 @@ class ProfessionalServiceCategoryController extends ApiController
 
         // Optional include_archived behavior
         $includeArchived = $request->boolean('include_archived');
-        if (!$includeArchived && $category->trashed()) {
+        if (! $includeArchived && $category->trashed()) {
             abort(404);
         }
 
@@ -124,13 +124,13 @@ class ProfessionalServiceCategoryController extends ApiController
                 ->pluck('id')
                 ->all();
 
-            if (!empty($toMove)) {
+            if (! empty($toMove)) {
                 $maxNull = Service::query()
                     ->where('professional_id', $pro->id)
                     ->whereNull('category_id')
                     ->max('sort_order');
 
-                $i = is_null($maxNull) ? 0 : ((int)$maxNull + 1);
+                $i = is_null($maxNull) ? 0 : ((int) $maxNull + 1);
 
                 foreach ($toMove as $serviceId) {
                     Service::query()
@@ -167,13 +167,13 @@ class ProfessionalServiceCategoryController extends ApiController
             $allSet = array_flip($allIds);
 
             foreach ($ids as $id) {
-                if (!isset($allSet[$id])) {
+                if (! isset($allSet[$id])) {
                     abort(422, 'One or more category IDs are invalid.');
                 }
             }
 
             $remaining = array_values(array_diff($allIds, $ids));
-            $newOrder  = array_merge($ids, $remaining);
+            $newOrder = array_merge($ids, $remaining);
 
             foreach ($newOrder as $i => $id) {
                 ServiceCategory::query()
@@ -192,7 +192,7 @@ class ProfessionalServiceCategoryController extends ApiController
 
         abort_unless($category->professional_id === $pro->id, 404);
 
-        if (!$category->trashed()) {
+        if (! $category->trashed()) {
             return $this->success(['restored' => true, 'category' => $category->fresh()]);
         }
 
@@ -203,7 +203,7 @@ class ProfessionalServiceCategoryController extends ApiController
                 ->where('professional_id', $pro->id)
                 ->max('sort_order');
 
-            $category->sort_order = is_null($max) ? 0 : ((int)$max + 1);
+            $category->sort_order = is_null($max) ? 0 : ((int) $max + 1);
             $category->save();
         });
 

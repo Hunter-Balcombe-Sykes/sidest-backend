@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates Side St sales channel publication on the brand's Shopify store. Products must be published to this channel to appear on affiliate storefronts.
-class CreateShopifySalesChannelJob implements ShouldQueue, ShouldBeUnique
+class CreateShopifySalesChannelJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 

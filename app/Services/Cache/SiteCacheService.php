@@ -78,7 +78,7 @@ class SiteCacheService
 
         // Cache miss — acquire a per-subdomain fill lock so only one process rebuilds
         // the payload from the DB view while concurrent requests wait (single-flight).
-        $fillLock = Cache::lock('site:fill:' . $subdomain, 10);
+        $fillLock = Cache::lock('site:fill:'.$subdomain, 10);
 
         try {
             // Block up to 5 s for the lock; raises LockTimeoutException if it can't.
@@ -90,6 +90,7 @@ class SiteCacheService
             if ($warm === self::MISS_SENTINEL) {
                 return null;
             }
+
             return is_array($warm) ? $warm : null;
         }
 
@@ -167,18 +168,18 @@ class SiteCacheService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function applyBrandImageFallbacks(array $payload): array
     {
         $professional = $payload['professional'] ?? null;
-        if (!is_array($professional) || ($professional['professional_type'] ?? null) === 'brand') {
+        if (! is_array($professional) || ($professional['professional_type'] ?? null) === 'brand') {
             return $payload;
         }
 
         $brandPartner = $payload['site']['settings']['brand_partner'] ?? null;
-        if (!is_array($brandPartner) || empty($brandPartner['professional_id'])) {
+        if (! is_array($brandPartner) || empty($brandPartner['professional_id'])) {
             return $payload;
         }
 
@@ -187,7 +188,7 @@ class SiteCacheService
             ->where('professional_id', $brandId)
             ->first();
 
-        if (!$brandSite) {
+        if (! $brandSite) {
             return $payload;
         }
 
@@ -212,7 +213,7 @@ class SiteCacheService
         $imageKeys = ['gallery', 'content_images'];
 
         foreach ($imageKeys as $key) {
-            if (!isset($payload['site'][$key]) || !is_array($payload['site'][$key])) {
+            if (! isset($payload['site'][$key]) || ! is_array($payload['site'][$key])) {
                 continue;
             }
 

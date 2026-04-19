@@ -1,8 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\AffiliateInviteController;
-use App\Http\Controllers\Api\Professional\ProfessionalAccountDeletionController;
-use App\Http\Middleware\Context\EnforcePendingDeletionReadOnly;
 use App\Http\Controllers\Api\Professional\Analytics\AffiliateCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Analytics\BrandCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
@@ -20,6 +18,7 @@ use App\Http\Controllers\Api\Professional\Notifications\NotificationEmailPrefere
 use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscriptionController;
 use App\Http\Controllers\Api\Professional\OpenInviteController;
 use App\Http\Controllers\Api\Professional\PlanController;
+use App\Http\Controllers\Api\Professional\ProfessionalAccountDeletionController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
 use App\Http\Controllers\Api\Professional\ProfessionalController;
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
@@ -44,6 +43,7 @@ use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
 use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
+use App\Http\Middleware\Context\EnforcePendingDeletionReadOnly;
 use Illuminate\Support\Facades\Route;
 
 // Public Plans

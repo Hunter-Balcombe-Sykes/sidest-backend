@@ -1,35 +1,35 @@
 <?php
 
-use App\Http\Controllers\Api\PublicSite\BootstrapController;
-use App\Http\Controllers\Api\PublicSite\PublicConfigController;
-use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
-use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
-use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
-use App\Http\Controllers\Api\PublicSite\PublicBookingController;
-use App\Http\Controllers\Api\PublicSite\PublicBrandAffiliateInviteController;
-use App\Http\Controllers\Api\PublicSite\PublicOpenInviteController;
-use App\Http\Controllers\Api\PublicSite\PublicSignupAvailabilityController;
-use App\Http\Controllers\Api\PublicSite\PublicWaitlistController;
-use App\Http\Controllers\Api\PublicSite\AnalyticsController;
-use App\Http\Controllers\Api\PublicSite\PublicSiteController;
-use App\Http\Controllers\Api\PublicSite\PublicShopifyStorefrontController;
-use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
-use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
+use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateController;
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateProductsController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandConfigController;
-use App\Http\Controllers\Api\Internal\HydrogenDeploymentController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandDesignController;
+use App\Http\Controllers\Api\Internal\HydrogenDeploymentController;
+use App\Http\Controllers\Api\PublicSite\AnalyticsController;
+use App\Http\Controllers\Api\PublicSite\BootstrapController;
+use App\Http\Controllers\Api\PublicSite\PublicBookingController;
+use App\Http\Controllers\Api\PublicSite\PublicBrandAffiliateInviteController;
+use App\Http\Controllers\Api\PublicSite\PublicConfigController;
+use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
+use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
+use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
+use App\Http\Controllers\Api\PublicSite\PublicOpenInviteController;
+use App\Http\Controllers\Api\PublicSite\PublicShopifyStorefrontController;
+use App\Http\Controllers\Api\PublicSite\PublicSignupAvailabilityController;
+use App\Http\Controllers\Api\PublicSite\PublicSiteController;
+use App\Http\Controllers\Api\PublicSite\PublicWaitlistController;
+use App\Http\Controllers\Api\Shopify\ShopifyAppOAuthController;
+use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyAppUninstalledWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyGdprWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyOrdersUpdatedWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyShopUpdateWebhookController;
+use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\HealthController;
-use App\Http\Controllers\Api\Shopify\ShopifyAppOAuthController;
 
 // Ping
 Route::get('/ping', fn () => response()->json(['pong' => true]));
@@ -71,9 +71,9 @@ Route::middleware('throttle:webhooks')->group(function () {
 Route::middleware(['supabase.jwt', 'throttle:bootstrap'])->post('/bootstrap', [BootstrapController::class, 'bootstrap']);
 
 // Split route files (keeps api.php tidy)
-require __DIR__ . '/api/professional.php';
-require __DIR__ . '/api/staff.php';
-require __DIR__ . '/api/publicSite.php';
+require __DIR__.'/api/professional.php';
+require __DIR__.'/api/staff.php';
+require __DIR__.'/api/publicSite.php';
 
 Route::get('/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::class, 'unsubscribe'])
     ->where('token', '[A-Za-z0-9]+')

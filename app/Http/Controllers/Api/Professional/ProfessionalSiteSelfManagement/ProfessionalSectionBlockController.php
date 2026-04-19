@@ -3,15 +3,15 @@
 namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\Site\UpsertSectionBlockRequest;
 use App\Models\Core\Site\Block;
 use App\Services\Professional\AccountTypeDefaultsService;
 use App\Services\Professional\SectionVisibilityService;
-use Illuminate\Http\Request;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 
 // V2: Manages site section visibility (gallery, services, shop, booking, bio). Account-type restrictions apply.
 class ProfessionalSectionBlockController extends ApiController
@@ -110,18 +110,18 @@ class ProfessionalSectionBlockController extends ApiController
 
             $block = Block::query()->firstOrNew([
                 'professional_id' => $pro->id,
-                'site_id'         => $site->id,
-                'block_group'     => 'sections',
-                'block_type'      => $blockType,
+                'site_id' => $site->id,
+                'block_group' => 'sections',
+                'block_type' => $blockType,
             ]);
 
-            if (!$block->exists) {
+            if (! $block->exists) {
                 $existingCount = Block::query()
                     ->where('site_id', $site->id)
                     ->where('block_group', 'sections')
                     ->count();
-                $block->sort_order  = (int) $existingCount;
-                $block->settings    = $data['settings'] ?? [];
+                $block->sort_order = (int) $existingCount;
+                $block->settings = $data['settings'] ?? [];
             }
 
             // Account-allowed sections are always available in account pages.
@@ -133,11 +133,12 @@ class ProfessionalSectionBlockController extends ApiController
                 $existing = is_array($block->settings) ? $block->settings : [];
                 $incoming = is_array($data['settings']) ? $data['settings'] : [];
                 $block->settings = array_replace_recursive($existing, $incoming);
-            } elseif (!$block->exists) {
+            } elseif (! $block->exists) {
                 $block->settings = [];
             }
 
             $block->save();
+
             return $block->fresh();
         });
 
@@ -151,7 +152,6 @@ class ProfessionalSectionBlockController extends ApiController
             $pro->bio = data_get($block->settings, 'text'); // merged + saved value
             $pro->save();
         }
-
 
         return $this->success([
             'section' => $this->serializeSection($block->fresh()),
@@ -254,6 +254,7 @@ class ProfessionalSectionBlockController extends ApiController
             $payload['can_publish'] = $canPublish;
             $payload['requirement_reason'] = $reason;
         }
+
 
         return $payload;
     }
