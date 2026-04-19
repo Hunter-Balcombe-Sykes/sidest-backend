@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\Staff\StaffSite\StaffSiteController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliateController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCustomerManagementController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffIntegrationController;
 use Illuminate\Support\Facades\Route;
 
 // Authorised Staff Viewing
@@ -96,6 +97,9 @@ Route::prefix('staff')
 
     // List all payouts platform-wide
     Route::get('/commission-payouts', [StaffCommissionPayoutController::class, 'index']);
+
+    // View integration status for a professional
+    Route::get('/professionals/{professional}/integrations', [StaffIntegrationController::class, 'index']);
 });
 
 // Authorised Staff Admin Editing
