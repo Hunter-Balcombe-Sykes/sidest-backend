@@ -2283,7 +2283,60 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - PATCH /api/staff/professionals/{professional}/subscription
 - POST /api/staff/professionals/{professional}/subscription/cancel
 - POST /api/staff/professionals/{professional}/subscription/resume
-- POST /api/staff/notifications Staff analytics summary endpoints Stage 1-2 staff analytics is:
+- POST /api/staff/notifications
+
+#### Staff — Brand-Affiliate Link Management (admin only, `throttle:30,1`)
+
+##### `POST /api/staff/professionals/{brand}/affiliates/{affiliate}`
+
+Staff manually creates a brand-affiliate link, bypassing the invite flow. Used for manual recovery when an affiliate cannot complete the normal invite claim.
+
+**Auth:** `staff.admin` middleware. Rate limit: 30/min per user.
+
+**Request body:** `{ "reason": "string, required, 10–500 chars" }`
+
+**Response 201:** `{ "data": { "link": { "id": "uuid", "slot": 0, "brand_professional_id": "uuid", "affiliate_professional_id": "uuid", "created_at": "iso8601" } } }`
+
+**Errors:** 422 (guard failure or validation), 409 (link already exists).
+
+**Bypassed guards:** `brand.status='active'`, `brand_profile.brand_status`. Enforced guards: type checks, not-deactivated, slot availability.
+
+##### `DELETE /api/staff/professionals/{brand}/affiliates/{affiliate}`
+
+Staff removes a brand-affiliate link. Handles pending commissions per `on_pending_commissions`.
+
+**Auth:** `staff.admin`. Rate limit: 30/min per user.
+
+**Request body:**
+```json
+{
+  "reason": "string, required; min 10 if keep, min 20 if void; max 500",
+  "on_pending_commissions": "keep | void"
+}
+```
+
+**Response 200 (sync):** `{ "data": { "disconnected": true, "voided_commission_count": n, "voided_commission_cents": n, "selections_removed": n } }`
+
+**Response 202 (async overflow):** when `on_pending_commissions=void` and pending > 200, returns `voided_async: true` plus `pending_commission_{count,cents}`. A queued job (`VoidPendingCommissionsForLinkJob`) processes the voiding and sends completion notifications.
+
+**Errors:** 404 (link not found), 422 (validation).
+
+#### Changes to existing professional disconnect endpoints
+
+`DELETE /api/brand-affiliates/{affiliate}` (brand actor) and `DELETE /api/brand-partners/{brandProfessionalId}` (affiliate actor) now:
+
+- Accept optional `reason` in the request body (`nullable, string, max:500`).
+- Write an audit row to `brand.brand_partner_link_events`.
+- Send a `BrandPartnerRemoved` notification to the other party.
+- Include `selections_removed: n` in the success response.
+- Pending commissions are **never voided** on these paths — they follow the normal payout/void lifecycle.
+- Rate-limited to `throttle:30,1`.
+
+#### Breaking change: `POST /api/affiliate/selections`
+
+Now requires `brand_professional_id` (uuid) in the request body. The affiliate must have an active `brand_partner_links` row for that brand; otherwise 422.
+
+Staff analytics summary endpoints Stage 1-2 staff analytics is:
 - GET /api/staff/professionals/{professional}/analytics It returns totals, daily charts, and top links for the selected professional.
 
 It requires a staff JWT (core.sidest_staff).
