@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliateStat
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandProfileController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionVoidController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffShopifyResyncController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStoreSettingsController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffInviteController;
 use Illuminate\Support\Facades\Route;
 
@@ -211,4 +212,7 @@ Route::prefix('staff')
 
     // Trigger Shopify resync for a brand (admin only)
     Route::post('/professionals/{professional}/integrations/shopify/resync', [StaffShopifyResyncController::class, 'invoke']);
+
+    // Override brand commission rate and payout hold days (admin only)
+    Route::patch('/professionals/{professional}/store-settings', [StaffStoreSettingsController::class, 'update']);
 });
