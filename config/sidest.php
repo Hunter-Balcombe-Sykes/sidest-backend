@@ -247,8 +247,10 @@ return [
     | content = broad-use images (icon, headshot, banner, etc. – frontend assigns purpose)
     */
     'image_pools' => [
-        'gallery' => ['max' => (int) env('SIDEST_GALLERY_IMAGE_MAX', 5)],
-        'content' => ['max' => (int) env('SIDEST_CONTENT_IMAGE_MAX', 5)],
+        // Affiliate sitepage gallery + content panels both expose 6 slots
+        // in the dashboard — keep the env override available, default to 6.
+        'gallery' => ['max' => (int) env('SIDEST_GALLERY_IMAGE_MAX', 6)],
+        'content' => ['max' => (int) env('SIDEST_CONTENT_IMAGE_MAX', 6)],
         'product' => ['max' => (int) env('SIDEST_PRODUCT_IMAGE_MAX', 5)],
         'brand_gallery' => ['max' => (int) env('SIDEST_BRAND_GALLERY_IMAGE_MAX', 5)],
         'product_custom' => ['max' => (int) env('SIDEST_PRODUCT_CUSTOM_PHOTO_MAX', 1)],

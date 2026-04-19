@@ -56,7 +56,7 @@ class CommerceNotificationService
                 ->where('id', $professionalId)
                 ->value(DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), 'Partner')")));
 
-            $ctaUrl = '/account/booking?section=analytics&event='.$eventKey;
+            $ctaUrl = '/account/sitepage?section=bookings&event='.$eventKey;
             $body = $amountPaidCents > 0
                 ? "{$customerLabel} booked {$serviceLabel} ({$amountLabel})."
                 : "{$customerLabel} booked {$serviceLabel}.";
@@ -130,7 +130,7 @@ class CommerceNotificationService
                 title: 'Booking milestone reached',
                 body: "You have reached {$bookingMilestone} total bookings.",
                 dedupeKey: 'booking:count:'.$bookingMilestone,
-                ctaUrl: '/account/booking?section=analytics',
+                ctaUrl: '/account/sitepage?section=bookings',
                 retentionConfigKey: 'analytics_milestones',
             );
         }
@@ -144,7 +144,7 @@ class CommerceNotificationService
                 title: 'Booking revenue milestone reached',
                 body: 'Bookings revenue reached '.$this->formatMoneyFromCents($revenueMilestone, 'AUD').'.',
                 dedupeKey: 'booking:revenue:'.$revenueMilestone,
-                ctaUrl: '/account/booking?section=analytics',
+                ctaUrl: '/account/sitepage?section=bookings',
                 retentionConfigKey: 'analytics_milestones',
             );
         }
