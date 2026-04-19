@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api\Professional;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Professional\BrandPartnerLink;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\BrandPartnerLinkService;
-use App\Services\Store\SelectionCleanupService;
+use App\Services\Professional\DTO\DisconnectRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -87,8 +89,7 @@ class BrandAffiliateController extends ApiController
     public function disconnect(
         Request $request,
         string $affiliateId,
-        BrandPartnerLinkService $brandPartnerLinks,
-        SelectionCleanupService $selectionCleanup
+        BrandPartnerLinkLifecycleService $lifecycle,
     ): JsonResponse {
         $professional = $this->currentProfessional($request);
 
@@ -96,22 +97,29 @@ class BrandAffiliateController extends ApiController
             return $this->error('Only brand accounts can disconnect affiliates.', 403);
         }
 
-        $brandId = (string) $professional->id;
-        $disconnected = $brandPartnerLinks->disconnectBrandFromAffiliate((string) $affiliateId, $brandId);
-        if (! $disconnected) {
+        $data = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $affiliate = Professional::query()->whereKey($affiliateId)->first();
+        if (! $affiliate) {
+            return $this->error('Affiliate not found.', 404);
+        }
+
+        $result = $lifecycle->disconnect(DisconnectRequest::forBrand(
+            brand: $professional,
+            affiliate: $affiliate,
+            reason: $data['reason'] ?? null,
+        ));
+
+        if (! $result->disconnected) {
             return $this->error('Affiliate not found for this brand.', 404);
         }
 
-        $selectionCleanup->removeSelectionsForAffiliateBrand(
-            (string) $affiliateId,
-            $brandId,
-            'Brand connection removed',
-            '{count} selected product(s) were removed because this brand connection ended.'
-        );
-
         return $this->success([
-            'affiliate_id' => $affiliateId,
             'disconnected' => true,
+            'affiliate_id' => $affiliateId,
+            'selections_removed' => $result->selectionsRemoved,
         ]);
     }
 
