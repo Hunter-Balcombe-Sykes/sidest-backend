@@ -280,6 +280,81 @@ class CommissionVoidService
      * @param  string[]  $affiliateIds
      * @return array<string, int> affiliate_id => total_pending_cents
      */
+    /**
+     * Voids up to $cap pending commission entries for a specific affiliate-brand pair.
+     * Returns overflow: true (without voiding) when count exceeds cap — caller should
+     * dispatch VoidPendingCommissionsForLinkJob instead.
+     *
+     * @return array{count: int, total_cents: int, overflow: bool}
+     */
+    public function voidPendingForAffiliateBrand(
+        string $affiliateProfessionalId,
+        string $brandProfessionalId,
+        string $reason,
+        int $cap = 200,
+    ): array {
+        $pendingCount = DB::table('commerce.commission_ledger_entries')
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->where('status', 'pending')
+            ->whereNull('payout_id')
+            ->count();
+
+        if ($pendingCount > $cap) {
+            return ['count' => 0, 'total_cents' => 0, 'overflow' => true];
+        }
+
+        return $this->runVoidLoop($affiliateProfessionalId, $brandProfessionalId, $reason);
+    }
+
+    /** Loops voidEntry() over every pending entry for the pair. */
+    public function runVoidLoop(
+        string $affiliateProfessionalId,
+        string $brandProfessionalId,
+        string $reason,
+    ): array {
+        $voidedCount = 0;
+        $voidedCents = 0;
+
+        CommissionLedgerEntry::query()
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->where('status', 'pending')
+            ->whereNull('payout_id')
+            ->orderBy('occurred_at')
+            ->chunkById(50, function ($entries) use (&$voidedCount, &$voidedCents, $reason): void {
+                foreach ($entries as $entry) {
+                    if ($this->voidEntry($entry, $reason)) {
+                        $voidedCount++;
+                        $voidedCents += (int) $entry->amount_cents;
+                    }
+                }
+            });
+
+        return ['count' => $voidedCount, 'total_cents' => $voidedCents, 'overflow' => false];
+    }
+
+    /**
+     * @return array{count: int, total_cents: int}
+     */
+    public function pendingSummaryForAffiliateBrand(
+        string $affiliateProfessionalId,
+        string $brandProfessionalId,
+    ): array {
+        $row = DB::table('commerce.commission_ledger_entries')
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->where('status', 'pending')
+            ->whereNull('payout_id')
+            ->selectRaw('COUNT(*) AS c, COALESCE(SUM(amount_cents), 0) AS t')
+            ->first();
+
+        return [
+            'count' => (int) ($row->c ?? 0),
+            'total_cents' => (int) ($row->t ?? 0),
+        ];
+    }
+
     private function getPendingCommissionCentsBatch(array $affiliateIds): array
     {
         if ($affiliateIds === []) {
