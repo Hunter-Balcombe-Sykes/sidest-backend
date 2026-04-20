@@ -11,7 +11,7 @@ return [
     'jwt_audience' => env('SUPABASE_JWT_AUD', 'authenticated'),
 
     'jwks_url' => env('SUPABASE_JWKS_URL'),             // full URL
-    'jwks_cache_seconds' => (int) env('SUPABASE_JWKS_CACHE_SECONDS', 600),
+    'jwks_cache_seconds' => (int) env('SUPABASE_JWKS_CACHE_SECONDS', 300),
 
     // Service role key for server-side admin operations (user creation, etc.)
     'service_role_key' => env('SUPABASE_SERVICE_ROLE_KEY'),

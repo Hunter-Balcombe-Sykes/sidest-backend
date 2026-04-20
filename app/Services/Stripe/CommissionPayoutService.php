@@ -26,9 +26,9 @@ class CommissionPayoutService
 
     private int $minHoldDays;
 
-    public function __construct()
+    public function __construct(?StripeClient $stripe = null)
     {
-        $this->stripe = new StripeClient(config('services.stripe.secret_key'));
+        $this->stripe = $stripe ?? new StripeClient(config('services.stripe.secret_key'));
         $this->platformFeePercent = config('sidest.store.platform_fee_percent', 3);
         $this->systemHoldDays = max(0, (int) config('sidest.store.payout_hold_days', 7));
         $this->minHoldDays = (int) config('sidest.store.min_payout_hold_days', 7);
@@ -629,8 +629,13 @@ class CommissionPayoutService
             return false;
         }
 
+        // If the wallet was already debited in a previous run, resume from 'collecting'
+        // so processPayoutBatch() enters its idempotent resume branch and skips
+        // re-debiting. Resetting to 'pending' would bypass that branch and double-debit.
+        $resumeStatus = ((int) ($payout->wallet_debit_cents ?? 0)) > 0 ? 'collecting' : 'pending';
+
         $payout->update([
-            'status'         => 'pending',
+            'status'         => $resumeStatus,
             'failure_code'   => null,
             'failure_reason' => null,
             'retry_count'    => ($payout->retry_count ?? 0) + 1,

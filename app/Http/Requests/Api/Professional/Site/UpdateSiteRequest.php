@@ -12,10 +12,25 @@ class UpdateSiteRequest extends BaseFormRequest
 {
     protected function prepareForValidation(): void
     {
+        $merge = [];
+
         if (is_string($this->subdomain ?? null)) {
-            $this->merge([
-                'subdomain' => strtolower(trim($this->subdomain)),
-            ]);
+            $merge['subdomain'] = strtolower(trim($this->subdomain));
+        }
+
+        // Strip HTML tags from user-visible text fields — same defence as UpsertSectionBlockRequest.
+        $settings = $this->input('settings');
+        if (is_array($settings)) {
+            foreach (['hero_title', 'hero_subtitle', 'primary_button_text', 'bio_text'] as $field) {
+                if (isset($settings[$field]) && is_string($settings[$field])) {
+                    $settings[$field] = strip_tags($settings[$field]);
+                }
+            }
+            $merge['settings'] = $settings;
+        }
+
+        if ($merge !== []) {
+            $this->merge($merge);
         }
     }
 

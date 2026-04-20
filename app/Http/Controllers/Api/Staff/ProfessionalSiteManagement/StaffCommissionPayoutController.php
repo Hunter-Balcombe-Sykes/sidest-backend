@@ -9,6 +9,8 @@ use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Stripe\Exception\ApiConnectionException;
+use Stripe\Exception\RateLimitException;
 
 // V2: Staff-admin controls for commission payouts. Today only exposes manual
 // retry — the daily ProcessCommissionPayoutsJob handles normal flow and the
@@ -77,11 +79,14 @@ class StaffCommissionPayoutController extends ApiController
             );
         }
 
-        // retryPayout() resets the status to 'pending', clears failure_code/
-        // reason, and runs processPayoutBatch. The returned bool tells us
-        // whether the batch ended in `completed` (true) or anywhere else
-        // (false) — but the refreshed model state is the authoritative record.
-        $this->payoutService->retryPayout($payout);
+        // retryPayout() resets status, clears failure_code/reason, and runs
+        // processPayoutBatch synchronously. Transient Stripe errors re-throw
+        // (Horizon backoff design) — surface them as 503 so staff know to retry.
+        try {
+            $this->payoutService->retryPayout($payout);
+        } catch (ApiConnectionException | RateLimitException $e) {
+            return $this->error('Stripe is temporarily unavailable. Please try again in a moment.', 503);
+        }
         $payout->refresh();
 
         return $this->success([

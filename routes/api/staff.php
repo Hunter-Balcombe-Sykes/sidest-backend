@@ -218,8 +218,11 @@ Route::prefix('staff')
         // Override brand commission rate and payout hold days (admin only)
         Route::patch('/professionals/{professional}/store-settings', [StaffStoreSettingsController::class, 'update']);
 
-        // Manually create or remove brand-affiliate links (admin only)
-        Route::middleware('throttle:30,1')->group(function (): void {
+        // Manually create or remove brand-affiliate links (admin only).
+        // withoutScopedBindings(): {brand} and {affiliate} are two independent
+        // Professional models — not parent/child. scopeBindings() would try to
+        // call $brand->affiliates() which doesn't exist, causing a 500.
+        Route::middleware('throttle:30,1')->withoutScopedBindings()->group(function (): void {
             Route::post('/professionals/{brand}/affiliates/{affiliate}',
                 [\App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandAffiliateLinkController::class, 'store'])
                 ->whereUuid(['brand', 'affiliate']);
