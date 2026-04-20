@@ -3,6 +3,7 @@
 use App\Mail\Notifications\AccountDeletionCancelledMail;
 use App\Models\Core\Professional\Professional;
 use App\Services\Professional\AccountDeletionService;
+use App\Services\Stripe\StripeBillingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -85,11 +86,11 @@ it('writes cancelled audit event', function () {
     expect($audit)->not->toBeNull();
 });
 
-it('does not leave stripe_subscription_id unreachable when cancel path runs', function () {
+it('cancel path calls Stripe resume with the correct subscription ID from findStripeSubscription', function () {
     $pro = seedPendingDeletionProfessional();
 
     DB::connection('pgsql')->table('billing.subscriptions')->insert([
-        'id'                     => (string) \Illuminate\Support\Str::uuid(),
+        'id'                     => (string) Str::uuid(),
         'professional_id'        => $pro->id,
         'stripe_subscription_id' => 'sub_dedup_test',
         'status'                 => 'active',
@@ -97,9 +98,15 @@ it('does not leave stripe_subscription_id unreachable when cancel path runs', fu
         'updated_at'             => now()->toIso8601String(),
     ]);
 
-    // Stripe not configured in tests — service returns early without throwing.
-    $service = new AccountDeletionService;
-    $result  = $service->cancel($pro, \Illuminate\Http\Request::create('/', 'POST'));
+    config(['services.stripe.secret_key' => 'test-key']);
 
-    expect($result['success'])->toBeTrue();
+    $billing = Mockery::mock(StripeBillingService::class);
+    $billing->shouldReceive('resumeSubscription')
+        ->once()
+        ->with('sub_dedup_test');
+
+    app()->instance(StripeBillingService::class, $billing);
+
+    $service = new AccountDeletionService;
+    $service->cancel($pro, Request::create('/', 'POST'));
 });

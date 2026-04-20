@@ -47,7 +47,7 @@ class ResumeProfessionalSubscriptionAction
         DB::transaction(function () use ($subscription) {
             $subscription->update(['cancel_at_period_end' => false]);
 
-            if ($subscription->isStripeManaged()) {
+            if ($subscription->isStripeManaged() && $subscription->stripe_subscription_id) {
                 $this->billing->resumeSubscription($subscription->stripe_subscription_id);
             }
         });
