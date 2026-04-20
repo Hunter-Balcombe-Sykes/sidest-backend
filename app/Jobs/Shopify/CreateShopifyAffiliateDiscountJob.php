@@ -150,11 +150,7 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
                     'integration_id' => $this->integrationId,
                     'shop_domain' => $shopDomain,
                 ]);
-
-                return;
-            }
-
-            if ($this->automaticDiscountAlreadyInstalled($shopDomain, $accessToken, $apiVersion, $functionId)) {
+            } elseif ($this->automaticDiscountAlreadyInstalled($shopDomain, $accessToken, $apiVersion, $functionId)) {
                 $integration->mergeProviderMetadata(['sidest_discount_state' => 'registered']);
             } else {
                 $this->createAutomaticDiscount($shopDomain, $accessToken, $apiVersion, $functionId);
@@ -171,9 +167,11 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
             // Final step of the OAuth install chain: seed has_enabled_variants
             // on every existing product so the Active Products smart collection
             // resolves from the first page load. Idempotent — skips products
-            // where the existing value already matches. Dispatched whether
-            // the discount was freshly installed OR already present, because
-            // reinstall of the app still needs the flag seeded.
+            // where the existing value already matches. Dispatched unconditionally
+            // because the backfill is independent of the discount status:
+            //   - pending discount (function not deployed yet) → backfill still
+            //     needs to seed the flag so collections resolve correctly
+            //   - registered (new or already installed) → same reason
             BackfillBrandHasEnabledVariantsJob::dispatch($this->integrationId);
         } catch (\Throwable $e) {
             $integration->mergeProviderMetadata(['sidest_discount_state' => 'failed']);
