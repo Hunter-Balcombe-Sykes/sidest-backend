@@ -40,10 +40,15 @@ query allProducts($first: Int!, $after: String) {
         }
         # Variants + per-variant sidest.enabled state — needed by the brand
         # catalog table to render the expand chevron on multi-variant
-        # products and the per-variant enable/disable toggle. Matches the
-        # shape in PRODUCTS_WITH_METAFIELDS so both endpoints return
-        # variant data identically.
-        variants(first: 100) {
+        # products and the per-variant enable/disable toggle.
+        #
+        # Cap at 20 variants per product to stay under Shopify's GraphQL
+        # 1000-cost budget (50 products × 100 variants overflows). 20 is
+        # well above the practical max any brand is likely to ship on one
+        # product — colour × size typically tops out at ~15. If a brand
+        # ever needs more they can still fetch the full list via the
+        # single-product queries elsewhere in this service.
+        variants(first: 20) {
           edges {
             node {
               id
