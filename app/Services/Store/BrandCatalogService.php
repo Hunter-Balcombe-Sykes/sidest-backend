@@ -33,7 +33,9 @@ query allProducts($first: Int!, $after: String) {
         status
         description
         featuredImage { url altText }
-        images(first: 10) { edges { node { url altText } } }
+        # Single image — more is a waste for the catalog table (only featuredImage is rendered);
+        # bump if a richer detail panel ever needs the gallery inline.
+        images(first: 1) { edges { node { url altText } } }
         priceRange {
           minVariantPrice { amount currencyCode }
           maxVariantPrice { amount currencyCode }
@@ -42,13 +44,17 @@ query allProducts($first: Int!, $after: String) {
         # catalog table to render the expand chevron on multi-variant
         # products and the per-variant enable/disable toggle.
         #
-        # Cap at 20 variants per product to stay under Shopify's GraphQL
-        # 1000-cost budget (50 products × 100 variants overflows). 20 is
-        # well above the practical max any brand is likely to ship on one
-        # product — colour × size typically tops out at ~15. If a brand
-        # ever needs more they can still fetch the full list via the
-        # single-product queries elsewhere in this service.
-        variants(first: 20) {
+        # Cost math on this query (Shopify's 1000-point-per-request budget):
+        #   products(first: 50)             = 50
+        #   variants(first: N) × 50         = 50·N
+        #   images(first: 1) × 50           = 50
+        #   5 metafields × 50               = 250
+        #   ── total                       ≈ 350 + 50·N
+        # Capping variants at 5 lands us at ~600, a comfortable margin. If a
+        # brand has >5 variants on a product the catalog still shows the
+        # ones it can and the single-product detail queries elsewhere in
+        # this service fetch the full list on demand.
+        variants(first: 5) {
           edges {
             node {
               id
@@ -752,6 +758,12 @@ GRAPHQL;
             ->withHeaders([
                 'X-Shopify-Access-Token' => $accessToken,
                 'Content-Type' => 'application/json',
+                // Makes Shopify include extensions.cost in every response
+                // (requestedQueryCost, actualQueryCost, throttleStatus). Costs
+                // nothing extra; makes "why is this query failing?" debug
+                // trivial because the log below surfaces actual cost vs
+                // budget instead of us guessing.
+                'Shopify-GraphQL-Cost-Debug' => '1',
             ])
             ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", array_filter([
                 'query' => $query,
@@ -762,16 +774,21 @@ GRAPHQL;
             Log::warning('Shopify Admin API request failed.', [
                 'shop_domain' => $shopDomain,
                 'status' => $response->status(),
+                'body' => $response->body(),
             ]);
 
             throw new \RuntimeException('Unable to reach Shopify. Please try again.', 502);
         }
 
-        $errors = Arr::get($response->json(), 'errors', []);
+        $body = $response->json();
+        $errors = Arr::get($body, 'errors', []);
         if (! empty($errors)) {
             Log::warning('Shopify Admin API returned errors.', [
                 'shop_domain' => $shopDomain,
                 'errors' => $errors,
+                // Include the cost extension so cost-budget rejections
+                // self-identify in logs without a re-run.
+                'cost' => Arr::get($body, 'extensions.cost'),
             ]);
 
             throw new \RuntimeException('Unable to reach Shopify. Please try again.', 502);
