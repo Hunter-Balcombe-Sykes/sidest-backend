@@ -5,6 +5,7 @@ namespace App\Actions\Subscription;
 use App\Models\Billing\Subscription;
 use App\Models\Core\Professional\Professional;
 use App\Services\Stripe\StripeBillingService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 // V2: Resumes a subscription scheduled for cancellation. Clears cancel_at_period_end on both Stripe and local DB.
@@ -43,13 +44,13 @@ class ResumeProfessionalSubscriptionAction
             ]);
         }
 
-        if ($subscription->isStripeManaged()) {
-            $this->billing->resumeSubscription($subscription->stripe_subscription_id);
-        }
+        DB::transaction(function () use ($subscription) {
+            $subscription->update(['cancel_at_period_end' => false]);
 
-        $subscription->update([
-            'cancel_at_period_end' => false,
-        ]);
+            if ($subscription->isStripeManaged()) {
+                $this->billing->resumeSubscription($subscription->stripe_subscription_id);
+            }
+        });
 
         return $subscription->fresh();
     }
