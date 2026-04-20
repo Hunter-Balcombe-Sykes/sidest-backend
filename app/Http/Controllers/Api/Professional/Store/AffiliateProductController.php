@@ -140,18 +140,23 @@ class AffiliateProductController extends ApiController
 
         $max = (int) config('sidest.store.max_featured_products', 10);
 
-        $currentCount = AffiliateProductSelection::query()
-            ->where('affiliate_professional_id', $pro->id)
-            ->where('brand_professional_id', $validated['brand_professional_id'])
-            ->count();
-
-        if ($currentCount >= $max) {
-            return $this->error("Maximum of {$max} selections allowed.", 422);
-        }
-
         try {
-            $selection = DB::transaction(function () use ($pro, $validated, $selectedVariantGids) {
-                DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["aff-sel:{$pro->id}"]);
+            $selection = DB::transaction(function () use ($pro, $validated, $selectedVariantGids, $max) {
+                // Advisory lock serializes concurrent selections per affiliate. Postgres only;
+                // SQLite (tests) skips this — the UNIQUE constraint still prevents duplicates.
+                if (DB::connection()->getDriverName() === 'pgsql') {
+                    DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["aff-sel:{$pro->id}"]);
+                }
+
+                // Count check INSIDE the lock — authoritative against concurrent inserts.
+                $currentCount = AffiliateProductSelection::query()
+                    ->where('affiliate_professional_id', $pro->id)
+                    ->where('brand_professional_id', $validated['brand_professional_id'])
+                    ->count();
+
+                if ($currentCount >= $max) {
+                    throw new \DomainException("Maximum of {$max} selections allowed.");
+                }
 
                 return AffiliateProductSelection::create([
                     'affiliate_professional_id' => $pro->id,
@@ -161,6 +166,8 @@ class AffiliateProductController extends ApiController
                     'selected_variant_gids' => $selectedVariantGids,
                 ]);
             });
+        } catch (\DomainException $e) {
+            return $this->error($e->getMessage(), 422);
         } catch (QueryException $e) {
             if ($e->getCode() === '23505') {
                 return $this->error('This product is already selected.', 409);
