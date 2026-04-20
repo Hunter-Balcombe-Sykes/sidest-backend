@@ -4,9 +4,11 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Customers\ContactCaptureService;
+use App\Services\Store\BrandCatalogService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -33,7 +35,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
         $this->onQueue('integrations');
     }
 
-    public function handle(ContactCaptureService $contactCapture): void
+    public function handle(ContactCaptureService $contactCapture, BrandCatalogService $catalogService): void
     {
         $orderId = (string) Arr::get($this->orderPayload, 'id', '');
         $noteAttributes = Arr::get($this->orderPayload, 'note_attributes', []);
@@ -83,9 +85,38 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             return;
         }
 
-        // Get brand default commission rate as fallback
+        // Get brand settings and platform fallback for server-side rate resolution.
         $brandSettings = BrandStoreSettings::where('professional_id', $this->brandProfessionalId)->first();
-        $defaultRate = $brandSettings ? (float) $brandSettings->default_commission_rate : 15.0;
+        $platformDefault = (float) config('sidest.store.default_commission_rate', 15);
+
+        // Collect distinct product GIDs from the order's line items. Shopify
+        // sends a numeric product_id on the REST webhook payload; convert to GID
+        // shape so we can query the Admin API (which only accepts GIDs via nodes()).
+        $productGids = [];
+        foreach ($lineItems as $li) {
+            if (! is_array($li)) {
+                continue;
+            }
+            $productId = (string) Arr::get($li, 'product_id', '');
+            if ($productId !== '') {
+                $productGids[] = "gid://shopify/Product/{$productId}";
+            }
+        }
+        $productGids = array_values(array_unique($productGids));
+
+        // Fetch commission_override metafield for each product in ONE Admin API
+        // call. Buyer-set sidest_commission_rate line attributes are NOT used for
+        // calculation — they're writable by the buyer via the Storefront Cart API
+        // and therefore untrusted. We resolve the rate ourselves using the same
+        // precedence the Hydrogen storefront applies.
+        $integration = ProfessionalIntegration::query()
+            ->where('professional_id', $this->brandProfessionalId)
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->first();
+
+        $overrideMap = ($integration && ! empty($productGids))
+            ? $catalogService->fetchCommissionOverridesForProducts($integration, $productGids)
+            : [];
 
         // Phase 1: build candidates without touching the DB
         $candidates = [];
@@ -126,12 +157,26 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 continue;
             }
 
-            $commissionRate = $this->extractLineItemCommissionRate($lineItem, $defaultRate);
+            $productGid = ($productIdStr = (string) Arr::get($lineItem, 'product_id', '')) !== ''
+                ? "gid://shopify/Product/{$productIdStr}"
+                : '';
+
+            [$commissionRate, $rateSource] = $this->resolveCommissionRate(
+                $productGid,
+                $overrideMap,
+                $brandSettings,
+                $platformDefault,
+            );
+
             $commissionAmountCents = (int) round($lineTotal * ($commissionRate / 100) * 100);
 
             if ($commissionAmountCents <= 0) {
                 continue;
             }
+
+            // Audit trail: the buyer-submitted rate (may be empty or inflated).
+            // Recorded verbatim so post-hoc investigations can detect tampering.
+            $submittedRate = $this->extractSubmittedRate($lineItem);
 
             $candidates[] = [
                 'idempotency_key' => "shopify_order_{$orderId}_line_{$lineItemId}",
@@ -144,7 +189,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                     'amount_cents' => $commissionAmountCents,
                     'currency_code' => $currency,
                     'commission_rate' => $commissionRate,
-                    'rate_source' => 'cart_attribute',
+                    'rate_source' => $rateSource,
                     'idempotency_key' => "shopify_order_{$orderId}_line_{$lineItemId}",
                     'calculation_metadata' => [
                         'order_id' => $orderId,
@@ -160,6 +205,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                         'line_price_post_discount' => $lineTotal,
                         'quantity' => $quantity,
                         'affiliate_slug' => $affiliateSlug,
+                        'submitted_rate' => $submittedRate,
                     ],
                     'occurred_at' => $occurredAt,
                 ],
@@ -327,23 +373,51 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
     }
 
     /**
-     * Extract sidest_commission_rate from line item properties, or use default.
+     * Resolve the commission rate for a line item, server-side. Precedence:
+     *   1. product metafield `sidest.commission_override` (brand-set per-product)
+     *   2. brand.brand_store_settings.default_commission_rate (brand default)
+     *   3. config('sidest.store.default_commission_rate', 15) (platform fallback)
+     *
+     * @param  array<string, float|null>  $overrideMap
+     * @return array{0: float, 1: string}  [rate, rate_source]
      */
-    private function extractLineItemCommissionRate(array $lineItem, float $defaultRate): float
-    {
-        $properties = Arr::get($lineItem, 'properties', []);
-
-        if (is_array($properties)) {
-            foreach ($properties as $prop) {
-                if (is_array($prop) && strtolower(trim((string) ($prop['name'] ?? ''))) === 'sidest_commission_rate') {
-                    $rate = (float) ($prop['value'] ?? 0);
-                    if ($rate > 0 && $rate <= 100) {
-                        return $rate;
-                    }
-                }
+    private function resolveCommissionRate(
+        string $productGid,
+        array $overrideMap,
+        ?BrandStoreSettings $brandSettings,
+        float $platformDefault,
+    ): array {
+        if ($productGid !== '' && isset($overrideMap[$productGid]) && $overrideMap[$productGid] !== null) {
+            $rate = (float) $overrideMap[$productGid];
+            if ($rate > 0 && $rate <= 100) {
+                return [$rate, 'metafield_override'];
             }
         }
 
-        return $defaultRate;
+        if ($brandSettings && $brandSettings->default_commission_rate !== null) {
+            return [(float) $brandSettings->default_commission_rate, 'brand_default'];
+        }
+
+        return [$platformDefault, 'platform_default'];
+    }
+
+    /**
+     * Pull the buyer-submitted sidest_commission_rate for the audit trail.
+     * NOT used for calculation — returned verbatim so post-hoc analysis can
+     * spot cart tampering or Hydrogen/webhook drift.
+     */
+    private function extractSubmittedRate(array $lineItem): ?string
+    {
+        $properties = Arr::get($lineItem, 'properties', []);
+        if (! is_array($properties)) {
+            return null;
+        }
+        foreach ($properties as $prop) {
+            if (is_array($prop) && strtolower(trim((string) ($prop['name'] ?? ''))) === 'sidest_commission_rate') {
+                return (string) ($prop['value'] ?? '');
+            }
+        }
+
+        return null;
     }
 }

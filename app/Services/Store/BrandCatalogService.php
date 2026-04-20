@@ -138,6 +138,17 @@ GRAPHQL;
 
     private const SHOP_ID_QUERY = '{ shop { id } }';
 
+    private const COMMISSION_OVERRIDES_QUERY = <<<'GRAPHQL'
+query commissionOverrides($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Product {
+      id
+      metafield(namespace: "sidest", key: "commission_override") { value }
+    }
+  }
+}
+GRAPHQL;
+
     private const COLLECTIONS_QUERY = <<<'GRAPHQL'
 query collections($query: String!, $first: Int!) {
   collections(query: $query, first: $first) {
@@ -240,6 +251,68 @@ GRAPHQL;
     public function fetchBrandCatalog(Professional $brand): array
     {
         return $this->queryAdminCatalog($brand);
+    }
+
+    /**
+     * Fetch the sidest.commission_override metafield for a set of product GIDs
+     * in a single Admin API call. Returns a map keyed by product GID; value is
+     * the float override or null when the metafield is unset.
+     *
+     * Used by ProcessShopifyOrderWebhookJob to resolve commission rates
+     * server-side instead of trusting buyer-set cart line attributes.
+     *
+     * @param  array<int, string>  $productGids
+     * @return array<string, float|null>
+     */
+    public function fetchCommissionOverridesForProducts(ProfessionalIntegration $integration, array $productGids): array
+    {
+        $productGids = array_values(array_unique(array_filter($productGids)));
+        if (empty($productGids)) {
+            return [];
+        }
+
+        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+        $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
+        $accessToken = trim((string) $integration->access_token);
+
+        if ($shopDomain === '' || $accessToken === '') {
+            return array_fill_keys($productGids, null);
+        }
+
+        try {
+            $response = $this->graphql(
+                $shopDomain,
+                $accessToken,
+                self::COMMISSION_OVERRIDES_QUERY,
+                ['ids' => $productGids]
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Failed to fetch commission overrides.', [
+                'integration_id' => (string) $integration->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return array_fill_keys($productGids, null);
+        }
+
+        $nodes = $response->json('data.nodes', []);
+        $out = array_fill_keys($productGids, null);
+
+        if (is_array($nodes)) {
+            foreach ($nodes as $node) {
+                if (! is_array($node)) {
+                    continue;
+                }
+                $gid = (string) ($node['id'] ?? '');
+                if ($gid === '') {
+                    continue;
+                }
+                $val = Arr::get($node, 'metafield.value');
+                $out[$gid] = $val !== null ? (float) $val : null;
+            }
+        }
+
+        return $out;
     }
 
     /**
