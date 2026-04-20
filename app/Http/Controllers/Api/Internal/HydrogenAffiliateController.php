@@ -203,10 +203,16 @@ class HydrogenAffiliateController extends ApiController
     }
 
     /**
-     * Returns the affiliate's live link blocks ({title, url} only). Each
-     * link's dashboard Draft/Live toggle is its own is_active flag — there
-     * is no section-level gate for links. Rows missing a title or url are
-     * skipped so themes never see blanks.
+     * Returns the affiliate's live link blocks ({title, url, platform}).
+     * Each link's dashboard Draft/Live toggle is its own is_active flag —
+     * there is no section-level gate for links. Rows missing a title or
+     * url are skipped so themes never see blanks.
+     *
+     * `platform` is the normaliser-tagged social key (instagram, facebook,
+     * linkedin, youtube, tiktok, x, spotify, soundcloud) lifted out of
+     * settings.platform. Null on custom links so Hydrogen can decide
+     * whether to render a wordmark (when platform is known) or the title
+     * text (when not).
      */
     private function getAffiliateLinks(?Site $site): array
     {
@@ -220,10 +226,18 @@ class HydrogenAffiliateController extends ApiController
             ->where('is_active', true)
             ->orderBy('sort_order')
             ->get()
-            ->map(fn (Block $block): array => [
-                'title' => is_string($block->title) ? trim($block->title) : '',
-                'url' => is_string($block->url) ? trim($block->url) : '',
-            ])
+            ->map(function (Block $block): array {
+                $settings = is_array($block->settings) ? $block->settings : [];
+                $platform = is_string($settings['platform'] ?? null)
+                    ? strtolower(trim((string) $settings['platform']))
+                    : null;
+
+                return [
+                    'title' => is_string($block->title) ? trim($block->title) : '',
+                    'url' => is_string($block->url) ? trim($block->url) : '',
+                    'platform' => $platform !== '' ? $platform : null,
+                ];
+            })
             ->filter(fn (array $item) => $item['title'] !== '' && $item['url'] !== '')
             ->values()
             ->all();
