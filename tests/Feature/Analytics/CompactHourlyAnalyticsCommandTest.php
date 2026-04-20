@@ -17,7 +17,8 @@ it('dispatches one site batch when professional-day pairs fit in a single chunk'
     $siteQuery = Mockery::mock();
     $siteQuery->shouldReceive('where')->andReturnSelf();
     $siteQuery->shouldReceive('selectRaw')->andReturnSelf();
-    $siteQuery->shouldReceive('groupBy')->andReturnSelf();
+    $siteQuery->shouldReceive('groupByRaw')->andReturnSelf();
+    $siteQuery->shouldReceive('orderByRaw')->andReturnSelf();
     $siteQuery->shouldReceive('lazy')->andReturn(LazyCollection::make([
         (object) ['professional_id' => 'uuid-1', 'day' => '2026-04-18'],
         (object) ['professional_id' => 'uuid-2', 'day' => '2026-04-18'],
@@ -42,7 +43,8 @@ it('splits site dispatch into multiple batches when pairs exceed chunk size', fu
     $siteQuery = Mockery::mock();
     $siteQuery->shouldReceive('where')->andReturnSelf();
     $siteQuery->shouldReceive('selectRaw')->andReturnSelf();
-    $siteQuery->shouldReceive('groupBy')->andReturnSelf();
+    $siteQuery->shouldReceive('groupByRaw')->andReturnSelf();
+    $siteQuery->shouldReceive('orderByRaw')->andReturnSelf();
     $siteQuery->shouldReceive('lazy')->andReturn(LazyCollection::make($rows));
     $siteQuery->shouldReceive('count')->andReturn(5000);
     $siteQuery->shouldReceive('delete')->andReturn(5000);
@@ -61,7 +63,8 @@ it('dispatches nothing in site dry-run mode', function () {
     $siteQuery = Mockery::mock();
     $siteQuery->shouldReceive('where')->andReturnSelf();
     $siteQuery->shouldReceive('selectRaw')->andReturnSelf();
-    $siteQuery->shouldReceive('groupBy')->andReturnSelf();
+    $siteQuery->shouldReceive('groupByRaw')->andReturnSelf();
+    $siteQuery->shouldReceive('orderByRaw')->andReturnSelf();
     $siteQuery->shouldReceive('count')->andReturn(10);
     $siteQuery->shouldReceive('lazy')->never();
     $siteQuery->shouldReceive('delete')->never();
@@ -81,7 +84,8 @@ it('dispatches one booking batch when professional-day pairs fit in a single chu
     $bookingQuery = Mockery::mock();
     $bookingQuery->shouldReceive('where')->andReturnSelf();
     $bookingQuery->shouldReceive('selectRaw')->andReturnSelf();
-    $bookingQuery->shouldReceive('groupBy')->andReturnSelf();
+    $bookingQuery->shouldReceive('groupByRaw')->andReturnSelf();
+    $bookingQuery->shouldReceive('orderByRaw')->andReturnSelf();
     $bookingQuery->shouldReceive('lazy')->andReturn(LazyCollection::make([
         (object) ['professional_id' => 'uuid-1', 'day' => '2026-04-18'],
     ]));
@@ -102,7 +106,8 @@ it('dispatches nothing in booking dry-run mode', function () {
     $bookingQuery = Mockery::mock();
     $bookingQuery->shouldReceive('where')->andReturnSelf();
     $bookingQuery->shouldReceive('selectRaw')->andReturnSelf();
-    $bookingQuery->shouldReceive('groupBy')->andReturnSelf();
+    $bookingQuery->shouldReceive('groupByRaw')->andReturnSelf();
+    $bookingQuery->shouldReceive('orderByRaw')->andReturnSelf();
     $bookingQuery->shouldReceive('count')->andReturn(5);
     $bookingQuery->shouldReceive('lazy')->never();
     $bookingQuery->shouldReceive('delete')->never();
@@ -124,6 +129,7 @@ it('dispatches commerce batches using brand-affiliate triples from a single JOIN
     $joinQuery->shouldReceive('where')->andReturnSelf();
     $joinQuery->shouldReceive('selectRaw')->andReturnSelf();
     $joinQuery->shouldReceive('distinct')->andReturnSelf();
+    $joinQuery->shouldReceive('orderByRaw')->andReturnSelf();
     $joinQuery->shouldReceive('lazy')->andReturn(LazyCollection::make([
         (object) ['brand_professional_id' => 'brand-1', 'affiliate_professional_id' => 'aff-1', 'day' => '2026-04-18'],
         (object) ['brand_professional_id' => 'brand-1', 'affiliate_professional_id' => 'aff-2', 'day' => '2026-04-18'],
@@ -164,6 +170,7 @@ it('splits commerce dispatch into multiple batches when triples exceed chunk siz
     $joinQuery->shouldReceive('where')->andReturnSelf();
     $joinQuery->shouldReceive('selectRaw')->andReturnSelf();
     $joinQuery->shouldReceive('distinct')->andReturnSelf();
+    $joinQuery->shouldReceive('orderByRaw')->andReturnSelf();
     $joinQuery->shouldReceive('lazy')->andReturn(LazyCollection::make($triples));
 
     $brandDeleteQuery = Mockery::mock();

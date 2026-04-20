@@ -40,7 +40,7 @@ class BackfillHourlyAnalytics extends Command
         $this->line('Domains: '.implode(', ', $domains));
 
         if (in_array('commerce', $domains, true)) {
-            $this->backfillCommerce($hourBuckets, $start, $endExclusive);
+            $this->backfillCommerce($hourBuckets, $start, $endExclusive, $chunkSize);
         }
 
         if (in_array('site', $domains, true)) {
@@ -82,7 +82,7 @@ class BackfillHourlyAnalytics extends Command
     /**
      * @param  Collection<int, string>  $hourBuckets  ISO8601 strings
      */
-    private function backfillCommerce(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
+    private function backfillCommerce(Collection $hourBuckets, Carbon $start, Carbon $endExclusive, int $chunkSize): void
     {
         $this->line('Commerce backfill: V2 rebuild jobs not yet implemented, skipping.');
     }

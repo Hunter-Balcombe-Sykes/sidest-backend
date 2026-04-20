@@ -3,6 +3,7 @@
 namespace App\Jobs\Analytics;
 
 use App\Services\Analytics\CommerceAnalyticsAggregateService;
+use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -15,7 +16,7 @@ use Illuminate\Support\Facades\Log;
 // Dispatched immediately after a Shopify order webhook to keep the last-24h dashboard current.
 class RebuildCommerceHourlyAggregatesJob implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Batchable, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 

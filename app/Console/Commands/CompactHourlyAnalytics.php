@@ -111,6 +111,7 @@ class CompactHourlyAnalytics extends Command
                 ->selectRaw('cle.affiliate_professional_id')
                 ->selectRaw('(bmh.hour_start AT TIME ZONE bmh.timezone)::date as day')
                 ->distinct()
+                ->orderByRaw('bmh.brand_professional_id, cle.affiliate_professional_id, (bmh.hour_start AT TIME ZONE bmh.timezone)::date')
                 ->lazy()
                 ->chunk($chunkSize)
                 ->each(function (LazyCollection $chunk, int $chunkIndex) use (&$batchCount): void {
@@ -166,7 +167,8 @@ class CompactHourlyAnalytics extends Command
                 ->where('hour_start', '<', $cutoff)
                 ->selectRaw('professional_id')
                 ->selectRaw('(hour_start AT TIME ZONE timezone)::date as day')
-                ->groupBy('professional_id', 'day')
+                ->groupByRaw('professional_id, (hour_start AT TIME ZONE timezone)::date')
+                ->orderByRaw('professional_id, (hour_start AT TIME ZONE timezone)::date')
                 ->lazy()
                 ->chunk($chunkSize)
                 ->each(function (LazyCollection $chunk, int $chunkIndex) use (&$batchCount): void {
@@ -218,7 +220,8 @@ class CompactHourlyAnalytics extends Command
                 ->where('hour_start', '<', $cutoff)
                 ->selectRaw('professional_id')
                 ->selectRaw('(hour_start AT TIME ZONE timezone)::date as day')
-                ->groupBy('professional_id', 'day')
+                ->groupByRaw('professional_id, (hour_start AT TIME ZONE timezone)::date')
+                ->orderByRaw('professional_id, (hour_start AT TIME ZONE timezone)::date')
                 ->lazy()
                 ->chunk($chunkSize)
                 ->each(function (LazyCollection $chunk, int $chunkIndex) use (&$batchCount): void {
