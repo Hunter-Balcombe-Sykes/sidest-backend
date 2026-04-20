@@ -44,9 +44,9 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             $this->merge(['publication_state' => strtolower(trim($publicationState))]);
         }
 
-        // normalize text
+        // normalize text — strip HTML tags before validation to prevent stored XSS
         if (is_string(data_get($this->input('settings', []), 'text'))) {
-            $t = trim((string) data_get($this->input('settings'), 'text'));
+            $t = trim(strip_tags((string) data_get($this->input('settings'), 'text')));
             $settings = $this->input('settings', []);
             $settings['text'] = ($t === '') ? null : $t;
             $this->merge(['settings' => $settings]);

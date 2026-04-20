@@ -31,7 +31,7 @@ Route::group([
     Route::post('/booking/availability', [PublicBookingController::class, 'availability'])
         ->middleware('throttle:public-site');
     Route::post('/booking/checkout', [PublicBookingController::class, 'checkout'])
-        ->middleware('throttle:public-site');
+        ->middleware('throttle:booking-checkout');
 
     // Page View Analytics
     Route::post('/analytics/pageviews', [AnalyticsController::class, 'pageview'])

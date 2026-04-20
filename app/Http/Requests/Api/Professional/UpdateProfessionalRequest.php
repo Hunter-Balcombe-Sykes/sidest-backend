@@ -81,6 +81,15 @@ class UpdateProfessionalRequest extends BaseFormRequest
             $merge['professional_type'] = $this->normalizeProfessionalTypeInput($professionalType);
         }
 
+        // Strip HTML tags from bio — defence-in-depth even though the field is never rendered raw server-side
+        if ($this->has('bio')) {
+            $bio = $this->input('bio');
+            if (is_string($bio)) {
+                $bio = trim(strip_tags($bio));
+                $merge['bio'] = $bio === '' ? null : $bio;
+            }
+        }
+
         // Upper-case country_code if supplied so the ISO alpha-2 validator
         // accepts lower-case input from older clients.
         if ($this->has('country_code')) {

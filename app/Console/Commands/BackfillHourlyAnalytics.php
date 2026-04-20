@@ -7,6 +7,7 @@ use App\Jobs\Analytics\RebuildSiteHourlyAggregatesJob;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 
 // V2: Backfills hourly analytics aggregates for trailing N hours. Used after outages or data corrections.
@@ -98,19 +99,26 @@ class BackfillHourlyAnalytics extends Command
                     ->whereBetween('occurred_at', [$start, $endExclusive])
             )
             ->distinct()
-            ->lazy()
-            ->map(static fn ($row): string => trim((string) $row->professional_id))
-            ->filter();
+            ->pluck('professional_id')
+            ->map(static fn ($id): string => trim((string) $id))
+            ->filter()
+            ->values();
 
-        $count = 0;
-        foreach ($professionalIds as $professionalId) {
-            foreach ($hourBuckets as $hour) {
-                RebuildSiteHourlyAggregatesJob::dispatch($professionalId, $hour);
-            }
-            $count++;
+        $batchCount = 0;
+        foreach ($hourBuckets as $hour) {
+            $jobs = $professionalIds->map(
+                static fn (string $id) => new RebuildSiteHourlyAggregatesJob($id, $hour)
+            )->all();
+
+            Bus::batch($jobs)
+                ->name("site-hourly-backfill:{$hour}")
+                ->allowFailures()
+                ->dispatch();
+
+            $batchCount++;
         }
 
-        $this->line("Site jobs dispatched: professionals={$count}");
+        $this->line("Site batches dispatched: hours={$batchCount}, professionals={$professionalIds->count()}");
     }
 
     /**
@@ -122,18 +130,25 @@ class BackfillHourlyAnalytics extends Command
             ->select('professional_id')
             ->whereBetween('occurred_at', [$start, $endExclusive])
             ->distinct()
-            ->lazy()
-            ->map(static fn ($row): string => trim((string) $row->professional_id))
-            ->filter();
+            ->pluck('professional_id')
+            ->map(static fn ($id): string => trim((string) $id))
+            ->filter()
+            ->values();
 
-        $count = 0;
-        foreach ($professionalIds as $professionalId) {
-            foreach ($hourBuckets as $hour) {
-                RebuildBookingHourlyAggregatesJob::dispatch($professionalId, $hour);
-            }
-            $count++;
+        $batchCount = 0;
+        foreach ($hourBuckets as $hour) {
+            $jobs = $professionalIds->map(
+                static fn (string $id) => new RebuildBookingHourlyAggregatesJob($id, $hour)
+            )->all();
+
+            Bus::batch($jobs)
+                ->name("booking-hourly-backfill:{$hour}")
+                ->allowFailures()
+                ->dispatch();
+
+            $batchCount++;
         }
 
-        $this->line("Booking jobs dispatched: professionals={$count}");
+        $this->line("Booking batches dispatched: hours={$batchCount}, professionals={$professionalIds->count()}");
     }
 }

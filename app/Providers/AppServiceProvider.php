@@ -48,6 +48,21 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        // Booking checkout — tighter limit because checkout hits Stripe/Square synchronously
+        RateLimiter::for('booking-checkout', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(10)
+                ->by($request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many booking attempts. Please try again shortly.',
+                    ], 429);
+                });
+        });
+
         // Analytics endpoints (pageviews, clicks)
         RateLimiter::for('analytics', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {

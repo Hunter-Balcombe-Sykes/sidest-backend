@@ -97,7 +97,7 @@ Route::get('/public/booking/services-by-slug', [PublicBookingController::class, 
 Route::post('/public/booking/availability-by-slug', [PublicBookingController::class, 'availability'])
     ->middleware('throttle:public-site');
 Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
-    ->middleware('throttle:public-site');
+    ->middleware('throttle:booking-checkout');
 Route::get('/public/shopify/storefront-config', [PublicShopifyStorefrontController::class, 'storefrontConfig'])
     ->middleware('throttle:public-site');
 

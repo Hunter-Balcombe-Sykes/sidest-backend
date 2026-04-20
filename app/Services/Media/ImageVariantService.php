@@ -260,7 +260,9 @@ class ImageVariantService
     {
         $configured = (string) config('sidest.media_disk', 'media');
 
-        // If SIDEST_MEDIA_DISK is explicitly set, always honour it.
+        // $_ENV/$_SERVER are intentional here — Laravel Cloud caches config at deploy time
+        // but injects platform env vars directly into the process environment at runtime,
+        // so env()/config() won't see them. Direct superglobal access bypasses that cache.
         $explicit = $_ENV['SIDEST_MEDIA_DISK'] ?? $_SERVER['SIDEST_MEDIA_DISK'] ?? null;
         if (is_string($explicit) && trim($explicit) !== '') {
             return $configured;
