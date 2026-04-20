@@ -2,8 +2,9 @@
 
 use App\Services\Auth\SupabaseAdminService;
 use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
 
-uses(Tests\TestCase::class)->in(__FILE__);
+uses(TestCase::class)->in(__FILE__);
 
 beforeEach(function () {
     config([
@@ -51,6 +52,8 @@ it('createUser returns created=false when GoTrue v2 returns existing user id in 
     ]);
 });
 
+// Pre-fix: currently triggers the pagination fallback and does not throw.
+// Expected to fail until Task 2 removes the fallback.
 it('createUser throws when 422 arrives without user id in body', function () {
     Http::fake([
         'https://test.supabase.co/auth/v1/admin/users' => Http::response([
