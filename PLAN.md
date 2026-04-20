@@ -1712,7 +1712,7 @@ Build `app/account/storefront/` — the page where affiliates manage which produ
 
 ---
 
-#### Share Link Generation (Brand + Affiliate) — Frontend only (Type 1), Backend TBD (Type 2)
+#### Share Link Generation (Brand + Affiliate) — Type 1 frontend-only, Type 2 pending design decisions
 **Assigned:** Frontend Dev + Backend Dev
 **Release Batch:** Beta 3
 **Segments:** Next Frontend, Laravel, Hydrogen
@@ -1721,7 +1721,7 @@ In V1, brands could select products and generate a link to their sitepage with t
 
 ---
 
-**Type 1 — Featured Products Link** _(browse-first, for discovery)_
+**Type 1 — Featured Products Link** _(browse-first, for discovery)_ — **Frontend/Hydrogen only, no backend needed**
 
 Format: `evo.sidest.co/{affiliateSlug}?featured={gid1},{gid2}`
 
@@ -1745,31 +1745,60 @@ Brand dashboard UI (`app/account/catalog/` or `app/account/affiliates/`):
 
 ---
 
-**Type 2 — Direct Checkout Link** _(buy-now, for social/email promotion)_
+**Type 2 — Direct Checkout Link** _(buy-now, for social/email promotion)_ — **⚠️ Design decisions pending before implementation**
 
-Format: Shopify `checkoutUrl` returned from a server-side cart creation — contains a one-time cart token that goes directly to Shopify checkout
+The customer experience once they click is entirely Shopify's — the `checkoutUrl` goes to the brand's own Shopify checkout (their logo, colours, domain). Side St has zero control over that page. Shopify Checkout UI Extensions exist but are Plus-plan only. The only place Side St branding can live is the share URL itself, before the redirect.
 
-How it works:
-- Brand (or affiliate) selects specific products and variants in the dashboard
-- Calls `POST /api/share/checkout-link` → Side St API creates a Shopify cart via the Storefront API `cartCreate` mutation, setting:
-  - `affiliate` cart attribute
-  - `sidest_commission_rate` per line (resolved from metafield ?? brand default)
-  - The selected variant IDs + quantities
-- Returns the cart's `checkoutUrl` (e.g. `https://evo.myshopify.com/checkouts/...`)
-- Brand/affiliate copies and shares this link
-- Customer clicks → goes directly to Shopify checkout with items and attribution already set
-- **Attribution is guaranteed** — the cart was created server-side with the correct attributes regardless of how the customer arrived
+**Decided: Option C — `evo.sidest.co/buy/{token}` redirect** _(302 to Shopify checkout)_
 
-Backend endpoint:
+Rationale:
+- Brand's affiliate subdomain is the trust-signal domain customers are starting to recognise — using it keeps everything under one roof instead of introducing a bare `sidest.co/s/...` pattern
+- Gives us a row in `shared_checkouts` on generation + a click increment on redirect — minimum data needed for "which share links converted" analytics
+- Keeps the option to regenerate expired cart tokens on-the-fly: look up the row, re-call `cartCreate`, update the row, 302 to the fresh URL
+- Shopify checkout still owns the entire buying experience — zero friction for brands
+
+**Open questions still to resolve before implementation:**
+
+_Link lifetime:_
+- Shopify cart tokens live ~10 days by default. Do we (a) regenerate lazily on first click if expired, (b) pre-generate and let them expire, or (c) treat as one-shot?
+
+_Sold-out / price-changed handling:_
+- If a product is sold out or deactivated when the link is clicked, Shopify shows a checkout error. Do we intercept that with a friendlier Side St page, or let Shopify handle it?
+
+_Who can generate:_
+- Brands, affiliates, or both? (PLAN.md copy says "brand or affiliate" — confirming.)
+- Can a brand generate without an affiliate tag (e.g. their own Instagram campaign — no commission payable)?
+
+_Cart contents:_
+- Single product or bundle (multi-item "shop the look")? Both are easy — confirming scope.
+- Can the brand attach a discount code? Shopify cart supports it — expose in generator UI, or future scope?
+- Variants: does the brand pick a specific variant (customer can't change), or just the product (customer picks variant at checkout)?
+
+_Attribution:_
+- Commission follows the same rules as a normal affiliate link — same `ProcessShopifyOrderWebhookJob` handles payout.
+- If no affiliate tag: commission goes nowhere (brand keeps full margin).
+
+_Guardrails:_
+- Rate limit `POST /api/share/checkout-link` at the Side St layer — Shopify Storefront API has per-IP and per-shop limits on `cartCreate`.
+- Cache by hash: if same `{brand, affiliate, line_items}` combo is requested twice within 10 days, return the same token or create a fresh cart?
+
+**Backend implementation (once decisions above are resolved):**
+
+New table: `shared_checkouts` — stores `{ token, brand_id, affiliate_id, line_items (JSON), shopify_checkout_url, click_count, expires_at, created_at }`
+
+New route: `GET /{brand_subdomain}/buy/{token}` — resolves subdomain to brand, looks up row, regenerates if expired, 302s to `shopify_checkout_url`. No auth required.
+
+New route: `POST /api/share/checkout-link` — creates the cart, stores the row, returns `{ share_url: "evo.sidest.co/buy/{token}" }`.
+
 ```
 POST /api/share/checkout-link
-Body: { affiliate_slug, line_items: [{ product_gid, variant_gid, quantity }] }
+Body: { affiliate_slug?, line_items: [{ variant_gid, quantity }] }
 → resolves commission rates from metafields
-→ calls Storefront API cartCreate with all attributes set
-→ returns { checkout_url }
+→ calls Storefront API cartCreate with affiliate attr + sidest_commission_rate per line
+→ stores row in shared_checkouts
+→ returns { share_url }
 ```
 
-Storefront API cart mutation used:
 ```graphql
 mutation cartCreate($input: CartInput!) {
   cartCreate(input: $input) {
@@ -1777,7 +1806,7 @@ mutation cartCreate($input: CartInput!) {
     userErrors { field message }
   }
 }
-# input includes: lines (variantId + quantity + attributes), attributes [{ key: "affiliate", value: slug }]
+# input: lines (variantId + quantity + attributes), attributes [{ key: "affiliate", value: slug }]
 ```
 
 > **V1 migration note:** V1 used numeric product IDs in `?products=` params matched client-side. V2 uses Shopify GIDs throughout. The share link UI in V2 works with GIDs natively — no ID normalisation needed.
@@ -1927,22 +1956,18 @@ This is the public-facing endpoint hit when someone submits the open program lan
 
 ---
 
-#### Bulk Affiliate Invite Tool
+#### Bulk Affiliate Invite Tool ✅ DONE (Backend)
 **Assigned:** Frontend Dev + Backend Dev
 **Release Batch:** Beta 3
 **Segments:** Next Frontend, Laravel
 
-> ⚠️ **Configuration not yet worked out** — full feature spec to be defined. The following is a placeholder to capture scope only.
+Backend is complete. Two endpoints exist:
+- `POST /api/brand-affiliate-invites/bulk` — accepts `{ invites: [...] }` array, up to 500 rows, per-row validation with error reporting
+- `POST /api/brand-affiliate-invites/import-csv` — accepts a CSV file upload, parses rows and feeds through same `processBulkInvites()` service method
 
-Brand can invite multiple affiliates at once, either by entering several rows manually or by uploading a CSV file. V1 supported up to 500 rows via CSV with columns: `email`, `first_name`, `last_name`, `phone`, `message`. This feature should be preserved in V2 with the same rough shape.
+Both are routed and implemented in `BrandAffiliateInviteController` + `BrandAffiliateInviteService`. Supports: email, first_name, last_name, phone, message per row. Handles duplicates, existing affiliates, per-row validation errors, and the 500-row cap. Individual invite emails sent per row.
 
-What needs to be worked out:
-- Exact UI flow (table entry vs. CSV upload vs. both)
-- How duplicates and already-connected affiliates are handled in bulk
-- Whether bulk invites send individual emails or a batch
-- Error reporting per row vs. summary-only
-
-Backend will need a `POST /api/affiliates/invite/bulk` endpoint (or CSV upload variant). Frontend will need a dedicated bulk invite UI, likely in a modal or separate section of the affiliates page.
+**Remaining:** Frontend UI — a bulk invite modal or section in the affiliates page with manual row entry and CSV upload.
 
 ---
 
