@@ -9,12 +9,12 @@ use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Customers\ContactCaptureService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 // V2: Processes a Shopify orders/paid webhook — identifies affiliate, calculates commission, creates ledger entries, and captures the customer as an affiliate contact.
@@ -87,8 +87,8 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
         $brandSettings = BrandStoreSettings::where('professional_id', $this->brandProfessionalId)->first();
         $defaultRate = $brandSettings ? (float) $brandSettings->default_commission_rate : 15.0;
 
-        $entriesCreated = 0;
-
+        // Phase 1: build candidates without touching the DB
+        $candidates = [];
         foreach ($lineItems as $lineItem) {
             if (! is_array($lineItem)) {
                 continue;
@@ -102,10 +102,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 continue;
             }
 
-            // Extract commission rate from line item properties
             $commissionRate = $this->extractLineItemCommissionRate($lineItem, $defaultRate);
-
-            // Calculate commission in cents
             $lineTotal = $price * $quantity;
             $commissionAmountCents = (int) round($lineTotal * ($commissionRate / 100) * 100);
 
@@ -113,10 +110,9 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 continue;
             }
 
-            $idempotencyKey = "shopify_order_{$orderId}_line_{$lineItemId}";
-
-            try {
-                CommissionLedgerEntry::create([
+            $candidates[] = [
+                'idempotency_key' => "shopify_order_{$orderId}_line_{$lineItemId}",
+                'data' => [
                     'shopify_order_id' => $orderId,
                     'brand_professional_id' => $this->brandProfessionalId,
                     'affiliate_professional_id' => (string) $affiliate->id,
@@ -126,7 +122,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                     'currency_code' => $currency,
                     'commission_rate' => $commissionRate,
                     'rate_source' => 'cart_attribute',
-                    'idempotency_key' => $idempotencyKey,
+                    'idempotency_key' => "shopify_order_{$orderId}_line_{$lineItemId}",
                     'calculation_metadata' => [
                         'order_id' => $orderId,
                         'line_item_id' => $lineItemId,
@@ -136,16 +132,29 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                         'affiliate_slug' => $affiliateSlug,
                     ],
                     'occurred_at' => $occurredAt,
-                ]);
+                ],
+            ];
+        }
 
-                $entriesCreated++;
-            } catch (QueryException $e) {
-                // Unique constraint violation on idempotency_key — duplicate, skip
-                if ($e->getCode() === '23505') {
-                    continue;
+        // Phase 2: pre-filter existing idempotency keys (one query), then bulk-insert in one transaction.
+        // Pre-filtering avoids a 23505 unique violation inside the transaction — PostgreSQL aborts the
+        // entire transaction on constraint violations, so we can't catch-and-continue inside DB::transaction().
+        $entriesCreated = 0;
+        if (! empty($candidates)) {
+            $candidateKeys = array_column($candidates, 'idempotency_key');
+            $existingKeys = CommissionLedgerEntry::whereIn('idempotency_key', $candidateKeys)
+                ->pluck('idempotency_key')
+                ->flip()
+                ->all();
+
+            $newEntries = array_filter($candidates, fn ($c) => ! isset($existingKeys[$c['idempotency_key']]));
+
+            DB::transaction(function () use ($newEntries, &$entriesCreated): void {
+                foreach ($newEntries as $entry) {
+                    CommissionLedgerEntry::create($entry['data']);
+                    $entriesCreated++;
                 }
-                throw $e;
-            }
+            });
         }
 
         // Capture the buyer as an affiliate contact (Beta 3 — Contacts — Automatic Customer Capture).
