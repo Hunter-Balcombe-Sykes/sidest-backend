@@ -16,20 +16,20 @@ class ProcessCommissionPayoutsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    // Retry on transient failures (DB blip, Stripe timeout before the call
-    // lands, queue worker OOM). Idempotency comes from two existing guards:
-    //   1. Phase 1 of processEligiblePayouts sweeps any batch in status=pending
-    //      and re-runs processPayoutBatch on it. Most partial failures land
-    //      in pending via markPendingFunding() so retries pick them up cleanly.
-    //   2. Phase 2 filters accrual entries on whereNull('payout_id'). Once a
-    //      batch is created and linked, those entries are skipped on re-entry
-    //      so we can't double-create a batch for the same ledger rows.
-    // A retry will NOT resume a batch stuck mid-collect (wallet debited but
-    // status not yet updated to 'pending'); that rare case still needs manual
-    // intervention and is covered by the failure log + future audit dashboard.
+    // This job is now a lightweight orchestrator: it creates payout batches and
+    // dispatches one ExecuteCommissionPayoutJob per batch. Stripe API calls happen
+    // inside those child jobs, not here — so the timeout can be short.
+    //
+    // Retry guards:
+    //   1. processEligiblePayouts re-dispatches any pending/collecting/transferring
+    //      batches, so transient failures in child jobs are picked up next run.
+    //   2. createPayoutBatch filters accrual entries on whereNull('payout_id') so
+    //      we can't double-create a batch for the same ledger rows.
+    //   3. ExecuteCommissionPayoutJob uses idempotent resume logic in processPayoutBatch
+    //      — each step checks the payout's current status before executing.
     public int $tries = 3;
 
-    public int $timeout = 300;
+    public int $timeout = 60;
 
     /**
      * Backoff between retries in seconds. 1 minute for the first retry

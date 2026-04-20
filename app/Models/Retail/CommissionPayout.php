@@ -37,6 +37,7 @@ class CommissionPayout extends BaseModel
         'funding_source',
         'wallet_debit_cents',
         'charge_cents',
+        'retry_count',
     ];
 
     protected $casts = [
@@ -46,6 +47,7 @@ class CommissionPayout extends BaseModel
         'wallet_debit_cents' => 'integer',
         'charge_cents' => 'integer',
         'ledger_entry_count' => 'integer',
+        'retry_count' => 'integer',
         'eligible_after' => 'datetime',
         'processed_at' => 'datetime',
         'created_at' => 'datetime',
