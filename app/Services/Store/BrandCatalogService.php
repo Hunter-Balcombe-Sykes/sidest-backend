@@ -38,6 +38,22 @@ query allProducts($first: Int!, $after: String) {
           minVariantPrice { amount currencyCode }
           maxVariantPrice { amount currencyCode }
         }
+        # Variants + per-variant sidest.enabled state — needed by the brand
+        # catalog table to render the expand chevron on multi-variant
+        # products and the per-variant enable/disable toggle. Matches the
+        # shape in PRODUCTS_WITH_METAFIELDS so both endpoints return
+        # variant data identically.
+        variants(first: 100) {
+          edges {
+            node {
+              id
+              title
+              availableForSale
+              price { amount currencyCode }
+              metafield_enabled: metafield(namespace: "sidest", key: "enabled") { value }
+            }
+          }
+        }
         metafield_active: metafield(namespace: "sidest", key: "active") { value }
         metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
         metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
@@ -936,6 +952,22 @@ GRAPHQL;
                     );
                     $images = array_values(array_filter($images));
 
+                    // Variants + per-variant sidest.enabled flag. Null enabled
+                    // means the metafield is absent (dynamic default = enabled);
+                    // the frontend treats null as "not explicitly disabled".
+                    $variants = [];
+                    foreach (Arr::get($node, 'variants.edges', []) as $variantEdge) {
+                        $v = $variantEdge['node'] ?? [];
+                        $enabledVal = Arr::get($v, 'metafield_enabled.value');
+                        $variants[] = [
+                            'gid' => $v['id'] ?? '',
+                            'title' => $v['title'] ?? '',
+                            'available_for_sale' => $v['availableForSale'] ?? false,
+                            'price' => $v['price'] ?? null,
+                            'enabled' => $enabledVal !== null ? filter_var($enabledVal, FILTER_VALIDATE_BOOLEAN) : null,
+                        ];
+                    }
+
                     $products[] = [
                         'gid' => $node['id'] ?? '',
                         'title' => $node['title'] ?? '',
@@ -948,6 +980,7 @@ GRAPHQL;
                             'min' => Arr::get($node, 'priceRange.minVariantPrice'),
                             'max' => Arr::get($node, 'priceRange.maxVariantPrice'),
                         ],
+                        'variants' => $variants,
                         'metafields' => [
                             'active' => $activeVal !== null ? filter_var($activeVal, FILTER_VALIDATE_BOOLEAN) : null,
                             'commission_override' => $commissionVal !== null ? (float) $commissionVal : null,
