@@ -28,7 +28,7 @@ return [
             '#^https?://172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}(?::\d+)?$#',
         ] : []
     ),
-    'allowed_headers' => ['*'],
+    'allowed_headers' => ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
     'exposed_headers' => [],
     'max_age' => 0,
     'supports_credentials' => false,

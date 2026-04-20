@@ -7,6 +7,13 @@ use Illuminate\Foundation\Http\FormRequest;
 // V2: Base form request with shared input sanitization helpers — trim, lowercase, and email normalization.
 abstract class BaseFormRequest extends FormRequest
 {
+    /**
+     * Authorization is enforced entirely by route middleware (VerifySupabaseJwt,
+     * LoadCurrentProfessional, staff guards). Returning true here is intentional —
+     * FormRequest authorization is redundant when every route group is already
+     * gated. If you add a new route without appropriate middleware, this will NOT
+     * save you — ensure middleware is applied at the route group level.
+     */
     public function authorize(): bool
     {
         return true;

@@ -437,12 +437,16 @@ class CommissionPayoutService
                 'currency' => $payout->currency_code,
             ]);
 
-            // Rebuild commerce aggregates so commission_paid_cents is reflected
-            \App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob::dispatch(
-                (string) $payout->brand_professional_id,
-                (string) $payout->affiliate_professional_id,
-                now()->toDateString()
-            );
+            // Rebuild commerce aggregates so commission_paid_cents is reflected.
+            // Guard against null FKs (SET NULL on professional hard-delete) — skip
+            // the job rather than dispatch with an empty string professional ID.
+            if ($payout->brand_professional_id && $payout->affiliate_professional_id) {
+                \App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob::dispatch(
+                    (string) $payout->brand_professional_id,
+                    (string) $payout->affiliate_professional_id,
+                    now()->toDateString()
+                );
+            }
 
             return true;
         } catch (ApiErrorException $e) {

@@ -13,7 +13,7 @@ class StaffUpdateCustomerRequest extends BaseFormRequest
             'full_name' => ['sometimes', 'required', 'string', 'max:255'],
             'email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'phone' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'notes' => ['sometimes', 'nullable', 'string'],
+            'notes' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'source' => ['sometimes', 'nullable', 'string', 'max:225'],
             'external_id' => ['sometimes', 'nullable', 'string', 'max:255'],
         ];

@@ -18,28 +18,28 @@ class LoadCurrentProfessional
     public function handle(Request $request, Closure $next): Response
     {
 
-        Log::info('LoadCurrentProfessional start');
+        Log::debug('LoadCurrentProfessional start');
 
         $uid = $request->attributes->get('supabase_uid');
         if (! $uid) {
-            Log::info('LoadCurrentProfessional missing uid');
+            Log::debug('LoadCurrentProfessional missing uid');
 
             return response()->json(['message' => 'Missing uid'], 401);
         }
 
-        Log::info('LoadCurrentProfessional before cache getByAuthId', ['uid' => $uid]);
+        Log::debug('LoadCurrentProfessional before cache getByAuthId', ['uid' => $uid]);
 
         // Use cache service instead of a direct query
         $professional = $this->professionalCache->getByAuthId($uid);
 
-        Log::info('LoadCurrentProfessional after cache getByAuthId', [
+        Log::debug('LoadCurrentProfessional after cache getByAuthId', [
             'uid' => $uid,
             'found' => (bool) $professional,
         ]);
 
         if (! $professional) {
             // Important: /api/bootstrap should create this row
-            Log::info('LoadCurrentProfessional no professional for uid', ['uid' => $uid]);
+            Log::debug('LoadCurrentProfessional no professional for uid', ['uid' => $uid]);
 
             return response()->json([
                 'message' => 'professional profile missing. Call /api/bootstrap first.',
@@ -48,7 +48,7 @@ class LoadCurrentProfessional
 
         $status = $professional->status ?? 'active';
         if (! in_array($status, ['active', 'pending_deletion'], true)) {
-            Log::info('LoadCurrentProfessional blocked account', [
+            Log::debug('LoadCurrentProfessional blocked account', [
                 'uid' => $uid,
                 'status' => $status,
             ]);
@@ -60,7 +60,7 @@ class LoadCurrentProfessional
 
         $request->attributes->set('professional', $professional);
 
-        Log::info('LoadCurrentProfessional before next middleware');
+        Log::debug('LoadCurrentProfessional before next middleware');
 
         return $next($request);
     }

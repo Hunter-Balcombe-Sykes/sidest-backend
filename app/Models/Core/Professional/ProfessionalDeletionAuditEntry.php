@@ -41,6 +41,13 @@ class ProfessionalDeletionAuditEntry extends BaseModel
         'created_at',
     ];
 
+    // PII fields — never expose in serialisation (API responses, logs, job payloads)
+    protected $hidden = [
+        'professional_email_snapshot',
+        'ip_address',
+        'user_agent',
+    ];
+
     protected $casts = [
         'metadata' => 'array',
         'created_at' => 'datetime',
