@@ -9,7 +9,6 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -20,10 +19,6 @@ class AffiliateProductCatalogService
     ) {}
 
     private const STOREFRONT_PRODUCTS_PER_PAGE = 50;
-
-    private const CACHE_TTL_SECONDS = 300;   // 5 minutes
-
-    private const CACHE_PREFIX = 'sidest:brand_catalog:';
 
     private const COLLECTION_PRODUCTS_QUERY = <<<'GRAPHQL'
 query collectionProducts($handle: String!, $first: Int!, $after: String) {
@@ -119,11 +114,7 @@ GRAPHQL;
      */
     public function fetchActiveCatalog(string $brandProfessionalId): array
     {
-        return Cache::remember(
-            self::CACHE_PREFIX."storefront:{$brandProfessionalId}",
-            self::CACHE_TTL_SECONDS,
-            fn () => $this->queryStorefrontCatalog($brandProfessionalId)
-        );
+        return $this->queryStorefrontCatalog($brandProfessionalId);
     }
 
     /**
@@ -403,39 +394,31 @@ GRAPHQL;
      */
     private function fetchCollectionGids(ProfessionalIntegration $integration, string $metadataKey): array
     {
-        $integrationId = (string) $integration->id;
+        try {
+            $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+            $handle = trim((string) Arr::get($metadata, $metadataKey, ''));
 
-        return Cache::remember(
-            self::CACHE_PREFIX."collection_gids:{$integrationId}:{$metadataKey}",
-            self::CACHE_TTL_SECONDS,
-            function () use ($integration, $metadataKey) {
-                try {
-                    $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-                    $handle = trim((string) Arr::get($metadata, $metadataKey, ''));
-
-                    if ($handle === '') {
-                        return [];
-                    }
-
-                    $collectionGid = $this->brandCatalogService->resolveCollectionGid($integration, $handle);
-
-                    if (! $collectionGid) {
-                        return [];
-                    }
-
-                    $products = $this->brandCatalogService->fetchCollectionProducts($integration, $collectionGid);
-
-                    return array_map(fn (array $p) => $p['gid'] ?? '', $products);
-                } catch (\Throwable $e) {
-                    Log::warning('Failed to fetch collection GIDs for affiliate catalog.', [
-                        'metadata_key' => $metadataKey,
-                        'error' => $e->getMessage(),
-                    ]);
-
-                    return [];
-                }
+            if ($handle === '') {
+                return [];
             }
-        );
+
+            $collectionGid = $this->brandCatalogService->resolveCollectionGid($integration, $handle);
+
+            if (! $collectionGid) {
+                return [];
+            }
+
+            $products = $this->brandCatalogService->fetchCollectionProducts($integration, $collectionGid);
+
+            return array_map(fn (array $p) => $p['gid'] ?? '', $products);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to fetch collection GIDs for affiliate catalog.', [
+                'metadata_key' => $metadataKey,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
     }
 
     /**
@@ -446,44 +429,38 @@ GRAPHQL;
      */
     private function fetchBrandMetafieldMap(string $brandProfessionalId): array
     {
-        return Cache::remember(
-            self::CACHE_PREFIX."metafields:{$brandProfessionalId}",
-            self::CACHE_TTL_SECONDS,
-            function () use ($brandProfessionalId) {
-                try {
-                    $brand = Professional::find($brandProfessionalId);
+        try {
+            $brand = Professional::find($brandProfessionalId);
 
-                    if (! $brand) {
-                        return [];
-                    }
-
-                    $products = $this->brandCatalogService->fetchBrandCatalog($brand);
-                } catch (\Throwable $e) {
-                    Log::warning('Failed to fetch brand metafields for affiliate catalog.', [
-                        'brand_professional_id' => $brandProfessionalId,
-                        'error' => $e->getMessage(),
-                    ]);
-
-                    return [];
-                }
-
-                $map = [];
-                foreach ($products as $product) {
-                    $gid = $product['gid'] ?? '';
-                    if ($gid === '') {
-                        continue;
-                    }
-
-                    $metafields = $product['metafields'] ?? [];
-                    $map[$gid] = [
-                        'commission_override' => isset($metafields['commission_override']) ? (float) $metafields['commission_override'] : null,
-                        'affiliate_discount_pct' => isset($metafields['affiliate_discount_pct']) ? (float) $metafields['affiliate_discount_pct'] : null,
-                    ];
-                }
-
-                return $map;
+            if (! $brand) {
+                return [];
             }
-        );
+
+            $products = $this->brandCatalogService->fetchBrandCatalog($brand);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to fetch brand metafields for affiliate catalog.', [
+                'brand_professional_id' => $brandProfessionalId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
+
+        $map = [];
+        foreach ($products as $product) {
+            $gid = $product['gid'] ?? '';
+            if ($gid === '') {
+                continue;
+            }
+
+            $metafields = $product['metafields'] ?? [];
+            $map[$gid] = [
+                'commission_override' => isset($metafields['commission_override']) ? (float) $metafields['commission_override'] : null,
+                'affiliate_discount_pct' => isset($metafields['affiliate_discount_pct']) ? (float) $metafields['affiliate_discount_pct'] : null,
+            ];
+        }
+
+        return $map;
     }
 
     /**
