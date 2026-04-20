@@ -271,6 +271,80 @@ GRAPHQL;
     }
 
     /**
+     * Diagnostic probe: runs a minimal products query against Shopify and
+     * returns the raw response + cost extension so we can see exactly what
+     * Shopify is saying when the regular catalog fetch returns empty.
+     * Intended for ad-hoc debugging via the /brand/catalog/debug route —
+     * safe to leave in place because it's auth-gated and read-only, but
+     * can be removed once the current investigation is done.
+     *
+     * @return array{
+     *   shop: array<string, mixed>|null,
+     *   products_total_edges: int,
+     *   products_sample: array<int, array{id: string, title: string, status: string}>,
+     *   errors: array,
+     *   cost: array<string, mixed>|null,
+     *   http_status: int,
+     *   scopes_granted: array<int, string>,
+     * }
+     */
+    public function probeProductsQuery(Professional $brand): array
+    {
+        $resolved = $this->resolveBrandIntegration($brand);
+        $shopDomain = $resolved['shop_domain'];
+        $accessToken = $resolved['access_token'];
+        $metadata = $resolved['metadata'];
+        $apiVersion = (string) config('services.shopify.api_version', '2025-01');
+
+        $query = <<<'GRAPHQL'
+        query probe {
+          shop { id name myshopifyDomain }
+          products(first: 3) {
+            edges { node { id title status } }
+            pageInfo { hasNextPage }
+          }
+        }
+        GRAPHQL;
+
+        $httpStatus = 0;
+        $responseBody = [];
+        try {
+            $response = Http::withHeaders([
+                'X-Shopify-Access-Token' => $accessToken,
+                'Content-Type' => 'application/json',
+                'Shopify-GraphQL-Cost-Debug' => '1',
+            ])->timeout(10)->post(
+                "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
+                ['query' => $query]
+            );
+            $httpStatus = $response->status();
+            $responseBody = $response->json() ?? [];
+        } catch (\Throwable $e) {
+            Log::warning('Shopify probe: request failed', ['error' => $e->getMessage()]);
+        }
+
+        $edges = Arr::get($responseBody, 'data.products.edges', []);
+        $sample = array_map(
+            fn (array $edge) => [
+                'id' => (string) Arr::get($edge, 'node.id', ''),
+                'title' => (string) Arr::get($edge, 'node.title', ''),
+                'status' => (string) Arr::get($edge, 'node.status', ''),
+            ],
+            is_array($edges) ? $edges : []
+        );
+
+        return [
+            'shop' => Arr::get($responseBody, 'data.shop'),
+            'products_total_edges' => is_array($edges) ? count($edges) : 0,
+            'products_sample' => $sample,
+            'errors' => Arr::get($responseBody, 'errors', []),
+            'cost' => Arr::get($responseBody, 'extensions.cost'),
+            'http_status' => $httpStatus,
+            'scopes_granted' => is_array(Arr::get($metadata, 'scopes')) ? Arr::get($metadata, 'scopes') : [],
+        ];
+    }
+
+    /**
      * Fetch the brand's full product catalog with sidest.* metafield values (cached).
      *
      * @return array<int, array<string, mixed>>

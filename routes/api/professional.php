@@ -272,6 +272,11 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         // Brand Catalog Management
         Route::get('/brand/catalog', [BrandCatalogController::class, 'index']);
         Route::get('/brand/catalog/all', [BrandCatalogController::class, 'all']);
+        // Temporary diagnostic probe — returns raw Shopify response for a
+        // minimal products query so we can see exactly what Shopify returns
+        // (shop info, products sample, cost, errors, granted scopes). Safe
+        // to leave in place; auth-gated, read-only, no mutations.
+        Route::get('/brand/catalog/debug', [BrandCatalogController::class, 'debug']);
         Route::patch('/brand/catalog/{productGid}/metafields', [BrandCatalogController::class, 'updateMetafields'])
             ->middleware('throttle:brand-catalog-writes')
             ->where('productGid', '.*');

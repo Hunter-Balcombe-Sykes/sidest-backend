@@ -75,6 +75,34 @@ class BrandCatalogController extends ApiController
     }
 
     /**
+     * GET /brand/catalog/debug
+     *
+     * Diagnostic probe: runs a minimal products query against Shopify and
+     * returns the raw response (shop info, sample products, cost breakdown,
+     * granted scopes). Lets us tell "empty store" apart from "auth/scope
+     * problem" apart from "cost-budget exceeded" without scraping Laravel
+     * Cloud logs. Auth-gated to brand accounts; read-only.
+     */
+    public function debug(Request $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+
+        if (! $pro->isBrand()) {
+            return $this->error('This endpoint is only available for brand accounts.', 403);
+        }
+
+        try {
+            $probe = $this->catalogService->probeProductsQuery($pro);
+        } catch (\RuntimeException $e) {
+            return $this->error($e->getMessage(), $e->getCode() ?: 500);
+        } catch (\Throwable $e) {
+            return $this->error('Probe failed: '.$e->getMessage(), 502);
+        }
+
+        return $this->success($probe);
+    }
+
+    /**
      * PATCH /brand/catalog/{productGid}/metafields
      *
      * Bulk update any combination of sidest.* metafields on one product in a single
