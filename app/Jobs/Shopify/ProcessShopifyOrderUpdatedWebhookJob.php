@@ -6,11 +6,11 @@ use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 // V2: Processes orders/updated webhooks — handles full refunds, partial refunds, and cancellations by reversing commission ledger entries.
@@ -101,8 +101,8 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
             }
         }
 
-        $reversalsCreated = 0;
-
+        // Phase 1: flatten nested refund loops into candidates without touching the DB
+        $candidates = [];
         foreach ($refunds as $refund) {
             if (! is_array($refund)) {
                 continue;
@@ -133,7 +133,6 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                     continue;
                 }
 
-                // Calculate reversal amount using the original commission rate
                 $commissionRate = (float) $originalAccrual->commission_rate;
                 $reversalCents = (int) round($refundSubtotal * ($commissionRate / 100) * 100);
 
@@ -141,10 +140,9 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                     continue;
                 }
 
-                $idempotencyKey = "shopify_order_{$orderId}_refund_{$refundId}_line_{$lineItemId}";
-
-                try {
-                    CommissionLedgerEntry::create([
+                $candidates[] = [
+                    'idempotency_key' => "shopify_order_{$orderId}_refund_{$refundId}_line_{$lineItemId}",
+                    'data' => [
                         'shopify_order_id' => $orderId,
                         'brand_professional_id' => (string) $originalAccrual->brand_professional_id,
                         'affiliate_professional_id' => (string) $originalAccrual->affiliate_professional_id,
@@ -154,7 +152,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                         'currency_code' => $originalAccrual->currency_code,
                         'commission_rate' => $commissionRate,
                         'rate_source' => 'refund',
-                        'idempotency_key' => $idempotencyKey,
+                        'idempotency_key' => "shopify_order_{$orderId}_refund_{$refundId}_line_{$lineItemId}",
                         'calculation_metadata' => [
                             'order_id' => $orderId,
                             'refund_id' => $refundId,
@@ -163,17 +161,28 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                             'original_accrual_id' => (string) $originalAccrual->id,
                         ],
                         'occurred_at' => now(),
-                    ]);
-
-                    $reversalsCreated++;
-                } catch (QueryException $e) {
-                    // Unique constraint violation — already processed this refund line
-                    if ($e->getCode() === '23505') {
-                        continue;
-                    }
-                    throw $e;
-                }
+                    ],
+                ];
             }
+        }
+
+        // Phase 2: pre-filter duplicates in one query, then insert in one transaction.
+        $reversalsCreated = 0;
+        if (! empty($candidates)) {
+            $candidateKeys = array_column($candidates, 'idempotency_key');
+            $existingKeys = CommissionLedgerEntry::whereIn('idempotency_key', $candidateKeys)
+                ->pluck('idempotency_key')
+                ->flip()
+                ->all();
+
+            $newEntries = array_filter($candidates, fn ($c) => ! isset($existingKeys[$c['idempotency_key']]));
+
+            DB::transaction(function () use ($newEntries, &$reversalsCreated): void {
+                foreach ($newEntries as $entry) {
+                    CommissionLedgerEntry::create($entry['data']);
+                    $reversalsCreated++;
+                }
+            });
         }
 
         if ($reversalsCreated > 0) {
