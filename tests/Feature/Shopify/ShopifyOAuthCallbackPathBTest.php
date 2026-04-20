@@ -52,22 +52,8 @@ beforeEach(function () {
         }
     }
 
-    // Schema-prefixed tables — must use core. prefix to match model $table definitions
-    $conn->statement('CREATE TABLE IF NOT EXISTS core.professionals (
-        id TEXT PRIMARY KEY,
-        auth_user_id TEXT,
-        handle TEXT,
-        handle_lc TEXT,
-        display_name TEXT,
-        primary_email TEXT,
-        professional_type TEXT DEFAULT "brand",
-        status TEXT DEFAULT "active",
-        first_name TEXT,
-        last_name TEXT,
-        deleted_at TEXT,
-        created_at TEXT,
-        updated_at TEXT
-    )');
+    // Schema-prefixed tables — use shared helper to avoid DDL drift
+    setupProfessionalsTable();
 
     // Needed for Path A check (must be empty to reach Path B/C in these tests)
     $conn->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
@@ -123,7 +109,7 @@ it('takes Path B and calls handleExistingBrandConnect when shop email matches a 
     $brandSignup = Mockery::mock(BrandSignupService::class);
     $brandSignup->shouldReceive('handleExistingBrandConnect')
         ->once()
-        ->with($professional, $shop, 'shpat_fake', Mockery::any(), Mockery::any())
+        ->with(Mockery::type(Professional::class), $shop, 'shpat_fake', Mockery::any(), Mockery::any())
         ->andReturn($fakeResult);
     app()->instance(BrandSignupService::class, $brandSignup);
 
