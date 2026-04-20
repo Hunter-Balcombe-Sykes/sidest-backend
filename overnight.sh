@@ -3,8 +3,9 @@
 # overnight.sh — Run a Claude Code prompt unattended, sleeping through usage-limit resets.
 #
 # Usage:
-#   ./overnight.sh "your prompt here"
-#   ./overnight.sh  # omit to start fresh with no prompt (or use --continue from the start)
+#   ./overnight.sh prompt.txt          # recommended: read prompt from file (safe with backticks, quotes, etc.)
+#   ./overnight.sh "simple prompt"     # inline string — avoid for prompts containing backticks or $()
+#   ./overnight.sh                     # no prompt — useful when chaining with --continue
 #
 # Env overrides:
 #   RESET_WAIT=<seconds>   How long to sleep on a usage limit (default: 18300 = 5h 5m)
@@ -15,7 +16,7 @@ set -euo pipefail
 RESET_WAIT="${RESET_WAIT:-18300}"
 MAX_RETRIES="${MAX_RETRIES:-5}"
 LOGFILE="claude-overnight.log"
-PROMPT="${1:-}"
+ARG="${1:-}"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,13 @@ resume_time() {
 hit_limit() {
     grep -qiE "rate.?limit|usage.?limit|quota exceeded|too many requests|overloaded|please wait" "$1" 2>/dev/null
 }
+
+# Resolve prompt: if ARG is a readable file, slurp it; otherwise treat as literal string.
+if [[ -f "$ARG" && -r "$ARG" ]]; then
+    PROMPT=$(< "$ARG")
+else
+    PROMPT="$ARG"
+fi
 
 # ── first run ─────────────────────────────────────────────────────────────────
 
