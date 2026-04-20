@@ -5,6 +5,7 @@ namespace App\Jobs\Stripe;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -14,13 +15,18 @@ use Illuminate\Support\Facades\Log;
 // V2: Core. Processes a single commission payout (wallet debit → card charge → Stripe transfer).
 // Dispatched by ProcessCommissionPayoutsJob for each eligible payout batch.
 // Idempotent: processPayoutBatch resumes from the payout's current status so Horizon retries are safe.
-class ExecuteCommissionPayoutJob implements ShouldQueue
+// ShouldBeUnique prevents two workers racing on the same payout if the daily cron re-dispatches
+// a job that is already queued or processing (e.g. waiting on a backoff delay).
+class ExecuteCommissionPayoutJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 5;
 
     public int $timeout = 120;
+
+    // Uniqueness lock TTL — slightly longer than timeout so the lock outlives the job.
+    public int $uniqueFor = 180;
 
     /**
      * Backoff between Horizon retries in seconds.
@@ -32,6 +38,11 @@ class ExecuteCommissionPayoutJob implements ShouldQueue
     }
 
     public function __construct(public readonly string $payoutId) {}
+
+    public function uniqueId(): string
+    {
+        return $this->payoutId;
+    }
 
     public function handle(CommissionPayoutService $payoutService): void
     {
@@ -50,5 +61,22 @@ class ExecuteCommissionPayoutJob implements ShouldQueue
             'payout_id' => $this->payoutId,
             'error'     => $e->getMessage(),
         ]);
+
+        // Transition the payout to `failed` so it surfaces in the staff dashboard
+        // and unblocks the manual retry flow. Without this, a payout stuck in
+        // `collecting` or `transferring` after all retries is invisible to staff
+        // and the wallet debit has no error surface. wallet_debit_cents and
+        // stripe_payment_intent_id on the record give staff enough context for
+        // manual reconciliation.
+        $payout = CommissionPayout::find($this->payoutId);
+        if ($payout && ! in_array($payout->status, ['completed', 'failed'], true)) {
+            $payout->update([
+                'status'         => 'failed',
+                'failure_code'   => 'job_exhausted',
+                'failure_reason' => 'Payout job exhausted all Horizon retries after transient errors. '
+                    . 'Check wallet_debit_cents and stripe_payment_intent_id for manual reconciliation. '
+                    . $e->getMessage(),
+            ]);
+        }
     }
 }

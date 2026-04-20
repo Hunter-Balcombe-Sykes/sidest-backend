@@ -10,7 +10,9 @@ use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Stripe\Exception\ApiConnectionException;
 use Stripe\Exception\ApiErrorException;
+use Stripe\Exception\RateLimitException;
 use Stripe\StripeClient;
 
 // V2: Core. Processes eligible commission payouts with hybrid funding (wallet balance first, card charge for shortfall). Transfers net amount to affiliate via Stripe Connect (80/20 split).
@@ -355,7 +357,13 @@ class CommissionPayoutService
                 ], ['idempotency_key' => 'pi_'.$payout->id.$retryKey]);
 
                 if ($paymentIntent->status !== 'succeeded') {
-                    // SCA required — refund wallet debit and mark pending
+                    // SCA required — cancel the PI so the idempotency key is freed for the next
+                    // attempt. Without cancellation the same key returns this stuck PI for 24h.
+                    try {
+                        $this->stripe->paymentIntents->cancel($paymentIntent->id);
+                    } catch (\Throwable) {
+                        // Non-critical: PI may already be in a terminal state
+                    }
                     if ($walletDebitCents > 0) {
                         $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
                     }
@@ -370,8 +378,13 @@ class CommissionPayoutService
                     'stripe_payment_intent_id' => $paymentIntent->id,
                     'status'                   => 'collected',
                 ]);
+            } catch (ApiConnectionException | RateLimitException $e) {
+                // Transient error — re-throw so Horizon retries with backoff.
+                // Wallet debit is already committed in 'collecting' status; the
+                // idempotent resume will skip re-debiting on the next attempt.
+                throw $e;
             } catch (ApiErrorException $e) {
-                // Card charge failed — refund wallet debit
+                // Terminal card failure (declined, invalid PM, SCA permanently blocked, etc.)
                 if ($walletDebitCents > 0) {
                     $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
                 }
@@ -443,8 +456,14 @@ class CommissionPayoutService
             }
 
             return true;
+        } catch (ApiConnectionException | RateLimitException $e) {
+            // Transient error — re-throw so Horizon retries from 'transferring' status.
+            // Wallet and charge are NOT reversed: if the transfer succeeded on Stripe's side
+            // but the response was lost in transit, the idempotency key returns the same
+            // transfer on retry rather than creating a duplicate.
+            throw $e;
         } catch (ApiErrorException $e) {
-            // Transfer failed — credit wallet back, then attempt to auto-refund the card charge.
+            // Terminal transfer failure — credit wallet back, then attempt to auto-refund.
             if ($walletDebitCents > 0) {
                 $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
             }
