@@ -284,6 +284,15 @@ Decided against (for now):
 
 Metafield access flip rollout: the existing definition with `access: []` is delete+recreated with `PUBLIC_READ` by `CreateShopifyMetafieldsJob` on its next run per store. Underlying values survive (`deleteAllAssociatedMetafields: false`).
 
+### 7.3 Disconnect / uninstall (shipped)
+
+Two disconnect paths, with different blast radius:
+
+- **Side St dashboard → Integrations → Disconnect** (`POST /api/shopify/disconnect`). Runs [`ShopifyTeardownService`](../app/Services/Shopify/ShopifyTeardownService.php) while the access token is still valid and deletes **everything** the install created: the automatic Side St Price discount, the four Side St collections, every `sidest.*` metafield definition on PRODUCT / PRODUCTVARIANT / SHOP owner types (with `deleteAllAssociatedMetafields: true` so values go too), the Side St storefront access token, the Side St sales channel publication. Then revokes the OAuth token, purges `commerce.affiliate_product_selections` for this brand, and deletes the `ProfessionalIntegration` row. Best-effort per step — partial failures log but don't block the next step.
+- **Shopify admin → Uninstall** (`POST /api/webhooks/shopify/app-uninstalled`). Shopify invalidates the token BEFORE delivering this webhook, so there's no way to call the Admin API from here. The handler purges affiliate selections + clears the local integration row. Shopify auto-deletes the app-backed automatic discount and webhook subscriptions on its side; the metafield definitions, collections, and storefront access token survive in the merchant's shop until they reinstall or clean up manually.
+
+The disconnect copy in [IntegrationsSection](../../../app/\(app\)/account/\(dashboard\)/settings/integrations-section.tsx) prompts brands to disconnect via Side St first for a full sweep.
+
 ### 7.1 Per-affiliate variant curation (shipped)
 
 Previously deferred, now implemented. Affiliates can narrow a product selection to a subset of the brand's currently-enabled variants:

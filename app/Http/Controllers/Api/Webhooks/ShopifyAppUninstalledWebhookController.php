@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ValidatesShopifyWebhookHmac;
+use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -53,9 +54,27 @@ class ShopifyAppUninstalledWebhookController extends ApiController
             'provider_metadata' => $metadata,
         ]);
 
+        // Purge affiliate curated selections for this brand. They reference
+        // Shopify product GIDs that will go stale the moment the brand
+        // reinstalls (new IDs) or stay stale if they never do — either way
+        // they're not meaningful while the integration is torn down.
+        //
+        // Note: we can't call the Shopify Admin API from here because the
+        // access token has already been revoked by Shopify BEFORE this
+        // webhook fires. Metafield definitions, collections, and the
+        // storefront access token will remain in the brand's store unless
+        // they clicked "Disconnect" in the Side St dashboard first (that
+        // path runs the full teardown via ShopifyTeardownService while the
+        // token is still alive). See docs/brand-catalog-v2.md for the
+        // recommended disconnect flow.
+        $deletedSelections = AffiliateProductSelection::query()
+            ->where('brand_professional_id', $integration->professional_id)
+            ->delete();
+
         Log::info('Shopify app uninstalled — integration disconnected.', [
             'professional_id' => (string) $integration->professional_id,
             'shop_domain' => $shopDomain,
+            'deleted_selections' => $deletedSelections,
         ]);
 
         return $this->success(['received' => true]);

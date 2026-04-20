@@ -14,6 +14,8 @@ use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
+use App\Models\Commerce\AffiliateProductSelection;
+use App\Services\Shopify\ShopifyTeardownService;
 use App\Services\Shopify\ShopProfileAutoFillService;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Http\Client\ConnectionException;
@@ -32,6 +34,7 @@ class ShopifyIntegrationController extends ApiController
 
     public function __construct(
         private readonly BrandAccessService $brandAccess,
+        private readonly ShopifyTeardownService $teardownService,
     ) {}
 
     private function currentShopifyIntegrationForBrand(string $brandProfessionalId): ?ProfessionalIntegration
@@ -274,6 +277,29 @@ class ShopifyIntegrationController extends ApiController
         ]);
     }
 
+    /**
+     * Disconnect the brand's Shopify integration with a full server-side
+     * sweep. Unlike a Shopify-initiated uninstall (where the token is
+     * revoked BEFORE we hear about it), this runs while we still hold a
+     * valid token, so we can delete:
+     *   - The Side St Price automatic discount
+     *   - The four Side St collections
+     *   - Every sidest.* metafield definition (with values)
+     *   - The Side St storefront access token
+     *   - The Side St sales channel publication
+     *   - Revoke the OAuth token itself
+     *
+     * Then locally:
+     *   - Purge affiliate_product_selections scoped to this brand (any
+     *     affiliate-curated lists become meaningless once the catalog is
+     *     gone)
+     *   - Delete the ProfessionalIntegration row
+     *
+     * Safe to call when no integration exists (returns success with an
+     * empty teardown summary). Per-step failures in the Shopify sweep are
+     * logged but don't abort the local cleanup — a brand who's already
+     * uninstalled in Shopify still gets their local state cleared cleanly.
+     */
     public function disconnect(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
@@ -296,6 +322,34 @@ class ShopifyIntegrationController extends ApiController
 
         $actorProfessional = $this->currentProfessional($request);
 
+        $integration = $this->currentShopifyIntegrationForBrand($targetBrandId);
+
+        $teardownSummary = null;
+        if ($integration && ! empty($integration->access_token)) {
+            try {
+                $teardownSummary = $this->teardownService->teardownForIntegration($integration);
+            } catch (\Throwable $e) {
+                // The teardown service already logs per-step failures; this
+                // catch only fires on a truly unexpected exception. We keep
+                // going so the local disconnect still runs — leaving the
+                // brand half-disconnected (Shopify side still present but
+                // Side St thinks it's gone) is worse than orphaning a few
+                // Shopify-side artifacts we can't re-reach.
+                Log::error('Shopify teardown threw unexpectedly; continuing with local disconnect', [
+                    'actor_professional_id' => (string) $actorProfessional->id,
+                    'brand_professional_id' => $targetBrandId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Affiliate curated selections only make sense while this brand has
+        // a catalog to curate from. Blow them away so the affiliates don't
+        // end up with dangling GIDs pointing at deleted products.
+        $deletedSelections = AffiliateProductSelection::query()
+            ->where('brand_professional_id', $targetBrandId)
+            ->delete();
+
         ProfessionalIntegration::query()
             ->where('professional_id', $targetBrandId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -304,11 +358,15 @@ class ShopifyIntegrationController extends ApiController
         Log::info('Shopify disconnected', [
             'actor_professional_id' => (string) $actorProfessional->id,
             'brand_professional_id' => $targetBrandId,
+            'teardown_summary' => $teardownSummary,
+            'deleted_selections' => $deletedSelections,
         ]);
 
         return $this->success([
             'connected' => false,
             'brand_professional_id' => $targetBrandId,
+            'teardown' => $teardownSummary,
+            'selections_deleted' => $deletedSelections,
         ]);
     }
 
