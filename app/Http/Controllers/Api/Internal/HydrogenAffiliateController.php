@@ -7,6 +7,7 @@ use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
+use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use Illuminate\Http\JsonResponse;
@@ -63,12 +64,23 @@ class HydrogenAffiliateController extends ApiController
         }
 
         $affiliateSite = Site::where('professional_id', $affiliate->id)->first();
-        $gallery = $this->getAffiliateGallery($affiliateSite);
+        // Gallery images are gated by the gallery section block's publication
+        // state (is_active). The per-image is_active + processing_state filter
+        // inside getAffiliateGallery() is the second gate — together they
+        // ensure Hydrogen only ever sees images the dashboard marked Live.
+        $gallerySectionLive = $affiliateSite
+            ? $this->isSectionLive((string) $affiliateSite->id, 'gallery')
+            : false;
+        $gallery = $gallerySectionLive ? $this->getAffiliateGallery($affiliateSite) : [];
         // Content pool images — affiliate's per-sitepage overrides that the
         // Hydrogen loader merges over the brand's default placeholders. Shape
         // matches the gallery payload so the Hydrogen side can read either
         // list through the same SitepageImage normaliser.
         $contentImages = $this->getAffiliateContent($affiliateSite);
+        // Links are gated per-row via block.is_active (each has its own
+        // Draft/Live toggle in the dashboard), so no section-level gate is
+        // required here.
+        $links = $this->getAffiliateLinks($affiliateSite);
 
         return $this->success([
             'affiliate_id' => (string) $affiliate->id,
@@ -77,6 +89,7 @@ class HydrogenAffiliateController extends ApiController
             'has_gallery' => ! empty($gallery),
             'gallery' => $gallery,
             'content_images' => $contentImages,
+            'links' => $links,
         ]);
     }
 
@@ -170,6 +183,50 @@ class HydrogenAffiliateController extends ApiController
     private function getAffiliateContent(?Site $site): array
     {
         return $this->getAffiliatePool($site, SiteMedia::POOL_CONTENT);
+    }
+
+    /**
+     * Returns whether the given section block (e.g. 'gallery') is currently
+     * Live on the site. The dashboard's section PublishSegmentedControl
+     * writes is_active on the matching site.blocks row; missing rows are
+     * treated as not-live so Hydrogen never sees content that was never
+     * explicitly published.
+     */
+    private function isSectionLive(string $siteId, string $blockType): bool
+    {
+        return (bool) Block::query()
+            ->where('site_id', $siteId)
+            ->where('block_group', 'sections')
+            ->where('block_type', $blockType)
+            ->where('is_active', true)
+            ->exists();
+    }
+
+    /**
+     * Returns the affiliate's live link blocks ({title, url} only). Each
+     * link's dashboard Draft/Live toggle is its own is_active flag — there
+     * is no section-level gate for links. Rows missing a title or url are
+     * skipped so themes never see blanks.
+     */
+    private function getAffiliateLinks(?Site $site): array
+    {
+        if (! $site) {
+            return [];
+        }
+
+        return Block::query()
+            ->where('site_id', $site->id)
+            ->where('block_group', 'links')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn (Block $block): array => [
+                'title' => is_string($block->title) ? trim($block->title) : '',
+                'url' => is_string($block->url) ? trim($block->url) : '',
+            ])
+            ->filter(fn (array $item) => $item['title'] !== '' && $item['url'] !== '')
+            ->values()
+            ->all();
     }
 
     /**
