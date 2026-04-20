@@ -52,8 +52,6 @@ it('createUser returns created=false when GoTrue v2 returns existing user id in 
     ]);
 });
 
-// Pre-fix: currently triggers the pagination fallback and does not throw.
-// Expected to fail until Task 2 removes the fallback.
 it('createUser throws when 422 arrives without user id in body', function () {
     Http::fake([
         'https://test.supabase.co/auth/v1/admin/users' => Http::response([
