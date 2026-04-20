@@ -77,7 +77,11 @@ return [
         'webhook_secret' => env('SHOPIFY_WEBHOOK_SECRET', env('SHOPIFY_API_SECRET')),
         'fallback_secret' => env('SHOPIFY_FALLBACK_SECRET'),
         'webhook_orders_topic' => env('SHOPIFY_WEBHOOK_ORDERS_TOPIC', 'orders/paid'),
-        'app_handle' => env('SHOPIFY_APP_HANDLE', 'side-st'),
+        // Must match `handle` in Sidest-Embedded/shopify.app.toml. Shopify's
+        // admin routes apps under /store/<shop>/apps/<app_handle>, so a
+        // mismatch 404s the post-install redirect. Override via env when
+        // multiple app builds share this codebase.
+        'app_handle' => env('SHOPIFY_APP_HANDLE', 'side-st-hydrogen'),
     ],
 
 ];
