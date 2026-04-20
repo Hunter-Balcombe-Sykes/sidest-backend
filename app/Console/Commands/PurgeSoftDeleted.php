@@ -43,18 +43,24 @@ class PurgeSoftDeleted extends Command
     private function purgeModel(string $modelClass, Carbon $cutoff): int
     {
         $count = 0;
+        $failed = 0;
 
         $modelClass::onlyTrashed()
             ->where('deleted_at', '<', $cutoff)
             ->orderBy('deleted_at')
-            ->chunk(500, function ($rows) use (&$count) {
+            ->chunk(500, function ($rows) use (&$count, &$failed) {
                 foreach ($rows as $row) {
-                    $row->forceDelete();
-                    $count++;
+                    try {
+                        $row->forceDelete();
+                        $count++;
+                    } catch (\Throwable $e) {
+                        $failed++;
+                        report($e);
+                    }
                 }
             });
 
-        $this->line(class_basename($modelClass).": {$count}");
+        $this->line(class_basename($modelClass).": {$count} purged, {$failed} failed.");
 
         return $count;
     }

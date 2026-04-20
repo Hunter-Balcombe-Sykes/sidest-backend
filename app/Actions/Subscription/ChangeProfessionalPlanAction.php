@@ -78,16 +78,12 @@ class ChangeProfessionalPlanAction
             return $subscription->fresh();
         }
 
-        // Paid -> Paid: update the price on the existing Stripe subscription
+        // Paid -> Paid: update price on Stripe; customer.subscription.updated webhook
+        // reconciles plan_id and cancel_at_period_end locally (same as paid->free path).
         $this->billing->updateSubscriptionPlan(
             $subscription->stripe_subscription_id,
             $newPlan,
         );
-
-        $subscription->update([
-            'plan_id' => $newPlan->id,
-            'cancel_at_period_end' => false,
-        ]);
 
         return $subscription->fresh();
     }
