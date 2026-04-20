@@ -28,7 +28,12 @@ return [
             '#^https?://172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}(?::\d+)?$#',
         ] : []
     ),
-    'allowed_headers' => ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    // Wildcard is safe here because supports_credentials => false — the
+    // browser's wildcard+credentials restriction doesn't apply. Restricting to
+    // an explicit list broke legitimate preflights where the frontend sends
+    // headers outside the four allowed (e.g. XSRF, Supabase client headers).
+    // Server-side auth still enforced via Authorization: Bearer JWT regardless.
+    'allowed_headers' => ['*'],
     'exposed_headers' => [],
     'max_age' => 0,
     'supports_credentials' => false,
