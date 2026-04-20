@@ -37,16 +37,22 @@ class ShopifyAppOAuthController extends ApiController
         }
 
         $apiKey = (string) config('services.shopify.api_key');
-        $scopes = (string) config('services.shopify.app_scopes', 'read_products,read_orders,write_orders');
         $redirectUri = rtrim((string) config('app.url'), '/').'/api/shopify/callback';
         $nonce = bin2hex(random_bytes(16));
 
         cache()->put("shopify_oauth_nonce_{$shop}", $nonce, now()->addMinutes(10));
 
+        // Managed installation: omit the `scope` parameter so Shopify grants
+        // every scope declared in Sidest-Embedded/shopify.app.toml
+        // access_scopes block (pushed via `shopify app deploy`). Passing a
+        // narrower scope= here would override the toml and short-grant the
+        // merchant — that's how previous installs ended up without
+        // read_products despite the toml listing it.
+        //
+        // Ref: https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/authorization-code-grant
         $authUrl = "https://{$shop}/admin/oauth/authorize?"
             .http_build_query([
                 'client_id' => $apiKey,
-                'scope' => $scopes,
                 'redirect_uri' => $redirectUri,
                 'state' => $nonce,
             ]);
