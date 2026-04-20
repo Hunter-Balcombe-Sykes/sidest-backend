@@ -552,6 +552,10 @@ class ShopifyIntegrationController extends ApiController
         try {
             $response = Http::timeout(6)
                 ->connectTimeout(4)
+                // SSRF hardening: disable redirects. Without this, a public-IP
+                // storefront could 302 to an internal host (e.g. 169.254.169.254)
+                // and Guzzle would follow it — bypassing isPrivateHost above.
+                ->withOptions(['allow_redirects' => false])
                 ->withHeaders([
                     // Some Shopify storefronts block default PHP/curl user agents
                     // with a WAF rule. A real-browser UA sidesteps that without
