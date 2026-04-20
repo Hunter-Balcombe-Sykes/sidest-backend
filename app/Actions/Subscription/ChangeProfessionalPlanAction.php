@@ -15,6 +15,8 @@ class ChangeProfessionalPlanAction
 
     /**
      * Change the professional's current plan.
+     * On paid→paid switches, plan_id and cancel_at_period_end are reconciled
+     * asynchronously via the customer.subscription.updated webhook.
      *
      * @return Subscription|array{checkout_url: string, session_id: string}
      */
