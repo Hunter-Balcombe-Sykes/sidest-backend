@@ -238,6 +238,11 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
 
         // Shopify Integration
         Route::get('/shopify/status', [ShopifyIntegrationController::class, 'status']);
+        // Resolve a custom primary domain (e.g. radiorufus.com) or bare handle
+        // to the canonical <handle>.myshopify.com used by the OAuth flow.
+        // Throttled because it fires an outbound HTTP request on every call.
+        Route::get('/shopify/resolve-shop', [ShopifyIntegrationController::class, 'resolveShop'])
+            ->middleware('throttle:30,1');
         Route::post('/shopify/connect', [ShopifyIntegrationController::class, 'connect']);
         Route::post('/shopify/disconnect', [ShopifyIntegrationController::class, 'disconnect']);
         Route::get('/shopify/token', [ShopifyIntegrationController::class, 'token']);

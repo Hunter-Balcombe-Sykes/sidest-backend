@@ -16,9 +16,11 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Services\Shopify\ShopProfileAutoFillService;
 use App\Services\Store\BrandAccessService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -378,5 +380,149 @@ class ShopifyIntegrationController extends ApiController
             'integration_id' => (string) $integration->id,
             'brand_professional_id' => $targetBrandId,
         ]);
+    }
+
+    /**
+     * Resolve a merchant-facing Shopify domain (custom primary domain or
+     * raw handle) to the canonical `<handle>.myshopify.com` used by the
+     * OAuth authorize flow.
+     *
+     *   mystore                     -> mystore.myshopify.com            (rewrite-only)
+     *   mystore.myshopify.com       -> mystore.myshopify.com            (rewrite-only)
+     *   https://mystore/admin       -> mystore.myshopify.com            (rewrite-only)
+     *   radiorufus.com              -> <handle>.myshopify.com           (HTML discovery)
+     *
+     * The discovery path fetches the storefront HTML and matches a Shopify
+     * storefront global that embeds the canonical shop URL. Most non-headless
+     * Shopify themes still expose this — Hydrogen storefronts and heavily
+     * stripped themes won't, so the caller must surface a clear fallback
+     * error when we return null.
+     *
+     * Auth-gated (brand professionals + staff) because it lets us make
+     * arbitrary outbound HTTP requests on behalf of the caller — an abuse
+     * vector if left open.
+     */
+    public function resolveShop(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->query(), [
+            'domain' => ['required', 'string', 'max:255'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        $raw = (string) $validator->validated()['domain'];
+        $host = $this->stripDomainNoise($raw);
+
+        if ($host === '') {
+            return $this->error('Enter a valid Shopify store domain.', 422);
+        }
+
+        // Already a myshopify handle — no discovery needed.
+        if (preg_match('/^([a-z0-9][a-z0-9-]*)\.myshopify\.com$/', $host, $m)) {
+            return $this->success(['shop_domain' => "{$m[1]}.myshopify.com"]);
+        }
+
+        // Bare handle (no dots) — assume the caller typed the myshopify handle
+        // without the TLD and rewrite. This matches the frontend's shortcut UX.
+        if (preg_match('/^[a-z0-9][a-z0-9-]*$/', $host)) {
+            return $this->success(['shop_domain' => "{$host}.myshopify.com"]);
+        }
+
+        // Anything else is a potential custom storefront domain — try to
+        // discover the myshopify handle by scraping the homepage HTML.
+        $discovered = $this->discoverShopifyHandle($host);
+
+        if ($discovered === null) {
+            return $this->error(
+                "Couldn't find a Shopify store at {$host}. Enter your myshopify.com URL instead (Shopify admin → Settings → Domains).",
+                404
+            );
+        }
+
+        return $this->success(['shop_domain' => $discovered]);
+    }
+
+    /**
+     * Strip scheme, path, querystring, port, and lowercase — leaves just
+     * the hostname. Returns '' when the input can't be coerced into a host.
+     */
+    private function stripDomainNoise(string $raw): string
+    {
+        $trimmed = strtolower(trim($raw));
+        if ($trimmed === '') {
+            return '';
+        }
+
+        $withoutScheme = preg_replace('#^https?://#', '', $trimmed) ?? '';
+        $host = preg_replace('#[:/?#].*$#', '', $withoutScheme) ?? '';
+
+        return $host;
+    }
+
+    /**
+     * Fetch the storefront homepage and look for the embedded
+     * `Shopify.shop = "<handle>.myshopify.com"` global that most themes
+     * render inline. Returns the canonical shop domain or null.
+     *
+     * Network / parse failures are swallowed and translated into null —
+     * the caller turns that into a user-facing 404.
+     */
+    private function discoverShopifyHandle(string $host): ?string
+    {
+        $url = "https://{$host}/";
+
+        try {
+            $response = Http::timeout(6)
+                ->connectTimeout(4)
+                ->withHeaders([
+                    // Some Shopify storefronts block default PHP/curl user agents
+                    // with a WAF rule. A real-browser UA sidesteps that without
+                    // misrepresenting intent.
+                    'User-Agent' => 'Mozilla/5.0 (compatible; SidestShopResolver/1.0)',
+                    'Accept' => 'text/html,application/xhtml+xml',
+                ])
+                ->get($url);
+        } catch (ConnectionException $e) {
+            Log::info('Shopify resolveShop: connection failed', [
+                'host' => $host,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        } catch (\Throwable $e) {
+            Log::info('Shopify resolveShop: unexpected error', [
+                'host' => $host,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $body = (string) $response->body();
+
+        // Shopify themes commonly embed one of these:
+        //   Shopify.shop = "foo.myshopify.com"
+        //   "shop":"foo.myshopify.com"
+        //   shop: "foo.myshopify.com"
+        // All carry the canonical <handle>.myshopify.com; we take the first.
+        $patterns = [
+            '/Shopify\.shop\s*=\s*["\']([a-z0-9][a-z0-9-]*\.myshopify\.com)["\']/i',
+            '/["\']shop["\']\s*:\s*["\']([a-z0-9][a-z0-9-]*\.myshopify\.com)["\']/i',
+            '/([a-z0-9][a-z0-9-]*\.myshopify\.com)/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body, $m)) {
+                return strtolower($m[1]);
+            }
+        }
+
+        return null;
     }
 }
