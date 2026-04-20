@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\PublicSite\PublicMarketingPreferenceController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use Illuminate\Support\Facades\Route;
 
+// TODO(v1): all routes in this file should be prefixed /v1/ once frontend is ready for the migration
+
 $publicDomain = config('sidest.public_domain');
 
 // Public/Anon

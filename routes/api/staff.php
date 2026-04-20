@@ -26,6 +26,8 @@ use App\Http\Controllers\Api\Staff\StaffSite\StaffSiteController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffStatsController;
 use Illuminate\Support\Facades\Route;
 
+// TODO(v1): all routes in this file should be prefixed /v1/ once frontend is ready for the migration
+
 // Authorised Staff Viewing
 Route::prefix('staff')
     ->middleware(['supabase.jwt', 'staff', 'throttle:staff'])

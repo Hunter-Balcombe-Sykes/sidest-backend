@@ -46,6 +46,8 @@ use App\Http\Controllers\Api\PublicSite\SiteVisibilityController;
 use App\Http\Middleware\Context\EnforcePendingDeletionReadOnly;
 use Illuminate\Support\Facades\Route;
 
+// TODO(v1): all routes in this file should be prefixed /v1/ once frontend is ready for the migration
+
 // Public Plans
 Route::get('/plans', [PlanController::class, 'index'])
     ->middleware('throttle:plans');

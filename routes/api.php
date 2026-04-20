@@ -31,6 +31,8 @@ use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
 
+// TODO(v1): all routes below should be prefixed /v1/ once frontend is ready for the migration
+
 // Ping
 Route::get('/ping', fn () => response()->json(['pong' => true]));
 
