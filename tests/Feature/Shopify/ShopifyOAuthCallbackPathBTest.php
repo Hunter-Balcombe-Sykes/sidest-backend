@@ -151,3 +151,43 @@ it('falls through to Path C when shop email does not match any professional prim
     expect($response->getStatusCode())->toBe(302);
     expect($response->headers->get('Location'))->toContain('shopify_setup_token');
 });
+
+it('falls through to Path C when matching professional is soft-deleted', function () {
+    $shop = 'deleted-shop.myshopify.com';
+    $shopEmail = 'deleted@example.com';
+    $nonce = 'testnonce_' . Str::random(8);
+    $secret = config('services.shopify.api_secret');
+
+    // Seed a soft-deleted professional with a matching email — should be ignored
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id'               => Str::uuid()->toString(),
+        'auth_user_id'     => 'supabase-uid-deleted',
+        'handle'           => 'deletedowner',
+        'handle_lc'        => 'deletedowner',
+        'display_name'     => 'Deleted Owner',
+        'primary_email'    => $shopEmail,
+        'professional_type'=> 'brand',
+        'status'           => 'active',
+        'deleted_at'       => now()->toDateTimeString(),
+        'created_at'       => now()->toDateTimeString(),
+        'updated_at'       => now()->toDateTimeString(),
+    ]);
+
+    Http::fake([
+        "https://{$shop}/admin/oauth/access_token" => Http::response(['access_token' => 'shpat_fake'], 200),
+        "https://{$shop}/admin/api/*/shop.json"    => Http::response(['shop' => ['email' => $shopEmail, 'id' => 77]], 200),
+    ]);
+
+    $brandSignup = Mockery::mock(BrandSignupService::class);
+    $brandSignup->shouldNotReceive('handleExistingBrandConnect');
+    app()->instance(BrandSignupService::class, $brandSignup);
+
+    cache()->put("shopify_oauth_nonce_{$shop}", $nonce, now()->addMinutes(10));
+
+    $request = makeShopifyCallbackRequest($shop, $nonce, $secret);
+    $controller = app(ShopifyAppOAuthController::class);
+    $response = $controller->callback($request);
+
+    expect($response->getStatusCode())->toBe(302);
+    expect($response->headers->get('Location'))->toContain('shopify_setup_token');
+});
