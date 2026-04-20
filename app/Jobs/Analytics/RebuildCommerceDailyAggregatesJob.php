@@ -3,6 +3,7 @@
 namespace App\Jobs\Analytics;
 
 use App\Services\Analytics\CommerceAnalyticsAggregateService;
+use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -14,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 // Rebuilds all commerce daily aggregates for one brand + affiliate + day from commission_ledger_entries.
 class RebuildCommerceDailyAggregatesJob implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Batchable, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
