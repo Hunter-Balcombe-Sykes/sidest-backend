@@ -1,0 +1,103 @@
+<?php
+
+use App\Services\Auth\SupabaseAdminService;
+use Illuminate\Support\Facades\Http;
+
+uses(Tests\TestCase::class)->in(__FILE__);
+
+beforeEach(function () {
+    config([
+        'supabase.url' => 'https://test.supabase.co',
+        'supabase.service_role_key' => 'test-service-key',
+    ]);
+});
+
+it('createUser returns id, email, and created=true on success', function () {
+    Http::fake([
+        'https://test.supabase.co/auth/v1/admin/users' => Http::response([
+            'id' => 'supabase-uuid-123',
+            'email' => 'new@example.com',
+        ], 200),
+    ]);
+
+    $service = new SupabaseAdminService;
+    $result = $service->createUser('new@example.com');
+
+    expect($result)->toBe([
+        'id' => 'supabase-uuid-123',
+        'email' => 'new@example.com',
+        'created' => true,
+    ]);
+});
+
+it('createUser returns created=false when GoTrue v2 returns existing user id in 422 body', function () {
+    Http::fake([
+        'https://test.supabase.co/auth/v1/admin/users' => Http::response([
+            'code' => 'email_exists',
+            'user' => [
+                'id' => 'existing-uuid-456',
+                'email' => 'existing@example.com',
+            ],
+        ], 422),
+    ]);
+
+    $service = new SupabaseAdminService;
+    $result = $service->createUser('existing@example.com');
+
+    expect($result)->toBe([
+        'id' => 'existing-uuid-456',
+        'email' => 'existing@example.com',
+        'created' => false,
+    ]);
+});
+
+it('createUser throws when 422 arrives without user id in body', function () {
+    Http::fake([
+        'https://test.supabase.co/auth/v1/admin/users' => Http::response([
+            'code' => 'email_exists',
+            'msg' => 'User already registered',
+            // no 'user' key — should throw, not paginate
+        ], 422),
+    ]);
+
+    $service = new SupabaseAdminService;
+
+    expect(fn () => $service->createUser('conflict@example.com'))
+        ->toThrow(RuntimeException::class);
+});
+
+it('createUser throws on generic HTTP failure', function () {
+    Http::fake([
+        'https://test.supabase.co/auth/v1/admin/users' => Http::response(['msg' => 'server error'], 500),
+    ]);
+
+    $service = new SupabaseAdminService;
+
+    expect(fn () => $service->createUser('fail@example.com'))
+        ->toThrow(RuntimeException::class);
+});
+
+it('createUser trims and lowercases the email', function () {
+    Http::fake([
+        'https://test.supabase.co/auth/v1/admin/users' => Http::response([
+            'id' => 'uuid-789',
+            'email' => 'user@example.com',
+        ], 200),
+    ]);
+
+    $service = new SupabaseAdminService;
+    $result = $service->createUser('  USER@Example.COM  ');
+
+    expect($result['email'])->toBe('user@example.com');
+
+    Http::assertSent(function ($request) {
+        return $request->data()['email'] === 'user@example.com';
+    });
+});
+
+it('createUser throws on empty email', function () {
+    $service = new SupabaseAdminService;
+
+    expect(fn () => $service->createUser(''))
+        ->toThrow(RuntimeException::class, 'Email is required');
+});
