@@ -479,6 +479,55 @@ class ShopifyIntegrationController extends ApiController
     }
 
     /**
+     * Reject private / link-local / loopback / multicast / reserved addresses
+     * before issuing an outbound HTTP request. Prevents the resolveShop endpoint
+     * from being abused as an SSRF probe against internal infrastructure.
+     *
+     * Accepts a host (IP literal or hostname). For hostnames, resolves all A
+     * records and rejects if any resolved IP falls in a blocked range.
+     */
+    private function isPrivateHost(string $host): bool
+    {
+        $host = trim($host);
+        if ($host === '') {
+            return true;
+        }
+
+        // If $host is a literal IP, just check it.
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return $this->ipIsBlocked($host);
+        }
+
+        // Otherwise resolve and check every A record.
+        $ips = gethostbynamel($host);
+        if ($ips === false || empty($ips)) {
+            // Non-resolvable — let the caller's Http::get error path handle it.
+            return false;
+        }
+
+        foreach ($ips as $ip) {
+            if ($this->ipIsBlocked($ip)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function ipIsBlocked(string $ip): bool
+    {
+        // NO_PRIV_RANGE  blocks 10/8, 172.16/12, 192.168/16, fc00::/7, fec0::/10
+        // NO_RES_RANGE   blocks 0/8, 127/8, 169.254/16, 224/4, 240/4, ::1, fe80::/10
+        $notPrivate = filter_var(
+            $ip,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+        );
+
+        return $notPrivate === false;
+    }
+
+    /**
      * Fetch the storefront homepage and look for the embedded
      * `Shopify.shop = "<handle>.myshopify.com"` global that most themes
      * render inline. Returns the canonical shop domain or null.
@@ -488,6 +537,16 @@ class ShopifyIntegrationController extends ApiController
      */
     private function discoverShopifyHandle(string $host): ?string
     {
+        // SSRF guard: an authenticated brand can still probe internal infrastructure
+        // via this endpoint. Rejecting private/link-local/loopback IPs blocks
+        // metadata endpoints (169.254.169.254) and internal services without
+        // breaking legitimate custom Shopify domains.
+        if ($this->isPrivateHost($host)) {
+            Log::info('Shopify resolveShop: rejected private/internal host', ['host' => $host]);
+
+            return null;
+        }
+
         $url = "https://{$host}/";
 
         try {
