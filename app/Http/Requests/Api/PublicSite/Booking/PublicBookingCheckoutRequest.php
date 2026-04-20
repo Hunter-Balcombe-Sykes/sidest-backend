@@ -21,7 +21,7 @@ class PublicBookingCheckoutRequest extends BaseFormRequest
             'customer' => ['required', 'array'],
             'customer.firstName' => ['required', 'string', 'max:120'],
             'customer.lastName' => ['required', 'string', 'max:120'],
-            'customer.email' => ['required', 'email', 'max:190'],
+            'customer.email' => ['required', 'email:rfc', 'max:190'],
             'customer.phone' => ['nullable', 'string', 'max:60'],
             'customer.note' => ['nullable', 'string', 'max:1000'],
         ];

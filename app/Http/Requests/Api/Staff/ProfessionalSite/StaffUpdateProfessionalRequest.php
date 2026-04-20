@@ -20,10 +20,10 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
             'last_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'bio' => ['sometimes', 'nullable', 'string', 'max:2000'],
 
-            'primary_email' => ['sometimes', 'required', 'email', 'max:255'],
+            'primary_email' => ['sometimes', 'required', 'email:rfc', 'max:255'],
             'phone' => ['sometimes', 'required', 'string', 'max:50'],
             'public_contact_number' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'public_contact_email' => ['sometimes', 'nullable', 'email', 'max:255'],
+            'public_contact_email' => ['sometimes', 'nullable', 'email:rfc', 'max:255'],
 
             // ISO 3166-1 alpha-2 only. Normalised to upper-case in
             // prepareForValidation before this rule runs.

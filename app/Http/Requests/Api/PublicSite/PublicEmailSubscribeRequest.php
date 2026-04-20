@@ -25,7 +25,7 @@ class PublicEmailSubscribeRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'email' => ['required', 'email:rfc'],
+            'email' => ['required', 'email:rfc', 'max:255'],
             'full_name' => ['nullable', 'string', 'max:200'],
             'list_key' => [
                 'required',

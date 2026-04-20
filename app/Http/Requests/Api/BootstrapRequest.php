@@ -33,7 +33,7 @@ class BootstrapRequest extends BaseFormRequest
             'handle' => ['sometimes', 'nullable', 'string', 'max:40'],
             'display_name' => ['required', 'string', 'max:80'],
             'primary_email' => [
-                'required', 'email', 'max:255',
+                'required', 'email:rfc', 'max:255',
                 Rule::unique('professionals', 'primary_email')->ignore($existingProfessionalId, 'id'),
             ],
             'phone' => ['required', 'string', 'max:40'],

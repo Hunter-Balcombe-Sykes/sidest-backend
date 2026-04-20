@@ -118,7 +118,7 @@ class VerifySupabaseJwt
             throw new \RuntimeException('Missing SUPABASE_JWKS_URL');
         }
 
-        $jwks = Cache::remember('supabase:jwks', config('supabase.jwks_cache_seconds', 600), function () use ($jwksUrl) {
+        $jwks = Cache::remember('supabase:jwks', config('supabase.jwks_cache_seconds', 300), function () use ($jwksUrl) {
             $res = Http::timeout(5)->get($jwksUrl);
             if (! $res->ok()) {
                 throw new \RuntimeException('Failed to fetch JWKS');
