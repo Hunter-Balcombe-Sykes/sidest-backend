@@ -6,7 +6,6 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
-use App\Services\Auth\SupabaseAdminService;
 use App\Services\Shopify\BrandSignupService;
 use App\Services\Shopify\ShopifySetupTokenService;
 use Illuminate\Http\JsonResponse;
@@ -133,25 +132,22 @@ class ShopifyAppOAuthController extends ApiController
                 return redirect()->away($basePath);
             }
 
-            // Path B: Existing account — shop email matches a Supabase user with a Professional
+            // Path B: Existing account — shop email matches a Professional's primary_email (indexed local lookup).
+            // Users whose Shopify email differs from their Side St email fall through to Path C.
             if ($shopEmail !== '') {
-                $supabaseUser = app(SupabaseAdminService::class)->getUserByEmail($shopEmail);
+                $existingProfessional = Professional::whereRaw('lower(primary_email) = ?', [$shopEmail])->first();
 
-                if ($supabaseUser !== null) {
-                    $existingProfessional = Professional::where('auth_user_id', $supabaseUser['id'])->first();
+                if ($existingProfessional) {
+                    $result = $this->brandSignup->handleExistingBrandConnect(
+                        $existingProfessional, $shop, $accessToken, $shopData, $scopes
+                    );
 
-                    if ($existingProfessional) {
-                        $result = $this->brandSignup->handleExistingBrandConnect(
-                            $existingProfessional, $shop, $accessToken, $shopData, $scopes
-                        );
+                    Log::info('Shopify OAuth: existing account connect', [
+                        'professional_id' => (string) $result->professional->id,
+                        'shop_domain' => $shop,
+                    ]);
 
-                        Log::info('Shopify OAuth: existing account connect', [
-                            'professional_id' => (string) $result->professional->id,
-                            'shop_domain' => $shop,
-                        ]);
-
-                        return redirect()->away($basePath);
-                    }
+                    return redirect()->away($basePath);
                 }
             }
 
