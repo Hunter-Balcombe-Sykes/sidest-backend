@@ -13,12 +13,12 @@
         "endroid/qr-code": "^5.0",
         "firebase/php-jwt": "^7.0",
         "laravel/framework": "^12.0",
-        "laravel/horizon": "*",
-        "laravel/nightwatch": "*",
+        "laravel/horizon": "^5.45",
+        "laravel/nightwatch": "^1.24",
         "laravel/tinker": "^2.10.1",
         "league/flysystem-aws-s3-v3": "^3.0",
         "predis/predis": "^3.3",
-        "stripe/stripe-php": "*"
+        "stripe/stripe-php": "^19.4"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

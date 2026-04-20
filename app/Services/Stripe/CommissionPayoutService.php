@@ -47,8 +47,10 @@ class CommissionPayoutService
         ];
 
         // Retry previously created batches that are still unresolved.
+        // 'collecting' and 'transferring' are mid-flight states that can get stuck if a
+        // DB write fails after a Stripe call succeeded — idempotency keys make these safe to retry.
         $existingPending = CommissionPayout::query()
-            ->where('status', 'pending')
+            ->whereIn('status', ['pending', 'collecting', 'transferring'])
             ->whereNull('processed_at')
             ->where('eligible_after', '<=', now())
             ->orderBy('eligible_after')
@@ -345,6 +347,8 @@ class CommissionPayoutService
         $latestChargeId = null;
         if ($chargeAmountCents > 0) {
             try {
+                // Idempotency key ensures a retry after a DB write failure re-uses the
+                // same PaymentIntent rather than double-charging the brand.
                 $paymentIntent = $this->stripe->paymentIntents->create([
                     'amount' => $chargeAmountCents,
                     'currency' => $currencyLower,
@@ -358,7 +362,7 @@ class CommissionPayoutService
                         'brand_id' => $brand->id,
                         'affiliate_id' => $affiliate->id,
                     ],
-                ]);
+                ], ['idempotency_key' => 'pi_'.$payout->id]);
 
                 if ($paymentIntent->status !== 'succeeded') {
                     // SCA required — refund wallet debit and mark pending
@@ -410,7 +414,9 @@ class CommissionPayoutService
                 $transferPayload['source_transaction'] = $latestChargeId;
             }
 
-            $transfer = $this->stripe->transfers->create($transferPayload);
+            // Idempotency key ensures a retry after a DB write failure re-uses the
+            // same Transfer rather than double-paying the affiliate.
+            $transfer = $this->stripe->transfers->create($transferPayload, ['idempotency_key' => 'tr_'.$payout->id]);
 
             $payout->update([
                 'stripe_transfer_id' => $transfer->id,

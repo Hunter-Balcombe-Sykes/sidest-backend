@@ -39,6 +39,13 @@ class VerifySupabaseJwt
 
             return $next($request);
         } catch (\Throwable $e) {
+            // Log every JWKS failure before falling back — repeated infra-level failures
+            // (e.g. network blocking JWKS fetches) are security-relevant and must be visible.
+            Log::warning('JWT JWKS verification failed, falling back to auth server', [
+                'reason' => $e->getMessage(),
+                'ip' => $request->ip(),
+            ]);
+
             // 2) Fallback for legacy/shared-secret setups:
             // Supabase recommends verifying by calling Auth server /user. :contentReference[oaicite:2]{index=2}
             try {
@@ -93,6 +100,14 @@ class VerifySupabaseJwt
         }
 
         $header = json_decode($this->b64urlDecode($parts[0]), true) ?: [];
+
+        // Reject non-RS256 tokens before key lookup to prevent algorithm confusion attacks
+        // (e.g. HS256 signed with the public key as the HMAC secret).
+        $alg = $header['alg'] ?? null;
+        if ($alg !== 'RS256') {
+            throw new \RuntimeException('JWT alg must be RS256, got: '.($alg ?? 'none'));
+        }
+
         $kid = $header['kid'] ?? null;
         if (! $kid) {
             throw new \RuntimeException('JWT header missing kid');

@@ -56,7 +56,7 @@ class BackfillSocialLinksCommand extends Command
         // Operator identity is best-effort (works locally, may be empty in some
         // container environments — that's fine, the timestamp is what matters).
         Log::info('Backfill social links started', [
-            'operator' => trim((string) @shell_exec('whoami')) ?: 'unknown',
+            'operator' => get_current_user() ?: 'unknown',
             'dry_run' => $dryRun,
             'limit' => $limit,
         ]);

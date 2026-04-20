@@ -27,6 +27,10 @@ class BrandStoreSettings extends Model
         'oxygen_storefront_id',
     ];
 
+    protected $hidden = [
+        'oxygen_deployment_token',
+    ];
+
     protected $casts = [
         'default_commission_rate' => 'decimal:2',
         'payout_hold_days' => 'integer',

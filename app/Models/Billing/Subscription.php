@@ -45,6 +45,12 @@ class Subscription extends BaseModel
         'provider_payload',
     ];
 
+    protected $hidden = [
+        'stripe_customer_id',
+        'stripe_subscription_id',
+        'provider_payload',
+    ];
+
     protected $casts = [
         'current_period_start' => 'datetime',
         'current_period_end' => 'datetime',

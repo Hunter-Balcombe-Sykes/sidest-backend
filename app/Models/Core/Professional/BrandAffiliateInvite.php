@@ -33,6 +33,10 @@ class BrandAffiliateInvite extends BaseModel
         'expires_at',
     ];
 
+    protected $hidden = [
+        'token',
+    ];
+
     protected $casts = [
         'accepted_at' => 'datetime',
         'expires_at' => 'datetime',

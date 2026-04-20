@@ -6,6 +6,7 @@ use App\Models\Core\MediaVariant;
 use App\Models\Core\Site\SiteMedia;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\Process\Process;
 
 /**
  * Transcodes a video original into MP4 + HLS variants and a poster image,
@@ -57,7 +58,7 @@ class VideoVariantService
             escapeshellarg($localPath),
         );
 
-        $output = $this->exec($cmd, $exitCode);
+        $output = $this->runCommand($cmd, $exitCode);
 
         if ($exitCode !== 0) {
             throw new \RuntimeException("ffprobe failed (exit {$exitCode}): {$output}");
@@ -332,7 +333,7 @@ class VideoVariantService
             escapeshellarg($output),
         );
 
-        $output_str = $this->exec($cmd, $exitCode);
+        $output_str = $this->runCommand($cmd, $exitCode);
 
         if ($exitCode !== 0) {
             throw new \RuntimeException("ffmpeg MP4 encoding failed (exit {$exitCode}): {$output_str}");
@@ -354,7 +355,7 @@ class VideoVariantService
             escapeshellarg($playlistOutput),
         );
 
-        $output = $this->exec($cmd, $exitCode);
+        $output = $this->runCommand($cmd, $exitCode);
 
         if ($exitCode !== 0) {
             throw new \RuntimeException("ffmpeg HLS packaging failed (exit {$exitCode}): {$output}");
@@ -372,7 +373,7 @@ class VideoVariantService
             escapeshellarg($output),
         );
 
-        $outputStr = $this->exec($cmd, $exitCode);
+        $outputStr = $this->runCommand($cmd, $exitCode);
 
         if ($exitCode !== 0 || ! file_exists($output)) {
             // Non-fatal: try frame at 0s as fallback
@@ -382,7 +383,7 @@ class VideoVariantService
                 escapeshellarg($input),
                 escapeshellarg($output),
             );
-            $this->exec($cmd2, $exitCode2);
+            $this->runCommand($cmd2, $exitCode2);
 
             if ($exitCode2 !== 0 || ! file_exists($output)) {
                 Log::warning('VideoVariantService: could not extract poster frame.', [
@@ -447,17 +448,23 @@ class VideoVariantService
     }
 
     /**
-     * Execute a shell command and return its output.
+     * Run a pre-escaped shell command via Symfony Process and return its output.
      * $exitCode is set by reference.
+     *
+     * All arguments in $cmd must be escaped by the caller via
+     * escapeshellcmd()/escapeshellarg() before this method is called.
+     * No timeout is applied — video encoding can be arbitrarily long.
      */
-    private function exec(string $cmd, ?int &$exitCode = null): string
+    private function runCommand(string $cmd, ?int &$exitCode = null): string
     {
-        $output = [];
-        $exitCode = 0;
+        $process = Process::fromShellCommandline($cmd);
+        $process->setTimeout(null);
+        $process->run();
 
-        exec($cmd, $output, $exitCode);
+        $exitCode = $process->getExitCode() ?? 0;
 
-        return implode("\n", $output);
+        // Callers append 2>&1, so all output (including stderr) is in stdout
+        return $process->getOutput();
     }
 
     private function removeDir(string $dir): void
