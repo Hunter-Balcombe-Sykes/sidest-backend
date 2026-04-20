@@ -224,8 +224,10 @@ it('clears variant restrictions when null is submitted', function () {
     // null disabled list → all variants re-enabled
     $service->shouldReceive('setVariantEnabledStates')
         ->once()
-        ->withArgs(function ($integration, $allGids, $disabledGids) {
-            return count($allGids) === 2 && $disabledGids === [];
+        ->withArgs(function ($integration, $productGid, $allGids, $disabledGids) {
+            return $productGid === 'gid://shopify/Product/123'
+                && count($allGids) === 2
+                && $disabledGids === [];
         })
         ->andReturn(['success' => true, 'userErrors' => []]);
 
@@ -254,8 +256,10 @@ it('clears variant restrictions when empty array is submitted', function () {
         ]);
     $service->shouldReceive('setVariantEnabledStates')
         ->once()
-        ->withArgs(function ($integration, $allGids, $disabledGids) {
-            return count($allGids) === 2 && $disabledGids === [];
+        ->withArgs(function ($integration, $productGid, $allGids, $disabledGids) {
+            return $productGid === 'gid://shopify/Product/123'
+                && count($allGids) === 2
+                && $disabledGids === [];
         })
         ->andReturn(['success' => true, 'userErrors' => []]);
 
@@ -285,8 +289,9 @@ it('disables specific variants via variant-level metafields', function () {
         ]);
     $service->shouldReceive('setVariantEnabledStates')
         ->once()
-        ->withArgs(function ($integration, $allGids, $disabledGids) {
-            return count($allGids) === 3
+        ->withArgs(function ($integration, $productGid, $allGids, $disabledGids) {
+            return $productGid === 'gid://shopify/Product/123'
+                && count($allGids) === 3
                 && $disabledGids === ['gid://shopify/ProductVariant/3'];
         })
         ->andReturn(['success' => true, 'userErrors' => []]);

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional\Store;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Requests\Api\Professional\Store\ReorderSelectionsRequest;
+use App\Http\Requests\Api\Professional\Store\UpdateSelectionVariantsRequest;
 use App\Http\Resources\AffiliateProductResource;
 use App\Http\Resources\AffiliateProductSelectionResource;
 use App\Models\Commerce\AffiliateProductSelection;
@@ -97,6 +98,11 @@ class AffiliateProductController extends ApiController
             'brand_professional_id' => ['required', 'uuid'],
             'shopify_product_gid' => ['required', 'string', 'max:100', 'regex:/^gid:\/\/shopify\/Product\/\d+$/'],
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:999'],
+            // Optional on create — most affiliates start with all variants shown
+            // and narrow later via the PATCH variants endpoint. Null/empty stores
+            // as NULL (show every brand-enabled variant).
+            'selected_variant_gids' => ['sometimes', 'nullable', 'array'],
+            'selected_variant_gids.*' => ['string', 'regex:/^gid:\/\/shopify\/ProductVariant\/\d+$/'],
         ]);
 
         $linked = DB::table('brand.brand_partner_links')
@@ -117,6 +123,21 @@ class AffiliateProductController extends ApiController
             return $this->error('Unable to reach product catalog. Please try again.', 502);
         }
 
+        // If the affiliate supplied a variant subset, intersect it with the brand's
+        // currently-enabled variants. An empty or null array is treated as "no
+        // override" and stored as NULL so a future brand-side re-enable is picked
+        // up automatically.
+        $selectedVariantGids = $this->resolveSelectedVariantGidsOrFail(
+            $validated['brand_professional_id'],
+            $validated['shopify_product_gid'],
+            $validated['selected_variant_gids'] ?? null,
+            $errorResponse
+        );
+
+        if ($errorResponse !== null) {
+            return $errorResponse;
+        }
+
         $max = (int) config('sidest.store.max_featured_products', 10);
 
         $currentCount = AffiliateProductSelection::query()
@@ -129,7 +150,7 @@ class AffiliateProductController extends ApiController
         }
 
         try {
-            $selection = DB::transaction(function () use ($pro, $validated) {
+            $selection = DB::transaction(function () use ($pro, $validated, $selectedVariantGids) {
                 DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ["aff-sel:{$pro->id}"]);
 
                 return AffiliateProductSelection::create([
@@ -137,6 +158,7 @@ class AffiliateProductController extends ApiController
                     'brand_professional_id' => $validated['brand_professional_id'],
                     'shopify_product_gid' => $validated['shopify_product_gid'],
                     'sort_order' => $validated['sort_order'] ?? 0,
+                    'selected_variant_gids' => $selectedVariantGids,
                 ]);
             });
         } catch (QueryException $e) {
@@ -149,6 +171,112 @@ class AffiliateProductController extends ApiController
         return $this->success([
             'selection' => new AffiliateProductSelectionResource($selection),
         ], 201);
+    }
+
+    /**
+     * PATCH /affiliate/selections/{productGid}/variants
+     *
+     * Update the affiliate's per-selection variant subset. Pass null or an empty
+     * array in variant_gids to reset back to "show every brand-enabled variant"
+     * (default). Pass a populated array to narrow the storefront to exactly those
+     * variants — each one must currently be brand-enabled or the request 422s.
+     */
+    public function updateVariants(UpdateSelectionVariantsRequest $request, string $productGid): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+
+        if ($pro->isBrand()) {
+            return $this->error('Brand accounts cannot manage product selections.', 403);
+        }
+
+        if (! preg_match('/^gid:\/\/shopify\/Product\/\d+$/', $productGid)) {
+            return $this->error('Invalid product GID format.', 422);
+        }
+
+        $validated = $request->validated();
+        $brandId = $validated['brand_professional_id'];
+
+        $selection = AffiliateProductSelection::query()
+            ->where('affiliate_professional_id', $pro->id)
+            ->where('brand_professional_id', $brandId)
+            ->where('shopify_product_gid', $productGid)
+            ->first();
+
+        if (! $selection) {
+            return $this->error('Selection not found.', 404);
+        }
+
+        $selectedVariantGids = $this->resolveSelectedVariantGidsOrFail(
+            $brandId,
+            $productGid,
+            $validated['variant_gids'] ?? null,
+            $errorResponse
+        );
+
+        if ($errorResponse !== null) {
+            return $errorResponse;
+        }
+
+        $selection->selected_variant_gids = $selectedVariantGids;
+        $selection->save();
+
+        return $this->success([
+            'selection' => new AffiliateProductSelectionResource($selection),
+        ]);
+    }
+
+    /**
+     * Validate + normalise a submitted variant_gids list against the brand's
+     * currently-enabled variants for a product. Returns the array to persist, or
+     * null if the client passed null/empty (reset to default). On validation
+     * failure, writes a JsonResponse to $errorResponse and returns null — callers
+     * must check $errorResponse before using the return value.
+     *
+     * @param  array<int, string>|null  $submitted
+     * @return array<int, string>|null
+     */
+    private function resolveSelectedVariantGidsOrFail(
+        string $brandId,
+        string $productGid,
+        ?array $submitted,
+        ?JsonResponse &$errorResponse
+    ): ?array {
+        $errorResponse = null;
+
+        // Null or empty array = reset to default-all, stored as NULL.
+        if ($submitted === null || $submitted === []) {
+            return null;
+        }
+
+        try {
+            $enabled = $this->catalogService->getEnabledVariantGidsForProduct($brandId, $productGid);
+        } catch (\Throwable $e) {
+            $errorResponse = $this->error('Unable to reach product catalog. Please try again.', 502);
+
+            return null;
+        }
+
+        if (empty($enabled)) {
+            // Either product missing from catalog or brand has disabled every variant —
+            // nothing to narrow against. Reject rather than silently resetting so the
+            // UI can show a clear message.
+            $errorResponse = $this->error('This product has no variants available for selection.', 422);
+
+            return null;
+        }
+
+        $allowed = array_flip($enabled);
+        $invalid = array_values(array_filter($submitted, fn (string $gid) => ! isset($allowed[$gid])));
+
+        if (! empty($invalid)) {
+            $errorResponse = $this->error('One or more variants are not available on this product.', 422);
+
+            return null;
+        }
+
+        // Deduplicate + reindex; the order the affiliate submits doesn't matter
+        // because the frontend re-sorts by Shopify's variant order at render time.
+        return array_values(array_unique($submitted));
     }
 
     /**

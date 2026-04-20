@@ -336,6 +336,12 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
             ->where('gid', '.*');
         Route::patch('/affiliate/selections/reorder', [AffiliateProductController::class, 'reorder'])
             ->middleware('throttle:affiliate-writes');
+        // Per-selection variant picker. Accepts variant_gids=[] or null to reset
+        // back to "show every brand-enabled variant"; accepts a populated array
+        // to narrow the storefront to exactly those variants.
+        Route::patch('/affiliate/selections/{productGid}/variants', [AffiliateProductController::class, 'updateVariants'])
+            ->middleware('throttle:affiliate-writes')
+            ->where('productGid', '.*');
         Route::post('/affiliate/selections/reset-to-defaults', [AffiliateProductController::class, 'resetToDefaults'])
             ->middleware('throttle:affiliate-writes');
 

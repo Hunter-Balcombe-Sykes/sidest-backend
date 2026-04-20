@@ -105,6 +105,15 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
     }
     GRAPHQL;
 
+    // Smart collections use `appliedDisjunctively: false` → rules are ANDed.
+    // Active + High Commission both include sidest.has_enabled_variants=true so a
+    // product with every variant disabled falls out of affiliate-facing surfaces
+    // automatically, even if the brand never touched sidest.active.
+    //
+    // Note on existing brands: findOrCreateCollection skips when a collection with
+    // the target title already exists, so updating this array only affects newly
+    // connected brands. Existing stores are reconciled by the
+    // backfill:has-enabled-variants artisan command (Phase 11).
     private const COLLECTIONS = [
         [
             'title' => 'Side St — Active Products',
@@ -112,6 +121,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
             'smart' => true,
             'rules' => [
                 ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.has_enabled_variants'],
             ],
         ],
         [
@@ -132,6 +142,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
             'smart' => true,
             'rules' => [
                 ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.has_enabled_variants'],
                 ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'GREATER_THAN', 'condition' => '0', 'metafield_ref' => 'sidest.commission_override'],
             ],
         ],
@@ -225,6 +236,13 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
                 'integration_id' => $this->integrationId,
                 'shop_domain' => $shopDomain,
             ]);
+
+            // Collections are the last structural dependency of the Side St
+            // Price automatic discount (we want collections in place before
+            // the function starts firing, so "Active Products" behaviour is
+            // coherent the moment the discount activates). Dispatch the
+            // install job — idempotent, safe to re-run on retries.
+            CreateShopifyAffiliateDiscountJob::dispatch($this->integrationId);
         } catch (\Throwable $e) {
             Log::error('Failed to create Shopify collections', [
                 'integration_id' => $this->integrationId,

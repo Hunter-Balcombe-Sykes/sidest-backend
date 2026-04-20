@@ -95,15 +95,38 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             }
 
             $lineItemId = (string) Arr::get($lineItem, 'id', '');
-            $price = (float) Arr::get($lineItem, 'price', 0);
+            $unitPrice = (float) Arr::get($lineItem, 'price', 0);
             $quantity = (int) Arr::get($lineItem, 'quantity', 1);
 
-            if ($lineItemId === '' || $price <= 0 || $quantity <= 0) {
+            if ($lineItemId === '' || $unitPrice <= 0 || $quantity <= 0) {
+                continue;
+            }
+
+            // Commission base = what the customer actually paid for this line
+            // (post-discount). Shopify's orders/paid webhook line_items shape:
+            //   price             — pre-discount unit price
+            //   quantity          — units in the line
+            //   total_discount    — sum of every discount allocation applied to this line
+            //                       (Side St Price Function discount included)
+            //   discount_allocations[] — per-allocation breakdown (not needed here,
+            //       but worth knowing if we ever need to differentiate our function
+            //       from a manually-applied code on the same line).
+            //
+            // Using post-discount line total keeps commission aligned with the
+            // brand's actual revenue on the sale — a 20% Side St Price discount
+            // means the brand took home 20% less, and the affiliate's commission
+            // on that line is 20% smaller too at the same commission rate.
+            $lineTotalPreDiscount = $unitPrice * $quantity;
+            $totalDiscount = (float) Arr::get($lineItem, 'total_discount', 0);
+            $lineTotal = max(0.0, $lineTotalPreDiscount - $totalDiscount);
+
+            if ($lineTotal <= 0) {
+                // Line fully discounted (100% off, comp, etc.) — nothing to
+                // accrue. Skip rather than emit a zero-cent entry.
                 continue;
             }
 
             $commissionRate = $this->extractLineItemCommissionRate($lineItem, $defaultRate);
-            $lineTotal = $price * $quantity;
             $commissionAmountCents = (int) round($lineTotal * ($commissionRate / 100) * 100);
 
             if ($commissionAmountCents <= 0) {
@@ -127,7 +150,14 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                         'order_id' => $orderId,
                         'line_item_id' => $lineItemId,
                         'product_id' => (string) Arr::get($lineItem, 'product_id', ''),
-                        'line_price' => $price,
+                        // Keep both for audit: pre-discount line price (what the
+                        // Shopify sticker was) plus the discount applied by
+                        // any function/code, plus the post-discount figure we
+                        // computed commission off.
+                        'unit_price' => $unitPrice,
+                        'line_price_pre_discount' => $lineTotalPreDiscount,
+                        'total_discount' => $totalDiscount,
+                        'line_price_post_discount' => $lineTotal,
                         'quantity' => $quantity,
                         'affiliate_slug' => $affiliateSlug,
                     ],

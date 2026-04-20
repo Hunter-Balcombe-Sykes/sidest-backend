@@ -176,6 +176,7 @@ class BrandCatalogController extends ApiController
             try {
                 $result = $this->catalogService->setVariantEnabledStates(
                     $integration,
+                    $productGid,
                     $productVariantGids,
                     $submitted ?? []
                 );

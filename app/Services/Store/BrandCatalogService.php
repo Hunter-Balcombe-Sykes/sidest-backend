@@ -42,6 +42,7 @@ query allProducts($first: Int!, $after: String) {
         metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
         metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
         metafield_custom_photos: metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
+        metafield_has_enabled_variants: metafield(namespace: "sidest", key: "has_enabled_variants") { value }
       }
       cursor
     }
@@ -82,6 +83,7 @@ query products($first: Int!, $after: String) {
         metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
         metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
         metafield_custom_photos: metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
+        metafield_has_enabled_variants: metafield(namespace: "sidest", key: "has_enabled_variants") { value }
       }
       cursor
     }
@@ -326,14 +328,24 @@ GRAPHQL;
      * and `true` on all others to clear any previous restriction. Uses a single
      * metafieldsSet mutation (batched at 25 if the product has many variants).
      *
+     * Also recomputes and writes sidest.has_enabled_variants on the parent product:
+     * true if at least one variant is not disabled, false if every variant is
+     * disabled. This drives the Active Products smart collection condition so a
+     * product with no enabled variants falls out of affiliate-facing surfaces
+     * automatically, without the brand having to flip sidest.active themselves.
+     *
+     * @param  string  $productGid  Parent product GID (used to write the derived product metafield)
      * @param  array<int, string>  $allVariantGids  Every variant GID for the product (pre-fetched for validation)
      * @param  array<int, string>  $disabledVariantGids  Variant GIDs to mark as disabled
      * @return array{success: bool, userErrors: array}
      */
-    public function setVariantEnabledStates(ProfessionalIntegration $integration, array $allVariantGids, array $disabledVariantGids = []): array
+    public function setVariantEnabledStates(ProfessionalIntegration $integration, string $productGid, array $allVariantGids, array $disabledVariantGids = []): array
     {
         if (empty($allVariantGids)) {
-            return ['success' => true, 'userErrors' => []];
+            // No variants on this product — has_enabled_variants is trivially true.
+            // Write it anyway so newly created products get an explicit value and the
+            // Active Products smart collection picks them up.
+            return $this->writeHasEnabledVariants($integration, $productGid, true);
         }
 
         $disabled = array_flip($disabledVariantGids);
@@ -364,7 +376,44 @@ GRAPHQL;
         Cache::forget(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
         Cache::forget(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
 
-        return ['success' => true, 'userErrors' => []];
+        // Recompute and persist the derived product-level flag
+        $hasEnabled = count($disabledVariantGids) < count($allVariantGids);
+
+        return $this->writeHasEnabledVariants($integration, $productGid, $hasEnabled);
+    }
+
+    /**
+     * Write the derived sidest.has_enabled_variants metafield on a product. Separated
+     * out so the backfill command can call it with a precomputed value without
+     * re-writing every variant metafield.
+     *
+     * @return array{success: bool, userErrors: array}
+     */
+    public function writeHasEnabledVariants(ProfessionalIntegration $integration, string $productGid, bool $value): array
+    {
+        $resolved = $this->resolveCredentials($integration);
+
+        $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::METAFIELDS_SET, [
+            'metafields' => [[
+                'namespace' => 'sidest',
+                'key' => 'has_enabled_variants',
+                'value' => $value ? 'true' : 'false',
+                'type' => 'boolean',
+                'ownerId' => $productGid,
+            ]],
+        ]);
+
+        $userErrors = Arr::get($response->json(), 'data.metafieldsSet.userErrors', []);
+
+        // Writing has_enabled_variants moves the product in/out of the Active Products
+        // smart collection, so the affiliate-facing cache must be invalidated too.
+        Cache::forget(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
+        Cache::forget(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
+
+        return [
+            'success' => empty($userErrors),
+            'userErrors' => $userErrors,
+        ];
     }
 
     /**
@@ -722,6 +771,7 @@ GRAPHQL;
                     $commissionVal = Arr::get($node, 'metafield_commission.value');
                     $discountVal = Arr::get($node, 'metafield_discount.value');
                     $customPhotosVal = Arr::get($node, 'metafield_custom_photos.value');
+                    $hasEnabledVariantsVal = Arr::get($node, 'metafield_has_enabled_variants.value');
 
                     $products[] = [
                         'gid' => $node['id'] ?? '',
@@ -739,6 +789,10 @@ GRAPHQL;
                             'commission_override' => $commissionVal !== null ? (float) $commissionVal : null,
                             'affiliate_discount_pct' => $discountVal !== null ? (float) $discountVal : null,
                             'custom_photos_enabled' => $customPhotosVal !== null ? filter_var($customPhotosVal, FILTER_VALIDATE_BOOLEAN) : null,
+                            // null = unwritten (pre-backfill); true/false = explicit. The backfill
+                            // command populates this for existing products; new writes go through
+                            // writeHasEnabledVariants on every variant-state change.
+                            'has_enabled_variants' => $hasEnabledVariantsVal !== null ? filter_var($hasEnabledVariantsVal, FILTER_VALIDATE_BOOLEAN) : null,
                         ],
                     ];
                 }
@@ -800,6 +854,7 @@ GRAPHQL;
                     $commissionVal = Arr::get($node, 'metafield_commission.value');
                     $discountVal = Arr::get($node, 'metafield_discount.value');
                     $customPhotosVal = Arr::get($node, 'metafield_custom_photos.value');
+                    $hasEnabledVariantsVal = Arr::get($node, 'metafield_has_enabled_variants.value');
 
                     // Map product images from GraphQL edges
                     $images = array_map(
@@ -825,6 +880,7 @@ GRAPHQL;
                             'commission_override' => $commissionVal !== null ? (float) $commissionVal : null,
                             'affiliate_discount_pct' => $discountVal !== null ? (float) $discountVal : null,
                             'custom_photos_enabled' => $customPhotosVal !== null ? filter_var($customPhotosVal, FILTER_VALIDATE_BOOLEAN) : null,
+                            'has_enabled_variants' => $hasEnabledVariantsVal !== null ? filter_var($hasEnabledVariantsVal, FILTER_VALIDATE_BOOLEAN) : null,
                         ],
                     ];
                 }

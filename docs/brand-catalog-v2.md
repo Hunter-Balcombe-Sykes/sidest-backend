@@ -56,9 +56,25 @@ All metafields are scoped to a single Shopify product unless noted otherwise. Th
 |-----|------|------------------------|---------|------------------|
 | `active` | `boolean` | `false` | Whether the product is offered to affiliates at all. False = hidden from the affiliate catalog entirely. | `null` → unset → default. `true`/`false` → explicit value. |
 | `commission_override` | `number_decimal` | Falls through to `BrandStoreSettings.default_commission_rate` (or 15%) | Per-product commission rate (% of order value paid to affiliate). | `null` → delete metafield → revert to brand default. Numeric → set. |
-| `affiliate_discount_pct` | `number_decimal` | No discount | Per-product discount the affiliate's customers receive. | `null` → delete. Numeric (0-100) → set. |
+| `affiliate_discount_pct` | `number_decimal` | No discount | Per-product discount the affiliate's customers receive. Enforced at checkout by the `sidest-affiliate-discount` Shopify Function and surfaced in Hydrogen as the product's *only* displayed price. Access: `PUBLIC_READ`. | `null` → delete. Numeric (0-100) → set. |
 | `custom_photos_enabled` | `boolean` | Falls through to brand-level `provider_metadata.custom_photos_enabled` (default `true`) | Whether affiliates can upload their own lifestyle photos for this product. | `null` → delete → fall through. `true`/`false` → explicit override. |
-| `enabled_variant_gids` | `json` (array of variant GIDs) | All variants enabled (dynamic) | Restricts which of the product's variants are offered to affiliates. | `null` or `[]` → delete → all variants enabled. Non-empty array → only these variants are offered. |
+| `enabled_variant_gids` | `json` (array of variant GIDs) | All variants enabled (dynamic) | **Deprecated** — kept only for legacy reads while stores migrate. Superseded by per-variant `sidest.enabled` (see §3.2). | `null` or `[]` → delete → all variants enabled. Non-empty array → only these variants are offered. |
+| `has_enabled_variants` | `boolean` | `null` (unwritten) | **Derived.** True when the product has at least one variant with `sidest.enabled != false` (or no variants at all). Written automatically by `BrandCatalogService::setVariantEnabledStates` whenever variant states change; backfilled by `sidest:backfill-has-enabled-variants` for pre-existing stores. Used as a smart-collection condition so products with every variant disabled automatically drop out of the Active Products collection without the brand having to flip `sidest.active`. | Never set by the brand directly; always computed server-side. |
+
+### 3.2 Per-variant metafields (`ownerType: PRODUCTVARIANT`)
+
+| Key | Type | Default (missing) | Meaning |
+|-----|------|--------------------|---------|
+| `enabled` | `boolean` | `true` | Whether this specific variant is offered to affiliates. Only `false` hides the variant — missing or `true` keeps it available. `PUBLIC_READ` so Hydrogen reads directly via the Storefront API. |
+
+### 3.3 "Active Products" smart collection condition
+
+The Active Products smart collection rules are ANDed (`appliedDisjunctively: false`):
+
+1. `sidest.active = true`
+2. `sidest.has_enabled_variants = true`
+
+A brand can't accidentally ship a product where every variant has been disabled — the collection condition catches it automatically.
 
 ### 3.1 Permission resolution: 3-level hierarchy (custom photos)
 
@@ -252,10 +268,30 @@ This prevents stale or fabricated GIDs from polluting the metafield.
 
 Decided against (for now):
 
-- **Per-affiliate variant curation.** Affiliates cannot pick a subset of the brand's allowed variants. The brand's restriction is the only gate. This was the "Option C hybrid" in the original design discussion — deferred until a real customer asks.
 - **Featured/default variant separate from enabled.** Picking one variant *is* the standalone mode. There is no separate "this is the default but others are also available" concept.
 - **Variant-level commission/discount overrides.** Commission and discount remain product-level only.
 - **Reconciliation jobs for stale GIDs.** Stale GIDs (e.g. a brand-saved variant that gets deleted from Shopify) are tolerated until the next save. No background job cleans them up.
+
+### 7.2 Side St Price enforcement (shipped)
+
+`sidest.affiliate_discount_pct` is no longer just a UI number — it's enforced end-to-end:
+
+- **Checkout** — the `sidest-affiliate-discount` Shopify Function (see `Sidest-Embedded/extensions/sidest-affiliate-discount/`) reads each cart line's parent product metafield and applies a matching percentage product discount. The function gates on the cart attribute `_sidest_affiliate_id`; brand-direct customers pay the Shopify sticker price.
+- **Hydrogen display** — the products engine fetches the metafield via Storefront API (PUBLIC_READ) and exposes the *post-discount* price on `StorefrontProduct.priceRange`. Affiliate sitepages render a **single clean price** — no strike-through, no "was $X now $Y". The Shopify sticker price is invisible to the customer.
+- **Cart attribution** — Hydrogen's `$affiliateSlug.tsx` action passes `affiliate.id` as the `_sidest_affiliate_id` cart attribute on `cartCreate`. **First-touch** semantics: if a visitor browses two affiliates in one session, the cart retains whichever affiliate claimed it first. Prevents last-click hijacking.
+- **Auto-install** — on Shopify OAuth, `CreateShopifyAffiliateDiscountJob` runs after the collections job and calls `discountAutomaticAppCreate` to activate the function as a store-wide automatic app discount. Idempotent. State tracked on `provider_metadata.sidest_discount_state` (`registered` | `pending` | `failed`). Backfill existing brands with `php artisan sidest:install-affiliate-discount [--brand=<uuid>]`.
+- **Commission accounting** — `ProcessShopifyOrderWebhookJob` now computes commission on **post-discount line totals** (`line.price × quantity − line.total_discount`). `calculation_metadata` preserves both pre- and post-discount figures for audit.
+
+Metafield access flip rollout: the existing definition with `access: []` is delete+recreated with `PUBLIC_READ` by `CreateShopifyMetafieldsJob` on its next run per store. Underlying values survive (`deleteAllAssociatedMetafields: false`).
+
+### 7.1 Per-affiliate variant curation (shipped)
+
+Previously deferred, now implemented. Affiliates can narrow a product selection to a subset of the brand's currently-enabled variants:
+
+- Column `commerce.affiliate_product_selections.selected_variant_gids jsonb` — NULL = show every brand-enabled variant (default), populated = the affiliate has narrowed.
+- `POST /api/affiliate/selections` and `PATCH /api/affiliate/selections/{productGid}/variants` validate picks against the brand's currently-enabled variant set (intersection of Shopify variants ∩ `sidest.enabled != false`).
+- Brand disables always win: the read path in `AffiliateProductCatalogService::getCatalogWithSelections` intersects brand-enabled variants with the affiliate's explicit subset, so a brand-side disable removes a variant from the affiliate storefront even if the affiliate had picked it.
+- Stale selections (product archived, every chosen variant disabled) are filtered from the affiliate's read view and surfaced through `GET /api/affiliate/selections/stale` for UI cleanup prompts.
 
 ---
 

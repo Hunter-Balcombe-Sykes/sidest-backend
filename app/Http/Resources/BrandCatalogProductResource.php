@@ -34,6 +34,11 @@ class BrandCatalogProductResource extends JsonResource
                 'commission_override' => $this->resource['metafields']['commission_override'] ?? null,
                 'affiliate_discount_pct' => $this->resource['metafields']['affiliate_discount_pct'] ?? null,
                 'custom_photos_enabled' => $this->resource['metafields']['custom_photos_enabled'] ?? null,
+                // Derived from variant-level sidest.enabled state. Null until the
+                // backfill command has run for this product (or until a variant
+                // write triggers its first computation). Surfaced so the brand UI
+                // can show "all variants disabled" warnings without a second call.
+                'has_enabled_variants' => $this->resource['metafields']['has_enabled_variants'] ?? null,
             ],
         ];
     }

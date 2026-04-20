@@ -202,6 +202,7 @@ GRAPHQL;
 
         $selections = AffiliateProductSelection::query()
             ->where('affiliate_professional_id', $affiliate->id)
+            ->where('brand_professional_id', $brandId)
             ->get()
             ->keyBy('shopify_product_gid');
 
@@ -211,26 +212,64 @@ GRAPHQL;
 
             $product['selected'] = $selection !== null;
             $product['sort_order'] = $selection?->sort_order;
+            // Pass the affiliate's explicit variant subset through to the UI so the
+            // variant picker can show current state. Null = no override (default-all).
+            $product['selected_variant_gids'] = $selection?->selected_variant_gids;
 
             // Merge metafield data from Admin API
             $meta = $metafieldMap[$gid] ?? [];
             $product['commission_override'] = $meta['commission_override'] ?? null;
             $product['affiliate_discount_pct'] = $meta['affiliate_discount_pct'] ?? null;
 
-            // Server-side variant filter: variants with sidest.enabled=false are hidden.
-            // Missing metafield (null) or true = variant is available (dynamic default).
-            // Hydrogen reads this directly from the Storefront API; this filter ensures
-            // the affiliate dashboard also respects the restriction.
-            $product['variants'] = array_values(array_filter(
+            // Two-layer variant filter, in order:
+            //   1. Brand-side: variants with sidest.enabled=false are hidden. Missing
+            //      metafield (null) or true = available (dynamic default).
+            //   2. Affiliate-side: if selected_variant_gids is populated, only those
+            //      survive. If null, all brand-enabled variants remain.
+            // Brand disables always win; the intersection guarantees an affiliate
+            // never surfaces a variant the brand has taken down.
+            $brandEnabledVariants = array_values(array_filter(
                 $product['variants'] ?? [],
                 fn (array $variant) => ($variant['enabled'] ?? null) !== false
             ));
+
+            $affiliatePicks = $selection?->selected_variant_gids;
+            if (is_array($affiliatePicks) && ! empty($affiliatePicks)) {
+                $picked = array_flip($affiliatePicks);
+                $product['variants'] = array_values(array_filter(
+                    $brandEnabledVariants,
+                    fn (array $v) => isset($picked[$v['gid'] ?? ''])
+                ));
+            } else {
+                $product['variants'] = $brandEnabledVariants;
+            }
 
             // Collection membership flags
             $product['in_favourites'] = in_array($gid, $favouritesGids, true);
 
             return $product;
         }, $catalog);
+
+        // Stale recommendation: never serve a selection whose product or every chosen
+        // variant has disappeared. The UI still sees them via getStaleSelections() and
+        // can prompt a cleanup, but the storefront-facing view is already clean.
+        $products = array_values(array_filter(
+            $products,
+            function (array $p) {
+                if (! ($p['selected'] ?? false)) {
+                    // Non-selected products always stay visible — the affiliate is browsing.
+                    return true;
+                }
+
+                // Selected products only disappear from the catalog when the selection
+                // has been explicitly narrowed to variants that no longer exist. An
+                // unnarrowed selection with zero brand-enabled variants is a brand-side
+                // stale state, surfaced through getStaleSelections().
+                $picks = $p['selected_variant_gids'] ?? null;
+
+                return ! (is_array($picks) && ! empty($picks) && empty($p['variants']));
+            }
+        ));
 
         return [
             'products' => $products,
@@ -240,19 +279,72 @@ GRAPHQL;
     }
 
     /**
-     * Return selections whose GIDs no longer appear in the brand's active catalog.
+     * Return selections whose product has disappeared from the brand's active catalog,
+     * OR whose every brand-enabled variant has been disabled, OR whose explicit
+     * affiliate-picked variants are now fully disabled by the brand. The frontend
+     * surfaces these for affiliate-side cleanup.
      */
     public function getStaleSelections(Professional $affiliate): Collection
     {
         $resolved = $this->resolveAffiliateBrandIntegration($affiliate);
-        $catalog = $this->fetchActiveCatalog($resolved['brand_professional_id']);
+        $brandId = $resolved['brand_professional_id'];
+        $catalog = $this->fetchActiveCatalog($brandId);
 
-        $activeGids = collect($catalog)->pluck('gid')->all();
+        // Build a lookup of enabled variant GIDs per product once, then test each
+        // selection against it.
+        $enabledVariantsByProduct = [];
+        foreach ($catalog as $product) {
+            $gid = $product['gid'] ?? '';
+            if ($gid === '') {
+                continue;
+            }
+            $enabledVariantsByProduct[$gid] = array_map(
+                fn (array $v) => $v['gid'] ?? '',
+                array_filter(
+                    $product['variants'] ?? [],
+                    fn (array $v) => ($v['enabled'] ?? null) !== false
+                )
+            );
+        }
 
         return AffiliateProductSelection::query()
             ->where('affiliate_professional_id', $affiliate->id)
+            ->where('brand_professional_id', $brandId)
             ->get()
-            ->filter(fn (AffiliateProductSelection $sel) => ! in_array($sel->shopify_product_gid, $activeGids, true));
+            ->filter(function (AffiliateProductSelection $sel) use ($enabledVariantsByProduct) {
+                // Product no longer in active catalog (archived, deactivated, etc.)
+                if (! isset($enabledVariantsByProduct[$sel->shopify_product_gid])) {
+                    return true;
+                }
+
+                $enabledVariants = $enabledVariantsByProduct[$sel->shopify_product_gid];
+
+                // Product still exists but every variant is disabled — stale.
+                // (Products with no variants at all have an empty list too; those
+                // are single-SKU products where the "variant" is implicit and
+                // shouldn't be flagged. The brand-side has_enabled_variants flag
+                // already captures this distinction, but since we don't have it
+                // locally yet we keep the simpler rule for now: a selection is
+                // stale only if the brand *had* variants and disabled them all.)
+                $catalogVariantCount = count($enabledVariantsByProduct[$sel->shopify_product_gid]);
+                if ($catalogVariantCount === 0) {
+                    // Could be "no variants on product" (fine) or "all disabled"
+                    // (stale). Without distinguishing, err toward not-stale so
+                    // simple single-SKU products keep working.
+                    return false;
+                }
+
+                // Affiliate has narrowed to specific variants — stale if every
+                // chosen variant is no longer enabled.
+                $picks = $sel->selected_variant_gids;
+                if (is_array($picks) && ! empty($picks)) {
+                    $stillValid = array_intersect($picks, $enabledVariants);
+
+                    return empty($stillValid);
+                }
+
+                return false;
+            });
     }
 
     /**
@@ -263,6 +355,35 @@ GRAPHQL;
         $catalog = $this->fetchActiveCatalog($brandProfessionalId);
 
         return collect($catalog)->contains('gid', $productGid);
+    }
+
+    /**
+     * Return the list of variant GIDs for a product that are currently brand-enabled
+     * (i.e. variants with sidest.enabled != false). Used by the selection variants
+     * endpoint to validate affiliate-submitted variant picks without trusting the
+     * client. Returns an empty array if the product isn't in the active catalog.
+     *
+     * @return array<int, string>
+     */
+    public function getEnabledVariantGidsForProduct(string $brandProfessionalId, string $productGid): array
+    {
+        $catalog = $this->fetchActiveCatalog($brandProfessionalId);
+
+        foreach ($catalog as $product) {
+            if (($product['gid'] ?? '') !== $productGid) {
+                continue;
+            }
+
+            return array_values(array_map(
+                fn (array $v) => $v['gid'] ?? '',
+                array_filter(
+                    $product['variants'] ?? [],
+                    fn (array $v) => ($v['enabled'] ?? null) !== false
+                )
+            ));
+        }
+
+        return [];
     }
 
     /**

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;
 use App\Http\Requests\Api\Professional\Store\ReorderSelectionsRequest;
 use App\Http\Requests\Api\Professional\Store\StoreSelectionRequest;
+use App\Http\Requests\Api\Professional\Store\UpdateSelectionVariantsRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Store\AffiliateProductCatalogService;
@@ -266,4 +267,52 @@ it('validates items array in ReorderSelectionsRequest', function () {
     expect($rules['items'])->toContain('array');
     expect($rules)->toHaveKey('items.*.product_gid');
     expect($rules)->toHaveKey('items.*.sort_order');
+});
+
+// --- Per-selection variant picker ---
+
+it('validates shape in UpdateSelectionVariantsRequest', function () {
+    $request = new UpdateSelectionVariantsRequest;
+    $rules = $request->rules();
+
+    expect($rules['brand_professional_id'])->toContain('required');
+    expect($rules['brand_professional_id'])->toContain('uuid');
+    expect($rules['variant_gids'])->toContain('sometimes');
+    expect($rules['variant_gids'])->toContain('nullable');
+    expect($rules['variant_gids'])->toContain('array');
+    expect($rules)->toHaveKey('variant_gids.*');
+});
+
+it('rejects 403 on updateVariants for brand accounts', function () {
+    $service = app(AffiliateProductCatalogService::class);
+    $controller = new AffiliateProductController($service);
+
+    $request = makeBrandRequest('PATCH', [
+        'brand_professional_id' => (string) Str::uuid(),
+        'variant_gids' => null,
+    ]);
+    $formRequest = UpdateSelectionVariantsRequest::createFrom($request);
+    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
+
+    $response = $controller->updateVariants($formRequest, 'gid://shopify/Product/123');
+
+    expect($response->status())->toBe(403);
+});
+
+it('rejects malformed product GID on updateVariants', function () {
+    $service = app(AffiliateProductCatalogService::class);
+    $controller = new AffiliateProductController($service);
+
+    $request = makeAffiliateRequest('PATCH', [
+        'brand_professional_id' => (string) Str::uuid(),
+        'variant_gids' => null,
+    ]);
+    $formRequest = UpdateSelectionVariantsRequest::createFrom($request);
+    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
+    $formRequest->setContainer(app())->setRedirector(app('redirect'))->validateResolved();
+
+    $response = $controller->updateVariants($formRequest, 'not-a-product-gid');
+
+    expect($response->status())->toBe(422);
+    expect($response->getData(true)['message'])->toContain('Invalid product GID');
 });

@@ -23,10 +23,15 @@ class AffiliateProductSelection extends BaseModel
         'brand_professional_id',
         'shopify_product_gid',
         'sort_order',
+        'selected_variant_gids',
     ];
 
+    // selected_variant_gids: NULL = show all brand-enabled variants (default);
+    // non-null array = only these variant GIDs, still intersected with the
+    // brand's sidest.enabled variant metafield at read time.
     protected $casts = [
         'sort_order' => 'integer',
+        'selected_variant_gids' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

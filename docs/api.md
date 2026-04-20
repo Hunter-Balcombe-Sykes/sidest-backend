@@ -2336,6 +2336,32 @@ Staff removes a brand-affiliate link. Handles pending commissions per `on_pendin
 
 Now requires `brand_professional_id` (uuid) in the request body. The affiliate must have an active `brand_partner_links` row for that brand; otherwise 422.
 
+Additionally accepts optional `selected_variant_gids: string[] | null` — when present, narrows the affiliate's storefront to that subset of the product's variants. Each GID must belong to the product AND be currently brand-enabled (`sidest.enabled != false`); otherwise 422. Omit or send `null`/`[]` to default to "show every brand-enabled variant" (stored as `NULL`).
+
+#### New: `PATCH /api/affiliate/selections/{productGid}/variants`
+
+Update an existing selection's variant subset in place. Requires `brand_professional_id` (uuid) and optional `variant_gids: string[] | null`:
+- `null` or `[]` → resets back to "show every brand-enabled variant" (stores `NULL`).
+- Populated array → narrows the storefront to exactly those variants. Each GID must currently be brand-enabled; otherwise 422.
+
+Returns the updated `AffiliateProductSelectionResource` with the new `selected_variant_gids` field. Rate-limited by `throttle:affiliate-writes`.
+
+#### Side St Price enforced via Shopify Function + cart attribute
+
+`sidest.affiliate_discount_pct` (product-level, now `PUBLIC_READ`) is read by the `sidest-affiliate-discount` Shopify Function and applied as a line-level percentage discount at checkout. The function fires only when the cart carries the `_sidest_affiliate_id` attribute — set by Hydrogen on `cartCreate` from `$affiliateSlug.tsx` — so brand-direct customers pay the Shopify sticker price.
+
+Hydrogen's `products` engine now applies the discount client-side (via Storefront API) so every affiliate-facing surface shows a single clean price (no strike-through, no reference to the sticker price). First-touch attribution: the first affiliate to claim a cart keeps it until the cart is cleared.
+
+**Auto-install on OAuth:** `CreateShopifyAffiliateDiscountJob` runs after the collections job and calls `discountAutomaticAppCreate`. Idempotent. State tracked on `provider_metadata.sidest_discount_state`: `registered` | `pending` | `failed`. Existing brands backfilled via `php artisan sidest:install-affiliate-discount [--brand=<uuid>]`.
+
+**Commission calculation change (orders/paid webhook):** commission is now computed on post-discount line totals — `(line.price × quantity) − line.total_discount`. `calculation_metadata` keys updated:
+- `line_price` → removed; replaced by `unit_price`, `line_price_pre_discount`, `total_discount`, `line_price_post_discount`.
+- Dollar values on existing entries are unaffected (new shape applies only to new entries).
+
+#### New product metafield: `sidest.has_enabled_variants`
+
+Derived boolean metafield written by the backend (never by brands directly). True when the product has at least one variant with `sidest.enabled != false`, or when the product has no variants at all. The Active Products smart collection now ANDs two conditions — `sidest.active = true` AND `sidest.has_enabled_variants = true` — so products with every variant disabled drop out automatically. Backfilled for existing stores via `php artisan sidest:backfill-has-enabled-variants`.
+
 Staff analytics summary endpoints Stage 1-2 staff analytics is:
 - GET /api/staff/professionals/{professional}/analytics It returns totals, daily charts, and top links for the selected professional.
 
