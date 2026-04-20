@@ -64,6 +64,11 @@ class HydrogenAffiliateController extends ApiController
 
         $affiliateSite = Site::where('professional_id', $affiliate->id)->first();
         $gallery = $this->getAffiliateGallery($affiliateSite);
+        // Content pool images — affiliate's per-sitepage overrides that the
+        // Hydrogen loader merges over the brand's default placeholders. Shape
+        // matches the gallery payload so the Hydrogen side can read either
+        // list through the same SitepageImage normaliser.
+        $contentImages = $this->getAffiliateContent($affiliateSite);
 
         return $this->success([
             'affiliate_id' => (string) $affiliate->id,
@@ -71,6 +76,7 @@ class HydrogenAffiliateController extends ApiController
             'slug' => $affiliate->handle,
             'has_gallery' => ! empty($gallery),
             'gallery' => $gallery,
+            'content_images' => $contentImages,
         ]);
     }
 
@@ -154,13 +160,32 @@ class HydrogenAffiliateController extends ApiController
 
     private function getAffiliateGallery(?Site $site): array
     {
+        return $this->getAffiliatePool($site, SiteMedia::POOL_GALLERY);
+    }
+
+    /**
+     * Returns the affiliate's content-pool images — used by the Hydrogen
+     * sitepage to override the brand's default placeholders position-for-position.
+     */
+    private function getAffiliateContent(?Site $site): array
+    {
+        return $this->getAffiliatePool($site, SiteMedia::POOL_CONTENT);
+    }
+
+    /**
+     * Shared lookup for an affiliate's site-media pool. Returns ordered items
+     * with the optimised webp URL + alt text; skips rows without a resolvable
+     * variant so callers never see null URLs.
+     */
+    private function getAffiliatePool(?Site $site, string $pool): array
+    {
         if (! $site) {
             return [];
         }
 
         return SiteMedia::query()
             ->where('site_id', $site->id)
-            ->where('pool', SiteMedia::POOL_GALLERY)
+            ->where('pool', $pool)
             ->where('is_active', true)
             ->where('processing_state', SiteMedia::PROCESSING_STATE_READY)
             ->with('mediaVariants')
