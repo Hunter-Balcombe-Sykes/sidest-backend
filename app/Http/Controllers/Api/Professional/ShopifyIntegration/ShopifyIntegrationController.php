@@ -447,16 +447,33 @@ class ShopifyIntegrationController extends ApiController
     /**
      * Strip scheme, path, querystring, port, and lowercase — leaves just
      * the hostname. Returns '' when the input can't be coerced into a host.
+     *
+     * Implemented with explicit strpos calls instead of a single regex
+     * because including `#` inside a `#`-delimited character class trips
+     * PHP's PCRE parser ("Unknown modifier ']'"), and Laravel escalates
+     * that warning to a 500. Plain string ops sidestep the ambiguity.
      */
     private function stripDomainNoise(string $raw): string
     {
-        $trimmed = strtolower(trim($raw));
-        if ($trimmed === '') {
+        $host = strtolower(trim($raw));
+        if ($host === '') {
             return '';
         }
 
-        $withoutScheme = preg_replace('#^https?://#', '', $trimmed) ?? '';
-        $host = preg_replace('#[:/?#].*$#', '', $withoutScheme) ?? '';
+        // Strip scheme.
+        if (str_starts_with($host, 'https://')) {
+            $host = substr($host, 8);
+        } elseif (str_starts_with($host, 'http://')) {
+            $host = substr($host, 7);
+        }
+
+        // Cut at the first boundary character — path, port, query, fragment.
+        foreach ([':', '/', '?', '#'] as $boundary) {
+            $pos = strpos($host, $boundary);
+            if ($pos !== false) {
+                $host = substr($host, 0, $pos);
+            }
+        }
 
         return $host;
     }
