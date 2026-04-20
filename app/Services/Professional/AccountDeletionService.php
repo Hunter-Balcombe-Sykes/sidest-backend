@@ -307,17 +307,26 @@ class AccountDeletionService
     }
 
     /**
+     * Fetch the billing.subscriptions row with a Stripe subscription ID for this
+     * professional. Returns null when no such row exists.
+     */
+    private function findStripeSubscription(Professional $professional): ?object
+    {
+        return DB::connection('pgsql')
+            ->table('billing.subscriptions')
+            ->where('professional_id', $professional->id)
+            ->whereNotNull('stripe_subscription_id')
+            ->first();
+    }
+
+    /**
      * Schedule Stripe subscription to cancel at the end of the current billing
      * period. Best effort — log and continue on failure.
      */
     private function cancelStripeAtPeriodEnd(Professional $professional): void
     {
         try {
-            $subscription = DB::connection('pgsql')
-                ->table('billing.subscriptions')
-                ->where('professional_id', $professional->id)
-                ->whereNotNull('stripe_subscription_id')
-                ->first();
+            $subscription = $this->findStripeSubscription($professional);
 
             if (! $subscription || empty($subscription->stripe_subscription_id)) {
                 return;
@@ -344,11 +353,7 @@ class AccountDeletionService
     private function resumeStripeSubscription(Professional $professional): void
     {
         try {
-            $subscription = DB::connection('pgsql')
-                ->table('billing.subscriptions')
-                ->where('professional_id', $professional->id)
-                ->whereNotNull('stripe_subscription_id')
-                ->first();
+            $subscription = $this->findStripeSubscription($professional);
 
             if (! $subscription || empty($subscription->stripe_subscription_id)) {
                 return;

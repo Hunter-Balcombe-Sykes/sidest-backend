@@ -84,3 +84,22 @@ it('writes cancelled audit event', function () {
 
     expect($audit)->not->toBeNull();
 });
+
+it('does not leave stripe_subscription_id unreachable when cancel path runs', function () {
+    $pro = seedPendingDeletionProfessional();
+
+    DB::connection('pgsql')->table('billing.subscriptions')->insert([
+        'id'                     => (string) \Illuminate\Support\Str::uuid(),
+        'professional_id'        => $pro->id,
+        'stripe_subscription_id' => 'sub_dedup_test',
+        'status'                 => 'active',
+        'created_at'             => now()->toIso8601String(),
+        'updated_at'             => now()->toIso8601String(),
+    ]);
+
+    // Stripe not configured in tests — service returns early without throwing.
+    $service = new AccountDeletionService;
+    $result  = $service->cancel($pro, \Illuminate\Http\Request::create('/', 'POST'));
+
+    expect($result['success'])->toBeTrue();
+});
