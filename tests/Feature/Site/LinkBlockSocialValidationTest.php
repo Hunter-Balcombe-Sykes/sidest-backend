@@ -117,6 +117,7 @@ it('accepts a valid custom link with title and https url', function () {
         'title' => 'Book Now',
         'url' => 'https://booking.example.com/joshhunter',
         'icon_key' => 'calendar',
+        'category' => 'other',
     ]);
 
     expect($result['ok'])->toBeTrue();
@@ -127,6 +128,7 @@ it('accepts a custom link with http (not just https)', function () {
     $result = validateStoreRequest([
         'title' => 'Local Site',
         'url' => 'http://localhost:8080/intranet',
+        'category' => 'other',
     ]);
 
     expect($result['ok'])->toBeTrue();
@@ -206,6 +208,7 @@ it('strips HTML tags from the title (executable content removed)', function () {
     $result = validateStoreRequest([
         'title' => '<script>alert(1)</script>Book',
         'url' => 'https://example.com',
+        'category' => 'other',
     ]);
 
     expect($result['ok'])->toBeTrue();
@@ -221,6 +224,7 @@ it('strips control characters from the title', function () {
     $result = validateStoreRequest([
         'title' => "Book\x00\x01Now",
         'url' => 'https://example.com',
+        'category' => 'other',
     ]);
 
     expect($result['ok'])->toBeTrue();
@@ -231,6 +235,7 @@ it('strips img tag attempts from the title', function () {
     $result = validateStoreRequest([
         'title' => '<img src=x onerror=alert(1)>Hello',
         'url' => 'https://example.com',
+        'category' => 'other',
     ]);
 
     expect($result['ok'])->toBeTrue();

@@ -80,6 +80,11 @@ class StoreLinkBlockRequest extends BaseFormRequest
             'settings' => ['sometimes', 'array'],
             'settings.highlight' => ['sometimes', 'boolean'],
             'settings.note' => ['sometimes', 'string', 'max:140'],
+
+            // Category enum — always validated against the registry when supplied.
+            // Required for custom links (enforced in withValidator); optional for
+            // social links (controller falls back to the platform's default_category).
+            'category' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_categories', []))],
         ];
     }
 
@@ -106,6 +111,13 @@ class StoreLinkBlockRequest extends BaseFormRequest
                     $validator->errors()->add('url', 'The url field is required for custom links.');
                 } elseif (! $this->isAllowedScheme($url)) {
                     $validator->errors()->add('url', 'Custom link URLs must use http or https.');
+                }
+
+                // Category is required for custom links; platform links fall back
+                // to the registry's default_category when omitted.
+                $category = $this->input('category');
+                if ($category === null || $category === '') {
+                    $validator->errors()->add('category', 'The category field is required for custom links.');
                 }
             }
 
