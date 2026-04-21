@@ -402,7 +402,7 @@ return [
         ],
     ],
 
-    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
+    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents'],
 
     'professional_types' => [
         'brand' => 'Brand',
@@ -440,7 +440,7 @@ return [
     'account_type_defaults' => [
         // Influencer is the base type (most basic account)
         'influencer' => [
-            'allowed_sections' => ['shop', 'services', 'gallery'],
+            'allowed_sections' => ['shop', 'services', 'gallery', 'documents'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'is_published' => true,
             'allowed_theme_count' => 3,
@@ -456,7 +456,7 @@ return [
         // Professional inherits influencer + adds booking, analytics, custom links
         'professional' => [
             'inherits' => 'influencer',
-            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
+            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'custom_links_allowed' => true,
         ],
@@ -507,6 +507,7 @@ return [
         'product' => ['max' => (int) env('SIDEST_PRODUCT_IMAGE_MAX', 5)],
         'brand_gallery' => ['max' => (int) env('SIDEST_BRAND_GALLERY_IMAGE_MAX', 5)],
         'product_custom' => ['max' => (int) env('SIDEST_PRODUCT_CUSTOM_PHOTO_MAX', 1)],
+        'documents' => ['max' => 1],
     ],
 
     /*
