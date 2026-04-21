@@ -24,3 +24,11 @@ it('includes the 16 new platform icon keys in the allowlist', function () {
         expect($keys)->toContain($expected);
     }
 });
+
+it('each existing social platform has default_category=social and handle_location=path', function () {
+    foreach (['instagram', 'facebook', 'linkedin', 'youtube', 'tiktok', 'x', 'spotify', 'soundcloud'] as $key) {
+        $config = config("sidest.social_platforms.{$key}");
+        expect($config['default_category'])->toBe('social', "platform {$key} missing default_category=social");
+        expect($config['handle_location'])->toBe('path', "platform {$key} missing handle_location=path");
+    }
+});

@@ -117,6 +117,8 @@ return [
             'url_template' => 'https://instagram.com/{handle}',
             'host_allowlist' => ['instagram.com', 'www.instagram.com'],
             'url_path_extractor' => '#^/([a-zA-Z0-9._]{1,30})/?$#',
+            'default_category' => 'social',
+            'handle_location' => 'path',
         ],
         'facebook' => [
             'display_name' => 'Facebook',
@@ -126,6 +128,8 @@ return [
             'url_template' => 'https://facebook.com/{handle}',
             'host_allowlist' => ['facebook.com', 'www.facebook.com', 'fb.com', 'm.facebook.com'],
             'url_path_extractor' => '#^/([a-zA-Z0-9.]{5,50})/?$#',
+            'default_category' => 'social',
+            'handle_location' => 'path',
         ],
         'linkedin' => [
             'display_name' => 'LinkedIn',
@@ -136,6 +140,8 @@ return [
             'host_allowlist' => ['linkedin.com', 'www.linkedin.com'],
             // Matches both /in/{handle} (personal) and /company/{handle} (company pages)
             'url_path_extractor' => '#^/(?:in|company)/([a-zA-Z0-9-]{3,100})/?$#',
+            'default_category' => 'social',
+            'handle_location' => 'path',
         ],
         'youtube' => [
             'display_name' => 'YouTube',
@@ -145,6 +151,8 @@ return [
             'url_template' => 'https://youtube.com/@{handle}',
             'host_allowlist' => ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'],
             'url_path_extractor' => '#^/@([a-zA-Z0-9._-]{3,30})/?$#',
+            'default_category' => 'social',
+            'handle_location' => 'path',
         ],
         'tiktok' => [
             'display_name' => 'TikTok',
@@ -154,6 +162,8 @@ return [
             'url_template' => 'https://tiktok.com/@{handle}',
             'host_allowlist' => ['tiktok.com', 'www.tiktok.com', 'vm.tiktok.com'],
             'url_path_extractor' => '#^/@([a-zA-Z0-9._]{2,24})/?$#',
+            'default_category' => 'social',
+            'handle_location' => 'path',
         ],
         'x' => [
             'display_name' => 'X',
@@ -164,6 +174,8 @@ return [
             'url_template' => 'https://x.com/{handle}',
             'host_allowlist' => ['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com', 'mobile.twitter.com'],
             'url_path_extractor' => '#^/([a-zA-Z0-9_]{1,15})/?$#',
+            'default_category' => 'social',
+            'handle_location' => 'path',
         ],
         'spotify' => [
             'display_name' => 'Spotify',
@@ -174,6 +186,8 @@ return [
             'host_allowlist' => ['open.spotify.com', 'spotify.com'],
             // Matches /user/{handle} (profiles) and /artist/{id} (artist pages)
             'url_path_extractor' => '#^/(?:user|artist)/([a-zA-Z0-9._-]{3,40})/?$#',
+            'default_category' => 'social',
+            'handle_location' => 'path',
         ],
         'soundcloud' => [
             'display_name' => 'SoundCloud',
@@ -183,6 +197,8 @@ return [
             'url_template' => 'https://soundcloud.com/{handle}',
             'host_allowlist' => ['soundcloud.com', 'www.soundcloud.com'],
             'url_path_extractor' => '#^/([a-zA-Z0-9_-]{3,40})/?$#',
+            'default_category' => 'social',
+            'handle_location' => 'path',
         ],
     ],
 
