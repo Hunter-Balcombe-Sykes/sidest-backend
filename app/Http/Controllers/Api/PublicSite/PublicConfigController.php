@@ -28,14 +28,18 @@ class PublicConfigController extends ApiController
     /**
      * GET /api/public/config/social-platforms
      *
-     * Returns the list of supported social platforms with frontend-facing metadata
-     * (display name, icon key, placeholder). Used by the affiliate dashboard to
-     * render the social link picker. See docs/social-links.md for the full contract.
+     * Returns the list of supported platforms with frontend-facing metadata
+     * (display name, icon key, placeholder, category) plus the canonical
+     * `categories` enum. Used by the affiliate dashboard to render the
+     * platform picker grouped by category. See docs/social-links.md.
      */
     public function socialPlatforms(): JsonResponse
     {
         return response()
-            ->json(['platforms' => $this->normalizer->getPublicRegistry()])
+            ->json([
+                'platforms' => $this->normalizer->getPublicRegistry(),
+                'categories' => config('sidest.link_categories', []),
+            ])
             ->header('Cache-Control', 'public, max-age=3600');
     }
 

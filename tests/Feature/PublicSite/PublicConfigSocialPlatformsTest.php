@@ -11,13 +11,15 @@ it('returns 200 with the social platforms registry without auth', function () {
     ]);
 });
 
-it('returns all 8 supported platforms in stable order', function () {
+it('returns all 24 supported platforms and the first 8 are the original social platforms', function () {
     $response = $this->getJson('/api/public/config/social-platforms');
 
     $platforms = $response->json('platforms');
     $keys = array_column($platforms, 'key');
 
-    expect($keys)->toBe([
+    expect($keys)->toHaveCount(24);
+    // Original 8 social platforms remain first in stable registry order
+    expect(array_slice($keys, 0, 8))->toBe([
         'instagram', 'facebook', 'linkedin', 'youtube', 'tiktok', 'x', 'spotify', 'soundcloud',
     ]);
 });
@@ -59,4 +61,32 @@ it('returns expected display names for each platform', function () {
         'spotify' => 'Spotify',
         'soundcloud' => 'SoundCloud',
     ]);
+});
+
+it('returns 24 platforms with category field each', function () {
+    $response = $this->getJson('/api/public/config/social-platforms');
+
+    $response->assertOk();
+    $response->assertJsonCount(24, 'platforms');
+
+    $platforms = $response->json('platforms');
+    foreach ($platforms as $p) {
+        expect($p)->toHaveKeys(['key', 'display_name', 'icon_key', 'placeholder', 'category']);
+    }
+});
+
+it('returns the canonical categories array alongside platforms', function () {
+    $response = $this->getJson('/api/public/config/social-platforms');
+
+    $response->assertOk();
+    $response->assertJson([
+        'categories' => ['social', 'booking', 'education', 'content', 'events', 'other'],
+    ]);
+});
+
+it('sends a 1-hour public cache header', function () {
+    $response = $this->getJson('/api/public/config/social-platforms');
+
+    // assertHeader does an exact match — Laravel normalizes the header as max-age first
+    $response->assertHeader('Cache-Control', 'max-age=3600, public');
 });
