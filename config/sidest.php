@@ -286,6 +286,7 @@ return [
         // --- Education platforms — subdomain mode (default_category: education) ---
         // Handle lives in the subdomain: {handle}.mykajabi.com / {handle}.circle.so
         // host_allowlist[0] = base domain; labelled-suffix match in normalizer.
+        // Note: url_path_extractor is present for schema consistency but unused in subdomain mode.
         'kajabi' => [
             'display_name' => 'Kajabi',
             'icon_key' => 'kajabi',
@@ -376,6 +377,7 @@ return [
         ],
 
         // --- Content platforms — subdomain mode (default_category: content) ---
+        // Note: url_path_extractor is present for schema consistency but unused in subdomain mode.
         'substack' => [
             'display_name' => 'Substack',
             'icon_key' => 'substack',

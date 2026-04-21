@@ -97,14 +97,25 @@ class SocialLinkNormalizer
         $config = $this->resolvePlatform($platformKey);
 
         $parsed = parse_url($url);
-        if (! is_array($parsed) || ! isset($parsed['host'], $parsed['path'])) {
+        if (! is_array($parsed) || ! isset($parsed['host'])) {
             return null;
         }
 
         // parse_url() decodes punycode for us, so an IDN host like xn--... will
         // be returned as the punycode string itself. Our host_allowlist is plain
         // ASCII, so any punycode lookalike fails the allowlist check naturally.
-        $host = strtolower($parsed['host']);
+        // rtrim strips trailing dot from FQDN notation (e.g. "foo.substack.com.").
+        $host = rtrim(strtolower($parsed['host']), '.');
+
+        // Subdomain-mode platforms encode the handle in the leftmost label.
+        if (($config['handle_location'] ?? 'path') === 'subdomain') {
+            return $this->extractSubdomainHandle($config, $host);
+        }
+
+        if (! isset($parsed['path'])) {
+            return null;
+        }
+
         if (! in_array($host, $config['host_allowlist'], true)) {
             return null;
         }
@@ -153,7 +164,8 @@ class SocialLinkNormalizer
             );
         }
 
-        $host = strtolower($parsed['host']);
+        // rtrim strips trailing dot from FQDN notation (e.g. "foo.substack.com.").
+        $host = rtrim(strtolower($parsed['host']), '.');
 
         if (($config['handle_location'] ?? 'path') === 'subdomain') {
             return $this->normalizeSubdomainUrl($platformKey, $config, $host, $parsed);
@@ -226,20 +238,16 @@ class SocialLinkNormalizer
             );
         }
 
-        // Extract the leftmost label as the candidate handle.
-        // str_ends_with guaranteed the trailing ".{base}", so strlen math is safe.
-        $subdomainPortion = substr($host, 0, strlen($host) - strlen($base) - 1);
-        $labels = explode('.', $subdomainPortion);
-        $candidate = $labels[0] ?? '';
+        $candidate = $this->extractSubdomainHandle($config, $host);
 
         $path = $parsed['path'] ?? '/';
         $hasQuery = isset($parsed['query']) && $parsed['query'] !== '';
         $hasFragment = isset($parsed['fragment']) && $parsed['fragment'] !== '';
 
-        // Root-URL fast path: candidate must match handle_pattern AND
+        // Root-URL fast path: candidate must be extractable AND
         // path must be empty-or-slash-only AND no query/fragment.
         if (
-            preg_match($config['handle_pattern'], $candidate) === 1 &&
+            $candidate !== null &&
             in_array($path, ['', '/'], true) &&
             ! $hasQuery &&
             ! $hasFragment
@@ -265,6 +273,34 @@ class SocialLinkNormalizer
             'display_name' => $config['display_name'],
             'platform_key' => $platformKey,
         ];
+    }
+
+    /**
+     * Extract the handle from the leftmost subdomain label for subdomain-mode platforms.
+     *
+     * Returns the handle string if the host is a valid "X.base" subdomain and the
+     * leftmost label matches handle_pattern. Returns null if the host is not on this
+     * platform, or if the leftmost label does not pass handle_pattern (e.g. a
+     * multi-label subdomain). Never throws — callers that need throw semantics on a
+     * bad host must perform their own host validation first (see normalizeSubdomainUrl).
+     */
+    private function extractSubdomainHandle(array $config, string $host): ?string
+    {
+        $base = $config['host_allowlist'][0];
+
+        if ($host === $base || ! str_ends_with($host, '.'.$base)) {
+            return null; // not on this platform
+        }
+
+        $subdomainPortion = substr($host, 0, strlen($host) - strlen($base) - 1);
+        $labels = explode('.', $subdomainPortion);
+        $candidate = $labels[0] ?? '';
+
+        if (preg_match($config['handle_pattern'], $candidate) === 1) {
+            return $candidate;
+        }
+
+        return null; // valid host, no extractable handle (e.g. multi-label subdomain)
     }
 
     /**

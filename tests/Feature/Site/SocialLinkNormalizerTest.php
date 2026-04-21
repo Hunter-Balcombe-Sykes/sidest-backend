@@ -303,3 +303,17 @@ it('rejects the bare base domain as handle-less (no subdomain present)', functio
     expect(fn () => normalizer()->normalize('substack', null, 'https://substack.com/'))
         ->toThrow(InvalidArgumentException::class);
 });
+
+it('normalizes a subdomain URL with mixed-case host', function () {
+    $result = normalizer()->normalize('substack', null, 'https://JoshHunter.Substack.COM/');
+
+    expect($result['url'])->toBe('https://joshhunter.substack.com/');
+    expect($result['handle'])->toBe('joshhunter');
+});
+
+it('normalizes a subdomain URL with a trailing-dot FQDN host', function () {
+    $result = normalizer()->normalize('substack', null, 'https://joshhunter.substack.com./');
+
+    expect($result['url'])->toBe('https://joshhunter.substack.com/');
+    expect($result['handle'])->toBe('joshhunter');
+});
