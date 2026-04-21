@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\PublicSite\PublicBrandAffiliateInviteController;
 use App\Http\Controllers\Api\PublicSite\PublicConfigController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
+use App\Http\Controllers\Api\PublicSite\PublicDocumentDownloadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
 use App\Http\Controllers\Api\PublicSite\PublicOpenInviteController;
@@ -101,6 +102,13 @@ Route::middleware('feature:smart_booking')->group(function () {
         ->middleware('throttle:booking-checkout');
 });
 Route::get('/public/shopify/storefront-config', [PublicShopifyStorefrontController::class, 'storefrontConfig'])
+    ->middleware('throttle:public-site');
+
+// Public document download — 302-redirects to a short-TTL R2 presigned URL
+// with a response-content-disposition=attachment override so the browser
+// forces a download instead of rendering inline.
+Route::get('/public/documents/{document}/download', PublicDocumentDownloadController::class)
+    ->whereUuid('document')
     ->middleware('throttle:public-site');
 
 // Static frontend config (social platform registry, etc). Aggressively cacheable.
