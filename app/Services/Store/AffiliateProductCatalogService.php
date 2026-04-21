@@ -30,6 +30,7 @@ query collectionProducts($handle: String!, $first: Int!, $after: String) {
           title
           handle
           availableForSale
+          description
           featuredImage {
             url
             altText
@@ -580,6 +581,7 @@ GRAPHQL;
                         'gid' => $node['id'] ?? '',
                         'title' => $node['title'] ?? '',
                         'handle' => $node['handle'] ?? '',
+                        'description' => $node['description'] ?? '',
                         'available_for_sale' => $node['availableForSale'] ?? false,
                         'featured_image' => $node['featuredImage'] ?? null,
                         'images' => $images,

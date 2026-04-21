@@ -13,6 +13,7 @@ class AffiliateProductResource extends JsonResource
             'gid' => $this->resource['gid'] ?? '',
             'title' => $this->resource['title'] ?? '',
             'handle' => $this->resource['handle'] ?? '',
+            'description' => (string) ($this->resource['description'] ?? ''),
             'available_for_sale' => (bool) ($this->resource['available_for_sale'] ?? false),
             'featured_image' => $this->resource['featured_image'] ?? null,
             // Product gallery — populated for the detail modal on the
