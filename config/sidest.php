@@ -374,6 +374,30 @@ return [
             'default_category' => 'content',
             'handle_location' => 'path',
         ],
+
+        // --- Content platforms — subdomain mode (default_category: content) ---
+        'substack' => [
+            'display_name' => 'Substack',
+            'icon_key' => 'substack',
+            'placeholder' => 'yourname',
+            'handle_pattern' => '/^[a-zA-Z0-9-]{3,63}$/',
+            'url_template' => 'https://{handle}.substack.com/',
+            'host_allowlist' => ['substack.com'],
+            'url_path_extractor' => '#^/?$#',
+            'default_category' => 'content',
+            'handle_location' => 'subdomain',
+        ],
+        'bandcamp' => [
+            'display_name' => 'Bandcamp',
+            'icon_key' => 'bandcamp',
+            'placeholder' => 'yourname',
+            'handle_pattern' => '/^[a-zA-Z0-9-]{3,63}$/',
+            'url_template' => 'https://{handle}.bandcamp.com/',
+            'host_allowlist' => ['bandcamp.com'],
+            'url_path_extractor' => '#^/?$#',
+            'default_category' => 'content',
+            'handle_location' => 'subdomain',
+        ],
     ],
 
     'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],

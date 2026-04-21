@@ -79,3 +79,13 @@ it('registers apple_podcasts as a content path-mode platform', function () {
     expect($config['handle_location'])->toBe('path');
     expect($config['host_allowlist'])->toContain('podcasts.apple.com');
 });
+
+it('registers substack and bandcamp as content subdomain-mode platforms', function () {
+    foreach (['substack' => 'substack.com', 'bandcamp' => 'bandcamp.com'] as $key => $base) {
+        $config = config("sidest.social_platforms.{$key}");
+        expect($config)->not->toBeNull();
+        expect($config['default_category'])->toBe('content');
+        expect($config['handle_location'])->toBe('subdomain');
+        expect($config['host_allowlist'][0])->toBe($base);
+    }
+});

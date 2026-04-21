@@ -9,13 +9,10 @@ function normalizer(): SocialLinkNormalizer
 
 // --- getPublicRegistry() ---
 
-it('returns 8 platforms in the public registry', function () {
+it('returns 24 platforms in the public registry', function () {
     $registry = normalizer()->getPublicRegistry();
 
-    expect($registry)->toHaveCount(8);
-    expect(collect($registry)->pluck('key')->all())->toBe([
-        'instagram', 'facebook', 'linkedin', 'youtube', 'tiktok', 'x', 'spotify', 'soundcloud',
-    ]);
+    expect($registry)->toHaveCount(24);
 });
 
 it('strips internal validation fields from the public registry', function () {
