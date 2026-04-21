@@ -219,31 +219,6 @@ function setupMediaTables(): void
 }
 
 /**
- * site.blocks for section visibility / block settings tests.
- */
-function setupBlocksTable(): void
-{
-    attachTestSchemas();
-    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS site.blocks (
-        id TEXT PRIMARY KEY,
-        professional_id TEXT NULL,
-        site_id TEXT NULL,
-        block_group TEXT NULL,
-        block_type TEXT NULL,
-        title TEXT NULL,
-        url TEXT NULL,
-        icon_key TEXT NULL,
-        sort_order INTEGER NULL,
-        settings TEXT NULL,
-        is_enabled INTEGER NULL,
-        is_active INTEGER NULL,
-        deleted_at TEXT NULL,
-        created_at TEXT NULL,
-        updated_at TEXT NULL
-    )');
-}
-
-/**
  * core.brand_partner_links + core.brand_affiliate_invites for brand connection tests.
  */
 function setupBrandLinkTables(): void
