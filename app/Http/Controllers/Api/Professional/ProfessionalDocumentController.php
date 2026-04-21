@@ -66,10 +66,12 @@ class ProfessionalDocumentController extends ApiController
         $caption = $this->normaliseOptionalString($request->validated('caption'));
         $originalFilename = substr((string) $file->getClientOriginalName(), 0, 255);
 
-        // Flat-replace: inside one transaction, remove the existing document
-        // row + R2 bytes (if any), then create the new row. Advisory lock
-        // prevents two parallel uploads from racing.
-        $media = DB::transaction(function () use ($site, $pro, $file, $actualMime, $title, $caption, $originalFilename) {
+        // Flat-replace: inside one transaction, soft-delete the existing row
+        // (if any), create the new row, stream the file to R2, and set the path.
+        // The old row's R2 bytes are deleted AFTER commit so a transaction
+        // rollback doesn't leave an active row pointing at missing bytes.
+        $previousPath = null;
+        $media = DB::transaction(function () use ($site, $pro, $file, $actualMime, $title, $caption, $originalFilename, &$previousPath) {
             if (DB::getDriverName() === 'pgsql') {
                 DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-documents:{$site->id}"]);
             }
@@ -82,15 +84,8 @@ class ProfessionalDocumentController extends ApiController
                 ->first();
 
             if ($existing) {
-                try {
-                    Storage::disk(config('sidest.media_disk'))->delete((string) $existing->path);
-                } catch (\Throwable $e) {
-                    Log::warning('Failed to delete previous document R2 object', [
-                        'media_id' => $existing->id,
-                        'path' => $existing->path,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
+                // Capture the path for post-commit R2 cleanup.
+                $previousPath = (string) $existing->path;
                 $existing->delete();
             }
 
@@ -131,6 +126,22 @@ class ProfessionalDocumentController extends ApiController
 
             return $media;
         });
+
+        // Post-commit: delete old R2 bytes. Safe to run outside the txn because
+        // the old row is already soft-deleted (so no reader will try to fetch
+        // the old path), and if this delete fails we just leak bytes — not a
+        // correctness issue. If the transaction had rolled back, $previousPath
+        // would stay null and this is a no-op.
+        if ($previousPath !== null && $previousPath !== '') {
+            try {
+                Storage::disk(config('sidest.media_disk'))->delete($previousPath);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to delete previous document R2 object after commit', [
+                    'path' => $previousPath,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         app(SiteCacheService::class)->invalidateSite($site);
 
