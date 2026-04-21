@@ -91,8 +91,13 @@ class BrandCatalogController extends ApiController
             return $this->error('This endpoint is only available for brand accounts.', 403);
         }
 
+        // ?mode=all runs the exact ALL_PRODUCTS query /brand/catalog/all uses
+        // so we can see whether that specific query is the one failing.
+        // Defaults to 'minimal' which just probes auth + returns a tiny sample.
+        $mode = $request->query('mode') === 'all' ? 'all' : 'minimal';
+
         try {
-            $probe = $this->catalogService->probeProductsQuery($pro);
+            $probe = $this->catalogService->probeProductsQuery($pro, $mode);
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 500);
         } catch (\Throwable $e) {

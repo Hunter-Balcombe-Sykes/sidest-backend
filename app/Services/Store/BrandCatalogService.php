@@ -271,24 +271,22 @@ GRAPHQL;
     }
 
     /**
-     * Diagnostic probe: runs a minimal products query against Shopify and
-     * returns the raw response + cost extension so we can see exactly what
-     * Shopify is saying when the regular catalog fetch returns empty.
-     * Intended for ad-hoc debugging via the /brand/catalog/debug route —
-     * safe to leave in place because it's auth-gated and read-only, but
-     * can be removed once the current investigation is done.
+     * Diagnostic probe: two modes.
      *
-     * @return array{
-     *   shop: array<string, mixed>|null,
-     *   products_total_edges: int,
-     *   products_sample: array<int, array{id: string, title: string, status: string}>,
-     *   errors: array,
-     *   cost: array<string, mixed>|null,
-     *   http_status: int,
-     *   scopes_granted: array<int, string>,
-     * }
+     *   mode = 'minimal' (default)
+     *     Runs a hand-rolled minimal query (shop + products(first:3) with
+     *     just id/title/status). Confirms auth works and returns a sample.
+     *
+     *   mode = 'all'
+     *     Runs the exact same ALL_PRODUCTS query that /brand/catalog/all uses,
+     *     with the same PRODUCTS_PER_PAGE variable, and returns the raw
+     *     Shopify response — so we can see the full cost breakdown, any
+     *     errors, and the actual edge count for the real query.
+     *
+     * Both modes surface Shopify's errors array, the extensions.cost
+     * breakdown, the HTTP status, and the locally-stored scope list.
      */
-    public function probeProductsQuery(Professional $brand): array
+    public function probeProductsQuery(Professional $brand, string $mode = 'minimal'): array
     {
         $resolved = $this->resolveBrandIntegration($brand);
         $shopDomain = $resolved['shop_domain'];
@@ -296,7 +294,7 @@ GRAPHQL;
         $metadata = $resolved['metadata'];
         $apiVersion = (string) config('services.shopify.api_version', '2025-01');
 
-        $query = <<<'GRAPHQL'
+        $minimalQuery = <<<'GRAPHQL'
         query probe {
           shop { id name myshopifyDomain }
           products(first: 3) {
@@ -306,6 +304,10 @@ GRAPHQL;
         }
         GRAPHQL;
 
+        [$query, $variables] = $mode === 'all'
+            ? [self::ALL_PRODUCTS, ['first' => self::PRODUCTS_PER_PAGE]]
+            : [$minimalQuery, []];
+
         $httpStatus = 0;
         $responseBody = [];
         try {
@@ -313,14 +315,17 @@ GRAPHQL;
                 'X-Shopify-Access-Token' => $accessToken,
                 'Content-Type' => 'application/json',
                 'Shopify-GraphQL-Cost-Debug' => '1',
-            ])->timeout(10)->post(
+            ])->timeout(15)->post(
                 "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-                ['query' => $query]
+                array_filter([
+                    'query' => $query,
+                    'variables' => ! empty($variables) ? $variables : null,
+                ])
             );
             $httpStatus = $response->status();
             $responseBody = $response->json() ?? [];
         } catch (\Throwable $e) {
-            Log::warning('Shopify probe: request failed', ['error' => $e->getMessage()]);
+            Log::warning('Shopify probe: request failed', ['error' => $e->getMessage(), 'mode' => $mode]);
         }
 
         $edges = Arr::get($responseBody, 'data.products.edges', []);
@@ -330,13 +335,15 @@ GRAPHQL;
                 'title' => (string) Arr::get($edge, 'node.title', ''),
                 'status' => (string) Arr::get($edge, 'node.status', ''),
             ],
-            is_array($edges) ? $edges : []
+            is_array($edges) ? array_slice($edges, 0, 5) : []
         );
 
         return [
+            'mode' => $mode,
             'shop' => Arr::get($responseBody, 'data.shop'),
             'products_total_edges' => is_array($edges) ? count($edges) : 0,
             'products_sample' => $sample,
+            'page_info' => Arr::get($responseBody, 'data.products.pageInfo'),
             'errors' => Arr::get($responseBody, 'errors', []),
             'cost' => Arr::get($responseBody, 'extensions.cost'),
             'http_status' => $httpStatus,
