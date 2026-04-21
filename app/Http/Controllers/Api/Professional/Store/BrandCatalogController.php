@@ -75,6 +75,44 @@ class BrandCatalogController extends ApiController
     }
 
     /**
+     * POST /brand/catalog/refresh-derived-flags
+     *
+     * Re-runs BackfillBrandHasEnabledVariantsJob for the current brand. Needed
+     * when the first backfill at install-time fetched an empty catalog (e.g.
+     * the earlier Money-scalar bug silently returned zero products), leaving
+     * every product's sidest.has_enabled_variants unwritten. Without that
+     * metafield set, Shopify's Active Products smart collection (which ANDs
+     * sidest.active=true AND sidest.has_enabled_variants=true) can't match
+     * anything, so single-variant products drop out of the Active collection
+     * until this runs successfully.
+     *
+     * Idempotent: skips products where the stored value already matches the
+     * computed one.
+     */
+    public function refreshDerivedFlags(Request $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+
+        if (! $pro->isBrand()) {
+            return $this->error('This endpoint is only available for brand accounts.', 403);
+        }
+
+        try {
+            $resolved = $this->catalogService->resolveBrandIntegration($pro);
+        } catch (\RuntimeException $e) {
+            return $this->error($e->getMessage(), $e->getCode() ?: 500);
+        }
+
+        \App\Jobs\Shopify\BackfillBrandHasEnabledVariantsJob::dispatch((string) $resolved['integration']->id);
+
+        return $this->success([
+            'dispatched' => true,
+            'integration_id' => (string) $resolved['integration']->id,
+            'note' => 'Backfill queued. Check provider_metadata.has_enabled_variants_backfill_state after a minute or re-run this endpoint.',
+        ]);
+    }
+
+    /**
      * GET /brand/catalog/debug
      *
      * Diagnostic probe: runs a minimal products query against Shopify and

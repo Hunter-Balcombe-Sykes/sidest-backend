@@ -277,6 +277,12 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         // (shop info, products sample, cost, errors, granted scopes). Safe
         // to leave in place; auth-gated, read-only, no mutations.
         Route::get('/brand/catalog/debug', [BrandCatalogController::class, 'debug']);
+        // Re-dispatches the has_enabled_variants backfill — for brands whose
+        // first backfill pass hit an earlier bug and marked "complete" with
+        // zero writes. Throttled because it kicks off a catalog-wide Shopify
+        // read; no reason to let a client spam it.
+        Route::post('/brand/catalog/refresh-derived-flags', [BrandCatalogController::class, 'refreshDerivedFlags'])
+            ->middleware('throttle:6,1');
         Route::patch('/brand/catalog/{productGid}/metafields', [BrandCatalogController::class, 'updateMetafields'])
             ->middleware('throttle:brand-catalog-writes')
             ->where('productGid', '.*');
