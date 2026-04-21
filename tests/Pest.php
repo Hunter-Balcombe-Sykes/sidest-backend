@@ -105,6 +105,7 @@ function setupProfessionalsTable(): void
         professional_type TEXT NULL,
         status TEXT NULL,
         bio TEXT NULL,
+        about TEXT NULL,
         country_code TEXT NULL,
         timezone TEXT NULL,
         onboarding_step INTEGER NULL,
