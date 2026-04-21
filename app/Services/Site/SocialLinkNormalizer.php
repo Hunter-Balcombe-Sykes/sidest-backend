@@ -129,6 +129,8 @@ class SocialLinkNormalizer
             );
         }
 
+        // Both path-mode and subdomain-mode use {handle} substitution; the
+        // url_template baked the mode-specific shape in at registry time.
         return [
             'url' => str_replace('{handle}', $cleaned, $config['url_template']),
             'handle' => $cleaned,
@@ -152,6 +154,12 @@ class SocialLinkNormalizer
         }
 
         $host = strtolower($parsed['host']);
+
+        if (($config['handle_location'] ?? 'path') === 'subdomain') {
+            return $this->normalizeSubdomainUrl($platformKey, $config, $host, $parsed);
+        }
+
+        // Path-mode (existing behaviour)
         if (! in_array($host, $config['host_allowlist'], true)) {
             throw new InvalidArgumentException(
                 "That URL doesn't belong to {$config['display_name']}. Expected one of: ".implode(', ', $config['host_allowlist']).'.'
@@ -188,7 +196,79 @@ class SocialLinkNormalizer
     }
 
     /**
-     * @return array{display_name: string, icon_key: string, placeholder: string, handle_pattern: string, url_template: string, host_allowlist: array<int, string>, url_path_extractor: string}
+     * Subdomain-mode URL normalization.
+     *
+     * Host validation is a labelled-suffix check against the registry's base
+     * domain (host_allowlist[0]). The leading dot is essential — without it,
+     * `evilsubstack.com` would match `substack.com`. That is an open-phishing
+     * vulnerability; see docs/social-links.md §8 and the spec's §8.2.
+     *
+     * If the host is the bare base (e.g. `substack.com` with no subdomain), we
+     * reject — there's no handle to extract and no sensible canonical URL.
+     *
+     * If the leftmost label passes the handle_pattern AND the path is the bare
+     * root (`/` or empty), recurse into normalizeHandle to get the clean URL.
+     * Otherwise fall back to lenient storage: keep the URL, force https, no
+     * handle extracted (e.g. `alice.substack.com/p/my-post`).
+     *
+     * @param  array{host?: string, path?: string, query?: string, fragment?: string}  $parsed
+     * @return array{url: string, handle: string|null, icon_key: string, display_name: string, platform_key: string}
+     */
+    private function normalizeSubdomainUrl(string $platformKey, array $config, string $host, array $parsed): array
+    {
+        $base = $config['host_allowlist'][0];
+
+        // Labelled-suffix match: host must be "X.base" for some non-empty X.
+        // Bare base (`substack.com`) is rejected — no handle present.
+        if ($host === $base || ! str_ends_with($host, '.'.$base)) {
+            throw new InvalidArgumentException(
+                "That URL doesn't belong to {$config['display_name']}. Expected a {$base} subdomain."
+            );
+        }
+
+        // Extract the leftmost label as the candidate handle.
+        // str_ends_with guaranteed the trailing ".{base}", so strlen math is safe.
+        $subdomainPortion = substr($host, 0, strlen($host) - strlen($base) - 1);
+        $labels = explode('.', $subdomainPortion);
+        $candidate = $labels[0] ?? '';
+
+        $path = $parsed['path'] ?? '/';
+        $hasQuery = isset($parsed['query']) && $parsed['query'] !== '';
+        $hasFragment = isset($parsed['fragment']) && $parsed['fragment'] !== '';
+
+        // Root-URL fast path: candidate must match handle_pattern AND
+        // path must be empty-or-slash-only AND no query/fragment.
+        if (
+            preg_match($config['handle_pattern'], $candidate) === 1 &&
+            in_array($path, ['', '/'], true) &&
+            ! $hasQuery &&
+            ! $hasFragment
+        ) {
+            return $this->normalizeHandle($platformKey, $config, $candidate);
+        }
+
+        // Lenient deep-link path: preserve the URL but force https. Candidate
+        // handle may be invalid (e.g. multi-label subdomain) or URL has extra
+        // path/query — we still trust the host validation above and store as-is.
+        $rebuilt = 'https://'.$host.$path;
+        if ($hasQuery) {
+            $rebuilt .= '?'.$parsed['query'];
+        }
+        if ($hasFragment) {
+            $rebuilt .= '#'.$parsed['fragment'];
+        }
+
+        return [
+            'url' => $rebuilt,
+            'handle' => null,
+            'icon_key' => $config['icon_key'],
+            'display_name' => $config['display_name'],
+            'platform_key' => $platformKey,
+        ];
+    }
+
+    /**
+     * @return array{display_name: string, icon_key: string, placeholder: string, handle_pattern: string, url_template: string, host_allowlist: array<int, string>, url_path_extractor: string, default_category: string, handle_location: string}
      */
     private function resolvePlatform(string $platformKey): array
     {

@@ -224,3 +224,82 @@ it('returns null for a wrong-host URL', function () {
     expect(normalizer()->extractHandleFromUrl('instagram', 'https://linktr.ee/joshhunter'))
         ->toBeNull();
 });
+
+// --- Subdomain-mode normalization ---
+
+it('normalizes a substack handle by subdomain', function () {
+    $result = normalizer()->normalize('substack', 'joshhunter', null);
+
+    expect($result['url'])->toBe('https://joshhunter.substack.com/');
+    expect($result['handle'])->toBe('joshhunter');
+    expect($result['icon_key'])->toBe('substack');
+    expect($result['platform_key'])->toBe('substack');
+});
+
+it('strips leading @ in subdomain-mode handle input', function () {
+    $result = normalizer()->normalize('substack', '@joshhunter', null);
+
+    expect($result['handle'])->toBe('joshhunter');
+    expect($result['url'])->toBe('https://joshhunter.substack.com/');
+});
+
+it('extracts the handle from a substack root URL', function () {
+    $result = normalizer()->normalize('substack', null, 'https://joshhunter.substack.com/');
+
+    expect($result['url'])->toBe('https://joshhunter.substack.com/');
+    expect($result['handle'])->toBe('joshhunter');
+});
+
+it('extracts the handle from a bandcamp root URL', function () {
+    $result = normalizer()->normalize('bandcamp', null, 'https://somebands.bandcamp.com');
+
+    expect($result['handle'])->toBe('somebands');
+    expect($result['url'])->toBe('https://somebands.bandcamp.com/');
+});
+
+it('extracts the handle for kajabi (mykajabi.com base)', function () {
+    $result = normalizer()->normalize('kajabi', null, 'https://acmecoach.mykajabi.com/');
+
+    expect($result['handle'])->toBe('acmecoach');
+    expect($result['url'])->toBe('https://acmecoach.mykajabi.com/');
+});
+
+it('falls back to lenient URL storage on subdomain deep-link', function () {
+    $result = normalizer()->normalize('substack', null, 'https://joshhunter.substack.com/p/my-post');
+
+    // Deep link, handle not extracted
+    expect($result['handle'])->toBeNull();
+    // URL is preserved, https forced
+    expect($result['url'])->toBe('https://joshhunter.substack.com/p/my-post');
+});
+
+it('forces https on http subdomain input', function () {
+    $result = normalizer()->normalize('substack', null, 'http://joshhunter.substack.com/');
+
+    expect($result['url'])->toBe('https://joshhunter.substack.com/');
+});
+
+it('rejects a labelled-suffix attack: evilsubstack.com must not match substack', function () {
+    expect(fn () => normalizer()->normalize('substack', null, 'https://evilsubstack.com/fake'))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+it('rejects a wrong-host URL for a subdomain platform', function () {
+    expect(fn () => normalizer()->normalize('substack', null, 'https://alice.medium.com/'))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+it('rejects a subdomain handle with invalid characters', function () {
+    expect(fn () => normalizer()->normalize('substack', 'josh.hunter', null))
+        ->toThrow(InvalidArgumentException::class); // dots not allowed per pattern
+});
+
+it('rejects a subdomain handle that is too short', function () {
+    expect(fn () => normalizer()->normalize('substack', 'ab', null))
+        ->toThrow(InvalidArgumentException::class); // min 3 chars
+});
+
+it('rejects the bare base domain as handle-less (no subdomain present)', function () {
+    expect(fn () => normalizer()->normalize('substack', null, 'https://substack.com/'))
+        ->toThrow(InvalidArgumentException::class);
+});
