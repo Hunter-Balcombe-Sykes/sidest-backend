@@ -11,7 +11,6 @@ use Illuminate\Support\Str;
  * parent rows exist solely to satisfy FK constraints (SQLite doesn't enforce
  * them, but the helper keeps the test data coherent).
  */
-
 beforeEach(function () {
     setupProfessionalsTable();
     setupSitesTable();

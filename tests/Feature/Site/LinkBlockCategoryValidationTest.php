@@ -12,7 +12,6 @@ use Illuminate\Validation\ValidationException;
  * no DB, no HTTP stack. The controller-level persistence tests live in
  * tests/Feature/Site/LinkBlockCategoryPersistenceTest.php (added in Task 15).
  */
-
 function validateStoreRequestCategory(array $payload): array
 {
     $request = Request::create('/api/test', 'POST', $payload);
