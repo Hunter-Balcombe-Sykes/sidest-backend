@@ -29,6 +29,26 @@ return [
         'x',
         'spotify',
         'soundcloud',
+        // Booking platform icons
+        'fresha',
+        'booksy',
+        'timely',
+        'calendly',
+        'square',
+        // Education platform icons
+        'stan',
+        'skool',
+        'kajabi',
+        'circle',
+        // Event platform icons
+        'eventbrite',
+        'humanitix',
+        'luma',
+        'partiful',
+        // Content platform icons
+        'apple_podcasts',
+        'substack',
+        'bandcamp',
     ],
     'link_block_settings_keys' => [
         'open_in_new_tab',

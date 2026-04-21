@@ -11,3 +11,16 @@ it('exposes the 6 link categories in config', function () {
 it('includes category in the link_block_settings_keys allowlist', function () {
     expect(config('sidest.link_block_settings_keys'))->toContain('category');
 });
+
+it('includes the 16 new platform icon keys in the allowlist', function () {
+    $keys = config('sidest.link_block_icon_keys');
+
+    foreach ([
+        'fresha', 'booksy', 'timely', 'calendly', 'square',
+        'stan', 'skool', 'kajabi', 'circle',
+        'eventbrite', 'humanitix', 'luma', 'partiful',
+        'apple_podcasts', 'substack', 'bandcamp',
+    ] as $expected) {
+        expect($keys)->toContain($expected);
+    }
+});
