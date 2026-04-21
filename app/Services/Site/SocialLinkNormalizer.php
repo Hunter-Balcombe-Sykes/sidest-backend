@@ -26,10 +26,14 @@ class SocialLinkNormalizer
 {
     /**
      * Return the public-safe view of the registry — display name, icon key,
-     * and placeholder only. Strips handle_pattern, host_allowlist, and
-     * url_path_extractor so internal validation logic never reaches the wire.
+     * placeholder, and category only. Strips handle_pattern, host_allowlist,
+     * url_path_extractor, url_template, and handle_location so internal
+     * validation logic never reaches the wire.
      *
-     * @return array<int, array{key: string, display_name: string, icon_key: string, placeholder: string}>
+     * `default_category` in the stored registry is renamed to `category` in
+     * the output — consumers don't need to know there's an override mechanism.
+     *
+     * @return array<int, array{key: string, display_name: string, icon_key: string, placeholder: string, category: string}>
      */
     public function getPublicRegistry(): array
     {
@@ -42,6 +46,7 @@ class SocialLinkNormalizer
                 'display_name' => $config['display_name'],
                 'icon_key' => $config['icon_key'],
                 'placeholder' => $config['placeholder'],
+                'category' => $config['default_category'],
             ];
         }
 

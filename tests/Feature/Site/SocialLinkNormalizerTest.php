@@ -317,3 +317,41 @@ it('normalizes a subdomain URL with a trailing-dot FQDN host', function () {
     expect($result['url'])->toBe('https://joshhunter.substack.com/');
     expect($result['handle'])->toBe('joshhunter');
 });
+
+// --- Public registry: category exposure ---
+
+it('exposes category in the public registry entries', function () {
+    $registry = normalizer()->getPublicRegistry();
+
+    foreach ($registry as $entry) {
+        expect($entry)->toHaveKey('category');
+        expect($entry['category'])->toBeIn(['social', 'booking', 'education', 'content', 'events', 'other']);
+    }
+});
+
+it('maps instagram to category=social in the public registry', function () {
+    $registry = normalizer()->getPublicRegistry();
+    $instagram = collect($registry)->firstWhere('key', 'instagram');
+
+    expect($instagram['category'])->toBe('social');
+});
+
+it('maps calendly to category=booking in the public registry', function () {
+    $registry = normalizer()->getPublicRegistry();
+    $calendly = collect($registry)->firstWhere('key', 'calendly');
+
+    expect($calendly['category'])->toBe('booking');
+});
+
+it('still strips internal validation fields including handle_location', function () {
+    $registry = normalizer()->getPublicRegistry();
+
+    foreach ($registry as $entry) {
+        expect($entry)->not->toHaveKey('handle_pattern');
+        expect($entry)->not->toHaveKey('host_allowlist');
+        expect($entry)->not->toHaveKey('url_path_extractor');
+        expect($entry)->not->toHaveKey('url_template');
+        expect($entry)->not->toHaveKey('handle_location');
+        expect($entry)->not->toHaveKey('default_category'); // renamed to `category` in output
+    }
+});
