@@ -42,3 +42,12 @@ it('registers the 5 booking platforms with default_category=booking', function (
         expect($config['url_template'])->toStartWith('https://');
     }
 });
+
+it('registers stan and skool as education path-mode platforms', function () {
+    foreach (['stan', 'skool'] as $key) {
+        $config = config("sidest.social_platforms.{$key}");
+        expect($config)->not->toBeNull();
+        expect($config['default_category'])->toBe('education');
+        expect($config['handle_location'])->toBe('path');
+    }
+});

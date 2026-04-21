@@ -258,6 +258,30 @@ return [
             'default_category' => 'booking',
             'handle_location' => 'path',
         ],
+
+        // --- Education platforms — path mode (default_category: education) ---
+        'stan' => [
+            'display_name' => 'Stan',
+            'icon_key' => 'stan',
+            'placeholder' => 'yourname',
+            'handle_pattern' => '/^[a-zA-Z0-9_-]{2,40}$/',
+            'url_template' => 'https://stan.store/{handle}',
+            'host_allowlist' => ['stan.store', 'www.stan.store'],
+            'url_path_extractor' => '#^/([a-zA-Z0-9_-]{2,40})/?$#',
+            'default_category' => 'education',
+            'handle_location' => 'path',
+        ],
+        'skool' => [
+            'display_name' => 'Skool',
+            'icon_key' => 'skool',
+            'placeholder' => 'community-slug',
+            'handle_pattern' => '/^[a-zA-Z0-9-]{3,60}$/',
+            'url_template' => 'https://skool.com/{handle}',
+            'host_allowlist' => ['skool.com', 'www.skool.com'],
+            'url_path_extractor' => '#^/([a-zA-Z0-9-]{3,60})/?$#',
+            'default_category' => 'education',
+            'handle_location' => 'path',
+        ],
     ],
 
     'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
