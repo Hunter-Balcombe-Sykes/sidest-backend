@@ -208,6 +208,17 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
             ->whereUuid('image');
         Route::post('/gallery/reorder', [ProfessionalGalleryController::class, 'reorder']);
 
+        // Documents (one file per site — PDF/JPG/PNG, 10 MB max)
+        Route::get('/documents', [ProfessionalDocumentController::class, 'index']);
+        Route::post('/documents', [ProfessionalDocumentController::class, 'store'])
+            ->middleware('throttle:10,1');
+        Route::patch('/documents/{document}', [ProfessionalDocumentController::class, 'update'])
+            ->whereUuid('document')
+            ->middleware('throttle:30,1');
+        Route::delete('/documents/{document}', [ProfessionalDocumentController::class, 'destroy'])
+            ->whereUuid('document')
+            ->middleware('throttle:30,1');
+
         // Notifications
         Route::get('/me/notifications', [NotificationController::class, 'index']);
         Route::post('/me/notifications/{notification}/read', [NotificationController::class, 'markRead'])
