@@ -139,8 +139,14 @@ class BrandCatalogController extends ApiController
         $validated = $request->validated();
         $metafieldsToSet = [];
 
+        // Whether this call is (re-)activating the product. When true, after
+        // the sidest.active write lands we also clear every variant's
+        // explicit sidest.enabled=false metafield so re-activation puts
+        // variants back to the default-enabled state.
+        $activatingProduct = false;
         if (array_key_exists('active', $validated)) {
             $metafieldsToSet[] = ['key' => 'active', 'value' => $validated['active'] ? 'true' : 'false', 'type' => 'boolean'];
+            $activatingProduct = (bool) $validated['active'];
         }
 
         if (array_key_exists('commission_override', $validated)) {
@@ -240,6 +246,25 @@ class BrandCatalogController extends ApiController
             }
         }
 
+        // Activation cascade: when the product is being set active, sweep away
+        // any lingering `sidest.enabled=false` variant metafields so the
+        // brand's expectation — "making the product available re-enables all
+        // its variants" — actually happens in Shopify data, not just the UI.
+        //
+        // Best-effort: a failure here logs but doesn't fail the main update
+        // (the product is still active; brands can manually flip variants
+        // if the sweep had partial errors).
+        if ($activatingProduct) {
+            try {
+                $this->catalogService->clearVariantDisablesForProduct($integration, $productGid);
+            } catch (\Throwable $e) {
+                \Log::warning('Failed to cascade variant enable on product activation', [
+                    'product_gid' => $productGid,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         return $this->success(['updated' => true]);
     }
 
@@ -260,16 +285,32 @@ class BrandCatalogController extends ApiController
             return $this->error('Invalid product GID format.', 422);
         }
 
+        $newActive = (bool) $request->validated()['active'];
+
         try {
             $resolved = $this->catalogService->resolveBrandIntegration($pro);
             $result = $this->catalogService->setProductMetafields($resolved['integration'], $productGid, [
-                ['key' => 'active', 'value' => $request->validated()['active'] ? 'true' : 'false', 'type' => 'boolean'],
+                ['key' => 'active', 'value' => $newActive ? 'true' : 'false', 'type' => 'boolean'],
             ]);
 
             if (! $result['success']) {
                 $msg = $result['userErrors'][0]['message'] ?? 'Failed to update active status.';
 
                 return $this->error($msg, 422);
+            }
+
+            // Activation cascade — see updateMetafields() for the full reasoning.
+            // Best-effort: failure doesn't block the caller because the main
+            // sidest.active write already succeeded.
+            if ($newActive) {
+                try {
+                    $this->catalogService->clearVariantDisablesForProduct($resolved['integration'], $productGid);
+                } catch (\Throwable $e) {
+                    \Log::warning('Failed to cascade variant enable on product activation (toggleActive)', [
+                        'product_gid' => $productGid,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 502);

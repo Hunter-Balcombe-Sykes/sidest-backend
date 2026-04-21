@@ -483,6 +483,109 @@ GRAPHQL;
     }
 
     /**
+     * Clear every `sidest.enabled = false` metafield on the product's variants.
+     * Called when the product is activated (sidest.active flipped to true) so
+     * the brand's expectation — "making the product available re-enables all
+     * its variants" — is honoured in Shopify data, not just the dashboard UI.
+     *
+     * Strategy: read every variant with its current sidest.enabled value, then
+     * flip any that are explicitly false back to true via metafieldsSet (one
+     * batched call). Variants whose metafield is missing stay missing (dynamic
+     * default = enabled). After the sweep, the product's has_enabled_variants
+     * derived flag is rewritten to true since every variant now resolves to
+     * enabled (or the product has no variants at all).
+     *
+     * Idempotent: if no variants are disabled, makes no writes.
+     *
+     * @return array{success: bool, cleared: int, userErrors: array}
+     */
+    public function clearVariantDisablesForProduct(ProfessionalIntegration $integration, string $productGid): array
+    {
+        $resolved = $this->resolveCredentials($integration);
+
+        // Fetch variant GIDs + current sidest.enabled metafield values in one go.
+        // Same shape as the catalog query but scoped to a single product so
+        // cost stays tiny regardless of catalog size.
+        $query = <<<'GRAPHQL'
+        query variantEnabledStates($productId: ID!) {
+          product(id: $productId) {
+            variants(first: 100) {
+              edges {
+                node {
+                  id
+                  metafield_enabled: metafield(namespace: "sidest", key: "enabled") { value }
+                }
+              }
+            }
+          }
+        }
+        GRAPHQL;
+
+        $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], $query, [
+            'productId' => $productGid,
+        ]);
+
+        $edges = Arr::get($response->json(), 'data.product.variants.edges', []);
+        if (! is_array($edges)) {
+            return ['success' => true, 'cleared' => 0, 'userErrors' => []];
+        }
+
+        // Collect every variant currently marked explicitly disabled.
+        $disabledVariantGids = [];
+        foreach ($edges as $edge) {
+            $node = $edge['node'] ?? [];
+            $id = (string) Arr::get($node, 'id', '');
+            $enabledRaw = Arr::get($node, 'metafield_enabled.value');
+            if ($id === '' || $enabledRaw === null) {
+                continue;
+            }
+            if (filter_var($enabledRaw, FILTER_VALIDATE_BOOLEAN) === false) {
+                $disabledVariantGids[] = $id;
+            }
+        }
+
+        // Nothing to do — product's variants are all already enabled (or have
+        // no metafield, which means default-enabled anyway).
+        if (empty($disabledVariantGids)) {
+            // Still refresh the derived flag so re-activating a product whose
+            // has_enabled_variants was previously false (e.g. from an earlier
+            // bulk-disable) lands in a correct smart-collection state.
+            $this->writeHasEnabledVariants($integration, $productGid, true);
+
+            return ['success' => true, 'cleared' => 0, 'userErrors' => []];
+        }
+
+        // Flip each previously-false sidest.enabled to true.
+        $metafields = array_map(fn (string $variantGid) => [
+            'namespace' => 'sidest',
+            'key' => 'enabled',
+            'value' => 'true',
+            'type' => 'boolean',
+            'ownerId' => $variantGid,
+        ], $disabledVariantGids);
+
+        foreach (array_chunk($metafields, 25) as $batch) {
+            $writeResponse = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::METAFIELDS_SET, [
+                'metafields' => $batch,
+            ]);
+
+            $userErrors = Arr::get($writeResponse->json(), 'data.metafieldsSet.userErrors', []);
+            if (! empty($userErrors)) {
+                return ['success' => false, 'cleared' => 0, 'userErrors' => $userErrors];
+            }
+        }
+
+        // Cache bust — variant state affects both brand and affiliate catalog views.
+        Cache::forget(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
+        Cache::forget(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
+
+        // Recompute the derived has_enabled_variants flag — now trivially true.
+        $this->writeHasEnabledVariants($integration, $productGid, true);
+
+        return ['success' => true, 'cleared' => count($disabledVariantGids), 'userErrors' => []];
+    }
+
+    /**
      * Fetch the full set of variant GIDs for a single product. Used by the write path
      * to verify brand-submitted disabled_variant_gids only contains GIDs that
      * actually belong to this product. One GraphQL call regardless of catalog size.
