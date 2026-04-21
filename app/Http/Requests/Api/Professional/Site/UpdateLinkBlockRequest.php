@@ -81,6 +81,10 @@ class UpdateLinkBlockRequest extends BaseFormRequest
             'settings' => ['sometimes', 'array'],
             'settings.highlight' => ['sometimes', 'boolean'],
             'settings.note' => ['sometimes', 'string', 'max:140'],
+
+            // Category enum — all-optional on update (partial updates allowed).
+            // Enum is still checked when present; controller applies override semantics.
+            'category' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_categories', []))],
         ];
     }
 
