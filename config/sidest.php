@@ -308,6 +308,55 @@ return [
             'default_category' => 'education',
             'handle_location' => 'subdomain',
         ],
+
+        // --- Event platforms (default_category: events) ---
+        // Most event URLs are event-specific (/e/abc-123), not profile URLs.
+        // The url_path_extractor targets the "organizer profile" shape; deep
+        // links fall through to the lenient URL fallback — see docs/social-links.md §5.2.
+        'eventbrite' => [
+            'display_name' => 'Eventbrite',
+            'icon_key' => 'eventbrite',
+            'placeholder' => 'organizer-slug',
+            'handle_pattern' => '/^[a-zA-Z0-9-]{3,80}$/',
+            'url_template' => 'https://eventbrite.com/o/{handle}',
+            'host_allowlist' => ['eventbrite.com', 'www.eventbrite.com'],
+            'url_path_extractor' => '#^/o/([a-zA-Z0-9-]{3,80})/?$#',
+            'default_category' => 'events',
+            'handle_location' => 'path',
+        ],
+        'humanitix' => [
+            'display_name' => 'Humanitix',
+            'icon_key' => 'humanitix',
+            'placeholder' => 'organizer-slug',
+            'handle_pattern' => '/^[a-zA-Z0-9-]{3,80}$/',
+            'url_template' => 'https://humanitix.com/host/{handle}',
+            'host_allowlist' => ['humanitix.com', 'www.humanitix.com', 'events.humanitix.com'],
+            'url_path_extractor' => '#^/host/([a-zA-Z0-9-]{3,80})/?$#',
+            'default_category' => 'events',
+            'handle_location' => 'path',
+        ],
+        'luma' => [
+            'display_name' => 'Luma',
+            'icon_key' => 'luma',
+            'placeholder' => 'yourname',
+            'handle_pattern' => '/^[a-zA-Z0-9-]{2,40}$/',
+            'url_template' => 'https://lu.ma/{handle}',
+            'host_allowlist' => ['lu.ma', 'www.lu.ma'],
+            'url_path_extractor' => '#^/([a-zA-Z0-9-]{2,40})/?$#',
+            'default_category' => 'events',
+            'handle_location' => 'path',
+        ],
+        'partiful' => [
+            'display_name' => 'Partiful',
+            'icon_key' => 'partiful',
+            'placeholder' => 'yourname',
+            'handle_pattern' => '/^[a-zA-Z0-9-]{3,40}$/',
+            'url_template' => 'https://partiful.com/u/{handle}',
+            'host_allowlist' => ['partiful.com', 'www.partiful.com'],
+            'url_path_extractor' => '#^/u/([a-zA-Z0-9-]{3,40})/?$#',
+            'default_category' => 'events',
+            'handle_location' => 'path',
+        ],
     ],
 
     'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],

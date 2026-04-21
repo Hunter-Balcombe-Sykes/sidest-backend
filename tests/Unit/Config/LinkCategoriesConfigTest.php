@@ -62,3 +62,12 @@ it('registers kajabi and circle as education subdomain-mode platforms', function
         expect($config['host_allowlist'][0])->toBe($base);
     }
 });
+
+it('registers the 4 event platforms with default_category=events', function () {
+    foreach (['eventbrite', 'humanitix', 'luma', 'partiful'] as $key) {
+        $config = config("sidest.social_platforms.{$key}");
+        expect($config)->not->toBeNull();
+        expect($config['default_category'])->toBe('events');
+        expect($config['handle_location'])->toBe('path');
+    }
+});
