@@ -120,7 +120,11 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.additional_brand_partners' => ['prohibited'],
             'settings.show_branding' => ['sometimes', 'boolean'],
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
-            'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
+            'settings.booking_mode' => [
+                'sometimes',
+                'string',
+                Rule::in(config('sidest.features.smart_booking') ? ['manual', 'smart'] : ['manual']),
+            ],
             'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'settings.selected_products' => ['prohibited'],
 

@@ -17,6 +17,12 @@ class SquareCatalogWebhookController extends ApiController
 {
     public function __invoke(Request $request, SquareServiceSyncService $syncService): JsonResponse
     {
+        if (! (bool) config('sidest.features.square_sync', false)) {
+            Log::info('Square webhook suppressed — square_sync feature flag is off');
+
+            return $this->success(['received' => true, 'feature_gated' => true]);
+        }
+
         $rawBody = $request->getContent() ?: '';
         $signature = (string) $request->header('x-square-hmacsha256-signature', '');
 

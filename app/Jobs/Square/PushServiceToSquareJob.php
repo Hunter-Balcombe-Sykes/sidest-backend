@@ -24,6 +24,10 @@ class PushServiceToSquareJob implements ShouldQueue
 
     public function handle(SquareServiceSyncService $syncService): void
     {
+        if (! (bool) config('sidest.features.square_sync', false)) {
+            return;
+        }
+
         $service = Service::query()
             ->withTrashed()
             ->where('id', $this->serviceId)

@@ -17,6 +17,12 @@ class FreshaCatalogWebhookController extends ApiController
 {
     public function __invoke(Request $request, FreshaServiceSyncService $syncService): JsonResponse
     {
+        if (! (bool) config('sidest.features.fresha_sync', false)) {
+            Log::info('Fresha webhook suppressed — fresha_sync feature flag is off');
+
+            return $this->success(['received' => true, 'feature_gated' => true]);
+        }
+
         $rawBody = $request->getContent() ?: '';
         $signature = (string) $request->header('x-fresha-signature', '');
 

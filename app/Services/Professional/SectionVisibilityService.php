@@ -6,6 +6,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\SiteMedia;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 // V2: Validates section visibility requirements. Gallery needs 1+ images; booking needs 1+ service AND a booking integration or link; services needs 1+ service with a title + price > 0.
@@ -115,22 +116,40 @@ class SectionVisibilityService
             return [false, 'Booking section requires at least 1 active service.'];
         }
 
-        $hasBookingIntegration = ProfessionalIntegration::query()
-            ->where('professional_id', $professionalId)
-            ->whereIn('provider', [
-                ProfessionalIntegration::PROVIDER_SQUARE,
-                ProfessionalIntegration::PROVIDER_FRESHA,
-            ])
-            ->exists();
+        // Smart-booking integration path is only available when the feature flag is on.
+        // Pre-launch, only the manual booking_url (redirect link) path is accepted.
+        $hasBookingIntegration = (bool) config('sidest.features.smart_booking', false)
+            && ProfessionalIntegration::query()
+                ->where('professional_id', $professionalId)
+                ->whereIn('provider', [
+                    ProfessionalIntegration::PROVIDER_SQUARE,
+                    ProfessionalIntegration::PROVIDER_FRESHA,
+                ])
+                ->exists();
 
-        $hasBookingLink = Block::query()
+        if ($hasBookingIntegration) {
+            return [true, null];
+        }
+
+        // Fall back to the manual booking_url path. Uses Laravel's portable JSON
+        // arrow syntax (`settings->booking_url`) so the query is translated to
+        // Postgres `->>` or SQLite `json_extract` as appropriate. On Postgres
+        // we additionally BTRIM to treat whitespace-only values as empty — the
+        // original behaviour before the cross-DB portability rework.
+        $linkQuery = Block::query()
             ->where('professional_id', $professionalId)
             ->where('block_group', 'sections')
             ->where('block_type', 'booking')
-            ->whereRaw("NULLIF(BTRIM(settings->>'booking_url'), '') IS NOT NULL")
-            ->exists();
+            ->whereNotNull('settings->booking_url')
+            ->where('settings->booking_url', '!=', '');
 
-        if (! $hasBookingIntegration && ! $hasBookingLink) {
+        if (DB::connection()->getDriverName() === 'pgsql') {
+            $linkQuery->whereRaw("BTRIM(settings->>'booking_url') <> ''");
+        }
+
+        $hasBookingLink = $linkQuery->exists();
+
+        if (! $hasBookingLink) {
             return [false, 'Booking section requires a booking link or booking integration.'];
         }
 

@@ -53,8 +53,10 @@ class ProfessionalSiteController extends ApiController
      */
     public function updateBookingSettings(Request $request, UpdateSiteAction $action): JsonResponse
     {
+        $allowedModes = config('sidest.features.smart_booking') ? ['manual', 'smart'] : ['manual'];
+
         $validator = Validator::make($request->all(), [
-            'booking_mode' => ['required', 'string', Rule::in(['manual', 'smart'])],
+            'booking_mode' => ['required', 'string', Rule::in($allowedModes)],
             'manual_booking_url' => ['nullable', 'url', 'max:2048'],
         ]);
 

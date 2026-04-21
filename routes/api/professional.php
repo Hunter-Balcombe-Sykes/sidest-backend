@@ -134,8 +134,10 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
             ->whereUuid('category')
             ->withTrashed();
         Route::post('/services/reorder-layout', [ProfessionalServiceController::class, 'reorderLayout']);
-        Route::patch('/booking/settings', [ProfessionalSiteController::class, 'updateBookingSettings']);
-        Route::get('/booking/my-analytics/overview', [BookingAnalyticsController::class, 'myOverview']);
+        Route::middleware('feature:smart_booking')->group(function () {
+            Route::patch('/booking/settings', [ProfessionalSiteController::class, 'updateBookingSettings']);
+            Route::get('/booking/my-analytics/overview', [BookingAnalyticsController::class, 'myOverview']);
+        });
         Route::get('/affiliate/commerce-analytics', [AffiliateCommerceAnalyticsController::class, 'overview']);
         Route::get('/brand/commerce-analytics', [BrandCommerceAnalyticsController::class, 'overview']);
 
@@ -227,14 +229,16 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/me/subscription/billing-portal', [SubscriptionController::class, 'billingPortal']);
         Route::get('/me/subscription/preview-change', [SubscriptionController::class, 'previewPlanChange']);
 
-        // Square Integration
-        Route::get('/square/status', [SquareIntegrationController::class, 'status']);
-        Route::post('/square/connect', [SquareIntegrationController::class, 'connect']);
-        Route::post('/square/disconnect', [SquareIntegrationController::class, 'disconnect']);
-        Route::get('/square/token', [SquareIntegrationController::class, 'token']);
-        Route::post('/square/services/sync', [SquareIntegrationController::class, 'syncServicesNow']);
-        Route::post('/square/services/{service}/push', [SquareIntegrationController::class, 'pushServiceNow'])
-            ->whereUuid('service');
+        // Square Integration — gated behind square_sync feature flag
+        Route::middleware('feature:square_sync')->group(function () {
+            Route::get('/square/status', [SquareIntegrationController::class, 'status']);
+            Route::post('/square/connect', [SquareIntegrationController::class, 'connect']);
+            Route::post('/square/disconnect', [SquareIntegrationController::class, 'disconnect']);
+            Route::get('/square/token', [SquareIntegrationController::class, 'token']);
+            Route::post('/square/services/sync', [SquareIntegrationController::class, 'syncServicesNow']);
+            Route::post('/square/services/{service}/push', [SquareIntegrationController::class, 'pushServiceNow'])
+                ->whereUuid('service');
+        });
 
         // Shopify Integration
         Route::get('/shopify/status', [ShopifyIntegrationController::class, 'status']);
@@ -375,13 +379,15 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
             ->where('gid', '.*')
             ->middleware('throttle:affiliate-writes');
 
-        // Fresha Integration
-        Route::get('/fresha/status', [FreshaIntegrationController::class, 'status']);
-        Route::post('/fresha/connect', [FreshaIntegrationController::class, 'connect']);
-        Route::post('/fresha/disconnect', [FreshaIntegrationController::class, 'disconnect']);
-        Route::get('/fresha/token', [FreshaIntegrationController::class, 'token']);
-        Route::post('/fresha/services/sync', [FreshaIntegrationController::class, 'syncServicesNow']);
-        Route::post('/fresha/services/{service}/push', [FreshaIntegrationController::class, 'pushServiceNow'])
-            ->whereUuid('service');
+        // Fresha Integration — gated behind fresha_sync feature flag
+        Route::middleware('feature:fresha_sync')->group(function () {
+            Route::get('/fresha/status', [FreshaIntegrationController::class, 'status']);
+            Route::post('/fresha/connect', [FreshaIntegrationController::class, 'connect']);
+            Route::post('/fresha/disconnect', [FreshaIntegrationController::class, 'disconnect']);
+            Route::get('/fresha/token', [FreshaIntegrationController::class, 'token']);
+            Route::post('/fresha/services/sync', [FreshaIntegrationController::class, 'syncServicesNow']);
+            Route::post('/fresha/services/{service}/push', [FreshaIntegrationController::class, 'pushServiceNow'])
+                ->whereUuid('service');
+        });
 
     });

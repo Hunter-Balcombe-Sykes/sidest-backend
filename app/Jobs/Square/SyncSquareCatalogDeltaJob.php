@@ -27,6 +27,10 @@ class SyncSquareCatalogDeltaJob implements ShouldQueue
 
     public function handle(SquareServiceSyncService $syncService): void
     {
+        if (! (bool) config('sidest.features.square_sync', false)) {
+            return;
+        }
+
         $integration = ProfessionalIntegration::query()
             ->where('provider', ProfessionalIntegration::PROVIDER_SQUARE)
             ->where('external_account_id', $this->merchantId)

@@ -6,6 +6,7 @@ use App\Http\Middleware\Auth\EnsureSidestStaff;
 use App\Http\Middleware\Auth\VerifyHydrogenApiKey;
 use App\Http\Middleware\Auth\VerifySupabaseJwt;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
+use App\Http\Middleware\FeatureGate;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
 use App\Http\Middleware\RequirePlan;
 use App\Http\Middleware\SecureHeaders;
@@ -46,6 +47,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'lead.log' => LogLeadRateLimits::class,
             'plan' => RequirePlan::class,
             'hydrogen.key' => VerifyHydrogenApiKey::class,
+            'feature' => FeatureGate::class,
         ]);
     })
 

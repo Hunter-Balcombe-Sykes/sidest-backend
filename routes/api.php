@@ -90,14 +90,16 @@ Route::get('/health', fn () => response()->json(['ok' => true]));
 Route::get('/public/site-by-slug', [PublicSiteController::class, 'showByHeader'])
     ->middleware('throttle:public-site');
 
-Route::get('/public/booking/config-by-slug', [PublicBookingController::class, 'config'])
-    ->middleware('throttle:public-site');
-Route::get('/public/booking/services-by-slug', [PublicBookingController::class, 'services'])
-    ->middleware('throttle:public-site');
-Route::post('/public/booking/availability-by-slug', [PublicBookingController::class, 'availability'])
-    ->middleware('throttle:public-site');
-Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
-    ->middleware('throttle:booking-checkout');
+Route::middleware('feature:smart_booking')->group(function () {
+    Route::get('/public/booking/config-by-slug', [PublicBookingController::class, 'config'])
+        ->middleware('throttle:public-site');
+    Route::get('/public/booking/services-by-slug', [PublicBookingController::class, 'services'])
+        ->middleware('throttle:public-site');
+    Route::post('/public/booking/availability-by-slug', [PublicBookingController::class, 'availability'])
+        ->middleware('throttle:public-site');
+    Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
+        ->middleware('throttle:booking-checkout');
+});
 Route::get('/public/shopify/storefront-config', [PublicShopifyStorefrontController::class, 'storefrontConfig'])
     ->middleware('throttle:public-site');
 

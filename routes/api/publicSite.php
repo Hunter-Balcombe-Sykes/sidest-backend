@@ -23,15 +23,17 @@ Route::group([
     Route::get('/site', [PublicSiteController::class, 'show'])
         ->middleware('throttle:public-site');
 
-    // Public booking flow
-    Route::get('/booking/config', [PublicBookingController::class, 'config'])
-        ->middleware('throttle:public-site');
-    Route::get('/booking/services', [PublicBookingController::class, 'services'])
-        ->middleware('throttle:public-site');
-    Route::post('/booking/availability', [PublicBookingController::class, 'availability'])
-        ->middleware('throttle:public-site');
-    Route::post('/booking/checkout', [PublicBookingController::class, 'checkout'])
-        ->middleware('throttle:booking-checkout');
+    // Public booking flow — gated behind smart_booking feature flag
+    Route::middleware('feature:smart_booking')->group(function () {
+        Route::get('/booking/config', [PublicBookingController::class, 'config'])
+            ->middleware('throttle:public-site');
+        Route::get('/booking/services', [PublicBookingController::class, 'services'])
+            ->middleware('throttle:public-site');
+        Route::post('/booking/availability', [PublicBookingController::class, 'availability'])
+            ->middleware('throttle:public-site');
+        Route::post('/booking/checkout', [PublicBookingController::class, 'checkout'])
+            ->middleware('throttle:booking-checkout');
+    });
 
     // Page View Analytics
     Route::post('/analytics/pageviews', [AnalyticsController::class, 'pageview'])
