@@ -1258,99 +1258,137 @@ git commit -m "feat(links): include categories enum in public registry endpoint 
 **Files:**
 - Modify: `app/Http/Requests/Api/Professional/Site/StoreLinkBlockRequest.php:65-125`
 
+**Test pattern note:** this codebase has no Professional/Site/Block factories. Existing Form Request tests (`tests/Feature/Site/LinkBlockSocialValidationTest.php`) exercise the Form Request pipeline directly via `validateStoreRequest()` / `validateUpdateRequest()` helpers — no DB, no HTTP, no models. We follow the same pattern here. Tests that need actual persistence (controller → DB round-trip) move to Task 15 where the controller change lands.
+
 - [ ] **Step 1: Write the failing tests**
 
-Create `tests/Feature/Site/LinkBlockCategoryValidationTest.php`:
+Create `tests/Feature/Site/LinkBlockCategoryValidationTest.php` following the existing `LinkBlockSocialValidationTest.php` helper pattern:
 
 ```php
 <?php
 
-use App\Models\Core\Professional\Professional;
-use App\Models\Core\Site\Site;
-use Laravel\Sanctum\Sanctum;
+use App\Http\Requests\Api\Professional\Site\StoreLinkBlockRequest;
+use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
-// These tests assume factories exist for Professional/Site/Block in the project.
-// If not, adapt to however other tests in tests/Feature/Site/* build fixtures.
+/**
+ * Category-rule coverage for StoreLinkBlockRequest and UpdateLinkBlockRequest.
+ * Follows the direct-form-request pattern from LinkBlockSocialValidationTest —
+ * no DB, no HTTP stack. The controller-level persistence tests live in
+ * tests/Feature/Site/LinkBlockCategoryPersistenceTest.php (added in Task 15).
+ */
 
-function actingAsPro(): Professional
+function validateStoreRequestCategory(array $payload): array
 {
-    $pro = Professional::factory()->create(['professional_type' => 'brand']);
-    Site::factory()->create(['professional_id' => $pro->id]);
-    Sanctum::actingAs($pro->user);
+    $request = Request::create('/api/test', 'POST', $payload);
+    $formRequest = StoreLinkBlockRequest::createFrom($request);
+    $formRequest->setContainer(app())->setRedirector(app('redirect'));
 
-    return $pro;
+    try {
+        $formRequest->validateResolved();
+
+        return ['ok' => true, 'data' => $formRequest->validated()];
+    } catch (ValidationException $e) {
+        return ['ok' => false, 'errors' => $e->errors()];
+    }
 }
 
-it('requires category when creating a custom link (no platform)', function () {
-    actingAsPro();
+function validateUpdateRequestCategory(array $payload, ?string $blockId = null): array
+{
+    $request = Request::create('/api/test', 'PATCH', $payload);
+    $request->setRouteResolver(function () use ($blockId) {
+        $route = new Illuminate\Routing\Route(['PATCH'], '/api/test', []);
+        $route->parameters = ['linkBlock' => $blockId ?? (string) Str::uuid()];
 
-    $response = $this->postJson('/api/professional/site/link-blocks', [
+        return $route;
+    });
+
+    $formRequest = UpdateLinkBlockRequest::createFrom($request);
+    $formRequest->setContainer(app())->setRedirector(app('redirect'));
+
+    try {
+        $formRequest->validateResolved();
+
+        return ['ok' => true, 'data' => $formRequest->validated()];
+    } catch (ValidationException $e) {
+        return ['ok' => false, 'errors' => $e->errors()];
+    }
+}
+
+// --- Custom mode: category required ---
+
+it('rejects a custom link without category', function () {
+    $result = validateStoreRequestCategory([
         'title' => 'My custom',
         'url' => 'https://example.com',
     ]);
 
-    $response->assertStatus(422);
-    $response->assertJsonValidationErrors('category');
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('category');
 });
 
-it('accepts a custom link when category is supplied and valid', function () {
-    actingAsPro();
-
-    $response = $this->postJson('/api/professional/site/link-blocks', [
+it('accepts a custom link with a valid category', function () {
+    $result = validateStoreRequestCategory([
         'title' => 'My custom',
         'url' => 'https://example.com',
         'category' => 'other',
     ]);
 
-    $response->assertStatus(201);
-    $response->assertJsonPath('block.settings.category', 'other');
+    expect($result['ok'])->toBeTrue();
+    expect($result['data']['category'])->toBe('other');
 });
 
 it('rejects an invalid category value', function () {
-    actingAsPro();
-
-    $response = $this->postJson('/api/professional/site/link-blocks', [
+    $result = validateStoreRequestCategory([
         'title' => 'Bad',
         'url' => 'https://example.com',
         'category' => 'not-a-real-category',
     ]);
 
-    $response->assertStatus(422);
-    $response->assertJsonValidationErrors('category');
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('category');
 });
 
-it('auto-derives category from platform when category is omitted', function () {
-    actingAsPro();
+// --- Social mode: category optional (override semantics handled in controller) ---
 
-    $response = $this->postJson('/api/professional/site/link-blocks', [
+it('accepts a social link without category (platform default applies in controller)', function () {
+    $result = validateStoreRequestCategory([
         'platform' => 'calendly',
         'handle' => 'joshhunter',
     ]);
 
-    $response->assertStatus(201);
-    $response->assertJsonPath('block.settings.category', 'booking');
-    $response->assertJsonPath('block.settings.platform', 'calendly');
+    expect($result['ok'])->toBeTrue();
 });
 
-it('allows category override on a platform link', function () {
-    actingAsPro();
-
-    // Instagram defaults to social, but user is tagging it as events
-    $response = $this->postJson('/api/professional/site/link-blocks', [
+it('accepts a social link with an explicit category override', function () {
+    $result = validateStoreRequestCategory([
         'platform' => 'instagram',
         'handle' => 'joshhunter',
         'category' => 'events',
     ]);
 
-    $response->assertStatus(201);
-    $response->assertJsonPath('block.settings.category', 'events');
+    expect($result['ok'])->toBeTrue();
+    expect($result['data']['category'])->toBe('events');
+});
+
+it('rejects a social link with an invalid override category', function () {
+    $result = validateStoreRequestCategory([
+        'platform' => 'instagram',
+        'handle' => 'joshhunter',
+        'category' => 'not-real',
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('category');
 });
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `./vendor/bin/pest tests/Feature/Site/LinkBlockCategoryValidationTest.php`
-Expected: FAIL — `category` not validated, not persisted.
+Expected: FAIL — `category` not in rules, so enum validation doesn't trigger and "required for custom" check doesn't exist.
 
 - [ ] **Step 3: Update `StoreLinkBlockRequest`**
 
@@ -1385,21 +1423,20 @@ Edit `app/Http/Requests/Api/Professional/Site/StoreLinkBlockRequest.php`:
             }
 ```
 
-- [ ] **Step 4: Do NOT run tests yet — persistence still requires Task 15**
+- [ ] **Step 4: Run tests to confirm all pass**
 
-Tests won't pass until the controller persists `settings.category`. Tests 1-3 (validation errors) will pass now; tests 4-5 (successful writes) will fail until Task 15. That's expected — do not commit until Task 15.
+All 6 tests are validation-layer only (no controller/DB). They should all pass after the Form Request update.
 
-- [ ] **Step 5: Run the validation-only tests to confirm they pass**
+Run: `./vendor/bin/pest tests/Feature/Site/LinkBlockCategoryValidationTest.php`
+Expected: PASS — all 6 tests green.
 
-Run: `./vendor/bin/pest tests/Feature/Site/LinkBlockCategoryValidationTest.php --filter='requires category|rejects an invalid'`
-Expected: PASS for the 3 validation-error tests.
+- [ ] **Step 5: Commit**
 
-Run: `./vendor/bin/pest tests/Feature/Site/LinkBlockCategoryValidationTest.php --filter='accepts|auto-derives|override'`
-Expected: FAIL — persistence not wired yet (coming in Task 15).
-
-- [ ] **Step 6: Hold the commit for Task 15**
-
-No commit here. This change stays in the working tree until Task 15 wires persistence. A half-validated, half-persisted state would ship broken writes.
+```bash
+git add app/Http/Requests/Api/Professional/Site/StoreLinkBlockRequest.php \
+        tests/Feature/Site/LinkBlockCategoryValidationTest.php
+git commit -m "feat(links): require category on StoreLinkBlockRequest with enum validation"
+```
 
 ---
 
@@ -1413,55 +1450,39 @@ No commit here. This change stays in the working tree until Task 15 wires persis
 Append to `tests/Feature/Site/LinkBlockCategoryValidationTest.php`:
 
 ```php
-it('rejects an invalid category on update', function () {
-    $pro = actingAsPro();
-    $site = $pro->sites()->first();
-    $block = $pro->linkBlocks()->create([
-        'site_id' => $site->id,
-        'title' => 'Existing',
-        'url' => 'https://example.com',
-        'icon_key' => 'link',
-        'settings' => ['category' => 'other'],
-        'block_group' => 'links',
-        'block_type' => 'link',
-        'sort_order' => 0,
+// --- Update: category is all-optional but enum-checked when present ---
+
+it('accepts an update with no category (partial update)', function () {
+    $result = validateUpdateRequestCategory([
+        'title' => 'New title only',
     ]);
 
-    $response = $this->patchJson("/api/professional/site/link-blocks/{$block->id}", [
-        'category' => 'not-real',
-    ]);
-
-    $response->assertStatus(422);
-    $response->assertJsonValidationErrors('category');
+    expect($result['ok'])->toBeTrue();
 });
 
-it('updates category on an existing link block', function () {
-    $pro = actingAsPro();
-    $site = $pro->sites()->first();
-    $block = $pro->linkBlocks()->create([
-        'site_id' => $site->id,
-        'title' => 'Existing',
-        'url' => 'https://example.com',
-        'icon_key' => 'link',
-        'settings' => ['category' => 'other'],
-        'block_group' => 'links',
-        'block_type' => 'link',
-        'sort_order' => 0,
-    ]);
-
-    $response = $this->patchJson("/api/professional/site/link-blocks/{$block->id}", [
+it('accepts an update with a valid category', function () {
+    $result = validateUpdateRequestCategory([
         'category' => 'content',
     ]);
 
-    $response->assertStatus(200);
-    $response->assertJsonPath('block.settings.category', 'content');
+    expect($result['ok'])->toBeTrue();
+    expect($result['data']['category'])->toBe('content');
+});
+
+it('rejects an update with an invalid category', function () {
+    $result = validateUpdateRequestCategory([
+        'category' => 'not-real',
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('category');
 });
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `./vendor/bin/pest tests/Feature/Site/LinkBlockCategoryValidationTest.php --filter='update'`
-Expected: FAIL — `category` not in rules; persistence not wired.
+Expected: FAIL — `category` not in the update rules.
 
 - [ ] **Step 3: Update `UpdateLinkBlockRequest`**
 
@@ -1475,16 +1496,18 @@ Add `category` to `rules()` (insert after line 83 `settings.note`):
 
 No change needed in `withValidator()` — update is partial, so nullable `category` is fine; the controller will apply override semantics.
 
-- [ ] **Step 4: Run the rejection test**
+- [ ] **Step 4: Run tests to confirm all pass**
 
-Run: `./vendor/bin/pest tests/Feature/Site/LinkBlockCategoryValidationTest.php --filter='rejects an invalid category on update'`
-Expected: PASS — invalid enum rejected.
+Run: `./vendor/bin/pest tests/Feature/Site/LinkBlockCategoryValidationTest.php`
+Expected: PASS — all 9 tests green (6 from Task 13 + 3 update tests).
 
-The "updates category" test still fails pending Task 15 persistence.
+- [ ] **Step 5: Commit**
 
-- [ ] **Step 5: Hold commit for Task 15**
-
-No commit yet — bundled with Task 15.
+```bash
+git add app/Http/Requests/Api/Professional/Site/UpdateLinkBlockRequest.php \
+        tests/Feature/Site/LinkBlockCategoryValidationTest.php
+git commit -m "feat(links): accept category on UpdateLinkBlockRequest with enum validation"
+```
 
 ---
 
@@ -1613,24 +1636,76 @@ With:
 
 Note: the social-mode branch (platform provided) already routes through `buildBlockFields()` which now writes `settings.category`, so it gets it for free.
 
-- [ ] **Step 3: Run all category tests**
+- [ ] **Step 3: Write unit tests for `buildBlockFields` (via reflection helper)**
 
-Run: `./vendor/bin/pest tests/Feature/Site/LinkBlockCategoryValidationTest.php`
-Expected: PASS — all 7 tests green.
+`buildBlockFields` is private. Rather than route through a full HTTP test (which would need factories), test via a tiny reflection helper. Create `tests/Unit/Controllers/BuildBlockFieldsCategoryTest.php`:
 
-- [ ] **Step 4: Run existing link block tests to confirm no regression**
+```php
+<?php
 
-Run: `./vendor/bin/pest tests/Feature/Site/`
-Expected: PASS — no existing tests should break (except any hard-coded "8 platforms" count, which we already updated in Task 9).
+use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;
+use App\Services\Site\SocialLinkNormalizer;
 
-- [ ] **Step 5: Commit (bundles Tasks 13, 14, and 15)**
+function invokeBuildBlockFields(array $data): array
+{
+    $controller = new ProfessionalLinkBlockController(new SocialLinkNormalizer);
+    $method = (new ReflectionClass($controller))->getMethod('buildBlockFields');
+    $method->setAccessible(true);
+
+    return $method->invoke($controller, $data);
+}
+
+it('writes settings.category=other for a custom link with explicit category', function () {
+    $fields = invokeBuildBlockFields([
+        'title' => 'My link',
+        'url' => 'https://example.com',
+        'icon_key' => 'link',
+        'category' => 'other',
+    ]);
+
+    expect($fields['settings']['category'])->toBe('other');
+});
+
+it('writes settings.category=booking from platform default (calendly)', function () {
+    $fields = invokeBuildBlockFields([
+        'platform' => 'calendly',
+        'handle' => 'joshhunter',
+    ]);
+
+    expect($fields['settings']['category'])->toBe('booking');
+    expect($fields['settings']['platform'])->toBe('calendly');
+});
+
+it('respects an explicit category override on a platform link', function () {
+    $fields = invokeBuildBlockFields([
+        'platform' => 'instagram',
+        'handle' => 'joshhunter',
+        'category' => 'events',
+    ]);
+
+    expect($fields['settings']['category'])->toBe('events');
+    expect($fields['settings']['platform'])->toBe('instagram');
+});
+
+it('throws when a custom link omits category (defensive guard)', function () {
+    expect(fn () => invokeBuildBlockFields([
+        'title' => 'My link',
+        'url' => 'https://example.com',
+    ]))->toThrow(InvalidArgumentException::class);
+});
+```
+
+- [ ] **Step 4: Run all tests to confirm pass**
+
+Run: `./vendor/bin/pest tests/Unit/Controllers/BuildBlockFieldsCategoryTest.php tests/Feature/Site/`
+Expected: PASS — all category tests + existing Site feature tests green.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add app/Http/Requests/Api/Professional/Site/StoreLinkBlockRequest.php \
-        app/Http/Requests/Api/Professional/Site/UpdateLinkBlockRequest.php \
-        app/Http/Controllers/Api/Professional/ProfessionalSiteSelfManagement/ProfessionalLinkBlockController.php \
-        tests/Feature/Site/LinkBlockCategoryValidationTest.php
-git commit -m "feat(links): require category on write, with platform-default override semantics"
+git add app/Http/Controllers/Api/Professional/ProfessionalSiteSelfManagement/ProfessionalLinkBlockController.php \
+        tests/Unit/Controllers/BuildBlockFieldsCategoryTest.php
+git commit -m "feat(links): resolve category in buildBlockFields with platform-default override"
 ```
 
 ---
@@ -1642,23 +1717,56 @@ git commit -m "feat(links): require category on write, with platform-default ove
 
 - [ ] **Step 1: Write the failing test**
 
+No Professional/Site factories exist in this codebase. We use direct `DB::table(...)->insert(...)` to create minimal parent rows, then `Block::create(...)` for the blocks. The backfill command queries `site.blocks` directly, so we only need FK-valid parent rows — no Professional/Site model usage at test level.
+
+**Before writing the test:** inspect `app/Models/Core/Professional/Professional.php` and `app/Models/Core/Site/Site.php` for required columns. The fixture helper in the test must supply all NOT NULL fields. If the schema has many required columns on Professional, use `DB::table('core.professionals')->insert([...])` with a minimal valid row shape (copy the columns from the baseline migration `supabase/migrations/20260403000000_v2_baseline.sql` where `core.professionals` is defined). If this setup becomes onerous, **STOP and flag** to the controller — we may need to add a small Professional/Site factory instead.
+
 Create `tests/Feature/Console/BackfillLinkCategoriesTest.php`:
 
 ```php
 <?php
 
-use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
-use App\Models\Core\Site\Site;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+
+/**
+ * Backfill command tests. Uses direct DB inserts to avoid a factory dependency
+ * for Professional/Site — the backfill only cares about site.blocks rows; the
+ * parent rows exist solely to satisfy FK constraints.
+ */
+
+function createBackfillFixtureIds(): array
+{
+    $professionalId = (string) Str::uuid();
+    $siteId = (string) Str::uuid();
+
+    // Minimal Professional row — inspect the schema in
+    // supabase/migrations/20260403000000_v2_baseline.sql for required columns
+    // and adapt this insert if additional NOT NULL columns exist.
+    DB::table('core.professionals')->insert([
+        'id' => $professionalId,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('site.sites')->insert([
+        'id' => $siteId,
+        'professional_id' => $professionalId,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    return [$professionalId, $siteId];
+}
 
 it('backfills settings.category=social for pre-existing instagram links', function () {
-    $pro = Professional::factory()->create();
-    $site = Site::factory()->create(['professional_id' => $pro->id]);
+    [$proId, $siteId] = createBackfillFixtureIds();
 
     $block = Block::create([
-        'professional_id' => $pro->id,
-        'site_id' => $site->id,
+        'professional_id' => $proId,
+        'site_id' => $siteId,
         'block_type' => 'link',
         'block_group' => 'links',
         'title' => 'My IG',
@@ -1677,12 +1785,11 @@ it('backfills settings.category=social for pre-existing instagram links', functi
 });
 
 it('backfills settings.category=other for custom (icon_key=link) blocks', function () {
-    $pro = Professional::factory()->create();
-    $site = Site::factory()->create(['professional_id' => $pro->id]);
+    [$proId, $siteId] = createBackfillFixtureIds();
 
     $block = Block::create([
-        'professional_id' => $pro->id,
-        'site_id' => $site->id,
+        'professional_id' => $proId,
+        'site_id' => $siteId,
         'block_type' => 'link',
         'block_group' => 'links',
         'title' => 'My custom',
@@ -1700,12 +1807,11 @@ it('backfills settings.category=other for custom (icon_key=link) blocks', functi
 });
 
 it('is idempotent — existing category is preserved on re-run', function () {
-    $pro = Professional::factory()->create();
-    $site = Site::factory()->create(['professional_id' => $pro->id]);
+    [$proId, $siteId] = createBackfillFixtureIds();
 
     $block = Block::create([
-        'professional_id' => $pro->id,
-        'site_id' => $site->id,
+        'professional_id' => $proId,
+        'site_id' => $siteId,
         'block_type' => 'link',
         'block_group' => 'links',
         'title' => 'Already set',
@@ -1722,6 +1828,8 @@ it('is idempotent — existing category is preserved on re-run', function () {
     expect($block->settings['category'] ?? null)->toBe('events'); // preserved
 });
 ```
+
+**Schema-inspection note for the implementer:** before running, `Read` the v2 baseline at `supabase/migrations/20260403000000_v2_baseline.sql` for the `core.professionals` and `site.sites` CREATE TABLE statements. If either has NOT NULL columns beyond `id` and the timestamp columns above, extend `createBackfillFixtureIds()` accordingly. Typical missing fields: `professional_type`, `email`, `supabase_auth_user_id` on professionals; `subdomain` on sites. Add just enough to make the insert succeed.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
