@@ -274,6 +274,32 @@ function setupWaitlistTable(): void
 }
 
 /**
+ * site.blocks — all columns nullable except the PK. Used by backfill command
+ * tests and any test that exercises Block Eloquent operations in SQLite.
+ */
+function setupBlocksTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS site.blocks (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        site_id TEXT NULL,
+        block_group TEXT NULL,
+        block_type TEXT NULL,
+        title TEXT NULL,
+        url TEXT NULL,
+        icon_key TEXT NULL,
+        sort_order INTEGER NULL,
+        is_active INTEGER NULL,
+        is_enabled INTEGER NULL,
+        settings TEXT NULL,
+        deleted_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
  * notifications.notification_preferences for ConfirmationPreferenceServiceTest.
  */
 function setupNotificationPreferencesTable(): void

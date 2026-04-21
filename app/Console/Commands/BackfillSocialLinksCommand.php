@@ -10,16 +10,18 @@ use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 /**
- * One-shot backfill: tag existing link blocks whose icon_key matches a social
- * platform with `settings.platform` and (when extractable) `settings.handle`.
+ * One-shot backfill: tag ALL link blocks with `settings.platform`,
+ * `settings.handle` (when extractable), and `settings.category`.
  *
- * Idempotent — safe to re-run. Skips any block already tagged.
+ * Idempotent — safe to re-run. Skips rows that already have both platform
+ * and category set. Rows with a known social icon_key get full platform
+ * resolution; custom/unknown rows get category='other' only.
  *
  * Why we have this:
  *   When the social_platforms registry was introduced, existing link blocks
- *   used icon_key='instagram' etc. but had no platform tag in settings. This
- *   command brings those rows up to the new shape so the brand UI can render
- *   them in social mode and analytics can group by platform.
+ *   used icon_key='instagram' etc. but had no platform tag in settings. The
+ *   category field was added later, requiring another pass over all link
+ *   blocks (including custom ones with no platform).
  *
  * Run order:
  *   1. Always run with --dry-run first to preview the stats.
@@ -41,21 +43,17 @@ class BackfillSocialLinksCommand extends Command
         {--dry-run : Show what would change without writing}
         {--limit=0 : Process at most N rows (0 = unlimited)}';
 
-    protected $description = 'Tag existing link blocks with settings.platform/handle for known social icons. Idempotent — safe to re-run.';
+    protected $description = 'Backfill link blocks with settings.platform, settings.handle (when derivable), and settings.category. Idempotent — safe to re-run.';
 
     public function handle(SocialLinkNormalizer $normalizer): int
     {
         $registry = config('sidest.social_platforms', []);
         $iconToPlatform = $this->buildIconToPlatformMap($registry);
-        $socialIconKeys = array_keys($iconToPlatform);
 
         $dryRun = (bool) $this->option('dry-run');
         $limit = (int) $this->option('limit');
 
-        // Audit log on start — gives us a record of who ran the backfill and when.
-        // Operator identity is best-effort (works locally, may be empty in some
-        // container environments — that's fine, the timestamp is what matters).
-        Log::info('Backfill social links started', [
+        Log::info('Backfill link blocks started', [
             'operator' => get_current_user() ?: 'unknown',
             'dry_run' => $dryRun,
             'limit' => $limit,
@@ -66,83 +64,98 @@ class BackfillSocialLinksCommand extends Command
             'already_tagged' => 0,
             'tagged_with_handle' => 0,
             'tagged_url_only' => 0,
+            'category_only' => 0,
             'url_normalized' => 0,
             'unmatched_host' => 0,
             'errors' => 0,
         ];
 
+        // Process ALL link blocks. Social-icon rows get platform + category
+        // resolution; other rows get category='other'. See the plan §Task 16
+        // and docs/social-links.md for the rationale.
         $query = Block::query()
             ->where('block_group', 'links')
-            ->whereIn('icon_key', $socialIconKeys)
-            ->whereNotNull('url')
+            ->where('block_type', 'link')
             ->orderBy('id');
 
         if ($limit > 0) {
             $query->limit($limit);
         }
 
-        $query->chunkById(200, function ($blocks) use (&$stats, $iconToPlatform, $normalizer, $dryRun) {
-            // Per-chunk transaction: if any single block update fails partway
-            // through the chunk, roll the whole chunk back. Keeps the DB in a
-            // consistent state and lets the operator re-run without partial damage.
-            DB::transaction(function () use ($blocks, &$stats, $iconToPlatform, $normalizer, $dryRun) {
+        $query->chunkById(200, function ($blocks) use (&$stats, $iconToPlatform, $registry, $normalizer, $dryRun) {
+            DB::transaction(function () use ($blocks, &$stats, $iconToPlatform, $registry, $normalizer, $dryRun) {
                 foreach ($blocks as $block) {
                     $stats['total']++;
 
                     $settings = is_array($block->settings) ? $block->settings : [];
+                    $hasCategory = isset($settings['category']);
+                    $hasPlatform = isset($settings['platform']);
 
-                    // Idempotency guard: skip rows already tagged. Lets us
-                    // re-run the command after deploying new platforms or
-                    // fixing edge cases without touching what's already done.
-                    if (isset($settings['platform'])) {
+                    // Fully-tagged rows: skip (idempotent).
+                    if ($hasCategory && $hasPlatform) {
                         $stats['already_tagged']++;
 
                         continue;
                     }
 
-                    $platformKey = $iconToPlatform[$block->icon_key] ?? null;
-                    if ($platformKey === null) {
-                        $stats['errors']++;
+                    // Identify the platform to use for category lookup + (if the
+                    // row isn't platform-tagged yet) URL normalization.
+                    $platformKey = $hasPlatform
+                        ? $settings['platform']
+                        : ($iconToPlatform[$block->icon_key] ?? null);
 
-                        continue;
+                    // Legacy social-icon path: row has a social icon_key but no
+                    // settings.platform yet. Normalize URL, tag platform/handle.
+                    if (! $hasPlatform && $platformKey !== null && $block->url !== null) {
+                        try {
+                            $normalized = $normalizer->normalize($platformKey, null, $block->url);
+                        } catch (InvalidArgumentException $e) {
+                            // URL doesn't match the platform's host_allowlist
+                            // (e.g. a Linktree URL behind an Instagram icon).
+                            // Leave platform/handle alone but still backfill
+                            // category so the row isn't stuck.
+                            $stats['unmatched_host']++;
+                            $this->warn(sprintf('  Host mismatch for block %s (%s) — category-only backfill', $block->id, $platformKey));
+                            Log::warning('Backfill: host mismatch', [
+                                'block_id' => (string) $block->id,
+                                'platform' => $platformKey,
+                            ]);
+                            $platformKey = null; // fall through to category=other
+                        }
+
+                        if ($platformKey !== null && isset($normalized)) {
+                            $settings['platform'] = $platformKey;
+                            if ($normalized['handle'] !== null) {
+                                $settings['handle'] = $normalized['handle'];
+                                $stats['tagged_with_handle']++;
+                            } else {
+                                $stats['tagged_url_only']++;
+                            }
+
+                            if ($normalized['url'] !== $block->url) {
+                                $stats['url_normalized']++;
+                                if (! $dryRun) {
+                                    $block->url = $normalized['url'];
+                                }
+                            }
+                        }
                     }
 
-                    try {
-                        $normalized = $normalizer->normalize($platformKey, null, $block->url);
-                    } catch (InvalidArgumentException $e) {
-                        // URL doesn't match the platform's host_allowlist (e.g. a
-                        // Linktree URL behind an Instagram icon). Leave the row
-                        // alone — operator can investigate or fix manually.
-                        $stats['unmatched_host']++;
-                        $this->warn(sprintf('  Skipping block %s (%s): host mismatch', $block->id, $platformKey));
-                        Log::warning('Backfill social links: host mismatch', [
-                            'block_id' => (string) $block->id,
-                            'platform' => $platformKey,
-                        ]);
-
-                        continue;
-                    }
-
-                    $settings['platform'] = $platformKey;
-                    if ($normalized['handle'] !== null) {
-                        $settings['handle'] = $normalized['handle'];
-                        $stats['tagged_with_handle']++;
-                    } else {
-                        $stats['tagged_url_only']++;
-                    }
-
-                    $urlChanged = $normalized['url'] !== $block->url;
-                    if ($urlChanged) {
-                        $stats['url_normalized']++;
+                    // Resolve category: platform default, or 'other' for
+                    // custom/unknown rows and host-mismatch fallbacks.
+                    if (! $hasCategory) {
+                        $settings['category'] = $platformKey !== null
+                            ? ($registry[$platformKey]['default_category'] ?? 'other')
+                            : 'other';
+                        $stats['category_only']++;
                     }
 
                     if (! $dryRun) {
                         $block->settings = $settings;
-                        if ($urlChanged) {
-                            $block->url = $normalized['url'];
-                        }
                         $block->save();
                     }
+
+                    unset($normalized);
                 }
             });
         });
