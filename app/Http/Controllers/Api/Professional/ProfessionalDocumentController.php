@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
+use App\Http\Requests\Api\Professional\Documents\UpdateDocumentRequest;
 use App\Http\Requests\Api\Professional\Documents\UploadDocumentRequest;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
@@ -134,6 +135,82 @@ class ProfessionalDocumentController extends ApiController
         app(SiteCacheService::class)->invalidateSite($site);
 
         return $this->success(['document' => $this->buildDocumentPayload($media)], 201);
+    }
+
+    /**
+     * Edit document title and/or caption. isDirty-guarded so no-op PATCHes
+     * don't churn the public-site cache.
+     */
+    public function update(UpdateDocumentRequest $request, SiteMedia $document): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        abort_unless(
+            $document->site_id === $site->id
+            && $document->pool === SiteMedia::POOL_DOCUMENTS,
+            404
+        );
+
+        $data = $request->validated();
+        $update = [];
+
+        if (array_key_exists('title', $data)) {
+            $update['alt_text'] = $this->normaliseOptionalString($data['title']);
+        }
+
+        if (array_key_exists('caption', $data)) {
+            $update['caption'] = $this->normaliseOptionalString($data['caption']);
+        }
+
+        $changed = false;
+        if (! empty($update)) {
+            $document->fill($update);
+            if ($document->isDirty(['alt_text', 'caption'])) {
+                $document->save();
+                $changed = true;
+            }
+        }
+
+        if ($changed) {
+            app(SiteCacheService::class)->invalidateSite($site);
+        }
+
+        return $this->success(['document' => $this->buildDocumentPayload($document->fresh())]);
+    }
+
+    /**
+     * Soft-delete the row and synchronously delete the R2 bytes (no
+     * versioning, so there's no archival value in keeping bytes around).
+     */
+    public function destroy(Request $request, SiteMedia $document): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $pro->loadMissing('site');
+        $site = $this->currentSite($pro);
+
+        abort_unless(
+            $document->site_id === $site->id
+            && $document->pool === SiteMedia::POOL_DOCUMENTS,
+            404
+        );
+
+        try {
+            Storage::disk(config('sidest.media_disk'))->delete((string) $document->path);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to delete document R2 object on destroy', [
+                'media_id' => $document->id,
+                'path' => $document->path,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $document->delete();
+
+        app(SiteCacheService::class)->invalidateSite($site);
+
+        return $this->success(['deleted' => true]);
     }
 
     /**
