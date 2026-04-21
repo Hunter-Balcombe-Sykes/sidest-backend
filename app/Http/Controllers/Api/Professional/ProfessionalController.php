@@ -71,6 +71,7 @@ class ProfessionalController extends ApiController
                 'phone' => $pro->phone,
                 'primary_email' => $pro->primary_email,
                 'bio' => $pro->bio,
+                'about' => (object) ($pro->about ?? []),
                 'country_code' => $pro->country_code,
                 'timezone' => $pro->timezone,
                 'professional_type' => $pro->professional_type,

@@ -428,6 +428,7 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | handle                  | string   | no       | joshbarber                               | unqiue (case-sensitive), 3-40 char, must start with letter |
 | display_name            | string   | no       | Josh Barber                              | Max 80                                                     |
 | bio                     | string   | yes      | Mobile Barber in Darwin                  | Max 2000, also mirrored from bio section when updated      |
+| about                   | object   | no       | `{ "credentials": [...], "experience": [...] }` | Structured about-me content. See *About payload shape* below. Empty state is `{}`. |
 | professional_type       | string   | no       | professional                             | One of: `professional`, `influencer`, `brand` (enforced via config) |
 | primary_email           | email    | no       | josh@example.copm                        | Max 255                                                    |
 | phone                   | string   | no       | +6140000000                              | Max 40                                                     |
@@ -1280,8 +1281,14 @@ HTTP 423 Locked
 ### `PATCH /api/me`
 
 - Purpose: update professional profile fields
-- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "professional", "public_contact_email": "bookings@example.com" }`
+- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "professional", "public_contact_email": "bookings@example.com", "about": { "credentials": [...], "experience": [...] } }`
 - `professional_type` allowed values: `professional`, `influencer`, `brand`
+- `about` payload shape:
+  - `credentials`: array of up to 5 entries, each `{ "title": "Advanced Colourist" (required, ≤120), "issuer": "Toni & Guy" (optional, ≤120), "year": 2019 (optional, 1900..current+1) }`
+  - `experience`: array of up to 5 entries, each `{ "role": "Senior Stylist" (required, ≤120), "place": "Rokstar" (optional, ≤120), "start": "2021-03" (optional, YYYY-MM), "end": "2023-01" or null for ongoing (optional, YYYY-MM), "description": "..." (optional, ≤1000) }`
+  - `end` must be on or after `start` when both are set.
+  - Entries with unknown keys are rejected (strict keys via `array:title,issuer,year` / `array:role,place,start,end,description`).
+  - Omit the `about` field on PATCH to leave existing data untouched. Send `{}` to clear.
 - Response (200): `{ "professional": { ... } }`
 - Common status codes: 200, 401, 403, 422
 - Images are managed via `POST /api/uploads` (pool=gallery or pool=content). No image fields are accepted on this endpoint.
