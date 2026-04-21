@@ -16,11 +16,67 @@ V2 adds a **server-side registry of social platforms** (`config('sidest.social_p
 - Forces a canonical `https://` URL so all stored social links are consistent.
 - Lets us add new platforms by editing config alone — no frontend deploy.
 
-**Zero schema changes.** Platform identity lives in the existing `settings` JSONB column (`settings.platform`, `settings.handle`). When/if query-ability matters later (e.g. "show me all users with Instagram"), promoting `settings.platform` to a real column is a purely additive migration — no breaking change.
+**Zero schema changes.** Platform identity lives in the existing `settings` JSONB column (`settings.platform`, `settings.handle`, `settings.category`). When/if query-ability matters later (e.g. "show me all users with Instagram"), promoting these to real columns is a purely additive migration — no breaking change.
 
 ---
 
-## 2. The 8 supported platforms
+## 2. The 24 supported platforms
+
+Grouped by `default_category`. See `config('sidest.social_platforms')` for the full per-platform config.
+
+### 2.1 Social (8)
+
+Instagram, Facebook, LinkedIn, YouTube, TikTok, X, Spotify, SoundCloud — all path-mode, `default_category: 'social'`. See §2.6 below for handle/URL detail.
+
+### 2.2 Booking (5) — path mode
+
+`default_category: 'booking'`. Handles are ASCII alphanumerics with hyphens or underscores; strict regex per platform.
+
+| Key | Display name | Example URL |
+|-----|--------------|-------------|
+| `fresha` | Fresha | `https://fresha.com/a/{slug}` |
+| `booksy` | Booksy | `https://booksy.com/en-us/{slug}` |
+| `timely` | Timely | `https://book.gettimely.com/book/{slug}` |
+| `calendly` | Calendly | `https://calendly.com/{handle}` |
+| `square` | Square | `https://book.squareup.com/appointments/{slug}` |
+
+### 2.3 Education (4)
+
+`default_category: 'education'`. Stan and Skool are path-mode; Kajabi and Circle are subdomain-mode (see §3 for subdomain platform details).
+
+| Key | Display name | Example URL | Mode |
+|-----|--------------|-------------|------|
+| `stan` | Stan | `https://stan.store/{handle}` | path |
+| `skool` | Skool | `https://skool.com/{slug}` | path |
+| `kajabi` | Kajabi | `https://{handle}.mykajabi.com/` | subdomain |
+| `circle` | Circle | `https://{handle}.circle.so/` | subdomain |
+
+### 2.4 Events (4) — path mode
+
+`default_category: 'events'`. Handles are ASCII alphanumerics with hyphens.
+
+| Key | Display name | Example URL |
+|-----|--------------|-------------|
+| `eventbrite` | Eventbrite | `https://eventbrite.com/o/{slug}` |
+| `humanitix` | Humanitix | `https://humanitix.com/host/{slug}` |
+| `luma` | Luma | `https://lu.ma/{handle}` |
+| `partiful` | Partiful | `https://partiful.com/u/{handle}` |
+
+### 2.5 Content (3)
+
+`default_category: 'content'`. Apple Podcasts is path-mode (numeric ID handle); Substack and Bandcamp are subdomain-mode.
+
+| Key | Display name | Example URL | Mode |
+|-----|--------------|-------------|------|
+| `apple_podcasts` | Apple Podcasts | `https://podcasts.apple.com/us/podcast/id{numeric-id}` | path |
+| `substack` | Substack | `https://{handle}.substack.com/` | subdomain |
+| `bandcamp` | Bandcamp | `https://{handle}.bandcamp.com/` | subdomain |
+
+> Apple Podcasts note: the handle is the numeric ID at the end of the URL. Most users paste the full URL, so the lenient fallback (§5.2) is the common path.
+
+### 2.6 Legacy social-only reference table
+
+Original per-platform handle/URL detail, preserved for reference.
 
 | Key | Display name | Handle format | URL format | Allowed hosts |
 |-----|-------------|---------------|------------|---------------|
@@ -37,7 +93,7 @@ V2 adds a **server-side registry of social platforms** (`config('sidest.social_p
 
 ---
 
-## 3. Adding a 9th platform
+## 3. Adding a 25th platform
 
 1. Add an entry to `config/sidest.php` under `social_platforms`. Required fields:
    - `display_name` (string)
@@ -47,10 +103,37 @@ V2 adds a **server-side registry of social platforms** (`config('sidest.social_p
    - `url_template` (string with `{handle}` placeholder, **must be https**)
    - `host_allowlist` (array of plain-ASCII hosts)
    - `url_path_extractor` (PHP regex matching the path portion to extract a handle)
+   - `default_category` (one of `config('sidest.link_categories')`)
+   - `handle_location` (`'path'` or `'subdomain'`)
 2. Add the new `icon_key` value to the `link_block_icon_keys` allowlist in the same file.
 3. Add a unit test case in [tests/Feature/Site/SocialLinkNormalizerTest.php](../tests/Feature/Site/SocialLinkNormalizerTest.php) covering: clean handle, URL extraction, deep-link fallback, wrong-host rejection.
 4. Update the platforms table in §2 above.
 5. Frontend automatically picks up the new platform on next bootstrap — no frontend deploy needed.
+
+### Subdomain-mode platforms
+
+If the platform assigns each user their own subdomain (e.g. `alice.substack.com`), set `handle_location: 'subdomain'`. The `host_allowlist` stores only the base domain (`['substack.com']`) — the normalizer applies a labelled-suffix check (`.substack.com`) to validate the host. The `url_template` uses `{handle}` in the subdomain position: `https://{handle}.substack.com/`. The `url_path_extractor` is unused in subdomain mode; set it to `'#^/?$#'` for consistency.
+
+**Security:** the leading dot in the labelled-suffix check is critical — without it, `evilsubstack.com` would match `substack.com`. See §8.4.
+
+---
+
+## 3.5 Link categories
+
+Every link block has a required `category` stored in `settings.category`. The six valid values live in `config('sidest.link_categories')`:
+
+`social`, `booking`, `education`, `content`, `events`, `other`
+
+**Resolution order:**
+1. Request-provided `category` wins (must pass the enum).
+2. Else for platform-tagged links, the platform's `default_category` is used.
+3. Else for custom links (no `platform`), the request must include `category` (422 otherwise).
+
+The override is by design: a brand using their Instagram exclusively to announce events can tag that link as `events` even though Instagram's `default_category` is `social`.
+
+**Storage:** `settings.category` JSONB — zero schema change. Promotion to a real column follows the additive-migration path in §9; same trigger conditions apply as for `settings.platform`.
+
+The public registry endpoint (`GET /api/public/config/social-platforms`) returns the platform-to-category mapping (each platform entry includes a `category` field) plus a top-level `categories` array so the frontend can build a picker without hardcoding the enum. See §6 for the full response shape.
 
 ---
 
@@ -70,7 +153,7 @@ Either of these works:
 { "platform": "instagram", "url": "https://instagram.com/joshhunter" }
 ```
 
-Optional fields: `title` (auto-defaults to the platform's display name), `is_active`, `settings` (highlight, note).
+Optional fields: `title` (auto-defaults to the platform's display name), `is_active`, `category` (overrides the platform's `default_category`), `settings` (highlight, note).
 
 The backend normalizes either input to:
 - `url` = canonical `https://instagram.com/joshhunter`
@@ -78,14 +161,15 @@ The backend normalizes either input to:
 - `title` = `Instagram` (or whatever the user supplied)
 - `settings.platform` = `instagram` (soft tag)
 - `settings.handle` = `joshhunter` (or null if URL was a deep link with no extractable handle)
+- `settings.category` = `social` (or whatever was supplied/resolved)
 
 ### 4.2 Custom mode
 
 ```json
-{ "title": "Book Now", "url": "https://booking.example.com/joshhunter", "icon_key": "calendar" }
+{ "title": "Book Now", "url": "https://booking.example.com/joshhunter", "icon_key": "calendar", "category": "booking" }
 ```
 
-`title` and `url` are required. `icon_key` is optional but must be in the `link_block_icon_keys` allowlist if provided. No platform binding, no settings tagging.
+`title`, `url`, and `category` are required. `icon_key` is optional but must be in the `link_block_icon_keys` allowlist if provided. No platform binding, no settings tagging.
 
 ### 4.3 Custom-mode URL scheme allowlist
 
@@ -140,18 +224,22 @@ Every URL — handle-derived or extracted from input — is rebuilt with `https:
 ```json
 {
   "platforms": [
-    { "key": "instagram", "display_name": "Instagram", "icon_key": "instagram", "placeholder": "@yourname" },
-    { "key": "facebook", "display_name": "Facebook", "icon_key": "facebook", "placeholder": "yourname" },
+    { "key": "instagram", "display_name": "Instagram", "icon_key": "instagram", "placeholder": "@yourname", "category": "social" },
+    { "key": "calendly", "display_name": "Calendly", "icon_key": "calendly", "placeholder": "yourname", "category": "booking" },
     ...
-  ]
+  ],
+  "categories": ["social", "booking", "education", "content", "events", "other"]
 }
 ```
+
+The `category` field on each platform reflects its `default_category`. The top-level `categories` array lets the frontend build a category picker without hardcoding the enum.
 
 **What's NOT in the response:**
 - `handle_pattern` — server-side regex stays server-side
 - `host_allowlist` — server-side allowlist stays server-side
 - `url_path_extractor` — server-side regex stays server-side
 - `url_template` — derivable from the canonical URL, not needed by the frontend
+- `handle_location` — server-side routing detail, not needed by the frontend
 
 Internal validation logic never reaches the wire. This prevents attackers from reading the regex and crafting bypass payloads.
 
@@ -162,14 +250,14 @@ Internal validation logic never reaches the wire. This prevents attackers from r
 ### 7.1 Affiliate dashboard
 
 1. **At app load**: fetch `GET /api/public/config/social-platforms` once. Cache in app state. The registry only changes on backend deploy, so a long TTL is safe.
-2. **Add Link UI**: render a platform picker from the registry — show display name + icon for each platform, plus a "Custom" option for non-social links.
+2. **Add Link UI**: render a platform picker from the registry — show display name + icon for each platform, optionally grouped by the `categories` array for section headings. Include a "Custom" option for non-social links (requires an explicit `category`).
 3. **Per-platform input affordance**:
    - Show a single input field with the platform's `placeholder` as the hint.
    - Accept either a handle OR a full URL — both work, the backend normalizes either.
    - For instant feedback, mirror the handle regex client-side (display "Instagram handles must be 1-30 letters/numbers/dots/underscores"). This is a UX nicety — the backend is still the source of truth.
-4. **On save**: POST `{ platform: 'instagram', handle: 'joshhunter' }` (or `url` for deep links). Don't send `title` unless the user typed a custom one — let the backend auto-fill from the platform's display name.
-5. **Clear-the-platform / convert to custom**: send `{ platform: null, title: 'Custom Title', url: '...' }`. (Not yet exposed in the affiliate dashboard, but the API supports it.)
-6. **Render**: use `block.icon_key` for the visual icon (it's set automatically by the backend in social mode). Read `block.settings.platform` if you need to render social-specific UI (e.g. a different button style for Instagram vs custom).
+4. **On save**: POST `{ platform: 'instagram', handle: 'joshhunter' }` (or `url` for deep links). Don't send `title` unless the user typed a custom one — let the backend auto-fill from the platform's display name. Don't send `category` unless overriding the platform's default.
+5. **Clear-the-platform / convert to custom**: send `{ platform: null, title: 'Custom Title', url: '...', category: 'other' }`. (Not yet exposed in the affiliate dashboard, but the API supports it.)
+6. **Render**: use `block.icon_key` for the visual icon (it's set automatically by the backend in social mode). Read `block.settings.platform` if you need to render social-specific UI (e.g. a different button style for Instagram vs custom). Read `block.settings.category` for grouped rendering on the public mini-site.
 
 ### 7.2 All link block consumers (public mini-site, dashboards)
 
@@ -193,18 +281,28 @@ Handle regexes are deliberately ASCII-only. A user can't store `joshhunteг` (Cy
 
 `parse_url()` returns IDN hosts in their punycode form (e.g. `xn--instagram-...`). The `host_allowlist` is plain ASCII, so a punycode lookalike domain fails the allowlist check naturally. No additional code needed — this is a property of the existing check.
 
-### 8.4 https-only canonical URLs
+### 8.4 Subdomain-mode labelled-suffix check
+
+Subdomain-mode platforms (Substack, Bandcamp, Kajabi, Circle) validate the host with:
+
+```php
+$host === $base || str_ends_with($host, '.' . $base)
+```
+
+The leading dot is critical: without it, `evilsubstack.com` would match `substack.com` and become an open-phishing vulnerability. The bare base domain (`substack.com` with no subdomain) is also rejected — there's no handle to extract. Covered by a dedicated Pest test asserting `evilsubstack.com` rejects.
+
+### 8.5 https-only canonical URLs
 
 Every stored social URL is rebuilt with `https://`, even if the user pasted `http://`. This prevents:
 - Mixed-content warnings on the public mini-site.
 - MITM downgrade attacks on link clicks.
 - Inconsistent storage where the same profile is linked via 5 different URL variants.
 
-### 8.5 ReDoS
+### 8.6 ReDoS
 
 All `handle_pattern` regexes use bounded quantifiers (`{1,30}`, `{2,24}` etc.) with no nesting. They are not vulnerable to catastrophic backtracking even on adversarial input.
 
-### 8.6 SSRF (future risk if link previews are added)
+### 8.7 SSRF (future risk if link previews are added)
 
 **Not currently a concern** because the backend never fetches a user-supplied URL. We only store and return URLs; the browser fetches them.
 
@@ -217,7 +315,7 @@ If you ever add link previews / oEmbed / OpenGraph metadata fetching, you **must
 
 This is out of scope for the current implementation. If a future PR adds previews, link to this section in the PR description.
 
-### 8.7 Click tracking
+### 8.8 Click tracking
 
 Click tracking is **frontend-only today**. The backend's `POST /api/public/analytics/clicks` endpoint records a click in the DB and returns JSON — it does NOT issue a redirect. The frontend opens the URL itself via a normal anchor tag click.
 
@@ -231,29 +329,30 @@ Without these guarantees, a backend redirect endpoint is an open-redirect vulner
 
 ---
 
-## 9. Deferred — Option B (`platform` column)
+## 9. Deferred — Option B (`platform` / `category` columns)
 
-The current design stores platform identity in `settings` JSONB. Pros: zero schema change, additive migration when needed. Cons: not indexable, slow to query at scale.
+The current design stores platform identity and category in `settings` JSONB. Pros: zero schema change, additive migration when needed. Cons: not indexable, slow to query at scale.
 
-**Add a real `platform` column** when one of these is true:
+**Add real `platform` and `category` columns** when one of these is true:
 - A product feature requires "find all professionals with an Instagram link" as a fast query.
 - Per-platform analytics (clicks grouped by platform) becomes a hotspot. Today this works as a join through `blocks.settings->>'platform'` — fine for a few hundred users, slow for 100k+.
+- Per-category filtering or analytics (e.g. "show me all booking links site-wide") is needed at scale.
 - A platform-level integration is added (e.g. "sync your Instagram posts") that needs efficient lookups.
 
-The migration is purely additive:
+The migration is purely additive (same pattern for both columns):
 1. `ALTER TABLE site.blocks ADD COLUMN platform TEXT NULL`
 2. Backfill: `UPDATE site.blocks SET platform = settings->>'platform' WHERE settings ? 'platform'`
 3. Update Block model fillable + observers.
 4. Update controller writes to set the column alongside `settings.platform` (keep both during transition).
 5. Eventually drop `settings.platform` once all readers use the column.
 
-No breaking changes to any API. The `settings.platform` field stays valid for clients that read from it.
+Repeat steps 1-5 for `category`. No breaking changes to any API. The `settings.*` fields stay valid for clients that read from them.
 
 ---
 
 ## 10. Backfill command
 
-**Why:** When the social platforms registry was introduced, existing link blocks used `icon_key='instagram'` etc. but had no platform tag in `settings`. The backfill command brings those rows up to the new shape so the brand UI can render them in social mode.
+**Why:** When the social platforms registry was introduced, existing link blocks used `icon_key='instagram'` etc. but had no platform tag in `settings`. The backfill command brings those rows up to the new shape so the brand UI can render them in social mode. It also backfills `settings.category` (using the platform's `default_category`, or `'other'` for untagged custom links) so all rows satisfy the category requirement introduced alongside the 16 new platforms.
 
 **Usage:**
 ```bash
@@ -267,8 +366,10 @@ php artisan sidest:backfill-social-links
 php artisan sidest:backfill-social-links --limit=10
 ```
 
+The command is also aliased as `sidest:backfill-link-categories` for discoverability.
+
 **Properties:**
-- **Idempotent**: skips rows that already have `settings.platform` set. Safe to re-run.
+- **Idempotent**: skips rows that already have `settings.platform` and `settings.category` set. Safe to re-run.
 - **Chunked**: processes 200 rows at a time, each chunk in its own transaction.
 - **Honest**: prints a stats table at the end (`total / already_tagged / tagged_with_handle / tagged_url_only / url_normalized / unmatched_host / errors`).
 - **Fail-soft**: a block whose URL doesn't match the platform's host_allowlist (e.g. someone put a Linktree URL behind an Instagram icon) is left alone with a warning. No data lost.
@@ -277,7 +378,7 @@ php artisan sidest:backfill-social-links --limit=10
 
 **Where to run:** Locally during dev, then once on staging to verify, then once on production after deploy. Because it's idempotent, running it twice is harmless.
 
-**No automated test.** The project has no precedent for console command tests, no Block factory, and no test schema bootstrap for `site.blocks`. The risky logic (URL parsing, regex validation) is heavily covered by [SocialLinkNormalizerTest](../tests/Feature/Site/SocialLinkNormalizerTest.php) (32 cases). The command's unique logic is straightforward iteration glue, verified manually via `--dry-run`.
+**No automated test.** The project has no precedent for console command tests, no Block factory, and no test schema bootstrap for `site.blocks`. The risky logic (URL parsing, regex validation) is heavily covered by [SocialLinkNormalizerTest](../tests/Feature/Site/SocialLinkNormalizerTest.php). The command's unique logic is straightforward iteration glue, verified manually via `--dry-run`.
 
 ---
 
@@ -286,6 +387,7 @@ php artisan sidest:backfill-social-links --limit=10
 | Concern | File |
 |---------|------|
 | Registry definition | [config/sidest.php](../config/sidest.php) — `social_platforms` key |
+| Category enum | [config/sidest.php](../config/sidest.php) — `link_categories` key |
 | Validation + normalization | [`SocialLinkNormalizer`](../app/Services/Site/SocialLinkNormalizer.php) |
 | Public registry endpoint | [`PublicConfigController::socialPlatforms`](../app/Http/Controllers/Api/PublicSite/PublicConfigController.php) |
 | Form request — create | [`StoreLinkBlockRequest`](../app/Http/Requests/Api/Professional/Site/StoreLinkBlockRequest.php) |
@@ -295,3 +397,7 @@ php artisan sidest:backfill-social-links --limit=10
 | Normalizer tests | [tests/Feature/Site/SocialLinkNormalizerTest.php](../tests/Feature/Site/SocialLinkNormalizerTest.php) |
 | Endpoint test | [tests/Feature/PublicSite/PublicConfigSocialPlatformsTest.php](../tests/Feature/PublicSite/PublicConfigSocialPlatformsTest.php) |
 | Validation regression tests | [tests/Feature/Site/LinkBlockSocialValidationTest.php](../tests/Feature/Site/LinkBlockSocialValidationTest.php) |
+| Category validation tests | [tests/Feature/Site/LinkBlockCategoryValidationTest.php](../tests/Feature/Site/LinkBlockCategoryValidationTest.php) |
+| Category controller tests | [tests/Unit/Controllers/BuildBlockFieldsCategoryTest.php](../tests/Unit/Controllers/BuildBlockFieldsCategoryTest.php) |
+| Backfill category tests | [tests/Feature/Console/BackfillLinkCategoriesTest.php](../tests/Feature/Console/BackfillLinkCategoriesTest.php) |
+| Category config tests | [tests/Unit/Config/LinkCategoriesConfigTest.php](../tests/Unit/Config/LinkCategoriesConfigTest.php) |
