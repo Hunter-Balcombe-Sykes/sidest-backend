@@ -187,6 +187,7 @@ function setupMediaTables(): void
         is_active INTEGER NULL,
         product_gid TEXT NULL,
         alt_text TEXT NULL,
+        caption TEXT NULL,
         purpose TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL,

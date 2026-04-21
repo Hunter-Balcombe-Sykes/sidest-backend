@@ -65,6 +65,7 @@ class SiteMedia extends BaseModel
         'pool',
         'path',
         'alt_text',
+        'caption',
         'purpose',
         'sort_order',
         'is_active',

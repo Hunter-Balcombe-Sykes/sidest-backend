@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ImageGallery\ReorderGalleryImageRequest;
+use App\Http\Requests\Api\Professional\ImageGallery\UpdateGalleryImageRequest;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
@@ -45,6 +46,7 @@ class ProfessionalGalleryController extends ApiController
             'id' => $img->id,
             'pool' => $img->pool,
             'alt_text' => $img->alt_text,
+            'caption' => $img->caption,
             'sort_order' => $img->sort_order,
             'variants' => $img->variantUrls(),
             'created_at' => $img->created_at,
@@ -107,6 +109,65 @@ class ProfessionalGalleryController extends ApiController
         app(SiteCacheService::class)->invalidateSite($site);
 
         return $this->success(['ok' => true]);
+    }
+
+    /**
+     * Update caption and/or alt_text on a gallery image. Trims whitespace;
+     * an empty/whitespace-only value is stored as NULL. Invalidates the
+     * public-site cache only when a field actually changed — avoids cache
+     * churn on autosave-on-blur edits that don't mutate anything.
+     */
+    public function update(UpdateGalleryImageRequest $request, SiteMedia $image): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+        $site = $this->currentSite($pro);
+        abort_unless($image->site_id === $site->id, 404);
+
+        $data = $request->validated();
+        $update = [];
+
+        if (array_key_exists('caption', $data)) {
+            $update['caption'] = $this->normaliseOptionalString($data['caption']);
+        }
+
+        if (array_key_exists('alt_text', $data)) {
+            $update['alt_text'] = $this->normaliseOptionalString($data['alt_text']);
+        }
+
+        $changed = false;
+        if (! empty($update)) {
+            $image->fill($update);
+            if ($image->isDirty(['caption', 'alt_text'])) {
+                $image->save();
+                $changed = true;
+            }
+        }
+
+        if ($changed) {
+            app(SiteCacheService::class)->invalidateSite($site);
+        }
+
+        return $this->success([
+            'image' => [
+                'id' => $image->id,
+                'alt_text' => $image->alt_text,
+                'caption' => $image->caption,
+            ],
+        ]);
+    }
+
+    /**
+     * Trim, and coerce empty strings to null so NULL and "" mean the same.
+     */
+    private function normaliseOptionalString(?string $raw): ?string
+    {
+        if ($raw === null) {
+            return null;
+        }
+
+        $trimmed = trim($raw);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 
     /**

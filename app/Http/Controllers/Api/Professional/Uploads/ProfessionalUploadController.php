@@ -107,6 +107,7 @@ class ProfessionalUploadController extends ApiController
                 'pool' => $pool,
                 'path' => '',
                 'alt_text' => $request->validated('alt_text'),
+                'caption' => $this->normaliseOptionalString($request->validated('caption')),
                 'sort_order' => is_null($maxSort) ? 0 : ((int) $maxSort + 1),
                 'is_active' => true,
                 'media_type' => $mediaType,
@@ -627,6 +628,21 @@ class ProfessionalUploadController extends ApiController
             || $request->boolean('dont_ask_again');
     }
 
+    /**
+     * Trim caption / alt_text-like input and coerce empty strings to null
+     * so NULL and "" mean the same thing at rest.
+     */
+    private function normaliseOptionalString(?string $raw): ?string
+    {
+        if ($raw === null) {
+            return null;
+        }
+
+        $trimmed = trim($raw);
+
+        return $trimmed === '' ? null : $trimmed;
+    }
+
     private function dispatchVideoJob(string $mediaId, string $originalPath, string $basePath): void
     {
         $queueDefault = (string) config('queue.default', 'sync');
@@ -669,6 +685,7 @@ class ProfessionalUploadController extends ApiController
             'id' => $media->id,
             'pool' => $media->pool,
             'alt_text' => $media->alt_text,
+            'caption' => $media->caption,
             'sort_order' => $media->sort_order,
             'media_type' => $media->media_type,
             'processing_state' => $media->processing_state,

@@ -38,6 +38,7 @@ class UploadImageRequest extends BaseFormRequest
                 "max:{$videoMaxKb}",
             ],
             'alt_text' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'caption' => ['sometimes', 'nullable', 'string', 'max:200'],
         ];
     }
 
