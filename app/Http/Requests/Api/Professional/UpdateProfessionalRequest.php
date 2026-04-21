@@ -4,16 +4,18 @@ namespace App\Http\Requests\Api\Professional;
 
 use App\Http\Requests\BaseFormRequest;
 use App\Http\Requests\Concerns\NormalizesProfessionalType;
+use App\Http\Requests\Concerns\ValidatesProfessionalAbout;
 use Illuminate\Validation\Rule;
 
 // V2: Validates professional profile updates — display name, contact info, location, type normalization, and email/phone sanitization.
 class UpdateProfessionalRequest extends BaseFormRequest
 {
     use NormalizesProfessionalType;
+    use ValidatesProfessionalAbout;
 
     public function rules(): array
     {
-        return [
+        return array_merge([
             // keep handle out of this endpoint (handle changes should be a dedicated flow)
             'display_name' => ['sometimes', 'required', 'string', 'max:255'],
             'bio' => ['sometimes', 'nullable', 'string', 'max:2000'],
@@ -48,11 +50,20 @@ class UpdateProfessionalRequest extends BaseFormRequest
             'location_state' => ['sometimes', 'nullable', 'string', 'max:255'],
             'location_postcode' => ['sometimes', 'nullable', 'string', 'max:255'],
             'location_country' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ];
+        ], $this->aboutRules());
+    }
+
+    public function withValidator(\Illuminate\Validation\Validator $validator): void
+    {
+        $validator->after(function ($v) {
+            $this->validateExperienceDateOrder($v);
+        });
     }
 
     protected function prepareForValidation(): void
     {
+        $this->normalizeAboutPayload();
+
         $phone = $this->input('phone');
         if (is_string($phone)) {
             $phone = trim($phone);

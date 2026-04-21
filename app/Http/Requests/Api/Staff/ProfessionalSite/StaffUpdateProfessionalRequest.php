@@ -4,16 +4,18 @@ namespace App\Http\Requests\Api\Staff\ProfessionalSite;
 
 use App\Http\Requests\BaseFormRequest;
 use App\Http\Requests\Concerns\NormalizesProfessionalType;
+use App\Http\Requests\Concerns\ValidatesProfessionalAbout;
 use Illuminate\Validation\Rule;
 
 // V2: Validates staff update of a professional profile — supports display name, contact info, location, professional type, and phone normalization with PATCH semantics.
 class StaffUpdateProfessionalRequest extends BaseFormRequest
 {
     use NormalizesProfessionalType;
+    use ValidatesProfessionalAbout;
 
     public function rules(): array
     {
-        return [
+        return array_merge([
             // profile-ish fields
             'display_name' => ['sometimes', 'required', 'string', 'max:255'],
             'first_name' => ['sometimes', 'required', 'string', 'max:255'],
@@ -46,11 +48,20 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
             // optional staff-only flags (ONLY keep these if your DB/model actually has them)
             // 'is_suspended' => ['sometimes', 'boolean'],
             // 'admin_notes'  => ['sometimes', 'nullable', 'string', 'max:5000'],
-        ];
+        ], $this->aboutRules());
+    }
+
+    public function withValidator(\Illuminate\Validation\Validator $validator): void
+    {
+        $validator->after(function ($v) {
+            $this->validateExperienceDateOrder($v);
+        });
     }
 
     protected function prepareForValidation(): void
     {
+        $this->normalizeAboutPayload();
+
         $phone = $this->input('phone');
         if (is_string($phone)) {
             $phone = trim($phone);
