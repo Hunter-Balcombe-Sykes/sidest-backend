@@ -71,3 +71,11 @@ it('registers the 4 event platforms with default_category=events', function () {
         expect($config['handle_location'])->toBe('path');
     }
 });
+
+it('registers apple_podcasts as a content path-mode platform', function () {
+    $config = config('sidest.social_platforms.apple_podcasts');
+    expect($config)->not->toBeNull();
+    expect($config['default_category'])->toBe('content');
+    expect($config['handle_location'])->toBe('path');
+    expect($config['host_allowlist'])->toContain('podcasts.apple.com');
+});

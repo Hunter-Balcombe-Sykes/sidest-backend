@@ -357,6 +357,23 @@ return [
             'default_category' => 'events',
             'handle_location' => 'path',
         ],
+
+        // --- Content platforms — path mode (default_category: content) ---
+        // Apple Podcasts URLs always have the numeric ID as the stable identifier:
+        //   https://podcasts.apple.com/us/podcast/{slug}/id{numeric-id}
+        // The extractor captures the numeric id; most users will paste the full
+        // URL, so the lenient fallback does most of the real work here.
+        'apple_podcasts' => [
+            'display_name' => 'Apple Podcasts',
+            'icon_key' => 'apple_podcasts',
+            'placeholder' => 'Paste the show URL',
+            'handle_pattern' => '/^\d{5,15}$/',
+            'url_template' => 'https://podcasts.apple.com/us/podcast/id{handle}',
+            'host_allowlist' => ['podcasts.apple.com'],
+            'url_path_extractor' => '#^/[a-z]{2}/podcast/[a-zA-Z0-9-]+/id(\d{5,15})/?$#',
+            'default_category' => 'content',
+            'handle_location' => 'path',
+        ],
     ],
 
     'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
