@@ -139,6 +139,16 @@ class ProfessionalLinkBlockController extends ApiController
         } else {
             // Strip the social-mode-only keys before fill — they're not Block columns.
             unset($data['platform'], $data['handle']);
+
+            // Category lives in settings JSONB, not as a column. If the client
+            // supplied a new category in isolation, merge it into existing settings.
+            if (array_key_exists('category', $data)) {
+                $existingSettings = is_array($linkBlock->settings) ? $linkBlock->settings : [];
+                $existingSettings['category'] = $data['category'];
+                $data['settings'] = array_merge($existingSettings, $data['settings'] ?? []);
+                unset($data['category']);
+            }
+
             $linkBlock->fill($data);
         }
 
@@ -156,9 +166,18 @@ class ProfessionalLinkBlockController extends ApiController
      *   - url       = canonical https URL from the normalizer
      *   - icon_key  = registry's icon_key for the platform
      *   - title     = user-supplied OR the platform's display_name
-     *   - settings  = user settings + {platform, handle} soft tags
+     *   - settings  = user settings + {platform, handle, category} soft tags
      *
-     * Custom mode is pass-through.
+     * Custom mode produces:
+     *   - url       = as supplied
+     *   - icon_key  = as supplied
+     *   - title     = as supplied
+     *   - settings  = user settings + {category} (required in request)
+     *
+     * Category resolution order:
+     *   1. Request-provided `category` wins (validated against the enum in the Form Request).
+     *   2. Else fall back to the platform's default_category (platform-link case).
+     *   3. Else a 422-level guard (validation layer should have caught a missing category on custom links).
      *
      * @param  array<string, mixed>  $data  Validated request payload
      * @return array<string, mixed> Block fillable fields
@@ -168,6 +187,7 @@ class ProfessionalLinkBlockController extends ApiController
     private function buildBlockFields(array $data): array
     {
         $platform = $data['platform'] ?? null;
+        $requestedCategory = $data['category'] ?? null;
 
         if ($platform !== null && $platform !== '') {
             $normalized = $this->normalizer->normalize(
@@ -185,6 +205,10 @@ class ProfessionalLinkBlockController extends ApiController
                 $settings['handle'] = $normalized['handle'];
             }
 
+            // Category: explicit override wins, else platform default.
+            $registry = config("sidest.social_platforms.{$normalized['platform_key']}", []);
+            $settings['category'] = $requestedCategory ?: ($registry['default_category'] ?? 'other');
+
             return [
                 'title' => ($data['title'] ?? '') !== '' ? $data['title'] : $normalized['display_name'],
                 'url' => $normalized['url'],
@@ -193,12 +217,20 @@ class ProfessionalLinkBlockController extends ApiController
             ];
         }
 
-        // Custom mode: pass through.
+        // Custom mode: category is required by the Form Request. Defensive
+        // default here in case a future code path calls buildBlockFields
+        // directly with incomplete data.
+        $settings = is_array($data['settings'] ?? null) ? $data['settings'] : [];
+        if ($requestedCategory === null || $requestedCategory === '') {
+            throw new InvalidArgumentException('A category is required for custom links.');
+        }
+        $settings['category'] = $requestedCategory;
+
         return [
             'title' => $data['title'] ?? null,
             'url' => $data['url'] ?? null,
             'icon_key' => $data['icon_key'] ?? null,
-            'settings' => $data['settings'] ?? [],
+            'settings' => $settings,
         ];
     }
 
