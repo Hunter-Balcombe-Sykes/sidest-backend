@@ -355,3 +355,107 @@ it('still strips internal validation fields including handle_location', function
         expect($entry)->not->toHaveKey('default_category'); // renamed to `category` in output
     }
 });
+
+// --- New path-mode platforms: happy-path smoke tests ---
+
+it('normalizes a calendly handle', function () {
+    $r = normalizer()->normalize('calendly', 'joshhunter', null);
+    expect($r['url'])->toBe('https://calendly.com/joshhunter');
+    expect($r['handle'])->toBe('joshhunter');
+});
+
+it('normalizes a fresha business slug', function () {
+    $r = normalizer()->normalize('fresha', 'acme-hair', null);
+    expect($r['url'])->toBe('https://fresha.com/a/acme-hair');
+});
+
+it('normalizes a booksy business slug', function () {
+    $r = normalizer()->normalize('booksy', '12345_acme-salon', null);
+    expect($r['url'])->toBe('https://booksy.com/en-us/12345_acme-salon');
+});
+
+it('normalizes a timely business slug', function () {
+    $r = normalizer()->normalize('timely', 'acme-hair', null);
+    expect($r['url'])->toBe('https://book.gettimely.com/book/acme-hair');
+});
+
+it('normalizes a square business slug', function () {
+    $r = normalizer()->normalize('square', 'acme-hair', null);
+    expect($r['url'])->toBe('https://book.squareup.com/appointments/acme-hair');
+});
+
+it('normalizes a stan handle', function () {
+    $r = normalizer()->normalize('stan', 'joshhunter', null);
+    expect($r['url'])->toBe('https://stan.store/joshhunter');
+});
+
+it('normalizes a skool community slug', function () {
+    $r = normalizer()->normalize('skool', 'my-community', null);
+    expect($r['url'])->toBe('https://skool.com/my-community');
+});
+
+it('normalizes an eventbrite organizer slug', function () {
+    $r = normalizer()->normalize('eventbrite', 'acme-events', null);
+    expect($r['url'])->toBe('https://eventbrite.com/o/acme-events');
+});
+
+it('normalizes a humanitix organizer slug', function () {
+    $r = normalizer()->normalize('humanitix', 'acme-events', null);
+    expect($r['url'])->toBe('https://humanitix.com/host/acme-events');
+});
+
+it('normalizes a luma handle', function () {
+    $r = normalizer()->normalize('luma', 'joshhunter', null);
+    expect($r['url'])->toBe('https://lu.ma/joshhunter');
+});
+
+it('normalizes a partiful handle', function () {
+    $r = normalizer()->normalize('partiful', 'joshhunter', null);
+    expect($r['url'])->toBe('https://partiful.com/u/joshhunter');
+});
+
+it('normalizes an apple_podcasts numeric id', function () {
+    $r = normalizer()->normalize('apple_podcasts', '1234567890', null);
+    expect($r['url'])->toBe('https://podcasts.apple.com/us/podcast/id1234567890');
+});
+
+// --- New path-mode platforms: URL extraction + wrong-host rejection ---
+
+it('extracts a handle from a calendly URL', function () {
+    $r = normalizer()->normalize('calendly', null, 'https://calendly.com/joshhunter');
+    expect($r['handle'])->toBe('joshhunter');
+    expect($r['url'])->toBe('https://calendly.com/joshhunter');
+});
+
+it('accepts a calendly deep-link (event URL) via lenient fallback', function () {
+    $r = normalizer()->normalize('calendly', null, 'https://calendly.com/joshhunter/30min');
+    expect($r['handle'])->toBeNull();
+    expect($r['url'])->toBe('https://calendly.com/joshhunter/30min');
+});
+
+it('rejects a calendly URL with a wrong host', function () {
+    expect(fn () => normalizer()->normalize('calendly', null, 'https://calendl-y.com/joshhunter'))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+it('accepts an eventbrite event URL via lenient fallback', function () {
+    $r = normalizer()->normalize('eventbrite', null, 'https://eventbrite.com/e/some-event-123456789');
+    expect($r['handle'])->toBeNull();
+    expect($r['url'])->toBe('https://eventbrite.com/e/some-event-123456789');
+});
+
+it('extracts an apple_podcasts id from a full URL', function () {
+    $r = normalizer()->normalize('apple_podcasts', null, 'https://podcasts.apple.com/us/podcast/my-show/id1234567890');
+    expect($r['handle'])->toBe('1234567890');
+    expect($r['url'])->toBe('https://podcasts.apple.com/us/podcast/id1234567890');
+});
+
+it('forces https on an http calendly URL', function () {
+    $r = normalizer()->normalize('calendly', null, 'http://calendly.com/joshhunter');
+    expect($r['url'])->toBe('https://calendly.com/joshhunter');
+});
+
+it('rejects an invalid eventbrite handle with special characters', function () {
+    expect(fn () => normalizer()->normalize('eventbrite', 'has spaces', null))
+        ->toThrow(InvalidArgumentException::class);
+});
