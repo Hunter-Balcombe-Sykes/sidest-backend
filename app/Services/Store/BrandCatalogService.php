@@ -60,7 +60,11 @@ query allProducts($first: Int!, $after: String) {
               id
               title
               availableForSale
-              price { amount currencyCode }
+              # Admin API's ProductVariant.price is a `Money` scalar (decimal
+              # string like "29.99"), not a MoneyV2 object — doing subselections
+              # here fails with "Selections can't be made on scalars". Currency
+              # comes from the parent product's priceRange.minVariantPrice.
+              price
               metafield_enabled: metafield(namespace: "sidest", key: "enabled") { value }
             }
           }
@@ -101,7 +105,11 @@ query products($first: Int!, $after: String) {
               id
               title
               availableForSale
-              price { amount currencyCode }
+              # Admin API's ProductVariant.price is a `Money` scalar (decimal
+              # string like "29.99"), not a MoneyV2 object — doing subselections
+              # here fails with "Selections can't be made on scalars". Currency
+              # comes from the parent product's priceRange.minVariantPrice.
+              price
               metafield_enabled: metafield(namespace: "sidest", key: "enabled") { value }
             }
           }
@@ -946,15 +954,24 @@ GRAPHQL;
                     $node = $edge['node'] ?? [];
                     $cursor = $edge['cursor'] ?? null;
 
+                    // Admin API's variant.price is a Money scalar (string), while
+                    // our downstream shape (and the frontend) expect a {amount,
+                    // currencyCode} object. Borrow currency from the product's
+                    // priceRange so the object shape stays intact.
+                    $productCurrency = (string) Arr::get($node, 'priceRange.minVariantPrice.currencyCode', 'AUD');
+
                     $variants = [];
                     foreach (Arr::get($node, 'variants.edges', []) as $variantEdge) {
                         $v = $variantEdge['node'] ?? [];
                         $enabledVal = Arr::get($v, 'metafield_enabled.value');
+                        $priceAmount = $v['price'] ?? null;
                         $variants[] = [
                             'gid' => $v['id'] ?? '',
                             'title' => $v['title'] ?? '',
                             'available_for_sale' => $v['availableForSale'] ?? false,
-                            'price' => $v['price'] ?? null,
+                            'price' => $priceAmount !== null
+                                ? ['amount' => (string) $priceAmount, 'currencyCode' => $productCurrency]
+                                : null,
                             'enabled' => $enabledVal !== null ? filter_var($enabledVal, FILTER_VALIDATE_BOOLEAN) : null,
                         ];
                     }
@@ -1058,15 +1075,23 @@ GRAPHQL;
                     // Variants + per-variant sidest.enabled flag. Null enabled
                     // means the metafield is absent (dynamic default = enabled);
                     // the frontend treats null as "not explicitly disabled".
+                    // Admin API's variant.price is a Money scalar (string);
+                    // reshape into {amount, currencyCode} using the product's
+                    // priceRange currency so the downstream shape matches the
+                    // Storefront API's MoneyV2-native output.
+                    $productCurrency = (string) Arr::get($node, 'priceRange.minVariantPrice.currencyCode', 'AUD');
                     $variants = [];
                     foreach (Arr::get($node, 'variants.edges', []) as $variantEdge) {
                         $v = $variantEdge['node'] ?? [];
                         $enabledVal = Arr::get($v, 'metafield_enabled.value');
+                        $priceAmount = $v['price'] ?? null;
                         $variants[] = [
                             'gid' => $v['id'] ?? '',
                             'title' => $v['title'] ?? '',
                             'available_for_sale' => $v['availableForSale'] ?? false,
-                            'price' => $v['price'] ?? null,
+                            'price' => $priceAmount !== null
+                                ? ['amount' => (string) $priceAmount, 'currencyCode' => $productCurrency]
+                                : null,
                             'enabled' => $enabledVal !== null ? filter_var($enabledVal, FILTER_VALIDATE_BOOLEAN) : null,
                         ];
                     }
