@@ -282,6 +282,32 @@ return [
             'default_category' => 'education',
             'handle_location' => 'path',
         ],
+
+        // --- Education platforms — subdomain mode (default_category: education) ---
+        // Handle lives in the subdomain: {handle}.mykajabi.com / {handle}.circle.so
+        // host_allowlist[0] = base domain; labelled-suffix match in normalizer.
+        'kajabi' => [
+            'display_name' => 'Kajabi',
+            'icon_key' => 'kajabi',
+            'placeholder' => 'yourname',
+            'handle_pattern' => '/^[a-zA-Z0-9-]{3,63}$/',
+            'url_template' => 'https://{handle}.mykajabi.com/',
+            'host_allowlist' => ['mykajabi.com'],
+            'url_path_extractor' => '#^/?$#',
+            'default_category' => 'education',
+            'handle_location' => 'subdomain',
+        ],
+        'circle' => [
+            'display_name' => 'Circle',
+            'icon_key' => 'circle',
+            'placeholder' => 'community-name',
+            'handle_pattern' => '/^[a-zA-Z0-9-]{3,63}$/',
+            'url_template' => 'https://{handle}.circle.so/',
+            'host_allowlist' => ['circle.so'],
+            'url_path_extractor' => '#^/?$#',
+            'default_category' => 'education',
+            'handle_location' => 'subdomain',
+        ],
     ],
 
     'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],

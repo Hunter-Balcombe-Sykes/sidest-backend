@@ -51,3 +51,14 @@ it('registers stan and skool as education path-mode platforms', function () {
         expect($config['handle_location'])->toBe('path');
     }
 });
+
+it('registers kajabi and circle as education subdomain-mode platforms', function () {
+    foreach (['kajabi' => 'mykajabi.com', 'circle' => 'circle.so'] as $key => $base) {
+        $config = config("sidest.social_platforms.{$key}");
+        expect($config)->not->toBeNull();
+        expect($config['default_category'])->toBe('education');
+        expect($config['handle_location'])->toBe('subdomain');
+        // In subdomain mode, host_allowlist[0] is the base domain
+        expect($config['host_allowlist'][0])->toBe($base);
+    }
+});
