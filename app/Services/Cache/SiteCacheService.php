@@ -12,6 +12,7 @@ use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Views\PublicSitePayload;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 // V2: Public site payload caching with single-flight locking (prevents thundering herd). Handles 95% of traffic. Simplified in V2 — no more product payload caching.
 class SiteCacheService
@@ -710,6 +711,12 @@ class SiteCacheService
         // Ensure video keys always exist even when there are no videos (backward-compat).
         $site['gallery_videos'] = $site['gallery_videos'] ?? [];
         $site['content_videos'] = $site['content_videos'] ?? [];
+
+        // --- Document: resolve preview_url from storage path to full CDN URL ---
+        if (isset($site['document']) && is_array($site['document']) && ! empty($site['document']['preview_url'])) {
+            $rawPath = (string) $site['document']['preview_url'];
+            $site['document']['preview_url'] = Storage::disk(config('sidest.media_disk'))->url($rawPath);
+        }
 
         return $site;
     }
