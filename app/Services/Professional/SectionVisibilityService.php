@@ -26,6 +26,7 @@ class SectionVisibilityService
             'gallery' => $this->checkGalleryRequirements($siteId),
             'booking' => $this->checkBookingRequirements($professionalId),
             'services' => $this->checkServicesRequirements($professionalId),
+            'documents' => $this->checkDocumentsRequirements($siteId),
             default => [true, null],
         };
     }
@@ -99,6 +100,22 @@ class SectionVisibilityService
 
         if (! $hasPricedService) {
             return [false, 'Services section requires at least 1 service with a title and price.'];
+        }
+
+        return [true, null];
+    }
+
+    private function checkDocumentsRequirements(string $siteId): array
+    {
+        $hasDocument = SiteMedia::query()
+            ->where('site_id', $siteId)
+            ->where('pool', SiteMedia::POOL_DOCUMENTS)
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->exists();
+
+        if (! $hasDocument) {
+            return [false, 'Documents section requires an uploaded document.'];
         }
 
         return [true, null];
