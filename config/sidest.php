@@ -42,7 +42,24 @@ return [
         // a real column (Option B) only when query-ability matters. See docs/social-links.md.
         'platform',
         'handle',
+        // Link category — one of config('sidest.link_categories'). Required on every
+        // write; resolved from the platform's default_category when not supplied.
+        // Same JSONB-first rationale as `platform` above.
+        'category',
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Link categories
+    |--------------------------------------------------------------------------
+    |
+    | Fixed enum applied to every link block in site.blocks.settings.category.
+    | One source of truth — imported by the Form Requests, the public registry
+    | endpoint response, and the backfill command. Do not add values without
+    | updating the frontend category picker and confirming the public mini-site
+    | renderer handles the new value.
+    */
+    'link_categories' => ['social', 'booking', 'education', 'content', 'events', 'other'],
 
     /*
     |--------------------------------------------------------------------------
