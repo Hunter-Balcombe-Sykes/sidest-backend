@@ -33,9 +33,11 @@ query allProducts($first: Int!, $after: String) {
         status
         description
         featuredImage { url altText }
-        # Single image — more is a waste for the catalog table (only featuredImage is rendered);
-        # bump if a richer detail panel ever needs the gallery inline.
-        images(first: 1) { edges { node { url altText } } }
+        # Gallery for the brand detail modal — five is plenty for the
+        # modal carousel and fits within Shopify's 1000-point cost budget.
+        # Cost math on this query: products(50) + variants(50·5=250) +
+        # images(50·5=250) + metafields(50·5=250) = 800, safely under.
+        images(first: 5) { edges { node { url altText } } }
         priceRange {
           minVariantPrice { amount currencyCode }
           maxVariantPrice { amount currencyCode }

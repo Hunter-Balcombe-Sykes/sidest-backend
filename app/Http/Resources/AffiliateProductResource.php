@@ -15,6 +15,11 @@ class AffiliateProductResource extends JsonResource
             'handle' => $this->resource['handle'] ?? '',
             'available_for_sale' => (bool) ($this->resource['available_for_sale'] ?? false),
             'featured_image' => $this->resource['featured_image'] ?? null,
+            // Product gallery — populated for the detail modal on the
+            // affiliate shop page. Empty array when the product has no
+            // non-featured images (in which case the modal falls back to
+            // featured_image).
+            'images' => $this->resource['images'] ?? [],
             'price_range' => $this->resource['price_range'] ?? null,
             'variants' => $this->resource['variants'] ?? [],
             'selected' => (bool) ($this->resource['selected'] ?? false),

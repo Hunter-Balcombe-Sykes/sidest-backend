@@ -34,6 +34,18 @@ query collectionProducts($handle: String!, $first: Int!, $after: String) {
             url
             altText
           }
+          # Gallery for the affiliate detail modal — up to 5 images per
+          # product stays well under Storefront API's per-query complexity
+          # budget and covers every realistic product page. featuredImage
+          # stays separate because it's the only one rendered on the card.
+          images(first: 5) {
+            edges {
+              node {
+                url
+                altText
+              }
+            }
+          }
           priceRange {
             minVariantPrice {
               amount
@@ -556,12 +568,21 @@ GRAPHQL;
                         ];
                     }
 
+                    // Flatten the images connection into a plain array so the
+                    // resource + frontend see the same shape both sides of
+                    // the catalog (storefront vs admin API) return.
+                    $images = array_values(array_filter(array_map(
+                        fn ($imgEdge) => $imgEdge['node'] ?? null,
+                        Arr::get($node, 'images.edges', [])
+                    )));
+
                     $products[] = [
                         'gid' => $node['id'] ?? '',
                         'title' => $node['title'] ?? '',
                         'handle' => $node['handle'] ?? '',
                         'available_for_sale' => $node['availableForSale'] ?? false,
                         'featured_image' => $node['featuredImage'] ?? null,
+                        'images' => $images,
                         'price_range' => [
                             'min' => Arr::get($node, 'priceRange.minVariantPrice'),
                             'max' => Arr::get($node, 'priceRange.maxVariantPrice'),
