@@ -32,3 +32,13 @@ it('each existing social platform has default_category=social and handle_locatio
         expect($config['handle_location'])->toBe('path', "platform {$key} missing handle_location=path");
     }
 });
+
+it('registers the 5 booking platforms with default_category=booking', function () {
+    foreach (['fresha', 'booksy', 'timely', 'calendly', 'square'] as $key) {
+        $config = config("sidest.social_platforms.{$key}");
+        expect($config)->not->toBeNull("booking platform {$key} not registered");
+        expect($config['default_category'])->toBe('booking');
+        expect($config['handle_location'])->toBe('path');
+        expect($config['url_template'])->toStartWith('https://');
+    }
+});
