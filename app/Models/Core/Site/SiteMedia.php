@@ -28,6 +28,10 @@ class SiteMedia extends BaseModel
 
     public const POOL_BRAND_GALLERY = 'brand_gallery';
 
+    // One downloadable document per site (PDF/JPG/PNG). See
+    // docs/superpowers/specs/2026-04-22-document-upload-design.md.
+    public const POOL_DOCUMENTS = 'documents';
+
     // Singleton brand design assets (logo, placeholder). No ordering semantics —
     // the per-pool sort_order unique index excludes this pool deliberately.
     public const POOL_DESIGN = 'design';
@@ -44,6 +48,8 @@ class SiteMedia extends BaseModel
     public const MEDIA_TYPE_IMAGE = 'image';
 
     public const MEDIA_TYPE_VIDEO = 'video';
+
+    public const MEDIA_TYPE_DOCUMENT = 'document';
 
     public const PROCESSING_STATE_PENDING = 'pending';
 
@@ -73,6 +79,7 @@ class SiteMedia extends BaseModel
         'processing_state',
         'processing_error',
         'original_mime',
+        'original_filename',
         'original_size_bytes',
         'duration_ms',
         'poster_path',
