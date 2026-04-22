@@ -192,3 +192,146 @@ it('rejects a state subtitle longer than 200 chars', function () {
     expect($result['ok'])->toBeFalse();
     expect($result['errors'])->toHaveKey('settings.states.pre_drop.subtitle');
 });
+
+it('accepts a CTA with https URL', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => [
+                    'cta' => ['label' => 'Shop the drop', 'url' => 'https://stan.store/foo'],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeTrue();
+});
+
+it('accepts a CTA with a hash anchor URL (internal section link)', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => [
+                    'cta' => ['label' => 'Shop now', 'url' => '#shop?products=abc,def'],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeTrue();
+});
+
+it('accepts a CTA with an absolute path URL', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => [
+                    'cta' => ['label' => 'Go', 'url' => '/some/page'],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeTrue();
+});
+
+it('rejects a javascript: URL', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => [
+                    'cta' => ['label' => 'Bad', 'url' => 'javascript:alert(1)'],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.states.live.cta.url');
+});
+
+it('rejects a mailto: URL', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => [
+                    'cta' => ['label' => 'Bad', 'url' => 'mailto:foo@example.com'],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.states.live.cta.url');
+});
+
+it('rejects a protocol-relative URL', function () {
+    // //example.com is protocol-relative and inherits the current scheme.
+    // Reject it — if someone needs an external URL, they should be explicit.
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => [
+                    'cta' => ['label' => 'Bad', 'url' => '//evil.example.com'],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.states.live.cta.url');
+});
+
+it('rejects a CTA label without a URL', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => [
+                    'cta' => ['label' => 'Shop now'],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.states.live.cta.url');
+});
+
+it('rejects a CTA URL without a label', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => [
+                    'cta' => ['url' => 'https://example.com'],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.states.live.cta.label');
+});
+
+it('rejects a CTA label longer than 40 chars', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => [
+                    'cta' => ['label' => str_repeat('a', 41), 'url' => 'https://x.test'],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.states.live.cta.label');
+});

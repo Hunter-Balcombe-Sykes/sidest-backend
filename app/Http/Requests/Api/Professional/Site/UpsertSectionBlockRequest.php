@@ -70,12 +70,32 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             'settings.states' => ['sometimes', 'array'],
         ];
 
-        // Per-state copy rules: same shape for all three states, so build them
-        // programmatically rather than writing 12 near-identical lines.
+        // URL scheme allowlist: https?://, absolute path (not protocol-relative //),
+        // or hash anchor. Rejects javascript:, data:, mailto:, and protocol-relative.
+        $urlPattern = '/^(https?:\/\/\S+|\/(?!\/)\S*|#\S*)$/i';
+
+        // Per-state copy + CTA rules: same shape for all three states, so build them
+        // programmatically rather than writing 18 near-identical lines.
         foreach (['pre_drop', 'live', 'expired'] as $state) {
             $rules["settings.states.{$state}"] = ['sometimes', 'array'];
             $rules["settings.states.{$state}.headline"] = ['sometimes', 'nullable', 'string', 'max:80'];
             $rules["settings.states.{$state}.subtitle"] = ['sometimes', 'nullable', 'string', 'max:200'];
+            $rules["settings.states.{$state}.cta"] = ['sometimes', 'array'];
+            // CTA label + url are paired. Drop `sometimes` so `required_with`
+            // fires when the counterpart IS present but this field is not.
+            $rules["settings.states.{$state}.cta.label"] = [
+                'nullable',
+                'string',
+                'max:40',
+                "required_with:settings.states.{$state}.cta.url",
+            ];
+            $rules["settings.states.{$state}.cta.url"] = [
+                'nullable',
+                'string',
+                'max:2048',
+                "required_with:settings.states.{$state}.cta.label",
+                "regex:{$urlPattern}",
+            ];
         }
 
         return $rules;
