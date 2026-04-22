@@ -32,6 +32,7 @@ class SectionVisibilityService
             'services' => $this->checkServicesRequirements($professionalId),
             'documents' => $this->checkDocumentsRequirements($siteId),
             'countdown' => $this->checkCountdownRequirements($professionalId, $siteId, $pendingSettings),
+            'contact' => $this->checkContactRequirements($professionalId, $siteId, $pendingSettings),
             default => [true, null],
         };
     }
@@ -176,6 +177,40 @@ class SectionVisibilityService
 
         if ($expiryTs->isPast()) {
             return [false, 'Countdown expiry time is already in the past.'];
+        }
+
+        return [true, null];
+    }
+
+    /**
+     * A contact block is publishable when it has a non-empty, valid
+     * notification_email in its settings. Like countdown, the requirement
+     * lives in the block's own payload — so the controller passes the
+     * incoming settings as $pendingSettings to cover the first-publish
+     * path (config + publication_state=live arrive together).
+     *
+     * @param  array<string, mixed>|null  $pendingSettings
+     * @return array{0: bool, 1: ?string}
+     */
+    private function checkContactRequirements(string $professionalId, string $siteId, ?array $pendingSettings = null): array
+    {
+        $block = Block::query()
+            ->where('professional_id', $professionalId)
+            ->where('site_id', $siteId)
+            ->where('block_group', 'sections')
+            ->where('block_type', 'contact')
+            ->first();
+
+        $stored = $block && is_array($block->settings) ? $block->settings : [];
+        $settings = $pendingSettings !== null
+            ? array_replace_recursive($stored, $pendingSettings)
+            : $stored;
+
+        $email = data_get($settings, 'notification_email');
+        $email = is_string($email) ? trim($email) : '';
+
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return [false, 'Contact section requires a notification email before it can go live.'];
         }
 
         return [true, null];
