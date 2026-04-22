@@ -104,7 +104,9 @@ The raw IP is never stored (GDPR). A hash is stored to enable abuse detection (e
 
 All fields are nullable except `notification_email`, which is required to publish. `subject_options` is the affiliate's additions only — merged with platform defaults at validation/render time.
 
-### Table: `site_enquiries` (new Supabase migration)
+### Table: `site.enquiries` (new Supabase migration)
+
+Placed in the `site` schema alongside `site.blocks` and `site.media` — this is site-owned visitor-submitted data.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -117,12 +119,13 @@ All fields are nullable except `notification_email`, which is required to publis
 | `subject` | varchar(100) | selected option from merged list |
 | `message` | text | |
 | `ip_hash` | varchar(64) | SHA-256 of submitter IP |
+| `user_agent` | varchar(500) nullable | for abuse audit |
 | `read_at` | timestamptz nullable | null = unread |
 | `deleted_at` | timestamptz nullable | soft delete |
 | `created_at` | timestamptz | |
 | `updated_at` | timestamptz | |
 
-Indexes: `professional_id`, `site_id`, `created_at DESC` (for inbox list query).
+Indexes: `(professional_id, created_at DESC)` (inbox list), `(site_id)`, `(ip_hash, created_at)` (abuse queries). Standard RLS policies matching the `site.blocks` pattern.
 
 ## Validation
 
@@ -142,12 +145,18 @@ Indexes: `professional_id`, `site_id`, `created_at DESC` (for inbox list query).
 | Field | Rules |
 |---|---|
 | `name` | required, string, max:100, strip_tags |
-| `email` | required, email, max:255 |
+| `email` | required, email:rfc, max:255 |
 | `phone` | nullable, string, max:30, strip_tags |
 | `subject` | required, string, validated against merged subject options list |
 | `message` | required, string, min:10, max:2000, strip_tags |
+| `website` | nullable, string, max:255 (honeypot) |
+| `form_started_at_ms` | required, integer, min:0 (timing check) |
 
 Subject validation resolves the site's block `settings.subject_options`, merges with platform defaults, and checks the submitted value is in that list. Prevents a crafted payload from injecting an arbitrary subject string.
+
+**Bot protection** (same pattern as `PublicCustomerLeadController`):
+- `website` field is a honeypot — if filled, the controller pretends success but discards the submission
+- `form_started_at_ms` is an epoch-ms timestamp; submissions outside `sidest.form_timing.min_ms` to `sidest.form_timing.max_ms` (default 2500ms–12h) are rejected as `too_fast`
 
 ## API
 
@@ -165,7 +174,11 @@ DELETE /api/professional/sites/{siteId}/sections/contact  → soft delete (sets 
 POST /public/enquiry
 ```
 
-Rate limit: `throttle:5,1` per IP per minute.
+Middleware: `lead.log`, `throttle:leads`
+- Reuses the existing `leads` rate limiter: 3/min per IP + 100/min per subdomain
+- Reuses `lead.log` middleware for consistent abuse-rate logging across all lead forms
+
+Registered in `routes/api/publicSite.php` (inside the `/public/*` group).
 
 Request body:
 ```json
@@ -174,20 +187,26 @@ Request body:
   "email": "sarah@example.com",
   "phone": "+44 7700 900000",
   "subject": "Wholesale",
-  "message": "Hi, I'd love to stock your products..."
+  "message": "Hi, I'd love to stock your products...",
+  "website": "",
+  "form_started_at_ms": 1713787200000
 }
 ```
 
-Site resolved from `X-Site-Subdomain` header or `subdomain` query param (same pattern as newsletter).
+Site resolved from `X-Site-Subdomain` header or `subdomain` query param (same pattern as newsletter / PublicCustomerLeadController).
 
 Controller flow (`PublicEnquiryController::submit()`):
-1. Resolve site from subdomain
-2. Verify `contact` block is active on that site — 422 if not
-3. Validate submission (subject checked against merged options)
-4. Save `SiteEnquiry`
-5. Upsert submitter as `Customer` with `source = 'enquiry'`
-6. Dispatch `SendEnquiryNotificationJob`
-7. Return `{ ok: true }`
+1. Validate (incl. honeypot + timing)
+2. If honeypot filled → log `outcome=honeypot` to `LeadSubmission`, return `{ ok: true }` (fake success)
+3. If timing out of range → log `outcome=too_fast`, return 422
+4. Resolve site from subdomain
+5. Verify `contact` block is active on that site — 422 if not
+6. Validate subject against merged subject options
+7. Save `Enquiry` record
+8. Upsert submitter as `Customer` with `source = 'enquiry'`
+9. Log `outcome=created` to `LeadSubmission` (unified analytics with other lead forms)
+10. Dispatch `SendEnquiryNotificationJob`
+11. Return `{ ok: true }`
 
 Response:
 ```json
@@ -277,18 +296,21 @@ Two additions to `config/sidest.php`:
 | 7 | Valid submission dispatches `SendEnquiryNotificationJob` |
 | 8 | Subject not in merged options list is rejected (422) |
 | 9 | Message under 10 chars is rejected (422) |
-| 10 | Rate limit: 6th submission in a minute is rejected (429) |
+| 10 | Rate limit: 4th submission in a minute is rejected (429) — `throttle:leads` enforces 3/min per IP |
 | 11 | Submission to site with no active contact block is rejected (422) |
 | 12 | HTML tags in name/message are stripped on input |
+| 13 | Honeypot `website` field filled → returns 200 but saves nothing, logs `outcome=honeypot` |
+| 14 | `form_started_at_ms` under `min_ms` threshold → 422 with `outcome=too_fast` |
+| 15 | Successful submission logs `outcome=created` to `LeadSubmission` |
 
 ### `tests/Feature/Professional/EnquiryTest.php`
 
 | # | Test |
 |---|---|
-| 13 | Affiliate can list their enquiries (paginated, newest first) |
-| 14 | Affiliate can mark an enquiry as read |
-| 15 | Affiliate can soft-delete an enquiry |
-| 16 | Affiliate cannot read another professional's enquiries (403) |
+| 16 | Affiliate can list their enquiries (paginated, newest first) |
+| 17 | Affiliate can mark an enquiry as read |
+| 18 | Affiliate can soft-delete an enquiry |
+| 19 | Affiliate cannot read another professional's enquiries (403) |
 
 ## Non-goals / deferred
 
