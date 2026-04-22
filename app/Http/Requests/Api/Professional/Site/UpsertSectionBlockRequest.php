@@ -21,7 +21,7 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             $textRules[] = new MaxWords(200);
         }
 
-        return [
+        $rules = [
             'block_type' => ['required', 'string', Rule::in($allowed)],
             'title' => ['sometimes', 'nullable', 'string', 'max:100'],
             'is_active' => ['sometimes', 'boolean'],
@@ -40,6 +40,33 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             // 'marketing' server-side if omitted; constrained to slug shape so
             // a free-form value can't collide with future system list keys.
             'settings.list_key' => ['sometimes', 'nullable', 'string', 'max:40', 'regex:/^[a-z0-9][a-z0-9_-]{0,39}$/'],
+        ];
+
+        if ($type === 'countdown') {
+            $rules = array_merge($rules, $this->countdownRules());
+        }
+
+        return $rules;
+    }
+
+    /**
+     * Countdown-specific settings shape. Timeline is paired (both or neither);
+     * title + per-state copy/CTAs are independent. Kept in its own method to
+     * keep rules() legible as more block types are added.
+     *
+     * @return array<string, array<int, mixed>>
+     */
+    private function countdownRules(): array
+    {
+        return [
+            'settings.title' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'settings.timeline' => ['sometimes', 'array'],
+            // Timeline fields are paired: if either is present, both must be.
+            // `required_with` handles that without `sometimes`; if neither key
+            // is sent, Laravel simply skips these rules (they're nested under
+            // `settings.timeline` which is optional).
+            'settings.timeline.drop_time' => ['required_with:settings.timeline.expiry_time', 'date'],
+            'settings.timeline.expiry_time' => ['required_with:settings.timeline.drop_time', 'date', 'after:settings.timeline.drop_time'],
         ];
     }
 
