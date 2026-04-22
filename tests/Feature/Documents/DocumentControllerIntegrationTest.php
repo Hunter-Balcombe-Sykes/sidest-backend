@@ -201,6 +201,58 @@ it('PATCH /api/documents/{id} returns 404 for a document belonging to another si
         ->toThrow(HttpException::class);
 });
 
+it('PATCH /api/documents/{id} returns 404 when the document is inactive (is_active=false)', function () {
+    $pro = seedProfessional();
+    $docId = (string) Str::uuid();
+    DB::connection('pgsql')->table('site.site_media')->insert([
+        'id' => $docId,
+        'site_id' => $pro->site->id,
+        'pool' => 'documents',
+        'media_type' => 'document',
+        'path' => "documents/{$pro->id}/{$docId}/original.pdf",
+        'alt_text' => 'Inactive Doc',
+        'original_mime' => 'application/pdf',
+        'processing_state' => 'ready',
+        'is_active' => 0,
+        'sort_order' => 0,
+    ]);
+
+    $doc = SiteMedia::find($docId);
+    $base = Request::create("/api/documents/{$docId}", 'PATCH', ['title' => 'Try to edit']);
+    $base->attributes->set('professional', $pro);
+    $req = UpdateDocumentRequest::createFrom($base);
+    $req->setContainer(app())->setRedirector(app('redirect'));
+    $req->validateResolved();
+    $req->attributes->set('professional', $pro);
+
+    expect(fn () => app(ProfessionalDocumentController::class)->update($req, $doc))
+        ->toThrow(HttpException::class);
+});
+
+it('DELETE /api/documents/{id} returns 404 when the document is inactive', function () {
+    $pro = seedProfessional();
+    $docId = (string) Str::uuid();
+    DB::connection('pgsql')->table('site.site_media')->insert([
+        'id' => $docId,
+        'site_id' => $pro->site->id,
+        'pool' => 'documents',
+        'media_type' => 'document',
+        'path' => "documents/{$pro->id}/{$docId}/original.pdf",
+        'alt_text' => 'Inactive Doc',
+        'original_mime' => 'application/pdf',
+        'processing_state' => 'ready',
+        'is_active' => 0,
+        'sort_order' => 0,
+    ]);
+
+    $doc = SiteMedia::find($docId);
+    $base = Request::create("/api/documents/{$docId}", 'DELETE');
+    $base->attributes->set('professional', $pro);
+
+    expect(fn () => app(ProfessionalDocumentController::class)->destroy($base, $doc))
+        ->toThrow(HttpException::class);
+});
+
 it('PATCH /api/documents/{id} skips cache invalidation when no field actually changed', function () {
     $pro = seedProfessional();
 

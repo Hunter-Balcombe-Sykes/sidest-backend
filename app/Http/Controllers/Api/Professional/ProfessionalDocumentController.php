@@ -92,7 +92,14 @@ class ProfessionalDocumentController extends ApiController
                 if ($existing) {
                     // Capture the path for post-commit R2 cleanup.
                     $previousPath = (string) $existing->path;
-                    $existing->delete();
+                    // Suppress the old row's `deleted` observer event during
+                    // flat-replace — the new row's `saved` event a few lines
+                    // below will trigger section-visibility reevaluation once.
+                    // Without this, both events fire post-commit and do the
+                    // same DB read + check in sequence (wasted work).
+                    SiteMedia::withoutEvents(function () use ($existing): void {
+                        $existing->delete();
+                    });
                 }
 
                 // Extension is derived from the actual MIME — never from the
@@ -180,9 +187,13 @@ class ProfessionalDocumentController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
+        // Ownership + active-row check. Route model binding already 404s on
+        // soft-deleted rows (SoftDeletes trait); is_active covers the case
+        // where an admin or future feature hides a row without deleting it.
         abort_unless(
             $document->site_id === $site->id
-            && $document->pool === SiteMedia::POOL_DOCUMENTS,
+            && $document->pool === SiteMedia::POOL_DOCUMENTS
+            && $document->is_active,
             404
         );
 
@@ -223,9 +234,12 @@ class ProfessionalDocumentController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
+        // Same ownership + active-row check as update(). Prevents a pro from
+        // re-deleting an already-soft-deleted or hidden row.
         abort_unless(
             $document->site_id === $site->id
-            && $document->pool === SiteMedia::POOL_DOCUMENTS,
+            && $document->pool === SiteMedia::POOL_DOCUMENTS
+            && $document->is_active,
             404
         );
 
