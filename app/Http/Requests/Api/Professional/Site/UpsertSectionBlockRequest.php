@@ -136,5 +136,60 @@ class UpsertSectionBlockRequest extends BaseFormRequest
         if ($settingsChanged) {
             $this->merge(['settings' => $settings]);
         }
+
+        // Countdown sanitization — title + per-state headline/subtitle/cta.label.
+        // Scoped by block_type to avoid mutating shape-equivalent keys on other
+        // block types (e.g. a future block using a `title` key differently).
+        if ($this->input('block_type') === 'countdown') {
+            $this->sanitizeCountdownSettings();
+        }
+    }
+
+    /**
+     * Strip HTML tags from user-authored string fields in countdown settings.
+     * Mirrors the bio/newsletter pattern: defense-in-depth against a future
+     * renderer that forgets to escape. URLs are NOT stripped — tags in URLs
+     * are invalid anyway, and the scheme-allowlist regex already rejects
+     * dangerous values.
+     */
+    private function sanitizeCountdownSettings(): void
+    {
+        $settings = $this->input('settings', []);
+        if (! is_array($settings)) {
+            return;
+        }
+
+        $clean = static function (mixed $value): mixed {
+            if (! is_string($value)) {
+                return $value;
+            }
+            $stripped = trim(strip_tags($value));
+
+            return $stripped === '' ? null : $stripped;
+        };
+
+        if (array_key_exists('title', $settings)) {
+            $settings['title'] = $clean($settings['title']);
+        }
+
+        foreach (['pre_drop', 'live', 'expired'] as $state) {
+            if (! isset($settings['states'][$state]) || ! is_array($settings['states'][$state])) {
+                continue;
+            }
+
+            foreach (['headline', 'subtitle'] as $field) {
+                if (array_key_exists($field, $settings['states'][$state])) {
+                    $settings['states'][$state][$field] = $clean($settings['states'][$state][$field]);
+                }
+            }
+
+            if (isset($settings['states'][$state]['cta']) && is_array($settings['states'][$state]['cta'])) {
+                if (array_key_exists('label', $settings['states'][$state]['cta'])) {
+                    $settings['states'][$state]['cta']['label'] = $clean($settings['states'][$state]['cta']['label']);
+                }
+            }
+        }
+
+        $this->merge(['settings' => $settings]);
     }
 }

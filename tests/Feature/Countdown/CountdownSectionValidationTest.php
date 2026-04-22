@@ -335,3 +335,31 @@ it('rejects a CTA label longer than 40 chars', function () {
     expect($result['ok'])->toBeFalse();
     expect($result['errors'])->toHaveKey('settings.states.live.cta.label');
 });
+
+it('strips HTML tags from countdown string fields (defense-in-depth)', function () {
+    // Matches the newsletter/bio sanitization pattern. Frontend auto-escape is
+    // the primary XSS defense; this prevents stored tags from reaching a
+    // future buggy renderer.
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'title' => 'The <b>Drop</b>',
+            'states' => [
+                'live' => [
+                    'headline' => '<script>alert(1)</script>Live now',
+                    'subtitle' => 'Shop <em>now</em>',
+                    'cta' => [
+                        'label' => '<img>Go',
+                        'url' => 'https://example.com',
+                    ],
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeTrue();
+    expect($result['data']['settings']['title'])->toBe('The Drop');
+    expect($result['data']['settings']['states']['live']['headline'])->toBe('alert(1)Live now');
+    expect($result['data']['settings']['states']['live']['subtitle'])->toBe('Shop now');
+    expect($result['data']['settings']['states']['live']['cta']['label'])->toBe('Go');
+});
