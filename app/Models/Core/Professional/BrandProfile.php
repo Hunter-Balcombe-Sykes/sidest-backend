@@ -42,4 +42,23 @@ class BrandProfile extends BaseModel
     {
         return $this->belongsTo(Professional::class, 'professional_id');
     }
+
+    /**
+     * First-is-primary convention: the first non-empty string entry in
+     * industries is the primary. Convenience for brand-side callers that
+     * already have a BrandProfile loaded; affiliate-side code should use
+     * Professional::primaryIndustry() instead.
+     */
+    public function primaryIndustry(): ?string
+    {
+        $industries = is_array($this->industries) ? $this->industries : [];
+
+        foreach ($industries as $value) {
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
 }

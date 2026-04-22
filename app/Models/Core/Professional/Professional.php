@@ -186,6 +186,65 @@ class Professional extends BaseModel
             ->orderByDesc('created_at');
     }
 
+    /**
+     * All brand connections where this professional is the affiliate.
+     * Empty for brand accounts (brands connect TO affiliates, not the reverse).
+     */
+    public function brandPartnerLinks(): HasMany
+    {
+        return $this->hasMany(BrandPartnerLink::class, 'affiliate_professional_id');
+    }
+
+    /**
+     * The affiliate's primary brand connection (slot 0). V2 uses a single-brand
+     * model, so this is effectively "the brand" for an affiliate, or null for
+     * an affiliate that hasn't connected yet / a brand account.
+     */
+    public function primaryBrandPartnerLink(): HasOne
+    {
+        return $this->hasOne(BrandPartnerLink::class, 'affiliate_professional_id')
+            ->where('slot', 0);
+    }
+
+    /**
+     * Return the industries that drive this professional's experience.
+     *
+     * - Brand: its own BrandProfile.industries (primary at index 0).
+     * - Affiliate (professional/influencer): the primary (slot=0) connected
+     *   brand's industries. If multi-brand lands later, the "union across
+     *   brands" decision is deferred — see docs/brand-industries.md §7.
+     *
+     * Always returns a clean array of string slugs; empty strings and
+     * non-strings are filtered defensively (legacy free-form data could
+     * contain either).
+     *
+     * @return array<int, string>
+     */
+    public function effectiveIndustries(): array
+    {
+        $industries = $this->isBrand()
+            ? ($this->brandProfile?->industries ?? [])
+            : ($this->primaryBrandPartnerLink?->brandProfessional?->brandProfile?->industries ?? []);
+
+        if (! is_array($industries)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $industries,
+            static fn ($value) => is_string($value) && $value !== ''
+        ));
+    }
+
+    /**
+     * First-is-primary convention: the first industry in the list is the
+     * primary. Null when no industries are set.
+     */
+    public function primaryIndustry(): ?string
+    {
+        return $this->effectiveIndustries()[0] ?? null;
+    }
+
     public function subscription(): HasOne
     {
         return $this->hasOne(Subscription::class, 'professional_id');
