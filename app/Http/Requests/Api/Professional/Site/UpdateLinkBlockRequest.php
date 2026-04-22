@@ -81,6 +81,10 @@ class UpdateLinkBlockRequest extends BaseFormRequest
             'settings' => ['sometimes', 'array'],
             'settings.highlight' => ['sometimes', 'boolean'],
             'settings.note' => ['sometimes', 'string', 'max:140'],
+            // Defense-in-depth: see StoreLinkBlockRequest for rationale. Enum-validate
+            // settings.category so a client sending {category, settings: {category: 'bogus'}}
+            // cannot bypass the top-level enum check through the update-path settings merge.
+            'settings.category' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_categories', []))],
 
             // Category enum — all-optional on update (partial updates allowed).
             // Enum is still checked when present; controller applies override semantics.

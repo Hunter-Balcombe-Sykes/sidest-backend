@@ -371,7 +371,7 @@ return [
             'handle_pattern' => '/^\d{5,15}$/',
             'url_template' => 'https://podcasts.apple.com/us/podcast/id{handle}',
             'host_allowlist' => ['podcasts.apple.com'],
-            'url_path_extractor' => '#^/[a-z]{2}/podcast/[a-zA-Z0-9-]+/id(\d{5,15})/?$#',
+            'url_path_extractor' => '#^/[a-z]{2}/podcast/[a-zA-Z0-9-]{1,120}/id(\d{5,15})/?$#',
             'default_category' => 'content',
             'handle_location' => 'path',
         ],

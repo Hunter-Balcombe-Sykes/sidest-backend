@@ -459,3 +459,10 @@ it('rejects an invalid eventbrite handle with special characters', function () {
     expect(fn () => normalizer()->normalize('eventbrite', 'has spaces', null))
         ->toThrow(InvalidArgumentException::class);
 });
+
+it('extracts the handle for circle (circle.so base)', function () {
+    $result = normalizer()->normalize('circle', null, 'https://acmecommunity.circle.so/');
+
+    expect($result['handle'])->toBe('acmecommunity');
+    expect($result['url'])->toBe('https://acmecommunity.circle.so/');
+});

@@ -80,6 +80,10 @@ class StoreLinkBlockRequest extends BaseFormRequest
             'settings' => ['sometimes', 'array'],
             'settings.highlight' => ['sometimes', 'boolean'],
             'settings.note' => ['sometimes', 'string', 'max:140'],
+            // Defense-in-depth: even though the controller overwrites settings.category
+            // with the top-level category before save, enum-validate the nested form
+            // in case a code path ever merges settings without overwriting.
+            'settings.category' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_categories', []))],
 
             // Category enum — always validated against the registry when supplied.
             // Required for custom links (enforced in withValidator); optional for

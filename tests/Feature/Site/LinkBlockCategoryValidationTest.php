@@ -143,3 +143,26 @@ it('rejects an update with an invalid category', function () {
     expect($result['ok'])->toBeFalse();
     expect($result['errors'])->toHaveKey('category');
 });
+
+// --- Defense-in-depth: settings.category is enum-validated too ---
+
+it('rejects an invalid settings.category on create (defense-in-depth)', function () {
+    $result = validateStoreRequestCategory([
+        'title' => 'My link',
+        'url' => 'https://example.com',
+        'category' => 'other',
+        'settings' => ['category' => 'not-real'],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.category');
+});
+
+it('rejects an invalid settings.category on update (defense-in-depth)', function () {
+    $result = validateUpdateRequestCategory([
+        'settings' => ['category' => 'not-real'],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.category');
+});
