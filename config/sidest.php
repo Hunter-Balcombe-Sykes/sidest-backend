@@ -402,7 +402,7 @@ return [
         ],
     ],
 
-    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter'],
+    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown'],
 
     'professional_types' => [
         'brand' => 'Brand',
