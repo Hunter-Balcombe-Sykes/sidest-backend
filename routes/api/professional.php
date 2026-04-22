@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalAccountDeletionController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
 use App\Http\Controllers\Api\Professional\ProfessionalController;
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
+use App\Http\Controllers\Api\Professional\ProfessionalEnquiryController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGoogleBusinessProfileController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;
@@ -172,6 +173,13 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/customers/{customer}/restore', [ProfessionalCustomerController::class, 'restore'])
             ->whereUuid('customer')
             ->withTrashed();
+
+        // Contact section enquiry inbox
+        Route::get('/enquiries', [ProfessionalEnquiryController::class, 'index']);
+        Route::patch('/enquiries/{id}', [ProfessionalEnquiryController::class, 'update'])
+            ->whereUuid('id');
+        Route::delete('/enquiries/{id}', [ProfessionalEnquiryController::class, 'destroy'])
+            ->whereUuid('id');
 
         // UI Confirmation Preferences ("don't ask again" toggles)
         Route::get('/confirmation-preferences', [ConfirmationPreferenceController::class, 'show']);
