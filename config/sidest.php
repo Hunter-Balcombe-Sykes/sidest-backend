@@ -402,7 +402,7 @@ return [
         ],
     ],
 
-    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents'],
+    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter'],
 
     'professional_types' => [
         'brand' => 'Brand',
@@ -467,7 +467,7 @@ return [
     'account_type_defaults' => [
         // Influencer is the base type (most basic account)
         'influencer' => [
-            'allowed_sections' => ['shop', 'services', 'gallery', 'documents'],
+            'allowed_sections' => ['shop', 'services', 'gallery', 'documents', 'newsletter'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'is_published' => true,
             'allowed_theme_count' => 3,
@@ -483,12 +483,12 @@ return [
         // Professional inherits influencer + adds booking, analytics, custom links
         'professional' => [
             'inherits' => 'influencer',
-            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents'],
+            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'custom_links_allowed' => true,
         ],
         'brand' => [
-            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info'],
+            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'newsletter'],
             'default_sections' => [],
             'is_published' => false,
             'allowed_theme_count' => null, // unlimited
