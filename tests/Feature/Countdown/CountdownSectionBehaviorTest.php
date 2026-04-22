@@ -159,3 +159,45 @@ it('merges pending settings over stored when checking (partial PATCH path)', fun
 
     expect($canBeVisible)->toBeTrue();
 });
+
+it('preserves sibling state fields when array_replace_recursive merges a nested PATCH', function () {
+    // The controller uses array_replace_recursive to PATCH-merge settings on
+    // every upsert. This test locks in that a countdown-shaped nested PATCH
+    // (updating only settings.states.live.headline) doesn't clobber siblings
+    // (cta.label, cta.url, other states). Countdown is the first block type
+    // with multi-level nesting inside states, so it's worth confirming the
+    // merge semantics survive the shape we're introducing.
+    $stored = [
+        'title' => 'The Drop',
+        'timeline' => [
+            'drop_time' => '2099-01-01T00:00:00Z',
+            'expiry_time' => '2099-01-03T00:00:00Z',
+        ],
+        'states' => [
+            'live' => [
+                'headline' => 'Original headline',
+                'subtitle' => 'Original subtitle',
+                'cta' => ['label' => 'Shop', 'url' => 'https://x.test'],
+            ],
+            'pre_drop' => [
+                'headline' => 'Coming soon',
+            ],
+        ],
+    ];
+
+    $pending = [
+        'states' => [
+            'live' => ['headline' => 'Updated headline'],
+        ],
+    ];
+
+    $merged = array_replace_recursive($stored, $pending);
+
+    expect($merged['title'])->toBe('The Drop');
+    expect($merged['timeline']['drop_time'])->toBe('2099-01-01T00:00:00Z');
+    expect($merged['states']['live']['headline'])->toBe('Updated headline');
+    expect($merged['states']['live']['subtitle'])->toBe('Original subtitle');
+    expect($merged['states']['live']['cta']['label'])->toBe('Shop');
+    expect($merged['states']['live']['cta']['url'])->toBe('https://x.test');
+    expect($merged['states']['pre_drop']['headline'])->toBe('Coming soon');
+});
