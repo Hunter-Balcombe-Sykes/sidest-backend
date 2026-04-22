@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Professional\BrandProfile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 // V2: Brand business profile (ABN, industries, visibility). Used by embedded app wizard during brand onboarding.
@@ -42,8 +43,15 @@ class BrandProfileController extends ApiController
             'acn' => ['sometimes', 'nullable', 'string', 'max:20'],
             'legal_business_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'business_type' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'industries' => ['sometimes', 'array', 'max:10'],
-            'industries.*' => ['string', 'max:100'],
+            // Industries are a controlled enum (see config/sidest.php → brand_industries).
+            // Cap of 3 enforces the primary/secondary/tertiary pattern — beyond that
+            // the "primary" signal (first-is-primary) dilutes. Empty array is valid
+            // for partially-onboarded brands; setup_complete gates on non-empty.
+            'industries' => ['sometimes', 'array', 'max:3'],
+            'industries.*' => [
+                'string',
+                Rule::in(array_keys(config('sidest.brand_industries', []))),
+            ],
             'estimated_annual_income' => ['sometimes', 'nullable', 'string', 'max:100'],
             'business_website' => ['sometimes', 'nullable', 'string', 'max:500'],
             'affiliate_visibility' => ['sometimes', 'string', 'in:public,invite_only'],
