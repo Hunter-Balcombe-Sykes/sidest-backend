@@ -70,62 +70,84 @@ class ProfessionalDocumentController extends ApiController
         // (if any), create the new row, stream the file to R2, and set the path.
         // The old row's R2 bytes are deleted AFTER commit so a transaction
         // rollback doesn't leave an active row pointing at missing bytes.
+        //
+        // If the transaction closure throws AFTER we've streamed the new file
+        // to R2, the uploaded bytes would be orphaned (row gone, file remains).
+        // Track the new path and clean it up in the catch branch below.
         $previousPath = null;
-        $media = DB::transaction(function () use ($site, $pro, $file, $actualMime, $title, $caption, $originalFilename, &$previousPath) {
-            if (DB::getDriverName() === 'pgsql') {
-                DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-documents:{$site->id}"]);
+        $newUploadedPath = null;
+        try {
+            $media = DB::transaction(function () use ($site, $pro, $file, $actualMime, $title, $caption, $originalFilename, &$previousPath, &$newUploadedPath) {
+                if (DB::getDriverName() === 'pgsql') {
+                    DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-documents:{$site->id}"]);
+                }
+
+                $existing = SiteMedia::query()
+                    ->where('site_id', $site->id)
+                    ->where('pool', SiteMedia::POOL_DOCUMENTS)
+                    ->where('is_active', true)
+                    ->whereNull('deleted_at')
+                    ->first();
+
+                if ($existing) {
+                    // Capture the path for post-commit R2 cleanup.
+                    $previousPath = (string) $existing->path;
+                    $existing->delete();
+                }
+
+                // Extension is derived from the actual MIME — never from the
+                // client-supplied filename (spoofable).
+                $ext = match ($actualMime) {
+                    'application/pdf' => 'pdf',
+                    'image/jpeg' => 'jpg',
+                    'image/png' => 'png',
+                };
+
+                $media = SiteMedia::create([
+                    'site_id' => $site->id,
+                    'pool' => SiteMedia::POOL_DOCUMENTS,
+                    'path' => '',
+                    'alt_text' => $title,
+                    'caption' => $caption,
+                    'sort_order' => 0,
+                    'is_active' => true,
+                    'media_type' => SiteMedia::MEDIA_TYPE_DOCUMENT,
+                    'processing_state' => SiteMedia::PROCESSING_STATE_READY,
+                    'original_mime' => $actualMime,
+                    'original_filename' => $originalFilename,
+                    'original_size_bytes' => $file->getSize(),
+                ]);
+
+                // Stream to R2 (not in-memory) — matches the video upload path
+                // so 10 MB PDFs don't peg worker memory.
+                $mediaDisk = config('sidest.media_disk');
+                $path = "documents/{$pro->id}/{$media->id}/original.{$ext}";
+                $stream = fopen($file->getRealPath(), 'rb');
+                Storage::disk($mediaDisk)->put($path, $stream, 'public');
+                if (is_resource($stream)) {
+                    fclose($stream);
+                }
+                $newUploadedPath = $path;
+
+                $media->update(['path' => $path]);
+
+                return $media;
+            });
+        } catch (\Throwable $e) {
+            // Transaction failed after the R2 put succeeded — clean up the
+            // orphaned bytes so we don't leak storage on retries.
+            if ($newUploadedPath !== null) {
+                try {
+                    Storage::disk(config('sidest.media_disk'))->delete($newUploadedPath);
+                } catch (\Throwable $cleanupError) {
+                    Log::warning('Failed to clean up orphaned document R2 object after transaction failure', [
+                        'path' => $newUploadedPath,
+                        'error' => $cleanupError->getMessage(),
+                    ]);
+                }
             }
-
-            $existing = SiteMedia::query()
-                ->where('site_id', $site->id)
-                ->where('pool', SiteMedia::POOL_DOCUMENTS)
-                ->where('is_active', true)
-                ->whereNull('deleted_at')
-                ->first();
-
-            if ($existing) {
-                // Capture the path for post-commit R2 cleanup.
-                $previousPath = (string) $existing->path;
-                $existing->delete();
-            }
-
-            // Extension is derived from the actual MIME — never from the
-            // client-supplied filename (spoofable).
-            $ext = match ($actualMime) {
-                'application/pdf' => 'pdf',
-                'image/jpeg' => 'jpg',
-                'image/png' => 'png',
-            };
-
-            $media = SiteMedia::create([
-                'site_id' => $site->id,
-                'pool' => SiteMedia::POOL_DOCUMENTS,
-                'path' => '',
-                'alt_text' => $title,
-                'caption' => $caption,
-                'sort_order' => 0,
-                'is_active' => true,
-                'media_type' => SiteMedia::MEDIA_TYPE_DOCUMENT,
-                'processing_state' => SiteMedia::PROCESSING_STATE_READY,
-                'original_mime' => $actualMime,
-                'original_filename' => $originalFilename,
-                'original_size_bytes' => $file->getSize(),
-            ]);
-
-            // Stream to R2 (not in-memory) — matches the video upload path
-            // so 10 MB PDFs don't peg worker memory.
-            $mediaDisk = config('sidest.media_disk');
-            $path = "documents/{$pro->id}/{$media->id}/original.{$ext}";
-            $stream = fopen($file->getRealPath(), 'rb');
-            Storage::disk($mediaDisk)->put($path, $stream, 'public');
-            if (is_resource($stream)) {
-                fclose($stream);
-            }
-
-            $media->update(['path' => $path]);
-
-            return $media;
-        });
+            throw $e;
+        }
 
         // Post-commit: delete old R2 bytes. Safe to run outside the txn because
         // the old row is already soft-deleted (so no reader will try to fetch

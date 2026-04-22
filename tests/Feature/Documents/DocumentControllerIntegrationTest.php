@@ -1,0 +1,232 @@
+<?php
+
+use App\Http\Controllers\Api\Professional\ProfessionalDocumentController;
+use App\Http\Requests\Api\Professional\Documents\UpdateDocumentRequest;
+use App\Http\Requests\Api\Professional\Documents\UploadDocumentRequest;
+use App\Models\Core\Professional\Professional;
+use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteMedia;
+use App\Services\Cache\SiteCacheService;
+use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use Tests\Feature\Documents\DocumentTestCase;
+
+/**
+ * Behavioural integration tests for ProfessionalDocumentController. These
+ * bypass HTTP auth middleware by invoking the controller directly and
+ * injecting the authenticated pro via the `professional` request attribute
+ * (the same pattern ReadOnlyEnforcementTest uses). Storage::fake('media')
+ * isolates R2 interactions so we can assert file operations.
+ */
+beforeEach(function () {
+    DocumentTestCase::boot();
+    Storage::fake('media');
+
+    // Mock SiteCacheService — its real invalidateSite() queries tables
+    // (site_subdomain_aliases, brand_partner_links) we don't stub in
+    // DocumentTestCase. Tests that care about cache behaviour override
+    // this instance explicitly.
+    $stub = Mockery::mock(SiteCacheService::class);
+    $stub->shouldReceive('invalidateSite')->zeroOrMoreTimes();
+    app()->instance(SiteCacheService::class, $stub);
+});
+
+function seedProfessional(string $type = 'professional'): Professional
+{
+    $proId = (string) Str::uuid();
+    $siteId = (string) Str::uuid();
+
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => $proId,
+        'handle' => 'p-'.substr($proId, 0, 8),
+        'handle_lc' => 'p-'.substr($proId, 0, 8),
+        'display_name' => 'Test Pro',
+        'primary_email' => 'p-'.substr($proId, 0, 8).'@example.com',
+        'status' => 'active',
+        'professional_type' => $type,
+    ]);
+
+    DB::connection('pgsql')->table('site.sites')->insert([
+        'id' => $siteId,
+        'professional_id' => $proId,
+        'subdomain' => 'p-'.substr($proId, 0, 8),
+        'is_published' => 1,
+    ]);
+
+    return Professional::query()->where('id', $proId)->first();
+}
+
+function uploadRequestFor(Professional $pro, UploadedFile $file, string $title, ?string $caption = null): UploadDocumentRequest
+{
+    $payload = ['title' => $title];
+    if ($caption !== null) {
+        $payload['caption'] = $caption;
+    }
+    $base = Request::create('/api/documents', 'POST', $payload, [], ['file' => $file]);
+    $base->attributes->set('professional', $pro);
+
+    $req = UploadDocumentRequest::createFrom($base);
+    $req->setContainer(app())->setRedirector(app('redirect'));
+    $req->validateResolved();
+
+    // Re-attach the authenticated pro to the post-validation form request.
+    $req->attributes->set('professional', $pro);
+
+    return $req;
+}
+
+it('POST /api/documents creates a SiteMedia row and stores the file on R2', function () {
+    $pro = seedProfessional();
+    $file = UploadedFile::fake()->create('schedule.pdf', 200, 'application/pdf');
+
+    // Put actual PDF bytes into the fake upload so finfo returns application/pdf.
+    file_put_contents($file->getRealPath(), "%PDF-1.4\n%%EOF\n".str_repeat('x', 200 * 1024 - 12));
+
+    $controller = app(ProfessionalDocumentController::class);
+    $response = $controller->store(uploadRequestFor($pro, $file, 'Education Schedule'));
+
+    expect($response->status())->toBe(201);
+
+    $row = SiteMedia::query()
+        ->where('site_id', $pro->site->id)
+        ->where('pool', 'documents')
+        ->first();
+
+    expect($row)->not->toBeNull();
+    expect($row->alt_text)->toBe('Education Schedule');
+    expect($row->original_mime)->toBe('application/pdf');
+    expect($row->original_filename)->toBe('schedule.pdf');
+    expect($row->path)->toStartWith("documents/{$pro->id}/{$row->id}/original.pdf");
+
+    // File was put to the faked media disk.
+    Storage::disk('media')->assertExists($row->path);
+});
+
+it('POST /api/documents flat-replaces: old row soft-deleted, old R2 bytes removed, new active', function () {
+    $pro = seedProfessional();
+
+    // First upload
+    $file1 = UploadedFile::fake()->create('v1.pdf', 100, 'application/pdf');
+    file_put_contents($file1->getRealPath(), "%PDF-1.4\n%%EOF\n".str_repeat('a', 100 * 1024 - 12));
+    app(ProfessionalDocumentController::class)
+        ->store(uploadRequestFor($pro, $file1, 'Version 1'));
+
+    $firstRow = SiteMedia::query()->where('site_id', $pro->site->id)->first();
+    $firstPath = $firstRow->path;
+    Storage::disk('media')->assertExists($firstPath);
+
+    // Second upload (replacement)
+    $file2 = UploadedFile::fake()->create('v2.pdf', 150, 'application/pdf');
+    file_put_contents($file2->getRealPath(), "%PDF-1.4\n%%EOF\n".str_repeat('b', 150 * 1024 - 12));
+    app(ProfessionalDocumentController::class)
+        ->store(uploadRequestFor($pro, $file2, 'Version 2'));
+
+    // First row should be soft-deleted, first R2 bytes gone.
+    $firstRowAfter = SiteMedia::withTrashed()->find($firstRow->id);
+    expect($firstRowAfter->deleted_at)->not->toBeNull();
+    Storage::disk('media')->assertMissing($firstPath);
+
+    // Second row should be the only active one.
+    $activeRows = SiteMedia::query()
+        ->where('site_id', $pro->site->id)
+        ->where('pool', 'documents')
+        ->where('is_active', true)
+        ->whereNull('deleted_at')
+        ->get();
+    expect($activeRows)->toHaveCount(1);
+    expect($activeRows->first()->alt_text)->toBe('Version 2');
+    Storage::disk('media')->assertExists($activeRows->first()->path);
+});
+
+it('POST /api/documents returns 403 for brand accounts', function () {
+    $pro = seedProfessional(type: 'brand');
+    $file = UploadedFile::fake()->create('x.pdf', 50, 'application/pdf');
+
+    $controller = app(ProfessionalDocumentController::class);
+    $response = $controller->store(uploadRequestFor($pro, $file, 'Brand Asset'));
+
+    expect($response->status())->toBe(403);
+    expect($response->getData(true)['message'] ?? '')->toContain('brand');
+});
+
+it('POST /api/documents returns 415 when finfo detects MIME mismatch', function () {
+    $pro = seedProfessional();
+    // Create a file with .pdf extension but PNG-ish bytes → mimes rule passes
+    // (trusts ClientOriginalName), finfo rejects.
+    $file = UploadedFile::fake()->create('fake.pdf', 10, 'application/pdf');
+    file_put_contents($file->getRealPath(), "\x89PNG\r\n\x1a\n".str_repeat("\x00", 1024));
+
+    $controller = app(ProfessionalDocumentController::class);
+    $response = $controller->store(uploadRequestFor($pro, $file, 'Trick me'));
+
+    expect($response->status())->toBe(415);
+});
+
+it('PATCH /api/documents/{id} returns 404 for a document belonging to another site', function () {
+    $proA = seedProfessional();
+    $proB = seedProfessional();
+
+    // Seed a document for pro A directly.
+    $docId = (string) Str::uuid();
+    DB::connection('pgsql')->table('site.site_media')->insert([
+        'id' => $docId,
+        'site_id' => $proA->site->id,
+        'pool' => 'documents',
+        'media_type' => 'document',
+        'path' => "documents/{$proA->id}/{$docId}/original.pdf",
+        'alt_text' => 'A Doc',
+        'original_mime' => 'application/pdf',
+        'original_filename' => 'a.pdf',
+        'processing_state' => 'ready',
+        'is_active' => 1,
+        'sort_order' => 0,
+    ]);
+
+    // Pro B tries to PATCH pro A's document.
+    $doc = SiteMedia::find($docId);
+    $base = Request::create("/api/documents/{$docId}", 'PATCH', ['title' => 'Hacked']);
+    $base->attributes->set('professional', $proB);
+    $req = UpdateDocumentRequest::createFrom($base);
+    $req->setContainer(app())->setRedirector(app('redirect'));
+    $req->validateResolved();
+    $req->attributes->set('professional', $proB);
+
+    $controller = app(ProfessionalDocumentController::class);
+
+    expect(fn () => $controller->update($req, $doc))
+        ->toThrow(HttpException::class);
+});
+
+it('PATCH /api/documents/{id} skips cache invalidation when no field actually changed', function () {
+    $pro = seedProfessional();
+
+    // Upload an initial document so there's a row to PATCH.
+    $file = UploadedFile::fake()->create('s.pdf', 50, 'application/pdf');
+    file_put_contents($file->getRealPath(), "%PDF-1.4\n%%EOF\n".str_repeat('a', 50 * 1024 - 12));
+    app(ProfessionalDocumentController::class)->store(uploadRequestFor($pro, $file, 'Initial title'));
+
+    $doc = SiteMedia::query()->where('site_id', $pro->site->id)->first();
+
+    // Spy on SiteCacheService — assert invalidateSite is never called on no-op PATCH.
+    $spy = Mockery::mock(SiteCacheService::class);
+    $spy->shouldNotReceive('invalidateSite');
+    app()->instance(SiteCacheService::class, $spy);
+
+    // PATCH with the SAME title — should be a no-op via isDirty guard.
+    $base = Request::create("/api/documents/{$doc->id}", 'PATCH', ['title' => 'Initial title']);
+    $base->attributes->set('professional', $pro);
+    $req = UpdateDocumentRequest::createFrom($base);
+    $req->setContainer(app())->setRedirector(app('redirect'));
+    $req->validateResolved();
+    $req->attributes->set('professional', $pro);
+
+    $response = app(ProfessionalDocumentController::class)->update($req, $doc);
+
+    expect($response->status())->toBe(200);
+    // Mockery verifies shouldNotReceive at teardown — if invalidateSite had
+    // been called, this test would fail automatically.
+});
