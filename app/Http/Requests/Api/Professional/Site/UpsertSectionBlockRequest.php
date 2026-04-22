@@ -46,7 +46,32 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             $rules = array_merge($rules, $this->countdownRules());
         }
 
+        if ($type === 'contact') {
+            $rules = array_merge($rules, $this->contactRules());
+        }
+
         return $rules;
+    }
+
+    /**
+     * Contact section — enquiry form authoring.
+     *
+     * notification_email is nullable here so the affiliate can save a draft
+     * without it; SectionVisibilityService::checkContactRequirements gates
+     * Publish on a valid email being present. subject_options is the
+     * affiliate's *additions* to the platform defaults (config
+     * `sidest.contact_subject_defaults`); at render + submission time the
+     * two lists are merged.
+     *
+     * @return array<string, array<int, mixed>>
+     */
+    private function contactRules(): array
+    {
+        return [
+            'settings.notification_email' => ['sometimes', 'nullable', 'email:rfc', 'max:255'],
+            'settings.subject_options' => ['sometimes', 'nullable', 'array', 'max:10'],
+            'settings.subject_options.*' => ['string', 'max:60', 'distinct'],
+        ];
     }
 
     /**
