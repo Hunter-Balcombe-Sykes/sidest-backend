@@ -15,18 +15,23 @@ class SectionVisibilityService
     /**
      * Check if a section type meets its visibility requirements.
      *
+     * @param  array<string, mixed>|null  $pendingSettings  Incoming-but-not-yet-persisted settings, merged over stored
+     *                                                      for block types whose requirement lives in their own payload
+     *                                                      (countdown). Other block types ignore this.
      * @return array{0: bool, 1: ?string} [canBeVisible, reason]
      */
     public function checkVisibilityRequirements(
         string $professionalId,
         string $siteId,
-        string $blockType
+        string $blockType,
+        ?array $pendingSettings = null,
     ): array {
         return match ($blockType) {
             'gallery' => $this->checkGalleryRequirements($siteId),
             'booking' => $this->checkBookingRequirements($professionalId),
             'services' => $this->checkServicesRequirements($professionalId),
             'documents' => $this->checkDocumentsRequirements($siteId),
+            'countdown' => $this->checkCountdownRequirements($professionalId, $siteId, $pendingSettings),
             default => [true, null],
         };
     }
@@ -116,6 +121,61 @@ class SectionVisibilityService
 
         if (! $hasDocument) {
             return [false, 'Documents section requires an uploaded document.'];
+        }
+
+        return [true, null];
+    }
+
+    /**
+     * A countdown is publishable when it has both a drop_time and an expiry_time,
+     * with expiry strictly after drop, AND the expiry has not already elapsed.
+     * Unlike gallery/services/documents/booking (requirements stored externally),
+     * the countdown's requirement lives in its own settings — so the controller
+     * passes the incoming payload through as $pendingSettings to cover the
+     * first-time-publish path where the timeline and publication_state=live
+     * arrive together.
+     *
+     * @param  array<string, mixed>|null  $pendingSettings
+     * @return array{0: bool, 1: ?string}
+     */
+    private function checkCountdownRequirements(string $professionalId, string $siteId, ?array $pendingSettings = null): array
+    {
+        $block = Block::query()
+            ->where('professional_id', $professionalId)
+            ->where('site_id', $siteId)
+            ->where('block_group', 'sections')
+            ->where('block_type', 'countdown')
+            ->first();
+
+        $stored = $block && is_array($block->settings) ? $block->settings : [];
+        $settings = $pendingSettings !== null
+            ? array_replace_recursive($stored, $pendingSettings)
+            : $stored;
+
+        $drop = data_get($settings, 'timeline.drop_time');
+        $expiry = data_get($settings, 'timeline.expiry_time');
+
+        if (! is_string($drop) || $drop === '') {
+            return [false, 'Countdown section requires a drop time before it can go live.'];
+        }
+
+        if (! is_string($expiry) || $expiry === '') {
+            return [false, 'Countdown section requires an expiry time before it can go live.'];
+        }
+
+        try {
+            $dropTs = \Carbon\CarbonImmutable::parse($drop);
+            $expiryTs = \Carbon\CarbonImmutable::parse($expiry);
+        } catch (\Throwable) {
+            return [false, 'Countdown section has an invalid drop time or expiry time.'];
+        }
+
+        if ($expiryTs->lessThanOrEqualTo($dropTs)) {
+            return [false, 'Countdown expiry time must be after the drop time.'];
+        }
+
+        if ($expiryTs->isPast()) {
+            return [false, 'Countdown expiry time is already in the past.'];
         }
 
         return [true, null];

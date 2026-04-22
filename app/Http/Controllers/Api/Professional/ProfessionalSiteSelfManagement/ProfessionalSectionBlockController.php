@@ -94,11 +94,16 @@ class ProfessionalSectionBlockController extends ApiController
         $isPublishing = $nextIsLive && ! $currentlyIsLive;
 
         // Keep setup requirements tied to publishing Live state.
+        // For countdown, pass through the incoming settings — its requirement
+        // (a valid timeline) lives in the payload itself, not in an external
+        // resource, so first-time publish with timeline + live in the same
+        // request must see the pending values, not the pre-save stored ones.
         if ($isPublishing) {
             [$canBeVisible, $reason] = $this->visibilityService->checkVisibilityRequirements(
                 (string) $pro->id,
                 (string) $site->id,
-                $blockType
+                $blockType,
+                is_array($data['settings'] ?? null) ? $data['settings'] : null,
             );
             if (! $canBeVisible) {
                 return $this->error($reason, 422);
