@@ -430,6 +430,33 @@ return [
 
     /*
     |----------------------------------------------------------------------
+    | Brand industries – canonical taxonomy
+    |----------------------------------------------------------------------
+    | Controlled list of industries a brand may declare on its BrandProfile.
+    | Order here is NOT semantic (display order is a frontend concern).
+    | Keys are slugs used in storage + API; values are human display names.
+    |
+    | Additive-only: renaming a slug requires a data migration. Adding a new
+    | slug is safe. See docs/brand-industries.md for the stability contract.
+    */
+    'brand_industries' => [
+        'apparel' => 'Apparel',
+        'footwear' => 'Footwear',
+        'accessories' => 'Accessories',
+        'skin_care' => 'Skin Care',
+        'haircare' => 'Haircare',
+        'makeup' => 'Makeup',
+        'fragrance' => 'Fragrance',
+        'mens_grooming' => "Men's Grooming",
+        'health_wellness_supplements' => 'Health, Wellness & Supplements',
+        'activewear_fitness' => 'Activewear & Fitness',
+        'home_living' => 'Home & Living',
+        'electronics_tech' => 'Electronics & Tech',
+        'other' => 'Other',
+    ],
+
+    /*
+    |----------------------------------------------------------------------
     | Account type defaults – applied during registration
     |----------------------------------------------------------------------
     | 'professional' is the base type. 'influencer' inherits from it.
