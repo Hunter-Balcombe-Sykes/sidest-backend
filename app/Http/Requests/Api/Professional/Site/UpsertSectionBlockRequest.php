@@ -58,7 +58,7 @@ class UpsertSectionBlockRequest extends BaseFormRequest
      */
     private function countdownRules(): array
     {
-        return [
+        $rules = [
             'settings.title' => ['sometimes', 'nullable', 'string', 'max:80'],
             'settings.timeline' => ['sometimes', 'array'],
             // Timeline fields are paired: if either is present, both must be.
@@ -67,7 +67,18 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             // `settings.timeline` which is optional).
             'settings.timeline.drop_time' => ['required_with:settings.timeline.expiry_time', 'date'],
             'settings.timeline.expiry_time' => ['required_with:settings.timeline.drop_time', 'date', 'after:settings.timeline.drop_time'],
+            'settings.states' => ['sometimes', 'array'],
         ];
+
+        // Per-state copy rules: same shape for all three states, so build them
+        // programmatically rather than writing 12 near-identical lines.
+        foreach (['pre_drop', 'live', 'expired'] as $state) {
+            $rules["settings.states.{$state}"] = ['sometimes', 'array'];
+            $rules["settings.states.{$state}.headline"] = ['sometimes', 'nullable', 'string', 'max:80'];
+            $rules["settings.states.{$state}.subtitle"] = ['sometimes', 'nullable', 'string', 'max:200'];
+        }
+
+        return $rules;
     }
 
     protected function prepareForValidation(): void

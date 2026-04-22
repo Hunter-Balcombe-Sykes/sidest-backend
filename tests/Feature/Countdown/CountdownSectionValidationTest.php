@@ -121,3 +121,74 @@ it('requires drop_time when expiry_time is provided', function () {
     expect($result['ok'])->toBeFalse();
     expect($result['errors'])->toHaveKey('settings.timeline.drop_time');
 });
+
+it('accepts a full per-state countdown payload', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'title' => 'The Drop',
+            'timeline' => [
+                'drop_time' => '2026-05-01T20:00:00Z',
+                'expiry_time' => '2026-05-03T20:00:00Z',
+            ],
+            'states' => [
+                'pre_drop' => [
+                    'headline' => 'Coming Friday',
+                    'subtitle' => 'A limited run of three new knits.',
+                ],
+                'live' => [
+                    'headline' => "It's live",
+                    'subtitle' => "Shop now before they're gone.",
+                ],
+                'expired' => [
+                    'headline' => null,
+                    'subtitle' => null,
+                ],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeTrue();
+    expect($result['data']['settings']['title'])->toBe('The Drop');
+    expect($result['data']['settings']['states']['live']['headline'])->toBe("It's live");
+});
+
+it('rejects a title longer than 80 chars', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'title' => str_repeat('a', 81),
+        ],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.title');
+});
+
+it('rejects a state headline longer than 80 chars', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'live' => ['headline' => str_repeat('a', 81)],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.states.live.headline');
+});
+
+it('rejects a state subtitle longer than 200 chars', function () {
+    $result = validateCountdownUpsert([
+        'block_type' => 'countdown',
+        'settings' => [
+            'states' => [
+                'pre_drop' => ['subtitle' => str_repeat('a', 201)],
+            ],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeFalse();
+    expect($result['errors'])->toHaveKey('settings.states.pre_drop.subtitle');
+});
