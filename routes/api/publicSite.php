@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
+use App\Http\Controllers\Api\PublicSite\PublicEnquiryController;
 use App\Http\Controllers\Api\PublicSite\PublicMarketingPreferenceController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use Illuminate\Support\Facades\Route;
@@ -45,6 +46,10 @@ Route::group([
 
     // Customer Leads
     Route::post('/customers', [PublicCustomerLeadController::class, 'store'])
+        ->middleware(['lead.log', 'throttle:leads']);
+
+    // Contact Section Enquiries
+    Route::post('/enquiry', [PublicEnquiryController::class, 'submit'])
         ->middleware(['lead.log', 'throttle:leads']);
 
     Route::post('/subscribe', [PublicEmailSubscriptionController::class, 'subscribe'])

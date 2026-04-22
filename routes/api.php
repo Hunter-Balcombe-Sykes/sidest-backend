@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicDocumentDownloadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
+use App\Http\Controllers\Api\PublicSite\PublicEnquiryController;
 use App\Http\Controllers\Api\PublicSite\PublicOpenInviteController;
 use App\Http\Controllers\Api\PublicSite\PublicShopifyStorefrontController;
 use App\Http\Controllers\Api\PublicSite\PublicSignupAvailabilityController;
@@ -142,6 +143,9 @@ Route::get('/public/join/{handle}', [PublicOpenInviteController::class, 'show'])
     ->middleware('throttle:public-site');
 
 Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])
+    ->middleware(['lead.log', 'throttle:leads']);
+
+Route::post('/public/enquiry', [PublicEnquiryController::class, 'submit'])
     ->middleware(['lead.log', 'throttle:leads']);
 
 // Internal Hydrogen endpoints (server-to-server, API key auth)
