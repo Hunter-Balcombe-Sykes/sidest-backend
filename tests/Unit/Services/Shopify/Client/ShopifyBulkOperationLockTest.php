@@ -3,7 +3,7 @@
 use App\Services\Shopify\Client\ShopifyBulkOperationLock;
 use Illuminate\Support\Facades\Redis;
 
-uses(Tests\TestCase::class)->in(__FILE__);
+uses(Tests\TestCase::class);
 
 beforeEach(function () {
     $this->shop = 'test-shop.myshopify.com';
