@@ -82,6 +82,67 @@ class ShopifyAdminClient
         }
     }
 
+    /**
+     * Execute a REST request against the Shopify Admin API.
+     *
+     * REST throttling is bucket-based (40 calls on standard, 80 on Plus) and
+     * signalled via HTTP 429 + Retry-After. Low-volume in our codebase so we
+     * only react to 429 rather than pre-throttling.
+     *
+     * @param  string  $method  'GET'|'POST'|'PUT'|'DELETE'
+     * @param  string  $path  must start with `/admin/...`
+     * @param  array<string, mixed>  $body
+     * @throws ShopifyTransportException on non-2xx (excluding 401 when $allow401 is true)
+     */
+    public function rest(
+        string $method,
+        string $shopDomain,
+        string $accessToken,
+        string $path,
+        array $body = [],
+        ?int $timeoutSeconds = null,
+        bool $allow401 = false,
+    ): Response {
+        $timeout = $timeoutSeconds ?? (int) config('services.shopify.throttle.default_timeout', 20);
+        $maxRetries = (int) config('services.shopify.throttle.max_inprocess_retries', 3);
+        $url = "https://{$shopDomain}{$path}";
+
+        $attempt = 0;
+        while (true) {
+            try {
+                $pending = Http::withHeaders(['X-Shopify-Access-Token' => $accessToken])->timeout($timeout);
+                $response = match (strtoupper($method)) {
+                    'GET'    => $pending->get($url, $body),
+                    'POST'   => $pending->post($url, $body),
+                    'PUT'    => $pending->put($url, $body),
+                    'DELETE' => $pending->delete($url, $body),
+                    default  => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
+                };
+            } catch (ConnectionException $e) {
+                throw new ShopifyTransportException($shopDomain, 0, $e->getMessage(), $e);
+            }
+
+            if ($response->status() === 429 && $attempt < $maxRetries) {
+                $wait = max(1, (int) $response->header('Retry-After')) * 1000;
+                $this->metrics->throttled($shopDomain, $wait, $attempt + 1);
+                // Blocks the worker thread — keep max_inprocess_retries low (default 3).
+                usleep($wait * 1000);
+                $attempt++;
+                continue;
+            }
+
+            if ($response->successful()) {
+                return $response;
+            }
+
+            if ($allow401 && $response->status() === 401) {
+                return $response;
+            }
+
+            throw new ShopifyTransportException($shopDomain, $response->status(), (string) $response->body());
+        }
+    }
+
     private function post(
         string $shopDomain,
         string $accessToken,
