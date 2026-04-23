@@ -94,7 +94,6 @@ return [
             'max_wait_ms' => (int) env('SHOPIFY_THROTTLE_MAX_WAIT_MS', 5000),
             'default_timeout' => (int) env('SHOPIFY_HTTP_TIMEOUT', 20),
             'bucket_ttl_seconds' => 60,
-            'cost_window_size' => 20,
             'bulk_lock_ttl_seconds' => 3600,
         ],
     ],

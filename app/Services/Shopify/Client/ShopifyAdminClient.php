@@ -65,11 +65,10 @@ class ShopifyAdminClient
             $this->reconcileFromResponse($response, $shopDomain, $queryHash, $started);
 
             if ($this->isThrottled($response)) {
+                $wait = $this->throttleWaitMs($response, $maxWait);
                 if ($attempt >= $maxRetries) {
-                    $wait = $this->throttleWaitMs($response, $maxWait);
                     throw new ShopifyThrottledException($shopDomain, $wait, $attempt, $queryHash);
                 }
-                $wait = $this->throttleWaitMs($response, $maxWait);
                 $this->metrics->throttled($shopDomain, $wait, $attempt + 1);
                 // Blocks the worker thread — keep max_inprocess_retries low (default 3).
                 usleep($wait * 1000);
