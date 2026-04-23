@@ -171,7 +171,13 @@ class ShopifyAdminClient
         }
         GRAPHQL;
 
-        $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $mutation, ['query' => $query]);
+        try {
+            $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $mutation, ['query' => $query]);
+        } catch (\Throwable $e) {
+            $this->bulkLock->release($shopDomain);
+            throw $e;
+        }
+
         $userErrors = $response->json('data.bulkOperationRunQuery.userErrors', []);
 
         if (! empty($userErrors)) {
@@ -207,10 +213,16 @@ class ShopifyAdminClient
         }
         GRAPHQL;
 
-        $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $runner, [
-            'mutation' => $mutation,
-            'stagedUploadPath' => $stagedUploadPath,
-        ]);
+        try {
+            $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $runner, [
+                'mutation' => $mutation,
+                'stagedUploadPath' => $stagedUploadPath,
+            ]);
+        } catch (\Throwable $e) {
+            $this->bulkLock->release($shopDomain);
+            throw $e;
+        }
+
         $userErrors = $response->json('data.bulkOperationRunMutation.userErrors', []);
 
         if (! empty($userErrors)) {
@@ -225,6 +237,9 @@ class ShopifyAdminClient
      * Poll a bulk operation until it reaches a terminal state.
      * Releases the per-shop bulk lock on terminal state.
      *
+     * WARNING: synchronous — blocks the Horizon worker for up to $timeoutSeconds.
+     * Run in a dedicated long-running job, not an inline service call.
+     *
      * @return array{status: string, url: string|null, error_code: string|null}
      */
     public function waitForBulkOperation(
@@ -237,7 +252,7 @@ class ShopifyAdminClient
     ): array {
         $query = <<<'GRAPHQL'
         query bulkOperationStatus($id: ID!) {
-          node(id: $id) { ... on BulkOperation { id status errorCode url partialDataUrl } }
+          node(id: $id) { ... on BulkOperation { id status errorCode url } }
         }
         GRAPHQL;
 
@@ -245,7 +260,12 @@ class ShopifyAdminClient
         $terminal = ['COMPLETED', 'FAILED', 'CANCELED', 'EXPIRED'];
 
         while (microtime(true) < $deadline) {
-            $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $query, ['id' => $operationId]);
+            try {
+                $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $query, ['id' => $operationId]);
+            } catch (\Throwable $e) {
+                $this->bulkLock->release($shopDomain);
+                throw $e;
+            }
             $node = $response->json('data.node', []);
             $status = (string) ($node['status'] ?? 'UNKNOWN');
 
