@@ -4,6 +4,7 @@ namespace App\Services\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Support\Arr;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -539,37 +540,30 @@ class ShopifyTeardownService
      */
     private function revokeOauthToken(string $shopDomain, string $accessToken): bool
     {
-        $url = "https://{$shopDomain}/admin/api_permissions/current.json";
+        try {
+            $response = app(ShopifyAdminClient::class)->rest(
+                method: 'DELETE',
+                shopDomain: $shopDomain,
+                accessToken: $accessToken,
+                path: '/admin/api_permissions/current.json',
+                timeoutSeconds: 15,
+                allow401: true,
+            );
 
-        // Shopify's "app uninstall" endpoint — DELETE on api_permissions/current
-        // revokes the token AND triggers the app/uninstalled webhook flow.
-        // This ensures Shopify's auto-cleanup (app-backed automatic discounts,
-        // webhook subscriptions) also runs.
-        $response = Http::withHeaders(['X-Shopify-Access-Token' => $accessToken])
-            ->timeout(15)
-            ->delete($url);
-
-        // 200 or 204 → revoked. 401 → already revoked (treat as success).
-        return $response->successful() || $response->status() === 401;
+            return $response->successful() || $response->status() === 401;
+        } catch (\App\Exceptions\Shopify\ShopifyTransportException $e) {
+            return false;
+        }
     }
 
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
-        $response = Http::withHeaders([
-            'X-Shopify-Access-Token' => $accessToken,
-            'Content-Type' => 'application/json',
-        ])->timeout(20)->post(
-            "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-            array_filter([
-                'query' => $query,
-                'variables' => ! empty($variables) ? $variables : null,
-            ])
+        return app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            $query,
+            $variables,
         );
-
-        if (! $response->successful()) {
-            throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
-        }
-
-        return $response;
     }
 }
