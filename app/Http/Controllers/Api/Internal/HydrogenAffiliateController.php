@@ -93,7 +93,7 @@ class HydrogenAffiliateController extends ApiController
             'content_images' => $this->getAffiliateContent($site),
             'links' => $this->getAffiliateLinks($site, $booking),
             'bio' => $this->getAffiliateBio($affiliate, $sections),
-            'document' => $this->getAffiliateDocument($site, $sections),
+            'document' => $this->getAffiliateDocument($site),
             'newsletter' => $this->getAffiliateNewsletter($sections),
             'services' => $this->getAffiliateServices($site, $affiliate->id, $sections),
             'booking' => $booking,
@@ -449,39 +449,42 @@ class HydrogenAffiliateController extends ApiController
     // ── Document ─────────────────────────────────────────────────────────────
 
     /**
-     * @param  \Illuminate\Support\Collection<string, Block>  $sections
+     * Document is gated per-row (SiteMedia.is_active), not at the section
+     * level — the dashboard's Draft/Live toggle writes is_enabled which maps
+     * directly to SiteMedia.is_active, and there is no separate "documents"
+     * section block that also needs flipping. If a ready + active row exists
+     * the envelope is 'live', otherwise 'draft'.
+     *
      * @return array{state: string, data: array|null}
      */
-    private function getAffiliateDocument(?Site $site, $sections): array
+    private function getAffiliateDocument(?Site $site): array
     {
-        return $this->sectionEnvelope($sections, 'document', function () use ($site) {
-            if (! $site) {
-                return null;
-            }
-            // Document is a SiteMedia row in POOL_DOCUMENTS with is_active=true.
-            // The dashboard enforces one slot per site; if multiple exist (data
-            // anomaly) we take the most recent.
-            $media = SiteMedia::query()
+        $media = $site
+            ? SiteMedia::query()
                 ->where('site_id', $site->id)
                 ->where('pool', SiteMedia::POOL_DOCUMENTS)
                 ->where('is_active', true)
+                ->where('processing_state', SiteMedia::PROCESSING_STATE_READY)
                 ->orderByDesc('created_at')
-                ->first();
+                ->first()
+            : null;
 
-            if (! $media) {
-                return null;
-            }
+        if (! $media) {
+            return ['state' => 'draft', 'data' => null];
+        }
 
-            return [
+        return [
+            'state' => 'live',
+            'data' => [
                 'title' => $media->alt_text,
                 'caption' => $media->caption,
-                // Public download redirect that already exists in the API; avoids
-                // surfacing signed R2 credentials in the Hydrogen payload.
+                // Public download redirect that already exists in the API;
+                // avoids surfacing signed R2 credentials in the Hydrogen payload.
                 'download_url' => '/api/public/documents/'.$media->id.'/download',
                 'mime' => $media->original_mime,
                 'size_bytes' => $media->original_size_bytes,
-            ];
-        });
+            ],
+        ];
     }
 
     // ── Newsletter ───────────────────────────────────────────────────────────
