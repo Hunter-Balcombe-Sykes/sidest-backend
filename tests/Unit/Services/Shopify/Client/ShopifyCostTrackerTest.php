@@ -3,19 +3,12 @@
 use App\Services\Shopify\Client\ShopifyCostTracker;
 use Illuminate\Support\Facades\Redis;
 
-uses(Tests\TestCase::class)->in(__FILE__);
+uses(Tests\TestCase::class);
 
 beforeEach(function () {
     $this->tracker = new ShopifyCostTracker();
-});
-
-afterEach(function () {
-    // Clean up all shopify:cost:* keys created during tests.
-    // We flush the entire default Redis db to avoid stale key artifacts.
-    // This is safe in test isolation but only run in testing context.
-    if (app()->environment('testing')) {
-        app('redis')->flushdb();
-    }
+    // Pre-clean only the keys this test suite uses
+    Redis::del('shopify:cost:q1', 'shopify:cost:q2', 'shopify:cost:some-query-hash');
 });
 
 it('returns a conservative default estimate when nothing is recorded', function () {
@@ -57,7 +50,7 @@ it('uses a bounded sliding window so stale data ages out', function () {
     for ($i = 0; $i < 20; $i++) {
         $this->tracker->record('q1', 100, 80);
     }
-    expect($this->tracker->estimate('q1', 100))->toBeGreaterThanOrEqual(75);
+    expect($this->tracker->estimate('q1', 100))->toBe(80);
 });
 
 it('keeps separate history per query hash', function () {
