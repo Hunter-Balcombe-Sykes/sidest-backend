@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\Shopify\ShopifyGraphQLException;
+use App\Exceptions\Shopify\ShopifyThrottledException;
 use App\Exceptions\Shopify\ShopifyTransportException;
 use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Http;
@@ -129,4 +130,65 @@ it('records actual cost for future query estimates', function () {
 
     $costTracker = app(\App\Services\Shopify\Client\ShopifyCostTracker::class);
     expect($costTracker->estimate(sha1($query), 100))->toBeLessThanOrEqual(20);
+});
+
+it('retries in-process on a THROTTLED response and succeeds when budget recovers', function () {
+    Http::fake([
+        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::sequence()
+            ->push([
+                'errors' => [
+                    ['message' => 'Throttled', 'extensions' => ['code' => 'THROTTLED']],
+                ],
+                'extensions' => [
+                    'cost' => [
+                        'throttleStatus' => [
+                            'maximumAvailable' => 1000,
+                            'currentlyAvailable' => 0,
+                            'restoreRate' => 100,
+                        ],
+                    ],
+                ],
+            ], 200)
+            ->push([
+                'data' => ['shop' => ['id' => 'gid://shopify/Shop/1']],
+                'extensions' => [
+                    'cost' => [
+                        'requestedQueryCost' => 1,
+                        'actualQueryCost' => 1,
+                        'throttleStatus' => [
+                            'maximumAvailable' => 1000,
+                            'currentlyAvailable' => 999,
+                            'restoreRate' => 100,
+                        ],
+                    ],
+                ],
+            ], 200),
+    ]);
+
+    $response = $this->client->graphql($this->shop, $this->token, $this->version, 'query { shop { id } }');
+
+    expect($response->json('data.shop.id'))->toBe('gid://shopify/Shop/1');
+    Http::assertSentCount(2);
+});
+
+it('throws ShopifyThrottledException when max in-process retries are exhausted', function () {
+    Http::fake([
+        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+            'errors' => [
+                ['message' => 'Throttled', 'extensions' => ['code' => 'THROTTLED']],
+            ],
+            'extensions' => [
+                'cost' => [
+                    'throttleStatus' => [
+                        'maximumAvailable' => 1000,
+                        'currentlyAvailable' => 0,
+                        'restoreRate' => 100,
+                    ],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    expect(fn () => $this->client->graphql($this->shop, $this->token, $this->version, 'query { shop { id } }'))
+        ->toThrow(ShopifyThrottledException::class);
 });

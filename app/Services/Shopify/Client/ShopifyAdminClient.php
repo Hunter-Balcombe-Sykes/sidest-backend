@@ -3,6 +3,7 @@
 namespace App\Services\Shopify\Client;
 
 use App\Exceptions\Shopify\ShopifyGraphQLException;
+use App\Exceptions\Shopify\ShopifyThrottledException;
 use App\Exceptions\Shopify\ShopifyTransportException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
@@ -52,17 +53,32 @@ class ShopifyAdminClient
         ?int $timeoutSeconds = null,
     ): Response {
         $timeout = $timeoutSeconds ?? (int) config('services.shopify.throttle.default_timeout', 20);
+        $maxRetries = (int) config('services.shopify.throttle.max_inprocess_retries', 3);
+        $maxWait = (int) config('services.shopify.throttle.max_wait_ms', 5000);
         $queryHash = sha1($query);
+        $attempt = 0;
 
-        $this->preAcquireBudget($shopDomain, $queryHash);
+        while (true) {
+            $this->preAcquireBudget($shopDomain, $queryHash);
+            $started = microtime(true);
+            $response = $this->post($shopDomain, $accessToken, $apiVersion, $query, $variables, $timeout);
+            $this->reconcileFromResponse($response, $shopDomain, $queryHash, $started);
 
-        $started = microtime(true);
-        $response = $this->post($shopDomain, $accessToken, $apiVersion, $query, $variables, $timeout);
+            if ($this->isThrottled($response)) {
+                if ($attempt >= $maxRetries) {
+                    $wait = $this->throttleWaitMs($response, $maxWait);
+                    throw new ShopifyThrottledException($shopDomain, $wait, $attempt, $queryHash);
+                }
+                $wait = $this->throttleWaitMs($response, $maxWait);
+                $this->metrics->throttled($shopDomain, $wait, $attempt + 1);
+                usleep($wait * 1000);
+                $attempt++;
+                continue;
+            }
 
-        $this->handleGraphqlErrors($response, $shopDomain, $queryHash);
-        $this->reconcileFromResponse($response, $shopDomain, $queryHash, $started);
-
-        return $response;
+            $this->handleGraphqlErrors($response, $shopDomain, $queryHash);
+            return $response;
+        }
     }
 
     private function post(
@@ -101,16 +117,44 @@ class ShopifyAdminClient
             return;
         }
 
-        // Throttled errors are handled in the retry loop (added in Task 8). For now,
-        // any top-level errors → ShopifyGraphQLException.
         $this->metrics->graphqlError($shopDomain, $queryHash, $errors);
         throw new ShopifyGraphQLException($shopDomain, $errors, $queryHash);
+    }
+
+    private function isThrottled(Response $response): bool
+    {
+        $errors = $response->json('errors', []);
+        foreach ($errors as $error) {
+            if (($error['extensions']['code'] ?? '') === 'THROTTLED') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns how long to wait before retrying a THROTTLED response, in milliseconds.
+     * Falls back to max_wait_ms if no throttleStatus is available.
+     */
+    private function throttleWaitMs(Response $response, int $maxWait): int
+    {
+        $available = $response->json('extensions.cost.throttleStatus.currentlyAvailable');
+        $restoreRate = $response->json('extensions.cost.throttleStatus.restoreRate');
+
+        if ($restoreRate > 0 && $available !== null) {
+            // Estimate how many ms until 10 points are available (minimum useful budget)
+            $needed = max(0, 10 - (int) $available);
+            $waitMs = (int) ceil(($needed / $restoreRate) * 1000);
+            return min($waitMs, $maxWait);
+        }
+
+        return min(1000, $maxWait);
     }
 
     /**
      * Reserve estimated cost from the local token bucket before sending the request.
      * If the bucket is insufficient, waits up to max_wait_ms then retries once;
-     * any remaining deficit is accepted and left to the THROTTLED retry path (Task 8).
+     * any remaining deficit is accepted and left to the THROTTLED retry path.
      */
     private function preAcquireBudget(string $shopDomain, string $queryHash): void
     {
@@ -128,7 +172,7 @@ class ShopifyAdminClient
             usleep($wait * 1000);
 
             // Retry once after the wait — if still short, proceed anyway and
-            // let the THROTTLED retry path handle it (added in Task 8).
+            // let the THROTTLED retry path handle it.
             // Result is intentionally discarded; we proceed regardless of outcome.
             $this->budget->tryAcquire($shopDomain, $estimated, $max, $rate);
         }
