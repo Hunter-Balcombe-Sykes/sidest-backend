@@ -11,6 +11,7 @@ beforeEach(function () {
     Redis::del('shopify:cost:' . sha1('query { shop { id } }'));
     Redis::del('shopify:cost:' . sha1('query { foo }'));
     Redis::del('shopify:cost:' . sha1('query { ok }'));
+    Redis::del('shopify:cost:' . sha1('query test { ok }'));
     $this->client = app(ShopifyAdminClient::class);
     $this->shop = 'test.myshopify.com';
     $this->token = 'shpat_test';
@@ -75,4 +76,57 @@ it('sends the access token in the X-Shopify-Access-Token header', function () {
     Http::assertSent(function ($request) {
         return $request->header('X-Shopify-Access-Token')[0] === 'shpat_test';
     });
+});
+
+it('reconciles the local bucket from throttleStatus after each response', function () {
+    Http::fake([
+        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+            'data' => ['ok' => true],
+            'extensions' => [
+                'cost' => [
+                    'requestedQueryCost' => 100,
+                    'actualQueryCost' => 20,
+                    'throttleStatus' => [
+                        'maximumAvailable' => 1000,
+                        'currentlyAvailable' => 450,
+                        'restoreRate' => 100,
+                    ],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $this->client->graphql($this->shop, $this->token, $this->version, 'query { ok }');
+
+    // After reconcile, local bucket should report 450 available.
+    $tracker = app(\App\Services\Shopify\Client\ShopifyBudgetTracker::class);
+    $result = $tracker->tryAcquire($this->shop, 50, 1000, 100);
+    expect($result['remaining'])->toBe(400);
+});
+
+it('records actual cost for future query estimates', function () {
+    Http::fake([
+        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+            'data' => ['ok' => true],
+            'extensions' => [
+                'cost' => [
+                    'requestedQueryCost' => 100,
+                    'actualQueryCost' => 15,
+                    'throttleStatus' => [
+                        'maximumAvailable' => 1000,
+                        'currentlyAvailable' => 985,
+                        'restoreRate' => 100,
+                    ],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $query = 'query test { ok }';
+    for ($i = 0; $i < 5; $i++) {
+        $this->client->graphql($this->shop, $this->token, $this->version, $query);
+    }
+
+    $costTracker = app(\App\Services\Shopify\Client\ShopifyCostTracker::class);
+    expect($costTracker->estimate(sha1($query), 100))->toBeLessThanOrEqual(20);
 });

@@ -37,6 +37,9 @@ class ShopifyAdminClient
     /**
      * Execute a GraphQL request against the Shopify Admin API.
      *
+     * Pre-acquires from the local token bucket before sending and reconciles
+     * bucket state from the authoritative throttleStatus in the response.
+     *
      * @throws ShopifyGraphQLException  top-level GraphQL errors (excluding THROTTLED)
      * @throws ShopifyTransportException non-2xx HTTP, timeout, or connection failure
      */
@@ -51,9 +54,13 @@ class ShopifyAdminClient
         $timeout = $timeoutSeconds ?? (int) config('services.shopify.throttle.default_timeout', 20);
         $queryHash = sha1($query);
 
+        $this->preAcquireBudget($shopDomain, $queryHash);
+
+        $started = microtime(true);
         $response = $this->post($shopDomain, $accessToken, $apiVersion, $query, $variables, $timeout);
 
         $this->handleGraphqlErrors($response, $shopDomain, $queryHash);
+        $this->reconcileFromResponse($response, $shopDomain, $queryHash, $started);
 
         return $response;
     }
@@ -98,5 +105,65 @@ class ShopifyAdminClient
         // any top-level errors → ShopifyGraphQLException.
         $this->metrics->graphqlError($shopDomain, $queryHash, $errors);
         throw new ShopifyGraphQLException($shopDomain, $errors, $queryHash);
+    }
+
+    /**
+     * Reserve estimated cost from the local token bucket before sending the request.
+     * If the bucket is insufficient, waits up to max_wait_ms then retries once;
+     * any remaining deficit is accepted and left to the THROTTLED retry path (Task 8).
+     */
+    private function preAcquireBudget(string $shopDomain, string $queryHash): void
+    {
+        $defaultRequested = (int) config('services.shopify.throttle.default_estimated_cost', 10);
+        $estimated = $this->cost->estimate($queryHash, $defaultRequested);
+        $max = (int) config('services.shopify.throttle.default_max_capacity', 1000);
+        $rate = (int) config('services.shopify.throttle.default_restore_rate', 100);
+        $maxWait = (int) config('services.shopify.throttle.max_wait_ms', 5000);
+
+        $result = $this->budget->tryAcquire($shopDomain, $estimated, $max, $rate);
+
+        if (! $result['acquired']) {
+            $wait = min($result['wait_ms'], $maxWait);
+            $this->metrics->budgetWait($shopDomain, $wait, $estimated);
+            usleep($wait * 1000);
+
+            // Retry once after the wait — if still short, proceed anyway and
+            // let the THROTTLED retry path handle it (added in Task 8).
+            $this->budget->tryAcquire($shopDomain, $estimated, $max, $rate);
+        }
+    }
+
+    /**
+     * Overwrite local bucket state with Shopify's authoritative throttleStatus
+     * and record the actual/requested cost ratio for future estimates.
+     */
+    private function reconcileFromResponse(Response $response, string $shopDomain, string $queryHash, float $started): void
+    {
+        $cost = $response->json('extensions.cost');
+        if (! is_array($cost)) {
+            return;
+        }
+
+        $status = $cost['throttleStatus'] ?? [];
+        if (isset($status['currentlyAvailable'])) {
+            $this->budget->reconcile(
+                $shopDomain,
+                (int) $status['currentlyAvailable'],
+            );
+        }
+
+        $requested = (int) ($cost['requestedQueryCost'] ?? 0);
+        $actual = (int) ($cost['actualQueryCost'] ?? 0);
+        if ($requested > 0 && $actual > 0) {
+            $this->cost->record($queryHash, $requested, $actual);
+        }
+
+        $this->metrics->request(
+            $shopDomain,
+            $queryHash,
+            (microtime(true) - $started) * 1000,
+            $actual,
+            (int) ($status['currentlyAvailable'] ?? 0),
+        );
     }
 }
