@@ -144,6 +144,129 @@ class ShopifyAdminClient
         }
     }
 
+    /**
+     * Start a `bulkOperationRunQuery`. Returns the operation GID.
+     *
+     * Acquires the per-shop bulk lock; only one bulk op may be in flight at a time.
+     * Caller is responsible for calling `waitForBulkOperation()` which releases
+     * the lock on terminal state.
+     */
+    public function bulkQuery(
+        string $shopDomain,
+        string $accessToken,
+        string $apiVersion,
+        string $query,
+    ): string {
+        if (! $this->bulkLock->acquire($shopDomain)) {
+            $this->metrics->bulkLockContended($shopDomain);
+            throw new \RuntimeException("Shopify bulk operation already in progress for {$shopDomain}");
+        }
+
+        $mutation = <<<'GRAPHQL'
+        mutation bulkOperationRunQuery($query: String!) {
+          bulkOperationRunQuery(query: $query) {
+            bulkOperation { id status }
+            userErrors { field message }
+          }
+        }
+        GRAPHQL;
+
+        $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $mutation, ['query' => $query]);
+        $userErrors = $response->json('data.bulkOperationRunQuery.userErrors', []);
+
+        if (! empty($userErrors)) {
+            $this->bulkLock->release($shopDomain);
+            throw new \RuntimeException('Shopify bulkOperationRunQuery userErrors: ' . json_encode($userErrors));
+        }
+
+        return (string) $response->json('data.bulkOperationRunQuery.bulkOperation.id');
+    }
+
+    /**
+     * Start a `bulkOperationRunMutation`. Returns the operation GID.
+     * Same locking semantics as bulkQuery.
+     */
+    public function bulkMutation(
+        string $shopDomain,
+        string $accessToken,
+        string $apiVersion,
+        string $mutation,
+        string $stagedUploadPath,
+    ): string {
+        if (! $this->bulkLock->acquire($shopDomain)) {
+            $this->metrics->bulkLockContended($shopDomain);
+            throw new \RuntimeException("Shopify bulk operation already in progress for {$shopDomain}");
+        }
+
+        $runner = <<<'GRAPHQL'
+        mutation bulkOperationRunMutation($mutation: String!, $stagedUploadPath: String!) {
+          bulkOperationRunMutation(mutation: $mutation, stagedUploadPath: $stagedUploadPath) {
+            bulkOperation { id status }
+            userErrors { field message }
+          }
+        }
+        GRAPHQL;
+
+        $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $runner, [
+            'mutation' => $mutation,
+            'stagedUploadPath' => $stagedUploadPath,
+        ]);
+        $userErrors = $response->json('data.bulkOperationRunMutation.userErrors', []);
+
+        if (! empty($userErrors)) {
+            $this->bulkLock->release($shopDomain);
+            throw new \RuntimeException('Shopify bulkOperationRunMutation userErrors: ' . json_encode($userErrors));
+        }
+
+        return (string) $response->json('data.bulkOperationRunMutation.bulkOperation.id');
+    }
+
+    /**
+     * Poll a bulk operation until it reaches a terminal state.
+     * Releases the per-shop bulk lock on terminal state.
+     *
+     * @return array{status: string, url: string|null, error_code: string|null}
+     */
+    public function waitForBulkOperation(
+        string $shopDomain,
+        string $accessToken,
+        string $apiVersion,
+        string $operationId,
+        int $pollIntervalMs = 2000,
+        int $timeoutSeconds = 600,
+    ): array {
+        $query = <<<'GRAPHQL'
+        query bulkOperationStatus($id: ID!) {
+          node(id: $id) { ... on BulkOperation { id status errorCode url partialDataUrl } }
+        }
+        GRAPHQL;
+
+        $deadline = microtime(true) + $timeoutSeconds;
+        $terminal = ['COMPLETED', 'FAILED', 'CANCELED', 'EXPIRED'];
+
+        while (microtime(true) < $deadline) {
+            $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $query, ['id' => $operationId]);
+            $node = $response->json('data.node', []);
+            $status = (string) ($node['status'] ?? 'UNKNOWN');
+
+            if (in_array($status, $terminal, true)) {
+                $this->bulkLock->release($shopDomain);
+
+                return [
+                    'status' => $status,
+                    'url' => $node['url'] ?? null,
+                    'error_code' => $node['errorCode'] ?? null,
+                ];
+            }
+
+            usleep($pollIntervalMs * 1000);
+        }
+
+        // Timed out before terminal — release lock so shop isn't stuck
+        $this->bulkLock->release($shopDomain);
+        throw new \RuntimeException("Shopify bulk operation {$operationId} on {$shopDomain} timed out after {$timeoutSeconds}s");
+    }
+
     private function post(
         string $shopDomain,
         string $accessToken,
