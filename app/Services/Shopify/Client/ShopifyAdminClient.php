@@ -129,6 +129,7 @@ class ShopifyAdminClient
 
             // Retry once after the wait — if still short, proceed anyway and
             // let the THROTTLED retry path handle it (added in Task 8).
+            // Result is intentionally discarded; we proceed regardless of outcome.
             $this->budget->tryAcquire($shopDomain, $estimated, $max, $rate);
         }
     }
@@ -163,7 +164,7 @@ class ShopifyAdminClient
             $queryHash,
             (microtime(true) - $started) * 1000,
             $actual,
-            (int) ($status['currentlyAvailable'] ?? 0),
+            (int) ($status['currentlyAvailable'] ?? 0), // 0 when throttleStatus absent — not a true empty-bucket signal
         );
     }
 }
