@@ -18,7 +18,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyAdminClient::class);
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyBudgetTracker::class);
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyCostTracker::class);
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyMetrics::class);
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyBulkOperationLock::class);
     }
 
     /**
