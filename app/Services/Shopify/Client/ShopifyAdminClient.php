@@ -21,6 +21,9 @@ use Illuminate\Support\Facades\Http;
  * a standard Illuminate Http Response (or a throw). Throttle state is
  * tracked out-of-band via ShopifyBudgetTracker and reconciled from
  * extensions.cost.throttleStatus on every response.
+ *
+ * NOTE: budget pre-acquisition and THROTTLED retry are wired in the graphql()
+ * method — see preAcquireBudget(), reconcileFromResponse(), and isThrottled().
  */
 class ShopifyAdminClient
 {
