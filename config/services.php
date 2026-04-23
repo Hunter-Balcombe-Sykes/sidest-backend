@@ -82,6 +82,21 @@ return [
         // mismatch 404s the post-install redirect. Override via env when
         // multiple app builds share this codebase.
         'app_handle' => env('SHOPIFY_APP_HANDLE', 'side-st-hydrogen'),
+
+        // Admin API throttle client config. Shopify standard-plan GraphQL
+        // bucket is 1000 points, restoring at 100 pts/sec. Plus is 2000/200.
+        // We learn the actual values from throttleStatus on every response.
+        'throttle' => [
+            'default_max_capacity' => (int) env('SHOPIFY_THROTTLE_MAX', 1000),
+            'default_restore_rate' => (int) env('SHOPIFY_THROTTLE_RESTORE_RATE', 100),
+            'default_estimated_cost' => (int) env('SHOPIFY_THROTTLE_DEFAULT_COST', 10),
+            'max_inprocess_retries' => (int) env('SHOPIFY_THROTTLE_MAX_RETRIES', 3),
+            'max_wait_ms' => (int) env('SHOPIFY_THROTTLE_MAX_WAIT_MS', 5000),
+            'default_timeout' => (int) env('SHOPIFY_HTTP_TIMEOUT', 20),
+            'bucket_ttl_seconds' => 60,
+            'cost_window_size' => 20,
+            'bulk_lock_ttl_seconds' => 3600,
+        ],
     ],
 
 ];
