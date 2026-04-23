@@ -274,7 +274,13 @@ class ProfessionalUploadController extends ApiController
      * POST /api/images/reorder
      *   { pool: gallery|content, media_type?: image|video, ids: [uuid, ...] }
      *
-     * Scope is pool + media_type (defaults to image for backward compatibility).
+     * Scope is pool + optional media_type:
+     *   - `media_type` provided → reorder only items of that type (legacy
+     *     behaviour; kept so Content panel's image-only + video-only reorders
+     *     still work).
+     *   - `media_type` omitted → reorder the *entire pool* across media types.
+     *     Required for the unified affiliate gallery grid where photos and
+     *     videos share one ordered list of 6 slots.
      */
     public function reorder(ReorderPoolImagesRequest $request): JsonResponse
     {
@@ -283,7 +289,9 @@ class ProfessionalUploadController extends ApiController
         $site = $this->currentSite($pro);
 
         $pool = $request->validated('pool');
-        $mediaType = $request->validated('media_type') ?? SiteMedia::MEDIA_TYPE_IMAGE;
+        // null here = mixed-type reorder (unified grid). Don't default to
+        // 'image' — that silently drops video ids and corrupts the order.
+        $mediaType = $request->validated('media_type');
         $ids = array_values(array_unique($request->validated('ids') ?? []));
 
         DB::transaction(function () use ($site, $pool, $mediaType, $ids) {
@@ -301,7 +309,7 @@ class ProfessionalUploadController extends ApiController
             $targetImages = $siteImages
                 ->where('is_active', true)
                 ->where('pool', $pool)
-                ->where('media_type', $mediaType)
+                ->when($mediaType !== null, fn ($c) => $c->where('media_type', $mediaType))
                 ->values();
 
             if ($targetImages->isEmpty()) {
@@ -324,7 +332,9 @@ class ProfessionalUploadController extends ApiController
             $targetPositions = [];
 
             foreach ($siteImages as $index => $image) {
-                if ($image->is_active && $image->pool === $pool && $image->media_type === $mediaType) {
+                $matchesPool = $image->is_active && $image->pool === $pool;
+                $matchesType = $mediaType === null || $image->media_type === $mediaType;
+                if ($matchesPool && $matchesType) {
                     $targetPositions[] = $index;
                 }
             }
