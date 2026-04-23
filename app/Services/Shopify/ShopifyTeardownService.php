@@ -5,7 +5,6 @@ namespace App\Services\Shopify;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Support\Arr;
 use App\Services\Shopify\Client\ShopifyAdminClient;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -441,13 +440,15 @@ class ShopifyTeardownService
      */
     private function deleteStorefrontAccessTokens(string $shopDomain, string $accessToken, string $apiVersion): int
     {
-        $listUrl = "https://{$shopDomain}/admin/api/{$apiVersion}/storefront_access_tokens.json";
-
-        $response = Http::withHeaders(['X-Shopify-Access-Token' => $accessToken])
-            ->timeout(15)
-            ->get($listUrl);
-
-        if (! $response->successful()) {
+        try {
+            $response = app(ShopifyAdminClient::class)->rest(
+                method: 'GET',
+                shopDomain: $shopDomain,
+                accessToken: $accessToken,
+                path: "/admin/api/{$apiVersion}/storefront_access_tokens.json",
+                timeoutSeconds: 15,
+            );
+        } catch (\App\Exceptions\Shopify\ShopifyTransportException $e) {
             return 0;
         }
 
@@ -471,16 +472,19 @@ class ShopifyTeardownService
                 continue;
             }
 
-            $deleteRes = Http::withHeaders(['X-Shopify-Access-Token' => $accessToken])
-                ->timeout(15)
-                ->delete("https://{$shopDomain}/admin/api/{$apiVersion}/storefront_access_tokens/{$id}.json");
-
-            if ($deleteRes->successful()) {
+            try {
+                $deleteRes = app(ShopifyAdminClient::class)->rest(
+                    method: 'DELETE',
+                    shopDomain: $shopDomain,
+                    accessToken: $accessToken,
+                    path: "/admin/api/{$apiVersion}/storefront_access_tokens/{$id}.json",
+                    timeoutSeconds: 15,
+                );
                 $deleted++;
-            } else {
+            } catch (\App\Exceptions\Shopify\ShopifyTransportException $e) {
                 Log::warning('Shopify teardown: storefront access token delete failed', [
                     'token_id' => $id,
-                    'status' => $deleteRes->status(),
+                    'status' => $e->status,
                 ]);
             }
         }
