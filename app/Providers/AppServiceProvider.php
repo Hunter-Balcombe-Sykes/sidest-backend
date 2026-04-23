@@ -2,8 +2,11 @@
 
 namespace App\Providers;
 
+use App\Listeners\RecordScheduledTaskHeartbeat;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Events\ScheduledTaskStarting;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -24,6 +27,10 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureRateLimiting();
+
+        // Scheduler heartbeat — feeds GET /api/health/scheduler so a stopped cron
+        // runner becomes visible. See RecordScheduledTaskHeartbeat for rationale.
+        Event::listen(ScheduledTaskStarting::class, RecordScheduledTaskHeartbeat::class);
     }
 
     /**

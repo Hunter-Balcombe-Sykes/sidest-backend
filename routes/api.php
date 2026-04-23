@@ -160,3 +160,4 @@ Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('inter
 });
 
 Route::get('/ready', [HealthController::class, 'check']);
+Route::get('/health/scheduler', [HealthController::class, 'scheduler']);
