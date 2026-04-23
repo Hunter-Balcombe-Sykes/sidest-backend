@@ -46,13 +46,13 @@ else
     wait_ms = math.ceil((deficit / rate) * 1000)
 end
 
-redis.call('HMSET', KEYS[1], 'tokens', tokens, 'updated_ms', now)
+redis.call('HSET', KEYS[1], 'tokens', tokens, 'updated_ms', now)
 redis.call('EXPIRE', KEYS[1], ttl)
 return {acquired, math.floor(tokens), wait_ms}
 LUA;
 
     private const LUA_RECONCILE = <<<'LUA'
-redis.call('HMSET', KEYS[1], 'tokens', ARGV[1], 'updated_ms', ARGV[2])
+redis.call('HSET', KEYS[1], 'tokens', ARGV[1], 'updated_ms', ARGV[2])
 redis.call('EXPIRE', KEYS[1], ARGV[3])
 return 1
 LUA;
@@ -92,7 +92,7 @@ LUA;
      * Shopify's throttleStatus is the truth; our local estimate only exists
      * to prevent over-commitment before the first response lands.
      */
-    public function reconcile(string $shopDomain, int $currentlyAvailable, int $maximumAvailable, int $restoreRate): void
+    public function reconcile(string $shopDomain, int $currentlyAvailable): void
     {
         $ttl = (int) config('services.shopify.throttle.bucket_ttl_seconds', 60);
 

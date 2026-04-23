@@ -6,9 +6,9 @@ use App\Services\Shopify\Client\ShopifyBudgetTracker;
 use Illuminate\Support\Facades\Redis;
 
 beforeEach(function () {
-    Redis::flushdb();
-    $this->tracker = new ShopifyBudgetTracker();
     $this->shop = 'test-shop.myshopify.com';
+    $this->tracker = new ShopifyBudgetTracker();
+    Redis::del("shopify:bucket:{$this->shop}");
 });
 
 it('grants full capacity on first acquire', function () {
@@ -59,7 +59,7 @@ it('caps refill at max capacity', function () {
 it('reconcile overwrites local state with authoritative Shopify value', function () {
     $this->tracker->tryAcquire($this->shop, estimatedCost: 100, maxCapacity: 1000, restoreRate: 100);
 
-    $this->tracker->reconcile($this->shop, currentlyAvailable: 750, maximumAvailable: 1000, restoreRate: 100);
+    $this->tracker->reconcile($this->shop, currentlyAvailable: 750);
 
     $next = $this->tracker->tryAcquire($this->shop, estimatedCost: 50, maxCapacity: 1000, restoreRate: 100);
     expect($next['remaining'])->toBe(700);
