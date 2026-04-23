@@ -49,6 +49,9 @@ class ShopifyMetrics
         ]);
     }
 
+    /**
+     * @param  array<int, array<string, mixed>>  $errors
+     */
     public function graphqlError(string $shopDomain, string $queryHash, array $errors): void
     {
         Log::error('shopify.client.graphql_error', [
