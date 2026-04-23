@@ -29,10 +29,11 @@ class ProfessionalDocumentController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
+        // Return the document regardless of is_active so draft docs surface in
+        // the dashboard — the frontend publish toggle flips is_active directly.
         $media = SiteMedia::query()
             ->where('site_id', $site->id)
             ->where('pool', SiteMedia::POOL_DOCUMENTS)
-            ->where('is_active', true)
             ->whereNull('deleted_at')
             ->first();
 
@@ -82,10 +83,11 @@ class ProfessionalDocumentController extends ApiController
                     DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-documents:{$site->id}"]);
                 }
 
+                // Flat-replace targets any non-deleted doc (including drafts)
+                // so uploading a new file always takes over the single slot.
                 $existing = SiteMedia::query()
                     ->where('site_id', $site->id)
                     ->where('pool', SiteMedia::POOL_DOCUMENTS)
-                    ->where('is_active', true)
                     ->whereNull('deleted_at')
                     ->first();
 
@@ -187,13 +189,12 @@ class ProfessionalDocumentController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        // Ownership + active-row check. Route model binding already 404s on
-        // soft-deleted rows (SoftDeletes trait); is_active covers the case
-        // where an admin or future feature hides a row without deleting it.
+        // Ownership check. Route model binding already 404s on soft-deleted rows
+        // (SoftDeletes trait). We intentionally allow is_active = false so the
+        // publish toggle can flip a draft document back to live.
         abort_unless(
             $document->site_id === $site->id
-            && $document->pool === SiteMedia::POOL_DOCUMENTS
-            && $document->is_active,
+            && $document->pool === SiteMedia::POOL_DOCUMENTS,
             404
         );
 
@@ -208,10 +209,15 @@ class ProfessionalDocumentController extends ApiController
             $update['caption'] = $this->normaliseOptionalString($data['caption']);
         }
 
+        // is_enabled maps to is_active — the publish toggle flips this directly.
+        if (array_key_exists('is_enabled', $data)) {
+            $update['is_active'] = (bool) $data['is_enabled'];
+        }
+
         $changed = false;
         if (! empty($update)) {
             $document->fill($update);
-            if ($document->isDirty(['alt_text', 'caption'])) {
+            if ($document->isDirty(['alt_text', 'caption', 'is_active'])) {
                 $document->save();
                 $changed = true;
             }
@@ -234,12 +240,11 @@ class ProfessionalDocumentController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        // Same ownership + active-row check as update(). Prevents a pro from
-        // re-deleting an already-soft-deleted or hidden row.
+        // Ownership check — allows deleting draft (is_active = false) docs too.
+        // Route model binding already 404s on soft-deleted rows.
         abort_unless(
             $document->site_id === $site->id
-            && $document->pool === SiteMedia::POOL_DOCUMENTS
-            && $document->is_active,
+            && $document->pool === SiteMedia::POOL_DOCUMENTS,
             404
         );
 
@@ -261,7 +266,7 @@ class ProfessionalDocumentController extends ApiController
     }
 
     /**
-     * @return array{id: string, title: string|null, caption: string|null, original_mime: string|null, original_size_bytes: int|null, original_filename: string|null, preview_url: string, download_url: string, created_at: mixed, updated_at: mixed}
+     * @return array{id: string, title: string|null, caption: string|null, is_enabled: bool, original_mime: string|null, original_size_bytes: int|null, original_filename: string|null, preview_url: string, download_url: string, created_at: mixed, updated_at: mixed}
      */
     private function buildDocumentPayload(SiteMedia $media): array
     {
@@ -272,6 +277,8 @@ class ProfessionalDocumentController extends ApiController
             'id' => $media->id,
             'title' => $media->alt_text,
             'caption' => $media->caption,
+            // is_enabled maps to is_active — the publish toggle reads and writes this.
+            'is_enabled' => (bool) $media->is_active,
             'original_mime' => $media->original_mime,
             'original_size_bytes' => $media->original_size_bytes,
             'original_filename' => $media->original_filename,

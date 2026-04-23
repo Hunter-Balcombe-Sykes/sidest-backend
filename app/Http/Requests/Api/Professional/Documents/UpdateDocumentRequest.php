@@ -13,6 +13,8 @@ class UpdateDocumentRequest extends BaseFormRequest
         return [
             'title' => ['sometimes', 'nullable', 'string', 'max:200'],
             'caption' => ['sometimes', 'nullable', 'string', 'max:200'],
+            // Publish toggle — maps to is_active on site_media.
+            'is_enabled' => ['sometimes', 'boolean'],
         ];
     }
 }
