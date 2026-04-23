@@ -15,7 +15,16 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
-// V2: Internal endpoint for Hydrogen loaders. Validates an affiliate slug belongs to a brand and returns the affiliate record.
+// V2: Internal endpoint for Hydrogen loaders. Validates an affiliate slug belongs to
+// a brand and returns the affiliate's full sitepage payload: gallery, content images,
+// every link category (social + content + education + events + custom + synthesized
+// booking), bio + about, document, newsletter, services, and booking.
+//
+// Every section that has a Draft/Live toggle in the dashboard is returned as an
+// envelope `{state: "draft"|"live", data: <payload>|null}`. Hydrogen reads `state`
+// to decide whether to mount the section; `data` is always null when draft so draft
+// content never leaks publicly even if Hydrogen has a bug. Per-row Draft/Live (links)
+// is handled server-side: is_active=false rows are simply filtered out.
 class HydrogenAffiliateController extends ApiController
 {
     public function show(Request $request): JsonResponse
@@ -33,7 +42,6 @@ class HydrogenAffiliateController extends ApiController
         $shopDomain = strtolower(trim($validated['shop_domain']));
         $slug = strtolower(trim($validated['slug']));
 
-        // Find the brand by shop domain
         $integration = ProfessionalIntegration::query()
             ->where('shopify_shop_domain', $shopDomain)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -43,7 +51,6 @@ class HydrogenAffiliateController extends ApiController
             return $this->error('Brand not found.', 404);
         }
 
-        // Find the affiliate by slug
         $affiliate = Professional::query()
             ->where('handle_lc', $slug)
             ->whereNull('deleted_at')
@@ -53,7 +60,6 @@ class HydrogenAffiliateController extends ApiController
             return $this->error('Affiliate not found.', 404);
         }
 
-        // Verify affiliate is linked to this brand
         $linked = BrandPartnerLink::query()
             ->where('brand_professional_id', $integration->professional_id)
             ->where('affiliate_professional_id', $affiliate->id)
@@ -63,39 +69,41 @@ class HydrogenAffiliateController extends ApiController
             return $this->error('Affiliate not found.', 404);
         }
 
-        $affiliateSite = Site::where('professional_id', $affiliate->id)->first();
-        // Gallery images are gated by the gallery section block's publication
-        // state (is_active). The per-image is_active + processing_state filter
-        // inside getAffiliateGallery() is the second gate — together they
-        // ensure Hydrogen only ever sees images the dashboard marked Live.
-        $gallerySectionLive = $affiliateSite
-            ? $this->isSectionLive((string) $affiliateSite->id, 'gallery')
-            : false;
-        $gallery = $gallerySectionLive ? $this->getAffiliateGallery($affiliateSite) : [];
-        // Content pool images — affiliate's per-sitepage overrides that the
-        // Hydrogen loader merges over the brand's default placeholders. Shape
-        // matches the gallery payload so the Hydrogen side can read either
-        // list through the same SitepageImage normaliser.
-        $contentImages = $this->getAffiliateContent($affiliateSite);
-        // Links are gated per-row via block.is_active (each has its own
-        // Draft/Live toggle in the dashboard), so no section-level gate is
-        // required here.
-        $links = $this->getAffiliateLinks($affiliateSite);
+        $site = Site::where('professional_id', $affiliate->id)->first();
+
+        // Preload the site's section blocks once — every envelope helper reads
+        // `is_active` off this collection instead of issuing one exists query
+        // per section. Keyed by block_type for O(1) lookups.
+        $sections = $site
+            ? $site->sectionBlocks()->get()->keyBy('block_type')
+            : collect();
+
+        // Booking data is needed both as its own section and for synthesizing
+        // a link into the links list, so compute it once and pass the result
+        // into getAffiliateLinks().
+        $booking = $this->getAffiliateBooking($site, $sections);
 
         return $this->success([
             'affiliate_id' => (string) $affiliate->id,
             'name' => $affiliate->display_name,
             'slug' => $affiliate->handle,
-            'has_gallery' => ! empty($gallery),
-            'gallery' => $gallery,
-            'content_images' => $contentImages,
-            'links' => $links,
+            'gallery' => $this->getAffiliateGallery($site, $sections),
+            // Content pool — no section-level gate in the dashboard, so no
+            // envelope. Hydrogen merges these over brand defaults.
+            'content_images' => $this->getAffiliateContent($site),
+            'links' => $this->getAffiliateLinks($site, $booking),
+            'bio' => $this->getAffiliateBio($affiliate, $sections),
+            'document' => $this->getAffiliateDocument($site, $sections),
+            'newsletter' => $this->getAffiliateNewsletter($sections),
+            'services' => $this->getAffiliateServices($site, $affiliate->id, $sections),
+            'booking' => $booking,
         ]);
     }
 
     /**
      * Returns affiliate services for the Hydrogen "Services & Pricing" section.
-     * Used by manual mode affiliates whose services live in the Side St DB.
+     * Standalone endpoint kept for back-compat / lazy fetches; the same shape
+     * also appears inside show() under the `services` envelope's `data`.
      */
     public function services(Request $request): JsonResponse
     {
@@ -140,13 +148,365 @@ class HydrogenAffiliateController extends ApiController
         }
 
         $site = Site::where('professional_id', $affiliate->id)->first();
+
+        return $this->success($this->buildServicesData($site, $affiliate->id));
+    }
+
+    // ── Section envelope helper ──────────────────────────────────────────────
+    //
+    // Shape: ['state' => 'draft'|'live', 'data' => mixed|null].
+    // Pass the pre-loaded sections collection so we don't re-query per call.
+    // If the section row doesn't exist (edge case during rollout) we treat it
+    // as draft, matching the dashboard's "missing = not yet published" rule.
+
+    /**
+     * @param  \Illuminate\Support\Collection<string, Block>  $sections
+     * @return array{state: string, data: mixed}
+     */
+    private function sectionEnvelope($sections, string $blockType, callable $buildData): array
+    {
+        $section = $sections->get($blockType);
+        $isLive = $section !== null && (bool) $section->is_active;
+
+        return [
+            'state' => $isLive ? 'live' : 'draft',
+            'data' => $isLive ? $buildData($section) : null,
+        ];
+    }
+
+    // ── Gallery ──────────────────────────────────────────────────────────────
+
+    /**
+     * Returns the gallery envelope. When live, `data` is an ordered array of
+     * `{url, alt_text, caption, kind, poster, duration_ms}` rows covering both
+     * images and videos (the dashboard unifies them in one grid). Per-row filter
+     * keeps only ready rows so Hydrogen never sees processing placeholders.
+     *
+     * @param  \Illuminate\Support\Collection<string, Block>  $sections
+     * @return array{state: string, data: array|null}
+     */
+    private function getAffiliateGallery(?Site $site, $sections): array
+    {
+        return $this->sectionEnvelope($sections, 'gallery', function () use ($site): array {
+            if (! $site) {
+                return [];
+            }
+
+            return SiteMedia::query()
+                ->where('site_id', $site->id)
+                ->where('pool', SiteMedia::POOL_GALLERY)
+                ->where('is_active', true)
+                ->where('processing_state', SiteMedia::PROCESSING_STATE_READY)
+                ->with('mediaVariants')
+                ->orderBy('sort_order')
+                ->get()
+                ->map(fn (SiteMedia $media) => $this->buildGalleryItem($media))
+                ->filter(fn (?array $item) => $item !== null && $item['url'] !== '')
+                ->values()
+                ->all();
+        });
+    }
+
+    /**
+     * Project a SiteMedia row to the Hydrogen gallery shape. Videos prefer the
+     * HLS stream URL (plays natively in Safari + hls.js elsewhere) and fall
+     * back to progressive MP4 variants; images use the optimised WebP.
+     *
+     * @return array{url: string, alt_text: string|null, caption: string|null, kind: string, poster: string|null, duration_ms: int|null}|null
+     */
+    private function buildGalleryItem(SiteMedia $media): ?array
+    {
+        $isVideo = $media->media_type === SiteMedia::MEDIA_TYPE_VIDEO;
+
+        if ($isVideo) {
+            $streams = [];
+            $variants = [];
+            $poster = null;
+            foreach ($media->mediaVariants as $mv) {
+                if ($mv->artifact_type === 'hls_playlist') {
+                    $streams[$mv->variant_key] = $mv->url;
+                } elseif ($mv->artifact_type === 'mp4') {
+                    $variants[$mv->variant_key] = $mv->url;
+                } elseif ($mv->artifact_type === 'poster') {
+                    $poster = $mv->url;
+                }
+            }
+            // Prefer HLS; fall back through progressive MP4 variants to any
+            // remaining URL. Mirrors Sidest-Hydrogen's pickVideoSrc() order.
+            $url = $streams['optimized']
+                ?? $streams['maximized']
+                ?? $variants['optimized']
+                ?? $variants['maximized']
+                ?? $variants['original']
+                ?? '';
+
+            return [
+                'url' => $url,
+                'alt_text' => $media->alt_text,
+                'caption' => $media->caption,
+                'kind' => 'video',
+                'poster' => $poster,
+                'duration_ms' => $media->duration_ms,
+            ];
+        }
+
+        $variantUrls = $media->variantUrls();
+        $url = $variantUrls['optimized'] ?? $variantUrls['original'] ?? '';
+
+        return [
+            'url' => $url,
+            'alt_text' => $media->alt_text,
+            'caption' => $media->caption,
+            'kind' => 'image',
+            'poster' => null,
+            'duration_ms' => null,
+        ];
+    }
+
+    // ── Content images ───────────────────────────────────────────────────────
+
+    private function getAffiliateContent(?Site $site): array
+    {
+        if (! $site) {
+            return [];
+        }
+
+        return SiteMedia::query()
+            ->where('site_id', $site->id)
+            ->where('pool', SiteMedia::POOL_CONTENT)
+            ->where('is_active', true)
+            ->where('processing_state', SiteMedia::PROCESSING_STATE_READY)
+            ->with('mediaVariants')
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn (SiteMedia $media) => [
+                'url' => $media->variantUrls()['optimized'] ?? null,
+                'alt_text' => $media->alt_text,
+            ])
+            ->filter(fn (array $item) => $item['url'] !== null)
+            ->values()
+            ->all();
+    }
+
+    // ── Links (all categories + synthesized booking) ─────────────────────────
+
+    /**
+     * Returns every live link block the affiliate has, across every category
+     * (social, content, education, events, custom). Each link is tagged with
+     * `category` and, for platform-tagged rows, `platform`. Booking is not a
+     * link block on the dashboard side, but Hydrogen wants to render it
+     * alongside the other links — when the booking section is live, we
+     * synthesize a `{category: 'booking'}` row at the end of the list.
+     *
+     * @param  array{state: string, data: array|null}  $bookingEnvelope
+     */
+    private function getAffiliateLinks(?Site $site, array $bookingEnvelope): array
+    {
+        if (! $site) {
+            return [];
+        }
+
+        $rows = Block::query()
+            ->where('site_id', $site->id)
+            ->where('block_group', 'links')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->get()
+            ->map(function (Block $block): array {
+                $settings = is_array($block->settings) ? $block->settings : [];
+                $platform = is_string($settings['platform'] ?? null)
+                    ? strtolower(trim((string) $settings['platform']))
+                    : null;
+                // Category lives in settings to avoid a schema change for
+                // what is effectively a free-form tag. Default to 'custom'
+                // for older rows that pre-date the category field.
+                $category = is_string($settings['category'] ?? null)
+                    ? strtolower(trim((string) $settings['category']))
+                    : 'custom';
+
+                return [
+                    'title' => is_string($block->title) ? trim($block->title) : '',
+                    'url' => is_string($block->url) ? trim($block->url) : '',
+                    'category' => $category !== '' ? $category : 'custom',
+                    'platform' => $platform !== '' ? $platform : null,
+                ];
+            })
+            ->filter(fn (array $item) => $item['title'] !== '' && $item['url'] !== '')
+            ->values()
+            ->all();
+
+        // Append the synthesized booking link when booking is live + resolved.
+        // Keeping this controller-side means themes have a single list to
+        // render rather than special-casing booking everywhere.
+        if ($bookingEnvelope['state'] === 'live' && is_array($bookingEnvelope['data'])) {
+            $rows[] = [
+                'title' => (string) ($bookingEnvelope['data']['title'] ?? 'Book now'),
+                'url' => (string) ($bookingEnvelope['data']['resolved_url'] ?? ''),
+                'category' => 'booking',
+                'platform' => is_string($bookingEnvelope['data']['platform'] ?? null)
+                    ? $bookingEnvelope['data']['platform']
+                    : null,
+            ];
+            // Filter out the booking link if its url ended up empty.
+            $rows = array_values(array_filter(
+                $rows,
+                fn (array $item) => $item['url'] !== '',
+            ));
+        }
+
+        return $rows;
+    }
+
+    // ── Bio + credentials + experience ───────────────────────────────────────
+
+    /**
+     * @param  \Illuminate\Support\Collection<string, Block>  $sections
+     * @return array{state: string, data: array|null}
+     */
+    private function getAffiliateBio(Professional $affiliate, $sections): array
+    {
+        return $this->sectionEnvelope($sections, 'bio', function () use ($affiliate): array {
+            $about = is_array($affiliate->about) ? $affiliate->about : [];
+            $credentials = is_array($about['credentials'] ?? null) ? $about['credentials'] : [];
+            $experience = is_array($about['experience'] ?? null) ? $about['experience'] : [];
+
+            return [
+                'text' => (string) ($affiliate->bio ?? ''),
+                'credentials' => array_values(array_filter(array_map(
+                    fn ($row) => $this->normaliseCredential($row),
+                    $credentials,
+                ))),
+                'experience' => array_values(array_filter(array_map(
+                    fn ($row) => $this->normaliseExperience($row),
+                    $experience,
+                ))),
+            ];
+        });
+    }
+
+    /**
+     * Normalise a credential row from the about JSONB column. The dashboard
+     * sometimes stamps client-side UUIDs; we strip them so the wire shape is
+     * stable for Hydrogen.
+     */
+    private function normaliseCredential($row): ?array
+    {
+        if (! is_array($row)) {
+            return null;
+        }
+        $title = trim((string) ($row['title'] ?? ''));
+        if ($title === '') {
+            return null;
+        }
+
+        return [
+            'title' => $title,
+            'issuer' => trim((string) ($row['issuer'] ?? '')),
+            'year' => isset($row['year']) && $row['year'] !== '' ? (string) $row['year'] : null,
+        ];
+    }
+
+    private function normaliseExperience($row): ?array
+    {
+        if (! is_array($row)) {
+            return null;
+        }
+        $title = trim((string) ($row['title'] ?? ''));
+        if ($title === '') {
+            return null;
+        }
+
+        return [
+            'title' => $title,
+            'organisation' => trim((string) ($row['organisation'] ?? $row['organization'] ?? '')),
+            'period' => isset($row['period']) && $row['period'] !== '' ? (string) $row['period'] : null,
+        ];
+    }
+
+    // ── Document ─────────────────────────────────────────────────────────────
+
+    /**
+     * @param  \Illuminate\Support\Collection<string, Block>  $sections
+     * @return array{state: string, data: array|null}
+     */
+    private function getAffiliateDocument(?Site $site, $sections): array
+    {
+        return $this->sectionEnvelope($sections, 'document', function () use ($site) {
+            if (! $site) {
+                return null;
+            }
+            // Document is a SiteMedia row in POOL_DOCUMENTS with is_active=true.
+            // The dashboard enforces one slot per site; if multiple exist (data
+            // anomaly) we take the most recent.
+            $media = SiteMedia::query()
+                ->where('site_id', $site->id)
+                ->where('pool', SiteMedia::POOL_DOCUMENTS)
+                ->where('is_active', true)
+                ->orderByDesc('created_at')
+                ->first();
+
+            if (! $media) {
+                return null;
+            }
+
+            return [
+                'title' => $media->alt_text,
+                'caption' => $media->caption,
+                // Public download redirect that already exists in the API; avoids
+                // surfacing signed R2 credentials in the Hydrogen payload.
+                'download_url' => '/api/public/documents/'.$media->id.'/download',
+                'mime' => $media->original_mime,
+                'size_bytes' => $media->original_size_bytes,
+            ];
+        });
+    }
+
+    // ── Newsletter ───────────────────────────────────────────────────────────
+
+    /**
+     * @param  \Illuminate\Support\Collection<string, Block>  $sections
+     * @return array{state: string, data: array|null}
+     */
+    private function getAffiliateNewsletter($sections): array
+    {
+        return $this->sectionEnvelope($sections, 'newsletter', function (Block $section): array {
+            $settings = is_array($section->settings) ? $section->settings : [];
+
+            return [
+                'headline' => (string) ($settings['headline'] ?? ''),
+                'description' => (string) ($settings['description'] ?? ''),
+                'cta_label' => (string) ($settings['cta_label'] ?? ''),
+            ];
+        });
+    }
+
+    // ── Services ─────────────────────────────────────────────────────────────
+
+    /**
+     * @param  \Illuminate\Support\Collection<string, Block>  $sections
+     * @return array{state: string, data: array|null}
+     */
+    private function getAffiliateServices(?Site $site, string $affiliateId, $sections): array
+    {
+        return $this->sectionEnvelope($sections, 'services', function () use ($site, $affiliateId) {
+            return $this->buildServicesData($site, $affiliateId);
+        });
+    }
+
+    /**
+     * Builds the services payload shared by the envelope and the standalone
+     * /affiliate-services endpoint. Keeping them in one place means the two
+     * consumers can never drift.
+     */
+    private function buildServicesData(?Site $site, string $affiliateId): array
+    {
         $settings = is_array($site?->settings) ? $site->settings : [];
         $bookingMode = strtolower((string) ($settings['booking_mode'] ?? 'manual'));
         $manualBookingUrl = trim((string) ($settings['manual_booking_url'] ?? ''));
 
         $services = Service::query()
             ->with('category:id,title')
-            ->where('professional_id', $affiliate->id)
+            ->where('professional_id', $affiliateId)
             ->where('is_active', true)
             ->whereNull('deleted_at')
             ->orderBy('sort_order')
@@ -164,110 +524,54 @@ class HydrogenAffiliateController extends ApiController
             ->values()
             ->all();
 
-        return $this->success([
+        return [
             'booking_mode' => $bookingMode,
             'manual_booking_url' => $manualBookingUrl !== '' ? $manualBookingUrl : null,
             'services' => $services,
-        ]);
+        ];
     }
 
-    private function getAffiliateGallery(?Site $site): array
-    {
-        return $this->getAffiliatePool($site, SiteMedia::POOL_GALLERY);
-    }
+    // ── Booking ──────────────────────────────────────────────────────────────
 
     /**
-     * Returns the affiliate's content-pool images — used by the Hydrogen
-     * sitepage to override the brand's default placeholders position-for-position.
-     */
-    private function getAffiliateContent(?Site $site): array
-    {
-        return $this->getAffiliatePool($site, SiteMedia::POOL_CONTENT);
-    }
-
-    /**
-     * Returns whether the given section block (e.g. 'gallery') is currently
-     * Live on the site. The dashboard's section PublishSegmentedControl
-     * writes is_active on the matching site.blocks row; missing rows are
-     * treated as not-live so Hydrogen never sees content that was never
-     * explicitly published.
-     */
-    private function isSectionLive(string $siteId, string $blockType): bool
-    {
-        return (bool) Block::query()
-            ->where('site_id', $siteId)
-            ->where('block_group', 'sections')
-            ->where('block_type', $blockType)
-            ->where('is_active', true)
-            ->exists();
-    }
-
-    /**
-     * Returns the affiliate's live link blocks ({title, url, platform}).
-     * Each link's dashboard Draft/Live toggle is its own is_active flag —
-     * there is no section-level gate for links. Rows missing a title or
-     * url are skipped so themes never see blanks.
+     * Booking data lives on the `booking` section block's settings — the
+     * section-level toggle is the single gate (no separate booking section
+     * visibility state to reconcile). When live + a booking URL is set,
+     * returns the resolved URL; otherwise data is null.
      *
-     * `platform` is the normaliser-tagged social key (instagram, facebook,
-     * linkedin, youtube, tiktok, x, spotify, soundcloud) lifted out of
-     * settings.platform. Null on custom links so Hydrogen can decide
-     * whether to render a wordmark (when platform is known) or the title
-     * text (when not).
+     * @param  \Illuminate\Support\Collection<string, Block>  $sections
+     * @return array{state: string, data: array|null}
      */
-    private function getAffiliateLinks(?Site $site): array
+    private function getAffiliateBooking(?Site $site, $sections): array
     {
-        if (! $site) {
-            return [];
-        }
+        return $this->sectionEnvelope($sections, 'booking', function (Block $section): ?array {
+            $settings = is_array($section->settings) ? $section->settings : [];
+            $bookingUrl = trim((string) ($settings['booking_url'] ?? ''));
 
-        return Block::query()
-            ->where('site_id', $site->id)
-            ->where('block_group', 'links')
-            ->where('is_active', true)
-            ->orderBy('sort_order')
-            ->get()
-            ->map(function (Block $block): array {
-                $settings = is_array($block->settings) ? $block->settings : [];
-                $platform = is_string($settings['platform'] ?? null)
-                    ? strtolower(trim((string) $settings['platform']))
-                    : null;
+            // Platform is stored next to booking_url when known (calendly, acuity,
+            // etc.) so themes can pick a wordmark; missing platform = generic "book now" CTA.
+            $platform = is_string($settings['platform'] ?? null)
+                ? strtolower(trim((string) $settings['platform']))
+                : null;
 
-                return [
-                    'title' => is_string($block->title) ? trim($block->title) : '',
-                    'url' => is_string($block->url) ? trim($block->url) : '',
-                    'platform' => $platform !== '' ? $platform : null,
-                ];
-            })
-            ->filter(fn (array $item) => $item['title'] !== '' && $item['url'] !== '')
-            ->values()
-            ->all();
-    }
+            // Title override — affiliate may want "Book a consult" instead of "Book now".
+            $title = is_string($settings['title'] ?? null)
+                ? trim((string) $settings['title'])
+                : '';
 
-    /**
-     * Shared lookup for an affiliate's site-media pool. Returns ordered items
-     * with the optimised webp URL + alt text; skips rows without a resolvable
-     * variant so callers never see null URLs.
-     */
-    private function getAffiliatePool(?Site $site, string $pool): array
-    {
-        if (! $site) {
-            return [];
-        }
+            if ($bookingUrl === '') {
+                return null;
+            }
 
-        return SiteMedia::query()
-            ->where('site_id', $site->id)
-            ->where('pool', $pool)
-            ->where('is_active', true)
-            ->where('processing_state', SiteMedia::PROCESSING_STATE_READY)
-            ->with('mediaVariants')
-            ->orderBy('sort_order')
-            ->get()
-            ->map(fn (SiteMedia $media) => [
-                'url' => $media->variantUrls()['optimized'] ?? null,
-                'alt_text' => $media->alt_text,
-            ])
-            ->filter(fn (array $item) => $item['url'] !== null)
-            ->values()
-            ->all();
+            return [
+                'platform' => $platform !== '' ? $platform : null,
+                'path' => $bookingUrl,
+                // Backend currently stores the fully-resolved URL in settings.booking_url
+                // (the dashboard normalises before save). If/when we switch to storing
+                // platform+handle separately, resolve here.
+                'resolved_url' => $bookingUrl,
+                'title' => $title !== '' ? $title : 'Book now',
+            ];
+        });
     }
 }
