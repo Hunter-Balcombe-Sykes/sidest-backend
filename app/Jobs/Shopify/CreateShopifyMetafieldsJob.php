@@ -10,7 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates sidest.* metafield definitions on the brand's Shopify store. Idempotent — skips existing definitions.
@@ -286,10 +286,6 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
             'first' => 50,
         ]);
 
-        if (! $response->successful()) {
-            return [];
-        }
-
         $edges = $response->json('data.metafieldDefinitions.edges', []);
 
         return array_map(
@@ -376,15 +372,13 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
 
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
-        return Http::withHeaders([
-            'X-Shopify-Access-Token' => $accessToken,
-            'Content-Type' => 'application/json',
-        ])->timeout($this->timeout)->post(
-            "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-            array_filter([
-                'query' => $query,
-                'variables' => ! empty($variables) ? $variables : null,
-            ])
+        return app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            $query,
+            $variables,
+            $this->timeout,
         );
     }
 }
