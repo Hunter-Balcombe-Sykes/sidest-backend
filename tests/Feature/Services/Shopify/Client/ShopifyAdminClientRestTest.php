@@ -9,7 +9,6 @@ beforeEach(function () {
     $this->client = app(ShopifyAdminClient::class);
     $this->shop = 'test.myshopify.com';
     $this->token = 'shpat_test';
-    $this->version = '2025-01';
 });
 
 it('performs a successful DELETE', function () {
@@ -46,6 +45,7 @@ it('treats 401 as successful for token-revoke semantics', function () {
 it('throws ShopifyTransportException on non-2xx after 429 retries exhausted', function () {
     config()->set('services.shopify.throttle.max_inprocess_retries', 1);
 
+    // Http::fake() repeats the same response for every matching request.
     Http::fake([
         "https://{$this->shop}/admin/api_permissions/current.json" => Http::response('', 429, ['Retry-After' => '1']),
     ]);

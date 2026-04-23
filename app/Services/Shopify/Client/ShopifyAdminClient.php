@@ -92,6 +92,7 @@ class ShopifyAdminClient
      * @param  string  $method  'GET'|'POST'|'PUT'|'DELETE'
      * @param  string  $path  must start with `/admin/...`
      * @param  array<string, mixed>  $body
+     * @param  bool  $allow401  pass true for token-revoke calls where 401 means "already revoked"
      * @throws ShopifyTransportException on non-2xx (excluding 401 when $allow401 is true)
      */
     public function rest(
@@ -123,7 +124,7 @@ class ShopifyAdminClient
             }
 
             if ($response->status() === 429 && $attempt < $maxRetries) {
-                $wait = max(1, (int) $response->header('Retry-After')) * 1000;
+                $wait = max(1, (int) $response->header('Retry-After')) * 1000; // header absent → floor to 1 s
                 $this->metrics->throttled($shopDomain, $wait, $attempt + 1);
                 // Blocks the worker thread — keep max_inprocess_retries low (default 3).
                 usleep($wait * 1000);
