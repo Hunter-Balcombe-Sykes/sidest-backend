@@ -71,6 +71,7 @@ class ShopifyAdminClient
                 }
                 $wait = $this->throttleWaitMs($response, $maxWait);
                 $this->metrics->throttled($shopDomain, $wait, $attempt + 1);
+                // Blocks the worker thread — keep max_inprocess_retries low (default 3).
                 usleep($wait * 1000);
                 $attempt++;
                 continue;
@@ -134,7 +135,7 @@ class ShopifyAdminClient
 
     /**
      * Returns how long to wait before retrying a THROTTLED response, in milliseconds.
-     * Falls back to max_wait_ms if no throttleStatus is available.
+     * Falls back to 1 000 ms (capped at max_wait_ms) when no throttleStatus is available.
      */
     private function throttleWaitMs(Response $response, int $maxWait): int
     {
