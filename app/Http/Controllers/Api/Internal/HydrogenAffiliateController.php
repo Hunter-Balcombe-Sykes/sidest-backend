@@ -317,6 +317,7 @@ class HydrogenAffiliateController extends ApiController
                 $platform = is_string($settings['platform'] ?? null)
                     ? strtolower(trim((string) $settings['platform']))
                     : null;
+                $platform = $platform !== '' ? $platform : null;
                 // Category lives in settings to avoid a schema change for
                 // what is effectively a free-form tag. Default to 'custom'
                 // for older rows that pre-date the category field.
@@ -324,11 +325,33 @@ class HydrogenAffiliateController extends ApiController
                     ? strtolower(trim((string) $settings['category']))
                     : 'custom';
 
+                $title = is_string($block->title) ? trim($block->title) : '';
+                $url = is_string($block->url) ? trim($block->url) : '';
+
+                // Resilience: older link rows can have empty title/url at rest
+                // — settings.platform + settings.handle are the source of truth
+                // there. Rebuild both from the platform config so the row still
+                // renders on Hydrogen without requiring a backfill migration.
+                if (($title === '' || $url === '') && $platform !== null) {
+                    $config = config("sidest.social_platforms.{$platform}");
+                    $handle = is_string($settings['handle'] ?? null)
+                        ? trim((string) $settings['handle'])
+                        : '';
+                    if (is_array($config)) {
+                        if ($title === '' && is_string($config['display_name'] ?? null)) {
+                            $title = (string) $config['display_name'];
+                        }
+                        if ($url === '' && $handle !== '' && is_string($config['url_template'] ?? null)) {
+                            $url = str_replace('{handle}', $handle, (string) $config['url_template']);
+                        }
+                    }
+                }
+
                 return [
-                    'title' => is_string($block->title) ? trim($block->title) : '',
-                    'url' => is_string($block->url) ? trim($block->url) : '',
+                    'title' => $title,
+                    'url' => $url,
                     'category' => $category !== '' ? $category : 'custom',
-                    'platform' => $platform !== '' ? $platform : null,
+                    'platform' => $platform,
                 ];
             })
             ->filter(fn (array $item) => $item['title'] !== '' && $item['url'] !== '')
