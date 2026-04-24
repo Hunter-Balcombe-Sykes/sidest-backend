@@ -1,0 +1,76 @@
+<?php
+
+namespace App\Services\Streaming;
+
+use Illuminate\Support\Facades\Redis;
+
+/**
+ * Post-processes a cached site payload to inject live status for streaming platforms.
+ * Called after SiteCacheService::getPublicSitePayload() — never stored in the cache itself.
+ */
+class LiveStatusInjector
+{
+    private const LIVE_KEY_PREFIX = 'streaming:live:';
+
+    /**
+     * Injects is_live into the `links`, `sections`, and `blocks` arrays in a site payload.
+     *
+     * SiteCacheService::getPublicSitePayload() returns links and sections as separate
+     * top-level arrays (both living in site.blocks, differentiated by block_group).
+     * Covering all three keys future-proofs against streaming blocks appearing in sections.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function injectIntoPayload(array $payload): array
+    {
+        foreach (['links', 'sections', 'blocks'] as $key) {
+            if (isset($payload[$key]) && is_array($payload[$key])) {
+                $payload[$key] = $this->injectIntoBlocks($payload[$key]);
+            }
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Injects is_live into each block that has live_check_enabled=true and a streaming platform.
+     * Missing Redis key → is_live=false (safe default, no error).
+     *
+     * @param  array<int, mixed>  $blocks
+     * @return array<int, mixed>
+     */
+    public function injectIntoBlocks(array $blocks): array
+    {
+        $streamingPlatforms = config('sidest.streaming_platforms', []);
+
+        return array_map(function ($block) use ($streamingPlatforms) {
+            if (! is_array($block)) {
+                return $block;
+            }
+
+            $settings = $block['settings'] ?? [];
+            if (! is_array($settings)) {
+                return $block;
+            }
+
+            $platform = $settings['platform'] ?? null;
+            $handle = $settings['handle'] ?? null;
+            $liveCheckEnabled = (bool) ($settings['live_check_enabled'] ?? false);
+
+            if (
+                ! $liveCheckEnabled
+                || ! $platform
+                || ! $handle
+                || ! in_array($platform, $streamingPlatforms, true)
+            ) {
+                return $block;
+            }
+
+            $redisKey = self::LIVE_KEY_PREFIX."{$platform}:{$handle}";
+            $block['settings']['is_live'] = Redis::get($redisKey) === '1';
+
+            return $block;
+        }, $blocks);
+    }
+}
