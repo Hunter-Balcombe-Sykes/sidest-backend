@@ -37,32 +37,32 @@ beforeEach(function () {
 it('skips processing when stripe_event_id already logged', function () {
     // Pre-seed: this event was already processed.
     DB::table('billing.webhook_events')->insert([
-        'id'             => (string) Str::uuid(),
+        'id' => (string) Str::uuid(),
         'stripe_event_id' => 'evt_duplicate_123',
-        'event_type'     => 'account.updated',
-        'payload'        => json_encode(['id' => 'evt_duplicate_123']),
-        'processed_at'   => now()->toDateTimeString(),
+        'event_type' => 'account.updated',
+        'payload' => json_encode(['id' => 'evt_duplicate_123']),
+        'processed_at' => now()->toDateTimeString(),
     ]);
 
     $professional = Professional::create([
-        'id'                       => (string) Str::uuid(),
-        'handle'                   => 'p1',
-        'handle_lc'                => 'p1',
-        'display_name'             => 'P1',
-        'professional_type'        => 'affiliate',
-        'status'                   => 'active',
+        'id' => (string) Str::uuid(),
+        'handle' => 'p1',
+        'handle_lc' => 'p1',
+        'display_name' => 'P1',
+        'professional_type' => 'affiliate',
+        'status' => 'active',
         'stripe_connect_account_id' => 'acct_xyz',
-        'stripe_connect_status'    => 'onboarding',
+        'stripe_connect_status' => 'onboarding',
     ]);
 
     $payload = json_encode([
-        'id'   => 'evt_duplicate_123',
+        'id' => 'evt_duplicate_123',
         'type' => 'account.updated',
         'data' => ['object' => [
-            'id'                 => 'acct_xyz',
-            'charges_enabled'    => true,
-            'payouts_enabled'    => true,
-            'details_submitted'  => true,
+            'id' => 'acct_xyz',
+            'charges_enabled' => true,
+            'payouts_enabled' => true,
+            'details_submitted' => true,
         ]],
     ]);
 
@@ -70,16 +70,16 @@ it('skips processing when stripe_event_id already logged', function () {
     config(['services.stripe.connect_webhook_secret' => $signingSecret]);
     config(['services.stripe.webhook_secret' => null]);
 
-    $timestamp     = time();
+    $timestamp = time();
     $signedPayload = "{$timestamp}.{$payload}";
-    $signature     = hash_hmac('sha256', $signedPayload, $signingSecret);
+    $signature = hash_hmac('sha256', $signedPayload, $signingSecret);
 
     $response = $this->call(
         'POST',
         '/api/webhooks/stripe-connect',
         [], [], [],
         [
-            'CONTENT_TYPE'       => 'application/json',
+            'CONTENT_TYPE' => 'application/json',
             'HTTP_STRIPE_SIGNATURE' => "t={$timestamp},v1={$signature}",
         ],
         $payload
@@ -97,25 +97,25 @@ it('skips processing when stripe_event_id already logged', function () {
 
 it('processes a fresh event and records it in webhook_events', function () {
     $professional = Professional::create([
-        'id'                       => (string) Str::uuid(),
-        'handle'                   => 'p2',
-        'handle_lc'                => 'p2',
-        'display_name'             => 'P2',
-        'professional_type'        => 'affiliate',
-        'status'                   => 'active',
+        'id' => (string) Str::uuid(),
+        'handle' => 'p2',
+        'handle_lc' => 'p2',
+        'display_name' => 'P2',
+        'professional_type' => 'affiliate',
+        'status' => 'active',
         'stripe_connect_account_id' => 'acct_fresh',
-        'stripe_connect_status'    => 'onboarding',
+        'stripe_connect_status' => 'onboarding',
     ]);
 
     $payload = json_encode([
-        'id'   => 'evt_fresh_456',
+        'id' => 'evt_fresh_456',
         'type' => 'account.updated',
         'data' => ['object' => [
-            'id'                => 'acct_fresh',
-            'charges_enabled'   => true,
-            'payouts_enabled'   => true,
+            'id' => 'acct_fresh',
+            'charges_enabled' => true,
+            'payouts_enabled' => true,
             'details_submitted' => true,
-            'requirements'      => ['currently_due' => []],
+            'requirements' => ['currently_due' => []],
         ]],
     ]);
 
@@ -123,16 +123,16 @@ it('processes a fresh event and records it in webhook_events', function () {
     config(['services.stripe.connect_webhook_secret' => $signingSecret]);
     config(['services.stripe.webhook_secret' => null]);
 
-    $timestamp     = time();
+    $timestamp = time();
     $signedPayload = "{$timestamp}.{$payload}";
-    $signature     = hash_hmac('sha256', $signedPayload, $signingSecret);
+    $signature = hash_hmac('sha256', $signedPayload, $signingSecret);
 
     $response = $this->call(
         'POST',
         '/api/webhooks/stripe-connect',
         [], [], [],
         [
-            'CONTENT_TYPE'          => 'application/json',
+            'CONTENT_TYPE' => 'application/json',
             'HTTP_STRIPE_SIGNATURE' => "t={$timestamp},v1={$signature}",
         ],
         $payload

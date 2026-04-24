@@ -62,11 +62,11 @@ class StripeConnectWebhookController extends Controller
         // Stripe event IDs are globally unique across platform + Connect events,
         // so billing.webhook_events covers both this controller and StripeWebhookController.
         $alreadyProcessed = ! DB::table('billing.webhook_events')->insertOrIgnore([
-            'id'              => Str::uuid()->toString(),
+            'id' => Str::uuid()->toString(),
             'stripe_event_id' => $event->id,
-            'event_type'      => $event->type,
-            'payload'         => json_encode(json_decode($payload, true)),
-            'processed_at'    => now(),
+            'event_type' => $event->type,
+            'payload' => json_encode(json_decode($payload, true)),
+            'processed_at' => now(),
         ]);
 
         if ($alreadyProcessed) {
