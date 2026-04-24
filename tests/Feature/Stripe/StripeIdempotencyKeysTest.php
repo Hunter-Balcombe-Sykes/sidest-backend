@@ -39,7 +39,7 @@ beforeEach(function () {
     }
 });
 
-function makeProfessional(?string $id = null): Professional
+function idempotencyTest_makeProfessional(?string $id = null): Professional
 {
     $id ??= (string) Str::uuid();
 
@@ -57,7 +57,7 @@ function makeProfessional(?string $id = null): Professional
 // ── Task 2: StripeBillingService::ensureStripeCustomer ──────────────────────
 
 it('ensureStripeCustomer passes deterministic idempotency_key to Stripe', function () {
-    $professional = makeProfessional();
+    $professional = idempotencyTest_makeProfessional();
 
     $customersSpy = Mockery::mock();
     $customersSpy->shouldReceive('create')
@@ -87,7 +87,7 @@ it('ensureStripeCustomer passes deterministic idempotency_key to Stripe', functi
 });
 
 it('ensureStripeCustomer skips Stripe when customer already exists', function () {
-    $professional = makeProfessional();
+    $professional = idempotencyTest_makeProfessional();
     $professional->update(['stripe_customer_id' => 'cus_existing']);
 
     $customersSpy = Mockery::mock();
@@ -107,7 +107,7 @@ it('ensureStripeCustomer skips Stripe when customer already exists', function ()
 // ── Task 3: StripeConnectService::createConnectAccount ──────────────────────
 
 it('createConnectAccount passes deterministic idempotency_key to Stripe', function () {
-    $professional = makeProfessional();
+    $professional = idempotencyTest_makeProfessional();
     $professional->update(['country_code' => 'AU']);
 
     $accountsSpy = Mockery::mock();
@@ -140,7 +140,7 @@ it('createConnectAccount passes deterministic idempotency_key to Stripe', functi
 // ── Task 4: StripeConnectService::createCustomer (brand flow) ───────────────
 
 it('createCustomer (Connect/brand) passes deterministic idempotency_key to Stripe', function () {
-    $brand = makeProfessional();
+    $brand = idempotencyTest_makeProfessional();
     $brand->update(['professional_type' => 'brand']);
 
     $customersSpy = Mockery::mock();
