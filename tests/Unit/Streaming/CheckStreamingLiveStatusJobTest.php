@@ -1,0 +1,80 @@
+<?php
+
+/** @phpstan-ignore-all */
+
+use App\Jobs\Streaming\CheckStreamingLiveStatusJob;
+use App\Services\Streaming\LiveStatusPoller;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
+use Tests\TestCase;
+
+uses(TestCase::class)->in(__FILE__);
+
+beforeEach(fn () => Redis::flushdb());
+
+it('skips Kick entirely when rate_limited key is set in Redis', function () {
+    setupBlocksTable();
+    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    Redis::set('streaming:kick:rate_limited', '1', 'EX', 300);
+
+    $poller = Mockery::mock(LiveStatusPoller::class);
+    // Kick should NOT be dispatched
+    $poller->shouldReceive('poll')->with('kick', Mockery::any())->never();
+    // Twitch may be dispatched (with empty handles since no DB rows in this test)
+    $poller->shouldReceive('poll')->with('twitch', Mockery::any())->zeroOrMoreTimes();
+
+    Log::shouldReceive('warning')->once()->withArgs(fn ($msg) => str_contains((string) $msg, 'rate limited'));
+
+    $job = new CheckStreamingLiveStatusJob;
+    $job->handle($poller);
+});
+
+it('logs critical and aborts when Redis is unavailable', function () {
+    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+
+    Redis::shouldReceive('exists')
+        ->once()
+        ->andThrow(new \RedisException('Connection refused'));
+
+    Log::shouldReceive('critical')->once()->with('streaming.redis_unavailable', Mockery::any());
+
+    $poller = Mockery::mock(LiveStatusPoller::class);
+    $poller->shouldNotReceive('poll');
+
+    $job = new CheckStreamingLiveStatusJob;
+    $job->handle($poller);
+});
+
+it('catches poller exceptions and logs per-platform error without crashing the job', function () {
+    setupBlocksTable();
+    config(['sidest.streaming_platforms' => ['twitch']]);
+
+    // Insert a live-check-enabled block so the job finds handles and calls poll.
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.blocks')->insert([
+        'id'          => (string) \Illuminate\Support\Str::uuid(),
+        'block_group' => 'links',
+        'is_active'   => 1,
+        'settings'    => json_encode(['live_check_enabled' => 'true', 'platform' => 'twitch', 'handle' => 'testuser']),
+        'deleted_at'  => null,
+        'created_at'  => now()->toDateTimeString(),
+        'updated_at'  => now()->toDateTimeString(),
+    ]);
+
+    $poller = Mockery::mock(LiveStatusPoller::class);
+    $poller->shouldReceive('poll')
+        ->with('twitch', Mockery::any())
+        ->andThrow(new \RuntimeException('Network error'));
+
+    Log::shouldReceive('error')->once()->with('streaming.poll_error', Mockery::any());
+
+    $job = new CheckStreamingLiveStatusJob;
+    // Should not throw
+    $job->handle($poller);
+});
+
+it('logs job failure via failed() callback', function () {
+    Log::shouldReceive('error')->once()->with('streaming.job_failed', Mockery::any());
+
+    $job = new CheckStreamingLiveStatusJob;
+    $job->failed(new \RuntimeException('Something broke'));
+});
