@@ -478,9 +478,12 @@ class HydrogenAffiliateController extends ApiController
             'data' => [
                 'title' => $media->alt_text,
                 'caption' => $media->caption,
-                // Public download redirect that already exists in the API;
-                // avoids surfacing signed R2 credentials in the Hydrogen payload.
-                'download_url' => '/api/public/documents/'.$media->id.'/download',
+                // Absolute URL — Hydrogen fetches this from its own origin,
+                // so a relative path would resolve to the wrong host. Points
+                // at the existing public download redirect (signed R2 URL
+                // issued server-side) so the Hydrogen payload never carries
+                // R2 credentials.
+                'download_url' => url('/api/public/documents/'.$media->id.'/download'),
                 'mime' => $media->original_mime,
                 'size_bytes' => $media->original_size_bytes,
             ],
