@@ -7,22 +7,21 @@ use App\Models\Core\Notifications\Notification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-// V2: Core notification engine. Publishes with deduplication, optional email dispatch, retention policies, and per-professional category overrides.
+// V2: Core notification engine. Publishes with atomic dedup via dedupe_key column,
+// optional email dispatch, retention policies, and per-professional category overrides.
 class NotificationPublisher
 {
-    public const CATEGORIES = [
-        'invites',
-        'commissions',
-        'payouts',
-        'integrations',
-        'analytics_weekly',
-        'analytics_milestones',
-        'profile_tasks',
-        'catalog_changes',
-        'brand_status',
-        'subscriptions',
-        'brand_links',
-    ];
+    /**
+     * Valid category keys — derived from the single source of truth in
+     * config/sidest.php. FormRequests and controllers should prefer calling
+     * this method directly over importing a constant.
+     *
+     * @return array<int, string>
+     */
+    public static function categories(): array
+    {
+        return array_keys((array) config('sidest.notifications.mailables', []));
+    }
 
     public function publish(
         string $professionalId,
@@ -48,62 +47,51 @@ class NotificationPublisher
             return;
         }
 
-        $cta = $this->withDedupeKey($ctaUrl ?? '/account/overview', $dedupeKey);
-
-        $exists = DB::table('notifications.notifications')
-            ->where('professional_id', $professionalId)
-            ->where('cta_url', $cta)
-            ->exists();
-
-        if ($exists) {
+        $dedupeKey = trim($dedupeKey);
+        if ($dedupeKey === '') {
+            // Require a non-empty dedupe key — callers should always provide one.
             return;
         }
 
         $now = now();
         $type = Notification::normalizeFrontendType($frontendType);
-        $key = $retentionConfigKey ?? 'default';
-        $days = config("sidest.notification_retention_days.{$key}")
+        $retentionKey = $retentionConfigKey ?? 'default';
+        $days = config("sidest.notification_retention_days.{$retentionKey}")
             ?? config('sidest.notification_retention_days.default', 30);
 
         $notificationId = (string) Str::uuid();
 
-        DB::table('notifications.notifications')->insert([
+        // Atomic upsert: ON CONFLICT on (professional_id, dedupe_key) DO NOTHING.
+        // If a notification with this dedupe_key already exists for this pro,
+        // this is a no-op — no duplicate row, no race window.
+        $inserted = DB::table('notifications.notifications')->insertOrIgnore([
             'id' => $notificationId,
             'professional_id' => $professionalId,
             'type' => $type,
             'category' => $category,
             'title' => $title,
             'body' => $body,
-            'cta_url' => $cta,
+            'cta_url' => $ctaUrl ?? '/account/overview',
             'primary_action_label' => $primaryActionLabel,
             'secondary_action_label' => $secondaryActionLabel,
             'secondary_action_url' => $secondaryActionUrl,
             'severity' => Notification::severityForFrontendType($type),
             'starts_at' => $now,
             'ends_at' => $now->copy()->addDays((int) $days),
+            'dedupe_key' => $dedupeKey,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
 
-        if (config('sidest.notifications.email_enabled', false)) {
+        // Only dispatch the email job for genuinely-new rows. insertOrIgnore()
+        // returns the number of rows actually inserted (0 on conflict).
+        if ($inserted > 0 && config('sidest.notifications.email_enabled', false)) {
             SendTransactionalNotificationEmailJob::dispatch(
                 $notificationId,
                 $category,
                 $professionalId,
             )->onQueue('mail');
         }
-    }
-
-    public function withDedupeKey(string $url, string $dedupeKey): string
-    {
-        $trimmedUrl = trim($url);
-        if ($trimmedUrl === '') {
-            $trimmedUrl = '/account/overview';
-        }
-
-        $join = str_contains($trimmedUrl, '?') ? '&' : '?';
-
-        return $trimmedUrl.$join.'notif='.$dedupeKey;
     }
 
     public static function resolveEmailEnabled(string $professionalId, string $category): bool
