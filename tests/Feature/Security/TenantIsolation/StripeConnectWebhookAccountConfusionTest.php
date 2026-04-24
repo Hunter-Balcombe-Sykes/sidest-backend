@@ -44,16 +44,16 @@ it('rejects an account.updated event whose data.object.id does not match event.a
 
     // Craft a mismatched event: attacker account at top level, victim's at data.object
     $fakeEvent = Event::constructFrom([
-        'id'      => 'evt_fake_mismatch',
-        'type'    => 'account.updated',
+        'id' => 'evt_fake_mismatch',
+        'type' => 'account.updated',
         'account' => 'acct_ATTACKER',
-        'data'    => [
+        'data' => [
             'object' => [
-                'id'                => 'acct_VICTIM',
-                'charges_enabled'   => true,
-                'payouts_enabled'   => false,
+                'id' => 'acct_VICTIM',
+                'charges_enabled' => true,
+                'payouts_enabled' => false,
                 'details_submitted' => false,
-                'object'            => 'account',
+                'object' => 'account',
             ],
         ],
     ]);
@@ -73,16 +73,16 @@ it('processes account.updated when event.account matches data.object.id', functi
 
     // Legitimate event: top-level account matches data.object.id
     $fakeEvent = Event::constructFrom([
-        'id'      => 'evt_fake_legit',
-        'type'    => 'account.updated',
+        'id' => 'evt_fake_legit',
+        'type' => 'account.updated',
         'account' => 'acct_LEGIT',
-        'data'    => [
+        'data' => [
             'object' => [
-                'id'                => 'acct_LEGIT',
-                'charges_enabled'   => true,
-                'payouts_enabled'   => false,
+                'id' => 'acct_LEGIT',
+                'charges_enabled' => true,
+                'payouts_enabled' => false,
                 'details_submitted' => false,
-                'object'            => 'account',
+                'object' => 'account',
             ],
         ],
     ]);

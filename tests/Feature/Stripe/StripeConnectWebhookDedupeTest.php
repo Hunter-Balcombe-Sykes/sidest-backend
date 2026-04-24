@@ -58,13 +58,13 @@ it('skips processing when stripe_event_id already logged', function () {
     ]);
 
     $payload = json_encode([
-        'id'      => 'evt_duplicate_123',
-        'type'    => 'account.updated',
+        'id' => 'evt_duplicate_123',
+        'type' => 'account.updated',
         'account' => 'acct_xyz',   // top-level field must match data.object.id (real Stripe behavior)
-        'data'    => ['object' => [
-            'id'                => 'acct_xyz',
-            'charges_enabled'   => true,
-            'payouts_enabled'   => true,
+        'data' => ['object' => [
+            'id' => 'acct_xyz',
+            'charges_enabled' => true,
+            'payouts_enabled' => true,
             'details_submitted' => true,
         ]],
     ]);
@@ -111,15 +111,15 @@ it('processes a fresh event and records it in webhook_events', function () {
     ]);
 
     $payload = json_encode([
-        'id'      => 'evt_fresh_456',
-        'type'    => 'account.updated',
+        'id' => 'evt_fresh_456',
+        'type' => 'account.updated',
         'account' => 'acct_fresh',  // top-level field must match data.object.id (real Stripe behavior)
-        'data'    => ['object' => [
-            'id'                => 'acct_fresh',
-            'charges_enabled'   => true,
-            'payouts_enabled'   => true,
+        'data' => ['object' => [
+            'id' => 'acct_fresh',
+            'charges_enabled' => true,
+            'payouts_enabled' => true,
             'details_submitted' => true,
-            'requirements'      => ['currently_due' => []],
+            'requirements' => ['currently_due' => []],
         ]],
     ]);
 

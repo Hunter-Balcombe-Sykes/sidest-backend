@@ -102,9 +102,9 @@ class StripeConnectWebhookController extends Controller
 
             if ($topLevelAccount === null || $topLevelAccount !== $objectId) {
                 Log::warning('stripe.connect.account_mismatch', [
-                    'event_id'      => $event->id,
+                    'event_id' => $event->id,
                     'event_account' => $topLevelAccount,
-                    'object_id'     => $objectId,
+                    'object_id' => $objectId,
                 ]);
 
                 return response()->json(['error' => 'account_mismatch'], 400);
