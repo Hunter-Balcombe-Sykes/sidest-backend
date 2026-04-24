@@ -79,3 +79,20 @@ it('rejects destroy for a gid the affiliate has not selected', function () {
 
     expect($response->status())->toBe(404);
 });
+
+it('rejects reorder for a gid the affiliate has not selected', function () {
+    [$affA, $affB] = createTwoTenants('affiliate');
+
+    DB::connection('pgsql')->table('commerce.affiliate_product_selections')->insert([
+        'id' => (string) Str::uuid(),
+        'affiliate_professional_id' => $affB->id,
+        'brand_professional_id' => (string) Str::uuid(),
+        'shopify_product_gid' => 'gid://shopify/Product/12345',
+    ]);
+
+    $req = tenantRequestAs($affA, ['ids' => []]);
+    $controller = app(AffiliateProductPhotoController::class);
+
+    $response = $controller->reorder($req, 'gid://shopify/Product/12345');
+    expect($response->getStatusCode())->toBe(404);
+});
