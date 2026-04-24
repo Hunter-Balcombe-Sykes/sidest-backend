@@ -120,41 +120,6 @@ class PublicEmailSubscriptionController extends ApiController
         ]);
     }
 
-    private function resolveSiteSubdomain(Request $request): ?string
-    {
-        $fromHeader = trim((string) $request->header('X-Site-Subdomain', ''));
-        if ($fromHeader !== '') {
-            return strtolower($fromHeader);
-        }
-
-        $fromQuery = trim((string) $request->query('subdomain', ''));
-        if ($fromQuery !== '') {
-            return strtolower($fromQuery);
-        }
-
-        $fromSlugQuery = trim((string) $request->query('slug', ''));
-        if ($fromSlugQuery !== '') {
-            return strtolower($fromSlugQuery);
-        }
-
-        $fromInput = trim((string) $request->input('subdomain', ''));
-        if ($fromInput !== '') {
-            return strtolower($fromInput);
-        }
-
-        $fromSlugInput = trim((string) $request->input('slug', ''));
-        if ($fromSlugInput !== '') {
-            return strtolower($fromSlugInput);
-        }
-
-        $fromHost = $this->resolveSubdomainFromHost($request);
-        if ($fromHost) {
-            return strtolower($fromHost);
-        }
-
-        return null;
-    }
-
     private function upsertMarketingCustomer(
         string $professionalId,
         string $email,

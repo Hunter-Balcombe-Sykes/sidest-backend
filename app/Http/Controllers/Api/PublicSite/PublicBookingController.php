@@ -472,31 +472,6 @@ class PublicBookingController extends ApiController
         return [$site, $professional, null];
     }
 
-    private function resolveSiteSubdomain(Request $request): ?string
-    {
-        $fromHeader = trim((string) $request->header('X-Site-Subdomain', ''));
-        if ($fromHeader !== '') {
-            return strtolower($fromHeader);
-        }
-
-        $fromQuery = trim((string) $request->query('slug', ''));
-        if ($fromQuery !== '') {
-            return strtolower($fromQuery);
-        }
-
-        $fromInput = trim((string) $request->input('slug', ''));
-        if ($fromInput !== '') {
-            return strtolower($fromInput);
-        }
-
-        $fromHost = $this->resolveSubdomainFromHost($request);
-        if (is_string($fromHost) && $fromHost !== '') {
-            return strtolower($fromHost);
-        }
-
-        return null;
-    }
-
     /**
      * @return array{id:string,name:string,country:string,currency:string,status:string}
      */

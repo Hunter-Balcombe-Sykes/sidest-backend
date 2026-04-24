@@ -114,29 +114,6 @@ class PublicEnquiryController extends ApiController
         return $this->success(['ok' => true]);
     }
 
-    private function resolveSiteSubdomain(Request $request): ?string
-    {
-        $fromHeader = trim((string) $request->header('X-Site-Subdomain', ''));
-        if ($fromHeader !== '') {
-            return strtolower($fromHeader);
-        }
-
-        foreach (['subdomain', 'slug'] as $key) {
-            $fromQuery = trim((string) $request->query($key, ''));
-            if ($fromQuery !== '') {
-                return strtolower($fromQuery);
-            }
-            $fromInput = trim((string) $request->input($key, ''));
-            if ($fromInput !== '') {
-                return strtolower($fromInput);
-            }
-        }
-
-        $fromHost = $this->resolveSubdomainFromHost($request);
-
-        return $fromHost ? strtolower($fromHost) : null;
-    }
-
     private function upsertEnquiryCustomer(string $professionalId, string $email, ?string $fullName, ?string $phone): void
     {
         $normalizedEmail = strtolower(trim($email));
