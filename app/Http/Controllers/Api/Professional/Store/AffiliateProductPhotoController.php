@@ -49,6 +49,16 @@ class AffiliateProductPhotoController extends ApiController
             return $this->error('Invalid product ID.', 422);
         }
 
+        // Verify the GID is in the affiliate's selections to prevent IDOR reads
+        $hasSelection = AffiliateProductSelection::query()
+            ->where('affiliate_professional_id', $pro->id)
+            ->where('shopify_product_gid', $gid)
+            ->exists();
+
+        if (! $hasSelection) {
+            return $this->error('Product not found in your selections.', 404);
+        }
+
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
@@ -189,6 +199,16 @@ class AffiliateProductPhotoController extends ApiController
             return $this->error('Invalid product ID.', 422);
         }
 
+        // Verify the GID is in the affiliate's selections to prevent IDOR deletes
+        $hasSelection = AffiliateProductSelection::query()
+            ->where('affiliate_professional_id', $pro->id)
+            ->where('shopify_product_gid', $gid)
+            ->exists();
+
+        if (! $hasSelection) {
+            return $this->error('Product not found in your selections.', 404);
+        }
+
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
@@ -221,6 +241,16 @@ class AffiliateProductPhotoController extends ApiController
 
         if (! preg_match(self::GID_PATTERN, $gid)) {
             return $this->error('Invalid product ID.', 422);
+        }
+
+        // Verify the GID is in the affiliate's selections to prevent IDOR reorders
+        $hasSelection = AffiliateProductSelection::query()
+            ->where('affiliate_professional_id', $pro->id)
+            ->where('shopify_product_gid', $gid)
+            ->exists();
+
+        if (! $hasSelection) {
+            return $this->error('Product not found in your selections.', 404);
         }
 
         $request->validate([
