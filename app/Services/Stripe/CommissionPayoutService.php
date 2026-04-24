@@ -45,8 +45,8 @@ class CommissionPayoutService
     {
         $stats = [
             'batches_dispatched' => 0,
-            'batches_created'    => 0,
-            'batches_requeued'   => 0,
+            'batches_created' => 0,
+            'batches_requeued' => 0,
         ];
 
         // Re-dispatch any in-flight batches. ExecuteCommissionPayoutJob's idempotent
@@ -118,10 +118,10 @@ class CommissionPayoutService
                     $stats['batches_dispatched']++;
                 } catch (\Throwable $e) {
                     Log::error('Commission payout batch creation failed', [
-                        'brand_id'     => $group->brand_professional_id,
+                        'brand_id' => $group->brand_professional_id,
                         'affiliate_id' => $group->affiliate_professional_id,
-                        'currency'     => $group->currency_code,
-                        'error'        => $e->getMessage(),
+                        'currency' => $group->currency_code,
+                        'error' => $e->getMessage(),
                     ]);
                 }
             }
@@ -194,23 +194,23 @@ class CommissionPayoutService
             }
 
             $payout = CommissionPayout::create([
-                'brand_professional_id'    => $brandId,
-                'affiliate_professional_id'=> $affiliateId,
-                'status'                   => 'pending',
-                'gross_commission_cents'   => $netCommission,
-                'platform_fee_cents'       => $platformFeeCents,
-                'net_payout_cents'         => $netPayoutCents,
-                'currency_code'            => strtoupper($currency),
-                'ledger_entry_count'       => $entries->count(),
-                'eligible_after'           => $cutoff,
-                'funding_source'           => null,
+                'brand_professional_id' => $brandId,
+                'affiliate_professional_id' => $affiliateId,
+                'status' => 'pending',
+                'gross_commission_cents' => $netCommission,
+                'platform_fee_cents' => $platformFeeCents,
+                'net_payout_cents' => $netPayoutCents,
+                'currency_code' => strtoupper($currency),
+                'ledger_entry_count' => $entries->count(),
+                'eligible_after' => $cutoff,
+                'funding_source' => null,
             ]);
 
             foreach ($entries as $entry) {
                 CommissionPayoutItem::create([
-                    'payout_id'                   => $payout->id,
-                    'commission_ledger_entry_id'   => $entry->id,
-                    'amount_cents'                 => $entry->amount_cents,
+                    'payout_id' => $payout->id,
+                    'commission_ledger_entry_id' => $entry->id,
+                    'amount_cents' => $entry->amount_cents,
                 ]);
                 $entry->update(['payout_id' => $payout->id]);
             }
@@ -227,9 +227,9 @@ class CommissionPayoutService
 
             foreach ($reversals as $reversal) {
                 CommissionPayoutItem::create([
-                    'payout_id'                   => $payout->id,
-                    'commission_ledger_entry_id'   => $reversal->id,
-                    'amount_cents'                 => $reversal->amount_cents,
+                    'payout_id' => $payout->id,
+                    'commission_ledger_entry_id' => $reversal->id,
+                    'amount_cents' => $reversal->amount_cents,
                 ]);
                 $reversal->update(['payout_id' => $payout->id]);
             }
@@ -319,12 +319,12 @@ class CommissionPayoutService
                 }
 
                 $payout->update([
-                    'status'             => 'collecting',
-                    'funding_source'     => $fundingSource,
+                    'status' => 'collecting',
+                    'funding_source' => $fundingSource,
                     'wallet_debit_cents' => $walletDebitCents,
-                    'charge_cents'       => $chargeAmountCents,
-                    'failure_code'       => null,
-                    'failure_reason'     => null,
+                    'charge_cents' => $chargeAmountCents,
+                    'failure_code' => null,
+                    'failure_reason' => null,
                 ]);
             });
         }
@@ -342,17 +342,17 @@ class CommissionPayoutService
         } elseif ($chargeAmountCents > 0) {
             try {
                 $paymentIntent = $this->stripe->paymentIntents->create([
-                    'amount'         => $chargeAmountCents,
-                    'currency'       => $currencyLower,
-                    'customer'       => $brand->stripe_customer_id,
+                    'amount' => $chargeAmountCents,
+                    'currency' => $currencyLower,
+                    'customer' => $brand->stripe_customer_id,
                     'payment_method' => $brand->stripe_payment_method_id,
-                    'confirm'        => true,
-                    'off_session'    => true,
-                    'description'    => "Commission payout #{$payout->id}",
-                    'metadata'       => [
+                    'confirm' => true,
+                    'off_session' => true,
+                    'description' => "Commission payout #{$payout->id}",
+                    'metadata' => [
                         'sidest_payout_id' => $payout->id,
-                        'brand_id'         => $brand->id,
-                        'affiliate_id'     => $affiliate->id,
+                        'brand_id' => $brand->id,
+                        'affiliate_id' => $affiliate->id,
                     ],
                 ], ['idempotency_key' => 'pi_'.$payout->id.$retryKey]);
 
@@ -376,9 +376,9 @@ class CommissionPayoutService
 
                 $payout->update([
                     'stripe_payment_intent_id' => $paymentIntent->id,
-                    'status'                   => 'collected',
+                    'status' => 'collected',
                 ]);
-            } catch (ApiConnectionException | RateLimitException $e) {
+            } catch (ApiConnectionException|RateLimitException $e) {
                 // Transient error — re-throw so Horizon retries with backoff.
                 // Wallet debit is already committed in 'collecting' status; the
                 // idempotent resume will skip re-debiting on the next attempt.
@@ -406,14 +406,14 @@ class CommissionPayoutService
             }
 
             $transferPayload = [
-                'amount'      => $payout->net_payout_cents,
-                'currency'    => $currencyLower,
+                'amount' => $payout->net_payout_cents,
+                'currency' => $currencyLower,
                 'destination' => $affiliate->stripe_connect_account_id,
                 'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
-                'metadata'    => [
+                'metadata' => [
                     'sidest_payout_id' => $payout->id,
-                    'brand_id'         => $brand->id,
-                    'affiliate_id'     => $affiliate->id,
+                    'brand_id' => $brand->id,
+                    'affiliate_id' => $affiliate->id,
                 ],
             ];
 
@@ -428,21 +428,21 @@ class CommissionPayoutService
 
             $payout->update([
                 'stripe_transfer_id' => $transfer->id,
-                'status'             => 'completed',
-                'processed_at'       => now(),
-                'failure_code'       => null,
-                'failure_reason'     => null,
+                'status' => 'completed',
+                'processed_at' => now(),
+                'failure_code' => null,
+                'failure_reason' => null,
             ]);
 
             Log::info('Commission payout completed', [
-                'payout_id'          => $payout->id,
-                'gross_cents'        => $payout->gross_commission_cents,
+                'payout_id' => $payout->id,
+                'gross_cents' => $payout->gross_commission_cents,
                 'wallet_debit_cents' => $walletDebitCents,
-                'charge_cents'       => $chargeAmountCents,
+                'charge_cents' => $chargeAmountCents,
                 'platform_fee_cents' => $payout->platform_fee_cents,
-                'net_cents'          => $payout->net_payout_cents,
-                'funding_source'     => $payout->funding_source,
-                'currency'           => $payout->currency_code,
+                'net_cents' => $payout->net_payout_cents,
+                'funding_source' => $payout->funding_source,
+                'currency' => $payout->currency_code,
             ]);
 
             // Rebuild commerce aggregates so commission_paid_cents is reflected.
@@ -456,7 +456,7 @@ class CommissionPayoutService
             }
 
             return true;
-        } catch (ApiConnectionException | RateLimitException $e) {
+        } catch (ApiConnectionException|RateLimitException $e) {
             // Transient error — re-throw so Horizon retries from 'transferring' status.
             // Wallet and charge are NOT reversed: if the transfer succeeded on Stripe's side
             // but the response was lost in transit, the idempotency key returns the same
@@ -483,10 +483,10 @@ class CommissionPayoutService
                     // Auto-refund failed — the brand may still be charged. Flag for manual resolution.
                     $failureCode = 'transfer_failed_refund_needed';
                     Log::error('Auto-refund after transfer failure failed — manual action required', [
-                        'payout_id'         => $payout->id,
+                        'payout_id' => $payout->id,
                         'payment_intent_id' => $payout->stripe_payment_intent_id,
-                        'transfer_error'    => $e->getMessage(),
-                        'refund_error'      => $refundEx->getMessage(),
+                        'transfer_error' => $e->getMessage(),
+                        'refund_error' => $refundEx->getMessage(),
                     ]);
                 }
             }
@@ -579,7 +579,7 @@ class CommissionPayoutService
     private function markPendingFunding(CommissionPayout $payout, string $code, string $reason): void
     {
         $payout->update([
-            'status'       => 'pending',
+            'status' => 'pending',
             'failure_code' => $code,
             'failure_reason' => $reason,
             'processed_at' => null,
@@ -587,23 +587,23 @@ class CommissionPayoutService
 
         Log::notice('Commission payout pending funding', [
             'payout_id' => $payout->id,
-            'code'      => $code,
-            'reason'    => $reason,
+            'code' => $code,
+            'reason' => $reason,
         ]);
     }
 
     private function failPayout(CommissionPayout $payout, string $code, string $reason): void
     {
         $payout->update([
-            'status'         => 'failed',
-            'failure_code'   => $code,
+            'status' => 'failed',
+            'failure_code' => $code,
             'failure_reason' => $reason,
         ]);
 
         Log::warning('Commission payout failed', [
             'payout_id' => $payout->id,
-            'code'      => $code,
-            'reason'    => $reason,
+            'code' => $code,
+            'reason' => $reason,
         ]);
     }
 
@@ -635,10 +635,10 @@ class CommissionPayoutService
         $resumeStatus = ((int) ($payout->wallet_debit_cents ?? 0)) > 0 ? 'collecting' : 'pending';
 
         $payout->update([
-            'status'         => $resumeStatus,
-            'failure_code'   => null,
+            'status' => $resumeStatus,
+            'failure_code' => null,
             'failure_reason' => null,
-            'retry_count'    => ($payout->retry_count ?? 0) + 1,
+            'retry_count' => ($payout->retry_count ?? 0) + 1,
         ]);
 
         return $this->processPayoutBatch($payout) === true;
@@ -664,7 +664,7 @@ class CommissionPayoutService
             ->keyBy('status');
 
         return [
-            'as_brand'     => $asBrand,
+            'as_brand' => $asBrand,
             'as_affiliate' => $asAffiliate,
         ];
     }

@@ -66,14 +66,14 @@ function planTestProfessional(string $type = 'affiliate'): Professional
     $now = now()->toDateTimeString();
 
     DB::connection('pgsql')->table('core.professionals')->insert([
-        'id'                => $id,
-        'handle'            => "pro-{$id}",
-        'handle_lc'         => "pro-{$id}",
-        'display_name'      => "Test Pro {$id}",
+        'id' => $id,
+        'handle' => "pro-{$id}",
+        'handle_lc' => "pro-{$id}",
+        'display_name' => "Test Pro {$id}",
         'professional_type' => $type,
-        'status'            => 'active',
-        'created_at'        => $now,
-        'updated_at'        => $now,
+        'status' => 'active',
+        'created_at' => $now,
+        'updated_at' => $now,
     ]);
 
     return Professional::find($id);
@@ -88,13 +88,13 @@ function planTestPlan(string $key, string $priceId = 'price_abc'): Plan
     $now = now()->toDateTimeString();
 
     DB::connection('pgsql')->table('billing.plans')->insert([
-        'id'              => $id,
-        'plan_key'        => $key,
-        'name'            => ucfirst($key),
+        'id' => $id,
+        'plan_key' => $key,
+        'name' => ucfirst($key),
         'stripe_price_id' => $priceId,
-        'is_active'       => 1,
-        'created_at'      => $now,
-        'updated_at'      => $now,
+        'is_active' => 1,
+        'created_at' => $now,
+        'updated_at' => $now,
     ]);
 
     return Plan::find($id);
@@ -109,16 +109,16 @@ function planTestSubscription(Professional $professional, Plan $plan, string $st
     $now = now()->toDateTimeString();
 
     DB::connection('pgsql')->table('billing.subscriptions')->insert([
-        'id'                      => $id,
-        'professional_id'         => $professional->id,
-        'plan_id'                 => $plan->id,
-        'provider'                => 'stripe',
-        'stripe_subscription_id'  => $stripeSubId,
-        'status'                  => 'active',
-        'cancel_at_period_end'    => 0,
-        'ended_at'                => null,
-        'created_at'              => $now,
-        'updated_at'              => $now,
+        'id' => $id,
+        'professional_id' => $professional->id,
+        'plan_id' => $plan->id,
+        'provider' => 'stripe',
+        'stripe_subscription_id' => $stripeSubId,
+        'status' => 'active',
+        'cancel_at_period_end' => 0,
+        'ended_at' => null,
+        'created_at' => $now,
+        'updated_at' => $now,
     ]);
 
     return Subscription::find($id);
@@ -130,8 +130,8 @@ function planTestSubscription(Professional $professional, Plan $plan, string $st
 
 it('paid→paid: calls Stripe updateSubscriptionPlan and does NOT update plan_id locally', function () {
     $professional = planTestProfessional('affiliate');
-    $currentPlan  = planTestPlan('starter', 'price_starter');
-    $newPlan      = planTestPlan('growth', 'price_growth');
+    $currentPlan = planTestPlan('starter', 'price_starter');
+    $newPlan = planTestPlan('growth', 'price_growth');
     $subscription = planTestSubscription($professional, $currentPlan);
 
     $billing = Mockery::mock(StripeBillingService::class);
@@ -152,8 +152,8 @@ it('paid→paid: calls Stripe updateSubscriptionPlan and does NOT update plan_id
 
 it('paid→paid: does not reset cancel_at_period_end locally', function () {
     $professional = planTestProfessional('affiliate');
-    $currentPlan  = planTestPlan('starter', 'price_starter');
-    $newPlan      = planTestPlan('growth', 'price_growth');
+    $currentPlan = planTestPlan('starter', 'price_starter');
+    $newPlan = planTestPlan('growth', 'price_growth');
     $subscription = planTestSubscription($professional, $currentPlan);
 
     // Simulate a subscription already marked for cancellation at period end

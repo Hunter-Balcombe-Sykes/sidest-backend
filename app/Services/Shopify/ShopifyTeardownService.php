@@ -3,8 +3,8 @@
 namespace App\Services\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
-use Illuminate\Support\Arr;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
 /**

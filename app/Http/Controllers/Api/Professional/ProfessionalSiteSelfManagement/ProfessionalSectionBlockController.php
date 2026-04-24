@@ -260,7 +260,6 @@ class ProfessionalSectionBlockController extends ApiController
             $payload['requirement_reason'] = $reason;
         }
 
-
         return $payload;
     }
 }

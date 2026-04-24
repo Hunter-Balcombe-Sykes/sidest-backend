@@ -16,7 +16,7 @@ it('Square webhook returns 200 and does not dispatch sync when flag is off', fun
         'type' => 'catalog.version.updated',
         'merchant_id' => 'MERCHANT_ABC',
     ])->assertStatus(200)
-      ->assertJson(['received' => true, 'feature_gated' => true]);
+        ->assertJson(['received' => true, 'feature_gated' => true]);
 
     Queue::assertNotPushed(SyncSquareCatalogDeltaJob::class);
 });
@@ -29,7 +29,7 @@ it('Fresha webhook returns 200 and does not dispatch sync when flag is off', fun
         'type' => 'catalog.version.updated',
         'merchant_id' => 'MERCHANT_XYZ',
     ])->assertStatus(200)
-      ->assertJson(['received' => true, 'feature_gated' => true]);
+        ->assertJson(['received' => true, 'feature_gated' => true]);
 
     Queue::assertNotPushed(SyncFreshaCatalogDeltaJob::class);
 });

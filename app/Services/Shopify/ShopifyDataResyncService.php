@@ -4,9 +4,9 @@ namespace App\Services\Shopify;
 
 use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
-use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 

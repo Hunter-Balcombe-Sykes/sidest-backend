@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;
-use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\Professional;
 use App\Services\Store\AffiliateProductCatalogService;
 use Illuminate\Http\Request;
@@ -19,7 +18,8 @@ beforeEach(function () {
     foreach (['core', 'brand', 'commerce'] as $schema) {
         try {
             $conn->statement("ATTACH DATABASE ':memory:' AS {$schema}");
-        } catch (\Throwable) {}
+        } catch (\Throwable) {
+        }
     }
 
     $conn->statement('CREATE TABLE IF NOT EXISTS core.professionals (

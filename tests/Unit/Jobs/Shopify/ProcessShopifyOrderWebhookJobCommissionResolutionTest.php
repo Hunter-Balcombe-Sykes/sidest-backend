@@ -9,7 +9,6 @@ use App\Services\Store\BrandCatalogService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
-
 use Tests\TestCase;
 
 uses(TestCase::class)->in(__FILE__);
@@ -25,7 +24,8 @@ beforeEach(function () {
     foreach (['core', 'brand', 'commerce'] as $schema) {
         try {
             $conn->statement("ATTACH DATABASE ':memory:' AS {$schema}");
-        } catch (\Throwable) {}
+        } catch (\Throwable) {
+        }
     }
 
     $conn->statement('CREATE TABLE IF NOT EXISTS core.professionals (

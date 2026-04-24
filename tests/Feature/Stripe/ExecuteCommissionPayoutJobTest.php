@@ -40,19 +40,19 @@ function execJob_seedPayout(string $id, array $overrides = []): CommissionPayout
 {
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('commerce.commission_payouts')->insert(array_merge([
-        'id'                         => $id,
-        'brand_professional_id'      => 'brand-1',
-        'affiliate_professional_id'  => 'aff-1',
-        'status'                     => 'pending',
-        'gross_commission_cents'     => 10000,
-        'platform_fee_cents'         => 300,
-        'net_payout_cents'           => 9700,
-        'currency_code'              => 'AUD',
-        'wallet_debit_cents'         => 0,
-        'charge_cents'               => 0,
-        'retry_count'                => 0,
-        'created_at'                 => $now,
-        'updated_at'                 => $now,
+        'id' => $id,
+        'brand_professional_id' => 'brand-1',
+        'affiliate_professional_id' => 'aff-1',
+        'status' => 'pending',
+        'gross_commission_cents' => 10000,
+        'platform_fee_cents' => 300,
+        'net_payout_cents' => 9700,
+        'currency_code' => 'AUD',
+        'wallet_debit_cents' => 0,
+        'charge_cents' => 0,
+        'retry_count' => 0,
+        'created_at' => $now,
+        'updated_at' => $now,
     ], $overrides));
 
     return CommissionPayout::find($id);
@@ -127,7 +127,7 @@ it('failed() does not overwrite a completed payout', function () {
 
 it('failed() does not overwrite a payout already marked failed', function () {
     execJob_seedPayout('p1', [
-        'status'       => 'failed',
+        'status' => 'failed',
         'failure_code' => 'transfer_failed',
     ]);
 
@@ -154,21 +154,25 @@ it('retryPayout() resets to collecting when wallet was previously debited, preve
     // Payout exhausted Horizon retries after wallet debit was committed.
     // failed() set status=failed but left wallet_debit_cents intact.
     execJob_seedPayout('p1', [
-        'status'             => 'failed',
-        'failure_code'       => 'job_exhausted',
+        'status' => 'failed',
+        'failure_code' => 'job_exhausted',
         'wallet_debit_cents' => 4000,
-        'charge_cents'       => 6000,
+        'charge_cents' => 6000,
     ]);
 
     $payout = CommissionPayout::find('p1');
 
     // Subclass so retryPayout() runs normally but processPayoutBatch is stubbed.
-    $service = new class extends \App\Services\Stripe\CommissionPayoutService {
+    $service = new class extends \App\Services\Stripe\CommissionPayoutService
+    {
         public ?string $capturedStatus = null;
+
         public function __construct() {}
+
         public function processPayoutBatch(CommissionPayout $payout): ?bool
         {
             $this->capturedStatus = $payout->status;
+
             return true;
         }
     };
@@ -182,20 +186,24 @@ it('retryPayout() resets to collecting when wallet was previously debited, preve
 
 it('retryPayout() resets to pending when wallet was not previously debited', function () {
     execJob_seedPayout('p1', [
-        'status'             => 'failed',
-        'failure_code'       => 'job_exhausted',
+        'status' => 'failed',
+        'failure_code' => 'job_exhausted',
         'wallet_debit_cents' => 0,
-        'charge_cents'       => 0,
+        'charge_cents' => 0,
     ]);
 
     $payout = CommissionPayout::find('p1');
 
-    $service = new class extends \App\Services\Stripe\CommissionPayoutService {
+    $service = new class extends \App\Services\Stripe\CommissionPayoutService
+    {
         public ?string $capturedStatus = null;
+
         public function __construct() {}
+
         public function processPayoutBatch(CommissionPayout $payout): ?bool
         {
             $this->capturedStatus = $payout->status;
+
             return true;
         }
     };
@@ -207,16 +215,21 @@ it('retryPayout() resets to pending when wallet was not previously debited', fun
 
 it('retryPayout() increments retry_count on each call', function () {
     execJob_seedPayout('p1', [
-        'status'      => 'failed',
-        'failure_code'=> 'job_exhausted',
+        'status' => 'failed',
+        'failure_code' => 'job_exhausted',
         'retry_count' => 2,
     ]);
 
     $payout = CommissionPayout::find('p1');
 
-    $service = new class extends \App\Services\Stripe\CommissionPayoutService {
+    $service = new class extends \App\Services\Stripe\CommissionPayoutService
+    {
         public function __construct() {}
-        public function processPayoutBatch(CommissionPayout $payout): ?bool { return true; }
+
+        public function processPayoutBatch(CommissionPayout $payout): ?bool
+        {
+            return true;
+        }
     };
 
     $service->retryPayout($payout);
@@ -226,14 +239,16 @@ it('retryPayout() increments retry_count on each call', function () {
 
 it('retryPayout() returns false and does not retry transfer_failed_refund_needed payouts', function () {
     execJob_seedPayout('p1', [
-        'status'       => 'failed',
+        'status' => 'failed',
         'failure_code' => 'transfer_failed_refund_needed',
     ]);
 
     $payout = CommissionPayout::find('p1');
 
-    $service = new class extends \App\Services\Stripe\CommissionPayoutService {
+    $service = new class extends \App\Services\Stripe\CommissionPayoutService
+    {
         public function __construct() {}
+
         public function processPayoutBatch(CommissionPayout $payout): ?bool
         {
             throw new \LogicException('Should not be called');

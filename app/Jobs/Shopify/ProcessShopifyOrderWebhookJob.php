@@ -379,7 +379,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
      *   3. config('sidest.store.default_commission_rate', 15) (platform fallback)
      *
      * @param  array<string, float|null>  $overrideMap
-     * @return array{0: float, 1: string}  [rate, rate_source]
+     * @return array{0: float, 1: string} [rate, rate_source]
      */
     private function resolveCommissionRate(
         string $productGid,

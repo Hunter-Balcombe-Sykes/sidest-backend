@@ -21,8 +21,8 @@ it('dispatches one batch per hour when professionals fit in a single chunk', fun
     DB::shouldReceive('pluck')->andReturn(collect($professionalIds));
 
     $this->artisan('sidest:analytics:backfill-hourly', [
-        '--hours'      => 2,
-        '--domains'    => 'site',
+        '--hours' => 2,
+        '--domains' => 'site',
         '--chunk-size' => 500,
     ])->assertSuccessful();
 
@@ -42,8 +42,8 @@ it('splits into multiple batches per hour when professionals exceed chunk size',
     DB::shouldReceive('pluck')->andReturn($professionalIds);
 
     $this->artisan('sidest:analytics:backfill-hourly', [
-        '--hours'      => 1,
-        '--domains'    => 'site',
+        '--hours' => 1,
+        '--domains' => 'site',
         '--chunk-size' => 500,
     ])->assertSuccessful();
 
@@ -62,7 +62,7 @@ it('uses default chunk size of 500 when option is not supplied', function () {
     DB::shouldReceive('pluck')->andReturn($professionalIds);
 
     $this->artisan('sidest:analytics:backfill-hourly', [
-        '--hours'   => 1,
+        '--hours' => 1,
         '--domains' => 'site',
     ])->assertSuccessful();
 
@@ -81,8 +81,8 @@ it('dispatches site and booking batches independently with correct job types', f
     DB::shouldReceive('pluck')->andReturn(collect($ids));
 
     $this->artisan('sidest:analytics:backfill-hourly', [
-        '--hours'      => 1,
-        '--domains'    => 'all',
+        '--hours' => 1,
+        '--domains' => 'all',
         '--chunk-size' => 500,
     ])->assertSuccessful();
 
@@ -101,7 +101,7 @@ it('dispatches no batches when no professionals exist in range', function () {
     DB::shouldReceive('pluck')->andReturn(collect([]));
 
     $this->artisan('sidest:analytics:backfill-hourly', [
-        '--hours'   => 24,
+        '--hours' => 24,
         '--domains' => 'site',
     ])->assertSuccessful();
 

@@ -62,14 +62,14 @@ function whTestProfessional(): Professional
     $now = now()->toDateTimeString();
 
     DB::connection('pgsql')->table('core.professionals')->insert([
-        'id'                => $id,
-        'handle'            => "pro-{$id}",
-        'handle_lc'         => "pro-{$id}",
-        'display_name'      => "Test Pro {$id}",
+        'id' => $id,
+        'handle' => "pro-{$id}",
+        'handle_lc' => "pro-{$id}",
+        'display_name' => "Test Pro {$id}",
         'professional_type' => 'affiliate',
-        'status'            => 'active',
-        'created_at'        => $now,
-        'updated_at'        => $now,
+        'status' => 'active',
+        'created_at' => $now,
+        'updated_at' => $now,
     ]);
 
     return Professional::find($id);
@@ -81,13 +81,13 @@ function whTestPlan(string $key, string $priceId): Plan
     $now = now()->toDateTimeString();
 
     DB::connection('pgsql')->table('billing.plans')->insert([
-        'id'              => $id,
-        'plan_key'        => $key,
-        'name'            => ucfirst($key),
+        'id' => $id,
+        'plan_key' => $key,
+        'name' => ucfirst($key),
         'stripe_price_id' => $priceId,
-        'is_active'       => 1,
-        'created_at'      => $now,
-        'updated_at'      => $now,
+        'is_active' => 1,
+        'created_at' => $now,
+        'updated_at' => $now,
     ]);
 
     return Plan::find($id);
@@ -99,16 +99,16 @@ function whTestSubscription(Professional $professional, Plan $plan, string $stri
     $now = now()->toDateTimeString();
 
     DB::connection('pgsql')->table('billing.subscriptions')->insert([
-        'id'                     => $id,
-        'professional_id'        => $professional->id,
-        'plan_id'                => $plan->id,
-        'provider'               => 'stripe',
+        'id' => $id,
+        'professional_id' => $professional->id,
+        'plan_id' => $plan->id,
+        'provider' => 'stripe',
         'stripe_subscription_id' => $stripeSubId,
-        'status'                 => 'active',
-        'cancel_at_period_end'   => 0,
-        'ended_at'               => null,
-        'created_at'             => $now,
-        'updated_at'             => $now,
+        'status' => 'active',
+        'cancel_at_period_end' => 0,
+        'ended_at' => null,
+        'created_at' => $now,
+        'updated_at' => $now,
     ]);
 
     return Subscription::find($id);
@@ -120,17 +120,17 @@ function whTestSubscription(Professional $professional, Plan $plan, string $stri
 
 it('subscription.updated webhook updates plan_id when price changes', function () {
     $professional = whTestProfessional();
-    $oldPlan      = whTestPlan('starter', 'price_old');
-    $newPlan      = whTestPlan('growth', 'price_new');
+    $oldPlan = whTestPlan('starter', 'price_old');
+    $newPlan = whTestPlan('growth', 'price_new');
     $subscription = whTestSubscription($professional, $oldPlan, 'sub_abc');
 
     $stripeSubscription = (object) [
-        'id'                   => 'sub_abc',
-        'status'               => 'active',
+        'id' => 'sub_abc',
+        'status' => 'active',
         'current_period_start' => now()->timestamp,
-        'current_period_end'   => now()->addMonth()->timestamp,
+        'current_period_end' => now()->addMonth()->timestamp,
         'cancel_at_period_end' => false,
-        'items'                => (object) [
+        'items' => (object) [
             'data' => [
                 (object) [
                     'price' => (object) ['id' => 'price_new'],
@@ -150,16 +150,16 @@ it('subscription.updated webhook updates plan_id when price changes', function (
 
 it('subscription.updated webhook leaves plan_id unchanged when price is same', function () {
     $professional = whTestProfessional();
-    $plan         = whTestPlan('starter', 'price_same');
+    $plan = whTestPlan('starter', 'price_same');
     $subscription = whTestSubscription($professional, $plan, 'sub_xyz');
 
     $stripeSubscription = (object) [
-        'id'                   => 'sub_xyz',
-        'status'               => 'active',
+        'id' => 'sub_xyz',
+        'status' => 'active',
         'current_period_start' => now()->timestamp,
-        'current_period_end'   => now()->addMonth()->timestamp,
+        'current_period_end' => now()->addMonth()->timestamp,
         'cancel_at_period_end' => false,
-        'items'                => (object) [
+        'items' => (object) [
             'data' => [
                 (object) [
                     'price' => (object) ['id' => 'price_same'],

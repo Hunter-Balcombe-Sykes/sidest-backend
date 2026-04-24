@@ -3,7 +3,6 @@
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Support\Facades\Http;
-
 use Tests\TestCase;
 
 uses(TestCase::class)->in(__FILE__);

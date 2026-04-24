@@ -3,6 +3,7 @@
 namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -10,7 +11,6 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 
 // V2: Core. Creates Shopify Storefront API token ("Side St Hydrogen") via GraphQL. Required for Hydrogen storefronts to fetch product data. Matches existing "Side St" tokens for backward compat.

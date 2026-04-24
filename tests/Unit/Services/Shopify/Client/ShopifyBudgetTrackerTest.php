@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Redis;
 
 beforeEach(function () {
     $this->shop = 'test-shop.myshopify.com';
-    $this->tracker = new ShopifyBudgetTracker();
+    $this->tracker = new ShopifyBudgetTracker;
     Redis::del("shopify:bucket:{$this->shop}");
 });
 

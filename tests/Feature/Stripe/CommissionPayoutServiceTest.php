@@ -32,7 +32,8 @@ beforeEach(function () {
     ] as $col) {
         try {
             $conn->statement("ALTER TABLE core.professionals ADD COLUMN {$col}");
-        } catch (\Throwable) {}
+        } catch (\Throwable) {
+        }
     }
 
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
@@ -66,19 +67,19 @@ function payoutSvc_seedBrand(string $id, array $overrides = []): void
 {
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('core.professionals')->insert(array_merge([
-        'id'                            => $id,
-        'handle'                        => "brand-{$id}",
-        'handle_lc'                     => "brand-{$id}",
-        'display_name'                  => "Brand {$id}",
-        'professional_type'             => 'brand',
-        'status'                        => 'active',
-        'stripe_connect_status'         => 'active',
-        'stripe_customer_id'            => 'cus_test',
-        'stripe_payment_method_id'      => 'pm_test',
-        'stripe_manual_balance_cents'   => 0,
-        'stripe_manual_balance_currency'=> 'AUD',
-        'created_at'                    => $now,
-        'updated_at'                    => $now,
+        'id' => $id,
+        'handle' => "brand-{$id}",
+        'handle_lc' => "brand-{$id}",
+        'display_name' => "Brand {$id}",
+        'professional_type' => 'brand',
+        'status' => 'active',
+        'stripe_connect_status' => 'active',
+        'stripe_customer_id' => 'cus_test',
+        'stripe_payment_method_id' => 'pm_test',
+        'stripe_manual_balance_cents' => 0,
+        'stripe_manual_balance_currency' => 'AUD',
+        'created_at' => $now,
+        'updated_at' => $now,
     ], $overrides));
 }
 
@@ -86,16 +87,16 @@ function payoutSvc_seedAffiliate(string $id, array $overrides = []): void
 {
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('core.professionals')->insert(array_merge([
-        'id'                       => $id,
-        'handle'                   => "affiliate-{$id}",
-        'handle_lc'                => "affiliate-{$id}",
-        'display_name'             => "Affiliate {$id}",
-        'professional_type'        => 'influencer',
-        'status'                   => 'active',
-        'stripe_connect_account_id'=> 'acct_test',
-        'stripe_connect_status'    => 'active',
-        'created_at'               => now()->toDateTimeString(),
-        'updated_at'               => now()->toDateTimeString(),
+        'id' => $id,
+        'handle' => "affiliate-{$id}",
+        'handle_lc' => "affiliate-{$id}",
+        'display_name' => "Affiliate {$id}",
+        'professional_type' => 'influencer',
+        'status' => 'active',
+        'stripe_connect_account_id' => 'acct_test',
+        'stripe_connect_status' => 'active',
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
     ], $overrides));
 }
 
@@ -103,19 +104,19 @@ function payoutSvc_seedPayout(string $id, array $overrides = []): CommissionPayo
 {
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('commerce.commission_payouts')->insert(array_merge([
-        'id'                         => $id,
-        'brand_professional_id'      => 'brand-1',
-        'affiliate_professional_id'  => 'aff-1',
-        'status'                     => 'pending',
-        'gross_commission_cents'     => 10000,
-        'platform_fee_cents'         => 300,
-        'net_payout_cents'           => 9700,
-        'currency_code'              => 'AUD',
-        'wallet_debit_cents'         => 0,
-        'charge_cents'               => 0,
-        'retry_count'                => 0,
-        'created_at'                 => $now,
-        'updated_at'                 => $now,
+        'id' => $id,
+        'brand_professional_id' => 'brand-1',
+        'affiliate_professional_id' => 'aff-1',
+        'status' => 'pending',
+        'gross_commission_cents' => 10000,
+        'platform_fee_cents' => 300,
+        'net_payout_cents' => 9700,
+        'currency_code' => 'AUD',
+        'wallet_debit_cents' => 0,
+        'charge_cents' => 0,
+        'retry_count' => 0,
+        'created_at' => $now,
+        'updated_at' => $now,
     ], $overrides));
 
     return CommissionPayout::find($id);
@@ -128,9 +129,9 @@ function payoutSvc_seedPayout(string $id, array $overrides = []): CommissionPayo
  */
 function payoutSvc_makeStripe(array $services = []): StripeClient
 {
-    $piMock       = $services['pi'] ?? Mockery::mock();
+    $piMock = $services['pi'] ?? Mockery::mock();
     $transferMock = $services['transfer'] ?? Mockery::mock();
-    $refundMock   = $services['refund'] ?? Mockery::mock();
+    $refundMock = $services['refund'] ?? Mockery::mock();
 
     $stripe = Mockery::mock(StripeClient::class);
     $stripe->shouldReceive('getService')->with('paymentIntents')->andReturn($piMock);
@@ -162,7 +163,7 @@ it('marks affiliate_not_connected when affiliate has no active Stripe account', 
     payoutSvc_seedBrand('brand-1');
     payoutSvc_seedAffiliate('aff-1', [
         'stripe_connect_account_id' => null,
-        'stripe_connect_status'     => 'not_connected',
+        'stripe_connect_status' => 'not_connected',
     ]);
     $payout = payoutSvc_seedPayout('p1');
 
@@ -213,8 +214,8 @@ it('completes a card-only payout when brand wallet balance is zero', function ()
 
     $piMock = Mockery::mock();
     $piMock->shouldReceive('create')->once()->andReturn((object) [
-        'id'            => 'pi_test',
-        'status'        => 'succeeded',
+        'id' => 'pi_test',
+        'status' => 'succeeded',
         'latest_charge' => 'ch_test',
     ]);
 
@@ -236,7 +237,7 @@ it('completes a card-only payout when brand wallet balance is zero', function ()
 
 it('completes a wallet-only payout without creating a PaymentIntent', function () {
     payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents'    => 20000,
+        'stripe_manual_balance_cents' => 20000,
         'stripe_manual_balance_currency' => 'AUD',
     ]);
     payoutSvc_seedAffiliate('aff-1');
@@ -261,7 +262,7 @@ it('completes a wallet-only payout without creating a PaymentIntent', function (
 
 it('completes a wallet-and-card payout when wallet partially covers the amount', function () {
     payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents'    => 3000,
+        'stripe_manual_balance_cents' => 3000,
         'stripe_manual_balance_currency' => 'AUD',
     ]);
     payoutSvc_seedAffiliate('aff-1');
@@ -297,12 +298,12 @@ it('does not re-debit the wallet when resuming from collecting status', function
     payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
     payoutSvc_seedAffiliate('aff-1');
     $payout = payoutSvc_seedPayout('p1', [
-        'status'             => 'collecting',
+        'status' => 'collecting',
         'wallet_debit_cents' => 5000,
-        'charge_cents'       => 5000,
-        'funding_source'     => 'wallet_and_card',
+        'charge_cents' => 5000,
+        'funding_source' => 'wallet_and_card',
         'gross_commission_cents' => 10000,
-        'net_payout_cents'   => 9700,
+        'net_payout_cents' => 9700,
     ]);
 
     $piMock = Mockery::mock();
@@ -326,12 +327,12 @@ it('skips PaymentIntent creation and retrieves the existing one when resuming fr
     payoutSvc_seedBrand('brand-1');
     payoutSvc_seedAffiliate('aff-1');
     $payout = payoutSvc_seedPayout('p1', [
-        'status'                   => 'collected',
+        'status' => 'collected',
         'stripe_payment_intent_id' => 'pi_existing',
-        'wallet_debit_cents'       => 0,
-        'charge_cents'             => 10000,
-        'gross_commission_cents'   => 10000,
-        'net_payout_cents'         => 9700,
+        'wallet_debit_cents' => 0,
+        'charge_cents' => 10000,
+        'gross_commission_cents' => 10000,
+        'net_payout_cents' => 9700,
     ]);
 
     $piMock = Mockery::mock();
@@ -357,9 +358,9 @@ it('skips wallet debit and card charge when resuming from transferring status', 
     payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
     payoutSvc_seedAffiliate('aff-1');
     $payout = payoutSvc_seedPayout('p1', [
-        'status'           => 'transferring',
+        'status' => 'transferring',
         'wallet_debit_cents' => 0,
-        'charge_cents'     => 10000,
+        'charge_cents' => 10000,
         'gross_commission_cents' => 10000,
         'net_payout_cents' => 9700,
     ]);
@@ -497,7 +498,7 @@ it('blocks retryPayout when failure_code is transfer_failed_refund_needed', func
     payoutSvc_seedBrand('brand-1');
     payoutSvc_seedAffiliate('aff-1');
     $payout = payoutSvc_seedPayout('p1', [
-        'status'       => 'failed',
+        'status' => 'failed',
         'failure_code' => 'transfer_failed_refund_needed',
     ]);
 
@@ -527,9 +528,9 @@ it('increments retry_count so fresh Stripe idempotency keys are used on each adm
     payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
     payoutSvc_seedAffiliate('aff-1');
     $payout = payoutSvc_seedPayout('p1', [
-        'status'       => 'failed',
+        'status' => 'failed',
         'failure_code' => 'charge_failed',
-        'retry_count'  => 2,
+        'retry_count' => 2,
     ]);
 
     $piMock = Mockery::mock();
@@ -578,7 +579,7 @@ it('does not overwrite already-failed status in the failed hook', function () {
     payoutSvc_seedBrand('brand-1');
     payoutSvc_seedAffiliate('aff-1');
     $payout = payoutSvc_seedPayout('p1', [
-        'status'       => 'failed',
+        'status' => 'failed',
         'failure_code' => 'transfer_failed_refund_needed',
     ]);
 

@@ -28,7 +28,7 @@ class RecordScheduledTaskHeartbeat
     {
         $raw = (string) ($task->description ?: $task->command ?: 'unknown');
         // Strip "'/usr/bin/php' 'artisan' foo:bar" down to "foo:bar"
-        $raw = preg_replace("/^.*\\bartisan\\b\\s+/", '', $raw);
+        $raw = preg_replace('/^.*\\bartisan\\b\\s+/', '', $raw);
         $raw = trim($raw, " '\"");
 
         return preg_replace('/[^A-Za-z0-9:_.-]+/', '_', $raw);

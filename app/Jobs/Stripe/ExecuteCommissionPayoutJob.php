@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Log;
 // Idempotent: processPayoutBatch resumes from the payout's current status so Horizon retries are safe.
 // ShouldBeUnique prevents two workers racing on the same payout if the daily cron re-dispatches
 // a job that is already queued or processing (e.g. waiting on a backoff delay).
-class ExecuteCommissionPayoutJob implements ShouldQueue, ShouldBeUnique
+class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -59,7 +59,7 @@ class ExecuteCommissionPayoutJob implements ShouldQueue, ShouldBeUnique
     {
         Log::error('ExecuteCommissionPayoutJob exhausted all retries', [
             'payout_id' => $this->payoutId,
-            'error'     => $e->getMessage(),
+            'error' => $e->getMessage(),
         ]);
 
         // Transition the payout to `failed` so it surfaces in the staff dashboard
@@ -71,11 +71,11 @@ class ExecuteCommissionPayoutJob implements ShouldQueue, ShouldBeUnique
         $payout = CommissionPayout::find($this->payoutId);
         if ($payout && ! in_array($payout->status, ['completed', 'failed'], true)) {
             $payout->update([
-                'status'         => 'failed',
-                'failure_code'   => 'job_exhausted',
+                'status' => 'failed',
+                'failure_code' => 'job_exhausted',
                 'failure_reason' => 'Payout job exhausted all Horizon retries after transient errors. '
-                    . 'Check wallet_debit_cents and stripe_payment_intent_id for manual reconciliation. '
-                    . $e->getMessage(),
+                    .'Check wallet_debit_cents and stripe_payment_intent_id for manual reconciliation. '
+                    .$e->getMessage(),
             ]);
         }
     }

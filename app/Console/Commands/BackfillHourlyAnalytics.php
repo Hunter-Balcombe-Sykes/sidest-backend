@@ -22,15 +22,15 @@ class BackfillHourlyAnalytics extends Command
 
     public function handle(): int
     {
-        $hours     = max(1, min(168, (int) $this->option('hours')));
-        $domains   = $this->resolveDomains((string) $this->option('domains'));
+        $hours = max(1, min(168, (int) $this->option('hours')));
+        $domains = $this->resolveDomains((string) $this->option('domains'));
         $chunkSize = max(1, (int) $this->option('chunk-size'));
 
-        $start        = Carbon::now()->utc()->subHours($hours - 1)->startOfHour();
+        $start = Carbon::now()->utc()->subHours($hours - 1)->startOfHour();
         $endExclusive = Carbon::now()->utc()->addHour()->startOfHour();
 
         $hourBuckets = collect();
-        $cursor      = $start->copy();
+        $cursor = $start->copy();
         while ($cursor->lt($endExclusive)) {
             $hourBuckets->push($cursor->copy()->toIso8601String());
             $cursor->addHour();

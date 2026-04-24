@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Redis;
 uses(Tests\TestCase::class);
 
 beforeEach(function () {
-    $this->tracker = new ShopifyCostTracker();
+    $this->tracker = new ShopifyCostTracker;
     // Pre-clean only the keys this test suite uses
     Redis::del('shopify:cost:q1', 'shopify:cost:q2', 'shopify:cost:some-query-hash');
 });

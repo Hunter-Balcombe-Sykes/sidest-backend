@@ -160,9 +160,9 @@ it('dispatches commerce batches using brand-affiliate triples from a single JOIN
 
 it('splits commerce dispatch into multiple batches when triples exceed chunk size', function () {
     $triples = collect(range(1, 1100))->map(fn ($i) => (object) [
-        'brand_professional_id'     => 'brand-1',
+        'brand_professional_id' => 'brand-1',
         'affiliate_professional_id' => "aff-{$i}",
-        'day'                       => '2026-04-18',
+        'day' => '2026-04-18',
     ]);
 
     $joinQuery = Mockery::mock();

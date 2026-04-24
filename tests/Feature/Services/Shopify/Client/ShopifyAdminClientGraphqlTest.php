@@ -1,7 +1,6 @@
 <?php
 
 use App\Exceptions\Shopify\ShopifyGraphQLException;
-use App\Exceptions\Shopify\ShopifyThrottledException;
 use App\Exceptions\Shopify\ShopifyTransportException;
 use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Http;
@@ -9,10 +8,10 @@ use Illuminate\Support\Facades\Redis;
 
 beforeEach(function () {
     Redis::del('shopify:bucket:test.myshopify.com');
-    Redis::del('shopify:cost:' . sha1('query { shop { id } }'));
-    Redis::del('shopify:cost:' . sha1('query { foo }'));
-    Redis::del('shopify:cost:' . sha1('query { ok }'));
-    Redis::del('shopify:cost:' . sha1('query test { ok }'));
+    Redis::del('shopify:cost:'.sha1('query { shop { id } }'));
+    Redis::del('shopify:cost:'.sha1('query { foo }'));
+    Redis::del('shopify:cost:'.sha1('query { ok }'));
+    Redis::del('shopify:cost:'.sha1('query test { ok }'));
     $this->client = app(ShopifyAdminClient::class);
     $this->shop = 'test.myshopify.com';
     $this->token = 'shpat_test';

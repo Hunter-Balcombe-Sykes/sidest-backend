@@ -90,12 +90,12 @@ it('cancel path calls Stripe resume with the correct subscription ID from findSt
     $pro = seedPendingDeletionProfessional();
 
     DB::connection('pgsql')->table('billing.subscriptions')->insert([
-        'id'                     => (string) Str::uuid(),
-        'professional_id'        => $pro->id,
+        'id' => (string) Str::uuid(),
+        'professional_id' => $pro->id,
         'stripe_subscription_id' => 'sub_dedup_test',
-        'status'                 => 'active',
-        'created_at'             => now()->toIso8601String(),
-        'updated_at'             => now()->toIso8601String(),
+        'status' => 'active',
+        'created_at' => now()->toIso8601String(),
+        'updated_at' => now()->toIso8601String(),
     ]);
 
     config(['services.stripe.secret_key' => 'test-key']);

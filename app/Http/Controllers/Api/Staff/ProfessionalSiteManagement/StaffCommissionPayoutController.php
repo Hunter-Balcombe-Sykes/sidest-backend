@@ -84,7 +84,7 @@ class StaffCommissionPayoutController extends ApiController
         // (Horizon backoff design) — surface them as 503 so staff know to retry.
         try {
             $this->payoutService->retryPayout($payout);
-        } catch (ApiConnectionException | RateLimitException $e) {
+        } catch (ApiConnectionException|RateLimitException $e) {
             return $this->error('Stripe is temporarily unavailable. Please try again in a moment.', 503);
         }
         $payout->refresh();

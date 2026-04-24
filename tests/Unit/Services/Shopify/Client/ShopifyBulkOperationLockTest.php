@@ -7,11 +7,11 @@ uses(Tests\TestCase::class);
 
 beforeEach(function () {
     $this->shop = 'test-shop.myshopify.com';
-    $this->lock = new ShopifyBulkOperationLock();
+    $this->lock = new ShopifyBulkOperationLock;
     // Pre-clean the key used in tests
     Redis::del("shopify:bulk_lock:{$this->shop}");
-    Redis::del("shopify:bulk_lock:shop-a.myshopify.com");
-    Redis::del("shopify:bulk_lock:shop-b.myshopify.com");
+    Redis::del('shopify:bulk_lock:shop-a.myshopify.com');
+    Redis::del('shopify:bulk_lock:shop-b.myshopify.com');
 });
 
 it('acquires the lock on first try', function () {

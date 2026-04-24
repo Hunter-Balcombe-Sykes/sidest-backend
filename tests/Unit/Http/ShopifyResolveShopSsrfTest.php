@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationController;
-
 use Tests\TestCase;
 
 uses(TestCase::class)->in(__FILE__);

@@ -41,7 +41,7 @@ class ShopifyAdminClient
      * Pre-acquires from the local token bucket before sending and reconciles
      * bucket state from the authoritative throttleStatus in the response.
      *
-     * @throws ShopifyGraphQLException  top-level GraphQL errors (excluding THROTTLED)
+     * @throws ShopifyGraphQLException top-level GraphQL errors (excluding THROTTLED)
      * @throws ShopifyTransportException non-2xx HTTP, timeout, or connection failure
      */
     public function graphql(
@@ -73,10 +73,12 @@ class ShopifyAdminClient
                 // Blocks the worker thread — keep max_inprocess_retries low (default 3).
                 usleep($wait * 1000);
                 $attempt++;
+
                 continue;
             }
 
             $this->handleGraphqlErrors($response, $shopDomain, $queryHash);
+
             return $response;
         }
     }
@@ -92,6 +94,7 @@ class ShopifyAdminClient
      * @param  string  $path  must start with `/admin/...`
      * @param  array<string, mixed>  $body
      * @param  bool  $allow401  pass true for token-revoke calls where 401 means "already revoked"
+     *
      * @throws ShopifyTransportException on non-2xx (excluding 401 when $allow401 is true)
      */
     public function rest(
@@ -112,11 +115,11 @@ class ShopifyAdminClient
             try {
                 $pending = Http::withHeaders(['X-Shopify-Access-Token' => $accessToken])->timeout($timeout);
                 $response = match (strtoupper($method)) {
-                    'GET'    => $pending->get($url, $body),
-                    'POST'   => $pending->post($url, $body),
-                    'PUT'    => $pending->put($url, $body),
+                    'GET' => $pending->get($url, $body),
+                    'POST' => $pending->post($url, $body),
+                    'PUT' => $pending->put($url, $body),
                     'DELETE' => $pending->delete($url, $body),
-                    default  => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
+                    default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
                 };
             } catch (ConnectionException $e) {
                 throw new ShopifyTransportException($shopDomain, 0, $e->getMessage(), $e);
@@ -128,6 +131,7 @@ class ShopifyAdminClient
                 // Blocks the worker thread — keep max_inprocess_retries low (default 3).
                 usleep($wait * 1000);
                 $attempt++;
+
                 continue;
             }
 
@@ -181,7 +185,7 @@ class ShopifyAdminClient
 
         if (! empty($userErrors)) {
             $this->bulkLock->release($shopDomain);
-            throw new \RuntimeException('Shopify bulkOperationRunQuery userErrors: ' . json_encode($userErrors));
+            throw new \RuntimeException('Shopify bulkOperationRunQuery userErrors: '.json_encode($userErrors));
         }
 
         return (string) $response->json('data.bulkOperationRunQuery.bulkOperation.id');
@@ -226,7 +230,7 @@ class ShopifyAdminClient
 
         if (! empty($userErrors)) {
             $this->bulkLock->release($shopDomain);
-            throw new \RuntimeException('Shopify bulkOperationRunMutation userErrors: ' . json_encode($userErrors));
+            throw new \RuntimeException('Shopify bulkOperationRunMutation userErrors: '.json_encode($userErrors));
         }
 
         return (string) $response->json('data.bulkOperationRunMutation.bulkOperation.id');
@@ -334,6 +338,7 @@ class ShopifyAdminClient
                 return true;
             }
         }
+
         return false;
     }
 
@@ -350,6 +355,7 @@ class ShopifyAdminClient
             // Estimate how many ms until 10 points are available (minimum useful budget)
             $needed = max(0, 10 - (int) $available);
             $waitMs = (int) ceil(($needed / $restoreRate) * 1000);
+
             return min($waitMs, $maxWait);
         }
 

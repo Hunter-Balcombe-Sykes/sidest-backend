@@ -23,10 +23,10 @@ class CompactHourlyAnalytics extends Command
 
     public function handle(): int
     {
-        $dryRun    = (bool) $this->option('dry-run');
+        $dryRun = (bool) $this->option('dry-run');
         $chunkSize = max(1, (int) $this->option('chunk-size'));
-        $domains   = $this->resolveDomains((string) $this->option('domains'));
-        $cutoff    = Carbon::now()->utc()->subHours(24)->startOfHour();
+        $domains = $this->resolveDomains((string) $this->option('domains'));
+        $cutoff = Carbon::now()->utc()->subHours(24)->startOfHour();
 
         $this->info('Cutoff hour: '.$cutoff->toIso8601String());
         $this->line('Domains: '.implode(', ', $domains));
@@ -75,20 +75,20 @@ class CompactHourlyAnalytics extends Command
     private function compactCommerce(Carbon $cutoff, bool $dryRun, int $chunkSize): void
     {
         $staleBrandDayCount = DB::scalar(
-            "SELECT COUNT(*) FROM (
+            'SELECT COUNT(*) FROM (
                 SELECT 1 FROM analytics.brand_metrics_hourly
                 WHERE hour_start < ?
                 GROUP BY brand_professional_id, (hour_start AT TIME ZONE timezone)::date
-            ) sub",
+            ) sub',
             [$cutoff]
         );
 
         $staleAffiliateDayCount = DB::scalar(
-            "SELECT COUNT(*) FROM (
+            'SELECT COUNT(*) FROM (
                 SELECT 1 FROM analytics.professional_metrics_hourly
                 WHERE hour_start < ?
                 GROUP BY affiliate_professional_id, (hour_start AT TIME ZONE timezone)::date
-            ) sub",
+            ) sub',
             [$cutoff]
         );
 
@@ -134,10 +134,10 @@ class CompactHourlyAnalytics extends Command
             $this->line("Commerce daily batches dispatched: {$batchCount}");
         }
 
-        $brandRows     = DB::table('analytics.brand_metrics_hourly')->where('hour_start', '<', $cutoff);
+        $brandRows = DB::table('analytics.brand_metrics_hourly')->where('hour_start', '<', $cutoff);
         $affiliateRows = DB::table('analytics.professional_metrics_hourly')->where('hour_start', '<', $cutoff);
 
-        $brandCount     = (clone $brandRows)->count();
+        $brandCount = (clone $brandRows)->count();
         $affiliateCount = (clone $affiliateRows)->count();
 
         if (! $dryRun) {
@@ -151,11 +151,11 @@ class CompactHourlyAnalytics extends Command
     private function compactSite(Carbon $cutoff, bool $dryRun, int $chunkSize): void
     {
         $staleDayCount = DB::scalar(
-            "SELECT COUNT(*) FROM (
+            'SELECT COUNT(*) FROM (
                 SELECT 1 FROM analytics.site_metrics_hourly
                 WHERE hour_start < ?
                 GROUP BY professional_id, (hour_start AT TIME ZONE timezone)::date
-            ) sub",
+            ) sub',
             [$cutoff]
         );
 
@@ -204,11 +204,11 @@ class CompactHourlyAnalytics extends Command
     private function compactBooking(Carbon $cutoff, bool $dryRun, int $chunkSize): void
     {
         $staleDayCount = DB::scalar(
-            "SELECT COUNT(*) FROM (
+            'SELECT COUNT(*) FROM (
                 SELECT 1 FROM analytics.booking_metrics_hourly
                 WHERE hour_start < ?
                 GROUP BY professional_id, (hour_start AT TIME ZONE timezone)::date
-            ) sub",
+            ) sub',
             [$cutoff]
         );
 

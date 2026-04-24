@@ -3,6 +3,7 @@
 namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -10,7 +11,6 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates sidest.* metafield definitions on the brand's Shopify store. Idempotent — skips existing definitions.

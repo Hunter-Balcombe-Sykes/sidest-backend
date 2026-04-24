@@ -33,11 +33,11 @@ function resumeTestProfessional(): Professional
 {
     $id = (string) Str::uuid();
     DB::connection('pgsql')->table('core.professionals')->insert([
-        'id'            => $id,
+        'id' => $id,
         'primary_email' => 'pro@example.com',
-        'status'        => 'active',
-        'created_at'    => now()->toIso8601String(),
-        'updated_at'    => now()->toIso8601String(),
+        'status' => 'active',
+        'created_at' => now()->toIso8601String(),
+        'updated_at' => now()->toIso8601String(),
     ]);
 
     return Professional::query()->where('id', $id)->first();
@@ -46,16 +46,16 @@ function resumeTestProfessional(): Professional
 function seedResumeSubscription(string $professionalId, array $overrides = []): void
 {
     DB::connection('pgsql')->table('billing.subscriptions')->insert(array_merge([
-        'id'                     => (string) Str::uuid(),
-        'professional_id'        => $professionalId,
-        'provider'               => 'stripe',
+        'id' => (string) Str::uuid(),
+        'professional_id' => $professionalId,
+        'provider' => 'stripe',
         'stripe_subscription_id' => 'sub_test_123',
-        'status'                 => 'active',
-        'cancel_at_period_end'   => 1,
-        'current_period_end'     => now()->addDays(10)->toIso8601String(),
-        'ended_at'               => null,
-        'created_at'             => now()->toIso8601String(),
-        'updated_at'             => now()->toIso8601String(),
+        'status' => 'active',
+        'cancel_at_period_end' => 1,
+        'current_period_end' => now()->addDays(10)->toIso8601String(),
+        'ended_at' => null,
+        'created_at' => now()->toIso8601String(),
+        'updated_at' => now()->toIso8601String(),
     ], $overrides));
 }
 
@@ -87,7 +87,7 @@ it('clears cancel_at_period_end on success', function () {
     $billing = Mockery::mock(StripeBillingService::class);
     $billing->shouldReceive('resumeSubscription')->once()->andReturn(Mockery::mock(\Stripe\Subscription::class));
 
-    $action   = new ResumeProfessionalSubscriptionAction($billing);
+    $action = new ResumeProfessionalSubscriptionAction($billing);
     $returned = $action->execute($pro);
 
     expect($returned->cancel_at_period_end)->toBeFalse();
@@ -107,7 +107,7 @@ it('skips Stripe call for non-stripe provider and still clears DB flag', functio
     $billing = Mockery::mock(StripeBillingService::class);
     $billing->shouldNotReceive('resumeSubscription');
 
-    $action   = new ResumeProfessionalSubscriptionAction($billing);
+    $action = new ResumeProfessionalSubscriptionAction($billing);
     $returned = $action->execute($pro);
 
     expect($returned->cancel_at_period_end)->toBeFalse();

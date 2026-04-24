@@ -15,7 +15,9 @@ use Illuminate\Support\Facades\Redis;
 class ShopifyCostTracker
 {
     private const MIN_ESTIMATE = 10;
+
     private const WINDOW_SIZE = 20;
+
     private const EXPIRY_SECONDS = 86400;
 
     public function record(string $queryHash, int $requestedCost, int $actualCost): void
