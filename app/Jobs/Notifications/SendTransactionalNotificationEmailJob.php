@@ -2,17 +2,6 @@
 
 namespace App\Jobs\Notifications;
 
-use App\Mail\Notifications\AnalyticsMilestoneMail;
-use App\Mail\Notifications\AnalyticsWeeklyMail;
-use App\Mail\Notifications\BrandLinkMail;
-use App\Mail\Notifications\BrandStatusMail;
-use App\Mail\Notifications\CatalogChangeMail;
-use App\Mail\Notifications\CommissionNotificationMail;
-use App\Mail\Notifications\IntegrationNotificationMail;
-use App\Mail\Notifications\InviteNotificationMail;
-use App\Mail\Notifications\PayoutNotificationMail;
-use App\Mail\Notifications\ProfileTaskMail;
-use App\Mail\Notifications\SubscriptionMail;
 use App\Models\Core\Notifications\Notification;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Bus\Queueable;
@@ -49,6 +38,17 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
             return;
         }
 
+        // Early-exit if this category has no mailable (in-app-only or unregistered).
+        // Avoids unnecessary DB queries when there's nothing to send.
+        $class = config("sidest.notifications.mailables.{$this->category}");
+        if (! is_string($class) || ! class_exists($class)) {
+            Log::debug('Notification email skipped: category has no mailable', [
+                'category' => $this->category,
+            ]);
+
+            return;
+        }
+
         if (! NotificationPublisher::resolveEmailEnabled($this->professionalId, $this->category)) {
             Log::debug('Notification email skipped: user preference disabled', [
                 'category' => $this->category,
@@ -79,10 +79,11 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
             return;
         }
 
-        $mailable = $this->buildMailable($notification);
+        $mailable = $this->buildMailable($notification, $class);
         if ($mailable === null) {
-            Log::warning('Notification email skipped: unrecognised category', [
+            Log::warning('Notification email skipped: mailable instantiation failed', [
                 'category' => $this->category,
+                'class' => $class,
             ]);
 
             return;
@@ -101,21 +102,14 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
         ]);
     }
 
-    private function buildMailable(Notification $notification): ?\Illuminate\Mail\Mailable
+    private function buildMailable(Notification $notification, string $class): ?\Illuminate\Mail\Mailable
     {
-        return match ($this->category) {
-            'invites' => new InviteNotificationMail($notification),
-            'commissions' => new CommissionNotificationMail($notification),
-            'payouts' => new PayoutNotificationMail($notification),
-            'integrations' => new IntegrationNotificationMail($notification),
-            'analytics_weekly' => new AnalyticsWeeklyMail($notification),
-            'analytics_milestones' => new AnalyticsMilestoneMail($notification),
-            'profile_tasks' => new ProfileTaskMail($notification),
-            'catalog_changes' => new CatalogChangeMail($notification),
-            'brand_status' => new BrandStatusMail($notification),
-            'subscriptions' => new SubscriptionMail($notification),
-            'brand_links' => new BrandLinkMail($notification),
-            default => null,
-        };
+        $mailable = new $class($notification);
+
+        if (! $mailable instanceof \Illuminate\Mail\Mailable) {
+            return null;
+        }
+
+        return $mailable;
     }
 }
