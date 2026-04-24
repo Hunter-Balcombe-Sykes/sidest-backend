@@ -35,7 +35,11 @@ class AnalyticsController extends ApiController
         $site = $this->resolveSiteFromData($data);
 
         if (! $site) {
-            return $this->error('Site not found', 404);
+            // 422 when site_id was given but failed the subdomain cross-check (IDOR attempt).
+            // 404 when only a subdomain was given and simply wasn't found.
+            $statusCode = ! empty($data['site_id']) ? 422 : 404;
+
+            return $this->error('Site not found', $statusCode);
         }
 
         // Check if site is published
@@ -85,7 +89,11 @@ class AnalyticsController extends ApiController
         $site = $this->resolveSiteFromData($data);
 
         if (! $site) {
-            return $this->error('Site not found', 404);
+            // 422 when site_id was given but failed the subdomain cross-check (IDOR attempt).
+            // 404 when only a subdomain was given and simply wasn't found.
+            $statusCode = ! empty($data['site_id']) ? 422 : 404;
+
+            return $this->error('Site not found', $statusCode);
         }
 
         // Check if site is published
