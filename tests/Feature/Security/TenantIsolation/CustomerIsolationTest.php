@@ -1,0 +1,101 @@
+<?php
+
+use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
+use App\Http\Controllers\Api\Professional\ProfessionalEnquiryController;
+use App\Models\Core\Professional\Customer;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+
+beforeEach(function () {
+    tenantHelpersEnsureTables();
+
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.customers (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT,
+        email TEXT,
+        phone TEXT,
+        full_name TEXT,
+        source TEXT,
+        marketing_opt_in_cached INTEGER,
+        deleted_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )');
+
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS site.enquiries (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT,
+        email TEXT,
+        name TEXT,
+        message TEXT,
+        read_at TEXT,
+        deleted_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )');
+});
+
+it('customer index never includes customers from another professional', function () {
+    [$a, $b] = createTwoTenants('affiliate');
+    $now = now()->toDateTimeString();
+
+    DB::table('core.customers')->insert([
+        ['id' => (string) Str::uuid(), 'professional_id' => $a->id, 'email' => 'a@x.com', 'full_name' => 'A Customer', 'created_at' => $now, 'updated_at' => $now],
+        ['id' => (string) Str::uuid(), 'professional_id' => $b->id, 'email' => 'b@x.com', 'full_name' => 'B Customer', 'created_at' => $now, 'updated_at' => $now],
+    ]);
+
+    $req = tenantRequestAs($b);
+    $response = app(ProfessionalCustomerController::class)->index($req);
+    $payload = $response->getData(true);
+
+    // success() wraps via response()->json($payload) — no additional 'data' envelope.
+    $emails = collect($payload['customers'] ?? [])->pluck('email')->all();
+    expect($emails)->toContain('b@x.com');
+    expect($emails)->not->toContain('a@x.com');
+});
+
+it('customer show refuses a customer belonging to another professional', function () {
+    [$a, $b] = createTwoTenants('affiliate');
+    $now = now()->toDateTimeString();
+
+    $customerId = (string) Str::uuid();
+    DB::table('core.customers')->insert([
+        'id' => $customerId,
+        'professional_id' => $a->id,
+        'email' => 'secret@a.com',
+        'full_name' => 'Secret A',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $req = tenantRequestAs($b);
+    $customer = Customer::query()->findOrFail($customerId);
+
+    expect(fn () => app(ProfessionalCustomerController::class)->show($req, $customer))
+        ->toThrow(HttpException::class);
+});
+
+it('enquiry update refuses an enquiry belonging to another professional', function () {
+    [$a, $b] = createTwoTenants('affiliate');
+    $now = now()->toDateTimeString();
+
+    $enqId = (string) Str::uuid();
+    DB::table('site.enquiries')->insert([
+        'id' => $enqId,
+        'professional_id' => $a->id,
+        'email' => 'e@a.com',
+        'message' => 'Hello',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $req = tenantRequestAs($b, ['read' => true], 'PATCH');
+    $response = app(ProfessionalEnquiryController::class)->update($req, $enqId);
+
+    // Controller scopes by professional_id — Brand B's query returns null → 404.
+    expect($response->getStatusCode())->toBe(404);
+
+    // Original enquiry must be untouched.
+    expect(DB::table('site.enquiries')->where('id', $enqId)->value('read_at'))->toBeNull();
+});
