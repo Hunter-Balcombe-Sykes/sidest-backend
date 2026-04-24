@@ -402,7 +402,7 @@ return [
         ],
     ],
 
-    'section_block_types' => ['bio', 'gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact'],
+    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact', 'bio'],
 
     // Platform-default subject dropdown options for the contact section block.
     // Merged with the affiliate's settings.subject_options at render and
@@ -478,7 +478,13 @@ return [
     'account_type_defaults' => [
         // Influencer is the base type (most basic account)
         'influencer' => [
-            'allowed_sections' => ['bio', 'shop', 'services', 'gallery', 'documents', 'newsletter', 'countdown', 'contact'],
+            // NOTE: 'bio' MUST sit at the end of the list. syncAllowedSections
+            // iterates this array and writes sort_order = index, and a unique
+            // index on (site_id, block_group, sort_order) where block_group =
+            // 'sections' rejects any re-packing that would momentarily shift
+            // an existing row's sort_order onto another's. Placing new block
+            // types at the tail keeps existing rows at their stored indices.
+            'allowed_sections' => ['shop', 'services', 'gallery', 'documents', 'newsletter', 'countdown', 'contact', 'bio'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'is_published' => true,
             'allowed_theme_count' => 3,
@@ -494,7 +500,9 @@ return [
         // Professional inherits influencer + adds booking, analytics, custom links
         'professional' => [
             'inherits' => 'influencer',
-            'allowed_sections' => ['bio', 'shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact'],
+            // 'bio' stays at the end — see the note on the influencer block
+            // for why ordering here is load-bearing.
+            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact', 'bio'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'custom_links_allowed' => true,
         ],
