@@ -31,6 +31,7 @@ class Customer extends BaseModel
         'notes',
         'external_id',
         'marketing_opt_in_cached',
+        'redacted_at',
     ];
 
     protected $casts = [
@@ -38,6 +39,7 @@ class Customer extends BaseModel
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
         'marketing_opt_in_cached' => 'boolean',
+        'redacted_at' => 'datetime',
     ];
 
     /**
