@@ -10,7 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 
 // V2: Sets sidest.setup_complete = true shop metafield when brand completes the setup wizard.
@@ -79,13 +79,7 @@ class SetShopifySetupCompleteJob implements ShouldBeUnique, ShouldQueue
 
         try {
             // Get shop GID
-            $shopGidResponse = Http::withHeaders([
-                'X-Shopify-Access-Token' => $accessToken,
-                'Content-Type' => 'application/json',
-            ])->timeout($this->timeout)->post(
-                "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-                ['query' => '{ shop { id } }']
-            );
+            $shopGidResponse = $this->graphql($shopDomain, $accessToken, $apiVersion, '{ shop { id } }', []);
 
             $shopGid = (string) $shopGidResponse->json('data.shop.id', '');
             if ($shopGid === '') {
@@ -93,26 +87,17 @@ class SetShopifySetupCompleteJob implements ShouldBeUnique, ShouldQueue
             }
 
             // Set setup_complete metafield
-            Http::withHeaders([
-                'X-Shopify-Access-Token' => $accessToken,
-                'Content-Type' => 'application/json',
-            ])->timeout($this->timeout)->post(
-                "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-                [
-                    'query' => self::METAFIELDS_SET,
-                    'variables' => [
-                        'metafields' => [
-                            [
-                                'namespace' => 'sidest',
-                                'key' => 'setup_complete',
-                                'value' => 'true',
-                                'type' => 'boolean',
-                                'ownerId' => $shopGid,
-                            ],
-                        ],
+            $this->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELDS_SET, [
+                'metafields' => [
+                    [
+                        'namespace' => 'sidest',
+                        'key' => 'setup_complete',
+                        'value' => 'true',
+                        'type' => 'boolean',
+                        'ownerId' => $shopGid,
                     ],
-                ]
-            );
+                ],
+            ]);
 
             Log::info('Shopify setup_complete metafield set', [
                 'integration_id' => $this->integrationId,
@@ -134,5 +119,17 @@ class SetShopifySetupCompleteJob implements ShouldBeUnique, ShouldQueue
             'integration_id' => $this->integrationId,
             'error' => $e->getMessage(),
         ]);
+    }
+
+    private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
+    {
+        return app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            $query,
+            $variables,
+            $this->timeout,
+        );
     }
 }

@@ -10,7 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates Side St sales channel publication on the brand's Shopify store. Products must be published to this channel to appear on affiliate storefronts.
@@ -103,24 +103,9 @@ class CreateShopifySalesChannelJob implements ShouldBeUnique, ShouldQueue
             }
 
             // Create publication
-            $response = Http::withHeaders([
-                'X-Shopify-Access-Token' => $accessToken,
-                'Content-Type' => 'application/json',
-            ])->timeout($this->timeout)->post(
-                "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-                [
-                    'query' => self::PUBLICATION_CREATE,
-                    'variables' => [
-                        'input' => [
-                            'autoPublish' => false,
-                        ],
-                    ],
-                ]
-            );
-
-            if (! $response->ok()) {
-                throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
-            }
+            $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::PUBLICATION_CREATE, [
+                'input' => ['autoPublish' => false],
+            ]);
 
             $userErrors = $response->json('data.publicationCreate.userErrors', []);
             if (! empty($userErrors)) {
@@ -160,22 +145,21 @@ class CreateShopifySalesChannelJob implements ShouldBeUnique, ShouldQueue
         $integration?->mergeProviderMetadata(['sales_channel_state' => 'failed']);
     }
 
+    private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
+    {
+        return app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            $query,
+            $variables,
+            $this->timeout,
+        );
+    }
+
     private function findExistingPublicationId(string $shopDomain, string $accessToken, string $apiVersion): ?string
     {
-        $response = Http::withHeaders([
-            'X-Shopify-Access-Token' => $accessToken,
-            'Content-Type' => 'application/json',
-        ])->timeout($this->timeout)->post(
-            "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-            [
-                'query' => self::PUBLICATIONS_QUERY,
-                'variables' => ['first' => 50],
-            ]
-        );
-
-        if (! $response->ok()) {
-            throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
-        }
+        $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::PUBLICATIONS_QUERY, ['first' => 50]);
 
         $edges = $response->json('data.publications.edges', []);
 
