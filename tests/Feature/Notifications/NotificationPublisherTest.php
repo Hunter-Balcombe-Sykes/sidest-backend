@@ -140,6 +140,15 @@ it('rejects empty professional_id or empty title/body silently', function () {
         dedupeKey: 'k2',
     );
 
+    $publisher->publish(
+        professionalId: 'pro-1',
+        frontendType: 'Info',
+        category: 'invites',
+        title: 'T',
+        body: 'B',
+        dedupeKey: '   ', // whitespace-only → trimmed to empty → no-op
+    );
+
     expect(DB::table('notifications.notifications')->count())->toBe(0);
 });
 
