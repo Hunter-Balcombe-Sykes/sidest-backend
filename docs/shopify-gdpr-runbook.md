@@ -25,18 +25,7 @@ In the Shopify Partner Dashboard → App → App setup → GDPR webhooks, set:
 
 ### 3. `gdpr` Horizon queue configured
 
-Add to `config/horizon.php` supervisor environments:
-
-```php
-'gdpr' => [
-    'connection' => 'redis_gdpr',
-    'queue' => ['gdpr'],
-    'balance' => 'simple',
-    'processes' => 1,
-    'tries' => 3,
-    'timeout' => 660,
-],
-```
+`config/horizon.php` already defines a `supervisor-gdpr` wired to the `redis_gdpr` connection for both the `production` and `local` environments. No per-deploy edits required — the supervisor is always on.
 
 The `gdpr` queue uses a **dedicated `redis_gdpr` connection** (not the default `redis` connection). This is critical: the default `redis` connection has `retry_after=360`, which is less than `RedactShopJob::$timeout=600`. Without `redis_gdpr`, Redis would re-queue the job while it was still running, causing concurrent duplicate execution of a destructive GDPR operation. The `redis_gdpr` connection sets `retry_after=660` (600s job timeout + 60s safety margin).
 

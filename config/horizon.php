@@ -23,7 +23,7 @@ return [
         'redis:analytics'     => 300,
         'redis:images'        => 300,
         'redis:mail'          => 120,
-        'redis:gdpr'          => 600,
+        'redis_gdpr:gdpr'     => 600,
     ],
 
     'trim' => [
@@ -115,8 +115,13 @@ return [
             'timeout'      => 300,
             'nice'         => 10,
         ],
+        // Must use the redis_gdpr connection (retry_after=660), NOT the default redis
+        // connection (retry_after=360). RedactShopJob has $timeout=600; with the default
+        // connection the job would be re-queued mid-run, causing concurrent duplicate
+        // execution of a destructive GDPR operation. Worker timeout must also exceed
+        // 600s so Horizon does not SIGKILL mid-run.
         'supervisor-gdpr' => [
-            'connection'   => 'redis',
+            'connection'   => 'redis_gdpr',
             'queue'        => ['gdpr'],
             'balance'      => false,
             'maxProcesses' => 1,
@@ -124,7 +129,7 @@ return [
             'maxJobs'      => 0,
             'memory'       => 128,
             'tries'        => 1,
-            'timeout'      => 120,
+            'timeout'      => 660,
             'nice'         => 0,
         ],
         // Videos use a dedicated Redis connection with a 1-hour retry_after.
@@ -157,13 +162,23 @@ return [
 
         'local' => [
             // Single supervisor for local dev — processes all queues in priority order.
+            // `gdpr` is split out into its own supervisor because it requires the
+            // redis_gdpr connection (see supervisor-gdpr note above).
             'supervisor-1' => [
                 'connection'   => 'redis',
-                'queue'        => ['stripe', 'integrations', 'notifications', 'mail', 'default', 'analytics', 'images', 'gdpr'],
+                'queue'        => ['stripe', 'integrations', 'notifications', 'mail', 'default', 'analytics', 'images'],
                 'balance'      => 'simple',
                 'maxProcesses' => 3,
                 'tries'        => 1,
                 'timeout'      => 300,
+            ],
+            'supervisor-gdpr' => [
+                'connection'   => 'redis_gdpr',
+                'queue'        => ['gdpr'],
+                'balance'      => false,
+                'maxProcesses' => 1,
+                'tries'        => 1,
+                'timeout'      => 660,
             ],
             'supervisor-videos' => [
                 'connection'   => 'redis_video',
