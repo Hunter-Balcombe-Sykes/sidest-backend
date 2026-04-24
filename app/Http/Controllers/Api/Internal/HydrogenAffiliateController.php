@@ -429,20 +429,52 @@ class HydrogenAffiliateController extends ApiController
         ];
     }
 
+    /**
+     * Dashboard writes experience as {role, place, start, end, description}.
+     * Project to the Hydrogen contract {title, organisation, period} so the
+     * wire shape mirrors credentials and the theme layer doesn't have to know
+     * about the source schema differences.
+     */
     private function normaliseExperience($row): ?array
     {
         if (! is_array($row)) {
             return null;
         }
-        $title = trim((string) ($row['title'] ?? ''));
+
+        // Accept both the current dashboard schema (role/place) and the older
+        // Hydrogen contract names (title/organisation) so pre-migration rows
+        // don't silently drop.
+        $title = trim((string) ($row['role'] ?? $row['title'] ?? ''));
         if ($title === '') {
             return null;
         }
 
+        $organisation = trim((string) (
+            $row['place']
+            ?? $row['organisation']
+            ?? $row['organization']
+            ?? ''
+        ));
+
+        $start = isset($row['start']) && $row['start'] !== '' ? (string) $row['start'] : null;
+        // A null `end` means "currently active" per the dashboard's
+        // ExperienceEditorModal contract — render as "Current" so the public
+        // site reads like a CV, not a blank field.
+        $rawEnd = $row['end'] ?? null;
+        $end = is_string($rawEnd) && $rawEnd !== '' ? $rawEnd : null;
+
+        if ($start !== null) {
+            $period = $start.' – '.($end ?? 'Current');
+        } elseif (isset($row['period']) && $row['period'] !== '') {
+            $period = (string) $row['period'];
+        } else {
+            $period = null;
+        }
+
         return [
             'title' => $title,
-            'organisation' => trim((string) ($row['organisation'] ?? $row['organization'] ?? '')),
-            'period' => isset($row['period']) && $row['period'] !== '' ? (string) $row['period'] : null,
+            'organisation' => $organisation,
+            'period' => $period,
         ];
     }
 
