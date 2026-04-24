@@ -402,7 +402,7 @@ return [
         ],
     ],
 
-    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact'],
+    'section_block_types' => ['bio', 'gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact'],
 
     // Platform-default subject dropdown options for the contact section block.
     // Merged with the affiliate's settings.subject_options at render and
@@ -478,7 +478,7 @@ return [
     'account_type_defaults' => [
         // Influencer is the base type (most basic account)
         'influencer' => [
-            'allowed_sections' => ['shop', 'services', 'gallery', 'documents', 'newsletter', 'countdown', 'contact'],
+            'allowed_sections' => ['bio', 'shop', 'services', 'gallery', 'documents', 'newsletter', 'countdown', 'contact'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'is_published' => true,
             'allowed_theme_count' => 3,
@@ -494,7 +494,7 @@ return [
         // Professional inherits influencer + adds booking, analytics, custom links
         'professional' => [
             'inherits' => 'influencer',
-            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact'],
+            'allowed_sections' => ['bio', 'shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'custom_links_allowed' => true,
         ],
