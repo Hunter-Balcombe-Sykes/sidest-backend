@@ -30,8 +30,6 @@ return [
         'spotify',
         'soundcloud',
         'snapchat',
-        'twitch',
-        'kick',
         // Booking platform icons
         'fresha',
         'booksy',
@@ -229,29 +227,6 @@ return [
             'default_category' => 'social',
             'handle_location' => 'path',
         ],
-        'twitch' => [
-            'display_name' => 'Twitch',
-            'icon_key' => 'twitch',
-            'placeholder' => 'yourname',
-            'handle_pattern' => '/^[a-zA-Z0-9_]{4,25}$/',
-            'url_template' => 'https://twitch.tv/{handle}',
-            'host_allowlist' => ['twitch.tv', 'www.twitch.tv'],
-            'url_path_extractor' => '#^/([a-zA-Z0-9_]{4,25})/?$#',
-            'default_category' => 'social',
-            'handle_location' => 'path',
-        ],
-        'kick' => [
-            'display_name' => 'Kick',
-            'icon_key' => 'kick',
-            'placeholder' => 'yourname',
-            'handle_pattern' => '/^[a-zA-Z0-9_-]{3,25}$/',
-            'url_template' => 'https://kick.com/{handle}',
-            'host_allowlist' => ['kick.com', 'www.kick.com'],
-            'url_path_extractor' => '#^/([a-zA-Z0-9_-]{3,25})/?$#',
-            'default_category' => 'social',
-            'handle_location' => 'path',
-        ],
-
         // --- Booking platforms (default_category: booking) ---
         'fresha' => [
             'display_name' => 'Fresha',
