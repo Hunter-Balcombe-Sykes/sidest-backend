@@ -6,7 +6,7 @@ use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -83,19 +83,16 @@ class ShopifyDataResyncService
     private function fetchShopData(string $shopDomain, string $accessToken): array
     {
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
-        $endpoint = "https://{$shopDomain}/admin/api/{$apiVersion}/shop.json";
 
         try {
-            $response = Http::timeout(20)
-                ->acceptJson()
-                ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
-                ->get($endpoint);
-        } catch (\Throwable $e) {
+            $response = app(ShopifyAdminClient::class)->rest(
+                method: 'GET',
+                shopDomain: $shopDomain,
+                accessToken: $accessToken,
+                path: "/admin/api/{$apiVersion}/shop.json",
+            );
+        } catch (\App\Exceptions\Shopify\ShopifyTransportException $e) {
             throw new RuntimeException('Unable to reach Shopify: '.$e->getMessage(), previous: $e);
-        }
-
-        if (! $response->ok()) {
-            throw new RuntimeException("Shopify shop.json request failed (HTTP {$response->status()}).");
         }
 
         $shop = $response->json('shop');

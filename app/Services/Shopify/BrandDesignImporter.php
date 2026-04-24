@@ -4,7 +4,7 @@ namespace App\Services\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 
 // Imports the brand-design shape from Shopify for a single integration.
 //
@@ -169,22 +169,12 @@ class BrandDesignImporter
      */
     private function fetchBrand(string $shopDomain, string $accessToken, string $apiVersion): array
     {
-        $endpoint = "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json";
-
-        $response = Http::timeout(20)
-            ->acceptJson()
-            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
-            ->post($endpoint, ['query' => self::SHOP_BRAND_QUERY]);
-
-        if (! $response->ok()) {
-            throw new \RuntimeException("Shopify brand fetch failed (HTTP {$response->status()}).");
-        }
-
-        $errors = $response->json('errors', []);
-        if (is_array($errors) && $errors !== []) {
-            $message = (string) Arr::get($errors, '0.message', 'Shopify GraphQL returned errors.');
-            throw new \RuntimeException($message);
-        }
+        $response = app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            self::SHOP_BRAND_QUERY,
+        );
 
         return [
             'slogan' => $response->json('data.shop.brand.slogan'),
@@ -204,14 +194,14 @@ class BrandDesignImporter
     private function fetchActiveThemeSettings(string $shopDomain, string $accessToken, string $apiVersion): array
     {
         // Step 1 — find the MAIN (active) theme ID and name via GraphQL.
-        $gqlEndpoint = "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json";
-
-        $themesResponse = Http::timeout(20)
-            ->acceptJson()
-            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
-            ->post($gqlEndpoint, ['query' => self::THEMES_QUERY]);
-
-        if (! $themesResponse->ok()) {
+        try {
+            $themesResponse = app(ShopifyAdminClient::class)->graphql(
+                $shopDomain,
+                $accessToken,
+                $apiVersion,
+                self::THEMES_QUERY,
+            );
+        } catch (\Throwable) {
             return ['_theme_name' => null, 'current' => []];
         }
 
@@ -234,15 +224,17 @@ class BrandDesignImporter
         $themeId = $matches[1];
 
         // Step 2 — fetch settings_data.json via the Asset REST endpoint.
-        // The response body contains a `asset.value` string of JSON.
-        $assetEndpoint = "https://{$shopDomain}/admin/api/{$apiVersion}/themes/{$themeId}/assets.json";
-
-        $assetResponse = Http::timeout(20)
-            ->acceptJson()
-            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
-            ->get($assetEndpoint, ['asset[key]' => 'config/settings_data.json']);
-
-        if (! $assetResponse->ok()) {
+        // The response body contains an `asset.value` string of JSON.
+        // Step 2 — fetch settings_data.json via the Asset REST endpoint.
+        try {
+            $assetResponse = app(ShopifyAdminClient::class)->rest(
+                method: 'GET',
+                shopDomain: $shopDomain,
+                accessToken: $accessToken,
+                path: "/admin/api/{$apiVersion}/themes/{$themeId}/assets.json",
+                body: ['asset[key]' => 'config/settings_data.json'],
+            );
+        } catch (\Throwable) {
             return ['_theme_name' => $themeName, 'current' => []];
         }
 
