@@ -9,10 +9,10 @@ function normalizer(): SocialLinkNormalizer
 
 // --- getPublicRegistry() ---
 
-it('returns 24 platforms in the public registry', function () {
+it('returns 26 platforms in the public registry', function () {
     $registry = normalizer()->getPublicRegistry();
 
-    expect($registry)->toHaveCount(24);
+    expect($registry)->toHaveCount(26);
 });
 
 it('strips internal validation fields from the public registry', function () {
@@ -325,7 +325,7 @@ it('exposes category in the public registry entries', function () {
 
     foreach ($registry as $entry) {
         expect($entry)->toHaveKey('category');
-        expect($entry['category'])->toBeIn(['social', 'booking', 'education', 'content', 'events', 'other']);
+        expect($entry['category'])->toBeIn(['social', 'booking', 'education', 'content', 'events', 'streaming', 'other']);
     }
 });
 

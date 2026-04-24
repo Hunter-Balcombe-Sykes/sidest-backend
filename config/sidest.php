@@ -49,6 +49,9 @@ return [
         'apple_podcasts',
         'substack',
         'bandcamp',
+        // Streaming platform icons
+        'twitch',
+        'kick',
     ],
     'link_block_settings_keys' => [
         'open_in_new_tab',
@@ -66,6 +69,7 @@ return [
         // write; resolved from the platform's default_category when not supplied.
         // Same JSONB-first rationale as `platform` above.
         'category',
+        'live_check_enabled',
     ],
 
     /*
@@ -79,7 +83,18 @@ return [
     | updating the frontend category picker and confirming the public mini-site
     | renderer handles the new value.
     */
-    'link_categories' => ['social', 'booking', 'education', 'content', 'events', 'other'],
+    'link_categories' => ['social', 'booking', 'education', 'content', 'events', 'streaming', 'other'],
+
+    // Platforms that support automatic live status detection via the polling job.
+    // Must match keys in social_platforms above.
+    'streaming_platforms' => ['twitch', 'kick'],
+
+    // Live-status polling tuning knobs. Keeps API call volume bounded.
+    'streaming' => [
+        // Hard cap on blocks with live_check_enabled=true per site — prevents a single
+        // user from monopolizing the polling budget. Enforced in UpdateLinkBlockRequest.
+        'max_live_check_per_site' => (int) env('SIDEST_STREAMING_MAX_LIVE_CHECK_PER_SITE', 5),
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -399,6 +414,30 @@ return [
             'url_path_extractor' => '#^/?$#',
             'default_category' => 'content',
             'handle_location' => 'subdomain',
+        ],
+
+        // --- Streaming platforms ---
+        'twitch' => [
+            'display_name'       => 'Twitch',
+            'icon_key'           => 'twitch',
+            'placeholder'        => 'your channel name',
+            'handle_pattern'     => '/^[a-zA-Z0-9_]{4,25}$/',
+            'url_template'       => 'https://twitch.tv/{handle}',
+            'host_allowlist'     => ['twitch.tv', 'www.twitch.tv'],
+            'url_path_extractor' => '#^/([a-zA-Z0-9_]{4,25})/?$#',
+            'handle_location'    => 'path',
+            'default_category'   => 'streaming',
+        ],
+        'kick' => [
+            'display_name'       => 'Kick',
+            'icon_key'           => 'kick',
+            'placeholder'        => 'your channel name',
+            'handle_pattern'     => '/^[a-zA-Z0-9_-]{3,50}$/',
+            'url_template'       => 'https://kick.com/{handle}',
+            'host_allowlist'     => ['kick.com', 'www.kick.com'],
+            'url_path_extractor' => '#^/([a-zA-Z0-9_-]{3,50})/?$#',
+            'handle_location'    => 'path',
+            'default_category'   => 'streaming',
         ],
     ],
 
