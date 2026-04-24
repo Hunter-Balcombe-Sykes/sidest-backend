@@ -476,13 +476,17 @@ class HydrogenAffiliateController extends ApiController
         return [
             'state' => 'live',
             'data' => [
+                // Raw id — Hydrogen uses it to build a same-origin proxy URL
+                // (e.g. /api/document/{id}) so react-pdf can fetch bytes
+                // without tripping CORS. The absolute download_url below is
+                // still used by the Download button, which triggers a
+                // browser navigation and is not subject to CORS.
+                'id' => (string) $media->id,
                 'title' => $media->alt_text,
                 'caption' => $media->caption,
-                // Absolute URL — Hydrogen fetches this from its own origin,
-                // so a relative path would resolve to the wrong host. Points
-                // at the existing public download redirect (signed R2 URL
-                // issued server-side) so the Hydrogen payload never carries
-                // R2 credentials.
+                // Absolute URL to the backend download redirect (signed R2
+                // URL issued server-side) so the Hydrogen payload never
+                // carries R2 credentials.
                 'download_url' => url('/api/public/documents/'.$media->id.'/download'),
                 'mime' => $media->original_mime,
                 'size_bytes' => $media->original_size_bytes,
