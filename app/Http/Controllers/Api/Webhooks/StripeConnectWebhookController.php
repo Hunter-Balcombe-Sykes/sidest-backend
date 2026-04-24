@@ -76,6 +76,41 @@ class StripeConnectWebhookController extends Controller
             return response()->json(['received' => true]);
         }
 
+        return $this->handleParsedEvent($event);
+    }
+
+    /**
+     * Dispatch a verified, de-duplicated Stripe Event to the appropriate handler.
+     * Extracted from __invoke() so it can be unit-tested without HMAC signing.
+     *
+     * Guards account-scoped event types by verifying the HMAC-signed top-level
+     * `event->account` field matches `data.object->id`. A mismatch means the
+     * payload was tampered with; we reject with 400 rather than mutating records.
+     */
+    public function handleParsedEvent(\Stripe\Event $event): JsonResponse
+    {
+        // For account-scoped events, event->account is the HMAC-signed source of truth.
+        // If data.object.id differs, reject — payload could have been tampered with
+        // to mutate a victim account using the attacker's valid HMAC.
+        $accountScopedPrefixes = ['account.', 'capability.'];
+        $isAccountScoped = collect($accountScopedPrefixes)
+            ->contains(fn ($p) => str_starts_with($event->type, $p));
+
+        if ($isAccountScoped) {
+            $topLevelAccount = $event->account ?? null;
+            $objectId = $event->data->object->id ?? null;
+
+            if ($topLevelAccount === null || $topLevelAccount !== $objectId) {
+                Log::warning('stripe.connect.account_mismatch', [
+                    'event_id'      => $event->id,
+                    'event_account' => $topLevelAccount,
+                    'object_id'     => $objectId,
+                ]);
+
+                return response()->json(['error' => 'account_mismatch'], 400);
+            }
+        }
+
         match ($event->type) {
             'account.updated' => $this->handleAccountUpdated($event->data->object),
             'checkout.session.completed' => $this->handleCheckoutSessionCompleted($event->data->object, (string) ($event->account ?? '')),
