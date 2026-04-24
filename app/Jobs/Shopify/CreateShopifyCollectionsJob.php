@@ -10,7 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 
 // V2: Creates four Side St collections on the brand's Shopify store and writes handles to shop metafields.
@@ -337,17 +337,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
             'input' => $input,
         ]);
 
-        // Check for GraphQL-level errors (not userErrors)
-        $graphqlErrors = $response->json('errors', []);
-        if (! empty($graphqlErrors)) {
-            Log::warning('Shopify collection creation GraphQL errors', [
-                'title' => $def['title'],
-                'errors' => $graphqlErrors,
-            ]);
-
-            return null;
-        }
-
+        // client throws ShopifyGraphQLException on top-level errors — check userErrors only.
         $userErrors = $response->json('data.collectionCreate.userErrors', []);
         if (! empty($userErrors)) {
             Log::warning('Shopify collection creation had userErrors', [
@@ -492,21 +482,13 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
 
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
-        $response = Http::withHeaders([
-            'X-Shopify-Access-Token' => $accessToken,
-            'Content-Type' => 'application/json',
-        ])->timeout($this->timeout)->post(
-            "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-            array_filter([
-                'query' => $query,
-                'variables' => ! empty($variables) ? $variables : null,
-            ])
+        return app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            $query,
+            $variables,
+            $this->timeout,
         );
-
-        if (! $response->successful()) {
-            throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
-        }
-
-        return $response;
     }
 }
