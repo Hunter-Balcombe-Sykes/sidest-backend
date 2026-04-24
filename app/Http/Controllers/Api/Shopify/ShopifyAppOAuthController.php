@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Api\Shopify;
 
+use App\Exceptions\Shopify\ShopifyTransportException;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\BrandSignupService;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use App\Services\Shopify\ShopifySetupTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -106,13 +108,18 @@ class ShopifyAppOAuthController extends ApiController
             return $this->error('Empty access token received from Shopify.', 502);
         }
 
-        $shopResponse = Http::withHeaders([
-            'X-Shopify-Access-Token' => $accessToken,
-        ])->get("https://{$shop}/admin/api/".config('services.shopify.api_version').'/shop.json');
-
         $shopData = [];
-        if ($shopResponse->successful()) {
+        try {
+            $apiVersion = (string) config('services.shopify.api_version', '2025-01');
+            $shopResponse = app(ShopifyAdminClient::class)->rest(
+                method: 'GET',
+                shopDomain: $shop,
+                accessToken: $accessToken,
+                path: "/admin/api/{$apiVersion}/shop.json",
+            );
             $shopData = (array) ($shopResponse->json('shop') ?? []);
+        } catch (ShopifyTransportException $e) {
+            Log::warning('Shopify OAuth: shop fetch failed', ['shop' => $shop, 'status' => $e->status]);
         }
 
         $shopEmail = strtolower(trim((string) Arr::get($shopData, 'email', '')));
