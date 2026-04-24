@@ -62,7 +62,7 @@ class NotificationEmailPreferenceController extends ApiController
                 'overridden_by_policy' => in_array($perProMode, ['force_on', 'force_off'], true)
                     || in_array($globalMode, ['force_on', 'force_off'], true),
             ];
-        }, NotificationPublisher::CATEGORIES);
+        }, NotificationPublisher::categories());
 
         return $this->success(['preferences' => array_values($result)]);
     }

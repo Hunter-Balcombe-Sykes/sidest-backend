@@ -15,7 +15,7 @@ class UpdateNotificationEmailPoliciesRequest extends FormRequest
 
     public function rules(): array
     {
-        $validCategories = implode(',', NotificationPublisher::CATEGORIES);
+        $validCategories = implode(',', NotificationPublisher::categories());
 
         return [
             'policies' => ['required', 'array', 'min:1'],

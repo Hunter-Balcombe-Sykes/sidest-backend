@@ -15,7 +15,7 @@ class UpdateNotificationEmailPreferencesRequest extends FormRequest
 
     public function rules(): array
     {
-        $validCategories = implode(',', NotificationPublisher::CATEGORIES);
+        $validCategories = implode(',', NotificationPublisher::categories());
 
         return [
             'preferences' => ['required', 'array', 'min:1'],
