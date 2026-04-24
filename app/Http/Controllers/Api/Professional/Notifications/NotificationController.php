@@ -91,21 +91,20 @@ class NotificationController extends ApiController
 
     private function upsertReceipt(string $notificationId, string $professionalId, array $set): void
     {
+        // Whitelist — only read_at / dismissed_at can be set, no other columns.
         $set = array_intersect_key($set, array_flip(self::RECEIPT_COLUMNS));
-        $id = (string) Str::uuid();
 
-        $cols = array_keys($set);
-        $placeholders = implode(', ', array_fill(0, count($cols), '?'));
-        $updates = implode(', ', array_map(fn ($c) => "{$c} = EXCLUDED.{$c}", $cols));
-
-        $sql = '
-        INSERT INTO notifications.notification_receipts (id, notification_id, professional_id, '.implode(', ', $cols).", created_at, updated_at)
-        VALUES (?, ?, ?, {$placeholders}, NOW(), NOW())
-        ON CONFLICT (notification_id, professional_id)
-        DO UPDATE SET {$updates}, updated_at = NOW()
-        ";
-
-        DB::statement($sql, array_merge([$id, $notificationId, $professionalId], array_values($set)));
+        DB::table('notifications.notification_receipts')->upsert(
+            [array_merge([
+                'id' => (string) Str::uuid(),
+                'notification_id' => $notificationId,
+                'professional_id' => $professionalId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ], $set)],
+            ['notification_id', 'professional_id'],  // unique-by columns
+            [...array_keys($set), 'updated_at'],     // columns to overwrite on conflict
+        );
     }
 
     public function markRead(Request $request, Notification $notification): JsonResponse
