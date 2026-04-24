@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
+use App\Jobs\Shopify\ProcessShopifyOrderWebhookJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 
 beforeEach(function () {
@@ -53,6 +55,8 @@ it('shopify order webhook rejects a payload for an unknown shop domain', functio
 });
 
 it('shopify order webhook for brand A domain does not process events for brand B domain', function () {
+    Queue::fake();
+
     [$a, $b] = createTwoTenants('brand');
     $secret = 'test-webhook-secret-456';
     Config::set('services.shopify.webhook_secret', $secret);
@@ -70,13 +74,17 @@ it('shopify order webhook for brand A domain does not process events for brand B
     ]);
 
     // Payload claims to come from brand B's shop — but B has no integration.
-    // The webhook should acknowledge but dispatch nothing.
+    // The webhook should acknowledge but dispatch nothing for either brand.
     $payload = ['id' => 12345, 'total_price' => '50.00'];
     $req = buildShopifyWebhookRequest($payload, 'brand-b.myshopify.com', $secret);
 
     $response = app(ShopifyOrderWebhookController::class)->__invoke($req);
 
     expect($response->getStatusCode())->toBe(200);
+
+    // No processing job dispatched — Brand B's unregistered domain must not trigger
+    // Brand A's integration as a fallback.
+    Queue::assertNotPushed(ProcessShopifyOrderWebhookJob::class);
 
     // Brand A's integration record is unmodified (not used by Brand B's webhook).
     $aRecord = DB::table('core.professional_integrations')
