@@ -2,10 +2,10 @@
 
 uses(Tests\TestCase::class)->in(__FILE__);
 
-it('exposes the 6 link categories in config', function () {
+it('exposes the 7 link categories in config', function () {
     $categories = config('sidest.link_categories');
 
-    expect($categories)->toBe(['social', 'booking', 'education', 'content', 'events', 'other']);
+    expect($categories)->toBe(['social', 'booking', 'education', 'content', 'events', 'streaming', 'other']);
 });
 
 it('includes category in the link_block_settings_keys allowlist', function () {
@@ -88,4 +88,22 @@ it('registers substack and bandcamp as content subdomain-mode platforms', functi
         expect($config['handle_location'])->toBe('subdomain');
         expect($config['host_allowlist'][0])->toBe($base);
     }
+});
+
+it('registers twitch and kick as streaming path-mode platforms', function () {
+    foreach (['twitch', 'kick'] as $key) {
+        $config = config("sidest.social_platforms.{$key}");
+        expect($config)->not->toBeNull("{$key} not registered in social_platforms");
+        expect($config['default_category'])->toBe('streaming');
+        expect($config['handle_location'])->toBe('path');
+        expect($config['url_template'])->toStartWith('https://');
+    }
+});
+
+it('streaming_platforms config lists twitch and kick', function () {
+    expect(config('sidest.streaming_platforms'))->toBe(['twitch', 'kick']);
+});
+
+it('live_check_enabled is in the link_block_settings_keys allowlist', function () {
+    expect(config('sidest.link_block_settings_keys'))->toContain('live_check_enabled');
 });
