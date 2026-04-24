@@ -9,10 +9,13 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 beforeEach(function () {
     tenantHelpersEnsureTables();
 
+    // square_variation_id is included because the controller adds whereNull('square_variation_id')
+    // when the 'square' query param is absent. title matches the production column name on the model.
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS site.services (
         id TEXT PRIMARY KEY,
         professional_id TEXT,
-        name TEXT,
+        title TEXT,
+        square_variation_id TEXT,
         duration_minutes INTEGER,
         price_cents INTEGER,
         sort_order INTEGER,
@@ -31,7 +34,7 @@ it('service destroy refuses a service belonging to another professional', functi
     DB::table('site.services')->insert([
         'id' => $serviceId,
         'professional_id' => $a->id,
-        'name' => 'Secret Cut',
+        'title' => 'Secret Cut',
         'price_cents' => 50_00,
         'created_at' => $now,
         'updated_at' => $now,
@@ -53,15 +56,17 @@ it('service index only returns services belonging to the authenticated professio
     $now = now()->toDateTimeString();
 
     DB::table('site.services')->insert([
-        ['id' => (string) Str::uuid(), 'professional_id' => $a->id, 'name' => 'A Service', 'price_cents' => 100_00, 'created_at' => $now, 'updated_at' => $now],
-        ['id' => (string) Str::uuid(), 'professional_id' => $b->id, 'name' => 'B Service', 'price_cents' => 200_00, 'created_at' => $now, 'updated_at' => $now],
+        ['id' => (string) Str::uuid(), 'professional_id' => $a->id, 'title' => 'A Service', 'price_cents' => 100_00, 'created_at' => $now, 'updated_at' => $now],
+        ['id' => (string) Str::uuid(), 'professional_id' => $b->id, 'title' => 'B Service', 'price_cents' => 200_00, 'created_at' => $now, 'updated_at' => $now],
     ]);
 
+    // flat=1 returns {services:[...]} and skips the ServiceCategory grouping query.
     $req = tenantRequestAs($b);
+    $req->query->set('flat', '1');
     $response = app(ProfessionalServiceController::class)->index($req);
     $payload = $response->getData(true);
 
-    $names = collect($payload['data'] ?? $payload['services'] ?? [])->pluck('name')->all();
-    expect($names)->toContain('B Service');
-    expect($names)->not->toContain('A Service');
+    $titles = collect($payload['services'] ?? [])->pluck('title')->all();
+    expect($titles)->toContain('B Service');
+    expect($titles)->not->toContain('A Service');
 });

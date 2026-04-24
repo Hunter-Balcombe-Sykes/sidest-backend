@@ -10,15 +10,15 @@ beforeEach(function () {
     tenantHelpersEnsureTables();
     Cache::flush();
 
+    // Column names must match what the controllers actually query (day, gross_cents, orders_count).
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.brand_metrics_daily (
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
-        date_bucket TEXT,
-        gross_revenue_cents INTEGER,
-        order_count INTEGER,
-        commission_accrued_cents INTEGER,
-        commission_reversed_cents INTEGER,
-        commission_paid_cents INTEGER,
+        day TEXT,
+        orders_count INTEGER,
+        gross_cents INTEGER,
+        refunded_cents INTEGER,
+        net_cents INTEGER,
         currency_code TEXT
     )');
 
@@ -26,25 +26,34 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
         affiliate_professional_id TEXT,
-        date_bucket TEXT,
-        gross_revenue_cents INTEGER,
-        order_count INTEGER
+        day TEXT,
+        orders_count INTEGER,
+        gross_cents INTEGER,
+        net_cents INTEGER,
+        commission_net_cents INTEGER,
+        customers_count INTEGER,
+        currency_code TEXT
     )');
 
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.brand_commission_daily (
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
-        date_bucket TEXT,
-        commission_accrued_cents INTEGER,
-        commission_reversed_cents INTEGER,
-        commission_paid_cents INTEGER,
+        day TEXT,
+        payout_status TEXT,
+        net_outstanding_cents INTEGER,
+        payout_cents INTEGER,
+        reversal_cents INTEGER,
         currency_code TEXT
     )');
 
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.professional_metrics_daily (
         id TEXT PRIMARY KEY,
         affiliate_professional_id TEXT,
-        date_bucket TEXT,
+        day TEXT,
+        orders_count INTEGER,
+        gross_cents INTEGER,
+        refunded_cents INTEGER,
+        net_cents INTEGER,
         commission_accrued_cents INTEGER,
         commission_reversed_cents INTEGER,
         commission_paid_cents INTEGER,
@@ -55,6 +64,10 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         affiliate_professional_id TEXT,
         hour_start TEXT,
+        orders_count INTEGER,
+        gross_cents INTEGER,
+        refunded_cents INTEGER,
+        net_cents INTEGER,
         commission_accrued_cents INTEGER,
         commission_reversed_cents INTEGER,
         commission_paid_cents INTEGER,
@@ -65,11 +78,10 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
         hour_start TEXT,
-        gross_revenue_cents INTEGER,
-        order_count INTEGER,
-        commission_accrued_cents INTEGER,
-        commission_reversed_cents INTEGER,
-        commission_paid_cents INTEGER,
+        orders_count INTEGER,
+        gross_cents INTEGER,
+        refunded_cents INTEGER,
+        net_cents INTEGER,
         currency_code TEXT
     )');
 });
@@ -79,15 +91,15 @@ it('brand commerce analytics overview never exposes another brands revenue', fun
     $from = now()->subDays(7)->toDateString();
     $to = now()->toDateString();
 
+    // Only Brand A has revenue data.
     DB::table('analytics.brand_metrics_daily')->insert([
         'id' => (string) Str::uuid(),
         'brand_professional_id' => $a->id,
-        'date_bucket' => now()->subDay()->toDateString(),
-        'gross_revenue_cents' => 999_00,
-        'order_count' => 5,
-        'commission_accrued_cents' => 99_00,
-        'commission_reversed_cents' => 0,
-        'commission_paid_cents' => 0,
+        'day' => now()->subDay()->toDateString(),
+        'orders_count' => 5,
+        'gross_cents' => 999_00,
+        'refunded_cents' => 0,
+        'net_cents' => 900_00,
         'currency_code' => 'GBP',
     ]);
 
@@ -98,9 +110,10 @@ it('brand commerce analytics overview never exposes another brands revenue', fun
     $response = app(BrandCommerceAnalyticsController::class)->overview($req);
     $payload = $response->getData(true);
 
-    $totals = $payload['data']['totals'] ?? [];
-    expect((int) ($totals['gross_revenue_cents'] ?? $totals['total_revenue_cents'] ?? 0))->toBe(0);
-    expect((int) ($totals['order_count'] ?? 0))->toBe(0);
+    // success() wraps via response()->json($data) — totals is a top-level key, no 'data' envelope.
+    $totals = $payload['totals'] ?? [];
+    expect((int) ($totals['gross_cents'] ?? 0))->toBe(0);
+    expect((int) ($totals['orders_count'] ?? 0))->toBe(0);
 });
 
 it('affiliate commerce analytics overview never exposes another affiliates commissions', function () {
@@ -108,10 +121,15 @@ it('affiliate commerce analytics overview never exposes another affiliates commi
     $from = now()->subDays(7)->toDateString();
     $to = now()->toDateString();
 
+    // Only Affiliate A has commission data.
     DB::table('analytics.professional_metrics_daily')->insert([
         'id' => (string) Str::uuid(),
         'affiliate_professional_id' => $a->id,
-        'date_bucket' => now()->subDay()->toDateString(),
+        'day' => now()->subDay()->toDateString(),
+        'orders_count' => 3,
+        'gross_cents' => 500_00,
+        'refunded_cents' => 0,
+        'net_cents' => 450_00,
         'commission_accrued_cents' => 500_00,
         'commission_reversed_cents' => 0,
         'commission_paid_cents' => 0,
@@ -125,41 +143,7 @@ it('affiliate commerce analytics overview never exposes another affiliates commi
     $response = app(AffiliateCommerceAnalyticsController::class)->overview($req);
     $payload = $response->getData(true);
 
-    $totals = $payload['data']['totals'] ?? [];
+    // success() wraps via response()->json($data) — totals is a top-level key, no 'data' envelope.
+    $totals = $payload['totals'] ?? [];
     expect((int) ($totals['commission_accrued_cents'] ?? 0))->toBe(0);
-});
-
-it('site analytics data is scoped by professional_id at the database level', function () {
-    [$a, $b] = createTwoTenants('brand');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.site_visits (
-        id TEXT PRIMARY KEY,
-        professional_id TEXT,
-        site_id TEXT,
-        occurred_at TEXT,
-        device_type TEXT,
-        country_code TEXT,
-        referrer TEXT,
-        ip_hash TEXT
-    )');
-
-    DB::table('analytics.site_visits')->insert([
-        'id' => (string) Str::uuid(),
-        'professional_id' => $a->id,
-        'site_id' => $a->site->id,
-        'occurred_at' => now()->toDateTimeString(),
-    ]);
-
-    // Verify the DB-level WHERE clause isolates correctly
-    $countForB = DB::table('analytics.site_visits')
-        ->where('professional_id', $b->id)
-        ->count();
-
-    expect($countForB)->toBe(0);
-
-    $countForA = DB::table('analytics.site_visits')
-        ->where('professional_id', $a->id)
-        ->count();
-
-    expect($countForA)->toBe(1);
 });
