@@ -316,3 +316,102 @@ function setupNotificationPreferencesTable(): void
         updated_at TEXT NULL
     )');
 }
+
+/*
+|--------------------------------------------------------------------------
+| Tenant Isolation Helpers
+|--------------------------------------------------------------------------
+| Shared between tests/Feature/Security/TenantIsolation/*. Each helper
+| creates a minimal but realistic tenant (professional + site) and returns
+| the live Eloquent model so tests can wire it to a Request.
+*/
+
+use App\Models\Core\Professional\Professional;
+use App\Models\Core\Site\Site;
+
+function tenantHelpersEnsureTables(): void
+{
+    attachTestSchemas();
+    setupProfessionalsTable();
+    setupSitesTable();
+    setupBrandLinkTables();
+}
+
+/**
+ * Create an isolated tenant. Returns the freshly-loaded Professional model
+ * with its Site eager-loaded. Handle namespaces records so sequential calls
+ * never collide.
+ */
+function createTenant(string $handle, string $type = 'professional'): Professional
+{
+    tenantHelpersEnsureTables();
+
+    $proId = (string) \Illuminate\Support\Str::uuid();
+    $siteId = (string) \Illuminate\Support\Str::uuid();
+    $now = now()->toDateTimeString();
+
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => $proId,
+        'auth_user_id' => 'auth-'.\Illuminate\Support\Str::random(12),
+        'handle' => $handle,
+        'handle_lc' => strtolower($handle),
+        'display_name' => ucfirst($handle),
+        'primary_email' => $handle.'@example.test',
+        'professional_type' => $type,
+        'status' => 'active',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.sites')->insert([
+        'id' => $siteId,
+        'professional_id' => $proId,
+        'subdomain' => $handle,
+        'is_published' => 1,
+        'settings' => json_encode([]),
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    return Professional::query()->with('site')->findOrFail($proId);
+}
+
+function createBrandTenant(string $handle = 'brand-a'): Professional
+{
+    return createTenant($handle, 'brand');
+}
+
+function createAffiliateTenant(string $handle = 'affiliate-a'): Professional
+{
+    return createTenant($handle, 'professional');
+}
+
+/**
+ * Standard pair: two fully-independent tenants. Returns [$tenantA, $tenantB].
+ *
+ * @return array{0: Professional, 1: Professional}
+ */
+function createTwoTenants(string $type = 'brand'): array
+{
+    $a = $type === 'brand' ? createBrandTenant('brand-a') : createAffiliateTenant('aff-a');
+    $b = $type === 'brand' ? createBrandTenant('brand-b') : createAffiliateTenant('aff-b');
+
+    return [$a, $b];
+}
+
+/**
+ * Make a Request that simulates authenticated access as $tenant.
+ * Mirrors the pattern from DocumentControllerIntegrationTest — `current.pro`
+ * middleware normally sets this attribute at runtime.
+ *
+ * Named tenantRequestAs() to avoid collision with the local requestAs() helper
+ * declared in ProfessionalEnquiryControllerTest (different signature).
+ */
+function tenantRequestAs(Professional $tenant, array $input = [], string $method = 'GET'): \Illuminate\Http\Request
+{
+    $req = \Illuminate\Http\Request::create('/', $method, $input);
+    $req->attributes->set('professional', $tenant);
+    $req->setUserResolver(fn () => (object) ['professional' => $tenant]);
+
+    return $req;
+}
