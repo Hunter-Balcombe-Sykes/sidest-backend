@@ -696,6 +696,31 @@ return [
 
     'notifications' => [
         'email_enabled' => (bool) env('NOTIFICATIONS_EMAIL_ENABLED', false),
+
+        /*
+         * Category registry — single source of truth.
+         *
+         * Keys are valid category strings (validated in FormRequests).
+         * Values are the Mailable class sent for transactional email, or null
+         * for in-app-only categories. Adding a new notification type is:
+         *   1. Create a Mailable in app/Mail/Notifications/ (skip for in-app only)
+         *   2. Add one entry here
+         *   3. Call $publisher->publish(category: 'your_key', ...) at the emit site
+         * No edits to the publisher, no edits to the email dispatch job.
+         */
+        'mailables' => [
+            'invites' => \App\Mail\Notifications\InviteNotificationMail::class,
+            'commissions' => \App\Mail\Notifications\CommissionNotificationMail::class,
+            'payouts' => \App\Mail\Notifications\PayoutNotificationMail::class,
+            'integrations' => \App\Mail\Notifications\IntegrationNotificationMail::class,
+            'analytics_weekly' => \App\Mail\Notifications\AnalyticsWeeklyMail::class,
+            'analytics_milestones' => \App\Mail\Notifications\AnalyticsMilestoneMail::class,
+            'profile_tasks' => \App\Mail\Notifications\ProfileTaskMail::class,
+            'catalog_changes' => \App\Mail\Notifications\CatalogChangeMail::class,
+            'brand_status' => \App\Mail\Notifications\BrandStatusMail::class,
+            'subscriptions' => \App\Mail\Notifications\SubscriptionMail::class,
+            'brand_links' => \App\Mail\Notifications\BrandLinkMail::class,
+        ],
     ],
 
     /*
