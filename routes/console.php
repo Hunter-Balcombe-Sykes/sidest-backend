@@ -86,3 +86,19 @@ Schedule::job(new \App\Jobs\Notifications\SendWeeklyAnalyticsNotificationJob)
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: send-weekly-analytics-notification');
     });
+
+Schedule::command('queue:prune-failed --hours=72')
+    ->daily()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-failed-jobs');
+    });
+
+// withoutOverlapping(2) matches the every-2-min cadence: if a run exceeds 2 min
+// (should be rare now that both Twitch and Kick use batch endpoints), the next
+// scheduler tick skips exactly one cycle rather than stacking.
+Schedule::job(new \App\Jobs\Streaming\CheckStreamingLiveStatusJob)
+    ->everyTwoMinutes()
+    ->withoutOverlapping(2)
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: check-streaming-live-status');
+    });

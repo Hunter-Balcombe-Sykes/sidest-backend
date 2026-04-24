@@ -7,6 +7,7 @@ use App\Http\Requests\Api\PublicSite\PublicSiteShowRequest;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Services\Cache\SiteCacheService;
+use App\Services\Streaming\LiveStatusInjector;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -14,7 +15,8 @@ use Symfony\Component\HttpFoundation\Response;
 class PublicSiteController extends ApiController
 {
     public function __construct(
-        private SiteCacheService $siteCache
+        private SiteCacheService $siteCache,
+        private LiveStatusInjector $liveStatus,
     ) {}
 
     public function show(PublicSiteShowRequest $request): Response
@@ -23,7 +25,7 @@ class PublicSiteController extends ApiController
 
         $payload = $this->siteCache->getPublicSitePayload($subdomain);
         if ($payload) {
-            return $this->success($payload);
+            return $this->success($this->liveStatus->injectIntoPayload($payload));
         }
 
         $alias = SiteSubdomainAlias::query()
@@ -65,7 +67,7 @@ class PublicSiteController extends ApiController
 
         $payload = $this->siteCache->getPublicSitePayload($subdomain);
         if ($payload) {
-            return $this->success($payload);
+            return $this->success($this->liveStatus->injectIntoPayload($payload));
         }
 
         $alias = SiteSubdomainAlias::query()
@@ -77,7 +79,7 @@ class PublicSiteController extends ApiController
             if ($site) {
                 $canonicalPayload = $this->siteCache->getPublicSitePayload($site->subdomain);
                 if ($canonicalPayload) {
-                    return $this->success($canonicalPayload);
+                    return $this->success($this->liveStatus->injectIntoPayload($canonicalPayload));
                 }
             }
         }
