@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 // V2: Public document download. 302-redirects to an R2 presigned URL with
@@ -13,7 +14,7 @@ use Illuminate\Support\Facades\Storage;
 // a download with the original filename instead of rendering inline.
 class PublicDocumentDownloadController extends ApiController
 {
-    public function __invoke(SiteMedia $document): RedirectResponse
+    public function __invoke(SiteMedia $document, Request $request): RedirectResponse
     {
         // Only serve rows that are active, not soft-deleted, and actually
         // part of the documents pool — otherwise 404 without leaking details.
@@ -26,6 +27,17 @@ class PublicDocumentDownloadController extends ApiController
 
         $site = Site::query()->find($document->site_id);
         abort_unless($site && $site->is_published, 404);
+
+        // Enforce subdomain isolation when the caller provides an X-Site-Subdomain
+        // header (all public-site frontend requests do). Absent header = unenforced
+        // (used only by internal/test callers that bypass routing).
+        $requestedSubdomain = trim((string) $request->header('X-Site-Subdomain', ''));
+        if ($requestedSubdomain !== '') {
+            abort_unless(
+                strtolower($site->subdomain) === strtolower($requestedSubdomain),
+                404
+            );
+        }
 
         $mediaDisk = config('sidest.media_disk');
         $filename = $document->original_filename ?: 'document';
