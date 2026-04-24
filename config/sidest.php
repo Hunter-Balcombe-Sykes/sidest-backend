@@ -747,4 +747,23 @@ return [
         'square_sync' => (bool) env('SIDEST_SQUARE_SYNC_ENABLED', false),
         'fresha_sync' => (bool) env('SIDEST_FRESHA_SYNC_ENABLED', false),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | GDPR
+    |--------------------------------------------------------------------------
+    |
+    | Config for Shopify GDPR webhook handlers. Jobs dispatch onto a dedicated
+    | queue so they don't contend with the default worker on a mature shop
+    | (RedactShopJob can take several minutes). The placeholder domain is used
+    | when anonymising customer email addresses — pick a domain you own so
+    | bounces don't confuse third-party mail providers.
+    |
+    */
+
+    'gdpr' => [
+        'queue' => env('GDPR_QUEUE', 'gdpr'),
+        'redact_placeholder_domain' => env('GDPR_REDACT_PLACEHOLDER_DOMAIN', 'gdpr.sidest.io'),
+        'export_retention_days' => (int) env('GDPR_EXPORT_RETENTION_DAYS', 30),
+    ],
 ];
