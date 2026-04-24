@@ -10,7 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 
 // V2: Core. Registers all Shopify webhooks (functional + GDPR) via GraphQL on install. Idempotent — skips already-registered topics.
@@ -214,29 +214,14 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
 
     private function queryShopify(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables = []): array
     {
-        $endpoint = "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json";
+        $response = app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            $query,
+            $variables,
+        );
 
-        $response = Http::timeout(20)
-            ->acceptJson()
-            ->withHeaders([
-                'X-Shopify-Access-Token' => $accessToken,
-            ])
-            ->post($endpoint, [
-                'query' => $query,
-                'variables' => $variables,
-            ]);
-
-        if (! $response->ok()) {
-            throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
-        }
-
-        $payload = $response->json() ?? [];
-        $errors = Arr::get($payload, 'errors', []);
-        if (is_array($errors) && $errors !== []) {
-            $message = (string) Arr::get($errors, '0.message', 'Shopify GraphQL returned errors.');
-            throw new \RuntimeException($message);
-        }
-
-        return is_array(Arr::get($payload, 'data')) ? $payload['data'] : [];
+        return is_array($response->json('data')) ? $response->json('data') : [];
     }
 }

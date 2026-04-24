@@ -243,32 +243,26 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $endpoint = "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json";
-
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if ($encoded === false) {
             throw new \RuntimeException('Failed to encode brand design for metafield.');
         }
 
-        $response = Http::timeout(20)
-            ->acceptJson()
-            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
-            ->post($endpoint, [
-                'query' => self::METAFIELDS_SET_MUTATION,
-                'variables' => [
-                    'metafields' => [[
-                        'namespace' => 'sidest',
-                        'key' => 'brand_design',
-                        'ownerId' => $shopGid,
-                        'type' => 'json',
-                        'value' => $encoded,
-                    ]],
-                ],
-            ]);
-
-        if (! $response->ok()) {
-            throw new \RuntimeException("Shopify metafieldsSet failed (HTTP {$response->status()}).");
-        }
+        $response = app(\App\Services\Shopify\Client\ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            self::METAFIELDS_SET_MUTATION,
+            [
+                'metafields' => [[
+                    'namespace' => 'sidest',
+                    'key' => 'brand_design',
+                    'ownerId' => $shopGid,
+                    'type' => 'json',
+                    'value' => $encoded,
+                ]],
+            ],
+        );
 
         $userErrors = $response->json('data.metafieldsSet.userErrors', []);
         if (is_array($userErrors) && $userErrors !== []) {

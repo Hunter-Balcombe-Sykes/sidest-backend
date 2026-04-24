@@ -10,7 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -280,21 +280,13 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
 
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
-        $response = Http::withHeaders([
-            'X-Shopify-Access-Token' => $accessToken,
-            'Content-Type' => 'application/json',
-        ])->timeout($this->timeout)->post(
-            "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-            array_filter([
-                'query' => $query,
-                'variables' => ! empty($variables) ? $variables : null,
-            ])
+        return app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            $query,
+            $variables,
+            $this->timeout,
         );
-
-        if (! $response->successful()) {
-            throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
-        }
-
-        return $response;
     }
 }

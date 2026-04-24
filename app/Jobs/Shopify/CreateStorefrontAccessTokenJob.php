@@ -10,7 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Facades\Log;
 
 // V2: Core. Creates Shopify Storefront API token ("Side St Hydrogen") via GraphQL. Required for Hydrogen storefronts to fetch product data. Matches existing "Side St" tokens for backward compat.
@@ -118,14 +118,14 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
 
     private function findExistingToken(string $shopDomain, string $accessToken, string $apiVersion): ?string
     {
-        $url = sprintf("https://{$shopDomain}".self::STOREFRONT_TOKENS_REST_PATH, $apiVersion);
-
-        $response = Http::timeout(20)
-            ->acceptJson()
-            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
-            ->get($url);
-
-        if (! $response->ok()) {
+        try {
+            $response = app(ShopifyAdminClient::class)->rest(
+                method: 'GET',
+                shopDomain: $shopDomain,
+                accessToken: $accessToken,
+                path: sprintf(self::STOREFRONT_TOKENS_REST_PATH, $apiVersion),
+            );
+        } catch (\App\Exceptions\Shopify\ShopifyTransportException $e) {
             return null;
         }
 
@@ -163,32 +163,14 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
 
     private function queryShopify(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables = []): array
     {
-        $body = ['query' => $query];
-        if (! empty($variables)) {
-            $body['variables'] = $variables;
-        }
+        $response = app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            $query,
+            $variables,
+        );
 
-        $response = Http::timeout(20)
-            ->acceptJson()
-            ->withHeaders(['X-Shopify-Access-Token' => $accessToken])
-            ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", $body);
-
-        if (! $response->ok()) {
-            Log::error('Shopify Storefront token HTTP error', [
-                'integration_id' => $this->integrationId,
-                'status' => $response->status(),
-            ]);
-            throw new \RuntimeException("Shopify GraphQL request failed (HTTP {$response->status()}).");
-        }
-
-        $payload = $response->json() ?? [];
-        $errors = Arr::get($payload, 'errors', []);
-        if (is_array($errors) && $errors !== []) {
-            $errorJson = json_encode($errors);
-            Log::error("Shopify Storefront token GraphQL errors: {$errorJson}");
-            throw new \RuntimeException((string) Arr::get($errors, '0.message', 'Shopify GraphQL error.'));
-        }
-
-        return is_array(Arr::get($payload, 'data')) ? $payload['data'] : [];
+        return is_array($response->json('data')) ? $response->json('data') : [];
     }
 }
