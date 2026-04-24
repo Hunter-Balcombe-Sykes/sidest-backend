@@ -61,6 +61,9 @@ class StripeConnectWebhookController extends Controller
         // Idempotency: atomic insert-or-skip on the UNIQUE stripe_event_id.
         // Stripe event IDs are globally unique across platform + Connect events,
         // so billing.webhook_events covers both this controller and StripeWebhookController.
+        // The insert is committed before the match() dispatch: if a handler throws a 500,
+        // Stripe's retry will see the existing row and be short-circuited here rather than
+        // re-triggering the crashing handler. Investigate via Nightwatch if that occurs.
         $alreadyProcessed = ! DB::table('billing.webhook_events')->insertOrIgnore([
             'id' => Str::uuid()->toString(),
             'stripe_event_id' => $event->id,

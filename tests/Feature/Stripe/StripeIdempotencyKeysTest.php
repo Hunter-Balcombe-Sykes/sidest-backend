@@ -168,15 +168,6 @@ it('createCustomer (Connect/brand) passes deterministic idempotency_key to Strip
     expect($brand->fresh()->stripe_customer_id)->toBe('cus_brand_abc');
 });
 
-// ── Task 5: CommissionPayoutService refund idempotency key (source assertion) ─
-
-it('CommissionPayoutService refund call includes payout+PI idempotency_key', function () {
-    $source = file_get_contents(base_path('app/Services/Stripe/CommissionPayoutService.php'));
-
-    // The refund key is tied to both payout ID and PI ID. Including the PI
-    // matters: the failure path clears stripe_payment_intent_id on a successful
-    // refund so an admin retry creates a fresh PI with a distinct key.
-    expect($source)->toMatch(
-        '/refunds->create\s*\(\s*\[\s*[^\]]*payment_intent[^\]]*\]\s*,\s*\[\s*[\'"]idempotency_key[\'"]\s*=>\s*[\'"]rf_\{\$payout->id\}_\{\$payout->stripe_payment_intent_id\}[\'"]\s*\]\s*\)/'
-    );
-});
+// Task 5 (CommissionPayoutService refund) is covered behaviorally in
+// CommissionPayoutServiceTest — the Mockery ->with() call there asserts
+// the exact idempotency key format at runtime.

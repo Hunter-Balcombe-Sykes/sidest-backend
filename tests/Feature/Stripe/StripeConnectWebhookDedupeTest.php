@@ -25,12 +25,14 @@ beforeEach(function () {
         }
     }
 
+    // Production schema uses uuid/jsonb/timestamptz; SQLite-in-memory only supports TEXT.
+    // The UNIQUE constraint on stripe_event_id is what the dedupe logic actually relies on.
     $conn->statement('CREATE TABLE IF NOT EXISTS billing.webhook_events (
         id TEXT PRIMARY KEY,
         stripe_event_id TEXT NOT NULL UNIQUE,
         event_type TEXT NOT NULL,
-        payload TEXT NULL,
-        processed_at TEXT NOT NULL
+        payload TEXT,
+        processed_at TEXT NOT NULL DEFAULT (datetime(\'now\'))
     )');
 });
 
