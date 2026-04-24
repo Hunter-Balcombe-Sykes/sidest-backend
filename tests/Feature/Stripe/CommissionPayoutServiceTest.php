@@ -400,7 +400,7 @@ it('credits wallet and auto-refunds card when transfer fails and refund succeeds
 
     $refundMock = Mockery::mock();
     $refundMock->shouldReceive('create')->once()
-        ->with(['payment_intent' => 'pi_test'])
+        ->with(['payment_intent' => 'pi_test'], ['idempotency_key' => 'rf_p1_pi_test'])
         ->andReturn((object) ['id' => 're_test']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock, 'refund' => $refundMock]));

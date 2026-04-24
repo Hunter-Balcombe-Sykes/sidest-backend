@@ -474,7 +474,7 @@ class CommissionPayoutService
                 try {
                     $this->stripe->refunds->create([
                         'payment_intent' => $payout->stripe_payment_intent_id,
-                    ]);
+                    ], ['idempotency_key' => "rf_{$payout->id}_{$payout->stripe_payment_intent_id}"]);
                     $failureCode = 'transfer_failed_refunded';
                     // Clear PI ID so an admin retry can create a fresh PaymentIntent
                     // (same idempotency key within 24h would return the now-refunded PI).

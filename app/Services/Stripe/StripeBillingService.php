@@ -33,7 +33,7 @@ class StripeBillingService
                 'sidest_professional_id' => $professional->id,
                 'professional_type' => $professional->professional_type,
             ],
-        ]);
+        ], ['idempotency_key' => "customer_{$professional->id}"]);
 
         $professional->update([
             'stripe_customer_id' => $customer->id,

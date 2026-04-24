@@ -47,7 +47,7 @@ class StripeConnectService
                 'transfers' => ['requested' => true],
                 'card_payments' => ['requested' => true],
             ],
-        ]);
+        ], ['idempotency_key' => "acct_{$professional->id}"]);
 
         $professional->update([
             'stripe_connect_account_id' => $account->id,
@@ -188,7 +188,7 @@ class StripeConnectService
                 'sidest_professional_id' => $brand->id,
                 'professional_type' => $brand->professional_type,
             ],
-        ]);
+        ], ['idempotency_key' => "customer_{$brand->id}"]);
 
         $brand->update([
             'stripe_customer_id' => $customer->id,
