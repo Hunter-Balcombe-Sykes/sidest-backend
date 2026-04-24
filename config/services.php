@@ -69,6 +69,15 @@ return [
         'api_key' => env('HYDROGEN_API_KEY'),
     ],
 
+    'twitch' => [
+        'client_id'     => env('TWITCH_CLIENT_ID'),
+        'client_secret' => env('TWITCH_CLIENT_SECRET'),
+    ],
+    'kick' => [
+        'client_id'     => env('KICK_CLIENT_ID'),
+        'client_secret' => env('KICK_CLIENT_SECRET'),
+    ],
+
     'shopify' => [
         'api_key' => env('SHOPIFY_API_KEY'),
         'api_secret' => env('SHOPIFY_API_SECRET'),
