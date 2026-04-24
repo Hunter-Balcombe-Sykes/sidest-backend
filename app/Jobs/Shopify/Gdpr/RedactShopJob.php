@@ -28,7 +28,9 @@ class RedactShopJob implements ShouldQueue
 
     public function __construct(public string $gdprRequestId)
     {
-        $this->onQueue(config('sidest.gdpr.queue'));
+        // redis_gdpr connection has retry_after=660 so Redis won't re-queue
+        // this job while the 600s chunkById sweep is still running.
+        $this->onConnection('redis_gdpr')->onQueue(config('sidest.gdpr.queue'));
     }
 
     public function backoff(): array
@@ -128,6 +130,7 @@ class RedactShopJob implements ShouldQueue
         $count = 0;
 
         Customer::query()
+            ->withTrashed()
             ->where('professional_id', $professionalId)
             ->where('source', 'shopify')
             ->whereNull('redacted_at')
