@@ -5,9 +5,9 @@ namespace App\Services\Store;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class BrandCatalogService
@@ -321,19 +321,23 @@ GRAPHQL;
         $httpStatus = 0;
         $responseBody = [];
         try {
-            $response = Http::withHeaders([
-                'X-Shopify-Access-Token' => $accessToken,
-                'Content-Type' => 'application/json',
-                'Shopify-GraphQL-Cost-Debug' => '1',
-            ])->timeout(15)->post(
-                "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json",
-                array_filter([
-                    'query' => $query,
-                    'variables' => ! empty($variables) ? $variables : null,
-                ])
+            $response = app(ShopifyAdminClient::class)->graphql(
+                $shopDomain,
+                $accessToken,
+                $apiVersion,
+                $query,
+                $variables,
+                timeoutSeconds: 15,
             );
             $httpStatus = $response->status();
             $responseBody = $response->json() ?? [];
+        } catch (\App\Exceptions\Shopify\ShopifyTransportException $e) {
+            $httpStatus = $e->status;
+            Log::warning('Shopify probe: request failed', ['error' => $e->getMessage(), 'mode' => $mode]);
+        } catch (\App\Exceptions\Shopify\ShopifyGraphQLException $e) {
+            $httpStatus = 200;
+            $responseBody = ['errors' => $e->graphqlErrors];
+            Log::warning('Shopify probe: GraphQL errors', ['errors' => $e->graphqlErrors, 'mode' => $mode]);
         } catch (\Throwable $e) {
             Log::warning('Shopify probe: request failed', ['error' => $e->getMessage(), 'mode' => $mode]);
         }
@@ -947,48 +951,15 @@ GRAPHQL;
     {
         $apiVersion = config('services.shopify.api_version', '2025-01');
 
-        $response = Http::timeout(20)
-            ->acceptJson()
-            ->withHeaders([
-                'X-Shopify-Access-Token' => $accessToken,
-                'Content-Type' => 'application/json',
-                // Makes Shopify include extensions.cost in every response
-                // (requestedQueryCost, actualQueryCost, throttleStatus). Costs
-                // nothing extra; makes "why is this query failing?" debug
-                // trivial because the log below surfaces actual cost vs
-                // budget instead of us guessing.
-                'Shopify-GraphQL-Cost-Debug' => '1',
-            ])
-            ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", array_filter([
-                'query' => $query,
-                'variables' => ! empty($variables) ? $variables : null,
-            ]));
-
-        if (! $response->successful()) {
-            Log::warning('Shopify Admin API request failed.', [
-                'shop_domain' => $shopDomain,
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
-
-            throw new \RuntimeException('Unable to reach Shopify. Please try again.', 502);
-        }
-
-        $body = $response->json();
-        $errors = Arr::get($body, 'errors', []);
-        if (! empty($errors)) {
-            Log::warning('Shopify Admin API returned errors.', [
-                'shop_domain' => $shopDomain,
-                'errors' => $errors,
-                // Include the cost extension so cost-budget rejections
-                // self-identify in logs without a re-run.
-                'cost' => Arr::get($body, 'extensions.cost'),
-            ]);
-
-            throw new \RuntimeException('Unable to reach Shopify. Please try again.', 502);
-        }
-
-        return $response;
+        // Client throws ShopifyTransportException on non-2xx and ShopifyGraphQLException
+        // on top-level errors — both propagate as RuntimeException for the caller.
+        return app(ShopifyAdminClient::class)->graphql(
+            $shopDomain,
+            $accessToken,
+            $apiVersion,
+            $query,
+            $variables,
+        );
     }
 
     /**
