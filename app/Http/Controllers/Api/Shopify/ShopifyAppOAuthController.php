@@ -24,6 +24,7 @@ class ShopifyAppOAuthController extends ApiController
     public function __construct(
         private readonly BrandSignupService $brandSignup,
         private readonly ShopifySetupTokenService $setupTokens,
+        private readonly ShopifyAdminClient $shopifyClient,
     ) {}
 
     public function install(Request $request): RedirectResponse|JsonResponse
@@ -111,7 +112,7 @@ class ShopifyAppOAuthController extends ApiController
         $shopData = [];
         try {
             $apiVersion = (string) config('services.shopify.api_version', '2025-01');
-            $shopResponse = app(ShopifyAdminClient::class)->rest(
+            $shopResponse = $this->shopifyClient->rest(
                 method: 'GET',
                 shopDomain: $shop,
                 accessToken: $accessToken,

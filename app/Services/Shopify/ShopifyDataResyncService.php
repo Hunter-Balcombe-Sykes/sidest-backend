@@ -17,6 +17,7 @@ class ShopifyDataResyncService
 {
     public function __construct(
         private readonly ShopProfileAutoFillService $autoFill,
+        private readonly ShopifyAdminClient $client,
     ) {}
 
     /**
@@ -85,7 +86,7 @@ class ShopifyDataResyncService
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
         try {
-            $response = app(ShopifyAdminClient::class)->rest(
+            $response = $this->client->rest(
                 method: 'GET',
                 shopDomain: $shopDomain,
                 accessToken: $accessToken,

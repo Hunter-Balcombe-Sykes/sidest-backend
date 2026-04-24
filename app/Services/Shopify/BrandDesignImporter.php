@@ -21,6 +21,10 @@ use Illuminate\Support\Arr;
 // expected to preserve any existing user edits for those fields (leave-if-absent).
 class BrandDesignImporter
 {
+    public function __construct(
+        private readonly ShopifyAdminClient $client,
+    ) {}
+
     // Enum buckets. These thresholds intentionally match the design brief —
     // change them here and the whole app follows.
     //
@@ -169,7 +173,7 @@ class BrandDesignImporter
      */
     private function fetchBrand(string $shopDomain, string $accessToken, string $apiVersion): array
     {
-        $response = app(ShopifyAdminClient::class)->graphql(
+        $response = $this->client->graphql(
             $shopDomain,
             $accessToken,
             $apiVersion,
@@ -195,7 +199,7 @@ class BrandDesignImporter
     {
         // Step 1 — find the MAIN (active) theme ID and name via GraphQL.
         try {
-            $themesResponse = app(ShopifyAdminClient::class)->graphql(
+            $themesResponse = $this->client->graphql(
                 $shopDomain,
                 $accessToken,
                 $apiVersion,
@@ -227,7 +231,7 @@ class BrandDesignImporter
         // The response body contains an `asset.value` string of JSON.
         // Step 2 — fetch settings_data.json via the Asset REST endpoint.
         try {
-            $assetResponse = app(ShopifyAdminClient::class)->rest(
+            $assetResponse = $this->client->rest(
                 method: 'GET',
                 shopDomain: $shopDomain,
                 accessToken: $accessToken,

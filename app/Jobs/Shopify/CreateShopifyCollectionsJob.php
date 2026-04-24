@@ -148,14 +148,18 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
         ],
     ];
 
+    /** Populated by handle() — not serialized. */
+    private ShopifyAdminClient $client;
+
     public function __construct(
         public string $integrationId
     ) {
         $this->onQueue('integrations');
     }
 
-    public function handle(): void
+    public function handle(ShopifyAdminClient $client): void
     {
+        $this->client = $client;
         $integration = ProfessionalIntegration::query()
             ->where('id', $this->integrationId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -482,7 +486,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
 
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
-        return app(ShopifyAdminClient::class)->graphql(
+        return $this->client->graphql(
             $shopDomain,
             $accessToken,
             $apiVersion,

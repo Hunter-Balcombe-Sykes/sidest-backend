@@ -92,7 +92,7 @@ it('installs automatic app discount when function is present and none exists', f
             ], 200),
     ]);
 
-    (new CreateShopifyAffiliateDiscountJob($integration->id))->handle();
+    app()->call([new CreateShopifyAffiliateDiscountJob($integration->id), 'handle']);
 
     $integration->refresh();
     $meta = is_array($integration->provider_metadata) ? $integration->provider_metadata : json_decode($integration->provider_metadata, true);
@@ -140,7 +140,7 @@ it('skips create when automatic discount backed by function already exists', fun
             ], 200),
     ]);
 
-    (new CreateShopifyAffiliateDiscountJob($integration->id))->handle();
+    app()->call([new CreateShopifyAffiliateDiscountJob($integration->id), 'handle']);
 
     $integration->refresh();
     $meta = is_array($integration->provider_metadata) ? $integration->provider_metadata : json_decode($integration->provider_metadata, true);
@@ -159,7 +159,7 @@ it('marks state as pending when function is not present on the store yet', funct
         ], 200),
     ]);
 
-    (new CreateShopifyAffiliateDiscountJob($integration->id))->handle();
+    app()->call([new CreateShopifyAffiliateDiscountJob($integration->id), 'handle']);
 
     $integration->refresh();
     $meta = is_array($integration->provider_metadata) ? $integration->provider_metadata : json_decode($integration->provider_metadata, true);
@@ -171,7 +171,7 @@ it('marks state as pending when function is not present on the store yet', funct
 it('marks state as failed when shop_domain is malformed', function () {
     $integration = makeShopifyIntegration(['shop_domain' => 'not-a-shopify-domain.com']);
 
-    (new CreateShopifyAffiliateDiscountJob($integration->id))->handle();
+    app()->call([new CreateShopifyAffiliateDiscountJob($integration->id), 'handle']);
 
     $integration->refresh();
     $meta = is_array($integration->provider_metadata) ? $integration->provider_metadata : json_decode($integration->provider_metadata, true);

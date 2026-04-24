@@ -81,14 +81,18 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
         'SHOP_UPDATE' => '/api/webhooks/shopify/shop-update',
     ];
 
+    /** Populated by handle() — not serialized. */
+    private ShopifyAdminClient $client;
+
     public function __construct(
         public string $integrationId
     ) {
         $this->onQueue('integrations');
     }
 
-    public function handle(): void
+    public function handle(ShopifyAdminClient $client): void
     {
+        $this->client = $client;
         $integration = ProfessionalIntegration::query()
             ->where('id', $this->integrationId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -214,7 +218,7 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
 
     private function queryShopify(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables = []): array
     {
-        $response = app(ShopifyAdminClient::class)->graphql(
+        $response = $this->client->graphql(
             $shopDomain,
             $accessToken,
             $apiVersion,

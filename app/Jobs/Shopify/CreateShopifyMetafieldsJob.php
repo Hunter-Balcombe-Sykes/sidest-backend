@@ -155,14 +155,18 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
         ['key' => 'theme_tokens', 'name' => 'Side St Theme Tokens', 'type' => 'json', 'description' => 'Extracted CSS design tokens from the brand storefront theme'],
     ];
 
+    /** Populated by handle() — not serialized. */
+    private ShopifyAdminClient $client;
+
     public function __construct(
         public string $integrationId
     ) {
         $this->onQueue('integrations');
     }
 
-    public function handle(): void
+    public function handle(ShopifyAdminClient $client): void
     {
+        $this->client = $client;
         $integration = ProfessionalIntegration::query()
             ->where('id', $this->integrationId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -372,7 +376,7 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
 
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
-        return app(ShopifyAdminClient::class)->graphql(
+        return $this->client->graphql(
             $shopDomain,
             $accessToken,
             $apiVersion,

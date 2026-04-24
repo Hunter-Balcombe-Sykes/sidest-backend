@@ -12,6 +12,10 @@ use Illuminate\Support\Facades\Log;
 
 class BrandCatalogService
 {
+    public function __construct(
+        private readonly ShopifyAdminClient $client,
+    ) {}
+
     private const CATALOG_CACHE_TTL_MINUTES = 10;
 
     private const COLLECTION_GID_CACHE_TTL_MINUTES = 60;
@@ -321,7 +325,7 @@ GRAPHQL;
         $httpStatus = 0;
         $responseBody = [];
         try {
-            $response = app(ShopifyAdminClient::class)->graphql(
+            $response = $this->client->graphql(
                 $shopDomain,
                 $accessToken,
                 $apiVersion,
@@ -953,7 +957,7 @@ GRAPHQL;
 
         // Client throws ShopifyTransportException on non-2xx and ShopifyGraphQLException
         // on top-level errors — both propagate as RuntimeException for the caller.
-        return app(ShopifyAdminClient::class)->graphql(
+        return $this->client->graphql(
             $shopDomain,
             $accessToken,
             $apiVersion,

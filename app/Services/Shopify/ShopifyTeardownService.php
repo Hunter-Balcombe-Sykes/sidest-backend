@@ -29,6 +29,10 @@ use Illuminate\Support\Facades\Log;
  */
 class ShopifyTeardownService
 {
+    public function __construct(
+        private readonly ShopifyAdminClient $client,
+    ) {}
+
     // Mirrors CreateShopifyMetafieldsJob's definition tables. Any new sidest.*
     // key added there must also be listed here or it'll leak across uninstalls.
     private const PRODUCT_KEYS = ['active', 'commission_override', 'affiliate_discount_pct', 'has_enabled_variants'];
@@ -441,7 +445,7 @@ class ShopifyTeardownService
     private function deleteStorefrontAccessTokens(string $shopDomain, string $accessToken, string $apiVersion): int
     {
         try {
-            $response = app(ShopifyAdminClient::class)->rest(
+            $response = $this->client->rest(
                 method: 'GET',
                 shopDomain: $shopDomain,
                 accessToken: $accessToken,
@@ -473,7 +477,7 @@ class ShopifyTeardownService
             }
 
             try {
-                $deleteRes = app(ShopifyAdminClient::class)->rest(
+                $deleteRes = $this->client->rest(
                     method: 'DELETE',
                     shopDomain: $shopDomain,
                     accessToken: $accessToken,
@@ -545,7 +549,7 @@ class ShopifyTeardownService
     private function revokeOauthToken(string $shopDomain, string $accessToken): bool
     {
         try {
-            $response = app(ShopifyAdminClient::class)->rest(
+            $response = $this->client->rest(
                 method: 'DELETE',
                 shopDomain: $shopDomain,
                 accessToken: $accessToken,
@@ -562,7 +566,7 @@ class ShopifyTeardownService
 
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
-        return app(ShopifyAdminClient::class)->graphql(
+        return $this->client->graphql(
             $shopDomain,
             $accessToken,
             $apiVersion,

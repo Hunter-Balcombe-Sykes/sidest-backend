@@ -54,13 +54,17 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
     // Use REST API to check for existing tokens.
     private const STOREFRONT_TOKENS_REST_PATH = '/admin/api/%s/storefront_access_tokens.json';
 
+    /** Populated by handle() — not serialized. */
+    private ShopifyAdminClient $client;
+
     public function __construct(public string $integrationId)
     {
         $this->onQueue('integrations');
     }
 
-    public function handle(): void
+    public function handle(ShopifyAdminClient $client): void
     {
+        $this->client = $client;
         $integration = ProfessionalIntegration::query()
             ->where('id', $this->integrationId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -119,7 +123,7 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
     private function findExistingToken(string $shopDomain, string $accessToken, string $apiVersion): ?string
     {
         try {
-            $response = app(ShopifyAdminClient::class)->rest(
+            $response = $this->client->rest(
                 method: 'GET',
                 shopDomain: $shopDomain,
                 accessToken: $accessToken,
@@ -163,7 +167,7 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
 
     private function queryShopify(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables = []): array
     {
-        $response = app(ShopifyAdminClient::class)->graphql(
+        $response = $this->client->graphql(
             $shopDomain,
             $accessToken,
             $apiVersion,

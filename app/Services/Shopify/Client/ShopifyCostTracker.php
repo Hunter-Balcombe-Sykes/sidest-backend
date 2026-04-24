@@ -5,8 +5,9 @@ namespace App\Services\Shopify\Client;
 use Illuminate\Support\Facades\Redis;
 
 /**
- * Rolling-window tracker for the ratio of actual to requested GraphQL cost,
- * keyed per query hash (sha1 of the query string).
+ * Sliding-window cost tracker — records the ratio of actual to requested
+ * GraphQL cost per query hash and uses a windowed arithmetic mean over the
+ * last 20 samples to produce a tighter pre-acquisition estimate.
  *
  * Shopify's `requestedQueryCost` is a pre-execution estimate. For list queries
  * with `first: N`, the actual charge can be 5-20x lower. Learning the ratio
