@@ -264,6 +264,9 @@ class ProfessionalSectionBlockController extends ApiController
 
     /**
      * Ensure every account-type-allowed section exists and is always enabled.
+     * Never changes sort_order for existing blocks — only assigns one to new blocks
+     * (max existing + 1) to avoid conflicts with the partial unique index on
+     * (site_id, block_group, sort_order) WHERE block_group = 'sections'.
      *
      * @param  array<int, string>  $allowedSections
      */
@@ -274,16 +277,20 @@ class ProfessionalSectionBlockController extends ApiController
         return DB::transaction(function () use ($professionalId, $siteId, $orderedAllowed) {
             DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-sections:{$siteId}"]);
 
-            $blocks = Block::query()
+            // Query ALL section blocks (not just allowed types) so the max sort_order
+            // calculation accounts for every existing row and new blocks are never
+            // inserted at a position already held by a non-allowed block.
+            $allBlocks = Block::query()
                 ->where('professional_id', $professionalId)
                 ->where('site_id', $siteId)
                 ->where('block_group', 'sections')
-                ->whereIn('block_type', $orderedAllowed)
-                ->get()
-                ->keyBy('block_type');
+                ->get();
 
-            foreach ($orderedAllowed as $sortOrder => $blockType) {
-                $block = $blocks->get($blockType) ?? new Block([
+            $byType = $allBlocks->keyBy('block_type');
+            $maxSortOrder = $allBlocks->max('sort_order') ?? -1;
+
+            foreach ($orderedAllowed as $blockType) {
+                $block = $byType->get($blockType) ?? new Block([
                     'professional_id' => $professionalId,
                     'site_id' => $siteId,
                     'block_group' => 'sections',
@@ -293,15 +300,15 @@ class ProfessionalSectionBlockController extends ApiController
                 if (! $block->exists) {
                     $block->settings = [];
                     $block->is_active = false;
+                    $block->sort_order = ++$maxSortOrder;
                 }
 
-                $block->sort_order = $sortOrder;
                 $block->is_enabled = true;
                 $block->save();
-                $blocks->put($blockType, $block);
+                $byType->put($blockType, $block);
             }
 
-            return $blocks->values();
+            return $byType->values();
         });
     }
 
