@@ -4,7 +4,15 @@
 
 **Goal:** Add Twitch and Kick as linkable streaming platforms and auto-detect live status via background API polling, surfacing an `is_live` flag on public profile responses.
 
-**Architecture:** Platform config drives normalisation generically (no service changes); a scheduled job polls Twitch (batched) and Kick (per-handle) every 2 minutes and writes results to Redis only; `LiveStatusInjector` post-processes the cached site payload at read time so the 15-minute site cache stays clean.
+**Architecture:** Platform config drives normalisation generically (no service changes); a scheduled job polls Twitch (batched) and Kick (batched) every 2 minutes and writes results to Redis only; `LiveStatusInjector` post-processes the cached site payload at read time so the 15-minute site cache stays clean.
+
+**Scalability design:**
+- **Batch endpoints only** — both `TwitchApiClient::getLiveHandles()` and `KickApiClient::getLiveHandles()` accept up to 100 handles per request, keeping API traffic to `ceil(handles / 100)` calls per cycle.
+- **Cold-handle demotion** — the poller writes progressively longer TTLs for handles that have been offline for consecutive checks (3+ offlines → 10min TTL, 10+ offlines → 30min TTL). Since the TTL-skip filter bypasses handles with fresh Redis entries, cold streamers are polled ~1 in 15 cycles instead of every cycle. This is the single biggest scalability win at >95% offline rate.
+- **Per-site cap** — `live_check_enabled=true` is capped to N blocks per site (config: `sidest.streaming.max_live_check_per_site`, default 5) enforced at `UpdateLinkBlockRequest` time.
+- **Kick rate-limit circuit breaker** — a 429 response sets `streaming:kick:rate_limited` for 5 minutes and aborts remaining work.
+
+**v2 future work (not in this plan):** Kick publishes `livestream.status.updated` webhooks. Moving to a push model eliminates the polling API surface and is the recommended long-term architecture once the platform adds >1k concurrent streaming link blocks. This plan ships the polling model as v1.
 
 **Tech Stack:** Laravel 12, PHP 8.2, Redis (`Illuminate\Support\Facades\Redis`), Pest 4, Laravel HTTP client (`Illuminate\Support\Facades\Http`)
 
@@ -14,19 +22,19 @@
 
 | Action | Path | Responsibility |
 |---|---|---|
-| Modify | `config/sidest.php` | Add `twitch`/`kick` to `social_platforms`; add `streaming` to `link_categories`; add `live_check_enabled` to `link_block_settings_keys`; add `streaming_platforms` key |
+| Modify | `config/sidest.php` | Add `twitch`/`kick` to `social_platforms`; add `streaming` to `link_categories`; add `live_check_enabled` to `link_block_settings_keys`; add `streaming_platforms` key; add `streaming.max_live_check_per_site` cap |
 | Modify | `.env.example` | Add `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `KICK_CLIENT_ID`, `KICK_CLIENT_SECRET` |
-| Create | `supabase/migrations/{ts}_add_live_check_index.sql` | Expression index on `settings->>'live_check_enabled'` WHERE `block_type = 'link'` |
-| Modify | `app/Http/Requests/Api/Professional/Site/UpdateLinkBlockRequest.php` | Allow `settings.live_check_enabled` (boolean); reject on non-streaming platforms |
+| Create | `supabase/migrations/{ts}_add_live_check_index.sql` | Expression index on `settings->>'live_check_enabled'` WHERE `block_group = 'links'` |
+| Modify | `app/Http/Requests/Api/Professional/Site/UpdateLinkBlockRequest.php` | Allow `settings.live_check_enabled` (boolean); enforce per-site cap when enabling |
 | Create | `app/Services/Streaming/StreamingTokenManager.php` | Token fetch, Redis cache, atomic NX refresh lock |
 | Create | `app/Services/Streaming/TwitchApiClient.php` | Batched `/helix/streams` calls; returns live handle set |
-| Create | `app/Services/Streaming/KickApiClient.php` | Per-handle channel check; throws `KickRateLimitException` on 429 |
+| Create | `app/Services/Streaming/KickApiClient.php` | Batched `/public/v1/channels?slug=…` calls; throws `KickRateLimitException` on 429 |
 | Create | `app/Exceptions/Streaming/KickRateLimitException.php` | Typed exception for Kick 429 |
-| Create | `app/Services/Streaming/LiveStatusPoller.php` | Deduplication, TTL skip, batch grouping, Redis writes |
-| Create | `app/Jobs/Streaming/CheckStreamingLiveStatusJob.php` | DB chunk query, error handling, delegates to `LiveStatusPoller` |
-| Create | `app/Services/Streaming/LiveStatusInjector.php` | Post-processes cached payload; injects `is_live` from Redis |
+| Create | `app/Services/Streaming/LiveStatusPoller.php` | Dedup, TTL skip, batch grouping, cold-handle demotion (tiered TTLs), Redis writes |
+| Create | `app/Jobs/Streaming/CheckStreamingLiveStatusJob.php` | DB chunk query (`block_group = 'links'`), error handling, delegates to `LiveStatusPoller` |
+| Create | `app/Services/Streaming/LiveStatusInjector.php` | Post-processes cached payload (`links`, `sections`, `blocks`); injects `is_live` from Redis |
 | Modify | `app/Http/Controllers/Api/PublicSite/PublicSiteController.php` | Wire `LiveStatusInjector` into `show()` and `showByHeader()` |
-| Modify | `routes/console.php` | Schedule `CheckStreamingLiveStatusJob` every 2 min |
+| Modify | `routes/console.php` | Schedule `CheckStreamingLiveStatusJob` every 2 min with 2-min overlap lock |
 | Create | `tests/Unit/Streaming/LiveStatusPollerTest.php` | Unit: dedup, TTL skip, batching, Redis writes |
 | Create | `tests/Unit/Streaming/LiveStatusInjectorTest.php` | Unit: payload injection, passthrough, missing key default |
 | Create | `tests/Unit/Streaming/CheckStreamingLiveStatusJobTest.php` | Unit: job orchestration, rate limit abort, error logging (DB query bypassed — PostgreSQL-only JSONB operator) |
@@ -69,7 +77,7 @@ In `config/sidest.php`, after the last platform entry (currently `bandcamp`, end
         ],
 ```
 
-Also add `'twitch'` and `'kick'` to the icon keys array near the top of the file (the array that lists icon names).
+Also add `'twitch'` and `'kick'` to the `link_block_icon_keys` array (near line 13 of `config/sidest.php`, just after `'bandcamp'`).
 
 - [ ] **Step 2: Add `streaming` to `link_categories` and `live_check_enabled` to `link_block_settings_keys`**
 
@@ -98,13 +106,20 @@ In `link_block_settings_keys`, add `'live_check_enabled'` after `'category'`:
 ],
 ```
 
-- [ ] **Step 3: Add `streaming_platforms` key**
+- [ ] **Step 3: Add `streaming_platforms` key and the streaming settings block**
 
 After `link_categories`, add:
 ```php
 // Platforms that support automatic live status detection via the polling job.
 // Must match keys in social_platforms above.
 'streaming_platforms' => ['twitch', 'kick'],
+
+// Live-status polling tuning knobs. Keeps API call volume bounded.
+'streaming' => [
+    // Hard cap on blocks with live_check_enabled=true per site — prevents a single
+    // user from monopolizing the polling budget. Enforced in UpdateLinkBlockRequest.
+    'max_live_check_per_site' => (int) env('SIDEST_STREAMING_MAX_LIVE_CHECK_PER_SITE', 5),
+],
 ```
 
 - [ ] **Step 4: Add env vars to `.env.example`**
@@ -143,11 +158,12 @@ git commit -m "feat(streaming): add Twitch and Kick to platform registry"
 
 ```sql
 -- Expression index to accelerate the polling job's query:
---   WHERE block_type = 'link' AND settings->>'live_check_enabled' = 'true'
--- Without this, the job scans all link blocks on every 2-minute cycle.
+--   WHERE block_group = 'links' AND settings->>'live_check_enabled' = 'true'
+-- The blocks table differentiates links vs sections via block_group (NOT block_type).
+-- Without this index, the job scans all link blocks on every 2-minute cycle.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_blocks_live_check_enabled
     ON site.blocks ((settings->>'live_check_enabled'))
-    WHERE block_type = 'link' AND deleted_at IS NULL;
+    WHERE block_group = 'links' AND deleted_at IS NULL AND is_active = true;
 ```
 
 - [ ] **Step 2: Commit**
@@ -253,19 +269,120 @@ In `UpdateLinkBlockRequest::rules()`, add after `'settings.category'`:
 
 Note: `is_live` is intentionally NOT added to `link_block_settings_keys` in config. It is read-only and will be rejected by the existing `withValidator` allowlist check if a client attempts to submit it.
 
-- [ ] **Step 5: Run to verify all tests pass**
+- [ ] **Step 5: Add per-site cap enforcement in `withValidator`**
+
+Inside the existing `$validator->after(...)` closure, after the settings allowlist block, append:
+
+```php
+            // Per-site cap on live_check_enabled blocks — prevents one user from
+            // monopolizing the streaming poll budget.
+            if (is_array($settings) && array_key_exists('live_check_enabled', $settings) && (bool) $settings['live_check_enabled']) {
+                $currentBlock = $this->route('linkBlock') ?? $this->route('block');
+                $siteId = is_object($currentBlock) ? ($currentBlock->site_id ?? null) : null;
+                $currentBlockId = is_object($currentBlock) && method_exists($currentBlock, 'getKey')
+                    ? (string) $currentBlock->getKey()
+                    : null;
+
+                if ($siteId) {
+                    $cap = (int) config('sidest.streaming.max_live_check_per_site', 5);
+                    $existing = \App\Models\Core\Site\Block::query()
+                        ->where('site_id', $siteId)
+                        ->where('block_group', 'links')
+                        ->when($currentBlockId, fn ($q) => $q->where('id', '!=', $currentBlockId))
+                        ->whereRaw("settings->>'live_check_enabled' = 'true'")
+                        ->count();
+
+                    if ($existing >= $cap) {
+                        $validator->errors()->add(
+                            'settings.live_check_enabled',
+                            "You can enable live status checking on at most {$cap} link blocks per site."
+                        );
+                    }
+                }
+            }
+```
+
+- [ ] **Step 6: Add a per-site cap test**
+
+Append to `tests/Feature/Api/UpdateLinkBlockLiveCheckTest.php`:
+
+```php
+it('rejects live_check_enabled=true when site already has max_live_check_per_site blocks enabled', function () {
+    config([
+        'sidest.streaming.max_live_check_per_site' => 2,
+        'sidest.link_block_settings_keys' => [
+            'platform', 'handle', 'category', 'highlight', 'note',
+            'open_in_new_tab', 'rel_nofollow', 'rel_sponsored', 'rel_ugc',
+            'live_check_enabled',
+        ],
+    ]);
+
+    $professional = createTenant('cap-test-pro');
+    $site = $professional->site;
+
+    // Seed 2 existing blocks that already have live_check_enabled=true
+    foreach (['a', 'b'] as $suffix) {
+        \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.blocks')->insert([
+            'id'          => (string) \Illuminate\Support\Str::uuid(),
+            'site_id'     => $site->id,
+            'block_group' => 'links',
+            'block_type'  => 'link',
+            'settings'    => json_encode(['live_check_enabled' => true, 'platform' => 'twitch', 'handle' => "handle-{$suffix}"]),
+            'sort_order'  => 0,
+            'is_active'   => 1,
+            'is_enabled'  => 1,
+            'created_at'  => now()->toDateTimeString(),
+            'updated_at'  => now()->toDateTimeString(),
+        ]);
+    }
+
+    // A third block being updated to enable live_check should be rejected
+    $newBlockId = (string) \Illuminate\Support\Str::uuid();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.blocks')->insert([
+        'id'          => $newBlockId,
+        'site_id'     => $site->id,
+        'block_group' => 'links',
+        'block_type'  => 'link',
+        'settings'    => json_encode(['live_check_enabled' => false]),
+        'sort_order'  => 0,
+        'is_active'   => 1,
+        'is_enabled'  => 1,
+        'created_at'  => now()->toDateTimeString(),
+        'updated_at'  => now()->toDateTimeString(),
+    ]);
+
+    $block = \App\Models\Core\Site\Block::query()->find($newBlockId);
+
+    $request = UpdateLinkBlockRequest::create('/test', 'PATCH', [
+        'settings' => ['live_check_enabled' => true],
+    ]);
+    $request->setRouteResolver(function () use ($block) {
+        $route = new \Illuminate\Routing\Route(['PATCH'], '/test', []);
+        $route->setParameter('linkBlock', $block);
+        return $route;
+    });
+
+    $validator = Validator::make($request->all(), $request->rules());
+    $request->withValidator($validator);
+    $validator->passes(); // triggers 'after' callbacks
+
+    expect($validator->errors()->has('settings.live_check_enabled'))->toBeTrue();
+});
+```
+
+- [ ] **Step 7: Run to verify all tests pass**
 
 ```bash
 composer test -- --filter=UpdateLinkBlockLiveCheck
 ```
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add app/Http/Requests/Api/Professional/Site/UpdateLinkBlockRequest.php \
         tests/Feature/Api/UpdateLinkBlockLiveCheckTest.php
-git commit -m "feat(streaming): allow live_check_enabled toggle in UpdateLinkBlockRequest"
+git commit -m "feat(streaming): allow live_check_enabled toggle + per-site cap in UpdateLinkBlockRequest"
 ```
 
 ---
@@ -752,7 +869,9 @@ git commit -m "feat(streaming): add TwitchApiClient with batched live-status che
 - Create: `app/Services/Streaming/KickApiClient.php`
 - Create: `tests/Unit/Streaming/KickApiClientTest.php`
 
-> **Note:** Kick's API is at `https://api.kick.com/v1/`. Verify current endpoint shape at `https://dev.kick.com` before implementation. The response field for live status is `livestream` (non-null = live, null = offline).
+> **IMPORTANT — verify before coding:** Confirm the current endpoint shape at https://dev.kick.com (or https://github.com/KickEngineering/KickDevDocs). This plan assumes `GET https://api.kick.com/public/v1/channels?slug=a&slug=b` with response `data[]` where each entry has a `slug` and a `stream.is_live` (or equivalent) flag. If Kick has changed the path, param name, or response shape, update only the URL/param/field — the batching, auth, and rate-limit logic remain.
+>
+> **Why batch, not per-handle:** At 1000 `live_check_enabled` blocks polling every 2 min, per-handle requests = 500 req/min to Kick, which exceeds published limits (~60 req/min per OAuth token) and trips Cloudflare. The batch endpoint collapses this to 10 req/min.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -769,32 +888,36 @@ use App\Services\Streaming\StreamingTokenManager;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-it('returns true when the channel has an active livestream', function () {
+it('returns the subset of handles that are currently live', function () {
     $manager = Mockery::mock(StreamingTokenManager::class);
     $manager->shouldReceive('getToken')->with('kick')->andReturn('kick-token');
 
     Http::fake([
-        'api.kick.com/v1/channels/shroud' => Http::response([
-            'livestream' => ['id' => 123, 'is_live' => true],
+        'api.kick.com/public/v1/channels*' => Http::response([
+            'data' => [
+                ['slug' => 'shroud', 'stream' => ['is_live' => true]],
+                ['slug' => 'xqc',    'stream' => ['is_live' => true]],
+                ['slug' => 'offline','stream' => ['is_live' => false]],
+            ],
         ], 200),
     ]);
 
     $client = new KickApiClient($manager);
-    expect($client->isLive('shroud'))->toBeTrue();
+    $liveHandles = $client->getLiveHandles(['shroud', 'xqc', 'offline']);
+
+    expect($liveHandles)->toBe(['shroud', 'xqc']);
 });
 
-it('returns false when livestream is null', function () {
+it('returns empty array when no handles are live', function () {
     $manager = Mockery::mock(StreamingTokenManager::class);
     $manager->shouldReceive('getToken')->with('kick')->andReturn('kick-token');
 
     Http::fake([
-        'api.kick.com/v1/channels/shroud' => Http::response([
-            'livestream' => null,
-        ], 200),
+        'api.kick.com/public/v1/channels*' => Http::response(['data' => []], 200),
     ]);
 
     $client = new KickApiClient($manager);
-    expect($client->isLive('shroud'))->toBeFalse();
+    expect($client->getLiveHandles(['nobody']))->toBe([]);
 });
 
 it('throws KickRateLimitException on 429 with retry-after header', function () {
@@ -802,37 +925,54 @@ it('throws KickRateLimitException on 429 with retry-after header', function () {
     $manager->shouldReceive('getToken')->with('kick')->andReturn('kick-token');
 
     Http::fake([
-        'api.kick.com/v1/channels/*' => Http::response([], 429, ['Retry-After' => '60']),
+        'api.kick.com/public/v1/channels*' => Http::response([], 429, ['Retry-After' => '60']),
     ]);
 
     $client = new KickApiClient($manager);
 
-    expect(fn () => $client->isLive('someuser'))
+    expect(fn () => $client->getLiveHandles(['anyuser']))
         ->toThrow(KickRateLimitException::class);
 });
 
-it('returns false and logs error on 5xx', function () {
+it('returns empty array and logs error on 5xx', function () {
     $manager = Mockery::mock(StreamingTokenManager::class);
     $manager->shouldReceive('getToken')->with('kick')->andReturn('kick-token');
 
     Http::fake([
-        'api.kick.com/v1/channels/*' => Http::response([], 500),
+        'api.kick.com/public/v1/channels*' => Http::response([], 500),
     ]);
 
     Log::shouldReceive('error')->once()->with('streaming.api_error', Mockery::any());
 
     $client = new KickApiClient($manager);
-    expect($client->isLive('someuser'))->toBeFalse();
+    expect($client->getLiveHandles(['anyuser']))->toBe([]);
 });
 
-it('returns false and logs critical when token is unavailable', function () {
+it('returns empty array and logs critical when token is unavailable', function () {
     $manager = Mockery::mock(StreamingTokenManager::class);
     $manager->shouldReceive('getToken')->with('kick')->andReturn(null);
 
     Log::shouldReceive('critical')->once()->with('streaming.auth_failure', Mockery::any());
 
     $client = new KickApiClient($manager);
-    expect($client->isLive('someuser'))->toBeFalse();
+    expect($client->getLiveHandles(['anyuser']))->toBe([]);
+});
+
+it('sends slug as repeated query parameters (not comma-joined)', function () {
+    $manager = Mockery::mock(StreamingTokenManager::class);
+    $manager->shouldReceive('getToken')->with('kick')->andReturn('kick-token');
+
+    Http::fake(['api.kick.com/public/v1/channels*' => Http::response(['data' => []], 200)]);
+
+    $client = new KickApiClient($manager);
+    $client->getLiveHandles(['a', 'b']);
+
+    Http::assertSent(function ($request) {
+        // Laravel/Guzzle renders repeated array params as ?slug[0]=a&slug[1]=b or ?slug=a&slug=b
+        // depending on HTTP build style. Match either.
+        $url = $request->url();
+        return str_contains($url, 'slug=a') && str_contains($url, 'slug=b');
+    });
 });
 ```
 
@@ -855,37 +995,51 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Checks live status for a single Kick channel.
- * Throws KickRateLimitException on 429 so the poller can abort the cycle.
+ * Calls the Kick public channels endpoint to check live status.
+ * Accepts up to KICK_BATCH_SIZE handles per request — caller (LiveStatusPoller) batches.
  *
- * Endpoint reference: https://dev.kick.com — verify if endpoint shape changes.
+ * Endpoint: https://api.kick.com/public/v1/channels?slug=a&slug=b
+ * Verify current shape at https://dev.kick.com before editing.
+ *
+ * Throws KickRateLimitException on 429 so the poller can flip the circuit breaker.
  */
 class KickApiClient
 {
-    private const CHANNELS_URL = 'https://api.kick.com/v1/channels';
+    private const CHANNELS_URL = 'https://api.kick.com/public/v1/channels';
+
+    public const KICK_BATCH_SIZE = 50;
 
     public function __construct(
         private StreamingTokenManager $tokens
     ) {}
 
     /**
-     * Returns true if the channel is currently live on Kick.
+     * Returns the subset of $handles that are currently live on Kick.
+     * Caller must batch into groups <= KICK_BATCH_SIZE.
+     *
+     * @param  string[]  $handles
+     * @return string[]
      *
      * @throws KickRateLimitException when Kick returns 429
      */
-    public function isLive(string $handle): bool
+    public function getLiveHandles(array $handles): array
     {
+        if (empty($handles)) {
+            return [];
+        }
+
         $token = $this->tokens->getToken('kick');
         if (! $token) {
             Log::critical('streaming.auth_failure', ['platform' => 'kick']);
 
-            return false;
+            return [];
         }
 
         try {
             $response = Http::withHeaders([
                 'Authorization' => "Bearer {$token}",
-            ])->get(self::CHANNELS_URL.'/'.urlencode($handle));
+                'Accept'        => 'application/json',
+            ])->get(self::CHANNELS_URL, ['slug' => $handles]);
 
             if ($response->status() === 429) {
                 $retryAfter = (int) ($response->header('Retry-After') ?? 60);
@@ -895,25 +1049,44 @@ class KickApiClient
             if (! $response->successful()) {
                 Log::error('streaming.api_error', [
                     'platform' => 'kick',
-                    'handle'   => $handle,
                     'status'   => $response->status(),
                     'body'     => $response->body(),
                 ]);
 
-                return false;
+                return [];
             }
 
-            return $response->json('livestream') !== null;
+            $data = $response->json('data', []);
+
+            return array_values(array_filter(
+                array_map(fn ($entry) => $entry['slug'] ?? null, $data),
+                function ($slug) use ($data) {
+                    if (! is_string($slug)) {
+                        return false;
+                    }
+                    // Find the matching entry and check live flag. The exact path may be
+                    // `stream.is_live`, `livestream` (non-null), or `is_live` depending on
+                    // Kick API version — adjust here if response shape has drifted.
+                    foreach ($data as $entry) {
+                        if (($entry['slug'] ?? null) === $slug) {
+                            return (bool) ($entry['stream']['is_live']
+                                ?? (! is_null($entry['livestream'] ?? null))
+                                ?: false);
+                        }
+                    }
+
+                    return false;
+                }
+            ));
         } catch (KickRateLimitException $e) {
-            throw $e; // let poller handle it
+            throw $e; // poller handles
         } catch (\Throwable $e) {
             Log::error('streaming.api_error', [
                 'platform' => 'kick',
-                'handle'   => $handle,
                 'message'  => $e->getMessage(),
             ]);
 
-            return false;
+            return [];
         }
     }
 }
@@ -931,7 +1104,7 @@ Expected: PASS
 ```bash
 git add app/Services/Streaming/KickApiClient.php \
         tests/Unit/Streaming/KickApiClientTest.php
-git commit -m "feat(streaming): add KickApiClient with rate limit exception"
+git commit -m "feat(streaming): add KickApiClient with batched channel lookup + rate-limit exception"
 ```
 
 ---
@@ -942,7 +1115,16 @@ git commit -m "feat(streaming): add KickApiClient with rate limit exception"
 - Create: `app/Services/Streaming/LiveStatusPoller.php`
 - Create: `tests/Unit/Streaming/LiveStatusPollerTest.php`
 
-Redis key format: `streaming:live:{platform}:{handle}` → `"1"` or `"0"`, TTL 180 seconds.
+**Redis keys:**
+- `streaming:live:{platform}:{handle}` → `"1"` or `"0"`. TTL varies by status:
+  - Live (`"1"`): TTL 180s — re-poll every ~2 min while live.
+  - Offline, 1-2 consecutive misses: TTL 180s.
+  - Offline, 3-10 consecutive misses: TTL 600s (~10 min poll cadence).
+  - Offline, 11+ consecutive misses: TTL 1800s (~30 min poll cadence).
+- `streaming:offline_count:{platform}:{handle}` → integer counter of consecutive offline reads. Reset to 0 when live is observed. 1-day idle expiry.
+- `streaming:kick:rate_limited` → `"1"` with 5-min TTL when Kick returns 429.
+
+**Why cold-handle demotion:** >95% of streaming handles will be offline at any moment. Without tiered TTLs, the poller wastes most of its budget re-checking handles that haven't changed in hours. Tiered TTLs naturally spread the API load: hot (live) handles get 2-min freshness, cold handles drop to 30-min. Filter step already uses "skip if TTL > threshold," so no additional poller logic is needed — the TTL *is* the prioritization mechanism.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1033,11 +1215,11 @@ it('batches Twitch handles in groups of 100', function () {
     $poller->poll('twitch', $handles);
 });
 
-it('writes live=1 to Redis for a Kick handle that is live', function () {
+it('writes live=1 to Redis for a Kick handle that is live (batched)', function () {
     $twitch = Mockery::mock(TwitchApiClient::class);
 
     $kick = Mockery::mock(KickApiClient::class);
-    $kick->shouldReceive('isLive')->with('xqc')->andReturn(true);
+    $kick->shouldReceive('getLiveHandles')->with(['xqc'])->andReturn(['xqc']);
 
     $poller = new LiveStatusPoller($twitch, $kick);
     $poller->poll('kick', ['xqc']);
@@ -1045,20 +1227,79 @@ it('writes live=1 to Redis for a Kick handle that is live', function () {
     expect(Redis::get('streaming:live:kick:xqc'))->toBe('1');
 });
 
-it('sets rate_limited Redis key and aborts remaining Kick handles on 429', function () {
-    $twitch = Mockery::mock(TwitchApiClient::class);
+it('batches Kick handles into groups of 50', function () {
+    $handles = array_map(fn ($i) => "user{$i}", range(1, 80));
 
+    $twitch = Mockery::mock(TwitchApiClient::class);
     $kick = Mockery::mock(KickApiClient::class);
-    $kick->shouldReceive('isLive')
-        ->with('user1')
-        ->andThrow(new KickRateLimitException(60));
-    // user2 should NOT be called after the 429
-    $kick->shouldNotReceive('isLive')->with('user2');
+    // Expect 2 batches: 50 + 30
+    $kick->shouldReceive('getLiveHandles')->twice()->andReturn([]);
 
     $poller = new LiveStatusPoller($twitch, $kick);
-    $poller->poll('kick', ['user1', 'user2']);
+    $poller->poll('kick', $handles);
+});
+
+it('sets rate_limited Redis key and aborts remaining Kick batches on 429', function () {
+    $twitch = Mockery::mock(TwitchApiClient::class);
+
+    // 60 handles → 2 batches. First throws, second should never be called.
+    $handles = array_map(fn ($i) => "user{$i}", range(1, 60));
+
+    $kick = Mockery::mock(KickApiClient::class);
+    $kick->shouldReceive('getLiveHandles')
+        ->once()
+        ->andThrow(new KickRateLimitException(60));
+
+    $poller = new LiveStatusPoller($twitch, $kick);
+    $poller->poll('kick', $handles);
 
     expect(Redis::exists('streaming:kick:rate_limited'))->toBe(1);
+});
+
+it('resets offline_count and writes short TTL when a handle goes live', function () {
+    Redis::set('streaming:offline_count:twitch:shroud', '5');
+
+    $twitch = Mockery::mock(TwitchApiClient::class);
+    $twitch->shouldReceive('getLiveHandles')->with(['shroud'])->andReturn(['shroud']);
+    $kick = Mockery::mock(KickApiClient::class);
+
+    $poller = new LiveStatusPoller($twitch, $kick);
+    $poller->poll('twitch', ['shroud']);
+
+    expect(Redis::get('streaming:live:twitch:shroud'))->toBe('1');
+    expect(Redis::exists('streaming:offline_count:twitch:shroud'))->toBe(0);
+    // Live TTL should be ~180s (allow small jitter)
+    expect(Redis::ttl('streaming:live:twitch:shroud'))->toBeGreaterThan(150);
+});
+
+it('demotes TTL to cool tier (600s) after 3+ consecutive offline reads', function () {
+    Redis::set('streaming:offline_count:twitch:sleeper', '2');
+
+    $twitch = Mockery::mock(TwitchApiClient::class);
+    $twitch->shouldReceive('getLiveHandles')->andReturn([]);
+    $kick = Mockery::mock(KickApiClient::class);
+
+    $poller = new LiveStatusPoller($twitch, $kick);
+    $poller->poll('twitch', ['sleeper']);
+
+    // count incremented to 3 → cool tier: TTL in [500, 600]
+    expect(Redis::get('streaming:live:twitch:sleeper'))->toBe('0');
+    expect(Redis::ttl('streaming:live:twitch:sleeper'))->toBeGreaterThan(500);
+    expect(Redis::ttl('streaming:live:twitch:sleeper'))->toBeLessThanOrEqual(600);
+});
+
+it('demotes TTL to cold tier (1800s) after 11+ consecutive offline reads', function () {
+    Redis::set('streaming:offline_count:twitch:dormant', '10');
+
+    $twitch = Mockery::mock(TwitchApiClient::class);
+    $twitch->shouldReceive('getLiveHandles')->andReturn([]);
+    $kick = Mockery::mock(KickApiClient::class);
+
+    $poller = new LiveStatusPoller($twitch, $kick);
+    $poller->poll('twitch', ['dormant']);
+
+    expect(Redis::ttl('streaming:live:twitch:dormant'))->toBeGreaterThan(1700);
+    expect(Redis::ttl('streaming:live:twitch:dormant'))->toBeLessThanOrEqual(1800);
 });
 ```
 
@@ -1084,19 +1325,35 @@ use Illuminate\Support\Facades\Redis;
  * Polls Twitch and Kick APIs for live status and writes results to Redis.
  * No DB writes — live status is ephemeral.
  *
- * Redis keys: streaming:live:{platform}:{handle} → "1"|"0", TTL 180s
+ * Cold-handle demotion: handles offline for N consecutive reads get a longer
+ * TTL, which skips them on subsequent cycles via filterStaleHandles. This is
+ * the main scalability lever — most streaming handles are offline most of the
+ * time; tiered TTLs let the poller spend its API budget on likely-live handles.
  */
 class LiveStatusPoller
 {
     private const LIVE_KEY_PREFIX = 'streaming:live:';
 
+    private const OFFLINE_COUNT_PREFIX = 'streaming:offline_count:';
+
     private const KICK_RATE_LIMITED_KEY = 'streaming:kick:rate_limited';
 
-    private const LIVE_TTL_SECONDS = 180;
+    private const KICK_RATE_LIMITED_TTL = 300;
 
-    private const TTL_SKIP_THRESHOLD = 60;
+    // TTLs by tier. Keys stale at TTL <= TTL_SKIP_THRESHOLD are re-polled.
+    private const LIVE_TTL_SECONDS = 180;        // Live handle — freshness 2 min
+
+    private const WARM_OFFLINE_TTL = 180;         // 1-2 offline reads — still poll every cycle
+
+    private const COOL_OFFLINE_TTL = 600;         // 3-10 offline reads — poll ~every 10 min
+
+    private const COLD_OFFLINE_TTL = 1800;        // 11+ offline reads — poll ~every 30 min
+
+    private const TTL_SKIP_THRESHOLD = 60;        // Skip handles whose TTL hasn't dropped under 60s yet
 
     private const TWITCH_BATCH_SIZE = 100;
+
+    private const KICK_BATCH_SIZE = 50;           // Matches KickApiClient::KICK_BATCH_SIZE
 
     public function __construct(
         private TwitchApiClient $twitch,
@@ -1138,37 +1395,61 @@ class LiveStatusPoller
     /** @param string[] $handles */
     private function pollKick(array $handles): void
     {
-        foreach ($handles as $handle) {
+        foreach (array_chunk($handles, self::KICK_BATCH_SIZE) as $batch) {
             try {
-                $isLive = $this->kick->isLive($handle);
-                $this->writeStatus('kick', $handle, $isLive);
+                $liveSet = array_flip($this->kick->getLiveHandles($batch));
+                foreach ($batch as $handle) {
+                    $this->writeStatus('kick', $handle, isset($liveSet[$handle]));
+                }
             } catch (KickRateLimitException $e) {
                 Log::warning('streaming.rate_limit', [
                     'platform'    => 'kick',
-                    'handle'      => $handle,
                     'retry_after' => $e->retryAfter,
                 ]);
-                // Mark rate limited and abort remaining handles for this cycle.
-                Redis::set(self::KICK_RATE_LIMITED_KEY, '1', 'EX', 300);
+                // Flip the circuit breaker and stop polling Kick for this cycle
+                // (and subsequent cycles until the flag expires).
+                Redis::set(self::KICK_RATE_LIMITED_KEY, '1', 'EX', self::KICK_RATE_LIMITED_TTL);
 
                 return;
             }
         }
     }
 
+    /**
+     * Write live status + manage the consecutive-offline counter that drives TTL tiers.
+     * Live writes reset the counter; offline writes increment and pick a tiered TTL.
+     */
     private function writeStatus(string $platform, string $handle, bool $isLive): void
     {
-        Redis::set(
-            self::LIVE_KEY_PREFIX."{$platform}:{$handle}",
-            $isLive ? '1' : '0',
-            'EX',
-            self::LIVE_TTL_SECONDS
-        );
+        $liveKey = self::LIVE_KEY_PREFIX."{$platform}:{$handle}";
+        $countKey = self::OFFLINE_COUNT_PREFIX."{$platform}:{$handle}";
+
+        if ($isLive) {
+            Redis::set($liveKey, '1', 'EX', self::LIVE_TTL_SECONDS);
+            Redis::del($countKey);
+
+            return;
+        }
+
+        $count = (int) Redis::incr($countKey);
+        // Counter survives a day of inactivity so rarely-polled cold handles
+        // don't lose their tier when the 30-min TTL lapses between cycles.
+        Redis::expire($countKey, 86400);
+
+        $ttl = match (true) {
+            $count >= 11 => self::COLD_OFFLINE_TTL,
+            $count >= 3  => self::COOL_OFFLINE_TTL,
+            default      => self::WARM_OFFLINE_TTL,
+        };
+
+        Redis::set($liveKey, '0', 'EX', $ttl);
     }
 
     /**
      * Returns handles whose Redis key is missing or has TTL <= threshold.
      * Handles with fresh entries are skipped — no API call needed.
+     * This is where cold-handle demotion takes effect: demoted handles have
+     * a longer TTL and are filtered out on most cycles.
      *
      * @param  string[]  $handles
      * @return string[]
@@ -1334,9 +1615,10 @@ class CheckStreamingLiveStatusJob implements ShouldQueue
         /** @var array<string, list<string>> $handlesByPlatform */
         $handlesByPlatform = array_fill_keys($streamingPlatforms, []);
 
+        // block_group='links' (NOT block_type='link') is the links/sections discriminator
+        // in site.blocks. All other queries in the codebase use block_group.
         Block::query()
-            ->where('block_type', 'link')
-            ->whereNotNull('settings->platform')
+            ->where('block_group', 'links')
             ->whereRaw("settings->>'live_check_enabled' = 'true'")
             ->whereNull('deleted_at')
             ->where('is_active', true)
@@ -1410,9 +1692,12 @@ git commit -m "feat(streaming): add CheckStreamingLiveStatusJob with error handl
 In `routes/console.php`, append after the last `Schedule::job()` block:
 
 ```php
+// withoutOverlapping(2) matches the every-2-min cadence: if a run exceeds 2 min
+// (should be rare now that both Twitch and Kick use batch endpoints), the next
+// scheduler tick skips exactly one cycle rather than stacking.
 Schedule::job(new \App\Jobs\Streaming\CheckStreamingLiveStatusJob)
     ->everyTwoMinutes()
-    ->withoutOverlapping(5)
+    ->withoutOverlapping(2)
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: check-streaming-live-status');
     });
@@ -1589,19 +1874,21 @@ class LiveStatusInjector
     private const LIVE_KEY_PREFIX = 'streaming:live:';
 
     /**
-     * Injects is_live into both the `links` and `blocks` arrays in a site payload.
+     * Injects is_live into the `links`, `sections`, and `blocks` arrays in a site payload.
+     *
+     * SiteCacheService::getPublicSitePayload() returns links and sections as separate
+     * top-level arrays (both living in site.blocks, differentiated by block_group).
+     * Covering all three keys future-proofs against streaming blocks appearing in sections.
      *
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function injectIntoPayload(array $payload): array
     {
-        if (isset($payload['links']) && is_array($payload['links'])) {
-            $payload['links'] = $this->injectIntoBlocks($payload['links']);
-        }
-
-        if (isset($payload['blocks']) && is_array($payload['blocks'])) {
-            $payload['blocks'] = $this->injectIntoBlocks($payload['blocks']);
+        foreach (['links', 'sections', 'blocks'] as $key) {
+            if (isset($payload[$key]) && is_array($payload[$key])) {
+                $payload[$key] = $this->injectIntoBlocks($payload[$key]);
+            }
         }
 
         return $payload;
