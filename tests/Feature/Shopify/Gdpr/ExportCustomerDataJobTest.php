@@ -105,6 +105,23 @@ beforeEach(function () {
         updated_at TEXT
     )');
 
+    $conn->statement('CREATE TABLE IF NOT EXISTS analytics.booking_events (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NOT NULL,
+        site_id TEXT,
+        occurred_at TEXT,
+        status TEXT,
+        source TEXT,
+        customer_name TEXT,
+        customer_email TEXT,
+        customer_phone TEXT,
+        currency_code TEXT,
+        amount_paid_cents INTEGER,
+        raw_payload TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )');
+
     $conn->statement('CREATE TABLE IF NOT EXISTS core.gdpr_requests (
         id TEXT PRIMARY KEY,
         topic TEXT NOT NULL,
@@ -173,6 +190,42 @@ function seedExportFixture(): array
         'updated_at' => now(),
     ]);
 
+    // Booking for the target customer — must appear in the export.
+    DB::table('analytics.booking_events')->insert([
+        'id' => 'bk-export-target',
+        'professional_id' => $professionalId,
+        'site_id' => 'site-1',
+        'occurred_at' => now(),
+        'status' => 'completed',
+        'source' => 'site_booking_checkout',
+        'customer_name' => 'Target Customer',
+        'customer_email' => 'target@example.com',
+        'customer_phone' => '+1555',
+        'currency_code' => 'USD',
+        'amount_paid_cents' => 4200,
+        'raw_payload' => json_encode(['customer' => ['email' => 'target@example.com'], 'staff_id' => 'third-party-staff-id']),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    // Booking for a DIFFERENT customer — must not leak into the export.
+    DB::table('analytics.booking_events')->insert([
+        'id' => 'bk-export-other',
+        'professional_id' => $professionalId,
+        'site_id' => 'site-1',
+        'occurred_at' => now(),
+        'status' => 'completed',
+        'source' => 'site_booking_checkout',
+        'customer_name' => 'Other Customer',
+        'customer_email' => 'other@example.com',
+        'customer_phone' => '+9999',
+        'currency_code' => 'USD',
+        'amount_paid_cents' => 9999,
+        'raw_payload' => json_encode(['customer' => ['email' => 'other@example.com']]),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
     $gdpr = GdprRequest::create([
         'topic' => GdprRequest::TOPIC_CUSTOMERS_DATA_REQUEST,
         'shop_domain' => $shopDomain,
@@ -211,6 +264,23 @@ it('includes the customer row and email subscription in the export payload', fun
         return isset($data['customers'][0]['email'])
             && $data['customers'][0]['email'] === 'target@example.com'
             && count($data['email_subscriptions']) === 1;
+    });
+});
+
+it('includes booking_events for the matching email but omits raw_payload and other customers', function () {
+    seedExportFixture();
+
+    (new ExportCustomerDataJob(GdprRequest::first()->id))->handle();
+
+    Mail::assertSent(CustomerDataExportMail::class, function ($mail) {
+        $bookings = $mail->exportData['bookings'] ?? [];
+
+        // Only the target customer's booking — other@example.com's row is filtered out.
+        return count($bookings) === 1
+            && $bookings[0]['customer_email'] === 'target@example.com'
+            && $bookings[0]['amount_paid_cents'] === 4200
+            // raw_payload contains third-party data (staff_id) and is deliberately excluded.
+            && ! array_key_exists('raw_payload', $bookings[0]);
     });
 });
 

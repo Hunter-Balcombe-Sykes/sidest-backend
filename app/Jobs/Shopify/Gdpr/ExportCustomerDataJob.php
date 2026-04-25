@@ -119,7 +119,7 @@ class ExportCustomerDataJob implements ShouldQueue
      * Gather every PII record we hold for the given customer email, scoped
      * to the specified professional. Groups by source table.
      *
-     * @return array{customers: array, email_subscriptions: array, enquiries: array, lead_submissions: array}
+     * @return array{customers: array, email_subscriptions: array, enquiries: array, lead_submissions: array, bookings: array}
      */
     private function gatherExportData(string $professionalId, string $email): array
     {
@@ -173,15 +173,24 @@ class ExportCustomerDataJob implements ShouldQueue
                 ->all();
         }
 
-        // analytics.booking_events is intentionally excluded: those rows are
-        // denormalised analytics copies with no FK back to a verified customer
-        // identity, and are scrubbed separately by RedactCustomerJob on a redact request.
+        // raw_payload is deliberately excluded — it is the full third-party
+        // Square/Fresha API response which may contain other parties' data
+        // (staff member who took the booking, etc.) and would bloat the email.
+        $bookings = DB::connection('pgsql')
+            ->table('analytics.booking_events')
+            ->select(['id', 'occurred_at', 'status', 'source', 'customer_name', 'customer_email', 'customer_phone', 'amount_paid_cents', 'currency_code'])
+            ->where('professional_id', $professionalId)
+            ->whereRaw('LOWER(customer_email) = ?', [$emailLc])
+            ->get()
+            ->map(fn ($r) => (array) $r)
+            ->all();
 
         return [
             'customers' => $customers,
             'email_subscriptions' => $subscriptions,
             'enquiries' => $enquiries,
             'lead_submissions' => $leadSubmissions,
+            'bookings' => $bookings,
         ];
     }
 }
