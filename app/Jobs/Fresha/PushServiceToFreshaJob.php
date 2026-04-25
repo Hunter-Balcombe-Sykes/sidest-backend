@@ -33,7 +33,7 @@ class PushServiceToFreshaJob implements ShouldQueue
             ->where('id', $this->serviceId)
             ->first();
 
-        if (! $service) {
+        if (! $service || $service->trashed()) {
             return;
         }
 

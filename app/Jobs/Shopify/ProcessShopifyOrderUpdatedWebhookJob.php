@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Shopify;
 
+use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Bus\Queueable;
@@ -31,6 +32,14 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
     public function handle(): void
     {
+        if (! Professional::find($this->professionalId)) {
+            Log::warning('ProcessShopifyOrderUpdatedWebhookJob: brand professional not found, skipping', [
+                'professional_id' => $this->professionalId,
+            ]);
+
+            return;
+        }
+
         $orderId = (string) Arr::get($this->payload, 'id', '');
         $financialStatus = strtolower(trim((string) Arr::get($this->payload, 'financial_status', '')));
 

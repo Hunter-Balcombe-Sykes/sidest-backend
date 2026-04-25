@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Analytics;
 
+use App\Models\Core\Professional\Professional;
 use App\Services\Analytics\SiteAnalyticsAggregateService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
@@ -41,6 +42,10 @@ class RebuildSiteDailyAggregatesJob implements ShouldBeUnique, ShouldQueue
         $day = trim($this->day);
 
         if ($professionalId === '' || $day === '') {
+            return;
+        }
+
+        if (! Professional::find($professionalId)) {
             return;
         }
 

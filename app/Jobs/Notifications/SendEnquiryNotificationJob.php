@@ -22,7 +22,9 @@ class SendEnquiryNotificationJob implements ShouldQueue
     public function __construct(
         public readonly string $enquiryId,
         public readonly string $notificationEmail,
-    ) {}
+    ) {
+        $this->onQueue('notifications');
+    }
 
     public function handle(): void
     {

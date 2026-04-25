@@ -20,6 +20,11 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
 
     public int $timeout = 300;
 
+    public function __construct()
+    {
+        $this->onQueue('notifications');
+    }
+
     public function handle(NotificationPublisher $publisher): void
     {
         $yearWeek = now()->format('o-W'); // ISO year + week number

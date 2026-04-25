@@ -20,6 +20,11 @@ class InviteExpirySweepJob implements ShouldQueue
 
     public int $timeout = 120;
 
+    public function __construct()
+    {
+        $this->onQueue('notifications');
+    }
+
     public function handle(NotificationPublisher $publisher): void
     {
         $now = now();

@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Analytics;
 
+use App\Models\Core\Professional\Professional;
 use App\Services\Analytics\CommerceAnalyticsAggregateService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
@@ -48,6 +49,10 @@ class RebuildCommerceDailyAggregatesJob implements ShouldBeUnique, ShouldQueue
         $day = trim($this->day);
 
         if ($brandId === '' || $affiliateId === '' || $day === '') {
+            return;
+        }
+
+        if (! Professional::find($brandId) || ! Professional::find($affiliateId)) {
             return;
         }
 

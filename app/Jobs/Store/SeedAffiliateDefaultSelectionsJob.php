@@ -24,7 +24,9 @@ class SeedAffiliateDefaultSelectionsJob implements ShouldQueue
     public function __construct(
         public readonly string $affiliateProfessionalId,
         public readonly string $brandProfessionalId,
-    ) {}
+    ) {
+        $this->onQueue('integrations');
+    }
 
     public function handle(AffiliateProductCatalogService $catalogService): void
     {

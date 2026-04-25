@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Analytics;
 
+use App\Models\Core\Professional\Professional;
 use App\Services\Analytics\SiteAnalyticsAggregateService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
@@ -39,6 +40,10 @@ class RebuildSiteHourlyAggregatesJob implements ShouldBeUnique, ShouldQueue
     {
         $professionalId = trim($this->professionalId);
         if ($professionalId === '') {
+            return;
+        }
+
+        if (! Professional::find($professionalId)) {
             return;
         }
 

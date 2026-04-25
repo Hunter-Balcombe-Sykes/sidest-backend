@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Analytics;
 
+use App\Models\Core\Professional\Professional;
 use App\Services\Analytics\CommerceAnalyticsAggregateService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
@@ -46,12 +47,17 @@ class RebuildCommerceHourlyAggregatesJob implements ShouldBeUnique, ShouldQueue
     {
         $brandId = trim($this->brandProfessionalId);
         $affiliateId = trim($this->affiliateProfessionalId);
+        $hourStart = trim($this->hourStart);
 
-        if ($brandId === '' || $affiliateId === '') {
+        if ($brandId === '' || $affiliateId === '' || $hourStart === '') {
             return;
         }
 
-        $aggregates->rebuildForHour($brandId, $affiliateId, $this->hourStart);
+        if (! Professional::find($brandId) || ! Professional::find($affiliateId)) {
+            return;
+        }
+
+        $aggregates->rebuildForHour($brandId, $affiliateId, $hourStart);
     }
 
     public function failed(\Throwable $e): void

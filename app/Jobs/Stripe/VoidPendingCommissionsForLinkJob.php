@@ -30,7 +30,9 @@ class VoidPendingCommissionsForLinkJob implements ShouldQueue
         public readonly string $affiliateProfessionalId,
         public readonly string $brandProfessionalId,
         public readonly string $reason,
-    ) {}
+    ) {
+        $this->onQueue('stripe');
+    }
 
     public function handle(
         CommissionVoidService $voidService,

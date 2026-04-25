@@ -31,6 +31,11 @@ class ProcessCommissionPayoutsJob implements ShouldQueue
 
     public int $timeout = 60;
 
+    public function __construct()
+    {
+        $this->onQueue('stripe');
+    }
+
     /**
      * Backoff between retries in seconds. 1 minute for the first retry
      * (typical network blip), 3 minutes for the second (longer Stripe outage).

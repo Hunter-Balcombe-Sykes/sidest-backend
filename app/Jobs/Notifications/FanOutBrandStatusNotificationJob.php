@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Notifications;
 
+use App\Models\Core\Professional\Professional;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -21,15 +22,25 @@ class FanOutBrandStatusNotificationJob implements ShouldQueue
     public function __construct(
         public readonly string $brandProfessionalId,
         public readonly string $brandStatus, // 'active' | 'deactivated'
-    ) {}
+    ) {
+        $this->onQueue('notifications');
+    }
 
     public function handle(NotificationPublisher $publisher): void
     {
+        $brand = Professional::find($this->brandProfessionalId);
+
+        if (! $brand) {
+            Log::warning('FanOutBrandStatusNotificationJob: brand not found, skipping fan-out', [
+                'brand_professional_id' => $this->brandProfessionalId,
+            ]);
+
+            return;
+        }
+
         $yearWeek = now()->format('o-W');
 
-        $brandName = (string) DB::table('core.professionals')
-            ->where('id', $this->brandProfessionalId)
-            ->value(DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), 'Brand')"));
+        $brandName = (string) ($brand->display_name ?: $brand->handle ?: 'Brand');
 
         $affiliateIds = DB::table('brand.brand_partner_links')
             ->where('brand_professional_id', $this->brandProfessionalId)

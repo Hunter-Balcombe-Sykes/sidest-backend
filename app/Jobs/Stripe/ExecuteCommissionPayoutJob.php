@@ -37,7 +37,10 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
         return [60, 120, 300, 600];
     }
 
-    public function __construct(public readonly string $payoutId) {}
+    public function __construct(public readonly string $payoutId)
+    {
+        $this->onQueue('stripe');
+    }
 
     public function uniqueId(): string
     {
