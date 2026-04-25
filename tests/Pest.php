@@ -275,6 +275,26 @@ function setupWaitlistTable(): void
 }
 
 /**
+ * Register SQLite UDFs that mimic the Postgres functions our advisory-locking
+ * code paths rely on. Production calls `pg_advisory_xact_lock(hashtext(?))`
+ * to serialize concurrent reorder/upsert writes per site; under SQLite both
+ * functions are absent. The shims are no-ops (locks aren't meaningful in
+ * single-process in-memory SQLite anyway), which lets us exercise the real
+ * production code path in tests instead of branching on driver.
+ */
+function shimPgAdvisoryLockForSqlite(): void
+{
+    $conn = \Illuminate\Support\Facades\DB::connection('pgsql');
+    if ($conn->getDriverName() !== 'sqlite') {
+        return;
+    }
+
+    $pdo = $conn->getPdo();
+    $pdo->sqliteCreateFunction('hashtext', fn ($value) => crc32((string) $value), 1);
+    $pdo->sqliteCreateFunction('pg_advisory_xact_lock', fn ($value) => null, 1);
+}
+
+/**
  * site.blocks — all columns nullable except the PK. Used by backfill command
  * tests and any test that exercises Block Eloquent operations in SQLite.
  */

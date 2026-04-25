@@ -157,6 +157,7 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
 
         // Sections
         Route::get('/sections', [ProfessionalSectionBlockController::class, 'index']);
+        Route::post('/sections/reorder', [ProfessionalSectionBlockController::class, 'reorder']);
         Route::put('/sections/{blockType}', [ProfessionalSectionBlockController::class, 'upsert'])
             ->where('blockType', '[a-z0-9_-]+');
         Route::delete('/sections/{blockType}', [ProfessionalSectionBlockController::class, 'remove'])

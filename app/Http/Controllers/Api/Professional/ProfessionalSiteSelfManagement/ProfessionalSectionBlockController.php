@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
+use App\Http\Requests\Api\Professional\Site\ReorderBlocksRequest;
 use App\Http\Requests\Api\Professional\Site\UpsertSectionBlockRequest;
 use App\Models\Core\Site\Block;
 use App\Services\Professional\AccountTypeDefaultsService;
@@ -161,6 +162,72 @@ class ProfessionalSectionBlockController extends ApiController
         return $this->success([
             'section' => $this->serializeSection($block->fresh()),
         ], $block->wasRecentlyCreated ? 201 : 200);
+    }
+
+    /**
+     * Reorder section blocks for the current professional. Accepts an `ids` array
+     * representing the new order; any sections owned by this site that aren't in
+     * the array keep their current relative order and follow the supplied ids.
+     *
+     * The two-pass renumber (offset by max+1000, then 0..n) avoids transient
+     * unique-violation collisions if a unique index on sort_order is ever added.
+     */
+    public function reorder(ReorderBlocksRequest $request)
+    {
+        $pro = $this->currentProfessional($request);
+        $site = $this->currentSite($pro);
+
+        $ids = array_values(array_unique($request->validated()['ids'] ?? []));
+
+        DB::transaction(function () use ($pro, $site, $ids) {
+            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["blocks-sections:{$site->id}"]);
+
+            $allIds = Block::query()
+                ->where('professional_id', $pro->id)
+                ->where('site_id', $site->id)
+                ->where('block_group', 'sections')
+                ->lockForUpdate()
+                ->orderBy('sort_order')
+                ->orderBy('created_at')
+                ->pluck('id')
+                ->all();
+
+            $allSet = array_flip($allIds);
+
+            foreach ($ids as $id) {
+                if (! isset($allSet[$id])) {
+                    abort(403, 'One or more sections do not belong to you');
+                }
+            }
+
+            $remaining = array_values(array_diff($allIds, $ids));
+            $newOrder = array_merge($ids, $remaining);
+            $offset = (int) Block::query()
+                ->where('professional_id', $pro->id)
+                ->where('site_id', $site->id)
+                ->where('block_group', 'sections')
+                ->max('sort_order') + 1000;
+
+            foreach ($newOrder as $i => $id) {
+                Block::query()
+                    ->where('professional_id', $pro->id)
+                    ->where('site_id', $site->id)
+                    ->where('block_group', 'sections')
+                    ->where('id', $id)
+                    ->update(['sort_order' => $offset + $i]);
+            }
+
+            foreach ($newOrder as $i => $id) {
+                Block::query()
+                    ->where('professional_id', $pro->id)
+                    ->where('site_id', $site->id)
+                    ->where('block_group', 'sections')
+                    ->where('id', $id)
+                    ->update(['sort_order' => $i]);
+            }
+        });
+
+        return $this->success(['ok' => true]);
     }
 
     public function remove(Request $request, string $blockType)
