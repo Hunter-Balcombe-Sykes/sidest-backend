@@ -121,6 +121,25 @@ class AccountDeletionService
             return ['success' => false, 'code' => 404, 'error' => 'Invalid token.'];
         }
 
+        $deletesAt = $this->executeConfirmation($professional);
+
+        $this->logAuditEvent($professional, ProfessionalDeletionAuditEntry::EVENT_CONFIRMED, $request);
+
+        return [
+            'success' => true,
+            'code' => 200,
+            'deletes_at' => $deletesAt->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Apply the confirmed deletion: snapshot status, flip to pending_deletion,
+     * revoke integration credentials, schedule Stripe cancel-at-period-end,
+     * send scheduled email. Shared by self-service confirm() and admin
+     * adminInitiate(). Returns the deletes_at timestamp.
+     */
+    private function executeConfirmation(Professional $professional): Carbon
+    {
         $retentionDays = (int) config('sidest.soft_delete_retention_days', 30);
         $deletesAt = now()->addDays($retentionDays);
         $previousStatus = (string) ($professional->status ?? 'active');
@@ -157,17 +176,131 @@ class AccountDeletionService
                 'professional_id' => $professional->id,
                 'error' => $e->getMessage(),
             ]);
-            // Do not fail the confirm — the deletion itself is more important
-            // than the mail delivery. Cancel flow is still available via logged-in session.
+            // Do not fail the confirmation — the deletion is more important
+            // than the mail. Cancel flow remains available via logged-in session.
         }
 
-        $this->logAuditEvent($professional, ProfessionalDeletionAuditEntry::EVENT_CONFIRMED, $request);
+        return $deletesAt;
+    }
+
+    /**
+     * Admin-initiated deletion. Skips the email-token confirm step and goes
+     * straight to scheduling the 30-day grace period. Used when a professional
+     * emails support requesting erasure (e.g., GDPR Article 17 request).
+     *
+     * @param  Professional  $professional  The user being deleted.
+     * @param  string  $staffActorId  SidestStaff.id of the admin invoking this.
+     * @param  string  $staffActorHandle  Snapshot of staff name (or email) for audit.
+     * @param  string  $reason  GDPR reason / support ticket reference (10–500 chars).
+     * @param  bool  $overrideObligations  If true, proceed despite unpaid balance / pending payouts.
+     * @return array{success: bool, code: int, error?: string, reasons?: array<string>, deletes_at?: string}
+     */
+    public function adminInitiate(
+        Professional $professional,
+        string $staffActorId,
+        string $staffActorHandle,
+        string $reason,
+        bool $overrideObligations,
+        Request $request,
+    ): array {
+        if ($professional->status === 'pending_deletion') {
+            return ['success' => false, 'code' => 409, 'error' => 'Deletion already in progress.'];
+        }
+
+        $obligations = $this->checkObligations($professional);
+
+        if (! empty($obligations) && ! $overrideObligations) {
+            return [
+                'success' => false,
+                'code' => 422,
+                'error' => 'Outstanding obligations must be settled or explicitly overridden.',
+                'reasons' => $obligations,
+            ];
+        }
+
+        $deletesAt = $this->executeConfirmation($professional);
+
+        $metadata = ! empty($obligations)
+            ? ['obligations_overridden' => $obligations]
+            : [];
+
+        $this->logAuditEvent(
+            $professional,
+            ProfessionalDeletionAuditEntry::EVENT_ADMIN_INITIATED,
+            $request,
+            $metadata,
+            ProfessionalDeletionAuditEntry::ACTOR_TYPE_STAFF_ADMIN,
+            $staffActorId,
+            $staffActorHandle,
+            $reason,
+        );
 
         return [
             'success' => true,
             'code' => 200,
             'deletes_at' => $deletesAt->toIso8601String(),
         ];
+    }
+
+    /**
+     * Admin-initiated cancel during grace period. Same lifecycle as self-service
+     * cancel() but the audit row records which staff member triggered the cancel.
+     *
+     * @return array{success: bool, code: int, error?: string}
+     */
+    public function adminCancel(
+        Professional $professional,
+        string $staffActorId,
+        string $staffActorHandle,
+        ?string $reason,
+        Request $request,
+    ): array {
+        if ($professional->status !== 'pending_deletion') {
+            return ['success' => false, 'code' => 409, 'error' => 'No pending deletion to cancel.'];
+        }
+
+        $previousStatus = $professional->deletion_previous_status;
+        if (! is_string($previousStatus) || $previousStatus === '') {
+            $previousStatus = 'active';
+        }
+
+        DB::transaction(function () use ($professional, $previousStatus) {
+            $professional->update([
+                'status' => $previousStatus,
+                'deletion_requested_at' => null,
+                'deletion_confirmed_at' => null,
+                'deletion_previous_status' => null,
+                'deletion_token_hash' => null,
+            ]);
+        });
+
+        $this->resumeStripeSubscription($professional);
+
+        try {
+            Mail::to($professional->primary_email)->send(
+                new AccountDeletionCancelledMail(
+                    displayName: (string) ($professional->display_name ?? 'there'),
+                )
+            );
+        } catch (\Throwable $e) {
+            Log::error('Account deletion cancelled mail failed', [
+                'professional_id' => $professional->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->logAuditEvent(
+            $professional,
+            ProfessionalDeletionAuditEntry::EVENT_ADMIN_CANCELLED,
+            $request,
+            [],
+            ProfessionalDeletionAuditEntry::ACTOR_TYPE_STAFF_ADMIN,
+            $staffActorId,
+            $staffActorHandle,
+            $reason,
+        );
+
+        return ['success' => true, 'code' => 200];
     }
 
     /**
@@ -228,14 +361,13 @@ class AccountDeletionService
         // Step 1: delete Supabase auth user. If this fails, do NOT hard-delete
         // the DB row — we'd end up with an orphaned auth user and no way to retry.
         if ($authUserId !== '' && ! $this->deleteSupabaseAuthUser($authUserId)) {
-            ProfessionalDeletionAuditEntry::create([
-                'professional_id' => $professional->id,
-                'professional_handle_snapshot' => $handleSnapshot,
-                'professional_email_snapshot' => $emailSnapshot,
-                'event' => ProfessionalDeletionAuditEntry::EVENT_PURGE_FAILED,
-                'metadata' => ['reason' => 'supabase_deletion_failed'],
-                'created_at' => now(),
-            ]);
+            $this->logAuditEvent(
+                $professional,
+                ProfessionalDeletionAuditEntry::EVENT_PURGE_FAILED,
+                null,
+                ['reason' => 'supabase_deletion_failed'],
+                ProfessionalDeletionAuditEntry::ACTOR_TYPE_SYSTEM,
+            );
 
             return false;
         }
@@ -269,24 +401,26 @@ class AccountDeletionService
                 'professional_id' => $professional->id,
                 'error' => $e->getMessage(),
             ]);
-            ProfessionalDeletionAuditEntry::create([
-                'professional_id' => $professional->id,
-                'professional_handle_snapshot' => $handleSnapshot,
-                'professional_email_snapshot' => $emailSnapshot,
-                'event' => ProfessionalDeletionAuditEntry::EVENT_PURGE_FAILED,
-                'metadata' => ['reason' => 'force_delete_failed', 'error' => $e->getMessage()],
-                'created_at' => now(),
-            ]);
+            $this->logAuditEvent(
+                $professional,
+                ProfessionalDeletionAuditEntry::EVENT_PURGE_FAILED,
+                null,
+                ['reason' => 'force_delete_failed', 'error' => $e->getMessage()],
+                ProfessionalDeletionAuditEntry::ACTOR_TYPE_SYSTEM,
+            );
 
             return false;
         }
 
-        // Audit row — professional_id FK is SET NULL on hard delete, snapshots preserve identity.
+        // Direct create (not logAuditEvent) — the professional row was just
+        // force-deleted, so professional_id must be NULL to satisfy the FK.
+        // Snapshots taken at the top of purge() preserve identity for forensics.
         ProfessionalDeletionAuditEntry::create([
             'professional_id' => null,
             'professional_handle_snapshot' => $handleSnapshot,
             'professional_email_snapshot' => $emailSnapshot,
             'event' => ProfessionalDeletionAuditEntry::EVENT_PURGED,
+            'actor_type' => ProfessionalDeletionAuditEntry::ACTOR_TYPE_SYSTEM,
             'created_at' => now(),
         ]);
 
@@ -503,19 +637,29 @@ class AccountDeletionService
 
     /**
      * Append an audit row. Captures handle/email snapshots so the row survives
-     * the professional's eventual hard delete.
+     * the professional's eventual hard delete. Actor parameters identify who
+     * triggered this event — the professional themselves (self-service),
+     * a staff admin (support-initiated), or the system (daily purge command).
      */
     public function logAuditEvent(
         Professional $professional,
         string $event,
         ?Request $request = null,
-        array $metadata = []
+        array $metadata = [],
+        string $actorType = ProfessionalDeletionAuditEntry::ACTOR_TYPE_PROFESSIONAL,
+        ?string $actorId = null,
+        ?string $actorHandle = null,
+        ?string $reason = null,
     ): void {
         ProfessionalDeletionAuditEntry::create([
             'professional_id' => $professional->id,
             'professional_handle_snapshot' => (string) ($professional->handle ?? ''),
             'professional_email_snapshot' => (string) ($professional->primary_email ?? ''),
             'event' => $event,
+            'actor_type' => $actorType,
+            'actor_id' => $actorId,
+            'actor_handle_snapshot' => $actorHandle,
+            'reason' => $reason,
             'ip_address' => $request?->ip(),
             'user_agent' => $request?->userAgent(),
             'metadata' => ! empty($metadata) ? $metadata : null,

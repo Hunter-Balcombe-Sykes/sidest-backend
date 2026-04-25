@@ -59,10 +59,25 @@ class AccountDeletionTestCase
             professional_handle_snapshot TEXT NOT NULL,
             professional_email_snapshot TEXT NOT NULL,
             event TEXT NOT NULL,
+            actor_type TEXT,
+            actor_id TEXT,
+            actor_handle_snapshot TEXT,
+            reason TEXT,
             ip_address TEXT,
             user_agent TEXT,
             metadata TEXT,
             created_at TEXT
+        )');
+
+        $conn->statement('CREATE TABLE IF NOT EXISTS core.sidest_staff (
+            id TEXT PRIMARY KEY,
+            auth_user_id TEXT,
+            role TEXT,
+            name TEXT,
+            primary_email TEXT,
+            phone TEXT,
+            created_at TEXT,
+            updated_at TEXT
         )');
 
         $conn->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (

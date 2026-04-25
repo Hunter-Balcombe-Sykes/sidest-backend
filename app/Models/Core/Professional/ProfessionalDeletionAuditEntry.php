@@ -30,11 +30,25 @@ class ProfessionalDeletionAuditEntry extends BaseModel
 
     public const EVENT_PURGE_FAILED = 'purge_failed';
 
+    public const EVENT_ADMIN_INITIATED = 'admin_initiated';
+
+    public const EVENT_ADMIN_CANCELLED = 'admin_cancelled';
+
+    public const ACTOR_TYPE_PROFESSIONAL = 'professional';
+
+    public const ACTOR_TYPE_STAFF_ADMIN = 'staff_admin';
+
+    public const ACTOR_TYPE_SYSTEM = 'system';
+
     protected $fillable = [
         'professional_id',
         'professional_handle_snapshot',
         'professional_email_snapshot',
         'event',
+        'actor_type',
+        'actor_id',
+        'actor_handle_snapshot',
+        'reason',
         'ip_address',
         'user_agent',
         'metadata',
@@ -44,6 +58,7 @@ class ProfessionalDeletionAuditEntry extends BaseModel
     // PII fields — never expose in serialisation (API responses, logs, job payloads)
     protected $hidden = [
         'professional_email_snapshot',
+        'actor_handle_snapshot',
         'ip_address',
         'user_agent',
     ];

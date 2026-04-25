@@ -2,6 +2,7 @@
 
 use App\Mail\Notifications\AccountDeletionScheduledMail;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
 use App\Services\Professional\AccountDeletionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -141,5 +142,6 @@ it('writes confirmed audit event', function () {
         ->where('event', 'confirmed')
         ->first();
 
-    expect($audit)->not->toBeNull();
+    expect($audit)->not->toBeNull()
+        ->and($audit->actor_type)->toBe(ProfessionalDeletionAuditEntry::ACTOR_TYPE_PROFESSIONAL);
 });

@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffShopifyResync
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSiteManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStoreSettingsController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSubscriptionManagementController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffAccountDeletionController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAnalyticsController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffMeController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationController;
@@ -111,6 +112,12 @@ Route::prefix('staff')
 
         // View invites for a brand
         Route::get('/professionals/{professional}/invites', [StaffInviteController::class, 'index']);
+
+        // View account deletion state + audit log for support context.
+        // withTrashed: support may need to view erasure history of an account
+        // that has already been soft-deleted by a regular staff destroy.
+        Route::get('/professionals/{professional}/deletion', [StaffAccountDeletionController::class, 'show'])
+            ->withTrashed();
     });
 
 // Authorised Staff Admin Editing
@@ -217,6 +224,15 @@ Route::prefix('staff')
 
         // Override brand commission rate and payout hold days (admin only)
         Route::patch('/professionals/{professional}/store-settings', [StaffStoreSettingsController::class, 'update']);
+
+        // GDPR-triggered erasure: support invokes the same lifecycle as self-service
+        // but skips the email-token step. Reason field is mandatory.
+        // withTrashed: an already-soft-deleted account can still be the subject
+        // of an Article 17 request and must be reachable via this endpoint.
+        Route::post('/professionals/{professional}/deletion/initiate', [StaffAccountDeletionController::class, 'initiate'])
+            ->withTrashed();
+        Route::post('/professionals/{professional}/deletion/cancel', [StaffAccountDeletionController::class, 'cancel'])
+            ->withTrashed();
 
         // Manually create or remove brand-affiliate links (admin only).
         // withoutScopedBindings(): {brand} and {affiliate} are two independent

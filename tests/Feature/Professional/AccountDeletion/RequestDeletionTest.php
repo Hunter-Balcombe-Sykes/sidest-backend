@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
 use App\Services\Professional\AccountDeletionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -101,6 +102,7 @@ it('writes a requested audit entry on successful request', function () {
 
     expect($audit)->not->toBeNull()
         ->and($audit->event)->toBe('requested')
+        ->and($audit->actor_type)->toBe(ProfessionalDeletionAuditEntry::ACTOR_TYPE_PROFESSIONAL)
         ->and($audit->professional_handle_snapshot)->toBe($pro->handle)
         ->and($audit->professional_email_snapshot)->toBe($pro->primary_email)
         ->and($audit->ip_address)->toBe('1.2.3.4')

@@ -2,6 +2,7 @@
 
 use App\Mail\Notifications\AccountDeletionCancelledMail;
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
 use App\Services\Professional\AccountDeletionService;
 use App\Services\Stripe\StripeBillingService;
 use Illuminate\Http\Request;
@@ -83,7 +84,8 @@ it('writes cancelled audit event', function () {
         ->where('event', 'cancelled')
         ->first();
 
-    expect($audit)->not->toBeNull();
+    expect($audit)->not->toBeNull()
+        ->and($audit->actor_type)->toBe(ProfessionalDeletionAuditEntry::ACTOR_TYPE_PROFESSIONAL);
 });
 
 it('cancel path calls Stripe resume with the correct subscription ID from findStripeSubscription', function () {
