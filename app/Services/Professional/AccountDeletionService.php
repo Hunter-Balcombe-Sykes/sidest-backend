@@ -2,12 +2,17 @@
 
 namespace App\Services\Professional;
 
+use App\Jobs\DeleteMediaArtifactsJob;
 use App\Mail\Notifications\AccountDeletionCancelledMail;
 use App\Mail\Notifications\AccountDeletionRequestedMail;
 use App\Mail\Notifications\AccountDeletionScheduledMail;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Core\Site\Site;
+use App\Models\Core\Site\SiteMedia;
+use App\Services\Cache\SiteCacheService;
+use App\Services\Media\ImageVariantService;
 use App\Services\Stripe\StripeBillingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -15,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 // V2: All account-deletion business logic. Called from
@@ -234,7 +240,27 @@ class AccountDeletionService
             return false;
         }
 
-        // Step 2: hard-delete professional row. DB handles cascades (42 FKs CASCADE,
+        // Step 2: clean up R2 artifacts before the DB cascade deletes the rows.
+        // forceDelete() cascades to site_media, but DB cascades do not touch R2 storage.
+        $this->purgeMediaArtifacts($professional);
+
+        // Step 3: bust the public site cache (15-min TTL) so a just-purged site
+        // stops serving stale payloads to public requests the instant we delete.
+        // invalidateSite() handles the main subdomain + all aliases in one call.
+        $site = Site::query()->where('professional_id', $professional->id)->first();
+        if ($site) {
+            try {
+                app(SiteCacheService::class)->invalidateSite($site);
+            } catch (\Throwable $e) {
+                Log::warning('Site cache invalidation failed during account purge', [
+                    'professional_id' => $professional->id,
+                    'site_id' => $site->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Step 4: hard-delete professional row. DB handles cascades (42 FKs CASCADE,
         // 3 previously-RESTRICT FKs now SET NULL). forceDelete triggers model events.
         try {
             $professional->forceDelete();
@@ -255,7 +281,7 @@ class AccountDeletionService
             return false;
         }
 
-        // Step 3: audit row — professional_id FK is SET NULL, snapshots preserve identity.
+        // Audit row — professional_id FK is SET NULL on hard delete, snapshots preserve identity.
         ProfessionalDeletionAuditEntry::create([
             'professional_id' => null,
             'professional_handle_snapshot' => $handleSnapshot,
@@ -410,6 +436,69 @@ class AccountDeletionService
         }
 
         return true;
+    }
+
+    /**
+     * Enumerate all site media for this professional and clean up R2 artifacts.
+     * Videos are dispatched async (many HLS segments). Images and documents are
+     * deleted synchronously (single file per record). Failures are logged and
+     * skipped — a storage error must never block the DB deletion.
+     */
+    private function purgeMediaArtifacts(Professional $professional): void
+    {
+        $site = Site::query()->where('professional_id', $professional->id)->first();
+
+        if (! $site) {
+            return;
+        }
+
+        $mediaItems = SiteMedia::query()
+            ->withTrashed()
+            ->where('site_id', $site->id)
+            ->get();
+
+        foreach ($mediaItems as $media) {
+            try {
+                match ($media->media_type) {
+                    SiteMedia::MEDIA_TYPE_VIDEO => $this->purgeVideoArtifacts($media),
+                    SiteMedia::MEDIA_TYPE_DOCUMENT => $this->purgeDocumentArtifact($media),
+                    default => $this->purgeImageArtifacts($media),
+                };
+            } catch (\Throwable $e) {
+                Log::warning('R2 artifact cleanup failed for media item during account purge', [
+                    'professional_id' => $professional->id,
+                    'media_id' => $media->id,
+                    'media_type' => $media->media_type,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function purgeVideoArtifacts(SiteMedia $media): void
+    {
+        if (! $media->path) {
+            return;
+        }
+
+        DeleteMediaArtifactsJob::dispatch($media->id, $media->path, (string) $media->pool);
+    }
+
+    private function purgeImageArtifacts(SiteMedia $media): void
+    {
+        app(ImageVariantService::class)->deleteVariants($media->id, $media->path ?: null);
+    }
+
+    private function purgeDocumentArtifact(SiteMedia $media): void
+    {
+        if (! $media->path) {
+            return;
+        }
+
+        $disk = Storage::disk((string) config('sidest.media_disk'));
+        if ($disk->exists($media->path)) {
+            $disk->delete($media->path);
+        }
     }
 
     /**

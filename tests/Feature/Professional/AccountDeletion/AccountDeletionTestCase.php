@@ -107,12 +107,29 @@ class AccountDeletionTestCase
             deleted_at TEXT
         )');
 
-        $conn->statement('CREATE TABLE IF NOT EXISTS site.site_media (
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.sites (
             id TEXT PRIMARY KEY,
             professional_id TEXT,
+            subdomain TEXT,
+            is_published INTEGER,
+            settings TEXT,
+            deleted_at TEXT,
             created_at TEXT,
-            updated_at TEXT,
-            deleted_at TEXT
+            updated_at TEXT
+        )');
+
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.site_media (
+            id TEXT PRIMARY KEY,
+            site_id TEXT,
+            professional_id TEXT,
+            pool TEXT,
+            path TEXT,
+            media_type TEXT,
+            processing_state TEXT,
+            is_active INTEGER,
+            deleted_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
         )');
 
         $conn->statement('CREATE TABLE IF NOT EXISTS billing.subscriptions (

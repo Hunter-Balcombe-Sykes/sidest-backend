@@ -76,7 +76,7 @@ function attachTestSchemas(): void
         return;
     }
 
-    foreach (['core', 'site', 'commerce', 'notifications', 'analytics', 'billing', 'retail'] as $schema) {
+    foreach (['core', 'site', 'commerce', 'notifications', 'analytics', 'billing', 'retail', 'brand'] as $schema) {
         try {
             $conn->statement("ATTACH DATABASE ':memory:' AS {$schema}");
         } catch (\Throwable $e) {
@@ -230,6 +230,20 @@ function setupBrandLinkTables(): void
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT NULL,
         affiliate_professional_id TEXT NULL,
+        custom_photos_enabled INTEGER NULL,
+        status TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL,
+        deleted_at TEXT NULL
+    )');
+
+    // Production table lives in the brand schema (BrandPartnerLink model).
+    // core.brand_partner_links kept above for backward-compat with older tests.
+    $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_partner_links (
+        id TEXT PRIMARY KEY,
+        brand_professional_id TEXT NULL,
+        affiliate_professional_id TEXT NULL,
+        slot INTEGER NULL,
         custom_photos_enabled INTEGER NULL,
         status TEXT NULL,
         created_at TEXT NULL,
@@ -434,4 +448,23 @@ function tenantRequestAs(Professional $tenant, array $input = [], string $method
     $req->setUserResolver(fn () => (object) ['professional' => $tenant]);
 
     return $req;
+}
+
+/**
+ * core.professional_deletion_audit — all columns nullable, minimal for purge tests.
+ */
+function setupProfessionalDeletionAuditTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.professional_deletion_audit (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        professional_id TEXT NULL,
+        professional_handle_snapshot TEXT NULL,
+        professional_email_snapshot TEXT NULL,
+        event TEXT NULL,
+        ip_address TEXT NULL,
+        user_agent TEXT NULL,
+        metadata TEXT NULL,
+        created_at TEXT NULL
+    )');
 }
