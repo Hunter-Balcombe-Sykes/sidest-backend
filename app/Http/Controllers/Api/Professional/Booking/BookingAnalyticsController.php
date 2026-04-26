@@ -5,10 +5,10 @@ namespace App\Http\Controllers\Api\Professional\Booking;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +17,8 @@ use Illuminate\Validation\ValidationException;
 class BookingAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
+
+    public function __construct(private CacheLockService $cacheLock) {}
 
     public function myOverview(Request $request): JsonResponse
     {
@@ -50,7 +52,7 @@ class BookingAnalyticsController extends ApiController
             (string) $metricsContext['group_by']
         );
 
-        return $this->success(Cache::remember($cacheKey, $ttl, function () use ($professionalId, $timezone, $metricsContext): array {
+        return $this->success($this->cacheLock->rememberLocked($cacheKey, $ttl, function () use ($professionalId, $timezone, $metricsContext): array {
             if ($metricsContext['use_hourly']) {
                 $aggregateBase = DB::table('analytics.booking_metrics_hourly as h')
                     ->where('h.professional_id', $professionalId)
