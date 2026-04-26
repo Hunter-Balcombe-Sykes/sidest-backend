@@ -188,6 +188,8 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
             // Pre-fetch affiliates so the observer's notifyBrandSale() doesn't lazy-load
             // affiliateProfessional for each reversal entry (N+1 on display_name).
+            // setRelation pre-sets below survive the observer's afterCommit dispatch —
+            // Laravel keeps object identity (no clone) for synchronous post-commit callbacks.
             $affiliateIds = collect($newEntries)
                 ->pluck('data.affiliate_professional_id')
                 ->filter()

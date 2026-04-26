@@ -4,6 +4,7 @@ use App\Jobs\Shopify\CreateShopifyAffiliateDiscountJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 
 // End-to-end coverage for CreateShopifyAffiliateDiscountJob — dispatched at
 // the end of the Shopify OAuth chain and by sidest:install-affiliate-discount
@@ -12,6 +13,12 @@ use Illuminate\Support\Facades\Http;
 // writes.
 
 beforeEach(function () {
+    // Suppress the BackfillBrandHasEnabledVariantsJob dispatched at the end of
+    // handle() — its schema concerns are unrelated to what these tests verify
+    // (HTTP calls + provider_metadata state). Cleaner than seeding the
+    // professionals table just to keep an unrelated downstream job happy.
+    Queue::fake();
+
     $conn = DB::connection('pgsql');
     try {
         $conn->statement('ATTACH DATABASE \':memory:\' AS core');
@@ -34,11 +41,6 @@ beforeEach(function () {
         updated_at TEXT,
         deleted_at TEXT
     )');
-
-    // BackfillBrandHasEnabledVariantsJob is dispatched synchronously (QUEUE_CONNECTION=sync)
-    // at the end of handle(). It does a Professional::find() which throws if the table
-    // doesn't exist. Create an empty table so it returns null and exits cleanly.
-    setupProfessionalsTable();
 });
 
 function makeShopifyIntegration(array $meta = []): ProfessionalIntegration
