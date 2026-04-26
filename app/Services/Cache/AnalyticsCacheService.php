@@ -31,7 +31,13 @@ class AnalyticsCacheService
                     COUNT(DISTINCT device_type) as device_types
                 ')
                 ->first()
-                ->toArray();
+                ?->toArray() ?? [
+                    'total_visits' => 0,
+                    'unique_visitors' => 0,
+                    'days_with_visits' => 0,
+                    'unique_countries' => 0,
+                    'device_types' => 0,
+                ];
         });
     }
 

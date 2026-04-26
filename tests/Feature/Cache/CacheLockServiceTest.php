@@ -8,7 +8,7 @@ use Mockery as M;
 
 beforeEach(function () {
     Cache::flush();
-    $this->service = new CacheLockService();
+    $this->service = new CacheLockService;
 });
 
 afterEach(function () {
@@ -77,7 +77,7 @@ it('skips closure when cache fills during lock wait (double-check)', function ()
 
 it('falls through to closure when lock acquisition times out and cache is still empty', function () {
     $lock = M::mock(Lock::class);
-    $lock->shouldReceive('block')->with(5)->once()->andThrow(new LockTimeoutException());
+    $lock->shouldReceive('block')->with(5)->once()->andThrow(new LockTimeoutException);
 
     // Initial miss, then re-check after timeout still returns null.
     Cache::shouldReceive('get')->with('test:timeout')->twice()->andReturn(null, null);
@@ -95,7 +95,7 @@ it('falls through to closure when lock acquisition times out and cache is still 
 
 it('returns cached value on lock timeout if cache filled in the meantime', function () {
     $lock = M::mock(Lock::class);
-    $lock->shouldReceive('block')->with(5)->once()->andThrow(new LockTimeoutException());
+    $lock->shouldReceive('block')->with(5)->once()->andThrow(new LockTimeoutException);
 
     Cache::shouldReceive('get')
         ->with('test:timeout-filled')

@@ -28,10 +28,10 @@ class CacheLockService
     /**
      * Get the value at $key, or compute it via $callback under a single-flight lock.
      *
-     * @param  string  $key       Cache key (the lock key is auto-derived as 'lock:'.$key)
+     * @param  string  $key  Cache key (the lock key is auto-derived as 'lock:'.$key)
      * @param  DateTimeInterface|int  $ttl  Same TTL semantics as Cache::remember (DateTime or seconds)
      * @param  Closure(): mixed  $callback  Closure that produces the value on miss; must not return null
-     * @param  int  $lockSeconds   How long the lock is held before auto-expiring (must exceed worst-case closure runtime)
+     * @param  int  $lockSeconds  How long the lock is held before auto-expiring (must exceed worst-case closure runtime)
      * @param  int  $blockSeconds  How long a waiting request blocks for the lock before falling through
      */
     public function rememberLocked(
