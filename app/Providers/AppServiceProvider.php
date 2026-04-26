@@ -3,11 +3,14 @@
 namespace App\Providers;
 
 use App\Listeners\RecordScheduledTaskHeartbeat;
+use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Policies\IntegrationPolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\ScheduledTaskStarting;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -31,6 +34,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Gate::policy(ProfessionalIntegration::class, IntegrationPolicy::class);
+
         $this->configureRateLimiting();
 
         // Scheduler heartbeat — feeds GET /api/health/scheduler so a stopped cron
