@@ -5,10 +5,10 @@ namespace App\Http\Controllers\Api\Professional\Analytics;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -16,6 +16,8 @@ use Illuminate\Validation\ValidationException;
 class AffiliateCommerceAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
+
+    public function __construct(private CacheLockService $cacheLock) {}
 
     /**
      * Affiliate's own commerce performance summary.
@@ -32,7 +34,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
         $filters = $this->resolveFilters($request);
         $cacheKey = CacheKeyGenerator::affiliateCommerceAnalytics($professionalId, $filters['from'], $filters['to']);
 
-        return $this->success(Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $filters): array {
+        return $this->success($this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $filters): array {
             if ($filters['use_hourly']) {
                 return $this->buildHourlyResponse($professionalId, $filters);
             }
