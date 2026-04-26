@@ -2,11 +2,11 @@
 
 namespace App\Http\Middleware\Auth;
 
+use App\Services\Cache\CacheLockService;
 use Closure;
 use Firebase\JWT\JWK;
 use Firebase\JWT\JWT;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
@@ -14,6 +14,8 @@ use Symfony\Component\HttpFoundation\Response;
 // V2: JWT authentication via Supabase JWKS (asymmetric). Falls back to Auth Server query. All authenticated routes require this.
 class VerifySupabaseJwt
 {
+    public function __construct(private CacheLockService $cacheLock) {}
+
     public function handle(Request $request, Closure $next): Response
     {
         $token = $this->getBearerToken($request);
@@ -118,13 +120,20 @@ class VerifySupabaseJwt
             throw new \RuntimeException('Missing SUPABASE_JWKS_URL');
         }
 
-        $jwks = Cache::remember('supabase:jwks', config('supabase.jwks_cache_seconds', 300), function () use ($jwksUrl) {
+        $jwks = $this->cacheLock->rememberLocked('supabase:jwks', config('supabase.jwks_cache_seconds', 300), function () use ($jwksUrl) {
             $res = Http::timeout(5)->get($jwksUrl);
             if (! $res->ok()) {
                 throw new \RuntimeException('Failed to fetch JWKS');
             }
 
-            return $res->json();
+            $payload = $res->json();
+            if (! is_array($payload)) {
+                // Empty/invalid JSON body — never cache this. Throwing keeps the lock-release
+                // path clean and lets the caller's error logging surface the infra problem.
+                throw new \RuntimeException('JWKS response did not parse to an array');
+            }
+
+            return $payload;
         });
 
         // If your project isn't using asymmetric keys, JWKS may be empty. :contentReference[oaicite:3]{index=3}
