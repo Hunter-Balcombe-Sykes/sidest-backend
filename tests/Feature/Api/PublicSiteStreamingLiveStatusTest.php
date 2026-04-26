@@ -14,9 +14,9 @@ it('returns is_live=true for a live streaming link block on the public profile',
     $payload = [
         'links' => [[
             'block_group' => 'links',
-            'settings'    => [
-                'platform'           => 'twitch',
-                'handle'             => 'shroud',
+            'settings' => [
+                'platform' => 'twitch',
+                'handle' => 'shroud',
                 'live_check_enabled' => true,
             ],
         ]],
@@ -45,9 +45,9 @@ it('returns is_live=false when the handle is not in Redis', function () {
     $payload = [
         'links' => [[
             'block_group' => 'links',
-            'settings'    => [
-                'platform'           => 'twitch',
-                'handle'             => 'offlineuser',
+            'settings' => [
+                'platform' => 'twitch',
+                'handle' => 'offlineuser',
                 'live_check_enabled' => true,
             ],
         ]],

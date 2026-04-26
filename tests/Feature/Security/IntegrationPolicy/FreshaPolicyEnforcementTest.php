@@ -1,8 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController;
-use App\Models\Core\Professional\Professional;
-use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Fresha\FreshaServiceSyncService;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Auth\Access\AuthorizationException;

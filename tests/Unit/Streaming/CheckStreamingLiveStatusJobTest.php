@@ -51,13 +51,13 @@ it('catches poller exceptions and logs per-platform error without crashing the j
 
     // Insert a live-check-enabled block so the job finds handles and calls poll.
     \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.blocks')->insert([
-        'id'          => (string) \Illuminate\Support\Str::uuid(),
+        'id' => (string) \Illuminate\Support\Str::uuid(),
         'block_group' => 'links',
-        'is_active'   => 1,
-        'settings'    => json_encode(['live_check_enabled' => 'true', 'platform' => 'twitch', 'handle' => 'testuser']),
-        'deleted_at'  => null,
-        'created_at'  => now()->toDateTimeString(),
-        'updated_at'  => now()->toDateTimeString(),
+        'is_active' => 1,
+        'settings' => json_encode(['live_check_enabled' => 'true', 'platform' => 'twitch', 'handle' => 'testuser']),
+        'deleted_at' => null,
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
     ]);
 
     $poller = Mockery::mock(LiveStatusPoller::class);

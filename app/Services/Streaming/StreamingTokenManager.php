@@ -22,13 +22,13 @@ class StreamingTokenManager
     /** @var array<string, array{token_url: string, client_id_key: string, client_secret_key: string}> */
     private const PLATFORM_CONFIG = [
         'twitch' => [
-            'token_url'         => 'https://id.twitch.tv/oauth2/token',
-            'client_id_key'     => 'services.twitch.client_id',
+            'token_url' => 'https://id.twitch.tv/oauth2/token',
+            'client_id_key' => 'services.twitch.client_id',
             'client_secret_key' => 'services.twitch.client_secret',
         ],
         'kick' => [
-            'token_url'         => 'https://id.kick.com/oauth/token',
-            'client_id_key'     => 'services.kick.client_id',
+            'token_url' => 'https://id.kick.com/oauth/token',
+            'client_id_key' => 'services.kick.client_id',
             'client_secret_key' => 'services.kick.client_secret',
         ],
     ];
@@ -73,15 +73,15 @@ class StreamingTokenManager
 
         try {
             $response = Http::asForm()->post($cfg['token_url'], [
-                'client_id'     => $clientId,
+                'client_id' => $clientId,
                 'client_secret' => $clientSecret,
-                'grant_type'    => 'client_credentials',
+                'grant_type' => 'client_credentials',
             ]);
 
             if (! $response->successful()) {
                 Log::critical('streaming.auth_failure', [
                     'platform' => $platform,
-                    'status'   => $response->status(),
+                    'status' => $response->status(),
                 ]);
 
                 return null;
@@ -97,7 +97,7 @@ class StreamingTokenManager
         } catch (\Throwable $e) {
             Log::critical('streaming.auth_failure', [
                 'platform' => $platform,
-                'message'  => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
 
             return null;

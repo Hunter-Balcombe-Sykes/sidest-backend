@@ -1,8 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
-use App\Models\Core\Professional\Professional;
-use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Square\SquareServiceSyncService;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Auth\Access\AuthorizationException;

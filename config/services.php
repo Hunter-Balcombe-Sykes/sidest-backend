@@ -70,11 +70,11 @@ return [
     ],
 
     'twitch' => [
-        'client_id'     => env('TWITCH_CLIENT_ID'),
+        'client_id' => env('TWITCH_CLIENT_ID'),
         'client_secret' => env('TWITCH_CLIENT_SECRET'),
     ],
     'kick' => [
-        'client_id'     => env('KICK_CLIENT_ID'),
+        'client_id' => env('KICK_CLIENT_ID'),
         'client_secret' => env('KICK_CLIENT_SECRET'),
     ],
 

@@ -16,7 +16,7 @@ class FakePolicy extends BasePolicy
 it('returns null when the professional is active', function () {
     $pro = new Professional(['status' => 'active']);
 
-    $result = (new FakePolicy())->callDenyIfPendingDeletion($pro);
+    $result = (new FakePolicy)->callDenyIfPendingDeletion($pro);
 
     expect($result)->toBeNull();
 });
@@ -24,7 +24,7 @@ it('returns null when the professional is active', function () {
 it('returns a 423 deny response when the professional is pending deletion', function () {
     $pro = new Professional(['status' => 'pending_deletion']);
 
-    $result = (new FakePolicy())->callDenyIfPendingDeletion($pro);
+    $result = (new FakePolicy)->callDenyIfPendingDeletion($pro);
 
     expect($result)->toBeInstanceOf(Response::class);
     expect($result->status())->toBe(423);
@@ -34,7 +34,7 @@ it('returns a 423 deny response when the professional is pending deletion', func
 it('returns null when the professional has any other status', function () {
     $pro = new Professional(['status' => 'suspended']);
 
-    $result = (new FakePolicy())->callDenyIfPendingDeletion($pro);
+    $result = (new FakePolicy)->callDenyIfPendingDeletion($pro);
 
     expect($result)->toBeNull();
 });

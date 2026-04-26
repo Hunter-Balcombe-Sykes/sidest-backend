@@ -61,8 +61,8 @@ class LiveStatusPoller
 
         match ($platform) {
             'twitch' => $this->pollTwitch($handles),
-            'kick'   => $this->pollKick($handles),
-            default  => Log::warning('streaming.unknown_platform', ['platform' => $platform]),
+            'kick' => $this->pollKick($handles),
+            default => Log::warning('streaming.unknown_platform', ['platform' => $platform]),
         };
     }
 
@@ -88,7 +88,7 @@ class LiveStatusPoller
                 }
             } catch (KickRateLimitException $e) {
                 Log::warning('streaming.rate_limit', [
-                    'platform'    => 'kick',
+                    'platform' => 'kick',
                     'retry_after' => $e->retryAfter,
                 ]);
                 // Flip the circuit breaker and stop polling Kick for this cycle
@@ -123,8 +123,8 @@ class LiveStatusPoller
 
         $ttl = match (true) {
             $count >= 11 => self::COLD_OFFLINE_TTL,
-            $count >= 3  => self::COOL_OFFLINE_TTL,
-            default      => self::WARM_OFFLINE_TTL,
+            $count >= 3 => self::COOL_OFFLINE_TTL,
+            default => self::WARM_OFFLINE_TTL,
         };
 
         Redis::set($liveKey, '0', 'EX', $ttl);

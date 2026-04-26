@@ -11,6 +11,7 @@ use App\Services\Store\BrandCatalogService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+
 // Phase 0's preventLazyLoading (AppServiceProvider::boot) makes this a regression
 // test for the N+1: if the affiliate relation isn't preloaded before save, the
 // observer's notifyBrandSale() will access affiliateProfessional->display_name

@@ -62,6 +62,7 @@ Route::group([
     Route::post('/unsubscribe/{token}', [PublicMarketingPreferenceController::class, 'unsubscribe'])
         ->middleware('throttle:public-site');
 
-    Route::post('/resubscribe/{token}', [PublicMarketingPreferenceController::class, 'resubscribe'])
-        ->middleware('throttle:public-site');
+    // Resubscribe via token was removed — tokens rotate on unsubscribe to block
+    // email-link replay. Re-subscribing requires explicit opt-in via
+    // POST /api/public/subscribe (PublicEmailSubscriptionController).
 });

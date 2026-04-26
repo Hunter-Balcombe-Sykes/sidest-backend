@@ -20,7 +20,7 @@ it('returns the subset of handles that are currently live', function () {
             'data' => [
                 ['slug' => 'shroud', 'stream' => ['is_live' => true]],
                 ['slug' => 'xqc',    'stream' => ['is_live' => true]],
-                ['slug' => 'offline','stream' => ['is_live' => false]],
+                ['slug' => 'offline', 'stream' => ['is_live' => false]],
             ],
         ], 200),
     ]);
@@ -94,6 +94,7 @@ it('sends slug as repeated query parameters (not comma-joined)', function () {
         // Laravel/Guzzle renders repeated array params as ?slug[0]=a&slug[1]=b or ?slug=a&slug=b
         // depending on HTTP build style. Decode first to normalise %5B%5D brackets, then match either.
         $url = urldecode($request->url());
+
         // Both bare (?slug=a) and indexed (?slug[0]=a) forms end with "=a" and "=b" in the query.
         return (str_contains($url, 'slug=a') || str_contains($url, 'slug[0]=a'))
             && (str_contains($url, 'slug=b') || str_contains($url, 'slug[1]=b'));

@@ -60,6 +60,7 @@ it('rejects is_live in settings — it is read-only and not in the allowlist', f
     $request->setRouteResolver(function () use ($blockId) {
         $route = new \Illuminate\Routing\Route(['PATCH'], '/test', []);
         $route->setParameter('linkBlock', $blockId);
+
         return $route;
     });
 
@@ -99,32 +100,32 @@ it('rejects live_check_enabled=true when site already has max_live_check_per_sit
     // diverges, to make the same query work across both dialects in tests.
     foreach (['a', 'b'] as $suffix) {
         \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.blocks')->insert([
-            'id'          => (string) \Illuminate\Support\Str::uuid(),
-            'site_id'     => $site->id,
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'site_id' => $site->id,
             'block_group' => 'links',
-            'block_type'  => 'link',
-            'settings'    => json_encode(['live_check_enabled' => 'true', 'platform' => 'twitch', 'handle' => "handle-{$suffix}"]),
-            'sort_order'  => 0,
-            'is_active'   => 1,
-            'is_enabled'  => 1,
-            'created_at'  => now()->toDateTimeString(),
-            'updated_at'  => now()->toDateTimeString(),
+            'block_type' => 'link',
+            'settings' => json_encode(['live_check_enabled' => 'true', 'platform' => 'twitch', 'handle' => "handle-{$suffix}"]),
+            'sort_order' => 0,
+            'is_active' => 1,
+            'is_enabled' => 1,
+            'created_at' => now()->toDateTimeString(),
+            'updated_at' => now()->toDateTimeString(),
         ]);
     }
 
     // A third block being updated to enable live_check should be rejected
     $newBlockId = (string) \Illuminate\Support\Str::uuid();
     \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.blocks')->insert([
-        'id'          => $newBlockId,
-        'site_id'     => $site->id,
+        'id' => $newBlockId,
+        'site_id' => $site->id,
         'block_group' => 'links',
-        'block_type'  => 'link',
-        'settings'    => json_encode(['live_check_enabled' => false]),
-        'sort_order'  => 0,
-        'is_active'   => 1,
-        'is_enabled'  => 1,
-        'created_at'  => now()->toDateTimeString(),
-        'updated_at'  => now()->toDateTimeString(),
+        'block_type' => 'link',
+        'settings' => json_encode(['live_check_enabled' => false]),
+        'sort_order' => 0,
+        'is_active' => 1,
+        'is_enabled' => 1,
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
     ]);
 
     $block = \App\Models\Core\Site\Block::query()->find($newBlockId);
@@ -138,6 +139,7 @@ it('rejects live_check_enabled=true when site already has max_live_check_per_sit
         // "bound" (dispatched through the router), which doesn't happen in unit
         // tests. Setting the public property bypasses that guard.
         $route->parameters = ['linkBlock' => $block];
+
         return $route;
     });
 

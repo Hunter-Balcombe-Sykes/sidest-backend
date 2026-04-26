@@ -19,10 +19,10 @@ use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscri
 use App\Http\Controllers\Api\Professional\OpenInviteController;
 use App\Http\Controllers\Api\Professional\PlanController;
 use App\Http\Controllers\Api\Professional\ProfessionalAccountDeletionController;
-use App\Http\Controllers\Api\Professional\ProfessionalDataExportController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
 use App\Http\Controllers\Api\Professional\ProfessionalController;
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
+use App\Http\Controllers\Api\Professional\ProfessionalDataExportController;
 use App\Http\Controllers\Api\Professional\ProfessionalDocumentController;
 use App\Http\Controllers\Api\Professional\ProfessionalEnquiryController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;

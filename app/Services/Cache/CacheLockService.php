@@ -107,9 +107,9 @@ class CacheLockService
      * @param  DateTimeInterface|int  $ttl  TTL for non-null values
      * @param  Closure(): mixed  $callback  May return null. Must not return the sentinel string.
      * @param  DateTimeInterface|int|null  $nullTtl  TTL when caching a null result.
-     *         Defaults to $ttl when null. For negative-cache use cases, pass an explicit
-     *         shorter duration (e.g. 30s) so a "not found" lookup retries sooner once the
-     *         underlying row may have appeared.
+     *                                               Defaults to $ttl when null. For negative-cache use cases, pass an explicit
+     *                                               shorter duration (e.g. 30s) so a "not found" lookup retries sooner once the
+     *                                               underlying row may have appeared.
      */
     public function rememberLockedNullable(
         string $key,

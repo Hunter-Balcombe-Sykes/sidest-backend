@@ -10,7 +10,6 @@ use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Professional\Customer;
 use App\Services\Public\PublicSiteResolver;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 

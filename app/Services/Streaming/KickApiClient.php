@@ -50,7 +50,7 @@ class KickApiClient
         try {
             $response = Http::withHeaders([
                 'Authorization' => "Bearer {$token}",
-                'Accept'        => 'application/json',
+                'Accept' => 'application/json',
             ])->get(self::CHANNELS_URL, ['slug' => $handles]);
 
             if ($response->status() === 429) {
@@ -61,8 +61,8 @@ class KickApiClient
             if (! $response->successful()) {
                 Log::error('streaming.api_error', [
                     'platform' => 'kick',
-                    'status'   => $response->status(),
-                    'body'     => $response->body(),
+                    'status' => $response->status(),
+                    'body' => $response->body(),
                 ]);
 
                 return [];
@@ -95,7 +95,7 @@ class KickApiClient
         } catch (\Throwable $e) {
             Log::error('streaming.api_error', [
                 'platform' => 'kick',
-                'message'  => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
 
             return [];

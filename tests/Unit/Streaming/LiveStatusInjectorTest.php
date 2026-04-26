@@ -16,8 +16,8 @@ it('injects is_live=true into a streaming block whose handle is live in Redis', 
 
     $blocks = [[
         'settings' => [
-            'platform'           => 'twitch',
-            'handle'             => 'shroud',
+            'platform' => 'twitch',
+            'handle' => 'shroud',
             'live_check_enabled' => true,
         ],
     ]];
@@ -34,8 +34,8 @@ it('injects is_live=false when Redis key is missing', function () {
 
     $blocks = [[
         'settings' => [
-            'platform'           => 'twitch',
-            'handle'             => 'offlineuser',
+            'platform' => 'twitch',
+            'handle' => 'offlineuser',
             'live_check_enabled' => true,
         ],
     ]];
@@ -52,8 +52,8 @@ it('does not add is_live to blocks where live_check_enabled is false', function 
 
     $blocks = [[
         'settings' => [
-            'platform'           => 'twitch',
-            'handle'             => 'shroud',
+            'platform' => 'twitch',
+            'handle' => 'shroud',
             'live_check_enabled' => false,
         ],
     ]];
@@ -69,8 +69,8 @@ it('does not add is_live to non-streaming platform blocks', function () {
 
     $blocks = [[
         'settings' => [
-            'platform'           => 'instagram',
-            'handle'             => 'someone',
+            'platform' => 'instagram',
+            'handle' => 'someone',
             'live_check_enabled' => true,
         ],
     ]];
@@ -98,17 +98,17 @@ it('injects is_live into both links and blocks in the full payload', function ()
 
     $block = [
         'block_group' => 'links',
-        'settings'    => [
-            'platform'           => 'twitch',
-            'handle'             => 'shroud',
+        'settings' => [
+            'platform' => 'twitch',
+            'handle' => 'shroud',
             'live_check_enabled' => true,
         ],
     ];
 
     $payload = [
-        'links'  => [$block],
+        'links' => [$block],
         'blocks' => [$block],
-        'other'  => 'unchanged',
+        'other' => 'unchanged',
     ];
 
     $injector = new LiveStatusInjector;

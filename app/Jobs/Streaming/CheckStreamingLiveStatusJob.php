@@ -77,7 +77,7 @@ class CheckStreamingLiveStatusJob implements ShouldQueue
             } catch (\Throwable $e) {
                 Log::error('streaming.poll_error', [
                     'platform' => $platform,
-                    'message'  => $e->getMessage(),
+                    'message' => $e->getMessage(),
                 ]);
             }
         }

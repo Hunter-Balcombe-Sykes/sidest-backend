@@ -64,6 +64,12 @@ class StaffCustomerManagementController extends ApiController
      */
     public function show(Request $request, Professional $professional, Customer $customer): JsonResponse
     {
+        // Defence in depth: route group already scopes via ->scopeBindings() and
+        // Professional::customers(). The explicit check survives a future refactor
+        // that drops scopeBindings, and matches the pattern used by sibling staff
+        // controllers (StaffServiceManagementController etc).
+        abort_unless($customer->professional_id === $professional->id, 404);
+
         $includeArchived = $request->boolean('include_archived');
 
         if (! $includeArchived && $customer->trashed()) {
@@ -78,6 +84,8 @@ class StaffCustomerManagementController extends ApiController
      */
     public function update(StaffUpdateCustomerRequest $request, Professional $professional, Customer $customer): JsonResponse
     {
+        abort_unless($customer->professional_id === $professional->id, 404);
+
         if ($customer->trashed()) {
             abort(404);
         }
@@ -93,6 +101,8 @@ class StaffCustomerManagementController extends ApiController
      */
     public function destroy(Professional $professional, Customer $customer): JsonResponse
     {
+        abort_unless($customer->professional_id === $professional->id, 404);
+
         if (! $customer->trashed()) {
             $customer->delete();
         }
@@ -102,6 +112,8 @@ class StaffCustomerManagementController extends ApiController
 
     public function restore(Professional $professional, Customer $customer): JsonResponse
     {
+        abort_unless($customer->professional_id === $professional->id, 404);
+
         if ($customer->trashed()) {
             $customer->restore();
         }
@@ -111,6 +123,8 @@ class StaffCustomerManagementController extends ApiController
 
     public function forceDestroy(Professional $professional, Customer $customer): JsonResponse
     {
+        abort_unless($customer->professional_id === $professional->id, 404);
+
         $customer->forceDelete();
 
         return $this->success(['deleted' => true]);

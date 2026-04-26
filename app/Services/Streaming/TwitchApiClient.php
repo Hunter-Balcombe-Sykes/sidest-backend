@@ -47,14 +47,14 @@ class TwitchApiClient
         try {
             $response = Http::withHeaders([
                 'Authorization' => "Bearer {$token}",
-                'Client-ID'     => (string) config('services.twitch.client_id'),
+                'Client-ID' => (string) config('services.twitch.client_id'),
             ])->get(self::STREAMS_URL.'?'.$query);
 
             if (! $response->successful()) {
                 Log::error('streaming.api_error', [
                     'platform' => 'twitch',
-                    'status'   => $response->status(),
-                    'body'     => $response->body(),
+                    'status' => $response->status(),
+                    'body' => $response->body(),
                 ]);
 
                 return [];
@@ -69,7 +69,7 @@ class TwitchApiClient
         } catch (\Throwable $e) {
             Log::error('streaming.api_error', [
                 'platform' => 'twitch',
-                'message'  => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
 
             return [];
