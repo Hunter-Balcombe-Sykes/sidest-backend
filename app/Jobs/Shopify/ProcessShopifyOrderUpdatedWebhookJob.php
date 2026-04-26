@@ -186,9 +186,28 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
             $newEntries = array_filter($candidates, fn ($c) => ! isset($existingKeys[$c['idempotency_key']]));
 
-            DB::transaction(function () use ($newEntries, &$reversalsCreated): void {
+            // Pre-fetch affiliates so the observer's notifyBrandSale() doesn't lazy-load
+            // affiliateProfessional for each reversal entry (N+1 on display_name).
+            $affiliateIds = collect($newEntries)
+                ->pluck('data.affiliate_professional_id')
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+
+            $affiliatesById = Professional::query()
+                ->whereIn('id', $affiliateIds)
+                ->get(['id', 'display_name'])
+                ->keyBy('id');
+
+            DB::transaction(function () use ($newEntries, $affiliatesById, &$reversalsCreated): void {
                 foreach ($newEntries as $entry) {
-                    CommissionLedgerEntry::create($entry['data']);
+                    $row = new CommissionLedgerEntry($entry['data']);
+                    $affiliate = $affiliatesById->get($entry['data']['affiliate_professional_id'] ?? null);
+                    if ($affiliate) {
+                        $row->setRelation('affiliateProfessional', $affiliate);
+                    }
+                    $row->save();
                     $reversalsCreated++;
                 }
             });
