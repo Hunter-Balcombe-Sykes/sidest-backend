@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Analytics\LinkClick;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -19,6 +20,8 @@ class ProfessionalAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+
+    public function __construct(private CacheLockService $cacheLock) {}
 
     public function summary(Request $request): JsonResponse
     {
@@ -91,7 +94,7 @@ class ProfessionalAnalyticsController extends ApiController
         // Cache for 5 minutes (or longer for historical data)
         $cacheTTL = $to->isToday() ? now()->addMinutes(5) : now()->addHours(24);
 
-        $data = Cache::remember($cacheKey, $cacheTTL, function () use ($professional, $from, $to, $site, $professionalTimezone, $useHourlyBuckets) {
+        $data = $this->cacheLock->rememberLocked($cacheKey, $cacheTTL, function () use ($professional, $from, $to, $site, $professionalTimezone, $useHourlyBuckets) {
             // All your existing query logic here
 
             // Totals (visits)
