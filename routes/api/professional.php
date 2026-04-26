@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\Professional\Notifications\ProfessionalEmailSubscri
 use App\Http\Controllers\Api\Professional\OpenInviteController;
 use App\Http\Controllers\Api\Professional\PlanController;
 use App\Http\Controllers\Api\Professional\ProfessionalAccountDeletionController;
+use App\Http\Controllers\Api\Professional\ProfessionalDataExportController;
 use App\Http\Controllers\Api\Professional\ProfessionalAnalyticsController;
 use App\Http\Controllers\Api\Professional\ProfessionalController;
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
@@ -70,6 +71,13 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
             Route::post('/cancel', [ProfessionalAccountDeletionController::class, 'cancel'])
                 ->withoutMiddleware([EnforcePendingDeletionReadOnly::class]);
         });
+
+        // Data export — exempt from EnforcePendingDeletionReadOnly so a
+        // professional in their grace period can still pull their data
+        // (the whole point of GDPR portability). Rate-limited 1/24h.
+        Route::post('/me/data-export', [ProfessionalDataExportController::class, 'store'])
+            ->withoutMiddleware([EnforcePendingDeletionReadOnly::class])
+            ->middleware('throttle:1,1440');
         Route::get('/brand-affiliates', [BrandAffiliateController::class, 'index']);
         Route::middleware('throttle:30,1')->group(function (): void {
             Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect'])

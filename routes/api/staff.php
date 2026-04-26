@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceCatego
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffShopifyResyncController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSiteManagementController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffDataExportController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStoreSettingsController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSubscriptionManagementController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAccountDeletionController;
@@ -118,6 +119,10 @@ Route::prefix('staff')
         // that has already been soft-deleted by a regular staff destroy.
         Route::get('/professionals/{professional}/deletion', [StaffAccountDeletionController::class, 'show'])
             ->withTrashed();
+
+        // Data export — staff-triggered. ?send_to=staff requires admin role
+        // (enforced in the controller). Same 30-min dedup window as self-service.
+        Route::post('/professionals/{professional}/data-export', [StaffDataExportController::class, 'store']);
     });
 
 // Authorised Staff Admin Editing

@@ -823,5 +823,12 @@ return [
         'queue' => env('GDPR_QUEUE', 'gdpr'),
         'redact_placeholder_domain' => env('GDPR_REDACT_PLACEHOLDER_DOMAIN', 'gdpr.sidest.io'),
         'export_retention_days' => (int) env('GDPR_EXPORT_RETENTION_DAYS', 30),
+        // Signed URL TTL emailed to recipients of a professional data export.
+        // Must be <= export_retention_days (file is gone after that anyway).
+        'signed_url_ttl_days' => (int) env('GDPR_EXPORT_SIGNED_URL_TTL_DAYS', 7),
+        // Dedup window: a second export request for the same professional
+        // within this many minutes returns 409 instead of queuing again.
+        // Prevents accidental double-clicks AND queue thrashing.
+        'dedup_window_minutes' => (int) env('GDPR_EXPORT_DEDUP_WINDOW_MINUTES', 30),
     ],
 ];

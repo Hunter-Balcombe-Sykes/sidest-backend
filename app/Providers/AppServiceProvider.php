@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Listeners\RecordScheduledTaskHeartbeat;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\ScheduledTaskStarting;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
@@ -35,6 +36,10 @@ class AppServiceProvider extends ServiceProvider
         // Scheduler heartbeat — feeds GET /api/health/scheduler so a stopped cron
         // runner becomes visible. See RecordScheduledTaskHeartbeat for rationale.
         Event::listen(ScheduledTaskStarting::class, RecordScheduledTaskHeartbeat::class);
+
+        // Strict-mode N+1 trap: throw on unloaded relation access outside production
+        // so tests/local catch lazy loading instead of leaking slow queries to prod.
+        Model::preventLazyLoading(! app()->isProduction());
     }
 
     /**
