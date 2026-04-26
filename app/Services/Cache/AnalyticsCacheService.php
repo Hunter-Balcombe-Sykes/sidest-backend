@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Cache;
 // V2: Visit/click stats caching with version-token invalidation for bulk cache busting.
 class AnalyticsCacheService
 {
+    public function __construct(private CacheLockService $cacheLock) {}
+
     public function getVisitStats(string $professionalId, Carbon $startDate, Carbon $endDate): array
     {
         $cacheKey = CacheKeyGenerator::analyticsVisits(
@@ -18,7 +20,7 @@ class AnalyticsCacheService
             $endDate->format('Ymd')
         );
 
-        return Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
+        return $this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
             return SiteVisit::where('professional_id', $professionalId)
                 ->whereBetween('occurred_at', [$startDate, $endDate])
                 ->selectRaw('
@@ -41,7 +43,7 @@ class AnalyticsCacheService
             $endDate->format('Ymd')
         );
 
-        return Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
+        return $this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
             return LinkClick::runForBlockForeignKey(
                 function (string $blockColumn) use ($professionalId, $startDate, $endDate) {
                     return LinkClick::where('professional_id', $professionalId)
