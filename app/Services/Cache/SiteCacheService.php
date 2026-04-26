@@ -5,7 +5,6 @@ namespace App\Services\Cache;
 use App\Models\Core\MediaVariant;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
@@ -119,9 +118,9 @@ class SiteCacheService
 
             $payload = $row->payload ?? [];
 
-            $services = is_array($payload['services'] ?? null)
-                ? $payload['services']
-                : $this->buildServicesPayload((string) ($row->professional_id ?? ''));
+            // The view's COALESCE guarantees services is always a jsonb array,
+            // so a missing key is the only thing we have to defend against.
+            $services = $payload['services'] ?? [];
 
             $site = $payload['site'] ?? null;
             if (is_array($site)) {
@@ -719,40 +718,6 @@ class SiteCacheService
         }
 
         return $site;
-    }
-
-    /**
-     * Fallback builder for services when the public payload view is missing them.
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    private function buildServicesPayload(string $professionalId): array
-    {
-        if ($professionalId === '') {
-            return [];
-        }
-
-        return Service::query()
-            ->with('category:id,title')
-            ->where('professional_id', $professionalId)
-            ->where('is_active', true)
-            ->whereNull('deleted_at')
-            ->orderBy('sort_order')
-            ->orderBy('created_at')
-            ->get()
-            ->map(fn (Service $service): array => [
-                'id' => $service->id,
-                'title' => $service->title,
-                'description' => $service->description,
-                'price_cents' => $service->price_cents,
-                'currency_code' => $service->currency_code,
-                'duration_minutes' => $service->duration_minutes,
-                'is_active' => (bool) $service->is_active,
-                'sort_order' => $service->sort_order,
-                'category' => $service->category?->title ?? 'Services',
-            ])
-            ->values()
-            ->all();
     }
 
     /**

@@ -81,7 +81,7 @@ class PublicBookingController extends ApiController
             return $this->error('Site not found.', 404);
         }
 
-        $professional = Professional::query()->find($site->professional_id);
+        $professional = $site->professional;
         if (! $professional) {
             return $this->error('Booking is not available for this site.', 409);
         }
@@ -449,7 +449,7 @@ class PublicBookingController extends ApiController
             return [null, null, $this->error('Site not found.', 404)];
         }
 
-        $professional = Professional::query()->find($site->professional_id);
+        $professional = $site->professional;
         if (! $professional) {
             return [$site, null, $this->error('Booking is not available for this site.', 409)];
         }
