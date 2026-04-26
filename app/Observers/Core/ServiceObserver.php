@@ -23,13 +23,14 @@ class ServiceObserver
 
     private function bust(Service $service): ?Professional
     {
+        // Eager-load site once — every downstream caller (reevaluateBooking,
+        // shouldDispatchSquareSync, shouldDispatchFreshaSync) reads $pro->site.
+        $pro = Professional::query()->with('site')->find($service->professional_id);
+
         try {
-            $pro = Professional::query()->find($service->professional_id);
             if ($pro) {
                 $this->professionalCache->invalidateProfessional($pro);
             }
-
-            return $pro;
         } catch (\Throwable $e) {
             Log::warning('Professional cache invalidation failed on service change', [
                 'service_id' => $service->id,
@@ -38,7 +39,7 @@ class ServiceObserver
             ]);
         }
 
-        return Professional::query()->find($service->professional_id);
+        return $pro;
     }
 
     public function saved(Service $service): void

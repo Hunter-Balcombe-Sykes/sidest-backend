@@ -81,7 +81,7 @@ class ProfessionalIntegrationObserver
     private function reevaluateBooking(ProfessionalIntegration $integration): void
     {
         try {
-            $pro = Professional::query()->find($integration->professional_id);
+            $pro = Professional::query()->with('site')->find($integration->professional_id);
             $site = $pro?->site;
             if (! $pro || ! $site) {
                 return;
