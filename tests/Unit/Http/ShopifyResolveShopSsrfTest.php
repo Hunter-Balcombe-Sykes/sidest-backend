@@ -7,7 +7,8 @@ uses(TestCase::class)->in(__FILE__);
 
 it('rejects AWS metadata link-local address', function () {
     $controller = new ShopifyIntegrationController(
-        Mockery::mock(\App\Services\Store\BrandAccessService::class)->shouldIgnoreMissing()
+        Mockery::mock(\App\Services\Store\BrandAccessService::class)->shouldIgnoreMissing(),
+        Mockery::mock(\App\Services\Shopify\ShopifyTeardownService::class)->shouldIgnoreMissing()
     );
     $reflection = new ReflectionClass($controller);
     $method = $reflection->getMethod('isPrivateHost');
@@ -18,7 +19,8 @@ it('rejects AWS metadata link-local address', function () {
 
 it('rejects RFC1918 private ranges', function () {
     $controller = new ShopifyIntegrationController(
-        Mockery::mock(\App\Services\Store\BrandAccessService::class)->shouldIgnoreMissing()
+        Mockery::mock(\App\Services\Store\BrandAccessService::class)->shouldIgnoreMissing(),
+        Mockery::mock(\App\Services\Shopify\ShopifyTeardownService::class)->shouldIgnoreMissing()
     );
     $reflection = new ReflectionClass($controller);
     $method = $reflection->getMethod('isPrivateHost');
@@ -31,7 +33,8 @@ it('rejects RFC1918 private ranges', function () {
 
 it('rejects loopback addresses', function () {
     $controller = new ShopifyIntegrationController(
-        Mockery::mock(\App\Services\Store\BrandAccessService::class)->shouldIgnoreMissing()
+        Mockery::mock(\App\Services\Store\BrandAccessService::class)->shouldIgnoreMissing(),
+        Mockery::mock(\App\Services\Shopify\ShopifyTeardownService::class)->shouldIgnoreMissing()
     );
     $reflection = new ReflectionClass($controller);
     $method = $reflection->getMethod('isPrivateHost');
@@ -43,7 +46,8 @@ it('rejects loopback addresses', function () {
 
 it('allows public IPs', function () {
     $controller = new ShopifyIntegrationController(
-        Mockery::mock(\App\Services\Store\BrandAccessService::class)->shouldIgnoreMissing()
+        Mockery::mock(\App\Services\Store\BrandAccessService::class)->shouldIgnoreMissing(),
+        Mockery::mock(\App\Services\Shopify\ShopifyTeardownService::class)->shouldIgnoreMissing()
     );
     $reflection = new ReflectionClass($controller);
     $method = $reflection->getMethod('isPrivateHost');

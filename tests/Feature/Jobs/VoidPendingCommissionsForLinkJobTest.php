@@ -30,11 +30,17 @@ it('runs the void loop, writes audit completion row, and notifies both parties',
 
     // Class-based partial mock so $this inside handle() refers to the mock,
     // allowing loadProfessionals() to be intercepted without hitting the DB.
-    $jobPartial = Mockery::mock(VoidPendingCommissionsForLinkJob::class, [
-        $affiliate->id,
-        $brand->id,
-        'link_removed_by_staff: closing account',
-    ])->makePartial();
+    // Bypass the constructor (which calls onQueue via InteractsWithQueue) by
+    // not passing args to mock(); set the readonly properties via forceFill-
+    // equivalent Closure binding instead.
+    $jobPartial = Mockery::mock(VoidPendingCommissionsForLinkJob::class)->makePartial();
+
+    // Inject constructor-set readonly properties without invoking the constructor.
+    (Closure::bind(function () use ($affiliate, $brand) {
+        $this->affiliateProfessionalId = $affiliate->id;
+        $this->brandProfessionalId = $brand->id;
+        $this->reason = 'link_removed_by_staff: closing account';
+    }, $jobPartial, VoidPendingCommissionsForLinkJob::class))();
 
     $jobPartial->shouldReceive('loadProfessionals')
         ->once()

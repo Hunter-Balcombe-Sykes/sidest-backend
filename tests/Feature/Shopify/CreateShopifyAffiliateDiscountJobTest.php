@@ -34,6 +34,11 @@ beforeEach(function () {
         updated_at TEXT,
         deleted_at TEXT
     )');
+
+    // BackfillBrandHasEnabledVariantsJob is dispatched synchronously (QUEUE_CONNECTION=sync)
+    // at the end of handle(). It does a Professional::find() which throws if the table
+    // doesn't exist. Create an empty table so it returns null and exits cleanly.
+    setupProfessionalsTable();
 });
 
 function makeShopifyIntegration(array $meta = []): ProfessionalIntegration
@@ -42,12 +47,15 @@ function makeShopifyIntegration(array $meta = []): ProfessionalIntegration
         'shop_domain' => 'test-brand.myshopify.com',
     ];
 
+    // Pass provider_metadata as an array, not a pre-encoded JSON string.
+    // The 'array' cast on the model would double-encode a JSON string,
+    // leaving the job with a string it can't extract shop_domain from.
     return ProfessionalIntegration::create([
         'id' => 'int-'.uniqid(),
         'professional_id' => 'brand-'.uniqid(),
         'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
         'access_token' => 'shpat_test_token',
-        'provider_metadata' => json_encode(array_merge($defaults, $meta)),
+        'provider_metadata' => array_merge($defaults, $meta),
         'created_at' => now(),
         'updated_at' => now(),
     ]);

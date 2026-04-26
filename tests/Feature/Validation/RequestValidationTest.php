@@ -51,7 +51,9 @@ it('rejects invalid public waitlist payload', function () {
     $validator = Validator::make($payload, (new PublicWaitlistSignupRequest)->rules());
 
     expect($validator->fails())->toBeTrue();
-    expect($validator->errors()->has('name'))->toBeTrue();
+    // `name` is nullable — empty string is valid. Asserted explicitly so a
+    // future tightening of this rule shows up here as a regression.
+    expect($validator->errors()->has('name'))->toBeFalse();
     expect($validator->errors()->has('email'))->toBeTrue();
     expect($validator->errors()->has('phone'))->toBeTrue();
     expect($validator->errors()->has('type'))->toBeTrue();

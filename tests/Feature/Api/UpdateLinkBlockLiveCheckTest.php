@@ -83,17 +83,27 @@ it('rejects live_check_enabled=true when site already has max_live_check_per_sit
         ],
     ]);
 
+    // createTenant sets up professionals + sites; blocks table must be
+    // created separately before any site.blocks inserts.
+    setupBlocksTable();
+
     $professional = createTenant('cap-test-pro');
     $site = $professional->site;
 
-    // Seed 2 existing blocks that already have live_check_enabled=true
+    // Seed 2 existing blocks that already have live_check_enabled=true.
+    // Storing 'live_check_enabled' as the JSON string 'true' here is a
+    // SQLite-only test fixture quirk: Postgres `->>` returns text "true" for a
+    // JSON boolean (so production works fine), but SQLite's `->>` returns
+    // integer 1, causing = 'true' to miss. Production stores a real JSON
+    // boolean (Laravel's `boolean` rule + array cast) — only this fixture
+    // diverges, to make the same query work across both dialects in tests.
     foreach (['a', 'b'] as $suffix) {
         \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.blocks')->insert([
             'id'          => (string) \Illuminate\Support\Str::uuid(),
             'site_id'     => $site->id,
             'block_group' => 'links',
             'block_type'  => 'link',
-            'settings'    => json_encode(['live_check_enabled' => true, 'platform' => 'twitch', 'handle' => "handle-{$suffix}"]),
+            'settings'    => json_encode(['live_check_enabled' => 'true', 'platform' => 'twitch', 'handle' => "handle-{$suffix}"]),
             'sort_order'  => 0,
             'is_active'   => 1,
             'is_enabled'  => 1,
@@ -124,7 +134,10 @@ it('rejects live_check_enabled=true when site already has max_live_check_per_sit
     ]);
     $request->setRouteResolver(function () use ($block) {
         $route = new \Illuminate\Routing\Route(['PATCH'], '/test', []);
-        $route->setParameter('linkBlock', $block);
+        // Assign parameters directly — setParameter() requires the route to be
+        // "bound" (dispatched through the router), which doesn't happen in unit
+        // tests. Setting the public property bypasses that guard.
+        $route->parameters = ['linkBlock' => $block];
         return $route;
     });
 

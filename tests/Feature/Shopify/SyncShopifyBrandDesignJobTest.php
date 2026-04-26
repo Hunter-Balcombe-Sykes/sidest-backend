@@ -158,12 +158,15 @@ it('writes brand design enums into site.settings.design and logos into site_medi
     $site = Site::query()->where('professional_id', 'pro-bdjob-1')->first();
     $design = $site->settings['design'] ?? [];
 
-    // Enums + colours still live on settings.design — those aren't media.
-    expect($design['colors']['background'])->toBe('#ababab');
-    expect($design['colors']['text'])->toBe('#121212');
-    expect($design['colors']['accent'])->toBe('#cd00ef');
-    expect($design['colors']['border'])->toBeNull();
-    expect($design['corner_radius'])->toBe('default');
+    // Design tokens live on settings.design — those aren't media.
+    // Post-consolidation the importer stores only accent + theme_mode (background/text
+    // are derived from theme_mode at render time; border is no longer stored).
+    expect($design['colors']['accent'])->toBe('#cd00ef');        // secondary[0].background
+    expect(array_key_exists('background', $design['colors'] ?? []))->toBeFalse();
+    expect(array_key_exists('text', $design['colors'] ?? []))->toBeFalse();
+    expect(array_key_exists('border', $design['colors'] ?? []))->toBeFalse();
+    expect($design['theme_mode'])->toBe('dark');                 // inferred from primary #ababab (luminance < 0.5)
+    expect($design['corner_radius'])->toBe('default');           // buttons_radius=8 → default bucket
     expect($design['slogan'])->toBe('Job test slogan');
 
     // Logos now live in site.site_media as pool=design / purpose=logo_full|logo_square.
@@ -184,14 +187,11 @@ it('writes brand design enums into site.settings.design and logos into site_medi
 
 it('preserves an existing user accent colour when Shopify has no accent', function () {
     // Pre-seed a user-edited accent. Shopify will return only the primary
-    // colour pair (background + text) and an empty secondary array — the
-    // job's leave-if-absent merge must keep the user's accent intact.
+    // colour pair and an empty secondary array — the job's leave-if-absent
+    // merge must keep the user's accent intact.
     $integration = seedBrandDesignJobFixtures([
         'colors' => [
-            'background' => null,
-            'text' => null,
             'accent' => '#user-set-purple',
-            'border' => null,
         ],
     ]);
 
@@ -205,8 +205,8 @@ it('preserves an existing user accent colour when Shopify has no accent', functi
     $site = Site::query()->where('professional_id', 'pro-bdjob-1')->first();
     $design = $site->settings['design'];
 
-    expect($design['colors']['background'])->toBe('#ababab');         // overwritten by Shopify
-    expect($design['colors']['accent'])->toBe('#user-set-purple');    // preserved (Shopify had nothing)
+    expect($design['theme_mode'])->toBe('dark');                      // overwritten by Shopify (inferred from #ababab)
+    expect($design['colors']['accent'])->toBe('#user-set-purple');    // preserved (Shopify had nothing in secondary)
 });
 
 it('is a no-op when the integration row does not exist', function () {

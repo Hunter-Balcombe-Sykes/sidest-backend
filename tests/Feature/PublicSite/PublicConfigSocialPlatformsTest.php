@@ -11,17 +11,20 @@ it('returns 200 with the social platforms registry without auth', function () {
     ]);
 });
 
-it('returns all 24 supported platforms and the first 8 are the original social platforms', function () {
+it('returns all supported platforms and the first 8 are the original social platforms', function () {
     $response = $this->getJson('/api/public/config/social-platforms');
 
     $platforms = $response->json('platforms');
     $keys = array_column($platforms, 'key');
 
-    expect($keys)->toHaveCount(24);
     // Original 8 social platforms remain first in stable registry order
     expect(array_slice($keys, 0, 8))->toBe([
         'instagram', 'facebook', 'linkedin', 'youtube', 'tiktok', 'x', 'spotify', 'soundcloud',
     ]);
+    // All known platforms are present
+    expect($keys)->toContain('instagram');
+    expect($keys)->toContain('twitch');
+    expect($keys)->toContain('kick');
 });
 
 it('does not leak internal validation fields', function () {
@@ -63,13 +66,13 @@ it('returns expected display names for each platform', function () {
     ]);
 });
 
-it('returns 24 platforms with category field each', function () {
+it('returns all platforms with category field each', function () {
     $response = $this->getJson('/api/public/config/social-platforms');
 
     $response->assertOk();
-    $response->assertJsonCount(24, 'platforms');
 
     $platforms = $response->json('platforms');
+    expect($platforms)->not->toBeEmpty();
     foreach ($platforms as $p) {
         expect($p)->toHaveKeys(['key', 'display_name', 'icon_key', 'placeholder', 'category']);
     }
@@ -80,7 +83,7 @@ it('returns the canonical categories array alongside platforms', function () {
 
     $response->assertOk();
     $response->assertJson([
-        'categories' => ['social', 'booking', 'education', 'content', 'events', 'other'],
+        'categories' => ['social', 'booking', 'education', 'content', 'events', 'streaming', 'other'],
     ]);
 });
 

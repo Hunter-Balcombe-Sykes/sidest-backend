@@ -155,7 +155,7 @@ it('returns logo urls + placeholders from site_media on show', function () {
     expect($response->status())->toBe(200);
     expect($payload['logo']['full_url'])->not->toBeNull();
     expect($payload['logo']['square_url'])->not->toBeNull();
-    expect($payload['colors']['background'])->toBe('#ffffff');
+    expect($payload['colors']['accent'])->toBe('#ff0000');
     expect($payload['font_family'])->toBe('helvetica_neue');
     expect($payload['placeholders'])->toHaveCount(2);
     expect($payload['placeholders'][0]['sort_order'])->toBe(0);

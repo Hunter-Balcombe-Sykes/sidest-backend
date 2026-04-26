@@ -200,7 +200,7 @@ it('PATCH /api/documents/{id} returns 404 for a document belonging to another si
         ->toThrow(HttpException::class);
 });
 
-it('PATCH /api/documents/{id} returns 404 when the document is inactive (is_active=false)', function () {
+it('PATCH /api/documents/{id} allows editing an inactive (is_active=false) document', function () {
     $pro = seedProfessional();
     $docId = (string) Str::uuid();
     DB::connection('pgsql')->table('site.site_media')->insert([
@@ -224,11 +224,13 @@ it('PATCH /api/documents/{id} returns 404 when the document is inactive (is_acti
     $req->validateResolved();
     $req->attributes->set('professional', $pro);
 
-    expect(fn () => app(ProfessionalDocumentController::class)->update($req, $doc))
-        ->toThrow(HttpException::class);
+    // Controller intentionally allows editing draft (is_active=false) docs so
+    // the publish toggle can flip them back to live — ownership is the only gate.
+    $response = app(ProfessionalDocumentController::class)->update($req, $doc);
+    expect($response->status())->toBe(200);
 });
 
-it('DELETE /api/documents/{id} returns 404 when the document is inactive', function () {
+it('DELETE /api/documents/{id} allows deleting an inactive document', function () {
     $pro = seedProfessional();
     $docId = (string) Str::uuid();
     DB::connection('pgsql')->table('site.site_media')->insert([
@@ -248,8 +250,10 @@ it('DELETE /api/documents/{id} returns 404 when the document is inactive', funct
     $base = Request::create("/api/documents/{$docId}", 'DELETE');
     $base->attributes->set('professional', $pro);
 
-    expect(fn () => app(ProfessionalDocumentController::class)->destroy($base, $doc))
-        ->toThrow(HttpException::class);
+    // Controller intentionally allows deleting draft (is_active=false) docs —
+    // the comment says "allows deleting draft docs too". Ownership is the only gate.
+    $response = app(ProfessionalDocumentController::class)->destroy($base, $doc);
+    expect($response->status())->toBe(200);
 });
 
 it('PATCH /api/documents/{id} skips cache invalidation when no field actually changed', function () {

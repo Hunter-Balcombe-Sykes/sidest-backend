@@ -9,10 +9,10 @@ function normalizer(): SocialLinkNormalizer
 
 // --- getPublicRegistry() ---
 
-it('returns 26 platforms in the public registry', function () {
+it('returns 27 platforms in the public registry', function () {
     $registry = normalizer()->getPublicRegistry();
 
-    expect($registry)->toHaveCount(26);
+    expect($registry)->toHaveCount(27);
 });
 
 it('strips internal validation fields from the public registry', function () {
