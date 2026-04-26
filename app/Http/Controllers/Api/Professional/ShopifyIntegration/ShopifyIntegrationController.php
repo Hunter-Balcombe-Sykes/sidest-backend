@@ -392,7 +392,8 @@ class ShopifyIntegrationController extends ApiController
         [$targetBrandId, $error] = $this->resolveTargetBrandProfessionalId(
             $request,
             isset($validator->validated()['brand_professional_id']) ? (string) $validator->validated()['brand_professional_id'] : null,
-            true
+            true,
+            'view'
         );
 
         if ($error !== null) {
