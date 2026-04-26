@@ -20,11 +20,23 @@ use Throwable;
  *   - is hot (likely to be requested concurrently when it expires), AND
  *   - is expensive to regenerate (multiple DB queries, joins, external calls).
  *
- * Closures must return a non-null value. Storing null requires sentinel
- * handling that this helper intentionally does not provide.
+ * Two methods, depending on whether the closure can return null:
+ *   - rememberLocked()         — closures that always return a non-null value
+ *   - rememberLockedNullable() — closures that can return null (e.g. lookups that
+ *                                may not find a row); uses a sentinel so cached
+ *                                nulls survive across requests instead of triggering
+ *                                a fresh DB hit each time.
  */
 class CacheLockService
 {
+    /**
+     * Sentinel cached by rememberLockedNullable when a closure returns null,
+     * so the cache layer can distinguish "key absent" from "computed, was null".
+     * Chosen as an unlikely-to-collide string rather than a constant object so
+     * it survives Redis (de)serialisation cleanly.
+     */
+    private const NULL_SENTINEL = '__cache_lock_null_sentinel__';
+
     /**
      * Get the value at $key, or compute it via $callback under a single-flight lock.
      *
@@ -83,6 +95,75 @@ class CacheLockService
                 $lock->release();
             } catch (Throwable) {
                 // Lock already released or driver doesn't support release-after-expiry; ignore.
+            }
+        }
+    }
+
+    /**
+     * Like rememberLocked, but the callback may return null. Null results are cached
+     * as a sentinel so subsequent reads return null without re-running the callback.
+     *
+     * @param  string  $key  Cache key
+     * @param  DateTimeInterface|int  $ttl  TTL for non-null values
+     * @param  Closure(): mixed  $callback  May return null
+     * @param  DateTimeInterface|int|null  $nullTtl  TTL when caching a null result.
+     *         Defaults to $ttl when null. Pass a shorter duration to retry "not found"
+     *         lookups sooner (e.g. when a row may appear in the DB shortly after a miss).
+     */
+    public function rememberLockedNullable(
+        string $key,
+        DateTimeInterface|int $ttl,
+        Closure $callback,
+        DateTimeInterface|int|null $nullTtl = null,
+        int $lockSeconds = 10,
+        int $blockSeconds = 5,
+    ): mixed {
+        $cached = Cache::get($key);
+        if ($cached === self::NULL_SENTINEL) {
+            return null;
+        }
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $lock = Cache::lock('lock:'.$key, $lockSeconds);
+
+        try {
+            $lock->block($blockSeconds);
+        } catch (LockTimeoutException) {
+            $warm = Cache::get($key);
+            if ($warm === self::NULL_SENTINEL) {
+                return null;
+            }
+            if ($warm !== null) {
+                return $warm;
+            }
+
+            return $callback();
+        }
+
+        try {
+            $rechecked = Cache::get($key);
+            if ($rechecked === self::NULL_SENTINEL) {
+                return null;
+            }
+            if ($rechecked !== null) {
+                return $rechecked;
+            }
+
+            $value = $callback();
+            if ($value === null) {
+                Cache::put($key, self::NULL_SENTINEL, $nullTtl ?? $ttl);
+            } else {
+                Cache::put($key, $value, $ttl);
+            }
+
+            return $value;
+        } finally {
+            try {
+                $lock->release();
+            } catch (Throwable) {
+                // ignore
             }
         }
     }
