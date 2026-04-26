@@ -312,6 +312,24 @@ it('nullable: lock-timeout returns null when sentinel cached in the meantime', f
     expect($closureRan)->toBeFalse();
 });
 
+it('nullable: throws if closure returns the reserved sentinel string', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:n:reserved')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:n:reserved', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->never();
+
+    $call = fn () => $this->service->rememberLockedNullable(
+        'test:n:reserved',
+        60,
+        fn () => '__cache_lock_null_sentinel__',
+    );
+
+    expect($call)->toThrow(\LogicException::class, 'reserved');
+});
+
 it('nullable: releases lock when closure throws', function () {
     $lock = M::mock(Lock::class);
     $lock->shouldReceive('block')->with(5)->once();

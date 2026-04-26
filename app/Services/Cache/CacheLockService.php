@@ -105,10 +105,11 @@ class CacheLockService
      *
      * @param  string  $key  Cache key
      * @param  DateTimeInterface|int  $ttl  TTL for non-null values
-     * @param  Closure(): mixed  $callback  May return null
+     * @param  Closure(): mixed  $callback  May return null. Must not return the sentinel string.
      * @param  DateTimeInterface|int|null  $nullTtl  TTL when caching a null result.
-     *         Defaults to $ttl when null. Pass a shorter duration to retry "not found"
-     *         lookups sooner (e.g. when a row may appear in the DB shortly after a miss).
+     *         Defaults to $ttl when null. For negative-cache use cases, pass an explicit
+     *         shorter duration (e.g. 30s) so a "not found" lookup retries sooner once the
+     *         underlying row may have appeared.
      */
     public function rememberLockedNullable(
         string $key,
@@ -152,6 +153,9 @@ class CacheLockService
             }
 
             $value = $callback();
+            if ($value === self::NULL_SENTINEL) {
+                throw new \LogicException('Closure returned the cache null sentinel; this value is reserved.');
+            }
             if ($value === null) {
                 Cache::put($key, self::NULL_SENTINEL, $nullTtl ?? $ttl);
             } else {
