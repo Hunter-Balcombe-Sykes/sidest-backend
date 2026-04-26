@@ -225,9 +225,13 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
 
             $newEntries = array_filter($candidates, fn ($c) => ! isset($existingKeys[$c['idempotency_key']]));
 
-            DB::transaction(function () use ($newEntries, &$entriesCreated): void {
+            DB::transaction(function () use ($newEntries, $affiliate, &$entriesCreated): void {
                 foreach ($newEntries as $entry) {
-                    CommissionLedgerEntry::create($entry['data']);
+                    // Preload the relation before save so the observer's notifyBrandSale()
+                    // can access affiliateProfessional->display_name without a lazy query.
+                    $row = new CommissionLedgerEntry($entry['data']);
+                    $row->setRelation('affiliateProfessional', $affiliate);
+                    $row->save();
                     $entriesCreated++;
                 }
             });
