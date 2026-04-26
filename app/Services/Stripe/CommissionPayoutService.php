@@ -171,7 +171,11 @@ class CommissionPayoutService
                 return null;
             }
 
-            $reversalCents = CommissionLedgerEntry::query()
+            // Single locked fetch — reused for both the net-commission sum
+            // below and the foreach that links these entries to the payout.
+            // lockForUpdate matches the accrual fetch above and closes the
+            // race where a reversal could land between SUM and GET.
+            $reversals = CommissionLedgerEntry::query()
                 ->whereNull('payout_id')
                 ->where('entry_type', 'reversal')
                 ->where('status', 'approved')
@@ -179,8 +183,10 @@ class CommissionPayoutService
                 ->where('affiliate_professional_id', $affiliateId)
                 ->where('currency_code', $currency)
                 ->where('occurred_at', '<=', $cutoff)
-                ->sum('amount_cents');
+                ->lockForUpdate()
+                ->get();
 
+            $reversalCents = (int) $reversals->sum('amount_cents');
             $netCommission = $grossCents + $reversalCents;
             if ($netCommission <= 0) {
                 return null;
@@ -214,16 +220,6 @@ class CommissionPayoutService
                 ]);
                 $entry->update(['payout_id' => $payout->id]);
             }
-
-            $reversals = CommissionLedgerEntry::query()
-                ->whereNull('payout_id')
-                ->where('entry_type', 'reversal')
-                ->where('status', 'approved')
-                ->where('brand_professional_id', $brandId)
-                ->where('affiliate_professional_id', $affiliateId)
-                ->where('currency_code', $currency)
-                ->where('occurred_at', '<=', $cutoff)
-                ->get();
 
             foreach ($reversals as $reversal) {
                 CommissionPayoutItem::create([
