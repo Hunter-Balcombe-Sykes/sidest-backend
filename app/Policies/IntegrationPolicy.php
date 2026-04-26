@@ -27,6 +27,15 @@ class IntegrationPolicy extends BasePolicy
         return $this->actorCanReachOwner($actor, $integration);
     }
 
+    public function manage(Professional $actor, ProfessionalIntegration $integration): bool|Response
+    {
+        if ($denied = $this->denyIfPendingDeletion($actor)) {
+            return $denied;
+        }
+
+        return $this->actorCanReachOwner($actor, $integration);
+    }
+
     private function actorCanReachOwner(Professional $actor, ProfessionalIntegration $integration): bool
     {
         $ownerId = trim((string) ($integration->professional_id ?? ''));

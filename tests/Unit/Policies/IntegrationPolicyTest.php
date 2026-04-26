@@ -47,3 +47,55 @@ it('denies view when the integration has no professional_id', function () {
 
     expect($this->policy->view($actor, $integration))->toBeFalse();
 });
+
+it('allows manage when the actor owns the integration and is active', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active', 'professional_type' => 'professional']);
+    $integration = new ProfessionalIntegration(['professional_id' => 'pro-1', 'provider' => 'fresha']);
+
+    expect($this->policy->manage($actor, $integration))->toBeTrue();
+});
+
+it('denies manage with a 423 deny response when the actor is pending deletion', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'pending_deletion', 'professional_type' => 'professional']);
+    $integration = new ProfessionalIntegration(['professional_id' => 'pro-1', 'provider' => 'fresha']);
+
+    $result = $this->policy->manage($actor, $integration);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(423);
+    expect($result->message())->toBe('Account is pending deletion.');
+});
+
+it('denies manage when the actor is not the owner and lacks brand-team capability', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active', 'professional_type' => 'professional']);
+    $integration = new ProfessionalIntegration(['professional_id' => 'pro-2', 'provider' => 'fresha']);
+
+    $this->brandAccess->shouldReceive('canManageShopify')
+        ->with(Mockery::on(fn ($p) => $p->id === 'pro-1'), 'pro-2')
+        ->andReturn(false);
+
+    expect($this->policy->manage($actor, $integration))->toBeFalse();
+});
+
+it('allows manage when the actor is a brand team member with manage capability', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active', 'professional_type' => 'professional']);
+    $integration = new ProfessionalIntegration(['professional_id' => 'brand-9', 'provider' => 'shopify']);
+
+    $this->brandAccess->shouldReceive('canManageShopify')
+        ->with(Mockery::on(fn ($p) => $p->id === 'pro-1'), 'brand-9')
+        ->andReturn(true);
+
+    expect($this->policy->manage($actor, $integration))->toBeTrue();
+});
+
+it('denies manage on an unsaved integration skeleton when caller has no claim on the target owner', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active', 'professional_type' => 'professional']);
+    // "Connect" flow: caller passes an unsaved skeleton with professional_id set.
+    $skeleton = new ProfessionalIntegration(['professional_id' => 'brand-9', 'provider' => 'shopify']);
+
+    $this->brandAccess->shouldReceive('canManageShopify')
+        ->with(Mockery::on(fn ($p) => $p->id === 'pro-1'), 'brand-9')
+        ->andReturn(false);
+
+    expect($this->policy->manage($actor, $skeleton))->toBeFalse();
+});
