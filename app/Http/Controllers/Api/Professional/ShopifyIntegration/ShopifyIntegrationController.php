@@ -18,6 +18,7 @@ use App\Models\Core\Site\Site;
 use App\Services\Shopify\ShopifyTeardownService;
 use App\Services\Shopify\ShopProfileAutoFillService;
 use App\Services\Store\BrandAccessService;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -47,11 +48,14 @@ class ShopifyIntegrationController extends ApiController
 
     /**
      * @return array{0: string, 1: JsonResponse|null}
+     *
+     * @throws AuthorizationException (403 or 423) — callers let it propagate.
      */
     private function resolveTargetBrandProfessionalId(
         Request $request,
         ?string $requestedBrandProfessionalId,
-        bool $requireForNonBrand
+        bool $requireForNonBrand,
+        string $ability = 'manage'
     ): array {
         $professional = $this->currentProfessional($request);
         $requestedBrandProfessionalId = trim((string) $requestedBrandProfessionalId);
@@ -66,9 +70,13 @@ class ShopifyIntegrationController extends ApiController
             }
         }
 
-        if (! $this->brandAccess->canManageShopify($professional, $requestedBrandProfessionalId)) {
-            return ['', $this->error('You are not permitted to manage Shopify integrations for this brand.', 403)];
-        }
+        $skeleton = new ProfessionalIntegration([
+            'professional_id' => $requestedBrandProfessionalId,
+            'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+        ]);
+
+        // Throws AuthorizationException (403 or 423) — callers let it propagate.
+        $this->authorizeForUser($professional, $ability, $skeleton);
 
         return [$requestedBrandProfessionalId, null];
     }
@@ -95,7 +103,8 @@ class ShopifyIntegrationController extends ApiController
         [$targetBrandId, $error] = $this->resolveTargetBrandProfessionalId(
             $request,
             isset($validator->validated()['brand_professional_id']) ? (string) $validator->validated()['brand_professional_id'] : null,
-            false
+            false,
+            'view'
         );
 
         if ($error !== null) {
