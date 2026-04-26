@@ -7,7 +7,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 beforeEach(function () {
-    $this->controller = new BrandCommerceAnalyticsController;
+    $this->controller = app(BrandCommerceAnalyticsController::class);
     $this->professional = new Professional(['id' => (string) Str::uuid(), 'timezone' => 'UTC']);
     Cache::flush();
 });

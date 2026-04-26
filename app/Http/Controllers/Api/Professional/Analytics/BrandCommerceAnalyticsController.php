@@ -5,10 +5,10 @@ namespace App\Http\Controllers\Api\Professional\Analytics;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -16,6 +16,8 @@ use Illuminate\Validation\ValidationException;
 class BrandCommerceAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
+
+    public function __construct(private CacheLockService $cacheLock) {}
 
     /**
      * Brand's commerce performance overview.
@@ -32,7 +34,7 @@ class BrandCommerceAnalyticsController extends ApiController
         $filters = $this->resolveFilters($request);
         $cacheKey = CacheKeyGenerator::brandCommerceAnalytics($professionalId, $filters['from'], $filters['to']);
 
-        return $this->success(Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $filters): array {
+        return $this->success($this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $filters): array {
             [$totals, $timeseries, $currencyCode] = $filters['use_hourly']
                 ? $this->buildHourlyTotals($professionalId, $filters)
                 : $this->buildDailyTotals($professionalId, $filters);
