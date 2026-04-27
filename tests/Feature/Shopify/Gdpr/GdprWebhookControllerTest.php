@@ -38,11 +38,6 @@ beforeEach(function () {
     $conn->statement('CREATE UNIQUE INDEX IF NOT EXISTS core.gdpr_requests_payload_hash_unique ON gdpr_requests (payload_hash)');
 });
 
-function signShopifyBody(string $body): string
-{
-    return base64_encode(hash_hmac('sha256', $body, 'test_shared_secret', true));
-}
-
 it('returns 202 and dispatches RedactShopJob for a valid shop/redact webhook', function () {
     $payload = ['shop_domain' => 'test-brand.myshopify.com', 'shop_id' => 12345];
     $body = json_encode($payload);
@@ -51,7 +46,7 @@ it('returns 202 and dispatches RedactShopJob for a valid shop/redact webhook', f
         '/api/webhooks/shopify/gdpr/shop-redact',
         $payload,
         [
-            'X-Shopify-Hmac-SHA256' => signShopifyBody($body),
+            'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test_shared_secret'),
             'X-Shopify-Shop-Domain' => 'test-brand.myshopify.com',
         ]
     );
@@ -69,7 +64,7 @@ it('returns 202 and dispatches RedactCustomerJob for customers/redact', function
         '/api/webhooks/shopify/gdpr/customers-redact',
         $payload,
         [
-            'X-Shopify-Hmac-SHA256' => signShopifyBody($body),
+            'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test_shared_secret'),
             'X-Shopify-Shop-Domain' => 'test-brand.myshopify.com',
         ]
     )->assertStatus(202);
@@ -85,7 +80,7 @@ it('returns 202 and dispatches ExportCustomerDataJob for customers/data_request'
         '/api/webhooks/shopify/gdpr/customers-data-request',
         $payload,
         [
-            'X-Shopify-Hmac-SHA256' => signShopifyBody($body),
+            'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test_shared_secret'),
             'X-Shopify-Shop-Domain' => 'test-brand.myshopify.com',
         ]
     )->assertStatus(202);
@@ -114,7 +109,7 @@ it('deduplicates identical payloads — no second row, no second dispatch', func
     $payload = ['shop_domain' => 'test-brand.myshopify.com', 'shop_id' => 12345];
     $body = json_encode($payload);
     $headers = [
-        'X-Shopify-Hmac-SHA256' => signShopifyBody($body),
+        'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test_shared_secret'),
         'X-Shopify-Shop-Domain' => 'test-brand.myshopify.com',
     ];
 
@@ -133,7 +128,7 @@ it('persists payload_hash as sha256 of the raw body', function () {
         '/api/webhooks/shopify/gdpr/shop-redact',
         $payload,
         [
-            'X-Shopify-Hmac-SHA256' => signShopifyBody($body),
+            'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test_shared_secret'),
             'X-Shopify-Shop-Domain' => 'test-brand.myshopify.com',
         ]
     );
@@ -150,7 +145,7 @@ it('accepts the request even when shop_domain is unknown (deferred to the job)',
         '/api/webhooks/shopify/gdpr/shop-redact',
         $payload,
         [
-            'X-Shopify-Hmac-SHA256' => signShopifyBody($body),
+            'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test_shared_secret'),
             'X-Shopify-Shop-Domain' => 'ghost.myshopify.com',
         ]
     )->assertStatus(202);

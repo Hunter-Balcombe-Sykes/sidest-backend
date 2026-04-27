@@ -472,3 +472,69 @@ function setupProfessionalDeletionAuditTable(): void
         created_at TEXT NULL
     )');
 }
+
+/**
+ * core.professional_integrations — superset of all columns webhook controllers query.
+ * Includes shopify_shop_domain (production has it; the older WebhookCrossTenantTest
+ * schema omits it). All columns nullable.
+ */
+function setupProfessionalIntegrationsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        provider TEXT NULL,
+        external_account_id TEXT NULL,
+        shopify_shop_domain TEXT NULL,
+        access_token TEXT NULL,
+        refresh_token TEXT NULL,
+        provider_metadata TEXT NULL,
+        status TEXT NULL,
+        expires_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
+ * Sign a body string with the Shopify HMAC scheme: base64(HMAC-SHA256(body, secret)).
+ * Mirrors the production controller's verification in ValidatesShopifyWebhookHmac.
+ */
+function signShopifyBody(string $body, string $secret): string
+{
+    return base64_encode(hash_hmac('sha256', $body, $secret, true));
+}
+
+/**
+ * Sign a body string with Square's HMAC scheme: base64(HMAC-SHA256(notification_url + body, key)).
+ * The notification_url MUST match config('services.square.webhook_notification_url') OR the
+ * request's full URL — controller tries both.
+ */
+function signSquareBody(string $notificationUrl, string $body, string $key): string
+{
+    return base64_encode(hash_hmac('sha256', $notificationUrl.$body, $key, true));
+}
+
+/**
+ * Sign a body string with the Fresha HMAC scheme (currently mirrors Square).
+ * Update if Fresha's docs reveal a different scheme.
+ */
+function signFreshaBody(string $notificationUrl, string $body, string $key): string
+{
+    return base64_encode(hash_hmac('sha256', $notificationUrl.$body, $key, true));
+}
+
+/**
+ * Generate a valid Stripe-Signature header for a raw body string.
+ * Uses the official Stripe SDK so we exercise the real verification path,
+ * not a hand-rolled approximation.
+ */
+function signStripeBody(string $body, string $secret, ?int $timestamp = null): string
+{
+    $timestamp = $timestamp ?? time();
+    $signedPayload = $timestamp.'.'.$body;
+    $signature = hash_hmac('sha256', $signedPayload, $secret);
+
+    return 't='.$timestamp.',v1='.$signature;
+}
