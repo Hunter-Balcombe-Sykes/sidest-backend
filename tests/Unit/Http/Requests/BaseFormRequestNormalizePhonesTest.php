@@ -4,11 +4,20 @@ use App\Http\Requests\BaseFormRequest;
 
 function makePhoneRequest(array $data): BaseFormRequest
 {
-    $request = new class extends BaseFormRequest {
-        public function rules(): array { return []; }
-        public function exposeNormalizePhones(array $keys): void { $this->normalizePhones($keys); }
+    $request = new class extends BaseFormRequest
+    {
+        public function rules(): array
+        {
+            return [];
+        }
+
+        public function exposeNormalizePhones(array $keys): void
+        {
+            $this->normalizePhones($keys);
+        }
     };
     $request->merge($data);
+
     return $request;
 }
 

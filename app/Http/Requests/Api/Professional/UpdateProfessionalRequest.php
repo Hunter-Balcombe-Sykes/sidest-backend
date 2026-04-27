@@ -88,5 +88,4 @@ class UpdateProfessionalRequest extends BaseFormRequest
             $this->merge($merge);
         }
     }
-
 }

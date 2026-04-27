@@ -86,5 +86,4 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
             $this->merge($merge);
         }
     }
-
 }

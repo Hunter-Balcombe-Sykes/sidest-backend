@@ -4,11 +4,20 @@ use App\Http\Requests\BaseFormRequest;
 
 function makeCleanTextRequest(array $data): BaseFormRequest
 {
-    $request = new class extends BaseFormRequest {
-        public function rules(): array { return []; }
-        public function exposeCleanText(array $keys): void { $this->cleanText($keys); }
+    $request = new class extends BaseFormRequest
+    {
+        public function rules(): array
+        {
+            return [];
+        }
+
+        public function exposeCleanText(array $keys): void
+        {
+            $this->cleanText($keys);
+        }
     };
     $request->merge($data);
+
     return $request;
 }
 

@@ -6,10 +6,19 @@ use Illuminate\Routing\Route;
 
 function makeSubdomainRequest(?string $routeValue, ?string $headerValue, ?string $bodyValue = null): BaseFormRequest
 {
-    $request = new class extends BaseFormRequest {
+    $request = new class extends BaseFormRequest
+    {
         use ResolvesPublicSiteSubdomain;
-        public function rules(): array { return []; }
-        public function exposeMerge(?string $headerName = null): void { $this->mergeSubdomainFromRoute($headerName); }
+
+        public function rules(): array
+        {
+            return [];
+        }
+
+        public function exposeMerge(?string $headerName = null): void
+        {
+            $this->mergeSubdomainFromRoute($headerName);
+        }
     };
 
     if ($bodyValue !== null) {
@@ -24,6 +33,7 @@ function makeSubdomainRequest(?string $routeValue, ?string $headerValue, ?string
         $route->setParameter('subdomain', $routeValue);
         $request->setRouteResolver(fn () => $route);
     }
+
     return $request;
 }
 

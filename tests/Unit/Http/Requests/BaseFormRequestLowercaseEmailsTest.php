@@ -4,11 +4,20 @@ use App\Http\Requests\BaseFormRequest;
 
 function makeEmailRequest(array $data): BaseFormRequest
 {
-    $request = new class extends BaseFormRequest {
-        public function rules(): array { return []; }
-        public function exposeLowercaseEmails(array $keys): void { $this->lowercaseEmails($keys); }
+    $request = new class extends BaseFormRequest
+    {
+        public function rules(): array
+        {
+            return [];
+        }
+
+        public function exposeLowercaseEmails(array $keys): void
+        {
+            $this->lowercaseEmails($keys);
+        }
     };
     $request->merge($data);
+
     return $request;
 }
 
