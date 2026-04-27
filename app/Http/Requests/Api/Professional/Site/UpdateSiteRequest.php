@@ -18,13 +18,13 @@ class UpdateSiteRequest extends BaseFormRequest
             $merge['subdomain'] = strtolower(trim($this->subdomain));
         }
 
-        // Strip HTML tags from user-visible text fields — same defence as UpsertSectionBlockRequest.
         $settings = $this->input('settings');
         if (is_array($settings)) {
             foreach (['hero_title', 'hero_subtitle', 'primary_button_text', 'bio_text'] as $field) {
-                if (isset($settings[$field]) && is_string($settings[$field])) {
-                    $settings[$field] = strip_tags($settings[$field]);
+                if (! array_key_exists($field, $settings) || ! is_string($settings[$field])) {
+                    continue;
                 }
+                $settings[$field] = static::cleanString($settings[$field]);
             }
             $merge['settings'] = $settings;
         }

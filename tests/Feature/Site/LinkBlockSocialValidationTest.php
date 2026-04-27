@@ -199,12 +199,9 @@ it('rejects a custom link with ftp: scheme', function () {
 // --- Security: title sanitization (XSS defense-in-depth) ---
 
 it('strips HTML tags from the title (executable content removed)', function () {
-    // strip_tags() removes the tag wrapper but leaves the text inside.
-    // The leftover ('alert(1)Book') is plain text — frontend escaping treats
-    // it as literal characters, NOT executable code. The dangerous part
-    // (the <script> tag itself) is gone, which is what matters for XSS.
-    // Heavier sanitization that also removes tag CONTENTS would corrupt
-    // legitimate content like "I'm <the best> here" — bad UX trade-off.
+    // cleanString() removes the entire <script> block including its content
+    // (not just the tags), so injected JS payloads cannot survive even as
+    // plain text. Plain content after the block is preserved.
     $result = validateStoreRequest([
         'title' => '<script>alert(1)</script>Book',
         'url' => 'https://example.com',
@@ -212,10 +209,8 @@ it('strips HTML tags from the title (executable content removed)', function () {
     ]);
 
     expect($result['ok'])->toBeTrue();
-    expect($result['data']['title'])->toBe('alert(1)Book');
-    // The actual security guarantee: no tag wrapper survives.
-    expect($result['data']['title'])->not->toContain('<script>');
-    expect($result['data']['title'])->not->toContain('</script>');
+    expect($result['data']['title'])->toBe('Book');
+    expect($result['data']['title'])->not->toContain('alert');
     expect($result['data']['title'])->not->toContain('<');
     expect($result['data']['title'])->not->toContain('>');
 });

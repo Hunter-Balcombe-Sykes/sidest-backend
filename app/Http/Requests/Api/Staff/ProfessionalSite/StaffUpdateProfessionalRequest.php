@@ -63,6 +63,7 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
         $this->normalizeAboutPayload();
         $this->normalizePhones(['phone', 'public_contact_number']);
         $this->lowercaseEmails(['primary_email', 'public_contact_email']);
+        $this->cleanText(['bio']);
 
         $merge = [];
 

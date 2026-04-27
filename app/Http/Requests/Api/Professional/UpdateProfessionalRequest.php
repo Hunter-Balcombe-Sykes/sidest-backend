@@ -65,21 +65,13 @@ class UpdateProfessionalRequest extends BaseFormRequest
         $this->normalizeAboutPayload();
         $this->normalizePhones(['phone', 'public_contact_number']);
         $this->lowercaseEmails(['primary_email', 'public_contact_email']);
+        $this->cleanText(['bio']);
 
         $merge = [];
 
         if ($this->has('professional_type')) {
             $professionalType = $this->input('professional_type');
             $merge['professional_type'] = $this->normalizeProfessionalTypeInput($professionalType);
-        }
-
-        // Strip HTML tags from bio — defence-in-depth even though the field is never rendered raw server-side
-        if ($this->has('bio')) {
-            $bio = $this->input('bio');
-            if (is_string($bio)) {
-                $bio = trim(strip_tags($bio));
-                $merge['bio'] = $bio === '' ? null : $bio;
-            }
         }
 
         // Upper-case country_code if supplied so the ISO alpha-2 validator

@@ -138,28 +138,19 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             $this->merge(['publication_state' => strtolower(trim($publicationState))]);
         }
 
-        // normalize text — strip HTML tags before validation to prevent stored XSS
-        if (is_string(data_get($this->input('settings', []), 'text'))) {
-            $t = trim(strip_tags((string) data_get($this->input('settings'), 'text')));
-            $settings = $this->input('settings', []);
-            $settings['text'] = ($t === '') ? null : $t;
-            $this->merge(['settings' => $settings]);
-        }
-
-        // Same strip_tags defense-in-depth for newsletter copy fields.
-        // Frontend must still escape on render; this just prevents stored tags
-        // from reaching a future buggy renderer.
         $settings = $this->input('settings', []);
-        $settingsChanged = false;
-        foreach (['headline', 'description', 'cta_label'] as $key) {
-            if (is_string(data_get($settings, $key))) {
-                $cleaned = trim(strip_tags((string) $settings[$key]));
-                $settings[$key] = ($cleaned === '') ? null : $cleaned;
+        if (is_array($settings)) {
+            $settingsChanged = false;
+            foreach (['text', 'headline', 'description', 'cta_label'] as $field) {
+                if (! array_key_exists($field, $settings) || ! is_string($settings[$field])) {
+                    continue;
+                }
+                $settings[$field] = static::cleanString($settings[$field]);
                 $settingsChanged = true;
             }
-        }
-        if ($settingsChanged) {
-            $this->merge(['settings' => $settings]);
+            if ($settingsChanged) {
+                $this->merge(['settings' => $settings]);
+            }
         }
 
         // Countdown sanitization — title + per-state headline/subtitle/cta.label.
@@ -185,12 +176,7 @@ class UpsertSectionBlockRequest extends BaseFormRequest
         }
 
         $clean = static function (mixed $value): mixed {
-            if (! is_string($value)) {
-                return $value;
-            }
-            $stripped = trim(strip_tags($value));
-
-            return $stripped === '' ? null : $stripped;
+            return is_string($value) ? static::cleanString($value) : $value;
         };
 
         if (array_key_exists('title', $settings)) {

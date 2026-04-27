@@ -32,19 +32,14 @@ class StoreLinkBlockRequest extends BaseFormRequest
 {
     protected function prepareForValidation(): void
     {
-        $title = $this->input('title');
         $url = $this->input('url');
         $iconKey = $this->input('icon_key');
         $platform = $this->input('platform');
         $handle = $this->input('handle');
 
+        $this->cleanText(['title']);
+
         $this->merge([
-            // Title sanitization: strip control chars + HTML tags. Defense-in-depth
-            // on top of frontend escaping. Without this, a user could store
-            // `<script>alert(1)</script>` and rely on a buggy renderer to execute it.
-            'title' => is_string($title)
-                ? preg_replace('/[\x00-\x1F\x7F]/', '', strip_tags(trim($title)))
-                : $title,
             'url' => is_string($url) ? trim($url) : $url,
             'icon_key' => is_string($iconKey) ? trim($iconKey) : $iconKey,
             'platform' => is_string($platform) ? trim($platform) : $platform,

@@ -359,7 +359,7 @@ it('strips HTML tags from countdown string fields (defense-in-depth)', function 
 
     expect($result['ok'])->toBeTrue();
     expect($result['data']['settings']['title'])->toBe('The Drop');
-    expect($result['data']['settings']['states']['live']['headline'])->toBe('alert(1)Live now');
+    expect($result['data']['settings']['states']['live']['headline'])->toBe('Live now');
     expect($result['data']['settings']['states']['live']['subtitle'])->toBe('Shop now');
     expect($result['data']['settings']['states']['live']['cta']['label'])->toBe('Go');
 });
