@@ -18,7 +18,7 @@ abstract class BasePolicy
      */
     protected function denyIfPendingDeletion(Professional $professional): ?Response
     {
-        if (($professional->status ?? null) === 'pending_deletion') {
+        if ($professional->isPendingDeletion()) {
             return Response::denyWithStatus(423, 'Account is pending deletion.');
         }
 

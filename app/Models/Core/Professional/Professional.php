@@ -119,6 +119,14 @@ class Professional extends BaseModel
         return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'professional';
     }
 
+    // Account is in the post-confirm grace period: read-only HTTP, write-blocked
+    // policies. Canonical predicate — middleware and Policies both consult this
+    // so the literal status string lives in exactly one place.
+    public function isPendingDeletion(): bool
+    {
+        return mb_strtolower(trim((string) ($this->status ?? ''))) === 'pending_deletion';
+    }
+
     public function brandProfile(): HasOne
     {
         return $this->hasOne(BrandProfile::class, 'professional_id');

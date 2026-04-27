@@ -19,7 +19,7 @@ class EnforcePendingDeletionReadOnly
     {
         $professional = $request->attributes->get('professional');
 
-        if (! $professional || (($professional->status ?? null) !== 'pending_deletion')) {
+        if (! $professional || ! $professional->isPendingDeletion()) {
             return $next($request);
         }
 
