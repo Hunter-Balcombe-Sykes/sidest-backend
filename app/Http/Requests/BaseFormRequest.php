@@ -92,4 +92,50 @@ abstract class BaseFormRequest extends FormRequest
             $this->merge($data);
         }
     }
+
+    /**
+     * Value-level twin of `cleanText`. Strips HTML tags, ASCII control chars,
+     * and surrounding whitespace from a single string; returns null for empty
+     * results AND for non-string input. Lifted out of cleanText so traits
+     * (ValidatesProfessionalAbout) and nested-array loops (settings.*) can
+     * share the exact same transform without re-implementing it.
+     */
+    protected static function cleanString(?string $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+        // strip_tags() leaves content inside <script>/<style> blocks — remove those blocks entirely first.
+        $noScripts = preg_replace('/<(script|style)\b[^>]*>.*?<\/\1>/is', '', $value) ?? $value;
+        $stripped = preg_replace('/[\x00-\x1F\x7F]/', '', strip_tags($noScripts));
+        $cleaned = trim((string) $stripped);
+
+        return $cleaned === '' ? null : $cleaned;
+    }
+
+    /**
+     * Clean user-authored text inputs: strip HTML tags, ASCII control chars,
+     * and surrounding whitespace; coerce empty results to null. Defense-in-depth
+     * against stored XSS for fields that are echoed by the frontend. Skips keys
+     * that are absent or not strings.
+     */
+    protected function cleanText(array $keys): void
+    {
+        $data = [];
+
+        foreach ($keys as $key) {
+            if (! $this->has($key)) {
+                continue;
+            }
+            $value = $this->input($key);
+            if (! is_string($value)) {
+                continue;
+            }
+            $data[$key] = static::cleanString($value);
+        }
+
+        if (! empty($data)) {
+            $this->merge($data);
+        }
+    }
 }
