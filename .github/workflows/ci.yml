@@ -36,5 +36,26 @@ jobs:
       - name: Check code style
         run: php artisan pint --test
 
+      - name: Check for inline auth bypasses in controllers
+        run: |
+          # Direct canManageShopify calls in controllers bypass IntegrationPolicy — use authorizeForUser() instead.
+          MANAGE_SHOPIFY=$(grep -rn "canManageShopify" app/Http/Controllers/ | wc -l | tr -d ' ')
+          # Inline 403 aborts in controllers bypass the Policy layer — use authorizeForUser() instead.
+          INLINE_403=$(grep -rE "abort_unless|abort_if" app/Http/Controllers/ | grep "403" | wc -l | tr -d ' ')
+
+          if [ "$MANAGE_SHOPIFY" -gt 0 ]; then
+            echo "::error::Found $MANAGE_SHOPIFY direct canManageShopify() call(s) in controllers. Route authorization through IntegrationPolicy via authorizeForUser() instead."
+            grep -rn "canManageShopify" app/Http/Controllers/
+            exit 1
+          fi
+
+          if [ "$INLINE_403" -gt 0 ]; then
+            echo "::error::Found $INLINE_403 inline 403 abort(s) in controllers. Use a Policy via authorizeForUser() instead."
+            grep -rE "abort_unless|abort_if" app/Http/Controllers/ | grep "403"
+            exit 1
+          fi
+
+          echo "No inline auth bypasses found."
+
       - name: Run tests
         run: composer test

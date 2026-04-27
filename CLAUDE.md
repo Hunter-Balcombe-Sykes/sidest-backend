@@ -57,6 +57,43 @@ config/
 - **UUID primary keys** on all tables.
 - **Soft deletes** with 30-day retention (configurable via `SOFT_DELETE_RETENTION_DAYS`).
 - **JSON columns** for flexible settings (site.settings, brand product configs, etc.).
+- **Authorization via Policies** — never inline 403 checks in controllers. See below.
+
+### Authorization Pattern
+
+All resource-level authorization goes through Laravel Policies in `app/Policies/`. Every policy extends `BasePolicy`.
+
+**Never do this in a controller:**
+```php
+if (! $this->brandAccess->canManageShopify($pro, $brandId)) {
+    return $this->error('Forbidden', 403);
+}
+// or
+abort_unless($pro->id === $resource->professional_id, 403);
+```
+
+**Always do this:**
+```php
+$this->authorizeForUser($pro, 'manage', $integration);
+```
+
+**Why `authorizeForUser` not `authorize`:** This app uses Supabase JWT — `Auth::user()` is always null. `authorize()` calls `Gate::forUser(null)`, which silently passes or type-errors depending on the policy. `authorizeForUser($pro, ...)` passes the resolved professional explicitly.
+
+**Skeleton pattern for pre-create checks** (no DB row yet):
+```php
+$skeleton = new ProfessionalIntegration([
+    'professional_id' => $pro->id,
+    'provider' => ProfessionalIntegration::PROVIDER_FRESHA,
+]);
+$this->authorizeForUser($pro, 'manage', $skeleton);
+```
+
+**Registering a new policy:** Add one line to `AppServiceProvider::boot()`:
+```php
+Gate::policy(YourModel::class, YourPolicy::class);
+```
+
+**CI enforces:** Direct `canManageShopify()` calls and inline 403 aborts in controllers fail the build. See `.github/workflows/ci.yml`.
 
 ## Development Commands
 
