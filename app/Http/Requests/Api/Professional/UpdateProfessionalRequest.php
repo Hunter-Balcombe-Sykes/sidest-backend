@@ -63,19 +63,7 @@ class UpdateProfessionalRequest extends BaseFormRequest
     protected function prepareForValidation(): void
     {
         $this->normalizeAboutPayload();
-
-        $phone = $this->input('phone');
-        if (is_string($phone)) {
-            $phone = trim($phone);
-            $phone = preg_replace('/[^\d+]/', '', $phone); // keep digits and +
-            $this->merge(['phone' => $phone === '' ? null : $phone]);
-        }
-        $public = $this->input('public_contact_number');
-        if (is_string($public)) {
-            $public = trim($public);
-            $public = preg_replace('/[^\d+]/', '', $public); // keep digits and +
-            $this->merge(['public_contact_number' => $public === '' ? null : $public]);
-        }
+        $this->normalizePhones(['phone', 'public_contact_number']);
 
         $merge = [];
 

@@ -22,16 +22,7 @@ class StoreCustomerRequest extends BaseFormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge([
-            'source' => $this->input('source', 'manual'),
-        ]);
-
-        $phone = $this->input('phone');
-        if (is_string($phone)) {
-            $phone = trim($phone);
-            $phone = preg_replace('/[^\d+]/', '', $phone); // keep digits and +
-            $this->merge(['phone' => $phone === '' ? null : $phone]);
-        }
-
+        $this->merge(['source' => $this->input('source', 'manual')]);
+        $this->normalizePhones(['phone']);
     }
 }

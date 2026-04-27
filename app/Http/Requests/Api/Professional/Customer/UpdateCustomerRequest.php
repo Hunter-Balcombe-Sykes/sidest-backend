@@ -9,12 +9,7 @@ class UpdateCustomerRequest extends BaseFormRequest
 {
     protected function prepareForValidation(): void
     {
-        $phone = $this->input('phone');
-        if (is_string($phone)) {
-            $phone = trim($phone);
-            $phone = preg_replace('/[^\d+]/', '', $phone);
-            $this->merge(['phone' => $phone === '' ? null : $phone]);
-        }
+        $this->normalizePhones(['phone']);
     }
 
     public function rules(): array
