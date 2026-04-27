@@ -2,19 +2,14 @@
 
 namespace App\Http\Requests\Staff;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 use Illuminate\Validation\Rule;
 
 // V2: Validates the `send_to` query param on staff-triggered data exports.
 // Default is 'professional' (the safer mode). 'staff' requires admin role —
 // enforced in the controller, not here.
-class RequestStaffDataExportRequest extends FormRequest
+class RequestStaffDataExportRequest extends BaseFormRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
-
     protected function prepareForValidation(): void
     {
         $this->merge([

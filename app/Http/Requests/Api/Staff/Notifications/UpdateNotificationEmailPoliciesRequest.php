@@ -2,18 +2,13 @@
 
 namespace App\Http\Requests\Api\Staff\Notifications;
 
+use App\Http\Requests\BaseFormRequest;
 use App\Services\Notifications\NotificationPublisher;
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 // V2: Validates bulk update of notification email policies — requires an array of category/mode pairs with modes: default, force_on, or force_off.
-class UpdateNotificationEmailPoliciesRequest extends FormRequest
+class UpdateNotificationEmailPoliciesRequest extends BaseFormRequest
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
-
     public function rules(): array
     {
         return [

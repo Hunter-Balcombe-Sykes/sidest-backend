@@ -9,12 +9,13 @@ abstract class BaseFormRequest extends FormRequest
 {
     /**
      * Authorization is enforced entirely by route middleware (VerifySupabaseJwt,
-     * LoadCurrentProfessional, staff guards). Returning true here is intentional —
-     * FormRequest authorization is redundant when every route group is already
-     * gated. If you add a new route without appropriate middleware, this will NOT
-     * save you — ensure middleware is applied at the route group level.
+     * LoadCurrentProfessional, staff guards) and resource Policies invoked from
+     * controllers via `authorizeForUser($pro, ...)`. This method is intentionally
+     * `final` — Supabase JWT means `Auth::user()` is always null, so any logic
+     * here would gate against a null user and create a second, inconsistent
+     * authorization surface. Do NOT override.
      */
-    public function authorize(): bool
+    final public function authorize(): bool
     {
         return true;
     }

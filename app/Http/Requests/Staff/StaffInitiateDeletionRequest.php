@@ -2,15 +2,10 @@
 
 namespace App\Http\Requests\Staff;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\BaseFormRequest;
 
-class StaffInitiateDeletionRequest extends FormRequest
+class StaffInitiateDeletionRequest extends BaseFormRequest
 {
-    public function authorize(): bool
-    {
-        return true; // Authorization handled by staff.admin middleware
-    }
-
     public function rules(): array
     {
         return [
