@@ -95,13 +95,19 @@ class ServiceObserver
                 return;
             }
 
-            $this->visibilityService->reevaluateEnabled(
-                (string) $service->professional_id,
-                (string) $site->id,
-                'booking'
-            );
+            // Both sections gate on "has at least one valid service": booking
+            // requires it for the booking link/integration check, services
+            // requires it directly. Re-evaluate both so is_enabled tracks
+            // reality after add/update/delete/restore.
+            foreach (['booking', 'services'] as $blockType) {
+                $this->visibilityService->reevaluateEnabled(
+                    (string) $service->professional_id,
+                    (string) $site->id,
+                    $blockType,
+                );
+            }
         } catch (\Throwable $e) {
-            Log::warning('Booking section visibility reevaluation failed on service change', [
+            Log::warning('Section visibility reevaluation failed on service change', [
                 'service_id' => $service->id,
                 'professional_id' => $service->professional_id,
                 'message' => $e->getMessage(),
