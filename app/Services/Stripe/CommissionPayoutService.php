@@ -199,6 +199,13 @@ class CommissionPayoutService
                 return null;
             }
 
+            // Per-payout grace window — 60d from creation. If the affiliate
+            // hasn't activated Stripe Connect by then, VoidExpiredPayoutsJob
+            // cancels this payout and voids its ledger entries.
+            // grace_period_days lives in config/sidest.php so ops can tune
+            // the policy without a code release.
+            $graceDays = (int) config('sidest.grace_period_days', 60);
+
             $payout = CommissionPayout::create([
                 'brand_professional_id' => $brandId,
                 'affiliate_professional_id' => $affiliateId,
@@ -209,6 +216,7 @@ class CommissionPayoutService
                 'currency_code' => strtoupper($currency),
                 'ledger_entry_count' => $entries->count(),
                 'eligible_after' => $cutoff,
+                'void_at' => now()->addDays($graceDays),
                 'funding_source' => null,
             ]);
 

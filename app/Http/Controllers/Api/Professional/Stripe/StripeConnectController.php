@@ -347,6 +347,11 @@ class StripeConnectController extends Controller
                 'failure_reason' => $p->failure_reason,
                 'eligible_after' => $p->eligible_after?->toIso8601String(),
                 'processed_at' => $p->processed_at?->toIso8601String(),
+                // Per-payout grace deadline. Affiliate side renders this as
+                // "expires in N days" badge on rows where the affiliate
+                // hasn't connected Stripe yet; brand side uses it for
+                // reporting visibility.
+                'void_at' => $p->void_at?->toIso8601String(),
                 'created_at' => $p->created_at?->toIso8601String(),
                 'brand' => $p->brandProfessional ? [
                     'id' => $p->brandProfessional->id,

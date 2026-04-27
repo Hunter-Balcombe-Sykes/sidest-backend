@@ -872,7 +872,12 @@ return [
         'payout_hold_days' => (int) env('SIDEST_STORE_PAYOUT_HOLD_DAYS', 7),
         'min_payout_hold_days' => 7,
         'platform_fee_percent' => (float) env('SIDEST_STORE_PLATFORM_FEE_PERCENT', 20),
-        'grace_period_days' => (int) env('SIDEST_STORE_GRACE_PERIOD_DAYS', 30),
+        // Per-payout grace deadline. Each commission_payouts row's
+        // void_at is set to created_at + this many days. After that,
+        // if the affiliate's Stripe Connect isn't 'active', the
+        // VoidExpiredPayoutsJob cancels the payout (brand keeps the
+        // money — never charged).
+        'grace_period_days' => (int) env('SIDEST_STORE_GRACE_PERIOD_DAYS', 60),
         'commission_void_window_days' => (int) env('SIDEST_STORE_COMMISSION_VOID_WINDOW_DAYS', 30),
     ],
 

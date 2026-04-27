@@ -38,6 +38,15 @@ class CommissionPayout extends BaseModel
         'wallet_debit_cents',
         'charge_cents',
         'retry_count',
+        // Per-payout grace deadline (created_at + 60d by default). When
+        // void_at passes and the affiliate's Stripe Connect isn't active,
+        // the nightly VoidExpiredPayoutsJob marks the payout `cancelled`
+        // and links its ledger entries `voided`.
+        'void_at',
+        // Stripe `fee_xxx` reference when the payout used the destination-
+        // charge + application_fee path (R4 hybrid). Null for wallet-only
+        // payouts that took the manual Transfer path.
+        'stripe_application_fee_id',
     ];
 
     protected $casts = [
@@ -50,6 +59,7 @@ class CommissionPayout extends BaseModel
         'retry_count' => 'integer',
         'eligible_after' => 'datetime',
         'processed_at' => 'datetime',
+        'void_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
