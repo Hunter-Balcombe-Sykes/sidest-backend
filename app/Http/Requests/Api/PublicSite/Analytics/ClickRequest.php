@@ -3,24 +3,17 @@
 namespace App\Http\Requests\Api\PublicSite\Analytics;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Http\Requests\Concerns\ResolvesPublicSiteSubdomain;
 use Illuminate\Validation\Rule;
 
 // V2: Validates public click-tracking events — requires a block ID with site identification via UUID or subdomain, plus optional session and UTM fields.
 class ClickRequest extends BaseFormRequest
 {
+    use ResolvesPublicSiteSubdomain;
+
     protected function prepareForValidation(): void
     {
-        $routeSubdomain = $this->route('subdomain');
-        $headerSubdomain = $this->header('X-Site-Subdomain');
-        $candidateSubdomain = is_string($routeSubdomain) && $routeSubdomain !== ''
-            ? $routeSubdomain
-            : (is_string($headerSubdomain) ? trim($headerSubdomain) : '');
-
-        if ($candidateSubdomain !== '') {
-            $this->merge([
-                'subdomain' => strtolower($candidateSubdomain),
-            ]);
-        }
+        $this->mergeSubdomainFromRoute('X-Site-Subdomain');
     }
 
     public function rules(): array
