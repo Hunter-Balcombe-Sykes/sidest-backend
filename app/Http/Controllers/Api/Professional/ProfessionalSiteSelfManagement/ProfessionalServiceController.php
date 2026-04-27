@@ -120,21 +120,19 @@ class ProfessionalServiceController extends ApiController
                 DB::select('select pg_advisory_xact_lock(hashtext(?))', ["services:{$pro->id}"]);
 
                 if (! array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
-                    // whereNull instead of where('category_id', null) — the latter
-                    // generates `category_id = NULL` in some Laravel versions which
-                    // never matches (NULL is not equal to anything in SQL). Using
-                    // whereNull fires the correct `category_id IS NULL` predicate
-                    // so the max(sort_order) lookup actually finds existing rows
-                    // when the new service has no category.
-                    $maxQuery = Service::query()
+                    // The unique constraint
+                    //   services_professional_sort_order_uq
+                    //   ON (professional_id, sort_order) WHERE deleted_at IS NULL
+                    // is global per professional — it does NOT include
+                    // category_id. So the max-lookup must consider EVERY live
+                    // service for this professional regardless of category,
+                    // otherwise a new service in a different category (or with
+                    // null category) would compute sort_order=0 and collide
+                    // with an existing live row at sort_order=0.
+                    $max = Service::query()
                         ->where('professional_id', $pro->id)
-                        ->whereNull('deleted_at');
-                    if (($data['category_id'] ?? null) === null) {
-                        $maxQuery->whereNull('category_id');
-                    } else {
-                        $maxQuery->where('category_id', $data['category_id']);
-                    }
-                    $max = $maxQuery->max('sort_order');
+                        ->whereNull('deleted_at')
+                        ->max('sort_order');
 
                     $data['sort_order'] = is_null($max) ? 0 : ((int) $max + 1);
                 }
