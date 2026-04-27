@@ -34,18 +34,16 @@ class UpdateLinkBlockRequest extends BaseFormRequest
             ? (string) $param->getKey()
             : $param;
 
-        $title = $this->input('title');
         $url = $this->input('url');
         $iconKey = $this->input('icon_key');
         $platform = $this->input('platform');
         $handle = $this->input('handle');
 
+        // Same defense-in-depth title sanitization as the Store request
+        $this->cleanText(['title']);
+
         $this->merge([
             'id' => $routeId,
-            // Same defense-in-depth title sanitization as the Store request
-            'title' => is_string($title)
-                ? preg_replace('/[\x00-\x1F\x7F]/', '', strip_tags(trim($title)))
-                : $title,
             'url' => is_string($url) ? trim($url) : $url,
             'icon_key' => is_string($iconKey) ? trim($iconKey) : $iconKey,
             'platform' => is_string($platform) ? trim($platform) : $platform,
