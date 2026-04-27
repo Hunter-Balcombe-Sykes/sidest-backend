@@ -353,6 +353,7 @@ class HydrogenAffiliateController extends ApiController
                 }
 
                 return [
+                    'id' => (string) $block->id,
                     'title' => $title,
                     'url' => $url,
                     'category' => $category !== '' ? $category : 'custom',
