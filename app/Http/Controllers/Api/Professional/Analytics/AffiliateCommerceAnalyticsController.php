@@ -199,71 +199,89 @@ class AffiliateCommerceAnalyticsController extends ApiController
      */
     private function buildGraceSummary(string $professionalId): array
     {
-        $professional = DB::table('core.professionals')
-            ->where('id', $professionalId)
-            ->select('stripe_connect_status')
-            ->first();
-
-        $isActive = $professional && $professional->stripe_connect_status === 'active';
-
-        // When Stripe is active, no payouts can void for grace reasons —
-        // return a clean shape so the UI can short-circuit.
-        if ($isActive) {
-            return [
-                'status' => 'connected',
-                'earliest_expiring_payout_at' => null,
-                'earliest_at_risk_amount_cents' => 0,
-                'total_at_risk_cents' => 0,
-                'currency_code' => 'AUD',
-            ];
-        }
-
-        // Aggregate unvoided pending payouts that haven't been paid out.
-        // void_at is per-payout (created_at + 60d) so the earliest deadline
-        // dictates the most urgent banner.
-        $atRisk = DB::table('commerce.commission_payouts')
-            ->where('affiliate_professional_id', $professionalId)
-            ->whereIn('status', ['pending', 'pending_funds'])
-            ->where('void_at', '>', now())
-            ->selectRaw('
-                COUNT(*) as payout_count,
-                COALESCE(SUM(net_payout_cents), 0)::int as total_cents,
-                MIN(void_at) as earliest_at,
-                MAX(currency_code) as currency_code
-            ')
-            ->first();
-
-        $earliestPayoutCents = 0;
-        if ($atRisk && $atRisk->earliest_at) {
-            $earliest = DB::table('commerce.commission_payouts')
-                ->where('affiliate_professional_id', $professionalId)
-                ->where('void_at', '=', $atRisk->earliest_at)
-                ->whereIn('status', ['pending', 'pending_funds'])
-                ->select('net_payout_cents')
-                ->first();
-            $earliestPayoutCents = (int) ($earliest->net_payout_cents ?? 0);
-        }
-
-        // Status tone driven by days remaining. Mirrors the banner logic:
-        //   critical = ≤3d  warning = ≤14d  active = >14d  none = no payouts at risk
-        $earliestAt = $atRisk && $atRisk->earliest_at ? Carbon::parse($atRisk->earliest_at) : null;
-        $daysRemaining = $earliestAt ? (int) max(0, now()->diffInDays($earliestAt, false)) : null;
-
-        $status = match (true) {
-            ($atRisk->payout_count ?? 0) === 0 => 'none',
-            $daysRemaining !== null && $daysRemaining <= 3 => 'critical',
-            $daysRemaining !== null && $daysRemaining <= 14 => 'warning',
-            default => 'active',
-        };
-
-        return [
-            'status' => $status,
-            'earliest_expiring_payout_at' => $earliestAt?->toIso8601String(),
-            'earliest_at_risk_amount_cents' => $earliestPayoutCents,
-            'total_at_risk_cents' => (int) ($atRisk->total_cents ?? 0),
-            'days_remaining' => $daysRemaining,
-            'currency_code' => strtoupper($atRisk->currency_code ?? 'AUD'),
+        // Defensive empty shape — used when Stripe is connected, when the
+        // affiliate has nothing at risk, or when the void_at migration
+        // hasn't shipped yet (the column-missing exception below falls
+        // through to this exact shape so the dashboard still renders).
+        $emptyShape = [
+            'status' => 'none',
+            'earliest_expiring_payout_at' => null,
+            'earliest_at_risk_amount_cents' => 0,
+            'total_at_risk_cents' => 0,
+            'days_remaining' => null,
+            'currency_code' => 'AUD',
         ];
+
+        try {
+            $professional = DB::table('core.professionals')
+                ->where('id', $professionalId)
+                ->select('stripe_connect_status')
+                ->first();
+
+            $isActive = $professional && $professional->stripe_connect_status === 'active';
+
+            // When Stripe is active, no payouts can void for grace reasons —
+            // return a clean shape so the UI can short-circuit.
+            if ($isActive) {
+                return [...$emptyShape, 'status' => 'connected'];
+            }
+
+            // Aggregate unvoided pending payouts that haven't been paid out.
+            // void_at is per-payout (created_at + 60d) so the earliest deadline
+            // dictates the most urgent banner.
+            $atRisk = DB::table('commerce.commission_payouts')
+                ->where('affiliate_professional_id', $professionalId)
+                ->whereIn('status', ['pending', 'pending_funds'])
+                ->where('void_at', '>', now())
+                ->selectRaw('
+                    COUNT(*) as payout_count,
+                    COALESCE(SUM(net_payout_cents), 0)::int as total_cents,
+                    MIN(void_at) as earliest_at,
+                    MAX(currency_code) as currency_code
+                ')
+                ->first();
+
+            $earliestPayoutCents = 0;
+            if ($atRisk && $atRisk->earliest_at) {
+                $earliest = DB::table('commerce.commission_payouts')
+                    ->where('affiliate_professional_id', $professionalId)
+                    ->where('void_at', '=', $atRisk->earliest_at)
+                    ->whereIn('status', ['pending', 'pending_funds'])
+                    ->select('net_payout_cents')
+                    ->first();
+                $earliestPayoutCents = (int) ($earliest->net_payout_cents ?? 0);
+            }
+
+            // Status tone driven by days remaining. Mirrors the banner logic:
+            //   critical = ≤3d  warning = ≤14d  active = >14d  none = no payouts at risk
+            $earliestAt = $atRisk && $atRisk->earliest_at ? Carbon::parse($atRisk->earliest_at) : null;
+            $daysRemaining = $earliestAt ? (int) max(0, now()->diffInDays($earliestAt, false)) : null;
+
+            $status = match (true) {
+                ($atRisk->payout_count ?? 0) === 0 => 'none',
+                $daysRemaining !== null && $daysRemaining <= 3 => 'critical',
+                $daysRemaining !== null && $daysRemaining <= 14 => 'warning',
+                default => 'active',
+            };
+
+            return [
+                'status' => $status,
+                'earliest_expiring_payout_at' => $earliestAt?->toIso8601String(),
+                'earliest_at_risk_amount_cents' => $earliestPayoutCents,
+                'total_at_risk_cents' => (int) ($atRisk->total_cents ?? 0),
+                'days_remaining' => $daysRemaining,
+                'currency_code' => strtoupper($atRisk->currency_code ?? 'AUD'),
+            ];
+        } catch (\Throwable $e) {
+            // Most likely: void_at column missing because the grace migration
+            // hasn't been applied yet. Don't 500 the whole analytics
+            // endpoint over an optional banner — log and return empty.
+            \Illuminate\Support\Facades\Log::warning('buildGraceSummary failed; returning empty', [
+                'professional_id' => $professionalId,
+                'error' => $e->getMessage(),
+            ]);
+            return $emptyShape;
+        }
     }
 
     /** @param \Illuminate\Support\Collection $rows */
