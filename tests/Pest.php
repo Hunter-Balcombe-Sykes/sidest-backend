@@ -121,6 +121,8 @@ function setupProfessionalsTable(): void
         location_state TEXT NULL,
         location_country TEXT NULL,
         qr_slug TEXT NULL,
+        stripe_connect_account_id TEXT NULL,
+        stripe_connect_status TEXT NULL,
         deleted_at TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL

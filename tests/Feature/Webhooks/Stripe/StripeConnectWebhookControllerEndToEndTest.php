@@ -19,15 +19,7 @@ beforeEach(function () {
         processed_at TEXT
     )');
 
-    // Add Stripe Connect columns to professionals (setupProfessionalsTable doesn't include them)
-    try {
-        $conn->statement('ALTER TABLE core.professionals ADD COLUMN stripe_connect_account_id TEXT NULL');
-    } catch (\Throwable) {
-    }
-    try {
-        $conn->statement('ALTER TABLE core.professionals ADD COLUMN stripe_connect_status TEXT NULL');
-    } catch (\Throwable) {
-    }
+    // stripe_connect_account_id and stripe_connect_status are included in setupProfessionalsTable.
 
     Config::set('services.stripe.connect_webhook_secret', 'whsec_connect_test');
     Config::set('services.stripe.webhook_secret', 'whsec_billing_test');

@@ -89,4 +89,9 @@ it('stripe — accepts an event whose timestamp is within the tolerance window',
         'CONTENT_TYPE' => 'application/json',
         'HTTP_STRIPE_SIGNATURE' => $sig,
     ], $body)->assertOk();
+
+    // Confirm the event was accepted and persisted — catches silent-accept regressions.
+    expect(DB::table('billing.webhook_events')
+        ->where('stripe_event_id', $event['id'])
+        ->count())->toBe(1);
 });
