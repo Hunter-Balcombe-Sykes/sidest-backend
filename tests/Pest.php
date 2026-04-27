@@ -538,3 +538,21 @@ function signStripeBody(string $body, string $secret, ?int $timestamp = null): s
 
     return 't='.$timestamp.',v1='.$signature;
 }
+
+/**
+ * commerce.affiliate_product_selections — minimal columns for uninstall webhook tests.
+ */
+function setupAffiliateProductSelectionsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.affiliate_product_selections (
+        id TEXT PRIMARY KEY,
+        affiliate_professional_id TEXT NULL,
+        brand_professional_id TEXT NULL,
+        shopify_product_gid TEXT NULL,
+        sort_order INTEGER NULL,
+        deleted_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
