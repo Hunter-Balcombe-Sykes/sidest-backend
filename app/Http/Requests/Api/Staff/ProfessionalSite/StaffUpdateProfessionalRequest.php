@@ -62,16 +62,9 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
     {
         $this->normalizeAboutPayload();
         $this->normalizePhones(['phone', 'public_contact_number']);
+        $this->lowercaseEmails(['primary_email', 'public_contact_email']);
 
         $merge = [];
-
-        if ($this->has('primary_email')) {
-            $merge['primary_email'] = $this->lowerOrNull($this->input('primary_email'));
-        }
-
-        if ($this->has('public_contact_email')) {
-            $merge['public_contact_email'] = $this->lowerOrNull($this->input('public_contact_email'));
-        }
 
         if ($this->has('professional_type')) {
             $professionalType = $this->input('professional_type');
@@ -93,18 +86,4 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
         }
     }
 
-    private function lowerOrNull($value): ?string
-    {
-        if ($value === null) {
-            return null;
-        }
-
-        $value = trim((string) $value);
-
-        if ($value === '') {
-            return null;
-        }
-
-        return mb_strtolower($value);
-    }
 }
