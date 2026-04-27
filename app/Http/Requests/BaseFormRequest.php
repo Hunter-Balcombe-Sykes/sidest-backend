@@ -65,4 +65,31 @@ abstract class BaseFormRequest extends FormRequest
     {
         $this->lowercaseStrings($keys);
     }
+
+    /**
+     * Normalize phone-like inputs to digits and a leading `+` only.
+     * Strips whitespace, parens, dashes, and any other punctuation. Empty
+     * results coerce to null so downstream code never has to distinguish
+     * '' from null. Skips keys that are absent or not strings.
+     */
+    protected function normalizePhones(array $keys): void
+    {
+        $data = [];
+
+        foreach ($keys as $key) {
+            if (! $this->has($key)) {
+                continue;
+            }
+            $value = $this->input($key);
+            if (! is_string($value)) {
+                continue;
+            }
+            $normalized = preg_replace('/[^\d+]/', '', trim($value));
+            $data[$key] = $normalized === '' ? null : $normalized;
+        }
+
+        if (! empty($data)) {
+            $this->merge($data);
+        }
+    }
 }
