@@ -38,14 +38,16 @@ jobs:
 
       - name: Check for inline auth bypasses in controllers
         run: |
-          # Direct canManageShopify calls in controllers bypass IntegrationPolicy — use authorizeForUser() instead.
-          MANAGE_SHOPIFY=$(grep -rn "canManageShopify" app/Http/Controllers/ | wc -l | tr -d ' ')
+          # Direct BrandAccessService capability calls in controllers bypass Policies — use authorizeForUser() via a Policy instead.
+          # Add new capability methods to this pattern as they're introduced.
+          CAPABILITY_PATTERN="canManageShopify|canManageBrand|canReadBrandAnalytics|canReadBrandFinancialAnalytics"
+          CAPABILITY_BYPASS=$(grep -rEn "$CAPABILITY_PATTERN" app/Http/Controllers/ | wc -l | tr -d ' ')
           # Inline 403 aborts in controllers bypass the Policy layer — use authorizeForUser() instead.
           INLINE_403=$(grep -rE "abort_unless|abort_if" app/Http/Controllers/ | grep "403" | wc -l | tr -d ' ')
 
-          if [ "$MANAGE_SHOPIFY" -gt 0 ]; then
-            echo "::error::Found $MANAGE_SHOPIFY direct canManageShopify() call(s) in controllers. Route authorization through IntegrationPolicy via authorizeForUser() instead."
-            grep -rn "canManageShopify" app/Http/Controllers/
+          if [ "$CAPABILITY_BYPASS" -gt 0 ]; then
+            echo "::error::Found $CAPABILITY_BYPASS direct BrandAccessService capability call(s) in controllers. Route authorization through a Policy via authorizeForUser() instead."
+            grep -rEn "$CAPABILITY_PATTERN" app/Http/Controllers/
             exit 1
           fi
 

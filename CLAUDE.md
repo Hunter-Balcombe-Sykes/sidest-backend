@@ -93,7 +93,7 @@ $this->authorizeForUser($pro, 'manage', $skeleton);
 Gate::policy(YourModel::class, YourPolicy::class);
 ```
 
-**CI enforces:** Direct `canManageShopify()` calls and inline 403 aborts in controllers fail the build. See `.github/workflows/ci.yml`.
+**CI enforces:** Direct `BrandAccessService` capability calls (`canManageShopify`, `canManageBrand`, `canReadBrandAnalytics`, `canReadBrandFinancialAnalytics`) and inline 403 aborts in controllers fail the build. When you add a new capability method to `BrandAccessService`, also add it to the `CAPABILITY_PATTERN` in `.github/workflows/ci.yml`.
 
 ## Development Commands
 
