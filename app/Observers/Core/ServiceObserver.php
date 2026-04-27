@@ -44,46 +44,49 @@ class ServiceObserver
 
     public function saved(Service $service): void
     {
-        $pro = $this->bust($service);
-
-        $this->reevaluateBooking($service, $pro);
-
-        if ($this->shouldDispatchSquareSync($pro)) {
-            $this->dispatchSquareSync($service->id, 'upsert');
-        }
-
-        if ($this->shouldDispatchFreshaSync($pro)) {
-            $this->dispatchFreshaSync($service->id, 'upsert');
-        }
+        $this->runHooks($service, 'upsert');
     }
 
     public function deleted(Service $service): void
     {
-        $pro = $this->bust($service);
-
-        $this->reevaluateBooking($service, $pro);
-
-        if ($this->shouldDispatchSquareSync($pro)) {
-            $this->dispatchSquareSync($service->id, 'delete');
-        }
-
-        if ($this->shouldDispatchFreshaSync($pro)) {
-            $this->dispatchFreshaSync($service->id, 'delete');
-        }
+        $this->runHooks($service, 'delete');
     }
 
     public function restored(Service $service): void
     {
-        $pro = $this->bust($service);
+        $this->runHooks($service, 'upsert');
+    }
 
-        $this->reevaluateBooking($service, $pro);
+    /**
+     * Side-effect runner. Wraps every step in its own try/catch + a
+     * top-level catch-all so an observer failure can never bubble up
+     * and turn the originating Service::save() into a 500. Logs every
+     * failure with the service id for triage.
+     */
+    private function runHooks(Service $service, string $action): void
+    {
+        try {
+            $pro = $this->bust($service);
+            $this->reevaluateBooking($service, $pro);
 
-        if ($this->shouldDispatchSquareSync($pro)) {
-            $this->dispatchSquareSync($service->id, 'upsert');
-        }
+            if ($this->shouldDispatchSquareSync($pro)) {
+                $this->dispatchSquareSync($service->id, $action);
+            }
 
-        if ($this->shouldDispatchFreshaSync($pro)) {
-            $this->dispatchFreshaSync($service->id, 'upsert');
+            if ($this->shouldDispatchFreshaSync($pro)) {
+                $this->dispatchFreshaSync($service->id, $action);
+            }
+        } catch (\Throwable $e) {
+            // Catch-all so a sync/cache/visibility failure can't trip the
+            // request. Each step has its own try/catch; this wraps the
+            // glue + any unanticipated error in helper resolution.
+            Log::error('ServiceObserver hook failed', [
+                'service_id' => $service->id,
+                'professional_id' => $service->professional_id,
+                'action' => $action,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
     }
 
