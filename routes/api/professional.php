@@ -91,9 +91,14 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
             ->whereUuid('affiliate');
         Route::get('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'index']);
         Route::post('/brand-affiliate-invites/availability', [BrandAffiliateInviteController::class, 'availability']);
-        Route::post('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'store']);
-        Route::post('/brand-affiliate-invites/bulk', [BrandAffiliateInviteController::class, 'bulk']);
-        Route::post('/brand-affiliate-invites/import-csv', [BrandAffiliateInviteController::class, 'importCsv']);
+        // Write endpoints are gated by BrandFundingGate — a brand can't
+        // send invites without a payment method on file (the platform
+        // would absorb commission float for any lapsed brand otherwise).
+        Route::middleware('brand-funding-gate')->group(function (): void {
+            Route::post('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'store']);
+            Route::post('/brand-affiliate-invites/bulk', [BrandAffiliateInviteController::class, 'bulk']);
+            Route::post('/brand-affiliate-invites/import-csv', [BrandAffiliateInviteController::class, 'importCsv']);
+        });
         Route::delete('/brand-affiliate-invites/{invite}', [BrandAffiliateInviteController::class, 'destroy'])
             ->whereUuid('invite');
         Route::post('/brand-affiliate-invites/{token}/claim', [BrandAffiliateInviteController::class, 'claim']);
