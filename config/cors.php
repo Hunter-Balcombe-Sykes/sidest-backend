@@ -7,8 +7,10 @@ return [
         [
             'https://app.sidest.co',
             'https://sidest.co',
-            'https://hunterbalcombesykes.com',
-            'https://www.hunterbalcombesykes.com',
+            // Intentionally allowed in prod: frontend devs run a local Vite/Next
+            // server on :3000 against the deployed Laravel Cloud API. Safe because
+            // supports_credentials => false and all writes still require a valid
+            // Supabase JWT.
             'http://localhost:3000',
         ],
         in_array(env('APP_ENV'), ['local', 'development', 'testing']) ? [
@@ -17,6 +19,10 @@ return [
     ),
     'allowed_origins_patterns' => array_merge(
         [
+            '#^https://[a-z0-9-]+\.sidest\.co$#', // Brand storefronts (Hydrogen on *.sidest.co)
+            // Hydrogen Oxygen preview/staging URLs — used during brand onboarding
+            // before Cloudflare DNS is pointed at the Oxygen project.
+            '#^https://[a-z0-9][a-z0-9-]*\.o2\.myshopify\.dev$#',
             '#^https://.*\.vercel\.app$#', // For Vercel preview deployments
             '#^https?://localhost:3000$#',
         ],
