@@ -33,8 +33,17 @@ class BrandAffiliateInvite extends BaseModel
         'expires_at',
     ];
 
+    // PII + token are hidden from default model serialization. Controllers/Resources hand-pick
+    // fields explicitly when responses need to include them; this guards against accidental
+    // exposure via toArray() in queue payloads, broadcast events, or future endpoints.
     protected $hidden = [
         'token',
+        'email',
+        'email_lc',
+        'phone',
+        'first_name',
+        'last_name',
+        'message',
     ];
 
     protected $casts = [
