@@ -74,6 +74,29 @@ it('allows booking section via Square integration when smart_booking flag is on'
     expect($canBeVisible)->toBeTrue();
 });
 
+it('allows booking section via booking link block', function () {
+    config()->set('sidest.features.smart_booking', false);
+
+    [$proId, $siteId] = seedProAndSite();
+    seedActiveService($proId);
+
+    // Link blocks with category='booking' are the current path — stored in the
+    // links block_group, not on the booking section block itself.
+    DB::connection('pgsql')->table('site.blocks')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $proId,
+        'site_id' => $siteId,
+        'block_group' => 'links',
+        'block_type' => 'link',
+        'settings' => json_encode(['category' => 'booking', 'url' => 'https://example.com/book']),
+    ]);
+
+    [$canBeVisible] = app(SectionVisibilityService::class)
+        ->checkVisibilityRequirements($proId, $siteId, 'booking');
+
+    expect($canBeVisible)->toBeTrue();
+});
+
 it('allows booking section via manual booking_url when smart_booking flag is off', function () {
     config()->set('sidest.features.smart_booking', false);
 

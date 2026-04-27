@@ -243,12 +243,25 @@ class SectionVisibilityService
             return [true, null];
         }
 
-        // Fall back to the manual booking_url path. Uses Laravel's portable JSON
-        // arrow syntax (`settings->booking_url`) so the query is translated to
-        // Postgres `->>` or SQLite `json_extract` as appropriate. On Postgres
-        // we additionally BTRIM to treat whitespace-only values as empty — the
-        // original behaviour before the cross-DB portability rework.
-        $linkQuery = Block::query()
+        // Check for a booking link block — the current path. Link blocks use
+        // block_group='links' with settings->category='booking'. This replaced
+        // the old settings->booking_url field on the section block itself.
+        $hasLinkBlock = Block::query()
+            ->where('professional_id', $professionalId)
+            ->where('block_group', 'links')
+            ->where('settings->category', 'booking')
+            ->whereNull('deleted_at')
+            ->exists();
+
+        if ($hasLinkBlock) {
+            return [true, null];
+        }
+
+        // Legacy path: manual booking_url set directly on the booking section block.
+        // Kept for backwards compatibility with accounts created before the link
+        // block flow was introduced. Uses Laravel's portable JSON arrow syntax so
+        // the query works on both Postgres (`->>`) and SQLite (`json_extract`).
+        $legacyQuery = Block::query()
             ->where('professional_id', $professionalId)
             ->where('block_group', 'sections')
             ->where('block_type', 'booking')
@@ -256,15 +269,13 @@ class SectionVisibilityService
             ->where('settings->booking_url', '!=', '');
 
         if (DB::connection()->getDriverName() === 'pgsql') {
-            $linkQuery->whereRaw("BTRIM(settings->>'booking_url') <> ''");
+            $legacyQuery->whereRaw("BTRIM(settings->>'booking_url') <> ''");
         }
 
-        $hasBookingLink = $linkQuery->exists();
-
-        if (! $hasBookingLink) {
-            return [false, 'Booking section requires a booking link or booking integration.'];
+        if ($legacyQuery->exists()) {
+            return [true, null];
         }
 
-        return [true, null];
+        return [false, 'Booking section requires a booking link or booking integration.'];
     }
 }
