@@ -57,6 +57,16 @@ class BrandCommerceAnalyticsController extends ApiController
                 ->where('brand_professional_id', $professionalId)
                 ->pluck('affiliate_professional_id');
 
+            // Display labels keyed by professional id so the leaderboard
+            // can render real names instead of UUIDs. Falls back through
+            // display_name → handle → "Affiliate" so a row never goes
+            // blank even when a professional row is half-populated.
+            $identityRows = DB::table('core.professionals')
+                ->whereIn('id', $linkedAffiliateIds)
+                ->select('id', 'display_name', 'first_name', 'last_name', 'handle')
+                ->get()
+                ->keyBy('id');
+
             $pageviewByAffiliate = DB::table('analytics.site_metrics_daily')
                 ->whereIn('professional_id', $linkedAffiliateIds)
                 ->whereBetween('day', [$filters['from'], $filters['to']])
@@ -69,7 +79,7 @@ class BrandCommerceAnalyticsController extends ApiController
                 ->get()
                 ->keyBy('professional_id');
 
-            $affiliates = $affiliateRows->map(function ($rows, $affiliateId) use ($pageviewByAffiliate) {
+            $affiliates = $affiliateRows->map(function ($rows, $affiliateId) use ($pageviewByAffiliate, $identityRows) {
                 $affiliateCurrency = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
                 $primary = $rows->filter(fn ($r) => $r->currency_code === $affiliateCurrency);
                 $views = $pageviewByAffiliate->get($affiliateId);
@@ -83,8 +93,19 @@ class BrandCommerceAnalyticsController extends ApiController
                     ? round(($orders / $uniqueVisitors) * 100, 2)
                     : 0.0;
 
+                // Resolve affiliate label: prefer first+last → display_name
+                // → handle. Pure UUID is a last resort so the dashboard
+                // never has to render a 36-char hex id in the table.
+                $identity = $identityRows->get($affiliateId);
+                $fullName = trim(implode(' ', array_filter([$identity?->first_name, $identity?->last_name])));
+                $displayName = $fullName !== ''
+                    ? $fullName
+                    : ($identity?->display_name ?? $identity?->handle ?? 'Affiliate');
+
                 return [
                     'affiliate_professional_id' => $affiliateId,
+                    'affiliate_display_name' => $displayName,
+                    'affiliate_handle' => $identity?->handle,
                     'orders_count' => $orders,
                     'gross_cents' => (int) $primary->sum('gross_cents'),
                     'net_cents' => (int) $primary->sum('net_cents'),
