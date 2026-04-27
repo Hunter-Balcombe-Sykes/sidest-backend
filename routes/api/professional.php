@@ -87,6 +87,8 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         });
         Route::patch('/brand-affiliates/{affiliate}/custom-photos', [BrandAffiliateController::class, 'updateCustomPhotos'])
             ->whereUuid('affiliate');
+        Route::get('/brand-affiliates/{affiliate}/snapshot', [BrandAffiliateController::class, 'snapshot'])
+            ->whereUuid('affiliate');
         Route::get('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'index']);
         Route::post('/brand-affiliate-invites/availability', [BrandAffiliateInviteController::class, 'availability']);
         Route::post('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'store']);
