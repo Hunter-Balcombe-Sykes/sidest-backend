@@ -97,13 +97,14 @@ trait ValidatesProfessionalAbout
         }
     }
 
+    /**
+     * Delegates to BaseFormRequest::cleanString — kept here as a thin alias so
+     * the trait's nested-walks (credentials.*, experience.*) can stay readable.
+     * The trait is only ever used by classes that extend BaseFormRequest, so
+     * static::cleanString resolves through the consuming class.
+     */
     private function cleanStringOrNull(mixed $value): ?string
     {
-        if (! is_string($value)) {
-            return null;
-        }
-        $value = trim(strip_tags($value));
-
-        return $value === '' ? null : $value;
+        return static::cleanString(is_string($value) ? $value : null);
     }
 }
