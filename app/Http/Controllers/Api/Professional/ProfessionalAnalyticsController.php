@@ -282,15 +282,18 @@ class ProfessionalAnalyticsController extends ApiController
             try {
                 $topLinks = LinkClick::runForBlockForeignKey(
                     function (string $clickBlockColumn) use ($professional, $from, $to) {
-                        // Top links (total clicks, not unique clickers)
+                        // Top links (total clicks, not unique clickers).
+                        // platform is pulled from the JSON settings bag so the
+                        // dashboard can label rows by platform name (instagram,
+                        // fresha, etc.) rather than raw title/URL.
                         return DB::table('analytics.link_clicks as lc')
                             ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
                             ->where('lc.professional_id', $professional->id)
                             ->whereBetween('lc.occurred_at', [$from, $to])
                             ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
                             ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
-                            ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
-                            ->groupBy('b.id', 'b.title', 'b.url')
+                            ->selectRaw("b.id as block_id, b.title, b.url, b.settings->>'platform' as platform, b.settings->>'category' as category, COUNT(*) as clicks")
+                            ->groupBy('b.id', 'b.title', 'b.url', 'platform', 'category')
                             ->orderByDesc('clicks')
                             ->limit(10)
                             ->get();
