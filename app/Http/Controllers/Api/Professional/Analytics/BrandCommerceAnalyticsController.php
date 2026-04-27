@@ -223,7 +223,7 @@ class BrandCommerceAnalyticsController extends ApiController
         $validator = Validator::make($request->query(), [
             'from' => ['sometimes', 'date_format:Y-m-d'],
             'to' => ['sometimes', 'date_format:Y-m-d'],
-            'days' => ['sometimes', 'integer', 'min:1', 'max:365'],
+            'days' => ['sometimes', 'integer', 'min:1', 'max:3650'],
         ]);
 
         if ($validator->fails()) {

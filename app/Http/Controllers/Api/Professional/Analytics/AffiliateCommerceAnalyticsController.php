@@ -157,38 +157,60 @@ class AffiliateCommerceAnalyticsController extends ApiController
      */
     private function buildPayoutSummary(string $professionalId): array
     {
-        // Pending / eligible amounts — payouts that exist but haven't
-        // completed yet. Includes 'pending', 'pending_funds', 'collecting',
-        // 'transferring' (anything mid-flight).
-        $pendingAgg = DB::table('commerce.commission_payouts')
-            ->where('affiliate_professional_id', $professionalId)
-            ->whereIn('status', ['pending', 'pending_funds', 'collecting', 'transferring'])
-            ->selectRaw('
-                COALESCE(SUM(net_payout_cents), 0)::int as net_pending_cents,
-                MIN(eligible_after) as next_eligible_at,
-                MAX(currency_code) as currency_code
-            ')
-            ->first();
-
-        // Last completed payout — for the "last paid X.XX on date" line.
-        $lastCompleted = DB::table('commerce.commission_payouts')
-            ->where('affiliate_professional_id', $professionalId)
-            ->where('status', 'completed')
-            ->orderByDesc('processed_at')
-            ->select('processed_at', 'net_payout_cents', 'currency_code')
-            ->first();
-
-        return [
-            'next_payout_estimate_cents' => (int) ($pendingAgg->net_pending_cents ?? 0),
-            'next_payout_eligible_at' => $pendingAgg && $pendingAgg->next_eligible_at
-                ? Carbon::parse($pendingAgg->next_eligible_at)->toIso8601String()
-                : null,
-            'last_payout_at' => $lastCompleted && $lastCompleted->processed_at
-                ? Carbon::parse($lastCompleted->processed_at)->toIso8601String()
-                : null,
-            'last_payout_amount_cents' => (int) ($lastCompleted->net_payout_cents ?? 0),
-            'currency_code' => strtoupper($lastCompleted->currency_code ?? $pendingAgg->currency_code ?? 'AUD'),
+        $emptyShape = [
+            'next_payout_estimate_cents' => 0,
+            'next_payout_eligible_at' => null,
+            'last_payout_at' => null,
+            'last_payout_amount_cents' => 0,
+            'currency_code' => 'AUD',
         ];
+
+        try {
+            // Pending / eligible amounts — payouts that exist but haven't
+            // completed yet. Includes 'pending', 'pending_funds',
+            // 'collecting', 'transferring' (anything mid-flight). The
+            // pending_funds status was added with the grace migration —
+            // safe to include even when the enum doesn't carry it because
+            // SQL just treats unknown values as no-match.
+            $pendingAgg = DB::table('commerce.commission_payouts')
+                ->where('affiliate_professional_id', $professionalId)
+                ->whereIn('status', ['pending', 'pending_funds', 'collecting', 'transferring'])
+                ->selectRaw('
+                    COALESCE(SUM(net_payout_cents), 0)::int as net_pending_cents,
+                    MIN(eligible_after) as next_eligible_at,
+                    MAX(currency_code) as currency_code
+                ')
+                ->first();
+
+            // Last completed payout — for the "last paid X.XX on date" line.
+            $lastCompleted = DB::table('commerce.commission_payouts')
+                ->where('affiliate_professional_id', $professionalId)
+                ->where('status', 'completed')
+                ->orderByDesc('processed_at')
+                ->select('processed_at', 'net_payout_cents', 'currency_code')
+                ->first();
+
+            return [
+                'next_payout_estimate_cents' => (int) ($pendingAgg->net_pending_cents ?? 0),
+                'next_payout_eligible_at' => $pendingAgg && $pendingAgg->next_eligible_at
+                    ? Carbon::parse($pendingAgg->next_eligible_at)->toIso8601String()
+                    : null,
+                'last_payout_at' => $lastCompleted && $lastCompleted->processed_at
+                    ? Carbon::parse($lastCompleted->processed_at)->toIso8601String()
+                    : null,
+                'last_payout_amount_cents' => (int) ($lastCompleted->net_payout_cents ?? 0),
+                'currency_code' => strtoupper($lastCompleted->currency_code ?? $pendingAgg->currency_code ?? 'AUD'),
+            ];
+        } catch (\Throwable $e) {
+            // Most likely: pending_funds isn't in the status enum yet
+            // because the grace migration hasn't shipped. Don't 500 the
+            // whole endpoint — log and return empty.
+            \Illuminate\Support\Facades\Log::warning('buildPayoutSummary failed; returning empty', [
+                'professional_id' => $professionalId,
+                'error' => $e->getMessage(),
+            ]);
+            return $emptyShape;
+        }
     }
 
     /**
@@ -304,7 +326,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
         $validator = Validator::make($request->query(), [
             'from' => ['sometimes', 'date_format:Y-m-d'],
             'to' => ['sometimes', 'date_format:Y-m-d'],
-            'days' => ['sometimes', 'integer', 'min:1', 'max:365'],
+            'days' => ['sometimes', 'integer', 'min:1', 'max:3650'],
         ]);
 
         if ($validator->fails()) {
