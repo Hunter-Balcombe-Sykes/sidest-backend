@@ -115,32 +115,56 @@ class ProfessionalServiceController extends ApiController
 
         $this->assertCategoryBelongsToProfessional($pro->id, $data['category_id'] ?? null);
 
-        $service = DB::transaction(function () use ($pro, $data) {
-            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["services:{$pro->id}"]);
+        try {
+            $service = DB::transaction(function () use ($pro, $data) {
+                DB::select('select pg_advisory_xact_lock(hashtext(?))', ["services:{$pro->id}"]);
 
-            if (! array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
-                $max = Service::query()
-                    ->where('professional_id', $pro->id)
-                    ->where('category_id', $data['category_id'] ?? null)
-                    ->max('sort_order');
+                if (! array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
+                    // whereNull instead of where('category_id', null) — the latter
+                    // generates `category_id = NULL` in some Laravel versions which
+                    // never matches (NULL is not equal to anything in SQL). Using
+                    // whereNull fires the correct `category_id IS NULL` predicate
+                    // so the max(sort_order) lookup actually finds existing rows
+                    // when the new service has no category.
+                    $maxQuery = Service::query()
+                        ->where('professional_id', $pro->id)
+                        ->whereNull('deleted_at');
+                    if (($data['category_id'] ?? null) === null) {
+                        $maxQuery->whereNull('category_id');
+                    } else {
+                        $maxQuery->where('category_id', $data['category_id']);
+                    }
+                    $max = $maxQuery->max('sort_order');
 
-                $data['sort_order'] = is_null($max) ? 0 : ((int) $max + 1);
-            }
+                    $data['sort_order'] = is_null($max) ? 0 : ((int) $max + 1);
+                }
 
-            $service = Service::query()->create([
+                $service = Service::query()->create([
+                    'professional_id' => $pro->id,
+                    'category_id' => $data['category_id'] ?? null,
+                    'title' => $data['title'],
+                    'description' => $data['description'] ?? null,
+                    'price_cents' => $data['price_cents'],
+                    'currency_code' => $data['currency_code'] ?? 'AUD',
+                    'duration_minutes' => $data['duration_minutes'] ?? null,
+                    'is_active' => $data['is_active'] ?? true,
+                    'sort_order' => $data['sort_order'],
+                ]);
+
+                return $service->fresh();
+            });
+        } catch (\Throwable $e) {
+            // Log the actual cause so the user sees the real error in server
+            // logs instead of the generic "An error occurred" wrapper from
+            // bootstrap/app.php. Re-throws so the wrapper still returns 500.
+            \Illuminate\Support\Facades\Log::error('Service store failed', [
                 'professional_id' => $pro->id,
-                'category_id' => $data['category_id'] ?? null,
-                'title' => $data['title'],
-                'description' => $data['description'] ?? null,
-                'price_cents' => $data['price_cents'],
-                'currency_code' => $data['currency_code'] ?? 'AUD',
-                'duration_minutes' => $data['duration_minutes'] ?? null,
-                'is_active' => $data['is_active'] ?? true,
-                'sort_order' => $data['sort_order'],
+                'payload' => $data,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
-
-            return $service->fresh();
-        });
+            throw $e;
+        }
 
         return $this->success(['service' => $service], 201);
     }
