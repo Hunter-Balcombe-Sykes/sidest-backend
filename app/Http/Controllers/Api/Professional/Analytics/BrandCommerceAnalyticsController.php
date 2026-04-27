@@ -39,27 +39,70 @@ class BrandCommerceAnalyticsController extends ApiController
                 ? $this->buildHourlyTotals($professionalId, $filters)
                 : $this->buildDailyTotals($professionalId, $filters);
 
-            // Per-affiliate breakdown — daily only (no hourly equivalent table)
+            // Per-affiliate commerce breakdown — daily only (no hourly equivalent table)
             $affiliateRows = DB::table('analytics.brand_affiliate_daily')
                 ->where('brand_professional_id', $professionalId)
                 ->whereBetween('day', [$filters['from'], $filters['to']])
                 ->get()
                 ->groupBy('affiliate_professional_id');
 
-            $affiliates = $affiliateRows->map(function ($rows, $affiliateId) {
+            // Per-affiliate page views — pulled from site_metrics_daily for
+            // every linked affiliate of this brand. Joined here (not via
+            // a backend SQL JOIN) so the existing brand_affiliate_daily
+            // groupBy stays simple. Only affiliates with at least one
+            // BrandPartnerLink to this brand are included; the LEFT JOIN
+            // to brand_partner_links keeps the query brand-scoped without
+            // pulling in every site on the platform.
+            $linkedAffiliateIds = DB::table('brand.brand_partner_links')
+                ->where('brand_professional_id', $professionalId)
+                ->pluck('affiliate_professional_id');
+
+            $pageviewByAffiliate = DB::table('analytics.site_metrics_daily')
+                ->whereIn('professional_id', $linkedAffiliateIds)
+                ->whereBetween('day', [$filters['from'], $filters['to']])
+                ->select(
+                    'professional_id',
+                    DB::raw('SUM(visits_count)::int as visits_count'),
+                    DB::raw('SUM(unique_visitors)::int as unique_visitors'),
+                )
+                ->groupBy('professional_id')
+                ->get()
+                ->keyBy('professional_id');
+
+            $affiliates = $affiliateRows->map(function ($rows, $affiliateId) use ($pageviewByAffiliate) {
                 $affiliateCurrency = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
                 $primary = $rows->filter(fn ($r) => $r->currency_code === $affiliateCurrency);
+                $views = $pageviewByAffiliate->get($affiliateId);
+                $orders = (int) $primary->sum('orders_count');
+                $visits = (int) ($views->visits_count ?? 0);
+                // Conversion = orders / unique_visitors (more meaningful than
+                // raw visits which can include the same browser bouncing).
+                // Falls back to 0 when there's no traffic at all.
+                $uniqueVisitors = (int) ($views->unique_visitors ?? 0);
+                $conversionRate = $uniqueVisitors > 0
+                    ? round(($orders / $uniqueVisitors) * 100, 2)
+                    : 0.0;
 
                 return [
                     'affiliate_professional_id' => $affiliateId,
-                    'orders_count' => (int) $primary->sum('orders_count'),
+                    'orders_count' => $orders,
                     'gross_cents' => (int) $primary->sum('gross_cents'),
                     'net_cents' => (int) $primary->sum('net_cents'),
                     'commission_net_cents' => (int) $primary->sum('commission_net_cents'),
                     'customers_count' => (int) $primary->sum('customers_count'),
+                    'page_views' => $visits,
+                    'unique_visitors' => $uniqueVisitors,
+                    'conversion_rate_percent' => $conversionRate,
                     'currency_code' => strtoupper($affiliateCurrency),
                 ];
             })->values()->all();
+
+            // Brand-level page-view total — sum across every linked
+            // affiliate for the requested window. Surfaces as a KPI on
+            // the brand analytics page ("Page views across all your
+            // affiliates").
+            $totalPageviews = (int) $pageviewByAffiliate->sum('visits_count');
+            $totalUniqueVisitors = (int) $pageviewByAffiliate->sum('unique_visitors');
 
             // Commission summary — daily only
             $commissionRows = DB::table('analytics.brand_commission_daily')
@@ -77,6 +120,12 @@ class BrandCommerceAnalyticsController extends ApiController
                 'reversed_cents' => (int) ($commissionRows->get('reversed')?->sum('reversal_cents') ?? 0),
                 'currency_code' => strtoupper($commissionCurrencyCode),
             ];
+
+            // Layer the page-view totals onto the existing totals block so
+            // the dashboard can show "X orders / $Y gross / Z page views"
+            // as a coherent KPI strip.
+            $totals['page_views'] = $totalPageviews;
+            $totals['unique_visitors'] = $totalUniqueVisitors;
 
             return [
                 'range' => ['from' => $filters['from'], 'to' => $filters['to']],
