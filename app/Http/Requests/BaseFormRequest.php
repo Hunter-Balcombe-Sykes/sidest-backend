@@ -138,4 +138,31 @@ abstract class BaseFormRequest extends FormRequest
             $this->merge($data);
         }
     }
+
+    /**
+     * Lowercase email-like inputs and coerce empty strings to null. Use this
+     * for fields backed by a unique index where the difference between '' and
+     * null matters (e.g. professionals.primary_email). For looser semantics
+     * use `sanitizeEmails`.
+     */
+    protected function lowercaseEmails(array $keys): void
+    {
+        $data = [];
+
+        foreach ($keys as $key) {
+            if (! $this->has($key)) {
+                continue;
+            }
+            $value = $this->input($key);
+            if (! is_string($value)) {
+                continue;
+            }
+            $normalized = mb_strtolower(trim($value));
+            $data[$key] = ($normalized === '') ? null : $normalized;
+        }
+
+        if (! empty($data)) {
+            $this->merge($data);
+        }
+    }
 }
