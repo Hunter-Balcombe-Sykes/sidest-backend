@@ -53,13 +53,11 @@ return [
         'luma',
         'partiful',
         'ticketmaster',
-        'meetup',
         // Content platform icons
         'apple_podcasts',
         'substack',
         'bandcamp',
         'patreon',
-        'kofi',
         'gumroad',
         'medium',
         'vimeo',
@@ -474,18 +472,6 @@ return [
             'default_category' => 'events',
             'handle_location' => 'path',
         ],
-        'meetup' => [
-            'display_name' => 'Meetup',
-            'icon_key' => 'meetup',
-            'placeholder' => 'your-group-slug',
-            'handle_pattern' => '/^[a-zA-Z0-9-]{3,40}$/',
-            'url_template' => 'https://meetup.com/{handle}',
-            'host_allowlist' => ['meetup.com', 'www.meetup.com'],
-            'url_path_extractor' => '#^/([a-zA-Z0-9-]{3,40})/?$#',
-            'default_category' => 'events',
-            'handle_location' => 'path',
-        ],
-
         // --- Content platforms — path mode (default_category: content) ---
         // Apple Podcasts URLs always have the numeric ID as the stable identifier:
         //   https://podcasts.apple.com/us/podcast/{slug}/id{numeric-id}
@@ -534,17 +520,6 @@ return [
             'handle_pattern' => '/^[a-zA-Z0-9_-]{3,40}$/',
             'url_template' => 'https://patreon.com/{handle}',
             'host_allowlist' => ['patreon.com', 'www.patreon.com'],
-            'url_path_extractor' => '#^/([a-zA-Z0-9_-]{3,40})/?$#',
-            'default_category' => 'content',
-            'handle_location' => 'path',
-        ],
-        'kofi' => [
-            'display_name' => 'Ko-fi',
-            'icon_key' => 'kofi',
-            'placeholder' => 'yourname',
-            'handle_pattern' => '/^[a-zA-Z0-9_-]{3,40}$/',
-            'url_template' => 'https://ko-fi.com/{handle}',
-            'host_allowlist' => ['ko-fi.com', 'www.ko-fi.com'],
             'url_path_extractor' => '#^/([a-zA-Z0-9_-]{3,40})/?$#',
             'default_category' => 'content',
             'handle_location' => 'path',
