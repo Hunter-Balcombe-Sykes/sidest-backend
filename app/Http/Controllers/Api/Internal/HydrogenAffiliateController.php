@@ -97,6 +97,10 @@ class HydrogenAffiliateController extends ApiController
             'newsletter' => $this->getAffiliateNewsletter($sections),
             'services' => $this->getAffiliateServices($site, $affiliate->id, $sections),
             'booking' => $booking,
+            // Shop has no content envelope (products come from Shopify), but
+            // the block_id is needed so Hydrogen can fire click tracking when
+            // the visitor opens the shop card.
+            'shop' => $this->sectionEnvelope($sections, 'shop', fn() => null),
         ]);
     }
 
@@ -170,6 +174,7 @@ class HydrogenAffiliateController extends ApiController
 
         return [
             'state' => $isLive ? 'live' : 'draft',
+            'block_id' => $section?->id,
             'data' => $isLive ? $buildData($section) : null,
         ];
     }
