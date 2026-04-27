@@ -97,6 +97,22 @@ return [
     */
     'link_categories' => ['social', 'booking', 'education', 'content', 'events', 'streaming', 'other'],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Platform-link cap
+    |--------------------------------------------------------------------------
+    |
+    | Hard limit on how many link blocks a single professional can save in
+    | the categories surfaced under the dashboard's "Platform Links"
+    | container (Social / Content / Events / Streaming). Booking,
+    | Education, and Other links live in their own containers and are
+    | NOT counted against this cap. Frontend mirrors this constant so
+    | the Add button greys out at the limit; backend enforces it on
+    | StoreLinkBlockRequest as defence-in-depth.
+    */
+    'platform_links_max' => 7,
+    'platform_links_categories' => ['social', 'content', 'events', 'streaming'],
+
     // Platforms that support automatic live status detection via the polling job.
     // Must match keys in social_platforms above.
     'streaming_platforms' => ['twitch', 'kick'],

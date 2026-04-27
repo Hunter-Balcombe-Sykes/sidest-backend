@@ -120,6 +120,38 @@ class StoreLinkBlockRequest extends BaseFormRequest
                 }
             }
 
+            // Platform-link cap — defence-in-depth on top of the dashboard's
+            // disabled-Add-button UX. Resolves the link's effective category
+            // (top-level `category`, then platform default) and counts
+            // existing rows in the platform-links scope. Refuses creation
+            // beyond `config('sidest.platform_links_max')` so a savvy user
+            // can't bypass the UI cap by hammering the API.
+            $effectiveCategory = $this->input('category');
+            if (($effectiveCategory === null || $effectiveCategory === '') && is_string($platform) && $platform !== '') {
+                $effectiveCategory = config("sidest.social_platforms.{$platform}.default_category");
+            }
+
+            $cappedCategories = (array) config('sidest.platform_links_categories', []);
+            if (is_string($effectiveCategory) && in_array($effectiveCategory, $cappedCategories, true)) {
+                $max = (int) config('sidest.platform_links_max', 7);
+                $pro = $this->user();
+                $proId = is_object($pro) ? ($pro->id ?? null) : null;
+                if ($proId !== null && $max > 0) {
+                    $existing = \App\Models\Core\Site\Block::query()
+                        ->where('professional_id', $proId)
+                        ->where('block_group', 'links')
+                        ->whereNull('deleted_at')
+                        ->whereIn('settings->category', $cappedCategories)
+                        ->count();
+                    if ($existing >= $max) {
+                        $validator->errors()->add(
+                            'category',
+                            "You've reached the limit of {$max} platform links. Remove one to add another."
+                        );
+                    }
+                }
+            }
+
             // Settings allowlist (existing behaviour)
             $settings = $this->input('settings');
             if (is_array($settings)) {

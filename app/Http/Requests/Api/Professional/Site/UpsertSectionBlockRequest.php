@@ -30,12 +30,11 @@ class UpsertSectionBlockRequest extends BaseFormRequest
             'settings' => ['sometimes', 'array'],
             'settings.text' => $textRules,
 
-            // Newsletter section — configurable copy for the signup form.
-            // Frontend falls back to sensible defaults when any field is null,
-            // so the section works out-of-the-box without configuration.
-            'settings.headline' => ['sometimes', 'nullable', 'string', 'max:80'],
-            'settings.description' => ['sometimes', 'nullable', 'string', 'max:200'],
-            'settings.cta_label' => ['sometimes', 'nullable', 'string', 'max:40'],
+            // Newsletter section — single configurable field: the input
+            // placeholder text. Public site falls back to "Sign up with
+            // your email" when null. The old headline/description/cta_label
+            // trio was retired in favour of a one-line signup form.
+            'settings.input_placeholder' => ['sometimes', 'nullable', 'string', 'max:120'],
             // list_key routes the signup to a named mailing list. Defaults to
             // 'marketing' server-side if omitted; constrained to slug shape so
             // a free-form value can't collide with future system list keys.
@@ -141,7 +140,12 @@ class UpsertSectionBlockRequest extends BaseFormRequest
         $settings = $this->input('settings', []);
         if (is_array($settings)) {
             $settingsChanged = false;
-            foreach (['text', 'headline', 'description', 'cta_label'] as $field) {
+            // headline/description/cta_label remain in the strip-tags pass
+            // for backwards-compatible cleaning of legacy payloads. The
+            // newsletter validation rules no longer accept those keys —
+            // input_placeholder is the only authored newsletter field
+            // going forward.
+            foreach (['text', 'headline', 'description', 'cta_label', 'input_placeholder'] as $field) {
                 if (! array_key_exists($field, $settings) || ! is_string($settings[$field])) {
                     continue;
                 }
