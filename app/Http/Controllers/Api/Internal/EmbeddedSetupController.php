@@ -1,0 +1,377 @@
+<?php
+
+namespace App\Http\Controllers\Api\Internal;
+
+use App\Http\Controllers\Api\ApiController;
+use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
+use App\Models\Core\Professional\BrandPartnerLink;
+use App\Models\Core\Professional\BrandProfile;
+use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Core\Site\Site;
+use App\Models\Retail\BrandStoreSettings;
+use App\Models\Retail\CommissionLedgerEntry;
+use App\Services\Cache\ProfessionalCacheService;
+use App\Services\Cloudflare\CloudflareDnsService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+// Internal endpoints consumed by the Sidest-Embedded Shopify app wizard.
+// Auth: VerifyEmbeddedApiKey middleware resolves the brand via X-Shopify-Shop
+// and attaches 'embedded_professional_id' to the request.
+class EmbeddedSetupController extends ApiController
+{
+    public function __construct(
+        private readonly ProfessionalCacheService $cache,
+    ) {}
+
+    // ── Brand Profile ────────────────────────────────────────────────────────
+
+    /**
+     * Return all brand data needed to pre-fill the setup wizard.
+     *
+     * @return JsonResponse { data: BrandProfileShape }
+     */
+    public function brandProfile(Request $request): JsonResponse
+    {
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+
+        $professional = Professional::with(['brandProfile', 'site'])->findOrFail($professionalId);
+        $brandProfile = $professional->brandProfile;
+        $site = $professional->site;
+        $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
+
+        return $this->success([
+            'name'                => (string) ($professional->display_name ?? ''),
+            'logo_url'            => '',
+            'contact_email'       => (string) ($professional->primary_email ?? ''),
+            'contact_number'      => (string) ($professional->phone ?? ''),
+            'business_address'    => '',
+            'website_url'         => (string) ($brandProfile?->business_website ?? ''),
+            'legal_business_name' => (string) ($brandProfile?->legal_business_name ?? ''),
+            'abn'                 => (string) ($brandProfile?->abn ?? ''),
+            'business_type'       => (string) ($brandProfile?->business_type ?? ''),
+            'industries'          => (array) ($brandProfile?->industries ?? []),
+            'brand_slug'          => (string) ($site?->subdomain ?? ''),
+            'setup_complete'      => (bool) ($brandProfile?->setup_complete ?? false),
+            // Storefront settings
+            'default_commission_rate' => (string) ($storeSettings?->default_commission_rate ?? ''),
+            'theme_id'                => (int) ($storeSettings?->theme_id ?? 1),
+            'domain_mode'             => (string) ($storeSettings?->domain_mode ?? ''),
+            'custom_domain'           => (string) ($storeSettings?->custom_domain ?? ''),
+            // Shopify wizard progress fields
+            'oxygen_token_set'        => ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token')),
+            'oxygen_storefront_id'    => (string) ($storeSettings?->oxygen_storefront_id ?? ''),
+            'hydrogen_confirmed'      => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
+            'domain_provisioned'      => ! empty($storeSettings?->domain_mode),
+        ]);
+    }
+
+    /**
+     * Save step 1 brand identity fields to the Professional record.
+     */
+    public function saveIdentity(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name'             => ['sometimes', 'string', 'max:255'],
+            'contact_email'    => ['sometimes', 'email', 'max:255'],
+            'contact_number'   => ['sometimes', 'string', 'max:50'],
+            'website_url'      => ['sometimes', 'nullable', 'url', 'max:512'],
+        ]);
+
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+
+        $proUpdates = [];
+        if (isset($data['name'])) {
+            $proUpdates['display_name'] = $data['name'];
+        }
+        if (isset($data['contact_email'])) {
+            $proUpdates['primary_email'] = $data['contact_email'];
+        }
+        if (isset($data['contact_number'])) {
+            $proUpdates['phone'] = $data['contact_number'];
+        }
+        if (! empty($proUpdates)) {
+            $professional->update($proUpdates);
+        }
+
+        if (isset($data['website_url'])) {
+            BrandProfile::updateOrCreate(
+                ['professional_id' => $professionalId],
+                ['business_website' => $data['website_url']],
+            );
+        }
+
+        $this->cache->invalidateProfessional($professional);
+
+        return $this->success([], 'Profile saved.');
+    }
+
+    /**
+     * Save step 2 business detail fields to the BrandProfile record.
+     */
+    public function saveBusinessDetails(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'legal_business_name' => ['required', 'string', 'max:255'],
+            'abn'                 => ['required', 'string', 'max:14'],
+            'business_type'       => ['required', 'string', 'max:100'],
+            'industries'          => ['required', 'array'],
+            'industries.*'        => ['string', 'max:100'],
+        ]);
+
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+
+        BrandProfile::updateOrCreate(
+            ['professional_id' => $professionalId],
+            [
+                'legal_business_name' => $data['legal_business_name'],
+                'abn'                 => $data['abn'],
+                'business_type'       => $data['business_type'],
+                'industries'          => $data['industries'],
+            ],
+        );
+
+        $this->cache->invalidateProfessional($professional);
+
+        return $this->success([], 'Business details saved.');
+    }
+
+    // ── Store Settings ───────────────────────────────────────────────────────
+
+    /**
+     * Patch a single brand store setting by key.
+     *
+     * Accepted keys: default_commission_rate, theme_id, setup_complete
+     */
+    public function updateSetting(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'key'   => ['required', 'string', 'in:default_commission_rate,theme_id,setup_complete'],
+            'value' => ['required', 'string'],
+        ]);
+
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+
+        $payload = match ($data['key']) {
+            'default_commission_rate' => ['default_commission_rate' => (float) $data['value']],
+            'theme_id'                => ['theme_id' => (int) $data['value']],
+            // setup_complete lives on BrandProfile, not BrandStoreSettings
+            'setup_complete'          => null,
+        };
+
+        if ($data['key'] === 'setup_complete') {
+            BrandProfile::updateOrCreate(
+                ['professional_id' => $professionalId],
+                ['setup_complete' => filter_var($data['value'], FILTER_VALIDATE_BOOLEAN)],
+            );
+        } else {
+            BrandStoreSettings::updateOrCreate(
+                ['professional_id' => $professionalId],
+                $payload,
+            );
+        }
+
+        $this->cache->invalidateProfessional($professional);
+
+        return $this->success([], 'Setting saved.');
+    }
+
+    // ── Deployment Token ─────────────────────────────────────────────────────
+
+    /**
+     * Store the Oxygen deployment token and optionally the storefront ID.
+     * The token is encrypted at-rest via the model's encrypted cast.
+     */
+    public function saveDeploymentToken(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'token'        => ['required', 'string', 'max:512'],
+            'storefront_id' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]);
+
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+
+        $payload = ['oxygen_deployment_token' => $data['token']];
+        if (array_key_exists('storefront_id', $data)) {
+            $payload['oxygen_storefront_id'] = $data['storefront_id'];
+        }
+
+        BrandStoreSettings::updateOrCreate(
+            ['professional_id' => $professionalId],
+            $payload,
+        );
+
+        $this->cache->invalidateProfessional($professional);
+
+        return $this->success([], 'Deployment token saved.');
+    }
+
+    /**
+     * Mark Hydrogen as installed for this brand.
+     * Called from the embedded wizard step 2 "I've installed Hydrogen" button.
+     */
+    public function confirmHydrogenInstall(Request $request): JsonResponse
+    {
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+
+        BrandStoreSettings::updateOrCreate(
+            ['professional_id' => $professionalId],
+            ['hydrogen_install_confirmed' => true],
+        );
+
+        $this->cache->invalidateProfessional($professional);
+
+        return $this->success([], 'Hydrogen install confirmed.');
+    }
+
+    // ── Analytics Overview ───────────────────────────────────────────────────
+
+    /**
+     * Return summary analytics for the brand dashboard overview panel.
+     *
+     * @return JsonResponse { data: { affiliate_count, total_commission_cents, currency_code,
+     *                                recent_sales: [{affiliate_name, commission, occurred_at}] } }
+     */
+    public function overview(Request $request): JsonResponse
+    {
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+
+        $affiliateCount = BrandPartnerLink::where('brand_professional_id', $professionalId)->count();
+
+        // Sum pending + approved commissions (not yet reversed).
+        $commissionQuery = CommissionLedgerEntry::where('brand_professional_id', $professionalId)
+            ->whereIn('status', ['pending', 'approved']);
+
+        $totalCommissionCents = (int) $commissionQuery->sum('amount_cents');
+        $firstEntry = $commissionQuery->select('currency_code')->first();
+        $currencyCode = $firstEntry ? (string) $firstEntry->currency_code : 'AUD';
+
+        // Last 5 sales with affiliate display name from related Professional record.
+        $recentSales = CommissionLedgerEntry::with('affiliateProfessional:id,display_name')
+            ->where('brand_professional_id', $professionalId)
+            ->whereIn('status', ['pending', 'approved'])
+            ->orderByDesc('occurred_at')
+            ->limit(5)
+            ->get()
+            ->map(fn ($entry) => [
+                'affiliate_name' => (string) ($entry->affiliateProfessional?->display_name ?? 'Unknown'),
+                // Format as decimal string (cents → dollars) with currency suffix.
+                'commission'     => number_format($entry->amount_cents / 100, 2).' '.($entry->currency_code ?? ''),
+                'occurred_at'    => $entry->occurred_at?->toIso8601String(),
+            ])
+            ->values()
+            ->all();
+
+        return $this->success([
+            'affiliate_count'        => $affiliateCount,
+            'total_commission_cents' => $totalCommissionCents,
+            'currency_code'          => $currencyCode,
+            'recent_sales'           => $recentSales,
+        ]);
+    }
+
+    /**
+     * Queue a Shopify brand design sync for this brand's integration.
+     * Triggers BrandDesignImporter to pull theme tokens, colours, and logos.
+     */
+    public function syncDesign(Request $request): JsonResponse
+    {
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+
+        $integration = ProfessionalIntegration::query()
+            ->where('professional_id', $professionalId)
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->first();
+
+        if (! $integration) {
+            return $this->error('No Shopify integration found.', 404);
+        }
+
+        SyncShopifyBrandDesignJob::dispatch((string) $integration->id);
+
+        return $this->success([], 'Design sync queued.');
+    }
+
+    // ── Domain Verification ──────────────────────────────────────────────────
+
+    /**
+     * Return the current custom domain verification status for this brand.
+     *
+     * @return JsonResponse { data: { status: 'pending'|'verifying'|'live'|'error', domain: string } }
+     */
+    public function domainStatus(Request $request): JsonResponse
+    {
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+
+        $settings = BrandStoreSettings::where('professional_id', $professionalId)->first();
+
+        if (! $settings || $settings->domain_mode !== 'custom' || ! $settings->custom_domain) {
+            return $this->success(['status' => 'pending', 'domain' => '']);
+        }
+
+        $status = 'pending';
+
+        if ($settings->custom_domain_tls_provisioned_at) {
+            $status = 'live';
+        } elseif ($settings->custom_domain_verified_at) {
+            $status = 'verifying';
+        }
+
+        return $this->success([
+            'status' => $status,
+            'domain' => $settings->custom_domain,
+        ]);
+    }
+
+    // ── Domain Setup ─────────────────────────────────────────────────────────
+
+    /**
+     * Provision a platform subdomain (brand.sidest.co) for this brand's Oxygen storefront.
+     * Creates a CNAME DNS record via Cloudflare and persists the storefront ID.
+     *
+     * @return JsonResponse { data: { domain: string } }
+     */
+    public function setupDomain(Request $request): JsonResponse
+    {
+        $request->validate([
+            'oxygen_storefront_id' => ['required', 'string'],
+            // Subdomain input is validated but we use the brand's canonical site subdomain — not
+            // this input — for security. The field is accepted to match client expectations.
+            'subdomain'            => ['required', 'string', 'regex:/^[a-z0-9][a-z0-9-]{0,62}$/'],
+        ]);
+
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+
+        // Always derive subdomain from the canonical site record — never trust client input.
+        $site = Site::where('professional_id', $professionalId)->first();
+
+        if (! $site || ! $site->subdomain) {
+            return $this->error('No site subdomain found for this brand.', 422);
+        }
+
+        $subdomain = (string) $site->subdomain;
+
+        // Create (or confirm existing) CNAME: {subdomain}.sidest.co → shops.myshopify.com
+        $dns = new CloudflareDnsService;
+        $dns->ensureCname($subdomain, 'shops.myshopify.com', true);
+
+        BrandStoreSettings::updateOrCreate(
+            ['professional_id' => $professionalId],
+            [
+                'oxygen_storefront_id' => (string) $request->input('oxygen_storefront_id'),
+                'domain_mode'          => 'platform',
+            ],
+        );
+
+        $this->cache->invalidateProfessional($professional);
+
+        return $this->success(['domain' => "{$subdomain}.sidest.co"]);
+    }
+}

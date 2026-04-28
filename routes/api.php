@@ -173,6 +173,7 @@ Route::middleware(['embedded.key', 'throttle:60,1'])->prefix('internal/embedded'
     Route::get('/overview', [EmbeddedSetupController::class, 'overview']);
     Route::post('/sync-design', [EmbeddedSetupController::class, 'syncDesign']);
     Route::post('/domain/setup', [EmbeddedSetupController::class, 'setupDomain']);
+    Route::post('/confirm-hydrogen', [EmbeddedSetupController::class, 'confirmHydrogenInstall']);
 });
 
 // Internal Hydrogen endpoints (server-to-server, API key auth)

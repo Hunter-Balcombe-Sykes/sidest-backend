@@ -24,6 +24,7 @@ class UpdateBrandStoreSettingsRequest extends BaseFormRequest
             'theme_id' => ['sometimes', 'integer', 'in:1,2,3,4,5'],
             'oxygen_deployment_token' => ['sometimes', 'nullable', 'string', 'max:500'],
             'oxygen_storefront_id' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'hydrogen_install_confirmed' => ['sometimes', 'boolean'],
         ];
     }
 

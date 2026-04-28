@@ -57,6 +57,7 @@ class BrandStoreSettingsController extends ApiController
             // Token is never returned; only expose whether one has been saved
             'oxygen_token_set' => ! empty($storeSettings?->oxygen_deployment_token),
             'oxygen_storefront_id' => $storeSettings?->oxygen_storefront_id,
+            'hydrogen_install_confirmed' => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
         ]));
     }
 
@@ -87,6 +88,9 @@ class BrandStoreSettingsController extends ApiController
         }
         if (array_key_exists('oxygen_storefront_id', $validated)) {
             $dbFields['oxygen_storefront_id'] = $validated['oxygen_storefront_id'] ?: null;
+        }
+        if (array_key_exists('hydrogen_install_confirmed', $validated)) {
+            $dbFields['hydrogen_install_confirmed'] = (bool) $validated['hydrogen_install_confirmed'];
         }
 
         if (! empty($dbFields)) {
