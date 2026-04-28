@@ -134,8 +134,14 @@ class StoreLinkBlockRequest extends BaseFormRequest
             $cappedCategories = (array) config('sidest.platform_links_categories', []);
             if (is_string($effectiveCategory) && in_array($effectiveCategory, $cappedCategories, true)) {
                 $max = (int) config('sidest.platform_links_max', 7);
-                $pro = $this->user();
-                $proId = is_object($pro) ? ($pro->id ?? null) : null;
+                // Resolve the professional whose cap we're enforcing. Auth::user()
+                // is always null under Supabase JWT, so $this->user() can't be
+                // used. Prefer the route-bound target (staff path:
+                // /staff/.../professionals/{professional}/links) and fall back
+                // to the auth-context professional placed on request attributes
+                // by Context\LoadCurrentProfessional (self path).
+                $pro = $this->route('professional') ?? $this->attributes->get('professional');
+                $proId = $pro instanceof \App\Models\Core\Professional\Professional ? $pro->id : null;
                 if ($proId !== null && $max > 0) {
                     $existing = \App\Models\Core\Site\Block::query()
                         ->where('professional_id', $proId)
