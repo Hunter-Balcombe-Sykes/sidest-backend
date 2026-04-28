@@ -204,7 +204,7 @@ class CommissionPayoutService
             // cancels this payout and voids its ledger entries.
             // grace_period_days lives in config/sidest.php so ops can tune
             // the policy without a code release.
-            $graceDays = (int) config('sidest.grace_period_days', 60);
+            $graceDays = (int) config('sidest.store.grace_period_days', 60);
 
             $payout = CommissionPayout::create([
                 'brand_professional_id' => $brandId,
