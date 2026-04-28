@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\AffiliateInviteController;
+use App\Http\Controllers\Api\Professional\ShopifyEmbeddedConnectionController;
 use App\Http\Controllers\Api\Professional\Analytics\AffiliateCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Analytics\BrandCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
@@ -160,6 +161,7 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
 
         // View Analytics
         Route::get('/analytics', [ProfessionalAnalyticsController::class, 'summary']);
+        Route::get('/analytics/shop', [ProfessionalAnalyticsController::class, 'shopSummary']);
 
         // Links
         Route::get('/links', [ProfessionalLinkBlockController::class, 'index']);
@@ -290,6 +292,9 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/shopify/disconnect', [ShopifyIntegrationController::class, 'disconnect']);
         Route::get('/shopify/token', [ShopifyIntegrationController::class, 'token']);
         Route::post('/shopify/webhooks/register', [ShopifyIntegrationController::class, 'registerWebhooks']);
+        // Generates a one-time code for linking a Shopify store via the embedded app.
+        Route::post('/shopify/embedded-connection-code', [ShopifyEmbeddedConnectionController::class, 'generate'])
+            ->middleware('throttle:10,1');
 
         // Brand profile (business fields)
         Route::get('/brand/profile', [BrandProfileController::class, 'show']);

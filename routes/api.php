@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\Internal\HydrogenAffiliateController;
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateProductsController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandConfigController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandDesignController;
+use App\Http\Controllers\Api\Internal\EmbeddedConnectController;
+use App\Http\Controllers\Api\Internal\EmbeddedSetupController;
 use App\Http\Controllers\Api\Internal\HydrogenDeploymentController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
@@ -28,6 +30,7 @@ use App\Http\Controllers\Api\Webhooks\ShopifyGdprWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyOrdersUpdatedWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyShopUpdateWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyThemePublishedWebhookController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
@@ -63,6 +66,8 @@ Route::middleware('throttle:webhooks')->group(function () {
     Route::post('/webhooks/shopify/app-uninstalled', ShopifyAppUninstalledWebhookController::class)
         ->middleware('throttle:shopify-webhooks');
     Route::post('/webhooks/shopify/shop-update', ShopifyShopUpdateWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/themes-publish', ShopifyThemePublishedWebhookController::class)
         ->middleware('throttle:shopify-webhooks');
     Route::post('/webhooks/shopify/gdpr/customers-data-request', [ShopifyGdprWebhookController::class, 'customersDataRequest'])
         ->middleware('throttle:shopify-webhooks');
@@ -129,6 +134,8 @@ Route::post('/public/analytics/pageviews', [AnalyticsController::class, 'pagevie
     ->middleware('throttle:analytics');
 Route::post('/public/analytics/clicks', [AnalyticsController::class, 'click'])
     ->middleware('throttle:analytics');
+Route::post('/public/analytics/cart-events', [AnalyticsController::class, 'cartEvent'])
+    ->middleware('throttle:analytics');
 
 Route::post('/public/subscribe', [PublicEmailSubscriptionController::class, 'subscribe'])
     ->middleware('throttle:public-site');
@@ -148,6 +155,25 @@ Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])
 
 Route::post('/public/enquiry', [PublicEnquiryController::class, 'submit'])
     ->middleware(['lead.log', 'throttle:leads']);
+
+// Account-linking endpoint — called before a shop is associated with any brand,
+// so it cannot use the embedded.key middleware (which requires the shop to exist).
+// Validates the API key manually and consumes a Redis-backed connection code.
+Route::post('/internal/embedded/connect-account', [EmbeddedConnectController::class, 'connect'])
+    ->middleware('throttle:10,1');
+
+// Internal Shopify embedded app endpoints — consumed by Sidest-Embedded setup wizard
+Route::middleware(['embedded.key', 'throttle:60,1'])->prefix('internal/embedded')->group(function () {
+    Route::get('/brand-profile', [EmbeddedSetupController::class, 'brandProfile']);
+    Route::post('/brand-identity', [EmbeddedSetupController::class, 'saveIdentity']);
+    Route::post('/brand-details', [EmbeddedSetupController::class, 'saveBusinessDetails']);
+    Route::patch('/brand-settings', [EmbeddedSetupController::class, 'updateSetting']);
+    Route::post('/deployment-token', [EmbeddedSetupController::class, 'saveDeploymentToken']);
+    Route::get('/domain-status', [EmbeddedSetupController::class, 'domainStatus']);
+    Route::get('/overview', [EmbeddedSetupController::class, 'overview']);
+    Route::post('/sync-design', [EmbeddedSetupController::class, 'syncDesign']);
+    Route::post('/domain/setup', [EmbeddedSetupController::class, 'setupDomain']);
+});
 
 // Internal Hydrogen endpoints (server-to-server, API key auth)
 Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('internal/hydrogen')->group(function () {
