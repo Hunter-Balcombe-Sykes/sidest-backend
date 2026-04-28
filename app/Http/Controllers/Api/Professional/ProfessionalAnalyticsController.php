@@ -287,7 +287,7 @@ class ProfessionalAnalyticsController extends ApiController
                         // dashboard can label rows by platform name (instagram,
                         // fresha, etc.) rather than raw title/URL.
                         return DB::table('analytics.link_clicks as lc')
-                            ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
+                            ->join('site.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
                             ->where('lc.professional_id', $professional->id)
                             ->whereBetween('lc.occurred_at', [$from, $to])
                             ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
@@ -309,7 +309,7 @@ class ProfessionalAnalyticsController extends ApiController
                     function (string $clickBlockColumn) use ($professional, $from, $to) {
                         // Top sections (total opens)
                         return DB::table('analytics.link_clicks as lc')
-                            ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
+                            ->join('site.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
                             ->where('lc.professional_id', $professional->id)
                             ->whereBetween('lc.occurred_at', [$from, $to])
                             ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'sections'")
