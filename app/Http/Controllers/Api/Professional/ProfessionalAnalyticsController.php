@@ -293,7 +293,7 @@ class ProfessionalAnalyticsController extends ApiController
                             ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
                             ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
                             ->selectRaw("b.id as block_id, b.title, b.url, b.settings->>'platform' as platform, b.settings->>'category' as category, COUNT(*) as clicks")
-                            ->groupBy('b.id', 'b.title', 'b.url', 'platform', 'category')
+                            ->groupByRaw("b.id, b.title, b.url, b.settings->>'platform', b.settings->>'category'")
                             ->orderByDesc('clicks')
                             ->limit(10)
                             ->get();
@@ -315,7 +315,7 @@ class ProfessionalAnalyticsController extends ApiController
                             ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'sections'")
                             ->whereRaw("LOWER(COALESCE(b.block_type, '')) IN ('gallery', 'services', 'shop', 'booking')")
                             ->selectRaw("LOWER(COALESCE(b.block_type, '')) as section_key, COUNT(*) as clicks")
-                            ->groupBy('section_key')
+                            ->groupByRaw("LOWER(COALESCE(b.block_type, ''))")
                             ->orderByDesc('clicks')
                             ->get()
                             ->map(function ($entry) {
