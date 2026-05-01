@@ -41,6 +41,6 @@ class ShopifyEmbeddedConnectionController extends ApiController
         return $this->success([
             'code' => $code,
             'expires_in' => 1800, // seconds
-        ], 'Connection code generated. Valid for 30 minutes.');
+        ]);
     }
 }
