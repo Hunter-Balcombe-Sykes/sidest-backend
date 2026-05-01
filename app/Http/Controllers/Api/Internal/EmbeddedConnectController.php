@@ -88,6 +88,6 @@ class EmbeddedConnectController extends ApiController
             ]);
         }
 
-        return $this->success(['connected' => true], 'Shopify store connected successfully.');
+        return $this->success(['connected' => true]);
     }
 }
