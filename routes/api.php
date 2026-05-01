@@ -173,6 +173,7 @@ Route::middleware(['embedded.key', 'throttle:60,1'])->prefix('internal/embedded'
     Route::get('/overview', [EmbeddedSetupController::class, 'overview']);
     Route::post('/sync-design', [EmbeddedSetupController::class, 'syncDesign']);
     Route::post('/domain/setup', [EmbeddedSetupController::class, 'setupDomain']);
+    Route::post('/domain/provision-txt', [EmbeddedSetupController::class, 'provisionDomainTxt']);
     Route::post('/confirm-hydrogen', [EmbeddedSetupController::class, 'confirmHydrogenInstall']);
 });
 

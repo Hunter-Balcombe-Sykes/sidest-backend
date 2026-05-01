@@ -103,6 +103,63 @@ class CloudflareDnsService
     }
 
     /**
+     * Create or update a TXT record. Unlike ensureTxt (which skips if it exists),
+     * this patches the content if the record exists with a different value — needed
+     * for Shopify verification tokens that rotate on each domain-connect attempt.
+     */
+    public function upsertTxt(string $name, string $content): ?string
+    {
+        if (! $this->hasCredentials()) {
+            return null;
+        }
+
+        $existing = $this->findRecord('TXT', $name);
+
+        if ($existing !== null) {
+            if ($existing['content'] === $content) {
+                return $existing['id'];
+            }
+
+            $response = Http::withToken($this->apiToken)
+                ->patch($this->zonesUrl("/dns_records/{$existing['id']}"), [
+                    'content' => $content,
+                ]);
+
+            if (! $response->successful()) {
+                Log::error('CloudflareDnsService: failed to update TXT record.', [
+                    'name'   => $name,
+                    'status' => $response->status(),
+                    'body'   => $response->body(),
+                ]);
+
+                return null;
+            }
+
+            return $existing['id'];
+        }
+
+        $response = Http::withToken($this->apiToken)
+            ->post($this->zonesUrl('/dns_records'), [
+                'type'    => 'TXT',
+                'name'    => $name,
+                'content' => $content,
+                'ttl'     => 1,
+            ]);
+
+        if (! $response->successful()) {
+            Log::error('CloudflareDnsService: failed to create TXT record.', [
+                'name'   => $name,
+                'status' => $response->status(),
+                'body'   => $response->body(),
+            ]);
+
+            return null;
+        }
+
+        return (string) $response->json('result.id', '');
+    }
+
+    /**
      * Delete a DNS record by ID. No-op if the record doesn't exist (404 is swallowed).
      */
     public function deleteRecord(string $recordId): void

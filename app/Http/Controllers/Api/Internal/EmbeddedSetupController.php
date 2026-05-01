@@ -64,6 +64,7 @@ class EmbeddedSetupController extends ApiController
             'oxygen_storefront_id'    => (string) ($storeSettings?->oxygen_storefront_id ?? ''),
             'hydrogen_confirmed'      => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
             'domain_provisioned'      => (bool) ($storeSettings?->domain_wizard_complete ?? false),
+            'domain_txt_set'          => (bool) ($storeSettings?->domain_txt_confirmed ?? false),
         ]);
     }
 
@@ -374,5 +375,47 @@ class EmbeddedSetupController extends ApiController
         $this->cache->invalidateProfessional($professional);
 
         return $this->success(['domain' => "{$subdomain}.sidest.co"]);
+    }
+
+    /**
+     * Provision the Shopify domain ownership TXT record in Cloudflare on the brand's behalf.
+     *
+     * Shopify generates a unique verification token when a brand connects a domain to their
+     * Hydrogen storefront. Because the domain is brand.sidest.co (our zone), the brand cannot
+     * add the record themselves — they copy the token from Shopify and we create:
+     *   shopify_verification_{subdomain}.sidest.co TXT → {txt_value}
+     *
+     * Uses upsertTxt so re-attempts with a freshly generated Shopify token always win.
+     *
+     * @return JsonResponse { data: { record_name: string } }
+     */
+    public function provisionDomainTxt(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'txt_value' => ['required', 'string', 'max:255'],
+        ]);
+
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+
+        $site = Site::where('professional_id', $professionalId)->first();
+        if (! $site || ! $site->subdomain) {
+            return $this->error('No site subdomain found for this brand.', 422);
+        }
+
+        $subdomain = (string) $site->subdomain;
+        $recordName = "shopify_verification_{$subdomain}";
+
+        $dns = new CloudflareDnsService;
+        $dns->upsertTxt($recordName, (string) $data['txt_value']);
+
+        BrandStoreSettings::updateOrCreate(
+            ['professional_id' => $professionalId],
+            ['domain_txt_confirmed' => true],
+        );
+
+        $this->cache->invalidateProfessional($professional);
+
+        return $this->success(['record_name' => "{$recordName}.sidest.co"]);
     }
 }

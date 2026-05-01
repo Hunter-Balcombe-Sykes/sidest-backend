@@ -31,6 +31,7 @@ class BrandStoreSettings extends Model
         'custom_domain_verified_at',
         'custom_domain_tls_provisioned_at',
         'hydrogen_install_confirmed',
+        'domain_txt_confirmed',
     ];
 
     protected $hidden = [
@@ -91,13 +92,14 @@ class BrandStoreSettings extends Model
     public static function clearWizardProgress(string $professionalId): void
     {
         static::where('professional_id', $professionalId)->update([
-            'hydrogen_install_confirmed'     => false,
-            'oxygen_deployment_token'        => null,
-            'oxygen_storefront_id'           => null,
-            'domain_wizard_complete'         => false,
-            'domain_mode'                    => 'platform',
-            'custom_domain'                  => null,
-            'custom_domain_verified_at'      => null,
+            'hydrogen_install_confirmed'       => false,
+            'oxygen_deployment_token'          => null,
+            'oxygen_storefront_id'             => null,
+            'domain_wizard_complete'           => false,
+            'domain_txt_confirmed'             => false,
+            'domain_mode'                      => 'platform',
+            'custom_domain'                    => null,
+            'custom_domain_verified_at'        => null,
             'custom_domain_tls_provisioned_at' => null,
         ]);
     }
