@@ -63,7 +63,7 @@ class EmbeddedSetupController extends ApiController
             'oxygen_token_set'        => ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token')),
             'oxygen_storefront_id'    => (string) ($storeSettings?->oxygen_storefront_id ?? ''),
             'hydrogen_confirmed'      => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
-            'domain_provisioned'      => ! empty($storeSettings?->domain_mode),
+            'domain_provisioned'      => (bool) ($storeSettings?->domain_wizard_complete ?? false),
         ]);
     }
 
@@ -365,8 +365,9 @@ class EmbeddedSetupController extends ApiController
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],
             [
-                'oxygen_storefront_id' => (string) $request->input('oxygen_storefront_id'),
-                'domain_mode'          => 'platform',
+                'oxygen_storefront_id'  => (string) $request->input('oxygen_storefront_id'),
+                'domain_mode'           => 'platform',
+                'domain_wizard_complete' => true,
             ],
         );
 

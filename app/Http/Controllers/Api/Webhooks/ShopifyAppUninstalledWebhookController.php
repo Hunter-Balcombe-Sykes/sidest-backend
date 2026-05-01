@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ValidatesShopifyWebhookHmac;
 use App\Models\Commerce\AffiliateProductSelection;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -70,6 +72,11 @@ class ShopifyAppUninstalledWebhookController extends ApiController
         $deletedSelections = AffiliateProductSelection::query()
             ->where('brand_professional_id', $integration->professional_id)
             ->delete();
+
+        // Reset wizard progress so the setup flow starts fresh on reinstall.
+        BrandStoreSettings::clearWizardProgress((string) $integration->professional_id);
+        BrandProfile::where('professional_id', $integration->professional_id)
+            ->update(['setup_complete' => false]);
 
         Log::info('Shopify app uninstalled — integration disconnected.', [
             'professional_id' => (string) $integration->professional_id,

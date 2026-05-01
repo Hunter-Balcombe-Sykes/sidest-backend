@@ -26,6 +26,7 @@ class BrandStoreSettings extends Model
         'oxygen_deployment_token',
         'oxygen_storefront_id',
         'domain_mode',
+        'domain_wizard_complete',
         'custom_domain',
         'custom_domain_verified_at',
         'custom_domain_tls_provisioned_at',
@@ -80,5 +81,24 @@ class BrandStoreSettings extends Model
         }
 
         return max($min, $brandDays);
+    }
+
+    /**
+     * Reset all Shopify wizard progress fields.
+     * Called on disconnect (dashboard) and app/uninstalled webhook so the
+     * setup wizard starts fresh if the brand reconnects.
+     */
+    public static function clearWizardProgress(string $professionalId): void
+    {
+        static::where('professional_id', $professionalId)->update([
+            'hydrogen_install_confirmed'     => false,
+            'oxygen_deployment_token'        => null,
+            'oxygen_storefront_id'           => null,
+            'domain_wizard_complete'         => false,
+            'domain_mode'                    => 'platform',
+            'custom_domain'                  => null,
+            'custom_domain_verified_at'      => null,
+            'custom_domain_tls_provisioned_at' => null,
+        ]);
     }
 }

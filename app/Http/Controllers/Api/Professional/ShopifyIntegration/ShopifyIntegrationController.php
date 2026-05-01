@@ -13,6 +13,7 @@ use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
+use App\Models\Retail\BrandStoreSettings;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Services\Shopify\ShopifyTeardownService;
@@ -363,6 +364,11 @@ class ShopifyIntegrationController extends ApiController
             ->where('professional_id', $targetBrandId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->delete();
+
+        // Clear all wizard progress so the setup wizard starts fresh if the brand reconnects.
+        BrandStoreSettings::clearWizardProgress($targetBrandId);
+        BrandProfile::where('professional_id', $targetBrandId)
+            ->update(['setup_complete' => false]);
 
         Log::info('Shopify disconnected', [
             'actor_professional_id' => (string) $actorProfessional->id,
