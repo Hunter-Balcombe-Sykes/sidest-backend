@@ -69,6 +69,19 @@ return [
         'api_key' => env('HYDROGEN_API_KEY'),
     ],
 
+    // Cloudflare DNS API — used to provision platform subdomains (brand.sidest.co)
+    // for Hydrogen storefronts. Zone must correspond to the sidest.co domain.
+    'cloudflare' => [
+        'zone_id'   => env('CLOUDFLARE_ZONE_ID'),
+        'api_token' => env('CLOUDFLARE_API_TOKEN'),
+    ],
+
+    // Shared key for Sidest-Embedded Shopify app → backend calls.
+    // Set in both .env (Laravel) and SIDEST_EMBEDDED_API_KEY env var in the Remix app.
+    'embedded' => [
+        'api_key' => env('SIDEST_EMBEDDED_API_KEY'),
+    ],
+
     'twitch' => [
         'client_id' => env('TWITCH_CLIENT_ID'),
         'client_secret' => env('TWITCH_CLIENT_SECRET'),

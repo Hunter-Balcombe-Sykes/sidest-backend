@@ -2,7 +2,9 @@
 
 namespace App\Services\Professional;
 
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\ProfessionalCacheService;
 
 // Keeps site.settings.brand_partner and .additional_brand_partners in sync
@@ -51,8 +53,30 @@ class BrandPartnerSiteSettingsSync
         $primary = $links->firstWhere('slot', BrandPartnerLinkService::PRIMARY_SLOT);
         if ($primary) {
             $brandPartner['professional_id'] = (string) $primary->brand_professional_id;
+
+            // Sync the brand's storefront URL so affiliates can build correct share links.
+            // Uses the brand's custom domain when fully provisioned, else platform subdomain.
+            $brand = Professional::query()->with('site')->find($primary->brand_professional_id);
+            if ($brand && $brand->site) {
+                $subdomain = (string) $brand->site->subdomain;
+                $storeSettings = BrandStoreSettings::query()
+                    ->where('professional_id', $brand->id)
+                    ->first();
+
+                $storefrontBaseUrl = $storeSettings
+                    ? $storeSettings->storefrontBaseUrl($subdomain)
+                    : 'https://' . $subdomain . '.sidest.co';
+
+                $brandPartner['subdomain'] = $subdomain;
+                $brandPartner['storefront_base_url'] = $storefrontBaseUrl;
+            }
         } else {
-            unset($brandPartner['professional_id'], $brandPartner['professionalId']);
+            unset(
+                $brandPartner['professional_id'],
+                $brandPartner['professionalId'],
+                $brandPartner['subdomain'],
+                $brandPartner['storefront_base_url'],
+            );
         }
 
         $settings['brand_partner'] = $brandPartner;

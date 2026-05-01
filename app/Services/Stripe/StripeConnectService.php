@@ -39,6 +39,9 @@ class StripeConnectService
             'type' => 'express',
             'country' => $this->mapCountryCode($professional->country_code),
             'email' => $professional->primary_email,
+            // Affiliates are individuals/sole traders — pre-selects the individual
+            // KYC path so Stripe doesn't prompt with a business-type selector.
+            'business_type' => 'individual',
             'metadata' => [
                 'sidest_professional_id' => $professional->id,
                 'professional_type' => $professional->professional_type,
@@ -74,8 +77,22 @@ class StripeConnectService
 
         if (! $accountId) {
             $accountId = $this->createConnectAccount($professional);
-        } elseif ($professional->stripe_connect_status === 'disconnected') {
-            $professional->update(['stripe_connect_status' => 'onboarding']);
+        } else {
+            if ($professional->stripe_connect_status === 'disconnected') {
+                $professional->update(['stripe_connect_status' => 'onboarding']);
+            }
+
+            // Patch business_type to 'individual' on any existing account that
+            // hasn't finished onboarding yet. Stripe permits this update while
+            // details_submitted is false — once submitted it's locked in.
+            try {
+                $existing = $this->stripe->accounts->retrieve($accountId);
+                if (! $existing->details_submitted && $existing->business_type !== 'individual') {
+                    $this->stripe->accounts->update($accountId, ['business_type' => 'individual']);
+                }
+            } catch (ApiErrorException) {
+                // Non-fatal — continue with existing account as-is.
+            }
         }
 
         $link = $this->stripe->accountLinks->create([

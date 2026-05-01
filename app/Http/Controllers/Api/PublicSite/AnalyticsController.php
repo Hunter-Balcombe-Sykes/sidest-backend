@@ -6,9 +6,11 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\DetectsClientInfo;
 use App\Http\Controllers\Concerns\HashesClientData;
 use App\Http\Controllers\Concerns\ResolvesSiteFromRequest;
+use App\Http\Requests\Api\PublicSite\Analytics\CartEventRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\ClickRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\PageviewRequest;
 use App\Jobs\Analytics\RebuildSiteHourlyAggregatesJob;
+use App\Models\Analytics\CartEvent;
 use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
 use App\Models\Core\Site\Block;
@@ -176,5 +178,42 @@ class AnalyticsController extends ApiController
             'message' => $isTrackableSection ? 'Section interaction recorded' : 'Click recorded',
             'click_id' => $click->id,
         ], 201);
+    }
+
+    public function cartEvent(CartEventRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        $site = $this->resolveSiteFromData($data);
+
+        if (! $site) {
+            $statusCode = ! empty($data['site_id']) ? 422 : 404;
+
+            return $this->error('Site not found', $statusCode);
+        }
+
+        if (! $site->is_published) {
+            return $this->error('Site not published', 403);
+        }
+
+        $event = new CartEvent([
+            'event_type' => $data['event_type'],
+            'occurred_at' => now(),
+            'session_id' => $data['session_id'] ?? null,
+            'visitor_id' => $data['visitor_id'] ?? null,
+            'ip_hash' => $this->hashIp($request->ip()),
+            'shopify_product_id' => $data['shopify_product_id'] ?? null,
+            'quantity' => $data['quantity'] ?? null,
+        ]);
+        $event->professional_id = $site->professional_id;
+        $event->site_id = $site->id;
+        $event->save();
+
+        try {
+            $this->analyticsCache->invalidateAnalytics($site->professional_id);
+        } catch (Throwable) {
+        }
+
+        return $this->success(['message' => 'Cart event recorded', 'event_id' => $event->id], 201);
     }
 }

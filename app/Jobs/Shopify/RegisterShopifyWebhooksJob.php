@@ -75,10 +75,12 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
     // GDPR compliance topics (CUSTOMERS_DATA_REQUEST, CUSTOMERS_REDACT, SHOP_REDACT) cannot be
     // registered via the GraphQL API — they are handled via shopify.app.toml compliance_topics.
     private const WEBHOOKS = [
-        'ORDERS_PAID' => '/api/webhooks/shopify/orders-paid',
-        'ORDERS_UPDATED' => '/api/webhooks/shopify/orders-updated',
+        'ORDERS_PAID'     => '/api/webhooks/shopify/orders-paid',
+        'ORDERS_UPDATED'  => '/api/webhooks/shopify/orders-updated',
         'APP_UNINSTALLED' => '/api/webhooks/shopify/app-uninstalled',
-        'SHOP_UPDATE' => '/api/webhooks/shopify/shop-update',
+        'SHOP_UPDATE'     => '/api/webhooks/shopify/shop-update',
+        // Triggers a brand design re-sync whenever the merchant publishes a new theme.
+        'THEMES_PUBLISH'  => '/api/webhooks/shopify/themes-publish',
     ];
 
     /** Populated by handle() — not serialized. */

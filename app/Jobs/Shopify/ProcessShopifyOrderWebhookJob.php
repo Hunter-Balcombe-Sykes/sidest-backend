@@ -195,6 +195,11 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                         'order_id' => $orderId,
                         'line_item_id' => $lineItemId,
                         'product_id' => (string) Arr::get($lineItem, 'product_id', ''),
+                        // Captured here because Shopify only populates `title` on
+                        // the order/line payload — fetching it later would need an
+                        // Admin API roundtrip per row. Powers the "Top Products"
+                        // analytics widget.
+                        'product_title' => (string) Arr::get($lineItem, 'title', ''),
                         // Keep both for audit: pre-discount line price (what the
                         // Shopify sticker was) plus the discount applied by
                         // any function/code, plus the post-discount figure we
