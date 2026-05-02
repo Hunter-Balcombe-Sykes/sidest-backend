@@ -71,6 +71,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
 
         $email = DB::table('core.professionals')
             ->where('id', $this->professionalId)
+            ->whereNull('deleted_at')
             ->value('primary_email');
 
         if (! $email) {

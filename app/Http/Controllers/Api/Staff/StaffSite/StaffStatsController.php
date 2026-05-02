@@ -13,6 +13,7 @@ class StaffStatsController extends ApiController
     public function show(Request $request): JsonResponse
     {
         $typeCounts = DB::table('core.professionals')
+            ->whereNull('deleted_at')
             ->selectRaw('professional_type, count(*) as total')
             ->groupBy('professional_type')
             ->pluck('total', 'professional_type');

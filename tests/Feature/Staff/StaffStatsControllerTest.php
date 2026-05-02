@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 
 it('returns correct shape with zero data', function () {
     $profQuery = Mockery::mock();
+    $profQuery->shouldReceive('whereNull')->andReturnSelf();
     $profQuery->shouldReceive('selectRaw')->andReturnSelf();
     $profQuery->shouldReceive('groupBy')->andReturnSelf();
     $profQuery->shouldReceive('pluck')->andReturn(collect());
@@ -35,6 +36,7 @@ it('returns correct shape with zero data', function () {
 
 it('sums professional type counts correctly', function () {
     $profQuery = Mockery::mock();
+    $profQuery->shouldReceive('whereNull')->andReturnSelf();
     $profQuery->shouldReceive('selectRaw')->andReturnSelf();
     $profQuery->shouldReceive('groupBy')->andReturnSelf();
     $profQuery->shouldReceive('pluck')->andReturn(collect([

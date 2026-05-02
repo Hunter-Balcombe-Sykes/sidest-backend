@@ -90,6 +90,7 @@ class BrandAffiliateInviteObserver
     {
         return (string) (\Illuminate\Support\Facades\DB::table('core.professionals')
             ->where('id', $brandProfessionalId)
+            ->whereNull('deleted_at')
             ->value(\Illuminate\Support\Facades\DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), 'Brand')")));
     }
 
@@ -98,6 +99,7 @@ class BrandAffiliateInviteObserver
         if ($invite->claimed_professional_id) {
             $name = \Illuminate\Support\Facades\DB::table('core.professionals')
                 ->where('id', $invite->claimed_professional_id)
+                ->whereNull('deleted_at')
                 ->value(\Illuminate\Support\Facades\DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), NULL)"));
             if ($name) {
                 return (string) $name;

@@ -237,6 +237,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
         try {
             $professional = DB::table('core.professionals')
                 ->where('id', $professionalId)
+                ->whereNull('deleted_at')
                 ->select('stripe_connect_status')
                 ->first();
 

@@ -54,6 +54,7 @@ class CommerceNotificationService
 
             $affiliateName = (string) (DB::table('core.professionals')
                 ->where('id', $professionalId)
+                ->whereNull('deleted_at')
                 ->value(DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), 'Partner')")));
 
             $ctaUrl = '/account/sitepage?section=bookings&event='.$eventKey;

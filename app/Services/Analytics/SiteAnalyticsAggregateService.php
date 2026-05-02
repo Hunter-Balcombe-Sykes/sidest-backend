@@ -18,6 +18,11 @@ class SiteAnalyticsAggregateService
             return;
         }
 
+        // Skip aggregation for soft-deleted professionals (GDPR).
+        if (! DB::table('core.professionals')->where('id', $professionalId)->whereNull('deleted_at')->exists()) {
+            return;
+        }
+
         $hour = Carbon::parse($hourStart)->utc()->startOfHour();
         $hourEnd = $hour->copy()->addHour();
         $timezone = $this->professionalTimezone($professionalId);
@@ -108,6 +113,11 @@ class SiteAnalyticsAggregateService
     {
         $professionalId = trim($professionalId);
         if ($professionalId === '') {
+            return;
+        }
+
+        // Skip aggregation for soft-deleted professionals (GDPR).
+        if (! DB::table('core.professionals')->where('id', $professionalId)->whereNull('deleted_at')->exists()) {
             return;
         }
 

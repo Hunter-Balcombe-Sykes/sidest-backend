@@ -75,7 +75,7 @@ class HydrogenAffiliateController extends ApiController
         // `is_active` off this collection instead of issuing one exists query
         // per section. Keyed by block_type for O(1) lookups.
         $sections = $site
-            ? $site->sectionBlocks()->get()->keyBy('block_type')
+            ? $site->sectionBlocks()->whereNull('deleted_at')->get()->keyBy('block_type')
             : collect();
 
         // Booking data is needed both as its own section and for synthesizing
@@ -315,6 +315,7 @@ class HydrogenAffiliateController extends ApiController
             ->where('site_id', $site->id)
             ->where('block_group', 'links')
             ->where('is_active', true)
+            ->whereNull('deleted_at')
             ->orderBy('sort_order')
             ->get()
             ->map(function (Block $block): array {

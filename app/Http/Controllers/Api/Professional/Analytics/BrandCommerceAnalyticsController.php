@@ -63,6 +63,7 @@ class BrandCommerceAnalyticsController extends ApiController
             // blank even when a professional row is half-populated.
             $identityRows = DB::table('core.professionals')
                 ->whereIn('id', $linkedAffiliateIds)
+                ->whereNull('deleted_at')
                 ->select('id', 'display_name', 'first_name', 'last_name', 'handle')
                 ->get()
                 ->keyBy('id');
