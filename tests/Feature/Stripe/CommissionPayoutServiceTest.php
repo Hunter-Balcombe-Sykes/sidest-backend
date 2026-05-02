@@ -17,6 +17,11 @@ use Stripe\StripeClient;
 //   Gap 2 — auto-refund on transfer failure
 //   Gap 3 — job-level observability (failed() hook transitions payout status)
 
+afterEach(function () {
+    \Illuminate\Support\Carbon::setTestNow(null);
+    date_default_timezone_set('UTC');
+});
+
 beforeEach(function () {
     Bus::fake();
     setupProfessionalsTable();
@@ -56,6 +61,7 @@ beforeEach(function () {
         wallet_debit_cents INTEGER DEFAULT 0,
         charge_cents INTEGER DEFAULT 0,
         retry_count INTEGER NOT NULL DEFAULT 0,
+        void_at TEXT,
         created_at TEXT,
         updated_at TEXT
     )');
@@ -590,4 +596,70 @@ it('does not overwrite already-failed status in the failed hook', function () {
     expect($fresh->status)->toBe('failed');
     // Original failure_code preserved
     expect($fresh->failure_code)->toBe('transfer_failed_refund_needed');
+});
+
+// ============================================================
+// #V5-025 — UTC cutoff for payout hold window
+// ============================================================
+
+it('uses UTC for payout cutoff so an app-timezone offset does not shorten the hold window', function () {
+    $conn = DB::connection('pgsql');
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_store_settings (
+        id TEXT PRIMARY KEY, professional_id TEXT, payout_hold_days INTEGER,
+        default_commission_rate REAL, created_at TEXT, updated_at TEXT
+    )');
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
+        id TEXT PRIMARY KEY,
+        brand_professional_id TEXT, affiliate_professional_id TEXT,
+        entry_type TEXT, status TEXT, amount_cents INTEGER, currency_code TEXT,
+        commission_rate REAL, rate_source TEXT,
+        idempotency_key TEXT UNIQUE, calculation_metadata TEXT, payout_id TEXT,
+        occurred_at TEXT NOT NULL, created_at TEXT, updated_at TEXT
+    )');
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
+        id TEXT PRIMARY KEY, payout_id TEXT, commission_ledger_entry_id TEXT,
+        amount_cents INTEGER, created_at TEXT, updated_at TEXT
+    )');
+
+    // Carbon::now() converts testNow to date_default_timezone_get(), so we must set
+    // the PHP default TZ BEFORE setting the mock. With Auckland (UTC+12) as the default,
+    // now() returns '2026-05-02 12:00:00 +1200' and the two cutoff strings diverge:
+    //   now()->subDays(7)        → '2026-04-25 12:00:00' (Auckland local, no TZ in string)
+    //   now()->utc()->subDays(7) → '2026-04-25 00:00:00' (UTC)
+    date_default_timezone_set('Pacific/Auckland');
+    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-05-02 00:00:00', 'UTC'));
+
+    payoutSvc_seedBrand('brand-tz');
+    payoutSvc_seedAffiliate('aff-tz');
+
+    $conn->table('brand.brand_store_settings')->insert([
+        'id' => 'bss-tz', 'professional_id' => 'brand-tz', 'payout_hold_days' => 7,
+        'created_at' => now()->toDateTimeString(), 'updated_at' => now()->toDateTimeString(),
+    ]);
+
+    // Entry from 6 days + 18 hours ago (UTC). Still within the 7-day hold window.
+    // App-TZ cutoff '2026-04-25 12:00:00' incorrectly includes it (06:00 ≤ 12:00).
+    // UTC cutoff    '2026-04-25 00:00:00' correctly excludes it  (06:00 > 00:00).
+    $conn->table('commerce.commission_ledger_entries')->insert([
+        'id' => 'entry-tz',
+        'brand_professional_id' => 'brand-tz',
+        'affiliate_professional_id' => 'aff-tz',
+        'entry_type' => 'accrual',
+        'status' => 'approved',
+        'amount_cents' => 10000,
+        'currency_code' => 'AUD',
+        'commission_rate' => 10.0,
+        'rate_source' => 'brand_default',
+        'idempotency_key' => 'entry-tz-key',
+        'calculation_metadata' => '{}',
+        'occurred_at' => '2026-04-25 06:00:00',
+        'created_at' => '2026-04-25 06:00:00',
+        'updated_at' => '2026-04-25 06:00:00',
+    ]);
+
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(0);
 });

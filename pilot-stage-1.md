@@ -28,7 +28,7 @@ Each session should open the items in its bundle by ID — the full body still l
 - [x] **B3 — Platform-link cap fix.** #CR-001, #CR-011. (Optional follow-up: #V5-049.) ~1h. Same method (`StoreLinkBlockRequest:137`); the audit explicitly tags them as companions. One Pest test creates 7 blocks of one category and asserts the 8th is rejected — covers both.
 - **B4 — Soft-delete filter sweep.** #V5-012, #V5-013, #V5-038, #V5-039, #V5-056. ~4–5h. Identical "add `whereNull('deleted_at')`" pattern across analytics aggregates, observer notifications, public Hydrogen payloads, and 6 raw queries. One reasoning pass; regression tests can share a "soft-delete the parent, assert no leak in any output" fixture. **Watch out:** #V5-012 is GDPR-sensitive — verify the in-flight notification path still tests green.
 - **B5 — Throwable→QueryException narrowing in analytics.** #CR-010, #V5-017. ~1–2h. Same anti-pattern (AUDIT_REPORT.md line 287), two sibling analytics controllers. Lift one helper (catch `QueryException` + check SQLSTATE 42703) across both files.
-- **B6 — Time/currency/money cluster (lens-L).** #V5-024, #V5-025, #V5-026. ~2–3h. All in `CommissionPayoutService` / `CommissionVoidService`. Same domain (UTC vs app-TZ, `occurred_at` vs `created_at`, currency validation). One test: assert cutoffs use UTC, void uses `occurred_at`, currency validates against `shop_currency`. **Don't sweep in:** the broader payout backlog (#V5-007, #V5-008) — different concurrency / idempotency reasoning.
+- [x] **B6 — Time/currency/money cluster (lens-L).** #V5-024, #V5-025, #V5-026. ~2–3h. All in `CommissionPayoutService` / `CommissionVoidService`. Same domain (UTC vs app-TZ, `occurred_at` vs `created_at`, currency validation). One test: assert cutoffs use UTC, void uses `occurred_at`, currency validates against `shop_currency`. **Don't sweep in:** the broader payout backlog (#V5-007, #V5-008) — different concurrency / idempotency reasoning.
 - **B7 — Cache-key versioning post-deploy.** #CR-008, #V5-036, #V5-037. ~1–2h. All "shape change shipped without bumping cache version." One mental model: enumerate every key impacted, add a version suffix or flush, document the deploy-hygiene rule for next time.
 - **B8 — Stripe Connect webhook hardening.** #V5-009, #V5-010. ~2–4h. Same controller (`StripeConnectWebhookController`). Atomic flush + new `account.deauthorize` handler share a transaction-helper refactor.
 - **B15 — Shopify storefront token hardening.** #V5-003, #V5-004. ~3–5h. Both touch `StorefrontAccessToken` in `provider_metadata`. The encryption-cast change + reinstall-revocation flow share the same model + service touchpoints. **Optional:** #4-04 (encrypted-cast integration test, P3) rides naturally on this PR.
@@ -817,7 +817,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** `'payload'` in `$fillable`; arbitrary data accepted.
     - **Source:** v5 audit (discovery_lens: domain-subagent-9; in_scope_v4: no).
 
-- [ ] **#V5-024** · P1 — Order currency defaults to AUD without validation against shop_currency
+- [x] **#V5-024** · P1 — Order currency defaults to AUD without validation against shop_currency
     - **Where:** app/Jobs/Shopify/ProcessShopifyOrderWebhookJob.php:43
     - **Affects:** Multi-currency Shopify integrations; commission calculation correctness.
     - **Effort:** S (~1h)
@@ -826,7 +826,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** `$currency = strtoupper(trim((string) Arr::get($payload, 'currency', 'AUD')))` — no validation against integration's shop_currency.
     - **Source:** v5 audit (discovery_lens: lens-L-time-money-tz-currency; in_scope_v4: no).
 
-- [ ] **#V5-025** · P1 — now()->subDays in payout cutoff uses app TZ, not UTC — drift up to 15h
+- [x] **#V5-025** · P1 — now()->subDays in payout cutoff uses app TZ, not UTC — drift up to 15h
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:84
     - **Affects:** Payout cutoff windows across all brands/affiliates.
     - **Effort:** S (~1-2h)
@@ -835,7 +835,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** `$cutoff = now()->subDays($holdDays)` returns app-TZ time; occurred_at is UTC.
     - **Source:** v5 audit (discovery_lens: lens-L-time-money-tz-currency; in_scope_v4: no).
 
-- [ ] **#V5-026** · P1 — Commission void uses created_at, not occurred_at — extends grace by webhook latency
+- [x] **#V5-026** · P1 — Commission void uses created_at, not occurred_at — extends grace by webhook latency
     - **Where:** app/Services/Stripe/CommissionVoidService.php:40, 49, 257
     - **Affects:** Void window calculation; grace period semantics.
     - **Effort:** S (~0.5h)

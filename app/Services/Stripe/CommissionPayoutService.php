@@ -81,7 +81,7 @@ class CommissionPayoutService
 
         foreach ($brandIds as $brandId) {
             $holdDays = $this->resolveHoldDays($brandSettings[$brandId] ?? null);
-            $cutoff = now()->subDays($holdDays);
+            $cutoff = now()->utc()->subDays($holdDays);
 
             $groups = CommissionLedgerEntry::query()
                 ->whereNull('payout_id')

@@ -265,3 +265,68 @@ it('batches metafield lookup across multiple line items of distinct products', f
     expect($entries[1]->amount_cents)->toBe(500);
     expect($entries[1]->rate_source)->toBe('brand_default');
 });
+
+// ============================================================
+// #V5-024 — Currency validation against shop_currency
+// ============================================================
+
+it('skips commission creation when order currency does not match shop_currency in integration metadata', function () {
+    [$brandId] = seedAffiliateAndBrandForJob();
+
+    // Override integration to declare USD as the shop currency
+    DB::connection('pgsql')
+        ->table('core.professional_integrations')
+        ->where('professional_id', $brandId)
+        ->update(['provider_metadata' => json_encode(['shop_domain' => 'test-shop.myshopify.com', 'shop_currency' => 'USD'])]);
+
+    $job = new ProcessShopifyOrderWebhookJob($brandId, [
+        'id' => 'shop_order_curr_mismatch',
+        'currency' => 'AUD', // mismatches shop_currency = USD
+        'created_at' => now()->toIso8601String(),
+        'note_attributes' => [['name' => 'affiliate', 'value' => 'sarah']],
+        'line_items' => [[
+            'id' => 'line_1', 'product_id' => '1',
+            'price' => '100.00', 'quantity' => 1, 'total_discount' => '0',
+            'properties' => [],
+        ]],
+    ]);
+
+    $job->handle(
+        Mockery::mock(ContactCaptureService::class)->shouldIgnoreMissing(),
+        Mockery::mock(BrandCatalogService::class)->shouldIgnoreMissing(),
+    );
+
+    expect(CommissionLedgerEntry::query()->count())->toBe(0);
+});
+
+it('processes commission normally when order currency matches shop_currency', function () {
+    [$brandId] = seedAffiliateAndBrandForJob();
+
+    DB::connection('pgsql')
+        ->table('core.professional_integrations')
+        ->where('professional_id', $brandId)
+        ->update(['provider_metadata' => json_encode(['shop_domain' => 'test-shop.myshopify.com', 'shop_currency' => 'AUD'])]);
+
+    $catalogMock = Mockery::mock(BrandCatalogService::class);
+    $catalogMock->shouldReceive('fetchCommissionOverridesForProducts')->once()->andReturn([]);
+    app()->instance(BrandCatalogService::class, $catalogMock);
+
+    $job = new ProcessShopifyOrderWebhookJob($brandId, [
+        'id' => 'shop_order_curr_match',
+        'currency' => 'AUD',
+        'created_at' => now()->toIso8601String(),
+        'note_attributes' => [['name' => 'affiliate', 'value' => 'sarah']],
+        'line_items' => [[
+            'id' => 'line_1', 'product_id' => '1',
+            'price' => '100.00', 'quantity' => 1, 'total_discount' => '0',
+            'properties' => [],
+        ]],
+    ]);
+
+    $job->handle(
+        Mockery::mock(ContactCaptureService::class)->shouldIgnoreMissing(),
+        app(BrandCatalogService::class),
+    );
+
+    expect(CommissionLedgerEntry::query()->count())->toBe(1);
+});

@@ -78,9 +78,10 @@ function seedVoidBrand(string $id): void
     ]);
 }
 
-function seedVoidCommission(string $id, string $brandId, string $affiliateId, int $amountCents = 1000, ?string $createdAt = null): void
+function seedVoidCommission(string $id, string $brandId, string $affiliateId, int $amountCents = 1000, ?string $createdAt = null, ?string $occurredAt = null): void
 {
-    $now = $createdAt ?? now()->toDateTimeString();
+    $createdAt = $createdAt ?? now()->toDateTimeString();
+    $occurredAt = $occurredAt ?? $createdAt;
     DB::connection('pgsql')->table('commerce.commission_ledger_entries')->insert([
         'id' => $id,
         'brand_professional_id' => $brandId,
@@ -93,9 +94,9 @@ function seedVoidCommission(string $id, string $brandId, string $affiliateId, in
         'rate_source' => 'brand_default',
         'idempotency_key' => "test-{$id}",
         'calculation_metadata' => '{}',
-        'occurred_at' => $now,
-        'created_at' => $now,
-        'updated_at' => $now,
+        'occurred_at' => $occurredAt,
+        'created_at' => $createdAt,
+        'updated_at' => $createdAt,
     ]);
 }
 
@@ -202,4 +203,54 @@ it('does not void commissions that already have a payout_id', function () {
     $stats = $service->processVoidableCommissions();
 
     expect($stats['voided_count'])->toBe(0);
+});
+
+// ============================================================
+// #V5-026 — Use occurred_at, not created_at, for void window
+// ============================================================
+
+it('voids a commission based on occurred_at when the webhook arrived late after the void window', function () {
+    // Scenario: sale happened 31 days ago (occurred_at) but the Shopify webhook
+    // was delayed — the DB row was only inserted today (created_at = now).
+    // The void window (30 days) should be measured from the sale date, not the insertion date.
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'not_connected');
+
+    seedVoidCommission(
+        'c1', 'brand-1', 'aff-1', 1000,
+        createdAt: now()->toDateTimeString(),            // webhook processed today
+        occurredAt: now()->subDays(31)->toDateTimeString(), // sale was 31 days ago
+    );
+
+    $stats = $service->processVoidableCommissions();
+
+    // Should be voided: occurred_at is past the 30-day window
+    expect($stats['voided_count'])->toBe(1);
+    expect(CommissionLedgerEntry::find('c1')->status)->toBe('voided');
+});
+
+it('does not flush a held commission when occurred_at is past the void window even if created_at is recent', function () {
+    // Scenario: sale happened 31 days ago (past the 30-day void window) but the webhook
+    // arrived 2 days late — created_at is 29 days ago (within window).
+    // flushHeldCommissions should NOT flush this: the void window based on the sale date has expired.
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'active');
+
+    seedVoidCommission(
+        'c1', 'brand-1', 'aff-1', 1000,
+        createdAt: now()->subDays(29)->toDateTimeString(),  // late webhook insertion
+        occurredAt: now()->subDays(31)->toDateTimeString(), // sale expired the void window
+    );
+
+    $affiliate = Professional::find('aff-1');
+    $count = $service->flushHeldCommissions($affiliate);
+
+    expect($count)->toBe(0);
+    expect(CommissionLedgerEntry::find('c1')->status)->toBe('pending');
 });

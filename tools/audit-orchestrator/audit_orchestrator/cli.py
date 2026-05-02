@@ -154,6 +154,28 @@ def show_queue() -> None:
         click.echo(f"{i}. {item_id}")
 
 
+@main.command("sweep")
+def sweep() -> None:
+    """Remove already-done or already-blocked items from the queue."""
+    sm = StateManager(_state_path())
+    state = sm.load()
+    removed: list[str] = []
+    kept: list[str] = []
+    for qid in state.queue:
+        status = state.items.get(qid, {}).get("status")
+        if status in ("done", "blocked"):
+            removed.append(f"{qid} ({status})")
+        else:
+            kept.append(qid)
+    state.queue = kept
+    sm.save(state)
+    if removed:
+        click.echo(f"Swept {len(removed)} stale items: {', '.join(removed)}")
+    else:
+        click.echo("Queue is clean — nothing to sweep.")
+    click.echo(f"Queue now: {', '.join(kept) if kept else '(empty)'}")
+
+
 @main.command("clear")
 def clear() -> None:
     """Empty the queue."""

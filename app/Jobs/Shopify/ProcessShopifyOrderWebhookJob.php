@@ -114,6 +114,21 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->first();
 
+        // Validate order currency against shop_currency stored in integration metadata.
+        // Mismatches (e.g. a multi-currency store misconfiguration) mean commission math
+        // would be in the wrong unit — skip and log rather than create wrong ledger entries.
+        $shopCurrency = strtoupper(trim((string) Arr::get($integration?->provider_metadata ?? [], 'shop_currency', '')));
+        if ($shopCurrency !== '' && $shopCurrency !== $currency) {
+            Log::warning('Shopify order webhook: currency mismatch, skipping commission', [
+                'order_id' => $orderId,
+                'brand_professional_id' => $this->brandProfessionalId,
+                'order_currency' => $currency,
+                'shop_currency' => $shopCurrency,
+            ]);
+
+            return;
+        }
+
         $overrideMap = ($integration && ! empty($productGids))
             ? $catalogService->fetchCommissionOverridesForProducts($integration, $productGids)
             : [];

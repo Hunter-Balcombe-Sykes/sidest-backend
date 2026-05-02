@@ -49,7 +49,17 @@ class AuditApp(App):
         self._stop_runner = threading.Event()
         self._config = load_config(self.work_dir / "config.yml")
 
+        # Sweep the queue: drop items whose status is already done/blocked,
+        # so a stale leftover doesn't block the runner from making progress.
+        removed = self._cleanup_stale_queue()
+
         self._refresh_panels()
+
+        if removed:
+            self._log(
+                f"[dim]Queue swept: removed {len(removed)} stale items "
+                f"({', '.join(removed[:5])}{'...' if len(removed) > 5 else ''})[/dim]"
+            )
 
         # Watch state.json for queue/status changes
         self._state_observer = watch(
@@ -214,6 +224,19 @@ class AuditApp(App):
 
             item = state.items.get(next_id, {})
 
+            # Defensive: if item is already done/blocked but somehow still in
+            # the queue (e.g. user re-queued via UI, stale state from a crashed
+            # earlier run, or _mark didn't fire due to an artifact-write error),
+            # don't re-run it. Pop and move on.
+            current_status = item.get("status")
+            if current_status in ("done", "blocked"):
+                self._log_from_thread(
+                    f"  [dim]{next_id}[/dim] already [yellow]{current_status}[/yellow] — popping from queue"
+                )
+                state.queue = [q for q in state.queue if q != next_id]
+                self.state_mgr.save(state)
+                continue
+
             # If item is awaiting an answer, check whether one has arrived
             if item.get("status") == "awaiting_answer":
                 qfile = self.work_dir / "questions" / f"{next_id.lstrip('#')}.md"
@@ -351,6 +374,27 @@ class AuditApp(App):
             self.query_one(NowRunningPanel).step = stage
         except Exception:
             pass
+
+    def _cleanup_stale_queue(self) -> list[str]:
+        """Remove already-done or already-blocked items from state.queue.
+
+        Returns the list of removed ids (for logging).
+        """
+        state = self.state_mgr.load()
+        if not state.queue:
+            return []
+        removed: list[str] = []
+        kept: list[str] = []
+        for qid in state.queue:
+            status = state.items.get(qid, {}).get("status")
+            if status in ("done", "blocked"):
+                removed.append(f"{qid}({status})")
+            else:
+                kept.append(qid)
+        if removed:
+            state.queue = kept
+            self.state_mgr.save(state)
+        return removed
 
     def _make_on_action(self, item_id: str):
         """Build a callback that logs every tool call's snippet to the activity

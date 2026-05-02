@@ -158,15 +158,23 @@ class Runner:
         # Claude exited normally → run tests
         tests_pass = run_test_command(self.repo_root, self.config.test_command)
         if not tests_pass:
-            log_path = self.blocked_dir / f"{_safe_id(item_id)}.log"
-            log_excerpt = log_path.read_text(encoding="utf-8") if log_path.exists() else "test failure"
-            self._save_blocked_artifacts(item_id, reason="test_failure")
-            discard_working_changes(self.repo_root)
-            write_blocked_record(
-                self.completed_dir, item_id=item_id,
-                title=item.get("title", ""), source=item.get("source", ""),
-                reason="composer test failed", log_excerpt=log_excerpt,
-            )
+            try:
+                log_path = self.blocked_dir / f"{_safe_id(item_id)}.log"
+                log_excerpt = log_path.read_text(encoding="utf-8") if log_path.exists() else "test failure"
+                self._save_blocked_artifacts(item_id, reason="test_failure")
+                # discard_working_changes can throw if git is in a weird state;
+                # don't let it skip the _mark call below
+                try:
+                    discard_working_changes(self.repo_root)
+                except Exception:
+                    pass
+                write_blocked_record(
+                    self.completed_dir, item_id=item_id,
+                    title=item.get("title", ""), source=item.get("source", ""),
+                    reason="composer test failed", log_excerpt=log_excerpt,
+                )
+            except Exception:
+                pass  # artifact-saving best-effort; _mark below is what matters
             self._mark(item_id, status="blocked", blocked_reason="tests failed")
             return "blocked"
 

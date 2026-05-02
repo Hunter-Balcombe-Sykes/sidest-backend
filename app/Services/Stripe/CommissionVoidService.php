@@ -46,7 +46,7 @@ class CommissionVoidService
             ->whereNull('payout_id')
             ->where('entry_type', 'accrual')
             ->where('status', 'pending')
-            ->where('created_at', '<=', $cutoff)
+            ->where('occurred_at', '<=', $cutoff)
             ->whereHas('affiliateProfessional', function ($q) {
                 $q->where('stripe_connect_status', '!=', 'active');
             })
@@ -197,7 +197,7 @@ class CommissionVoidService
             ->whereNull('payout_id')
             ->where('entry_type', 'accrual')
             ->where('status', 'pending')
-            ->where('created_at', '<=', $warningCutoff->copy()->subDays($voidWindowDays))
+            ->where('occurred_at', '<=', $warningCutoff->copy()->subDays($voidWindowDays))
             ->whereHas('affiliateProfessional', function ($q) {
                 $q->where('stripe_connect_status', '!=', 'active')
                     ->where(function ($q2) {
@@ -208,7 +208,7 @@ class CommissionVoidService
             ->with('affiliateProfessional:id,display_name')
             ->chunkById(500, function ($entries) use (&$sent, $voidWindowDays) {
                 foreach ($entries as $entry) {
-                    $voidDate = $entry->created_at->addDays($voidWindowDays);
+                    $voidDate = $entry->occurred_at->addDays($voidWindowDays);
                     $daysLeft = (int) now()->diffInDays($voidDate, false);
 
                     if ($daysLeft < 0 || $daysLeft > 5) {
@@ -254,7 +254,7 @@ class CommissionVoidService
             ->where('entry_type', 'accrual')
             ->where('status', 'pending')
             ->where('affiliate_professional_id', $affiliate->id)
-            ->where('created_at', '>', now()->subDays($this->voidWindowDays))
+            ->where('occurred_at', '>', now()->subDays($this->voidWindowDays))
             ->update(['status' => 'approved']);
 
         if ($count > 0) {
