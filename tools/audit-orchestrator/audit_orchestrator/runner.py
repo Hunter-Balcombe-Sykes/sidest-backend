@@ -243,12 +243,24 @@ class Runner:
         return "pushed"
 
     def _commit_and_push_tick(self, item_id: str, source: str, ticked_ids: list[str]) -> None:
-        """Commit the markdown checkbox flips as a separate `chore(audit): ...`
-        commit and push to the configured branch. Keeps the working tree clean
-        for the next run's pre-push check."""
+        """Commit the markdown checkbox flips + completion record as a separate
+        `chore(audit): ...` commit and push to the configured branch. Keeps the
+        working tree clean for the next run's pre-push check."""
+        # Stage the audit markdown
         subprocess.run(
             ["git", "add", source], cwd=self.repo_root, check=True, capture_output=True,
         )
+        # Stage the completion record if Claude wrote one (durable audit trail)
+        completion_path = self.completed_dir / f"{_safe_id(item_id)}.md"
+        if completion_path.exists():
+            try:
+                subprocess.run(
+                    ["git", "add", str(completion_path)],
+                    cwd=self.repo_root, check=True, capture_output=True,
+                )
+            except subprocess.CalledProcessError:
+                pass  # If gitignored or otherwise unstageable, skip silently
+
         # Skip if nothing actually staged (no real change)
         diff_check = subprocess.run(
             ["git", "diff", "--cached", "--quiet"], cwd=self.repo_root,
@@ -258,8 +270,9 @@ class Runner:
 
         ids_text = ", ".join(ticked_ids)
         msg = (
-            f"chore(audit): mark {item_id} done in {source}\n\n"
-            f"Checks off {ids_text} after the orchestrator-completed fix."
+            f"chore(audit): mark {item_id} done + completion record\n\n"
+            f"Ticks {ids_text} in {source} and commits the per-fix audit trail "
+            f"after the orchestrator-completed fix."
         )
         subprocess.run(
             ["git", "commit", "-m", msg], cwd=self.repo_root, check=True, capture_output=True,
@@ -267,7 +280,7 @@ class Runner:
         try:
             push_to_remote(self.repo_root, branch=self.config.push_target)
         except RuntimeError:
-            pass  # Push failure is logged but shouldn't fail the run
+            pass
 
     def _files_in_commit(self, sha: str | None) -> list[str]:
         """Return list of paths touched by a commit (using git show --name-only)."""

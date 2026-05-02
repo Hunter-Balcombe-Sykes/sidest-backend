@@ -28,8 +28,9 @@ EFFORT_VALUE_RE = re.compile(r"^(?P<size>S|M|L|XL)\b")
 # Optional text like `(Optional ride-alongs: ...)` between members and `~Nh` is skipped.
 # Handles both `~1h` (integer, no range) and `~1–2h` / `~0.5–1h` (decimal range).
 BUNDLE_RE = re.compile(
-    r"^- \*\*(?P<id>B[\w-]+) — (?P<title>.+?)\.\*\* "
-    r"(?P<members>(?:#[A-Z0-9-]+(?:, )?)+)\."   # members list ends at '.'
+    r"^- (?:\[[ x]\] )?"                            # optional checkbox prefix
+    r"\*\*(?P<id>B[\w-]+) — (?P<title>.+?)\.\*\* "
+    r"(?P<members>(?:#[A-Z0-9-]+(?:, )?)+)\."       # members list ends at '.'
     r"(?:[^~]*)~(?P<low>[\d.]+)(?:[–-](?P<high>[\d.]+))?h\."  # skip optional text, then ~Nh
     r"\s*(?P<rationale>.*)$"
 )

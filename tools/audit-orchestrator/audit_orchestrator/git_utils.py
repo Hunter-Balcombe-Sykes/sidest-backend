@@ -23,13 +23,28 @@ def _run(repo: Path, *args: str) -> str:
 
 
 def pre_push_check(repo: Path, *, item_id: str, base_ref: str = "origin/development-v2") -> PrePushResult:
-    """Verify it's safe to push: clean tree, one commit ahead, commit references item.
+    """Verify it's safe to push: no uncommitted modifications to tracked files,
+    exactly one commit ahead of base, commit message references the item id.
+
+    Untracked files (`??` in porcelain) are ignored — `git push` doesn't care
+    about them, and the orchestrator's own state files (`.audit-work/...`)
+    legitimately appear as untracked during a run. We only reject when there
+    are MODIFIED tracked files that should have been committed.
 
     Returns PrePushResult.ok=True on success, with .commit_sha set.
     """
     status = _run(repo, "status", "--porcelain")
-    if status.strip():
-        return PrePushResult(ok=False, reason=f"working tree dirty / uncommitted changes:\n{status}")
+    # Filter porcelain lines: only keep modifications to tracked files
+    # (status codes M, A, D, R, C, U). Untracked (??) and ignored (!!) are OK.
+    dirty_tracked = [
+        line for line in status.splitlines()
+        if line and not line.startswith("??") and not line.startswith("!!")
+    ]
+    if dirty_tracked:
+        return PrePushResult(
+            ok=False,
+            reason="uncommitted modifications to tracked files:\n" + "\n".join(dirty_tracked),
+        )
 
     log = _run(repo, "log", "--oneline", f"{base_ref}..HEAD").strip()
     if not log:

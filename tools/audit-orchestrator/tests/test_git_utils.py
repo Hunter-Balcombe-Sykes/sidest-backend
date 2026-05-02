@@ -39,15 +39,36 @@ def test_pre_push_passes_for_one_commit_with_item_id(repo: Path):
     assert result.ok, result.reason
 
 
-def test_pre_push_fails_when_working_tree_dirty(repo: Path):
+def test_pre_push_fails_when_tracked_files_modified_uncommitted(repo: Path):
+    """Modifications to tracked files (staged but not committed, or staged for
+    addition) must block push."""
     (repo / "fix.txt").write_text("fixed")
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "fix(scope): thing\n\nItem: B5")
+    # Stage a new file but don't commit it — this IS a real "uncommitted change"
     (repo / "uncommitted.txt").write_text("oops")
     _git(repo, "add", "uncommitted.txt")
     result = pre_push_check(repo, item_id="B5", base_ref="origin/development-v2")
     assert not result.ok
-    assert "dirty" in result.reason.lower() or "uncommitted" in result.reason.lower()
+    assert "uncommitted" in result.reason.lower()
+
+
+def test_pre_push_passes_when_only_untracked_files_present(repo: Path):
+    """Untracked files (?? in porcelain) are OK — git push doesn't care.
+
+    The orchestrator's own state files (.audit-work/...) and any other
+    untracked artifacts left by Claude should not block the push.
+    """
+    (repo / "fix.txt").write_text("fixed")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "fix(scope): thing\n\nItem: B5")
+    # Untracked files everywhere — used to block but no longer should
+    (repo / ".audit-work").mkdir(exist_ok=True)
+    (repo / ".audit-work" / "completed").mkdir(exist_ok=True)
+    (repo / ".audit-work" / "completed" / "B5.md").write_text("# B5 record")
+    (repo / "scratch.txt").write_text("temp")
+    result = pre_push_check(repo, item_id="B5", base_ref="origin/development-v2")
+    assert result.ok, f"untracked files should not block push: {result.reason}"
 
 
 def test_pre_push_fails_when_two_commits_ahead(repo: Path):
