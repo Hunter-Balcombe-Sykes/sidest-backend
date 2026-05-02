@@ -237,7 +237,7 @@ class EmbeddedSetupController extends ApiController
 
         $this->cache->invalidateProfessional($professional);
 
-        return $this->success([], 'Hydrogen install confirmed.');
+        return $this->success([]);
     }
 
     // ── Analytics Overview ───────────────────────────────────────────────────
