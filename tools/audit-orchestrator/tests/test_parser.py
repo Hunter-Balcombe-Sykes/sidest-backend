@@ -43,3 +43,10 @@ def test_bundle_back_reference_on_items(fixtures_dir):
     assert items["#T-002"].bundle == "B-T1"
     assert items["#T-003"].bundle == "B-T2"
     assert items["#T-004"].bundle is None
+
+
+def test_extracts_standalone_subcategories(fixtures_dir):
+    result = parse_audit_file(fixtures_dir / "tiny-audit.md")
+    assert "#T-004" in result.standalone_xl
+    assert "#T-005" in result.standalone_architectural
+    assert "#T-006" in result.standalone_high_value
