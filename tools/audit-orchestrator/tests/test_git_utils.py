@@ -67,3 +67,34 @@ def test_pre_push_fails_when_commit_missing_item_id(repo: Path):
     result = pre_push_check(repo, item_id="B5", base_ref="origin/development-v2")
     assert not result.ok
     assert "item id" in result.reason.lower()
+
+
+def test_checkbox_tick_flips_only_named_item(tmp_path):
+    from audit_orchestrator.git_utils import tick_checkbox_for_item
+    md = tmp_path / "audit.md"
+    md.write_text(
+        "- [ ] **#A** · P0 — first\n"
+        "- [ ] **#B** · P0 — second\n"
+        "- [x] **#C** · P0 — already done\n"
+    )
+
+    flipped = tick_checkbox_for_item(md, "#B")
+    assert flipped is True
+    new_text = md.read_text()
+    assert "- [x] **#B**" in new_text
+    assert "- [ ] **#A**" in new_text
+    assert "- [x] **#C**" in new_text
+
+
+def test_checkbox_tick_returns_false_for_already_done(tmp_path):
+    from audit_orchestrator.git_utils import tick_checkbox_for_item
+    md = tmp_path / "audit.md"
+    md.write_text("- [x] **#A** · P0 — done\n")
+    assert tick_checkbox_for_item(md, "#A") is False
+
+
+def test_checkbox_tick_returns_false_for_missing_item(tmp_path):
+    from audit_orchestrator.git_utils import tick_checkbox_for_item
+    md = tmp_path / "audit.md"
+    md.write_text("- [ ] **#A** · P0 — exists\n")
+    assert tick_checkbox_for_item(md, "#NOPE") is False
