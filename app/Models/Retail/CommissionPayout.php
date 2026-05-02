@@ -19,35 +19,8 @@ class CommissionPayout extends BaseModel
 
     protected $keyType = 'string';
 
-    protected $fillable = [
-        'brand_professional_id',
-        'affiliate_professional_id',
-        'stripe_payment_intent_id',
-        'stripe_transfer_id',
-        'status',
-        'gross_commission_cents',
-        'platform_fee_cents',
-        'net_payout_cents',
-        'currency_code',
-        'failure_reason',
-        'failure_code',
-        'ledger_entry_count',
-        'eligible_after',
-        'processed_at',
-        'funding_source',
-        'wallet_debit_cents',
-        'charge_cents',
-        'retry_count',
-        // Per-payout grace deadline (created_at + 60d by default). When
-        // void_at passes and the affiliate's Stripe Connect isn't active,
-        // the nightly VoidExpiredPayoutsJob marks the payout `cancelled`
-        // and links its ledger entries `voided`.
-        'void_at',
-        // Stripe `fee_xxx` reference when the payout used the destination-
-        // charge + application_fee path (R4 hybrid). Null for wallet-only
-        // payouts that took the manual Transfer path.
-        'stripe_application_fee_id',
-    ];
+    // All writes are server-side (CommissionPayoutService). Use forceFill() at callsites.
+    protected $guarded = ['*'];
 
     protected $casts = [
         'gross_commission_cents' => 'integer',

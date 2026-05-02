@@ -215,15 +215,18 @@ class EmbeddedSetupController extends ApiController
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
 
-        $payload = ['oxygen_deployment_token' => $data['token']];
+        $otherFields = [];
         if (array_key_exists('storefront_id', $data)) {
-            $payload['oxygen_storefront_id'] = $data['storefront_id'];
+            $otherFields['oxygen_storefront_id'] = $data['storefront_id'];
         }
 
-        BrandStoreSettings::updateOrCreate(
+        $settings = BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],
-            $payload,
+            $otherFields,
         );
+        // Token is not in $fillable — set directly to avoid mass-assignment
+        $settings->oxygen_deployment_token = $data['token'];
+        $settings->save();
 
         $this->cache->invalidateProfessional($professional);
 

@@ -204,7 +204,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
             DB::transaction(function () use ($newEntries, $affiliatesById, &$reversalsCreated): void {
                 foreach ($newEntries as $entry) {
-                    $row = new CommissionLedgerEntry($entry['data']);
+                    $row = (new CommissionLedgerEntry)->forceFill($entry['data']);
                     $affiliate = $affiliatesById->get($entry['data']['affiliate_professional_id'] ?? null);
                     if ($affiliate) {
                         $row->setRelation('affiliateProfessional', $affiliate);

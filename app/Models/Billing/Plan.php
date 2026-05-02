@@ -14,7 +14,6 @@ class Plan extends BaseModel
     protected $keyType = 'string';
 
     protected $fillable = [
-        'id',
         'plan_key',
         'name',
         'description',

@@ -118,20 +118,21 @@ class StripeWebhookController extends Controller
                 ->lockForUpdate()
                 ->update(['ended_at' => now()]);
 
-            // Create the new Stripe-managed subscription
-            Subscription::create([
+            // Create the new Stripe-managed subscription; stripe IDs set directly (not mass-assignable)
+            $localSub = new Subscription([
                 'id' => Str::uuid()->toString(),
                 'professional_id' => $professional->id,
                 'plan_id' => $plan->id,
                 'provider' => 'stripe',
-                'stripe_customer_id' => (string) $subscription->customer,
-                'stripe_subscription_id' => (string) $subscription->id,
                 'status' => $this->mapStripeStatus($subscription->status),
                 'current_period_start' => Carbon::createFromTimestamp($subscription->current_period_start),
                 'current_period_end' => Carbon::createFromTimestamp($subscription->current_period_end),
                 'cancel_at_period_end' => $subscription->cancel_at_period_end ?? false,
                 'provider_payload' => json_decode(json_encode($event), true),
             ]);
+            $localSub->stripe_customer_id = (string) $subscription->customer;
+            $localSub->stripe_subscription_id = (string) $subscription->id;
+            $localSub->save();
         });
 
         Log::info('Stripe subscription created', [

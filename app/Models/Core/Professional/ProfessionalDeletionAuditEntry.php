@@ -52,7 +52,6 @@ class ProfessionalDeletionAuditEntry extends BaseModel
         'ip_address',
         'user_agent',
         'metadata',
-        'created_at',
     ];
 
     // PII fields — never expose in serialisation (API responses, logs, job payloads)
@@ -67,6 +66,15 @@ class ProfessionalDeletionAuditEntry extends BaseModel
         'metadata' => 'array',
         'created_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $entry) {
+            if (! $entry->created_at) {
+                $entry->created_at = now();
+            }
+        });
+    }
 
     public function professional(): BelongsTo
     {

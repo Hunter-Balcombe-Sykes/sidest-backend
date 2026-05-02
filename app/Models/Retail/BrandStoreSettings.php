@@ -23,7 +23,6 @@ class BrandStoreSettings extends Model
         'default_commission_rate',
         'payout_hold_days',
         'theme_id',
-        'oxygen_deployment_token',
         'oxygen_storefront_id',
         'domain_mode',
         'domain_wizard_complete',

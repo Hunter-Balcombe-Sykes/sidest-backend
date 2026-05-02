@@ -206,7 +206,7 @@ class CommissionPayoutService
             // the policy without a code release.
             $graceDays = (int) config('sidest.store.grace_period_days', 60);
 
-            $payout = CommissionPayout::create([
+            $payout = CommissionPayout::forceCreate([
                 'brand_professional_id' => $brandId,
                 'affiliate_professional_id' => $affiliateId,
                 'status' => 'pending',
@@ -226,7 +226,7 @@ class CommissionPayoutService
                     'commission_ledger_entry_id' => $entry->id,
                     'amount_cents' => $entry->amount_cents,
                 ]);
-                $entry->update(['payout_id' => $payout->id]);
+                $entry->forceFill(['payout_id' => $payout->id])->save();
             }
 
             foreach ($reversals as $reversal) {
@@ -235,7 +235,7 @@ class CommissionPayoutService
                     'commission_ledger_entry_id' => $reversal->id,
                     'amount_cents' => $reversal->amount_cents,
                 ]);
-                $reversal->update(['payout_id' => $payout->id]);
+                $reversal->forceFill(['payout_id' => $payout->id])->save();
             }
 
             return $payout;
@@ -322,14 +322,14 @@ class CommissionPayoutService
                     $fundingSource = 'wallet';
                 }
 
-                $payout->update([
+                $payout->forceFill([
                     'status' => 'collecting',
                     'funding_source' => $fundingSource,
                     'wallet_debit_cents' => $walletDebitCents,
                     'charge_cents' => $chargeAmountCents,
                     'failure_code' => null,
                     'failure_reason' => null,
-                ]);
+                ])->save();
             });
         }
 
@@ -378,10 +378,10 @@ class CommissionPayoutService
 
                 $latestChargeId = $this->extractLatestChargeId($paymentIntent);
 
-                $payout->update([
+                $payout->forceFill([
                     'stripe_payment_intent_id' => $paymentIntent->id,
                     'status' => 'collected',
-                ]);
+                ])->save();
             } catch (ApiConnectionException|RateLimitException $e) {
                 // Transient error — re-throw so Horizon retries with backoff.
                 // Wallet debit is already committed in 'collecting' status; the
@@ -399,14 +399,14 @@ class CommissionPayoutService
         } else {
             // Fully funded by wallet — only advance status if not already past this step
             if (! in_array($payout->status, ['collected', 'transferring'], true)) {
-                $payout->update(['status' => 'collected']);
+                $payout->forceFill(['status' => 'collected'])->save();
             }
         }
 
         // Step 3: Transfer net amount to the affiliate's Connect account
         try {
             if ($payout->status !== 'transferring') {
-                $payout->update(['status' => 'transferring']);
+                $payout->forceFill(['status' => 'transferring'])->save();
             }
 
             $transferPayload = [
@@ -430,13 +430,13 @@ class CommissionPayoutService
                 ['idempotency_key' => 'tr_'.$payout->id.$retryKey]
             );
 
-            $payout->update([
+            $payout->forceFill([
                 'stripe_transfer_id' => $transfer->id,
                 'status' => 'completed',
                 'processed_at' => now(),
                 'failure_code' => null,
                 'failure_reason' => null,
-            ]);
+            ])->save();
 
             Log::info('Commission payout completed', [
                 'payout_id' => $payout->id,
@@ -482,7 +482,7 @@ class CommissionPayoutService
                     $failureCode = 'transfer_failed_refunded';
                     // Clear PI ID so an admin retry can create a fresh PaymentIntent
                     // (same idempotency key within 24h would return the now-refunded PI).
-                    $payout->update(['stripe_payment_intent_id' => null]);
+                    $payout->forceFill(['stripe_payment_intent_id' => null])->save();
                 } catch (\Throwable $refundEx) {
                     // Auto-refund failed — the brand may still be charged. Flag for manual resolution.
                     $failureCode = 'transfer_failed_refund_needed';
@@ -582,12 +582,12 @@ class CommissionPayoutService
 
     private function markPendingFunding(CommissionPayout $payout, string $code, string $reason): void
     {
-        $payout->update([
+        $payout->forceFill([
             'status' => 'pending',
             'failure_code' => $code,
             'failure_reason' => $reason,
             'processed_at' => null,
-        ]);
+        ])->save();
 
         Log::notice('Commission payout pending funding', [
             'payout_id' => $payout->id,
@@ -598,11 +598,11 @@ class CommissionPayoutService
 
     private function failPayout(CommissionPayout $payout, string $code, string $reason): void
     {
-        $payout->update([
+        $payout->forceFill([
             'status' => 'failed',
             'failure_code' => $code,
             'failure_reason' => $reason,
-        ]);
+        ])->save();
 
         Log::warning('Commission payout failed', [
             'payout_id' => $payout->id,
@@ -638,12 +638,12 @@ class CommissionPayoutService
         // re-debiting. Resetting to 'pending' would bypass that branch and double-debit.
         $resumeStatus = ((int) ($payout->wallet_debit_cents ?? 0)) > 0 ? 'collecting' : 'pending';
 
-        $payout->update([
+        $payout->forceFill([
             'status' => $resumeStatus,
             'failure_code' => null,
             'failure_reason' => null,
             'retry_count' => ($payout->retry_count ?? 0) + 1,
-        ]);
+        ])->save();
 
         return $this->processPayoutBatch($payout) === true;
     }

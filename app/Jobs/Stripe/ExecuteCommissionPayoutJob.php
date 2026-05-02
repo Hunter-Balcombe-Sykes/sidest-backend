@@ -73,13 +73,13 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
         // manual reconciliation.
         $payout = CommissionPayout::find($this->payoutId);
         if ($payout && ! in_array($payout->status, ['completed', 'failed'], true)) {
-            $payout->update([
+            $payout->forceFill([
                 'status' => 'failed',
                 'failure_code' => 'job_exhausted',
                 'failure_reason' => 'Payout job exhausted all Horizon retries after transient errors. '
                     .'Check wallet_debit_cents and stripe_payment_intent_id for manual reconciliation. '
                     .$e->getMessage(),
-            ]);
+            ])->save();
         }
     }
 }

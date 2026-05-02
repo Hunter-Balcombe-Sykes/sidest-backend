@@ -18,23 +18,8 @@ class CommissionLedgerEntry extends BaseModel
 
     protected $keyType = 'string';
 
-    protected $fillable = [
-        'shopify_order_id',
-        'brand_professional_id',
-        'affiliate_professional_id',
-        'entry_type',
-        'status',
-        'amount_cents',
-        'currency_code',
-        'commission_rate',
-        'rate_source',
-        'idempotency_key',
-        'calculation_metadata',
-        'occurred_at',
-        'payout_id',
-        'voided_at',
-        'void_reason',
-    ];
+    // All writes are server-side (Shopify order jobs, CommissionPayoutService). Use forceFill() at callsites.
+    protected $guarded = ['*'];
 
     protected $casts = [
         'amount_cents' => 'integer',

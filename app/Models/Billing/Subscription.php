@@ -34,8 +34,6 @@ class Subscription extends BaseModel
         'professional_id',
         'plan_id',
         'provider',
-        'stripe_customer_id',
-        'stripe_subscription_id',
         'status',
         'current_period_start',
         'current_period_end',

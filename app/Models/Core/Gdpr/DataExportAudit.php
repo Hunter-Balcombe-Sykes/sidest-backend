@@ -52,8 +52,6 @@ class DataExportAudit extends BaseModel
         'file_sha256',
         'record_counts',
         'error_message',
-        'created_at',
-        'completed_at',
     ];
 
     protected $casts = [
@@ -103,22 +101,22 @@ class DataExportAudit extends BaseModel
         string $fileSha256,
         array $recordCounts,
     ): void {
+        $this->completed_at = now();
         $this->update([
             'status' => self::STATUS_COMPLETED,
             'file_path' => $filePath,
             'file_size_bytes' => $fileSizeBytes,
             'file_sha256' => $fileSha256,
             'record_counts' => $recordCounts,
-            'completed_at' => now(),
         ]);
     }
 
     public function markFailed(string $error): void
     {
+        $this->completed_at = now();
         $this->update([
             'status' => self::STATUS_FAILED,
             'error_message' => mb_substr($error, 0, 2000),
-            'completed_at' => now(),
         ]);
     }
 }

@@ -243,11 +243,11 @@ class StripeConnectWebhookController extends Controller
 
         $payout = CommissionPayout::find($payoutId);
         if ($payout && ! in_array($payout->status, ['failed', 'completed', 'cancelled'], true)) {
-            $payout->update([
+            $payout->forceFill([
                 'status' => 'failed',
                 'failure_code' => 'transfer_failed_webhook',
                 'failure_reason' => 'Transfer failed according to Stripe webhook',
-            ]);
+            ])->save();
         }
 
         Log::warning('Stripe transfer failed', [
@@ -280,11 +280,11 @@ class StripeConnectWebhookController extends Controller
 
         $payout = CommissionPayout::find($payoutId);
         if ($payout && ! in_array($payout->status, ['failed', 'completed'])) {
-            $payout->update([
+            $payout->forceFill([
                 'status' => 'failed',
                 'failure_code' => 'payment_failed_webhook',
                 'failure_reason' => $paymentIntent->last_payment_error?->message ?? 'Payment failed',
-            ]);
+            ])->save();
         }
 
         Log::warning('Stripe payment intent failed for payout', [

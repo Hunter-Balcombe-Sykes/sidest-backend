@@ -18,12 +18,8 @@ class BrandTeamMembership extends BaseModel
 
     protected $keyType = 'string';
 
-    protected $fillable = [
-        'brand_professional_id',
-        'member_professional_id',
-        'role',
-        'status',
-    ];
+    // Only written by server-side team management code. Use forceFill() at callsites.
+    protected $guarded = ['*'];
 
     protected $casts = [
         'created_at' => 'datetime',

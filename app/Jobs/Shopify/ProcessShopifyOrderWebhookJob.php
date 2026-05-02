@@ -251,7 +251,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                     // can access affiliateProfessional->display_name without a lazy query.
                     // The pre-set survives the observer's afterCommit dispatch — Laravel
                     // keeps object identity (no clone) for synchronous post-commit callbacks.
-                    $row = new CommissionLedgerEntry($entry['data']);
+                    $row = (new CommissionLedgerEntry)->forceFill($entry['data']);
                     $row->setRelation('affiliateProfessional', $affiliate);
                     $row->save();
                     $entriesCreated++;

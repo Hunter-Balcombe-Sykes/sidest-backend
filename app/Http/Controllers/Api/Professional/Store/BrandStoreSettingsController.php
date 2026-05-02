@@ -82,10 +82,6 @@ class BrandStoreSettingsController extends ApiController
         if (array_key_exists('theme_id', $validated)) {
             $dbFields['theme_id'] = (int) $validated['theme_id'];
         }
-        // Oxygen credentials — token encrypted by model cast; blank string clears it
-        if (array_key_exists('oxygen_deployment_token', $validated)) {
-            $dbFields['oxygen_deployment_token'] = $validated['oxygen_deployment_token'] ?: null;
-        }
         if (array_key_exists('oxygen_storefront_id', $validated)) {
             $dbFields['oxygen_storefront_id'] = $validated['oxygen_storefront_id'] ?: null;
         }
@@ -93,11 +89,18 @@ class BrandStoreSettingsController extends ApiController
             $dbFields['hydrogen_install_confirmed'] = (bool) $validated['hydrogen_install_confirmed'];
         }
 
-        if (! empty($dbFields)) {
-            BrandStoreSettings::updateOrCreate(
+        $hasOxygenToken = array_key_exists('oxygen_deployment_token', $validated);
+
+        if (! empty($dbFields) || $hasOxygenToken) {
+            $settings = BrandStoreSettings::updateOrCreate(
                 ['professional_id' => $pro->id],
                 $dbFields
             );
+            // Token is not in $fillable — set directly to avoid mass-assignment
+            if ($hasOxygenToken) {
+                $settings->oxygen_deployment_token = $validated['oxygen_deployment_token'] ?: null;
+                $settings->save();
+            }
         }
 
         // 2. Write visual settings to site.settings.design

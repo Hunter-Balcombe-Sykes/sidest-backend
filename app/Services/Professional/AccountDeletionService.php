@@ -421,7 +421,6 @@ class AccountDeletionService
             'professional_email_snapshot' => $emailSnapshot,
             'event' => ProfessionalDeletionAuditEntry::EVENT_PURGED,
             'actor_type' => ProfessionalDeletionAuditEntry::ACTOR_TYPE_SYSTEM,
-            'created_at' => now(),
         ]);
 
         return true;
@@ -663,7 +662,6 @@ class AccountDeletionService
             'ip_address' => $request?->ip(),
             'user_agent' => $request?->userAgent(),
             'metadata' => ! empty($metadata) ? $metadata : null,
-            'created_at' => now(),
         ]);
     }
 }

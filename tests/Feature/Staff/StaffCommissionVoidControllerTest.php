@@ -7,7 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 it('voids a pending commission entry', function () {
-    $entry = new CommissionLedgerEntry([
+    $entry = (new CommissionLedgerEntry)->forceFill([
         'id' => (string) Str::uuid(),
         'status' => 'pending',
         'payout_id' => null,
@@ -31,7 +31,7 @@ it('voids a pending commission entry', function () {
 });
 
 it('returns 422 when entry is not pending', function () {
-    $entry = new CommissionLedgerEntry([
+    $entry = (new CommissionLedgerEntry)->forceFill([
         'id' => (string) Str::uuid(),
         'status' => 'approved',
     ]);
@@ -47,7 +47,7 @@ it('returns 422 when entry is not pending', function () {
 });
 
 it('returns 422 when entry already has a payout', function () {
-    $entry = new CommissionLedgerEntry([
+    $entry = (new CommissionLedgerEntry)->forceFill([
         'id' => (string) Str::uuid(),
         'status' => 'pending',
         'payout_id' => (string) Str::uuid(),
@@ -64,7 +64,7 @@ it('returns 422 when entry already has a payout', function () {
 });
 
 it('returns 409 when optimistic lock loses the race', function () {
-    $entry = new CommissionLedgerEntry([
+    $entry = (new CommissionLedgerEntry)->forceFill([
         'id' => (string) Str::uuid(),
         'status' => 'pending',
         'payout_id' => null,
@@ -82,7 +82,7 @@ it('returns 409 when optimistic lock loses the race', function () {
 });
 
 it('requires a reason', function () {
-    $entry = new CommissionLedgerEntry([
+    $entry = (new CommissionLedgerEntry)->forceFill([
         'id' => (string) Str::uuid(),
         'status' => 'pending',
         'payout_id' => null,

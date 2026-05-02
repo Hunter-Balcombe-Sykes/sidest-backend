@@ -30,7 +30,7 @@ Each session should open the items in its bundle by ID — the full body still l
 - [x] **B5 — Throwable→QueryException narrowing in analytics.** #CR-010, #V5-017. ~1–2h. Same anti-pattern (AUDIT_REPORT.md line 287), two sibling analytics controllers. Lift one helper (catch `QueryException` + check SQLSTATE 42703) across both files.
 - [x] **B6 — Time/currency/money cluster (lens-L).** #V5-024, #V5-025, #V5-026. ~2–3h. All in `CommissionPayoutService` / `CommissionVoidService`. Same domain (UTC vs app-TZ, `occurred_at` vs `created_at`, currency validation). One test: assert cutoffs use UTC, void uses `occurred_at`, currency validates against `shop_currency`. **Don't sweep in:** the broader payout backlog (#V5-007, #V5-008) — different concurrency / idempotency reasoning.
 - [x] **B7 — Cache-key versioning post-deploy.** #CR-008, #V5-036, #V5-037. ~1–2h. All "shape change shipped without bumping cache version." One mental model: enumerate every key impacted, add a version suffix or flush, document the deploy-hygiene rule for next time.
-- **B8 — Stripe Connect webhook hardening.** #V5-009, #V5-010. ~2–4h. Same controller (`StripeConnectWebhookController`). Atomic flush + new `account.deauthorize` handler share a transaction-helper refactor.
+- [x] **B8 — Stripe Connect webhook hardening.** #V5-009, #V5-010. ~2–4h. Same controller (`StripeConnectWebhookController`). Atomic flush + new `account.deauthorize` handler share a transaction-helper refactor.
 - **B15 — Shopify storefront token hardening.** #V5-003, #V5-004. ~3–5h. Both touch `StorefrontAccessToken` in `provider_metadata`. The encryption-cast change + reinstall-revocation flow share the same model + service touchpoints. **Optional:** #4-04 (encrypted-cast integration test, P3) rides naturally on this PR.
 - **B16 — ServiceObserver hardening.** #CR-005, #CR-006. ~2–3h. Same observer file. Two sibling fixes (catch granularity + `dispatch` vs `dispatchSync`) reasoned about together yield one Pest test that exercises both the bust-failure isolation AND the queued sync path.
 
@@ -696,7 +696,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** `debitBrandManualBalancePartial()` returns 0 on currency mismatch even with positive balance. Caller charges full amount on card; wallet untouched; no notification.
     - **Source:** v5 audit (discovery_lens: domain-subagent-3; in_scope_v4: yes).
 
-- [ ] **#V5-009** · P1 — Commission flush on Stripe activation not atomic — earnings stick in pending
+- [x] **#V5-009** · P1 — Commission flush on Stripe activation not atomic — earnings stick in pending
     - **Where:** app/Http/Controllers/Api/Webhooks/StripeConnectWebhookController.php:172-182
     - **Affects:** Affiliate held-commission flush on Stripe Connect activation.
     - **Effort:** S (~1-2h)
@@ -706,7 +706,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Status update + flushHeldCommissions in try/catch. Flush failure is swallowed; status is already 'active' so Stripe doesn't retry.
     - **Source:** v5 audit (discovery_lens: domain-subagent-3; in_scope_v4: yes).
 
-- [ ] **#V5-010** · P1 — Stripe Connect account.deauthorize webhook event not handled
+- [x] **#V5-010** · P1 — Stripe Connect account.deauthorize webhook event not handled
     - **Where:** app/Http/Controllers/Api/Webhooks/StripeConnectWebhookController.php:114-123
     - **Affects:** Stripe Connect account lifecycle; payout retries to revoked accounts.
     - **Effort:** S (~1-2h)
