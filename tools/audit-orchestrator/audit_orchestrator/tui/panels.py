@@ -40,3 +40,27 @@ class ActivityLog(RichLog):
 
     def __init__(self) -> None:
         super().__init__(highlight=True, markup=True, wrap=True, id="activity-log")
+
+
+class QuestionPanel(Static):
+    """Visible only when a question file is pending. Click → opens QuestionModal."""
+
+    pending_count = reactive(0)
+    pending_summary = reactive("")
+
+    def compose(self):
+        yield Static("(no questions pending)", id="question-detail")
+
+    def watch_pending_count(self, n: int) -> None:
+        try:
+            detail = self.query_one("#question-detail", Static)
+            if n == 0:
+                self.add_class("hidden")
+                detail.update("(no questions pending)")
+            else:
+                self.remove_class("hidden")
+                detail.update(
+                    f"❗ {n} question(s) pending — click to answer\n{self.pending_summary}"
+                )
+        except Exception:
+            pass
