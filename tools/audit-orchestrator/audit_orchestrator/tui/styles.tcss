@@ -59,3 +59,57 @@ QuestionModal {
     border: thick $accent;
     background: $surface;
 }
+
+HelpModal {
+    align: center middle;
+}
+
+#help-dialog {
+    width: 90%;
+    height: 90%;
+    padding: 1 2;
+    border: thick $primary;
+    background: $surface;
+}
+
+#help-scroll {
+    height: 1fr;
+    padding: 0 1;
+}
+
+#help-footer {
+    height: 1;
+    text-align: center;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+QueueBrowser {
+    align: center middle;
+}
+
+#qb-dialog {
+    width: 95%;
+    height: 90%;
+    padding: 1 2;
+    border: thick $primary;
+    background: $surface;
+}
+
+#qb-title {
+    height: 1;
+    text-align: center;
+    color: $text;
+    margin-bottom: 1;
+}
+
+#qb-table {
+    height: 1fr;
+}
+
+#qb-status {
+    height: 1;
+    text-align: center;
+    color: $text-muted;
+    margin-top: 1;
+}

@@ -8,7 +8,7 @@ from textual.widgets import Header, Footer, Static
 from audit_orchestrator.tui.panels import (
     ProgressPanel, NowRunningPanel, ActivityLog, QuestionPanel,
 )
-from audit_orchestrator.tui.modals import ModePicker, QuestionModal
+from audit_orchestrator.tui.modals import ModePicker, QuestionModal, HelpModal, QueueBrowser
 from audit_orchestrator.runner import Runner, RunMode, now_iso
 from audit_orchestrator.config import load_config
 from audit_orchestrator.state import StateManager
@@ -128,10 +128,10 @@ class AuditApp(App):
         self.push_screen(QuestionModal(item_id=item_id, question_body=body), handle)
 
     def action_help(self) -> None:
-        self.notify("Help screen TBD")
+        self.push_screen(HelpModal())
 
     def action_queue(self) -> None:
-        self.notify("Queue browser TBD")
+        self.push_screen(QueueBrowser(work_dir=self.work_dir, repo_root=self.repo_root))
 
     def action_mode(self) -> None:
         def handle(result: str | None) -> None:
