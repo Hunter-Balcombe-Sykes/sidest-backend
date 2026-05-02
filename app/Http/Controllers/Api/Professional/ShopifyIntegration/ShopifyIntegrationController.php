@@ -129,22 +129,26 @@ class ShopifyIntegrationController extends ApiController
         $integration = $this->currentShopifyIntegrationForBrand($targetBrandId);
         $metadata = is_array($integration?->provider_metadata) ? $integration->provider_metadata : [];
         $shopDomain = $this->normalizeShopDomain((string) Arr::get($metadata, 'shop_domain', ''));
-        $connected = $integration !== null
-            && ! empty($integration->access_token)
-            && $shopDomain !== '';
+        // A shop is considered connected as long as the store is linked — the embedded
+        // wizard creates a minimal integration row (no access_token) that is still a
+        // valid, active connection for dashboard purposes. access_token presence tracks
+        // whether the full OAuth has been completed (required for catalog/webhook ops).
+        $connected = $integration !== null && $shopDomain !== '';
+        $tokenProvisioned = $connected && ! empty($integration?->access_token);
 
         return $this->success([
             'eligible' => true,
             'connected' => $connected,
+            'token_provisioned' => $tokenProvisioned,
             'brand_professional_id' => $targetBrandId,
             'shop_domain' => $connected ? $shopDomain : null,
             'shop_id' => $connected ? (string) Arr::get($metadata, 'shop_id') : null,
             'expires_at' => $integration?->expires_at?->toIso8601String(),
-            'webhook_registration_state' => $connected ? Arr::get($metadata, 'webhook_registration_state') : null,
-            'webhook_registration_last_attempt_at' => $connected
+            'webhook_registration_state' => $tokenProvisioned ? Arr::get($metadata, 'webhook_registration_state') : null,
+            'webhook_registration_last_attempt_at' => $tokenProvisioned
                 ? Arr::get($metadata, 'webhook_registration_last_attempt_at')
                 : null,
-            'webhook_orders_topic' => $connected
+            'webhook_orders_topic' => $tokenProvisioned
                 ? (string) Arr::get($metadata, 'webhook_orders_topic', config('services.shopify.webhook_orders_topic', 'orders/paid'))
                 : null,
         ]);
