@@ -255,6 +255,7 @@ class EmbeddedSetupController extends ApiController
      * Return summary analytics for the brand dashboard overview panel.
      *
      * @return JsonResponse { data: { affiliate_count, total_commission_cents, currency_code,
+     *                                commission_30d_cents, revenue_30d_cents,
      *                                recent_sales: [{affiliate_name, commission, occurred_at}] } }
      */
     public function overview(Request $request): JsonResponse
@@ -270,6 +271,23 @@ class EmbeddedSetupController extends ApiController
         $totalCommissionCents = (int) $commissionQuery->sum('amount_cents');
         $firstEntry = $commissionQuery->select('currency_code')->first();
         $currencyCode = $firstEntry ? (string) $firstEntry->currency_code : 'AUD';
+
+        $thirtyDaysAgo = now()->subDays(30);
+
+        // Commissions earned in the last 30 days (pending + approved).
+        $commission30dCents = (int) CommissionLedgerEntry::where('brand_professional_id', $professionalId)
+            ->whereIn('status', ['pending', 'approved'])
+            ->where('occurred_at', '>=', $thirtyDaysAgo)
+            ->sum('amount_cents');
+
+        // Revenue generated through affiliates in the last 30 days.
+        // line_price_post_discount is stored in dollars in calculation_metadata;
+        // multiply by 100 to get cents for a consistent money representation.
+        $revenue30dCents = (int) CommissionLedgerEntry::where('brand_professional_id', $professionalId)
+            ->whereIn('status', ['pending', 'approved'])
+            ->where('occurred_at', '>=', $thirtyDaysAgo)
+            ->selectRaw("COALESCE(SUM((calculation_metadata->>'line_price_post_discount')::NUMERIC * 100), 0) as revenue_cents")
+            ->value('revenue_cents');
 
         // Last 5 sales with affiliate display name from related Professional record.
         $recentSales = CommissionLedgerEntry::with('affiliateProfessional:id,display_name')
@@ -291,6 +309,8 @@ class EmbeddedSetupController extends ApiController
             'affiliate_count'        => $affiliateCount,
             'total_commission_cents' => $totalCommissionCents,
             'currency_code'          => $currencyCode,
+            'commission_30d_cents'   => $commission30dCents,
+            'revenue_30d_cents'      => $revenue30dCents,
             'recent_sales'           => $recentSales,
         ]);
     }
