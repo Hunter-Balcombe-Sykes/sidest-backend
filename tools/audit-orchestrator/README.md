@@ -10,22 +10,24 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# (Or install globally with pipx so the `audit` command works anywhere:)
+# (Or install globally with pipx so the `audit-orch` command works anywhere:)
 pipx install ./tools/audit-orchestrator
 ```
+
+The CLI command is **`audit-orch`** (not `audit` — that name collides with the macOS BSM auditing subsystem at `/usr/sbin/audit`).
 
 ## Usage
 
 ```bash
 # From the backend repo root:
-audit add B5 B10                    # queue specific items / bundles
-audit add suggest --count 8         # queue auto-recommended items
-audit suggest                       # preview recommendations without enqueuing
-audit queue                         # show what's queued
-audit clear                         # empty the queue
-audit status                        # one-line summary
+audit-orch add B5 B10                    # queue specific items / bundles
+audit-orch add suggest --count 8         # queue auto-recommended items
+audit-orch suggest                       # preview recommendations without enqueuing
+audit-orch queue                         # show what's queued
+audit-orch clear                         # empty the queue
+audit-orch status                        # one-line summary
 
-audit                               # open the TUI; F3 picks mode and starts runner
+audit-orch                               # open the TUI; F3 picks mode and starts runner
 ```
 
 ## Two modes
@@ -45,7 +47,7 @@ See `docs/superpowers/specs/2026-05-02-audit-orchestrator-design.md` for the ful
 
 ## Audit format
 
-The tool parses any markdown file matching `pilot-*.md` or `audit-*.md` (or files explicitly added via `audit sources add`). Format spec: `docs/audit-conventions.md`.
+The tool parses any markdown file matching `pilot-*.md` or `audit-*.md` (or files explicitly added via `audit-orch sources add`). Format spec: `docs/audit-conventions.md`.
 
 ## Configuration
 
@@ -65,11 +67,11 @@ overrides:                   # per-item classification overrides
 
 Each `claude` invocation by the orchestrator uses whatever auth is configured for your `claude` CLI. If you're on a Max subscription, every overnight run burns Max quota (which you may want to preserve for daytime work).
 
-To bill orchestrator-spawned sessions to API instead, export `ANTHROPIC_API_KEY` in the environment of the shell where you run `audit`:
+To bill orchestrator-spawned sessions to API instead, export `ANTHROPIC_API_KEY` in the environment of the shell where you run `audit-orch`:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-audit
+audit-orch
 ```
 
 ## Tests

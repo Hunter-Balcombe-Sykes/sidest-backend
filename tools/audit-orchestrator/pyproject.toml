@@ -22,7 +22,7 @@ dev = [
 ]
 
 [project.scripts]
-audit = "audit_orchestrator.cli:main"
+audit-orch = "audit_orchestrator.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["audit_orchestrator"]
