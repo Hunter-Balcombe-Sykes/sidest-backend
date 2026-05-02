@@ -484,12 +484,16 @@ class EmbeddedSetupController extends ApiController
             'connected_via'                  => 'embedded_wizard',
         ]);
 
-        // Dispatch jobs only on first provision OR when a previous provision had a bad
-        // token (webhook state still 'queued' means the jobs never confirmed success —
-        // e.g. the first run hit a 401 before the token-rotation fix).
+        // Dispatch jobs only on first provision OR when a previous provision appears
+        // incomplete. Two incomplete signals:
+        //   1. webhook state is 'queued' — all jobs likely failed (e.g. bad token)
+        //   2. collection handles are missing — metafields/collections jobs didn't finish
         $existingWebhookState = Arr::get($existingMetadata, 'webhook_registration_state', '');
+        $collectionsIncomplete = empty(Arr::get($existingMetadata, 'active_collection_handle'))
+            && empty(Arr::get($existingMetadata, 'default_collection_handle'));
         $needsJobDispatch = empty($existing?->access_token)
-            || $existingWebhookState === 'queued';
+            || $existingWebhookState === 'queued'
+            || $collectionsIncomplete;
 
         $integration = ProfessionalIntegration::updateOrCreate(
             [
