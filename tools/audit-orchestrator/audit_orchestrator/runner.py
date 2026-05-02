@@ -53,12 +53,16 @@ class Runner:
         self, item_id: str, *, mode: RunMode,
         on_step_change=None,
         on_action=None,
+        should_stop=None,
     ) -> str:
         """Run one queue item end-to-end. Returns outcome string.
 
         Callbacks (called on the runner thread):
           on_step_change(EventKind | None) — fired on monotonic stage transitions
           on_action(ToolCallDetail) — fired for every tool use with file/cmd detail
+          should_stop() -> bool — checked between stream-json events; True
+            terminates the subprocess and the item is marked 'interrupted'
+            (re-runnable, not blocked)
         """
         state = self.state_mgr.load()
         item = state.items.get(item_id)
@@ -83,10 +87,14 @@ class Runner:
         tracker = self._spawn_claude(
             prompt, item_id=item_id,
             on_step_change=on_step_change, on_action=on_action,
+            should_stop=should_stop,
         )
         return self._handle_exit(item_id, tracker, question_file)
 
-    def resume(self, item_id: str, answer: str, *, on_step_change=None, on_action=None) -> str:
+    def resume(
+        self, item_id: str, answer: str, *,
+        on_step_change=None, on_action=None, should_stop=None,
+    ) -> str:
         """Resume a session with the user's answer. Returns outcome string."""
         state = self.state_mgr.load()
         item = state.items.get(item_id)
@@ -97,6 +105,7 @@ class Runner:
         tracker = self._spawn_claude(
             prompt, item_id=item_id, resume_id=item["session_id"],
             on_step_change=on_step_change, on_action=on_action,
+            should_stop=should_stop,
         )
         question_file = self.questions_dir / f"{_safe_id(item_id)}.md"
         return self._handle_exit(item_id, tracker, question_file)
@@ -107,6 +116,7 @@ class Runner:
         resume_id: str | None = None,
         on_step_change=None,
         on_action=None,
+        should_stop=None,
     ) -> StreamEventTracker:
         cmd = ["claude", "--print", "--model", self.config.claude_model,
                "--allowedTools", ",".join(self.config.allowed_tools),
@@ -120,12 +130,22 @@ class Runner:
         # `tail -f` it from any terminal for live visibility.
         log_path = self.logs_dir / f"{_safe_id(item_id)}.jsonl"
         tracker = StreamEventTracker()
+        tracker.was_terminated = False  # set if should_stop fired mid-run
         proc = subprocess.Popen(cmd, cwd=self.repo_root, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, bufsize=1)
         prev_event = None
         with log_path.open("a", encoding="utf-8") as logf:
             if proc.stdout is not None:
                 for line in proc.stdout:
+                    # Cooperative interrupt — checked between every event
+                    if should_stop is not None:
+                        try:
+                            if should_stop():
+                                tracker.was_terminated = True
+                                proc.terminate()
+                                break
+                        except Exception:
+                            pass
                     logf.write(line)
                     logf.flush()
                     detail = tracker.feed_line(line)
@@ -140,13 +160,44 @@ class Runner:
                             on_step_change(tracker.last_event)
                         except Exception:
                             pass
-        proc.wait()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
         tracker.exit_code = proc.returncode
         return tracker
 
     def _handle_exit(self, item_id: str, tracker: StreamEventTracker, question_file: Path) -> str:
         state = self.state_mgr.load()
         item = state.items.get(item_id, {})
+
+        # FIRST: detect interrupts (user pause OR claude usage-limit/error).
+        # These are NOT failures — they should be re-runnable on next launch.
+        # Roll back any uncommitted Claude work so the next run starts clean.
+        was_terminated = getattr(tracker, "was_terminated", False)
+        if was_terminated or tracker.is_usage_limit or tracker.is_error:
+            try:
+                discard_working_changes(self.repo_root)
+            except Exception:
+                pass
+            if was_terminated:
+                reason = "user_paused"
+                msg = "interrupted by user pause"
+            elif tracker.is_usage_limit:
+                reason = "usage_limited"
+                msg = f"hit usage limit: {tracker.error_message or '?'}"
+            else:
+                reason = "claude_error"
+                msg = f"claude error: {tracker.error_message or '?'}"
+            self._mark(
+                item_id,
+                status="interrupted",
+                interrupted_reason=reason,
+                interrupted_message=msg,
+                session_id=tracker.session_id,
+            )
+            return "interrupted"
 
         # Check if Claude wrote a question file before running tests
         if question_file.exists():
@@ -344,12 +395,23 @@ class Runner:
             item = state.items.setdefault(item_id, {})
             for k, v in fields.items():
                 item[k] = v
-            if fields.get("status") in ("done", "blocked"):
+            status = fields.get("status")
+            if status in ("done", "blocked"):
+                # Terminal — pop from queue, log to history
                 state.queue = [q for q in state.queue if q != item_id]
                 state.current_run = None
                 state.history.append({
                     "id": item_id, "ended_at": now_iso(),
-                    "outcome": fields.get("status"),
+                    "outcome": status,
+                })
+            elif status == "interrupted":
+                # NON-terminal — leave in queue for re-attempt. Log to history
+                # so user can see the interruption happened, but include reason.
+                state.current_run = None
+                state.history.append({
+                    "id": item_id, "ended_at": now_iso(),
+                    "outcome": "interrupted",
+                    "reason": fields.get("interrupted_reason", "?"),
                 })
         self.state_mgr.update(mutate)
 

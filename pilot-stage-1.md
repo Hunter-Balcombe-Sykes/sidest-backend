@@ -26,7 +26,7 @@ Each session should open the items in its bundle by ID — the full body still l
 - [x] **B1 — Shopify webhook HMAC + idempotency.** #4-01, #4-06, #4-08, #V5-068. (Optional ride-alongs: #V5-018, #V5-019.) ~3–4h. Same 4–5 webhook controllers, same one-line bug pattern, single Pest sweep that POSTs a forged signature and asserts 401. The audit author already calls this out as a single PR in #4-08. **Don't pull in:** #V5-020 (middleware refactor) or #V5-005 (per-shop secret) — both are architectural and would balloon scope.
 - [x] **B2 — Composer dependency updates + audit step.** #10-01, #10-02, #10-03, #10-04, #10-05, #10-06, #10-07. ~2–3h. All `composer update X` plus one CI workflow change. One composer.lock commit, one CI run. Run `composer audit` first to confirm only these advisories surface; defer any new ones to a second pass.
 - [x] **B3 — Platform-link cap fix.** #CR-001, #CR-011. (Optional follow-up: #V5-049.) ~1h. Same method (`StoreLinkBlockRequest:137`); the audit explicitly tags them as companions. One Pest test creates 7 blocks of one category and asserts the 8th is rejected — covers both.
-- **B4 — Soft-delete filter sweep.** #V5-012, #V5-013, #V5-038, #V5-039, #V5-056. ~4–5h. Identical "add `whereNull('deleted_at')`" pattern across analytics aggregates, observer notifications, public Hydrogen payloads, and 6 raw queries. One reasoning pass; regression tests can share a "soft-delete the parent, assert no leak in any output" fixture. **Watch out:** #V5-012 is GDPR-sensitive — verify the in-flight notification path still tests green.
+- [x] **B4 — Soft-delete filter sweep.** #V5-012, #V5-013, #V5-038, #V5-039, #V5-056. ~4–5h. Identical "add `whereNull('deleted_at')`" pattern across analytics aggregates, observer notifications, public Hydrogen payloads, and 6 raw queries. One reasoning pass; regression tests can share a "soft-delete the parent, assert no leak in any output" fixture. **Watch out:** #V5-012 is GDPR-sensitive — verify the in-flight notification path still tests green.
 - [x] **B5 — Throwable→QueryException narrowing in analytics.** #CR-010, #V5-017. ~1–2h. Same anti-pattern (AUDIT_REPORT.md line 287), two sibling analytics controllers. Lift one helper (catch `QueryException` + check SQLSTATE 42703) across both files.
 - [x] **B6 — Time/currency/money cluster (lens-L).** #V5-024, #V5-025, #V5-026. ~2–3h. All in `CommissionPayoutService` / `CommissionVoidService`. Same domain (UTC vs app-TZ, `occurred_at` vs `created_at`, currency validation). One test: assert cutoffs use UTC, void uses `occurred_at`, currency validates against `shop_currency`. **Don't sweep in:** the broader payout backlog (#V5-007, #V5-008) — different concurrency / idempotency reasoning.
 - [x] **B7 — Cache-key versioning post-deploy.** #CR-008, #V5-036, #V5-037. ~1–2h. All "shape change shipped without bumping cache version." One mental model: enumerate every key impacted, add a version suffix or flush, document the deploy-hygiene rule for next time.
@@ -38,8 +38,8 @@ Each session should open the items in its bundle by ID — the full body still l
 
 - **B9 — `$fillable` mass-assignment cleanup.** #V5-052, #V5-053, #V5-054, #V5-055, #9-001, #9-002, #9-003, #9-004. ~2–3h. Mechanical "remove sensitive cols from `$fillable`" or `$guarded = ['*']`. One Pest test per model asserting un-fillable columns are rejected. **Excludes:** #V5-023 (WebhookEvent payload) — needs schema validation, different reasoning.
 - **B10 — Schedule task `withoutOverlapping`.** #10-08, #10-09. ~0.5–1h. Same file (`routes/console.php`), same one-line modifier.
-- **B11 — R2 orphan cleanup on variant failure.** #V5-043, #V5-044. ~1–2h. Same pattern (cleanup-in-catch or store-after-success), image and video pipelines. One helper, applied twice.
-- **B12 — Image MIME sniff.** #V5-015, #V5-047. ~1–2h. Different files but same defense (finfo MIME check before `getimagesize` / before storage). One helper extracted, two callers updated.
+- [x] **B11 — R2 orphan cleanup on variant failure.** #V5-043, #V5-044. ~1–2h. Same pattern (cleanup-in-catch or store-after-success), image and video pipelines. One helper, applied twice.
+- [x] **B12 — Image MIME sniff.** #V5-015, #V5-047. ~1–2h. Different files but same defense (finfo MIME check before `getimagesize` / before storage). One helper extracted, two callers updated.
 - **B13 — Retry-After / 429 backoff parity.** #V5-032, #V5-034. ~1–2h. Same fix (parse `Retry-After`, multiply by 1000, default 1000ms floor) across Shopify, Square, Fresha API clients.
 - **B14 — Throttle config hardening (P2 only).** #V5-057, #V5-059, #V5-060. ~1–2h. All `AppServiceProvider` rate-limiter config; same reasoning surface. **Do NOT bundle with #V5-001** (P0 TrustProxies) — that needs separate staging verification.
 - **B17 — Square/Fresha job retry hygiene.** #5-03, #5-05. ~1–2h. Both add `$tries` / `$backoff` / `failed()` to Square + Fresha jobs. Mechanical parity work.
@@ -743,7 +743,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** `Rule::exists('blocks', 'id')` searches default schema. Blocks live in `site.blocks`. Behavior depends on search_path.
     - **Source:** v5 audit (discovery_lens: domain-subagent-6; in_scope_v4: no).
 
-- [ ] **#V5-015** · P1 — Image bomb defense uses getimagesize on unverified content
+- [x] **#V5-015** · P1 — Image bomb defense uses getimagesize on unverified content
     - **Where:** app/Services/Media/ImageVariantService.php:347-373
     - **Affects:** Image upload pipeline; worker memory exhaustion from crafted bomb files.
     - **Effort:** S (~1h)
@@ -1073,7 +1073,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Video container parameters trusted from client; bad container blows up the transcode worker.
     - **Source:** v5 audit (discovery_lens: domain-subagent-7; in_scope_v4: yes).
 
-- [ ] **#V5-043** · P2 — Image variant job failure orphans the original on R2
+- [x] **#V5-043** · P2 — Image variant job failure orphans the original on R2
     - **Where:** app/Jobs/ProcessImageVariantsJob.php:48-152
     - **Effort:** S (~1h)
     - **What to do:**
@@ -1081,7 +1081,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** R2 storage bloat from orphaned originals on failed variant processing.
     - **Source:** v5 audit (discovery_lens: domain-subagent-7; in_scope_v4: yes).
 
-- [ ] **#V5-044** · P2 — Video variant job failure orphans the original on R2 (large files)
+- [x] **#V5-044** · P2 — Video variant job failure orphans the original on R2 (large files)
     - **Where:** app/Jobs/ProcessVideoVariantsJob.php:53-163
     - **Effort:** S (~1h)
     - **What to do:**
@@ -1105,7 +1105,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Worker time wasted on too-long videos; should reject at upload.
     - **Source:** v5 audit (discovery_lens: domain-subagent-7; in_scope_v4: yes).
 
-- [ ] **#V5-047** · P2 — BrandDesignMediaService brand-logo path also lacks MIME sniffing
+- [x] **#V5-047** · P2 — BrandDesignMediaService brand-logo path also lacks MIME sniffing
     - **Where:** app/Services/Media/BrandDesignMediaService.php:32-91
     - **Effort:** S (~0.5h)
     - **What to do:**

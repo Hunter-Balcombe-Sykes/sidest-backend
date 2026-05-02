@@ -35,6 +35,7 @@ class ItemStatus(str, Enum):
     AWAITING_ANSWER = "awaiting_answer"
     DONE = "done"
     BLOCKED = "blocked"
+    INTERRUPTED = "interrupted"  # paused by user OR hit usage limit; re-runnable
 
 
 @dataclass

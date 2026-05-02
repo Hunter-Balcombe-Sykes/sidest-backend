@@ -141,8 +141,10 @@ function fakeBrandDesignJobShopify(?array $brandColors = null): void
                 'value' => json_encode(['current' => ['buttons_radius' => 8]]),
             ],
         ]),
+        // Minimal valid 1×1 PNG — finfo::buffer() requires a complete PNG structure
+        // (signature + IHDR chunk), not just the magic-byte prefix.
         'cdn.shopify.com/*' => Http::response(
-            "\x89PNG\r\n\x1a\nfakebytes",
+            base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVQI12NgAAAAAgAB4iG8MwAAAABJRU5ErkJggg=='),
             200,
             ['Content-Type' => 'image/png']
         ),

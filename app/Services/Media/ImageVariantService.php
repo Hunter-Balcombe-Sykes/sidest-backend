@@ -21,6 +21,8 @@ use Illuminate\Support\Facades\Storage;
 // V2: Generates WebP image variants from uploads via GD. Content-hashed storage on Cloudflare R2 with adaptive quality targeting.
 class ImageVariantService
 {
+    private const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+
     /* ------------------------------------------------------------------ */
     /*  Public API */
     /* ------------------------------------------------------------------ */
@@ -346,6 +348,15 @@ class ImageVariantService
      */
     private function loadImage(string $path): \GdImage|false
     {
+        // Sniff actual bytes before getimagesize — prevents a crafted file from
+        // claiming a safe format while hiding a decompression bomb in its content stream.
+        $actualMime = (new \finfo(FILEINFO_MIME_TYPE))->file($path);
+        if (! in_array($actualMime, self::ALLOWED_IMAGE_MIMES, true)) {
+            throw new UnprocessableImageException(
+                "Rejected: MIME type '{$actualMime}' is not an accepted image format."
+            );
+        }
+
         $info = @getimagesize($path);
         if (! $info) {
             return false;

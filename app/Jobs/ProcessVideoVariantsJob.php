@@ -140,6 +140,21 @@ class ProcessVideoVariantsJob implements ShouldQueue
     public function failed(Throwable $e): void
     {
         $this->markFailed($e->getMessage());
+        $this->cleanupR2Artifacts();
+    }
+
+    // Delete the original (and any partial variants) from R2 after terminal failure
+    // so orphaned files don't accumulate on the media disk indefinitely.
+    private function cleanupR2Artifacts(): void
+    {
+        try {
+            app(VideoVariantService::class)->deleteVariants($this->mediaId, $this->basePath);
+        } catch (Throwable $e) {
+            Log::warning('ProcessVideoVariantsJob: R2 orphan cleanup failed.', [
+                'media_id' => $this->mediaId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function markFailed(string $reason): void

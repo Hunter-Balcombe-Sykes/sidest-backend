@@ -20,6 +20,8 @@ class BrandDesignMediaService
 {
     public const PLACEHOLDER_MAX = 5;
 
+    private const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+
     public function __construct(
         private readonly ImageVariantService $images,
     ) {}
@@ -32,6 +34,9 @@ class BrandDesignMediaService
     public function upsertLogoFromUploadedFile(Site $site, string $proId, UploadedFile $file, string $variant): SiteMedia
     {
         $purpose = $this->purposeForLogoVariant($variant);
+
+        // finfo against actual bytes — getMimeType() trusts the client Content-Type header.
+        $this->assertMimeAllowed((new \finfo(FILEINFO_MIME_TYPE))->file($file->getRealPath()));
 
         $media = $this->createDesignRow($site, $purpose, $file->getMimeType(), $file->getSize(), 0);
 
@@ -63,6 +68,9 @@ class BrandDesignMediaService
     public function upsertLogoFromBytes(Site $site, string $proId, string $bytes, string $mime, string $variant): SiteMedia
     {
         $purpose = $this->purposeForLogoVariant($variant);
+
+        // finfo against actual bytes — $mime comes from Shopify CDN headers, not verified.
+        $this->assertMimeAllowed((new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes));
 
         $media = $this->createDesignRow($site, $purpose, $mime, strlen($bytes), 0);
 
@@ -96,6 +104,8 @@ class BrandDesignMediaService
      */
     public function addPlaceholder(Site $site, string $proId, UploadedFile $file): SiteMedia
     {
+        $this->assertMimeAllowed((new \finfo(FILEINFO_MIME_TYPE))->file($file->getRealPath()));
+
         $media = DB::transaction(function () use ($site, $file) {
             $activeCount = SiteMedia::query()
                 ->where('site_id', $site->id)
@@ -309,6 +319,15 @@ class BrandDesignMediaService
     /* ------------------------------------------------------------------ */
     /*  Internal helpers */
     /* ------------------------------------------------------------------ */
+
+    private function assertMimeAllowed(string $actual): void
+    {
+        if (! in_array($actual, self::ALLOWED_IMAGE_MIMES, true)) {
+            throw new UnprocessableImageException(
+                "Rejected: MIME type '{$actual}' is not an accepted image format."
+            );
+        }
+    }
 
     private function purposeForLogoVariant(string $variant): string
     {

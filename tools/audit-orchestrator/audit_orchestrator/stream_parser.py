@@ -59,6 +59,10 @@ class StreamEventTracker:
         self.detail_history: list[ToolCallDetail] = []
         self.assistant_text: list[str] = []
         self.lines_seen: int = 0
+        self.result_event: dict | None = None
+        self.is_error: bool = False
+        self.error_message: str | None = None
+        self.is_usage_limit: bool = False
 
     def feed_line(self, line: str) -> ToolCallDetail | None:
         """Process one stdout line. Returns ToolCallDetail if it was a tool
@@ -75,6 +79,30 @@ class StreamEventTracker:
 
         if self.session_id is None and isinstance(event, dict):
             self.session_id = event.get("session_id") or self.session_id
+
+        # Capture the final result event (Claude's exit summary). If it
+        # indicates an error, classify the cause — usage limits look very
+        # different from real failures and need to be re-runnable.
+        if isinstance(event, dict) and event.get("type") == "result":
+            self.result_event = event
+            if event.get("is_error") or event.get("subtype") == "error":
+                self.is_error = True
+                # Stitch together whatever error info Claude provided
+                bits: list[str] = []
+                for k in ("api_error_status", "result", "error", "terminal_reason"):
+                    v = event.get(k)
+                    if v:
+                        bits.append(str(v))
+                self.error_message = " · ".join(bits) or "unknown error"
+                # Detect usage-limit signals (substring match across known phrasings)
+                lower = self.error_message.lower()
+                if any(kw in lower for kw in (
+                    "rate_limit", "rate limit",
+                    "usage limit", "quota",
+                    "max_tokens", "token limit",
+                    "credit", "billing",
+                )):
+                    self.is_usage_limit = True
 
         text = self._extract_assistant_text(event)
         if text:
