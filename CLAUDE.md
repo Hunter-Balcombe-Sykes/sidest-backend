@@ -123,6 +123,14 @@ Comment enough that a reader (Tobias, frontend Claude, future-you) can understan
 
 When in doubt, ask: "if I deleted this comment, would a new dev have to read 3 other files to understand?" If yes, keep it.
 
+## Audit Findings
+
+When generating audit / review markdown (e.g., `pilot-stage-*.md`, `audit-*.md`, post-`/ultrareview` outputs), follow the format in [`docs/audit-conventions.md`](docs/audit-conventions.md).
+
+The format is load-bearing: the audit orchestrator tool (`audit` CLI) parses these files to feed unattended fix sessions. Required: top-level `- [ ]` checkbox + `**#ID**` + tier marker + Effort tag + Where/Affects/What to do fields. Bundles go under `## Suggested Bundled Sessions`. Items that should not run unattended go under `### Standalone — do NOT bundle`.
+
+Companion files (`*-executive-summary.md`, `audit-ledger-*.md`, `*-legal-coding.md`) are not parsed — only files with the item-list structure are.
+
 ## Workflow
 
 ### Plan First
