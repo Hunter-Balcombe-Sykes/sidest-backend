@@ -715,7 +715,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Webhook handler covers 6 event types but not `account.deauthorize`. Dashboard-revoked accounts continue to appear active locally; payout job retries forever.
     - **Source:** v5 audit (discovery_lens: domain-subagent-3-pass2; in_scope_v4: no).
 
-- [ ] **#V5-012** · P1 — Email job queries soft-deleted professionals — sends to deleted accounts (GDPR risk)
+- [x] **#V5-012** · P1 — Email job queries soft-deleted professionals — sends to deleted accounts (GDPR risk)
     - **Where:** app/Jobs/Notifications/SendTransactionalNotificationEmailJob.php:72-74
     - **Affects:** All transactional notifications post-deletion (GDPR/Privacy Act).
     - **Effort:** S (~0.5h)
@@ -725,7 +725,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** When a professional is soft-deleted, queued emails already sitting in the queue still go out to their inbox afterwards. Add a deleted-at check in the job lookup.
     - **Source:** v5 audit (discovery_lens: lens-G-soft-delete-sweep; in_scope_v4: no).
 
-- [ ] **#V5-013** · P1 — Analytics aggregates include soft-deleted professionals
+- [x] **#V5-013** · P1 — Analytics aggregates include soft-deleted professionals
     - **Where:** app/Services/Analytics/SiteAnalyticsAggregateService.php:34-56
     - **Affects:** Aggregate analytics rebuild — processes deleted-user data (GDPR/Privacy Act).
     - **Effort:** M (~2h)
@@ -1041,7 +1041,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Lens E concluded `analyticsSummaryVersion` auto-bumps on writes — verify this resolves for the recent top_links/top_sections shape change.
     - **Source:** v5 audit (discovery_lens: domain-subagent-6; in_scope_v4: no).
 
-- [ ] **#V5-038** · P2 — Hydrogen affiliate payload doesn't filter soft-deleted blocks
+- [x] **#V5-038** · P2 — Hydrogen affiliate payload doesn't filter soft-deleted blocks
     - **Where:** app/Http/Controllers/Api/Internal/HydrogenAffiliateController.php:314-318
     - **Effort:** S (~1-2h)
     - **What to do:**
@@ -1049,7 +1049,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Soft-deleted blocks are returned to the storefront via Hydrogen's affiliate endpoint.
     - **Source:** v5 audit (discovery_lens: domain-subagent-6; in_scope_v4: no).
 
-- [ ] **#V5-039** · P2 — top_links/top_sections JOIN doesn't exclude soft-deleted blocks
+- [x] **#V5-039** · P2 — top_links/top_sections JOIN doesn't exclude soft-deleted blocks
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalAnalyticsController.php:283-343
     - **Effort:** S (~0.5h)
     - **What to do:**
@@ -1169,7 +1169,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Audit timestamps are server-controlled — should not be mass-assignable.
     - **Source:** v5 audit (discovery_lens: domain-subagent-9-pass2; in_scope_v4: no).
 
-- [ ] **#V5-056** · P2 — 6 raw queries on core.professionals don't filter deleted_at (lensG bundle, excluding lensG-004 which is #V5-012)
+- [x] **#V5-056** · P2 — 6 raw queries on core.professionals don't filter deleted_at (lensG bundle, excluding lensG-004 which is #V5-012)
     - **Where:**
         - app/Http/Controllers/Api/Staff/Analytics/BrandCommerceAnalyticsController.php:64-68
         - app/Http/Controllers/Api/Staff/StaffStatsController.php:15-18
