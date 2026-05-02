@@ -200,10 +200,26 @@ class Runner:
             self._mark(item_id, status="blocked", blocked_reason=f"push failed: {e}")
             return "blocked"
 
-        # Tick checkbox in source markdown
+        # Tick checkboxes in source markdown — for a bundle, tick every member;
+        # for a standalone item, tick the item itself. Then commit + push the
+        # markdown change so the next run starts from a clean working tree.
         source = item.get("source")
         if source:
-            tick_checkbox_for_item(self.repo_root / source, item_id)
+            source_path = self.repo_root / source
+            ticked: list[str] = []
+            if item.get("is_bundle"):
+                for member_id in item.get("members", []):
+                    if tick_checkbox_for_item(source_path, member_id):
+                        ticked.append(member_id)
+            else:
+                if tick_checkbox_for_item(source_path, item_id):
+                    ticked.append(item_id)
+
+            if ticked:
+                try:
+                    self._commit_and_push_tick(item_id, source, ticked)
+                except Exception:
+                    pass  # Best-effort; the markdown is still ticked locally
 
         # Write the completion record (Claude's body + our frontmatter + Q&A)
         question_files = [question_file] if question_file.exists() else []
@@ -225,6 +241,33 @@ class Runner:
 
         self._mark(item_id, status="done", completed_at=now_iso(), session_id=tracker.session_id)
         return "pushed"
+
+    def _commit_and_push_tick(self, item_id: str, source: str, ticked_ids: list[str]) -> None:
+        """Commit the markdown checkbox flips as a separate `chore(audit): ...`
+        commit and push to the configured branch. Keeps the working tree clean
+        for the next run's pre-push check."""
+        subprocess.run(
+            ["git", "add", source], cwd=self.repo_root, check=True, capture_output=True,
+        )
+        # Skip if nothing actually staged (no real change)
+        diff_check = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"], cwd=self.repo_root,
+        )
+        if diff_check.returncode == 0:
+            return  # nothing to commit
+
+        ids_text = ", ".join(ticked_ids)
+        msg = (
+            f"chore(audit): mark {item_id} done in {source}\n\n"
+            f"Checks off {ids_text} after the orchestrator-completed fix."
+        )
+        subprocess.run(
+            ["git", "commit", "-m", msg], cwd=self.repo_root, check=True, capture_output=True,
+        )
+        try:
+            push_to_remote(self.repo_root, branch=self.config.push_target)
+        except RuntimeError:
+            pass  # Push failure is logged but shouldn't fail the run
 
     def _files_in_commit(self, sha: str | None) -> list[str]:
         """Return list of paths touched by a commit (using git show --name-only)."""

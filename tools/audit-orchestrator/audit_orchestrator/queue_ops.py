@@ -95,6 +95,10 @@ def populate_item_metadata(
         # Standalone item lookup
         for item in r.items:
             if item.id == item_id:
+                # Honor the markdown's done state — if the user (or a previous
+                # run) already ticked [x], record it as done so the runner skips
+                # rather than re-attempting a completed fix.
+                already_done = item.status == ItemStatus.DONE
                 state.items[item_id] = {
                     "id": item.id,
                     "title": item.title,
@@ -103,7 +107,7 @@ def populate_item_metadata(
                     "effort": item.effort.value,
                     "body_markdown": item.body_markdown,
                     "bundle": item.bundle,
-                    "status": ItemStatus.PENDING.value,
+                    "status": ItemStatus.DONE.value if already_done else ItemStatus.PENDING.value,
                     "is_bundle": False,
                 }
                 return True
@@ -128,6 +132,13 @@ def populate_item_metadata(
                         body_parts.append(member.body_markdown)
                     body_parts.append("")
 
+                # Bundle is "done" only if EVERY member is already ticked
+                all_members_done = bool(bundle.members) and all(
+                    item_by_id.get(m) is not None
+                    and item_by_id[m].status == ItemStatus.DONE
+                    for m in bundle.members
+                )
+
                 state.items[item_id] = {
                     "id": bundle.id,
                     "title": bundle.title,
@@ -136,7 +147,7 @@ def populate_item_metadata(
                     "effort": "bundle",
                     "body_markdown": "\n".join(body_parts).strip(),
                     "members": list(bundle.members),
-                    "status": ItemStatus.PENDING.value,
+                    "status": ItemStatus.DONE.value if all_members_done else ItemStatus.PENDING.value,
                     "is_bundle": True,
                 }
                 return True
