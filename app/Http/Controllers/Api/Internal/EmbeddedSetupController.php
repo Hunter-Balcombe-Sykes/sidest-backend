@@ -318,7 +318,13 @@ class EmbeddedSetupController extends ApiController
     // ── Domain Verification ──────────────────────────────────────────────────
 
     /**
-     * Return the current custom domain verification status for this brand.
+     * Return the current domain verification status for this brand.
+     *
+     * Handles both modes:
+     *   - platform: brand.sidest.co — live once domain_wizard_complete and
+     *     domain_txt_confirmed, verifying if only CNAME provisioned, else pending.
+     *   - custom: brand-supplied domain — live after TLS, verifying after
+     *     ownership verified, else pending.
      *
      * @return JsonResponse { data: { status: 'pending'|'verifying'|'live'|'error', domain: string } }
      */
@@ -328,7 +334,27 @@ class EmbeddedSetupController extends ApiController
 
         $settings = BrandStoreSettings::where('professional_id', $professionalId)->first();
 
-        if (! $settings || $settings->domain_mode !== 'custom' || ! $settings->custom_domain) {
+        if (! $settings) {
+            return $this->success(['status' => 'pending', 'domain' => '']);
+        }
+
+        // Platform domain — derive status from wizard completion flags.
+        if ($settings->domain_mode === 'platform') {
+            $site = Site::where('professional_id', $professionalId)->first();
+            $platformDomain = $site?->subdomain ? "{$site->subdomain}.sidest.co" : '';
+
+            if (! $settings->domain_wizard_complete) {
+                return $this->success(['status' => 'pending', 'domain' => $platformDomain]);
+            }
+
+            // CNAME exists; TXT confirmed = live, otherwise verifying.
+            $status = $settings->domain_txt_confirmed ? 'live' : 'verifying';
+
+            return $this->success(['status' => $status, 'domain' => $platformDomain]);
+        }
+
+        // Custom domain.
+        if ($settings->domain_mode !== 'custom' || ! $settings->custom_domain) {
             return $this->success(['status' => 'pending', 'domain' => '']);
         }
 
