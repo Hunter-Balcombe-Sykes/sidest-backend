@@ -359,9 +359,11 @@ class EmbeddedSetupController extends ApiController
 
         $subdomain = (string) $site->subdomain;
 
-        // Create (or confirm existing) CNAME: {subdomain}.sidest.co → shops.myshopify.com
+        // CNAME: {subdomain}.sidest.co → shops.myshopify.com, DNS-only (proxied=false).
+        // Shopify Oxygen does not support Cloudflare's proxy — it needs a direct CNAME.
+        // upsertCname handles existing records so re-running fixes a previously proxied record.
         $dns = new CloudflareDnsService;
-        $dns->ensureCname($subdomain, 'shops.myshopify.com', true);
+        $dns->upsertCname($subdomain, 'shops.myshopify.com', false);
 
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],

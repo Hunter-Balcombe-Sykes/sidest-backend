@@ -66,6 +66,84 @@ class CloudflareDnsService
     }
 
     /**
+     * Create or update a CNAME record, including flipping the proxied flag.
+     * Unlike ensureCname (which skips if it exists), this patches an existing
+     * record when its target or proxied setting differs — needed when a record
+     * was previously created with the wrong settings (e.g. proxied=true for
+     * Shopify Oxygen, which requires DNS-only / proxied=false).
+     */
+    public function upsertCname(string $name, string $target, bool $proxied = false): ?string
+    {
+        if (! $this->hasCredentials()) {
+            return null;
+        }
+
+        $existing = $this->findRecord('CNAME', $name);
+
+        if ($existing !== null) {
+            if ($existing['content'] === $target) {
+                // Check proxied state — requires a fresh fetch as findRecord doesn't return it.
+                $response = Http::withToken($this->apiToken)
+                    ->patch($this->zonesUrl("/dns_records/{$existing['id']}"), [
+                        'proxied' => $proxied,
+                    ]);
+
+                if (! $response->successful()) {
+                    Log::error('CloudflareDnsService: failed to update CNAME proxied state.', [
+                        'name'   => $name,
+                        'status' => $response->status(),
+                        'body'   => $response->body(),
+                    ]);
+
+                    return null;
+                }
+
+                return $existing['id'];
+            }
+
+            $response = Http::withToken($this->apiToken)
+                ->patch($this->zonesUrl("/dns_records/{$existing['id']}"), [
+                    'content' => $target,
+                    'proxied' => $proxied,
+                ]);
+
+            if (! $response->successful()) {
+                Log::error('CloudflareDnsService: failed to update CNAME record.', [
+                    'name'   => $name,
+                    'status' => $response->status(),
+                    'body'   => $response->body(),
+                ]);
+
+                return null;
+            }
+
+            return $existing['id'];
+        }
+
+        $response = Http::withToken($this->apiToken)
+            ->post($this->zonesUrl('/dns_records'), [
+                'type'    => 'CNAME',
+                'name'    => $name,
+                'content' => $target,
+                'proxied' => $proxied,
+                'ttl'     => 1,
+            ]);
+
+        if (! $response->successful()) {
+            Log::error('CloudflareDnsService: failed to create CNAME record.', [
+                'name'   => $name,
+                'target' => $target,
+                'status' => $response->status(),
+                'body'   => $response->body(),
+            ]);
+
+            return null;
+        }
+
+        return (string) $response->json('result.id', '');
+    }
+
+    /**
      * Ensure a TXT record exists.
      * Used for Shopify domain verification challenges.
      * Returns the Cloudflare record ID, or null on error / dev mode.
