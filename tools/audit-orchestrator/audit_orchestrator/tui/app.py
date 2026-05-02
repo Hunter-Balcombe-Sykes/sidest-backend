@@ -12,7 +12,7 @@ from audit_orchestrator.tui.modals import ModePicker, QuestionModal, HelpModal, 
 from audit_orchestrator.runner import Runner, RunMode, now_iso
 from audit_orchestrator.config import load_config
 from audit_orchestrator.state import StateManager
-from audit_orchestrator.tui.watcher import watch
+from audit_orchestrator.tui.watcher import watch, watch_glob
 
 
 class AuditApp(App):
@@ -42,21 +42,37 @@ class AuditApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._refresh_panels()
-        self._observer = watch(
-            self.work_dir / "state.json",
-            lambda: self.call_from_thread(self._refresh_panels),
-        )
         self._mode: str | None = None
         self._runner_thread: threading.Thread | None = None
         self._stop_runner = threading.Event()
         self._config = load_config(self.work_dir / "config.yml")
-        self._log("TUI ready. Press F3 to pick a mode and start the runner.")
+
+        self._refresh_panels()
+
+        # Watch state.json for queue/status changes
+        self._state_observer = watch(
+            self.work_dir / "state.json",
+            lambda: self.call_from_thread(self._refresh_panels),
+        )
+        # Watch repo root for new/edited audit files (auto-discovers
+        # pilot-*.md and audit-*.md added during the session, and detects
+        # when a user ticks a checkbox in an existing audit markdown)
+        self._audit_observer = watch_glob(
+            self.repo_root,
+            ["pilot-*.md", "audit-*.md"],
+            lambda: self.call_from_thread(self._refresh_panels),
+        )
+        self._log("TUI ready. Press F1 for help, F2 to browse, F3 to pick a mode.")
 
     def on_unmount(self) -> None:
-        if hasattr(self, "_observer"):
-            self._observer.stop()
-            self._observer.join(timeout=1)
+        for attr in ("_state_observer", "_audit_observer"):
+            obs = getattr(self, attr, None)
+            if obs is not None:
+                try:
+                    obs.stop()
+                    obs.join(timeout=1)
+                except Exception:
+                    pass
 
     def _refresh_panels(self) -> None:
         from audit_orchestrator.parser import parse_audit_file
