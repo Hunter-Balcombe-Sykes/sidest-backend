@@ -59,15 +59,33 @@ class AuditApp(App):
             self._observer.join(timeout=1)
 
     def _refresh_panels(self) -> None:
+        from audit_orchestrator.parser import parse_audit_file
+        from audit_orchestrator.models import ItemStatus
+        from audit_orchestrator.tui.modals import _gather_sources, _short_source
+
         state = self.state_mgr.load()
 
+        # Progress panel: per-source done/total from re-parsed markdown
         try:
             detail = self.query_one("#progress-detail", Static)
-            done = sum(1 for v in state.items.values() if v.get("status") == "done")
-            total = len(state.items) or 1
-            detail.update(f"{done}/{total} items done · queue: {len(state.queue)}")
-        except Exception:
-            pass
+            sources = _gather_sources(self._config, self.repo_root)
+            if not sources:
+                detail.update(f"No audit files found · queue: {len(state.queue)}")
+            else:
+                lines = []
+                for p in sources:
+                    r = parse_audit_file(p)
+                    done = sum(1 for i in r.items if i.status == ItemStatus.DONE)
+                    total = len(r.items) or 1
+                    pct = int(100 * done / total)
+                    lines.append(f"{_short_source(r.source_filename):>5}: {done:>3}/{total:<3} ({pct}%)")
+                lines.append(f"queue: {len(state.queue)}")
+                detail.update("\n".join(lines))
+        except Exception as e:
+            try:
+                self.query_one("#progress-detail", Static).update(f"(progress error: {e})")
+            except Exception:
+                pass
 
         try:
             running = self.query_one(NowRunningPanel)

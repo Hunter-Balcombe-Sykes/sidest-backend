@@ -208,8 +208,31 @@ def _build_classifier_ctx(config, parse_results) -> ClassifierContext:
     return ctx
 
 
+def _short_source(filename: str) -> str:
+    """pilot-stage-1.md → 'S1'; pilot-stage-2.md → 'S2'; audit-2026-08.md → 'A26-08'."""
+    stem = filename.removesuffix(".md")
+    if stem.startswith("pilot-stage-"):
+        return "S" + stem.removeprefix("pilot-stage-")
+    if stem.startswith("audit-"):
+        return "A" + stem.removeprefix("audit-")
+    return stem[:6]
+
+
+def _bundle_done_status(members: list, item_status_done: dict[str, bool]) -> tuple[bool, int, int]:
+    """Return (all_done, done_count, total)."""
+    if not members:
+        return False, 0, 0
+    done_count = sum(1 for m in members if item_status_done.get(m.id, False))
+    return done_count == len(members), done_count, len(members)
+
+
 class QueueBrowser(ModalScreen[None]):
-    """Browse all parsed items + bundles. Toggle queue membership with Enter or Space."""
+    """Browse all parsed items + bundles. Toggle queue membership with Enter or Space.
+
+    Filters (toggleable via keys):
+      [s] show ✗ skip items
+      [d] show items already done (markdown checkbox - [x])
+    """
 
     BINDINGS = [
         Binding("escape", "close", "Close"),
@@ -224,12 +247,14 @@ class QueueBrowser(ModalScreen[None]):
         self.repo_root = repo_root
         self.state_mgr = StateManager(work_dir / "state.json")
         self._row_ids: list[str] = []  # row index → item/bundle id
-        self._show_skip = False         # filter: show ✗ skip items?
+        self._show_skip = False
+        self._show_done = False
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(
-                "Queue Browser — Space/Enter to toggle, [s] toggle skip-filter, Esc to close",
+                "Queue Browser — Space/Enter toggle queue · "
+                "[s] show skip · [d] show done · Esc close",
                 id="qb-title",
             ),
             DataTable(id="qb-table", cursor_type="row", zebra_stripes=True),
@@ -239,10 +264,12 @@ class QueueBrowser(ModalScreen[None]):
 
     def on_mount(self) -> None:
         table = self.query_one("#qb-table", DataTable)
-        table.add_columns("Q", "ID", "Title", "Tier", "Eff", "Class")
+        table.add_columns("Q", "Src", "ID", "Title", "Tier", "Eff", "Class", "Done")
         self._populate()
 
     def _populate(self) -> None:
+        from audit_orchestrator.models import ItemStatus  # local to avoid TUI module bloat
+
         config = load_config(self.work_dir / "config.yml")
         sources = _gather_sources(config, self.repo_root)
 
@@ -265,39 +292,61 @@ class QueueBrowser(ModalScreen[None]):
 
         total_items = 0
         total_bundles = 0
+        total_done_items = 0
+        total_done_bundles = 0
 
         for r in parse_results:
+            src_short = _short_source(r.source_filename)
             item_by_id = {i.id: i for i in r.items}
+            done_map = {i.id: i.status == ItemStatus.DONE for i in r.items}
 
             for bundle in r.bundles:
                 members = [item_by_id[m] for m in bundle.members if m in item_by_id]
                 cls = classify_bundle(bundle, members, ctx)
+                all_done, done_count, total = _bundle_done_status(members, done_map)
+                if all_done:
+                    total_done_bundles += 1
                 if cls == Classification.SKIP and not self._show_skip:
                     continue
-                self._add_row(table, bundle.id, bundle.title, "—", "bun", cls, queued)
+                if all_done and not self._show_done:
+                    continue
+                done_label = "✅" if all_done else (f"{done_count}/{total}" if done_count > 0 else "")
+                self._add_row(
+                    table, bundle.id, bundle.title, src_short,
+                    "—", "bun", cls, queued, done_label,
+                )
                 total_bundles += 1
 
             for item in r.items:
                 if item.bundle is not None:
-                    continue  # member of a bundle — shown as the bundle row
+                    continue
                 cls = classify_item(item, ctx)
+                is_done = done_map.get(item.id, False)
+                if is_done:
+                    total_done_items += 1
                 if cls == Classification.SKIP and not self._show_skip:
                     continue
+                if is_done and not self._show_done:
+                    continue
+                done_label = "✅" if is_done else ""
                 self._add_row(
-                    table, item.id, item.title,
-                    item.tier.value, item.effort.value, cls, queued,
+                    table, item.id, item.title, src_short,
+                    item.tier.value, item.effort.value, cls, queued, done_label,
                 )
                 total_items += 1
 
-        skip_label = "showing ✗ skip" if self._show_skip else "hiding ✗ skip (press s)"
+        skip_label = "showing skip" if self._show_skip else "hiding skip (s)"
+        done_label = "showing done" if self._show_done else "hiding done (d)"
         self.query_one("#qb-status", Static).update(
-            f"{total_bundles} bundles · {total_items} standalone items · "
-            f"queue: {len(queued)} · {skip_label}"
+            f"{total_bundles} bundles · {total_items} standalone · "
+            f"done: {total_done_bundles} bundles + {total_done_items} items · "
+            f"queue: {len(queued)} · {skip_label} · {done_label}"
         )
 
     def _add_row(
-        self, table: DataTable, item_id: str, title: str,
+        self, table: DataTable, item_id: str, title: str, src: str,
         tier: str, effort: str, cls: Classification, queued: set[str],
+        done_label: str,
     ) -> None:
         check = "✓" if item_id in queued else " "
         badge = {
@@ -305,16 +354,17 @@ class QueueBrowser(ModalScreen[None]):
             Classification.CAUTION: "⚠",
             Classification.SKIP: "✗",
         }.get(cls, "?")
-        # Truncate title if very long
-        title_trunc = title if len(title) <= 70 else title[:67] + "..."
-        table.add_row(check, item_id, title_trunc, tier, effort, badge)
+        title_trunc = title if len(title) <= 60 else title[:57] + "..."
+        table.add_row(check, src, item_id, title_trunc, tier, effort, badge, done_label)
         self._row_ids.append(item_id)
 
     def on_key(self, event) -> None:
-        # Catch the "s" toggle for the skip-filter (separate from BINDINGS so we
-        # can rely on the runtime key event rather than a global binding)
         if event.key == "s":
             self._show_skip = not self._show_skip
+            self._populate()
+            event.stop()
+        elif event.key == "d":
+            self._show_done = not self._show_done
             self._populate()
             event.stop()
 
@@ -331,7 +381,6 @@ class QueueBrowser(ModalScreen[None]):
             state.queue.append(item_id)
         self.state_mgr.save(state)
         self._populate()
-        # Keep cursor where it was
         try:
             table.move_cursor(row=row)
         except Exception:

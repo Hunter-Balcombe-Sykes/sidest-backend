@@ -3,7 +3,9 @@ Screen {
 }
 
 ProgressPanel {
-    height: 5;
+    height: auto;
+    min-height: 5;
+    max-height: 10;
     border: solid $primary;
     padding: 0 1;
 }
