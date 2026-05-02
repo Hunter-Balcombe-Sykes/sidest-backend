@@ -3,6 +3,11 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\NormalizesShopDomain;
+use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
+use App\Jobs\Shopify\CreateShopifySalesChannelJob;
+use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
+use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
 use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\BrandProfile;
@@ -15,12 +20,16 @@ use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cloudflare\CloudflareDnsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 
 // Internal endpoints consumed by the Sidest-Embedded Shopify app wizard.
 // Auth: VerifyEmbeddedApiKey middleware resolves the brand via X-Shopify-Shop
 // and attaches 'embedded_professional_id' to the request.
 class EmbeddedSetupController extends ApiController
 {
+    use NormalizesShopDomain;
+
     public function __construct(
         private readonly ProfessionalCacheService $cache,
     ) {}
@@ -419,5 +428,103 @@ class EmbeddedSetupController extends ApiController
         $this->cache->invalidateProfessional($professional);
 
         return $this->success(['record_name' => "{$recordName}.sidest.co"]);
+    }
+
+    // ── Integration provisioning ─────────────────────────────────────────────
+
+    /**
+     * Fully provision the Shopify integration using the embedded app's access token.
+     *
+     * Called from the Sidest-Embedded wizard immediately after the connection-code
+     * step links the brand's Side St account to their Shopify store. The embedded
+     * app has already completed Shopify OAuth and holds a fully-scoped access token
+     * — storing it here gives the Comet backend everything it needs to run catalog
+     * sync, webhook registration, and storefront token creation without requiring
+     * the brand to also do a separate OAuth from the Side St dashboard.
+     *
+     * Safe to call multiple times (idempotent via updateOrCreate).
+     *
+     * @return JsonResponse { data: { provisioned: bool } }
+     */
+    public function provisionShopifyIntegration(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'access_token' => ['required', 'string', 'max:512'],
+            'shop_id'      => ['sometimes', 'nullable', 'string', 'max:255'],
+            'scopes'       => ['sometimes', 'nullable', 'string', 'max:4096'],
+        ]);
+
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+        $shopDomain = $this->normalizeShopDomain(
+            strtolower(trim((string) $request->header('X-Shopify-Shop', '')))
+        );
+
+        $existing = ProfessionalIntegration::query()
+            ->where('professional_id', $professionalId)
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->first();
+
+        $existingMetadata = is_array($existing?->provider_metadata) ? $existing->provider_metadata : [];
+
+        $scopesArray = [];
+        if (! empty($data['scopes'])) {
+            $scopesArray = array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) $data['scopes'])
+            )));
+        }
+
+        $metadata = array_merge($existingMetadata, [
+            'shop_domain'                    => $shopDomain,
+            'shop_id'                        => $data['shop_id'] ?? Arr::get($existingMetadata, 'shop_id'),
+            'scopes'                         => $scopesArray ?: Arr::get($existingMetadata, 'scopes', []),
+            'connected_at'                   => now()->toIso8601String(),
+            'webhook_registration_state'     => 'queued',
+            'connected_via'                  => 'embedded_wizard',
+        ]);
+
+        $integration = ProfessionalIntegration::updateOrCreate(
+            [
+                'professional_id' => $professionalId,
+                'provider'        => ProfessionalIntegration::PROVIDER_SHOPIFY,
+            ],
+            [
+                'external_account_id'   => $shopDomain,
+                'access_token'          => $data['access_token'],
+                'last_catalog_sync_error' => null,
+                'provider_metadata'     => $metadata,
+            ],
+        );
+
+        BrandProfile::firstOrCreate(
+            ['professional_id' => $professionalId],
+            ['setup_complete'  => false],
+        );
+
+        // Dispatch the same setup jobs as the dashboard OAuth flow.
+        $jobs = [
+            RegisterShopifyWebhooksJob::class,
+            CreateStorefrontAccessTokenJob::class,
+            CreateShopifyMetafieldsJob::class,
+            CreateShopifySalesChannelJob::class,
+            SyncShopifyBrandDesignJob::class,
+        ];
+
+        foreach ($jobs as $jobClass) {
+            try {
+                $jobClass::dispatch((string) $integration->id);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to dispatch embedded integration setup job', [
+                    'professional_id' => $professionalId,
+                    'job'             => class_basename($jobClass),
+                    'message'         => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $this->cache->invalidateProfessional($professional);
+
+        return $this->success(['provisioned' => true]);
     }
 }
