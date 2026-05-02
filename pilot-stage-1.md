@@ -252,7 +252,7 @@ These are best in their own session because bundling would force unrelated archi
 
 ## P1 — Fix before pilot launch
 
-- [ ] **#10-08** · P1 — Destructive `sidest:purge-soft-deletes` scheduled task lacks `withoutOverlapping`
+- [x] **#10-08** · P1 — Destructive `sidest:purge-soft-deletes` scheduled task lacks `withoutOverlapping`
     - **Where:** routes/console.php (PurgeSoftDeleted schedule, ~line 45)
     - **Affects:** Soft-delete retention pipeline; account-deletion completion.
     - **Effort:** S (~0.5h)
@@ -887,7 +887,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** A SQL string includes a literal value where it could (and should) use a parameter binding instead.
     - **Evidence:** `->whereRaw("settings->>'live_check_enabled' = 'true'")`
 
-- [ ] **#10-09** · P2 — queue:prune-failed scheduled task lacks withoutOverlapping
+- [x] **#10-09** · P2 — queue:prune-failed scheduled task lacks withoutOverlapping
     - **Where:** routes/console.php (~line 85)
     - **Affects:** Failed-job retention pipeline.
     - **Effort:** S (~0.5h)
