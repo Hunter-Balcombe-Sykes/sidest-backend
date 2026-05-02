@@ -92,11 +92,14 @@ class StripeConnectWebhookController extends Controller
         // For account-scoped events, event->account is the HMAC-signed source of truth.
         // If data.object.id differs, reject — payload could have been tampered with
         // to mutate a victim account using the attacker's valid HMAC.
+        //
+        // account.application.* events are excluded: their data.object is an Application
+        // (id = ca_xxx), not an Account, so the id won't match event->account by design.
         $accountScopedPrefixes = ['account.', 'capability.'];
         $isAccountScoped = collect($accountScopedPrefixes)
             ->contains(fn ($p) => str_starts_with($event->type, $p));
 
-        if ($isAccountScoped) {
+        if ($isAccountScoped && ! str_starts_with($event->type, 'account.application.')) {
             $topLevelAccount = $event->account ?? null;
             $objectId = $event->data->object->id ?? null;
 
@@ -113,6 +116,7 @@ class StripeConnectWebhookController extends Controller
 
         match ($event->type) {
             'account.updated' => $this->handleAccountUpdated($event->data->object),
+            'account.application.deauthorized' => $this->handleAccountDeauthorized((string) ($event->account ?? '')),
             'checkout.session.completed' => $this->handleCheckoutSessionCompleted($event->data->object, (string) ($event->account ?? '')),
             'transfer.created' => $this->handleTransferCreated($event->data->object),
             'transfer.failed' => $this->handleTransferFailed($event->data->object),
@@ -130,6 +134,39 @@ class StripeConnectWebhookController extends Controller
         Log::debug('Stripe checkout session completed (no-op in V2)', [
             'checkout_session_id' => $checkoutSession->id ?? null,
             'connected_account_id' => $connectedAccountId,
+        ]);
+    }
+
+    /**
+     * Handle account.application.deauthorized — fired when an Express account owner
+     * revokes access via their Stripe dashboard. Mark them disconnected locally so
+     * the payout job stops targeting their account and the UI surfaces the disconnect.
+     *
+     * Note: event->account is the connected account ID (HMAC-signed); event->data->object
+     * is an Application object whose id will differ. The account-scope guard is skipped
+     * for account.application.* events for this reason.
+     */
+    private function handleAccountDeauthorized(string $stripeAccountId): void
+    {
+        if (! $stripeAccountId) {
+            Log::warning('stripe.connect.deauthorize_missing_account');
+
+            return;
+        }
+
+        $professional = Professional::where('stripe_connect_account_id', $stripeAccountId)->first();
+
+        if (! $professional) {
+            Log::debug('Stripe account.application.deauthorized for unknown account', ['account_id' => $stripeAccountId]);
+
+            return;
+        }
+
+        $professional->update(['stripe_connect_status' => 'disconnected']);
+
+        Log::info('Stripe Connect account deauthorized via dashboard', [
+            'professional_id' => $professional->id,
+            'account_id' => $stripeAccountId,
         ]);
     }
 
@@ -160,26 +197,25 @@ class StripeConnectWebhookController extends Controller
 
         if ($professional->stripe_connect_status !== $status) {
             $oldStatus = $professional->stripe_connect_status;
-            $professional->update(['stripe_connect_status' => $status]);
+
+            // Atomic: if flushHeldCommissions throws, the status update is rolled back.
+            // The professional stays in their prior state; the next account.updated
+            // (new event_id, bypasses idempotency) retries the full transition cleanly.
+            DB::transaction(function () use ($professional, $status, $oldStatus) {
+                $professional->update(['stripe_connect_status' => $status]);
+
+                // When an affiliate transitions to 'active', flush any held commissions
+                // so they enter the normal payout pipeline immediately.
+                if ($status === 'active' && $oldStatus !== 'active') {
+                    app(CommissionVoidService::class)->flushHeldCommissions($professional);
+                }
+            });
 
             Log::info('Stripe Connect status updated', [
                 'professional_id' => $professional->id,
                 'old_status' => $oldStatus,
                 'new_status' => $status,
             ]);
-
-            // When an affiliate transitions to 'active', flush any held commissions
-            // so they enter the normal payout pipeline immediately.
-            if ($status === 'active' && $oldStatus !== 'active') {
-                try {
-                    app(CommissionVoidService::class)->flushHeldCommissions($professional);
-                } catch (\Throwable $e) {
-                    Log::warning('Failed to flush held commissions on Stripe connect', [
-                        'professional_id' => $professional->id,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-            }
         }
     }
 

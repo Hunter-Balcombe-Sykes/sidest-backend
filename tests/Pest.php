@@ -583,6 +583,29 @@ function setupBrandProfilesTable(): void
 }
 
 /**
+ * commerce.commission_ledger_entries — minimal columns for CommissionVoidService flush/void tests.
+ */
+function setupCommissionLedgerEntriesTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
+        id TEXT PRIMARY KEY,
+        payout_id TEXT NULL,
+        brand_professional_id TEXT NULL,
+        affiliate_professional_id TEXT NULL,
+        entry_type TEXT NULL,
+        status TEXT NULL,
+        amount_cents INTEGER NULL,
+        currency_code TEXT NULL,
+        occurred_at TEXT NULL,
+        voided_at TEXT NULL,
+        void_reason TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
  * commerce.commission_payouts — minimal columns for affiliate analytics payout/grace summary.
  */
 function setupCommissionPayoutsTable(): void

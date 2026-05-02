@@ -12,6 +12,7 @@ use Illuminate\Support\Str;
 beforeEach(function () {
     attachTestSchemas();
     setupProfessionalsTable();
+    setupCommissionLedgerEntriesTable();
 
     $conn = DB::connection('pgsql');
 
