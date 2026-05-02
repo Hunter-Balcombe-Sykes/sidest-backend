@@ -98,22 +98,35 @@ def main(ctx: click.Context) -> None:
 def add(ids: tuple[str, ...], count: int) -> None:
     """Append item / bundle IDs to the queue.
 
-    Special form: `audit add suggest [--count N]` adds the auto-recommended top N.
+    Special form: `audit-orch add suggest [--count N]` adds the auto-recommended top N.
+    Each added id is also looked up in the audit sources so its full metadata
+    (title, body, source) gets written to state.items — without that, the
+    runner has nothing to send to Claude and would skip the item.
     """
+    from audit_orchestrator.queue_ops import populate_item_metadata, parse_all
+
+    config = load_config(_config_path())
     sm = StateManager(_state_path())
     state = sm.load()
 
     if ids == ("suggest",):
-        config = load_config(_config_path())
         to_add = _collect_recommended(config, count)
     else:
         to_add = list(ids)
 
+    parse_results = parse_all(config, Path.cwd())
+    not_found: list[str] = []
     for item_id in to_add:
+        if not populate_item_metadata(state, item_id, parse_results):
+            not_found.append(item_id)
+            continue
         if item_id not in state.queue:
             state.queue.append(item_id)
+
     sm.save(state)
     click.echo(f"Queue: {', '.join(state.queue) if state.queue else '(empty)'}")
+    if not_found:
+        click.echo(f"Not found in audit sources: {', '.join(not_found)}", err=True)
 
 
 @main.command("suggest")

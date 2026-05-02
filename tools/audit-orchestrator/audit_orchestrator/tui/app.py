@@ -185,6 +185,8 @@ class AuditApp(App):
         self._runner_thread.start()
 
     def _runner_loop(self) -> None:
+        from audit_orchestrator.queue_ops import populate_item_metadata, parse_all
+
         runner = Runner(work_dir=self.work_dir, repo_root=self.repo_root, config=self._config)
         mode = RunMode(self._mode) if self._mode else RunMode.OVERNIGHT
         while not self._stop_runner.is_set():
@@ -193,6 +195,21 @@ class AuditApp(App):
                 self._log_from_thread("Queue empty. Runner idle.")
                 break
             next_id = state.queue[0]
+
+            # Safety net: if metadata is missing (e.g. legacy queue from before
+            # the queue_ops fix), try to lazily populate. If still missing, drop
+            # it from the queue rather than infinite-looping on "skipped".
+            if next_id not in state.items:
+                parse_results = parse_all(self._config, self.repo_root)
+                if not populate_item_metadata(state, next_id, parse_results):
+                    self._log_from_thread(
+                        f"{next_id} not found in any audit source — removing from queue"
+                    )
+                    state.queue = [q for q in state.queue if q != next_id]
+                    self.state_mgr.save(state)
+                    continue
+                self.state_mgr.save(state)
+
             item = state.items.get(next_id, {})
 
             # If item is awaiting an answer, check whether one has arrived
@@ -203,6 +220,13 @@ class AuditApp(App):
                     self._log_from_thread(f"Resuming {next_id} with answer.")
                     outcome = runner.resume(next_id, answer)
                     self._log_from_thread(f"{next_id} → {outcome}")
+                    if outcome == "skipped":
+                        self._log_from_thread(
+                            f"{next_id} skipped despite being known — removing from queue"
+                        )
+                        state = self.state_mgr.load()
+                        state.queue = [q for q in state.queue if q != next_id]
+                        self.state_mgr.save(state)
                     continue
                 else:
                     if mode == RunMode.WORK:
@@ -217,6 +241,11 @@ class AuditApp(App):
             self._log_from_thread(f"Starting {next_id}...")
             outcome = runner.run_one(next_id, mode=mode)
             self._log_from_thread(f"{next_id} → {outcome}")
+            # Defensive: if runner reports skipped, pop the item to avoid loop
+            if outcome == "skipped":
+                state = self.state_mgr.load()
+                state.queue = [q for q in state.queue if q != next_id]
+                self.state_mgr.save(state)
 
     def _log(self, msg: str) -> None:
         try:

@@ -369,16 +369,22 @@ class QueueBrowser(ModalScreen[None]):
             event.stop()
 
     def action_toggle(self) -> None:
+        from audit_orchestrator.queue_ops import populate_item_metadata, parse_all
+
         table = self.query_one("#qb-table", DataTable)
         row = table.cursor_row
         if row is None or row >= len(self._row_ids):
             return
         item_id = self._row_ids[row]
+        config = load_config(self.work_dir / "config.yml")
         state = self.state_mgr.load()
         if item_id in state.queue:
             state.queue.remove(item_id)
         else:
-            state.queue.append(item_id)
+            # Populate metadata so the runner has something to send to Claude
+            parse_results = parse_all(config, self.repo_root)
+            if populate_item_metadata(state, item_id, parse_results):
+                state.queue.append(item_id)
         self.state_mgr.save(state)
         self._populate()
         try:
