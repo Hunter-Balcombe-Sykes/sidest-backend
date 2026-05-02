@@ -50,3 +50,12 @@ def test_extracts_standalone_subcategories(fixtures_dir):
     assert "#T-004" in result.standalone_xl
     assert "#T-005" in result.standalone_architectural
     assert "#T-006" in result.standalone_high_value
+
+
+def test_malformed_items_produce_warnings(fixtures_dir):
+    result = parse_audit_file(fixtures_dir / "malformed-audit.md")
+    warnings_text = "\n".join(result.warnings)
+    assert "#BAD-001" in warnings_text
+    item_ids = [item.id for item in result.items]
+    assert "#BAD-002" not in item_ids
+    assert "#BAD-003" not in item_ids
