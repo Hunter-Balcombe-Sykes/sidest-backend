@@ -640,7 +640,7 @@ These are best in their own session because bundling would force unrelated archi
         ```
     - **Source:** v5 audit (discovery_lens: domain-subagent-4; in_scope_v4: yes).
 
-- [ ] **#V5-003** · P1 — Shopify reinstall does not revoke old StorefrontAccessToken
+- [x] **#V5-003** · P1 — Shopify reinstall does not revoke old StorefrontAccessToken
     - **Where:** app/Services/Shopify/BrandSignupService.php:36-43
     - **Affects:** Shopify reinstall flow; storefront token lifecycle.
     - **Effort:** M (~1.5-2h)
@@ -650,7 +650,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Reinstall updates Admin API token but never revokes old StorefrontAccessToken in provider_metadata at Shopify. A leaked storefront token survives reinstall.
     - **Source:** v5 audit (discovery_lens: domain-subagent-4; in_scope_v4: yes).
 
-- [ ] **#V5-004** · P1 — Storefront access token stored unencrypted in provider_metadata JSON
+- [x] **#V5-004** · P1 — Storefront access token stored unencrypted in provider_metadata JSON
     - **Where:** app/Models/Core/Professional/ProfessionalIntegration.php:46-51
     - **Affects:** All Shopify integrations storing storefront tokens at rest.
     - **Effort:** M (~3-4h)
@@ -1385,7 +1385,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.25h)
     - **What to do:** Delete or update the memory file after confirming the implementation is complete.
 
-- [ ] **#4-04** · P3 — Encrypted cast on integration tokens not covered by an integration test
+- [x] **#4-04** · P3 — Encrypted cast on integration tokens not covered by an integration test
     - **Where:** app/Models/Core/Professional/ProfessionalIntegration.php:46-47
     - **Effort:** S (~1h)
     - **What to do:** Add a test that confirms tokens are encrypted at rest.
