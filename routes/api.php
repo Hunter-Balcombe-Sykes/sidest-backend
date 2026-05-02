@@ -171,6 +171,7 @@ Route::middleware(['embedded.key', 'throttle:60,1'])->prefix('internal/embedded'
     Route::post('/deployment-token', [EmbeddedSetupController::class, 'saveDeploymentToken']);
     Route::get('/domain-status', [EmbeddedSetupController::class, 'domainStatus']);
     Route::get('/overview', [EmbeddedSetupController::class, 'overview']);
+    Route::get('/products', [EmbeddedSetupController::class, 'embeddedProducts']);
     Route::post('/sync-design', [EmbeddedSetupController::class, 'syncDesign']);
     Route::post('/domain/setup', [EmbeddedSetupController::class, 'setupDomain']);
     Route::post('/domain/provision-txt', [EmbeddedSetupController::class, 'provisionDomainTxt']);

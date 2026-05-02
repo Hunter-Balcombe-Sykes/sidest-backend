@@ -18,6 +18,7 @@ use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cloudflare\CloudflareDnsService;
+use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -32,6 +33,7 @@ class EmbeddedSetupController extends ApiController
 
     public function __construct(
         private readonly ProfessionalCacheService $cache,
+        private readonly BrandCatalogService $catalog,
     ) {}
 
     // ── Brand Profile ────────────────────────────────────────────────────────
@@ -294,8 +296,57 @@ class EmbeddedSetupController extends ApiController
     }
 
     /**
+     * Return the brand's active product catalog for the embedded app Products tab.
+     *
+     * Uses BrandCatalogService to fetch all products with sidest.* metafields
+     * from the Shopify Admin API, then maps to a minimal shape for the embedded UI.
+     *
+     * @return JsonResponse { data: { products: EmbeddedProduct[], default_commission_rate: float } }
+     */
+    public function embeddedProducts(Request $request): JsonResponse
+    {
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+        $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
+        $defaultRate = (float) ($storeSettings?->default_commission_rate ?? 0);
+
+        try {
+            $raw = $this->catalog->fetchBrandCatalog($professional);
+        } catch (\Throwable $e) {
+            Log::warning('embeddedProducts: catalog fetch failed', [
+                'professional_id' => $professionalId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->success(['products' => [], 'default_commission_rate' => $defaultRate]);
+        }
+
+        $products = array_map(function (array $p) {
+            $metafields = $p['metafields'] ?? [];
+            $images = $p['images'] ?? [];
+            $featuredImage = $p['featured_image'] ?? null;
+            $imageUrl = $featuredImage['url'] ?? (! empty($images) ? ($images[0]['url'] ?? null) : null);
+
+            return [
+                'id'              => $p['gid'] ?? '',
+                'title'           => $p['title'] ?? '',
+                'image_url'       => $imageUrl,
+                'active'          => $metafields['active'] ?? null,
+                'commission_rate' => $metafields['commission_override'] ?? null,
+            ];
+        }, is_array($raw) ? $raw : []);
+
+        return $this->success([
+            'products'               => $products,
+            'default_commission_rate' => $defaultRate,
+        ]);
+    }
+
+    /**
      * Queue a Shopify brand design sync for this brand's integration.
      * Triggers BrandDesignImporter to pull theme tokens, colours, and logos.
+     * Best-effort — returns success even when no integration exists yet so the
+     * button never shows an error to the brand during the post-install window.
      */
     public function syncDesign(Request $request): JsonResponse
     {
@@ -306,8 +357,10 @@ class EmbeddedSetupController extends ApiController
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->first();
 
+        // No integration yet (e.g. during initial setup) — silently succeed.
+        // The design sync job will run once the integration is provisioned.
         if (! $integration) {
-            return $this->error('No Shopify integration found.', 404);
+            return $this->success([]);
         }
 
         SyncShopifyBrandDesignJob::dispatch((string) $integration->id);
