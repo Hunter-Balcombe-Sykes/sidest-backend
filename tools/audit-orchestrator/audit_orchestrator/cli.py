@@ -6,6 +6,9 @@ from pathlib import Path
 
 from audit_orchestrator.state import StateManager
 from audit_orchestrator.config import load_config
+from audit_orchestrator.parser import parse_audit_file
+from audit_orchestrator.classifier import classify_item, classify_bundle, ClassifierContext
+from audit_orchestrator.models import Classification, Item, Bundle
 
 
 def _state_path() -> Path:
@@ -14,6 +17,70 @@ def _state_path() -> Path:
 
 def _config_path() -> Path:
     return Path.cwd() / ".audit-work" / "config.yml"
+
+
+def _gather_sources(config) -> list[Path]:
+    """Collect source paths from explicit config + auto-discovery, deduplicated."""
+    cwd = Path.cwd()
+    explicit = [cwd / s for s in config.sources]
+    discovered: list[Path] = []
+    if config.auto_discover:
+        discovered = sorted(set(
+            list(cwd.glob("pilot-*.md")) + list(cwd.glob("audit-*.md"))
+        ))
+    seen: set[Path] = set()
+    out: list[Path] = []
+    for p in explicit + discovered:
+        if p in seen or not p.exists():
+            continue
+        seen.add(p)
+        out.append(p)
+    return out
+
+
+def _build_classifier_context(config, parse_results) -> ClassifierContext:
+    """Merge per-file standalone lists into a single ClassifierContext."""
+    ctx = ClassifierContext(
+        overrides=config.overrides,
+        caution_keywords=config.classifier.caution_keywords,
+        skip_keywords=config.classifier.skip_keywords,
+    )
+    for r in parse_results:
+        ctx.standalone_xl.extend(r.standalone_xl)
+        ctx.standalone_architectural.extend(r.standalone_architectural)
+        ctx.standalone_high_value.extend(r.standalone_high_value)
+    return ctx
+
+
+def _collect_recommended(config, count: int) -> list[str]:
+    """Return up to `count` item IDs classified as RECOMMENDED.
+
+    Recommended bundles are expanded to their member IDs so callers can queue
+    or display individual items. Standalone (unbundled) recommended items are
+    appended after bundled members.
+    """
+    sources = _gather_sources(config)
+    parse_results = [parse_audit_file(p) for p in sources]
+    ctx = _build_classifier_context(config, parse_results)
+
+    out: list[str] = []
+    for r in parse_results:
+        item_by_id = {i.id: i for i in r.items}
+        # Recommended bundles: expand to member IDs in order
+        for bundle in r.bundles:
+            members = [item_by_id[m] for m in bundle.members if m in item_by_id]
+            if classify_bundle(bundle, members, ctx) == Classification.RECOMMENDED:
+                for m in bundle.members:
+                    if m not in out:
+                        out.append(m)
+        # Standalone items not belonging to any bundle
+        for item in r.items:
+            if item.bundle is not None:
+                continue
+            if classify_item(item, ctx) == Classification.RECOMMENDED:
+                if item.id not in out:
+                    out.append(item.id)
+    return out[:count]
 
 
 @click.group(invoke_without_command=True)
@@ -26,15 +93,39 @@ def main(ctx: click.Context) -> None:
 
 @main.command("add")
 @click.argument("ids", nargs=-1, required=True)
-def add(ids: tuple[str, ...]) -> None:
-    """Append item / bundle IDs to the queue."""
+@click.option("--count", default=8, help="When adding suggest, max items.")
+def add(ids: tuple[str, ...], count: int) -> None:
+    """Append item / bundle IDs to the queue.
+
+    Special form: `audit add suggest [--count N]` adds the auto-recommended top N.
+    """
     sm = StateManager(_state_path())
     state = sm.load()
-    for item_id in ids:
+
+    if ids == ("suggest",):
+        config = load_config(_config_path())
+        to_add = _collect_recommended(config, count)
+    else:
+        to_add = list(ids)
+
+    for item_id in to_add:
         if item_id not in state.queue:
             state.queue.append(item_id)
     sm.save(state)
     click.echo(f"Queue: {', '.join(state.queue) if state.queue else '(empty)'}")
+
+
+@main.command("suggest")
+@click.option("--count", default=8, help="Maximum suggestions to return.")
+def suggest(count: int) -> None:
+    """Print recommended items without enqueuing."""
+    config = load_config(_config_path())
+    ids = _collect_recommended(config, count)
+    if not ids:
+        click.echo("No recommended items found.")
+        return
+    for i in ids:
+        click.echo(f"⭐ {i}")
 
 
 @main.command("queue")
