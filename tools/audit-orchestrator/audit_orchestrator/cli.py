@@ -211,5 +211,17 @@ def sources_remove(path: str) -> None:
     click.echo(f"Removed {path}.")
 
 
+@main.command("status")
+def status() -> None:
+    """One-line summary suitable for shell prompts / tmux status-line."""
+    sm = StateManager(_state_path())
+    state = sm.load()
+    queued = len(state.queue)
+    done = sum(1 for v in state.items.values() if v.get("status") == "done")
+    blocked = sum(1 for v in state.items.values() if v.get("status") == "blocked")
+    running = state.current_run["id"] if state.current_run else "idle"
+    click.echo(f"audit: queue={queued} done={done} blocked={blocked} running={running}")
+
+
 if __name__ == "__main__":
     main()
