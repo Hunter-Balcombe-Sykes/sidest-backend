@@ -1137,7 +1137,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Asymmetric FK behaviors — payout deletion preserves ledger entries (SET NULL), but ledger entries cascade-delete on professional deletion.
     - **Source:** v5 audit (discovery_lens: domain-subagent-9; in_scope_v4: yes).
 
-- [ ] **#V5-052** · P2 — Subscription stripe_customer_id and stripe_subscription_id mass-assignable
+- [x] **#V5-052** · P2 — Subscription stripe_customer_id and stripe_subscription_id mass-assignable
     - **Where:** app/Models/Billing/Subscription.php:32
     - **Effort:** S (~1.5h)
     - **What to do:**
@@ -1145,7 +1145,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Server-controlled identifiers should not be mass-assignable.
     - **Source:** v5 audit (discovery_lens: domain-subagent-9; in_scope_v4: yes).
 
-- [ ] **#V5-053** · P2 — BrandStoreSettings.oxygen_deployment_token mass-assignable
+- [x] **#V5-053** · P2 — BrandStoreSettings.oxygen_deployment_token mass-assignable
     - **Where:** app/Models/Retail/BrandStoreSettings.php:21
     - **Effort:** S (~1h)
     - **What to do:**
@@ -1153,7 +1153,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Sensitive deployment token should never be mass-assignable.
     - **Source:** v5 audit (discovery_lens: domain-subagent-9; in_scope_v4: yes).
 
-- [ ] **#V5-054** · P2 — Plan model has primary key 'id' in $fillable
+- [x] **#V5-054** · P2 — Plan model has primary key 'id' in $fillable
     - **Where:** app/Models/Billing/Plan.php:16
     - **Effort:** S (~0.5h)
     - **What to do:**
@@ -1161,7 +1161,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Mass-assigning the primary key is never the intent; sloppy `$fillable`.
     - **Source:** v5 audit (discovery_lens: domain-subagent-9; in_scope_v4: yes).
 
-- [ ] **#V5-055** · P2 — DataExportAudit and ProfessionalDeletionAuditEntry have created_at/completed_at in $fillable
+- [x] **#V5-055** · P2 — DataExportAudit and ProfessionalDeletionAuditEntry have created_at/completed_at in $fillable
     - **Where:** app/Models/Core/Gdpr/DataExportAudit.php, app/Models/Core/Professional/ProfessionalDeletionAuditEntry.php
     - **Effort:** S (~0.5h)
     - **What to do:**
@@ -1325,7 +1325,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~1h)
     - **What to do:** Optional — switch to selectRaw() with bindings for clarity. Currently safe but noisy.
 
-- [ ] **#9-004** · P3 — BrandStoreSettings $fillable includes default_commission_rate
+- [x] **#9-004** · P3 — BrandStoreSettings $fillable includes default_commission_rate
     - **Where:** app/Models/Retail/BrandStoreSettings.php
     - **Effort:** S (~1h)
     - **What to do:** Add a FormRequest validation for any update endpoint touching commission_rate; consider `$guarded = ['*']` on the model for defense in depth.
