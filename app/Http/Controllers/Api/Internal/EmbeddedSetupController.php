@@ -484,6 +484,10 @@ class EmbeddedSetupController extends ApiController
             'connected_via'                  => 'embedded_wizard',
         ]);
 
+        // Track whether this is the first time we're storing a valid access token.
+        // Jobs should only be dispatched once — not on every token refresh call.
+        $wasAlreadyProvisioned = ! empty($existing?->access_token);
+
         $integration = ProfessionalIntegration::updateOrCreate(
             [
                 'professional_id' => $professionalId,
@@ -502,24 +506,29 @@ class EmbeddedSetupController extends ApiController
             ['setup_complete'  => false],
         );
 
-        // Dispatch the same setup jobs as the dashboard OAuth flow.
-        $jobs = [
-            RegisterShopifyWebhooksJob::class,
-            CreateStorefrontAccessTokenJob::class,
-            CreateShopifyMetafieldsJob::class,
-            CreateShopifySalesChannelJob::class,
-            SyncShopifyBrandDesignJob::class,
-        ];
+        // Only dispatch setup jobs on the initial provision — not on token refreshes.
+        // This endpoint is called on every embedded app load to keep the access token
+        // fresh (Shopify rotates expiring offline tokens), so jobs must be idempotent
+        // with respect to repeat calls.
+        if (! $wasAlreadyProvisioned) {
+            $jobs = [
+                RegisterShopifyWebhooksJob::class,
+                CreateStorefrontAccessTokenJob::class,
+                CreateShopifyMetafieldsJob::class,
+                CreateShopifySalesChannelJob::class,
+                SyncShopifyBrandDesignJob::class,
+            ];
 
-        foreach ($jobs as $jobClass) {
-            try {
-                $jobClass::dispatch((string) $integration->id);
-            } catch (\Throwable $e) {
-                Log::warning('Failed to dispatch embedded integration setup job', [
-                    'professional_id' => $professionalId,
-                    'job'             => class_basename($jobClass),
-                    'message'         => $e->getMessage(),
-                ]);
+            foreach ($jobs as $jobClass) {
+                try {
+                    $jobClass::dispatch((string) $integration->id);
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to dispatch embedded integration setup job', [
+                        'professional_id' => $professionalId,
+                        'job'             => class_basename($jobClass),
+                        'message'         => $e->getMessage(),
+                    ]);
+                }
             }
         }
 
