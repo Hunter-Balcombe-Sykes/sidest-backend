@@ -41,8 +41,11 @@ class BrandCollectionController extends ApiController
         try {
             $collectionGid = $this->resolveCollectionGidFromType($pro, $collectionType);
 
+            // Handle not yet populated — Shopify setup jobs are still running.
+            // Return empty rather than 404 so the dashboard doesn't show errors
+            // during the post-connect provisioning window.
             if (! $collectionGid) {
-                return $this->error('Collection not found.', 404);
+                return $this->success(['products' => []]);
             }
 
             $resolved = $this->catalogService->resolveBrandIntegration($pro);
