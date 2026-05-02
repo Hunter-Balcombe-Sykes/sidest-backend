@@ -5,6 +5,7 @@ use App\Http\Middleware\Auth\EnsureSidestAdmin;
 use App\Http\Middleware\Auth\EnsureSidestStaff;
 use App\Http\Middleware\Auth\VerifyEmbeddedApiKey;
 use App\Http\Middleware\Auth\VerifyHydrogenApiKey;
+use App\Http\Middleware\Auth\VerifyShopifySessionToken;
 use App\Http\Middleware\Auth\VerifySupabaseJwt;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\BrandFundingGate;
@@ -50,6 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'plan' => RequirePlan::class,
             'hydrogen.key' => VerifyHydrogenApiKey::class,
             'embedded.key' => VerifyEmbeddedApiKey::class,
+            'shopify.session' => VerifyShopifySessionToken::class,
             'feature' => FeatureGate::class,
             'brand-funding-gate' => BrandFundingGate::class,
         ]);

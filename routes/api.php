@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\Internal\HydrogenAffiliateProductsController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandConfigController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandDesignController;
 use App\Http\Controllers\Api\Internal\EmbeddedConnectController;
+use App\Http\Controllers\Api\Internal\EmbeddedOrderAnalyticsController;
+use App\Http\Controllers\Api\Internal\EmbeddedProductAnalyticsController;
 use App\Http\Controllers\Api\Internal\EmbeddedSetupController;
 use App\Http\Controllers\Api\Internal\HydrogenDeploymentController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
@@ -177,6 +179,17 @@ Route::middleware(['embedded.key', 'throttle:60,1'])->prefix('internal/embedded'
     Route::post('/domain/provision-txt', [EmbeddedSetupController::class, 'provisionDomainTxt']);
     Route::post('/provision-integration', [EmbeddedSetupController::class, 'provisionShopifyIntegration']);
     Route::post('/confirm-hydrogen', [EmbeddedSetupController::class, 'confirmHydrogenInstall']);
+});
+
+// Shopify admin UI extensions (block extensions on order/product pages).
+// Auth via session-token JWT (signed with the app's API secret) — extensions
+// can't ship the embedded API key, so each request brings a freshly minted
+// token from App Bridge that we verify against the shared client secret.
+Route::middleware(['shopify.session', 'throttle:60,1'])->prefix('internal/embedded')->group(function () {
+    Route::get('/orders/{shopify_order_id}', [EmbeddedOrderAnalyticsController::class, 'show'])
+        ->where('shopify_order_id', '[A-Za-z0-9_/.:-]+');
+    Route::get('/products/{shopify_product_id}/analytics', [EmbeddedProductAnalyticsController::class, 'show'])
+        ->where('shopify_product_id', '[A-Za-z0-9_/.:-]+');
 });
 
 // Internal Hydrogen endpoints (server-to-server, API key auth)

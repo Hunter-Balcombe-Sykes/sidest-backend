@@ -210,6 +210,11 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                         'order_id' => $orderId,
                         'line_item_id' => $lineItemId,
                         'product_id' => (string) Arr::get($lineItem, 'product_id', ''),
+                        // Variant powers the per-variant breakdown on the
+                        // Shopify-admin product analytics block. Stored as the
+                        // numeric Shopify ID; we promote to a GID at read time.
+                        'variant_id' => (string) Arr::get($lineItem, 'variant_id', ''),
+                        'variant_title' => (string) Arr::get($lineItem, 'variant_title', ''),
                         // Captured here because Shopify only populates `title` on
                         // the order/line payload — fetching it later would need an
                         // Admin API roundtrip per row. Powers the "Top Products"
