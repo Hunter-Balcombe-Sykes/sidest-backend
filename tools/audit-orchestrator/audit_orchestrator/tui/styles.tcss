@@ -30,3 +30,32 @@ QuestionPanel {
 QuestionPanel.hidden {
     display: none;
 }
+
+ModePicker {
+    align: center middle;
+}
+
+#mode-dialog {
+    width: 70;
+    height: 11;
+    padding: 1 2;
+    border: thick $primary;
+    background: $surface;
+}
+
+#mode-title {
+    text-align: center;
+    margin-bottom: 1;
+}
+
+QuestionModal {
+    align: center middle;
+}
+
+#q-dialog {
+    width: 80;
+    height: 20;
+    padding: 1 2;
+    border: thick $accent;
+    background: $surface;
+}
