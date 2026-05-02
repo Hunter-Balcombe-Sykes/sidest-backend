@@ -26,6 +26,7 @@ class AuditApp(App):
         ("f2", "queue", "Queue"),
         ("f3", "mode", "Mode"),
         ("f5", "pause", "Pause"),
+        ("r", "reconcile", "Reconcile"),
         ("w", "watch_terminal", "Watch in Terminal"),
     ]
 
@@ -445,6 +446,51 @@ class AuditApp(App):
             self._log_from_thread(f"  [dim]{item_id}[/dim]  {snippet}")
 
         return on_action
+
+    def action_reconcile(self) -> None:
+        """Walk state.items; promote anything to done if its markdown checkbox
+        is now [x] (or, for bundles, every member is [x]). Same logic as the
+        `audit-orch reconcile` CLI command."""
+        from audit_orchestrator.queue_ops import parse_all
+        from audit_orchestrator.models import ItemStatus
+
+        try:
+            parse_results = parse_all(self._config, self.repo_root)
+            item_done: dict[str, bool] = {}
+            bundle_members: dict[str, list[str]] = {}
+            for r in parse_results:
+                for it in r.items:
+                    item_done[it.id] = (it.status == ItemStatus.DONE)
+                for b in r.bundles:
+                    bundle_members[b.id] = list(b.members)
+
+            state = self.state_mgr.load()
+            promoted: list[str] = []
+            for sid, sitem in state.items.items():
+                if sitem.get("status") == "done":
+                    continue
+                if sitem.get("is_bundle"):
+                    members = sitem.get("members") or bundle_members.get(sid, [])
+                    if members and all(item_done.get(m, False) for m in members):
+                        sitem["status"] = "done"
+                        promoted.append(sid)
+                else:
+                    if item_done.get(sid):
+                        sitem["status"] = "done"
+                        promoted.append(sid)
+            self.state_mgr.save(state)
+
+            if promoted:
+                self._log(f"[green]✅ Reconciled — promoted {len(promoted)} to done:[/green]")
+                for p in promoted:
+                    self._log(f"   ✅ {p}")
+                self.notify(f"Reconciled {len(promoted)} items")
+            else:
+                self._log("[dim]Reconcile: state already matches markdown — nothing to promote.[/dim]")
+                self.notify("Nothing to reconcile")
+        except Exception as e:
+            self._log(f"[red]Reconcile failed: {e}[/red]")
+            self.notify(f"Reconcile failed: {e}")
 
     def action_watch_terminal(self) -> None:
         """Open a new Terminal.app window tailing the current run's log."""

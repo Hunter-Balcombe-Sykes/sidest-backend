@@ -118,11 +118,22 @@ The Question panel (blue) appears when Claude needs you.
 | Key | Action |
 |---|---|
 | F1 | This help screen |
-| F2 | Queue browser *(not yet implemented)* |
-| F3 | Pick mode + start runner |
+| F2 | Queue browser — toggle items in/out of queue |
+| F3 | Pick mode + start runner (also clears any pause flag) |
 | F5 | Pause (stops after current item) |
+| r  | Reconcile state.json with markdown — promote stale-blocked items to done |
+| w  | Open Terminal.app tailing the current run's log |
 | q  | Quit |
 | Esc | Close this help / dismiss modals |
+
+## Reconcile (r)
+
+When state.json says blocked or pending but the markdown checkboxes are
+actually ticked off (e.g., a fix shipped via a manual commit, or earlier
+runs left stale bookkeeping), press **r** to walk every item and promote
+the ones whose markdown shows them done. Read-only on the markdown.
+
+CLI equivalent: `audit-orch reconcile`
 
 ## Where things live
 
