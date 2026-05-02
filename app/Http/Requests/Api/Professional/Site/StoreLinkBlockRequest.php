@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api\Professional\Site;
 
 use App\Http\Requests\BaseFormRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -147,7 +148,7 @@ class StoreLinkBlockRequest extends BaseFormRequest
                         ->where('professional_id', $proId)
                         ->where('block_group', 'links')
                         ->whereNull('deleted_at')
-                        ->whereIn('settings->category', $cappedCategories)
+                        ->whereIn(DB::raw("settings->>'category'"), $cappedCategories)
                         ->count();
                     if ($existing >= $max) {
                         $validator->errors()->add(

@@ -25,7 +25,7 @@ Each session should open the items in its bundle by ID — the full body still l
 
 - **B1 — Shopify webhook HMAC + idempotency.** #4-01, #4-06, #4-08, #V5-068. (Optional ride-alongs: #V5-018, #V5-019.) ~3–4h. Same 4–5 webhook controllers, same one-line bug pattern, single Pest sweep that POSTs a forged signature and asserts 401. The audit author already calls this out as a single PR in #4-08. **Don't pull in:** #V5-020 (middleware refactor) or #V5-005 (per-shop secret) — both are architectural and would balloon scope.
 - **B2 — Composer dependency updates + audit step.** #10-01, #10-02, #10-03, #10-04, #10-05, #10-06, #10-07. ~2–3h. All `composer update X` plus one CI workflow change. One composer.lock commit, one CI run. Run `composer audit` first to confirm only these advisories surface; defer any new ones to a second pass.
-- **B3 — Platform-link cap fix.** #CR-001, #CR-011. (Optional follow-up: #V5-049.) ~1h. Same method (`StoreLinkBlockRequest:137`); the audit explicitly tags them as companions. One Pest test creates 7 blocks of one category and asserts the 8th is rejected — covers both.
+- [x] **B3 — Platform-link cap fix.** #CR-001, #CR-011. (Optional follow-up: #V5-049.) ~1h. Same method (`StoreLinkBlockRequest:137`); the audit explicitly tags them as companions. One Pest test creates 7 blocks of one category and asserts the 8th is rejected — covers both.
 - **B4 — Soft-delete filter sweep.** #V5-012, #V5-013, #V5-038, #V5-039, #V5-056. ~4–5h. Identical "add `whereNull('deleted_at')`" pattern across analytics aggregates, observer notifications, public Hydrogen payloads, and 6 raw queries. One reasoning pass; regression tests can share a "soft-delete the parent, assert no leak in any output" fixture. **Watch out:** #V5-012 is GDPR-sensitive — verify the in-flight notification path still tests green.
 - **B5 — Throwable→QueryException narrowing in analytics.** #CR-010, #V5-017. ~1–2h. Same anti-pattern (AUDIT_REPORT.md line 287), two sibling analytics controllers. Lift one helper (catch `QueryException` + check SQLSTATE 42703) across both files.
 - **B6 — Time/currency/money cluster (lens-L).** #V5-024, #V5-025, #V5-026. ~2–3h. All in `CommissionPayoutService` / `CommissionVoidService`. Same domain (UTC vs app-TZ, `occurred_at` vs `created_at`, currency validation). One test: assert cutoffs use UTC, void uses `occurred_at`, currency validates against `shop_currency`. **Don't sweep in:** the broader payout backlog (#V5-007, #V5-008) — different concurrency / idempotency reasoning.
@@ -143,7 +143,7 @@ These are best in their own session because bundling would force unrelated archi
         }
         ```
 
-- [ ] **#CR-001** · P0 — StoreLinkBlockRequest platform-link cap silently bypassed (Auth::user() always null under Supabase JWT)
+- [x] **#CR-001** · P0 — StoreLinkBlockRequest platform-link cap silently bypassed (Auth::user() always null under Supabase JWT)
     - **Where:** app/Http/Requests/Api/Professional/Site/StoreLinkBlockRequest.php:137
     - **Affects:** All authenticated affiliates / brands using the link-block create endpoint. Cap (default 7 per category, configurable via `sidest.platform_links_max`) never fires in production.
     - **Effort:** S (~0.5h)
@@ -612,7 +612,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** A safety net was put in place to handle one specific deploy-ordering glitch. Now that the glitch can't happen, the net is left in to silently catch every other kind of bug too. Replace it with one that only catches the original glitch.
     - **Source:** Commit-batch review item #15 (commits `75d4f8f` and `82576ea`). Companion to AUDIT_REPORT.md line 287.
 
-- [ ] **#CR-011** · P1 — JSONB whereIn uses `->` (jsonb scalar) not `->>` (text); platform-link cap silently misses rows once #CR-001 lets the query run
+- [x] **#CR-011** · P1 — JSONB whereIn uses `->` (jsonb scalar) not `->>` (text); platform-link cap silently misses rows once #CR-001 lets the query run
     - **Where:** app/Http/Requests/Api/Professional/Site/StoreLinkBlockRequest.php:144
     - **Affects:** Once #CR-001 is fixed and the cap actually executes, `whereIn('settings->category', $cappedCategories)` may compare jsonb scalar `IN` PHP string array and silently return zero rows.
     - **Effort:** S (~0.25h)
