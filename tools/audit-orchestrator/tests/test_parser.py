@@ -1,5 +1,6 @@
 """Parser tests."""
 import pytest
+from pathlib import Path
 from audit_orchestrator.parser import parse_audit_file
 from audit_orchestrator.models import Tier, Effort, ItemStatus
 
@@ -59,3 +60,24 @@ def test_malformed_items_produce_warnings(fixtures_dir):
     item_ids = [item.id for item in result.items]
     assert "#BAD-002" not in item_ids
     assert "#BAD-003" not in item_ids
+
+
+def test_parses_real_pilot_stage_1():
+    """Sanity check against the actual file the tool will operate on."""
+    repo_root = Path(__file__).parent.parent.parent.parent
+    audit_path = repo_root / "pilot-stage-1.md"
+    if not audit_path.exists():
+        pytest.skip("pilot-stage-1.md not present; integration test skipped")
+
+    result = parse_audit_file(audit_path)
+
+    item_count = len(result.items)
+    bundle_count = len(result.bundles)
+    assert 100 < item_count < 200, f"expected ~137 items, got {item_count}"
+    assert 10 < bundle_count < 25, f"expected ~17 bundles, got {bundle_count}"
+
+    item_ids = {item.id for item in result.items}
+    assert "#V5-068" in item_ids
+    assert "#10-01" in item_ids
+    bundle_ids = {b.id for b in result.bundles}
+    assert "B5" in bundle_ids
