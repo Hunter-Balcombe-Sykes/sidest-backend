@@ -284,13 +284,17 @@ class EmbeddedSetupController extends ApiController
             ->sum('amount_cents');
 
         // Revenue generated through affiliates in the last 30 days.
-        // line_price_post_discount is stored in dollars in calculation_metadata;
-        // multiply by 100 to get cents for a consistent money representation.
-        $revenue30dCents = (int) CommissionLedgerEntry::where('brand_professional_id', $professionalId)
+        // Derived from amount_cents / commission_rate so it works on entries
+        // that pre-date the calculation_metadata.line_price_post_discount field.
+        // commission_rate is stored as a percentage (e.g. 10 for 10%), and
+        // amount_cents = lineTotal_dollars * commission_rate, so
+        // revenue_cents = amount_cents * 100 / commission_rate.
+        $revenue30dCents = (int) round((float) CommissionLedgerEntry::where('brand_professional_id', $professionalId)
             ->whereIn('status', ['pending', 'approved'])
             ->where('occurred_at', '>=', $thirtyDaysAgo)
-            ->selectRaw("COALESCE(SUM((calculation_metadata->>'line_price_post_discount')::NUMERIC * 100), 0) as revenue_cents")
-            ->value('revenue_cents');
+            ->where('commission_rate', '>', 0)
+            ->selectRaw('COALESCE(SUM(amount_cents * 100.0 / commission_rate), 0) as revenue_cents')
+            ->value('revenue_cents'));
 
         // Last 5 sales with affiliate display name from related Professional record.
         $recentSales = CommissionLedgerEntry::with('affiliateProfessional:id,display_name')
@@ -344,7 +348,14 @@ class EmbeddedSetupController extends ApiController
             return $this->success(['products' => [], 'default_commission_rate' => $defaultRate]);
         }
 
-        $products = array_map(function (array $p) {
+        // Embedded products tab is read-only and shows the affiliate-visible
+        // catalog only — filter to products the brand has actively enabled
+        // via the sidest.active metafield.
+        $activeOnly = array_filter(is_array($raw) ? $raw : [], function (array $p): bool {
+            return ($p['metafields']['active'] ?? null) === true;
+        });
+
+        $products = array_values(array_map(function (array $p) {
             $metafields = $p['metafields'] ?? [];
             $images = $p['images'] ?? [];
             $featuredImage = $p['featured_image'] ?? null;
@@ -354,10 +365,10 @@ class EmbeddedSetupController extends ApiController
                 'id'              => $p['gid'] ?? '',
                 'title'           => $p['title'] ?? '',
                 'image_url'       => $imageUrl,
-                'active'          => $metafields['active'] ?? null,
+                'active'          => true,
                 'commission_rate' => $metafields['commission_override'] ?? null,
             ];
-        }, is_array($raw) ? $raw : []);
+        }, $activeOnly));
 
         return $this->success([
             'products'               => $products,
@@ -388,7 +399,7 @@ class EmbeddedSetupController extends ApiController
 
         SyncShopifyBrandDesignJob::dispatch((string) $integration->id);
 
-        return $this->success([], 'Design sync queued.');
+        return $this->success([]);
     }
 
     // ── Domain Verification ──────────────────────────────────────────────────
