@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -201,14 +202,19 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 'last_payout_amount_cents' => (int) ($lastCompleted->net_payout_cents ?? 0),
                 'currency_code' => strtoupper($lastCompleted->currency_code ?? $pendingAgg->currency_code ?? 'AUD'),
             ];
-        } catch (\Throwable $e) {
-            // Most likely: pending_funds isn't in the status enum yet
-            // because the grace migration hasn't shipped. Don't 500 the
-            // whole endpoint — log and return empty.
+        } catch (QueryException $e) {
+            // Guard: SQLSTATE 42703 (undefined column) from schema drift — the
+            // grace migration has shipped, but this catch remains as a safety
+            // net for that specific case. Re-throw everything else so real bugs
+            // (connection failures, cast errors) surface in Nightwatch.
+            if (($e->errorInfo[0] ?? null) !== '42703') {
+                throw $e;
+            }
             \Illuminate\Support\Facades\Log::warning('buildPayoutSummary failed; returning empty', [
                 'professional_id' => $professionalId,
                 'error' => $e->getMessage(),
             ]);
+
             return $emptyShape;
         }
     }
@@ -295,14 +301,19 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 'days_remaining' => $daysRemaining,
                 'currency_code' => strtoupper($atRisk->currency_code ?? 'AUD'),
             ];
-        } catch (\Throwable $e) {
-            // Most likely: void_at column missing because the grace migration
-            // hasn't been applied yet. Don't 500 the whole analytics
-            // endpoint over an optional banner — log and return empty.
+        } catch (QueryException $e) {
+            // Guard: SQLSTATE 42703 (undefined column) — originally for void_at
+            // before the grace migration shipped. Re-throw everything else so
+            // real bugs surface in Nightwatch rather than silently returning
+            // an empty banner to the dashboard.
+            if (($e->errorInfo[0] ?? null) !== '42703') {
+                throw $e;
+            }
             \Illuminate\Support\Facades\Log::warning('buildGraceSummary failed; returning empty', [
                 'professional_id' => $professionalId,
                 'error' => $e->getMessage(),
             ]);
+
             return $emptyShape;
         }
     }

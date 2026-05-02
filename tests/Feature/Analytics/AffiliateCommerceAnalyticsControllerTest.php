@@ -12,6 +12,52 @@ beforeEach(function () {
     Cache::flush();
 });
 
+/**
+ * Stubs the three overview() sub-queries that aren't under test in the
+ * analytics unit tests: brand breakdown, payout summary, grace summary.
+ * Returns empty/zero shapes so the main timeseries assertions stay clean.
+ */
+function stubOverviewExtras(): void
+{
+    // DB::raw() is called on the facade directly by buildBrandBreakdown's select() calls
+    DB::shouldReceive('raw')->andReturnUsing(fn ($v) => new \Illuminate\Database\Query\Expression($v));
+
+    // brand breakdown — analytics.brand_affiliate_daily as bad → empty
+    $brandMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['leftJoin', 'where', 'whereBetween', 'select', 'selectRaw', 'groupBy', 'orderByDesc'] as $method) {
+        $brandMock->shouldReceive($method)->andReturnSelf();
+    }
+    $brandMock->shouldReceive('get')->andReturn(collect());
+    DB::shouldReceive('table')->with('analytics.brand_affiliate_daily as bad')->andReturn($brandMock);
+
+    // payout summary — two calls to commerce.commission_payouts
+    $pendingMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['where', 'whereIn', 'selectRaw'] as $method) {
+        $pendingMock->shouldReceive($method)->andReturnSelf();
+    }
+    $pendingMock->shouldReceive('first')->andReturn(
+        (object) ['net_pending_cents' => 0, 'next_eligible_at' => null, 'currency_code' => 'AUD']
+    );
+
+    $lastPaidMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['where', 'orderByDesc', 'select'] as $method) {
+        $lastPaidMock->shouldReceive($method)->andReturnSelf();
+    }
+    $lastPaidMock->shouldReceive('first')->andReturn(null);
+
+    DB::shouldReceive('table')->with('commerce.commission_payouts')
+        ->twice()
+        ->andReturn($pendingMock, $lastPaidMock);
+
+    // grace summary — core.professionals lookup returns active → early return (no further queries)
+    $proMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['where', 'whereNull', 'select'] as $method) {
+        $proMock->shouldReceive($method)->andReturnSelf();
+    }
+    $proMock->shouldReceive('first')->andReturn((object) ['stripe_connect_status' => 'active']);
+    DB::shouldReceive('table')->with('core.professionals')->andReturn($proMock);
+}
+
 it('throws ValidationException when from is provided without to', function () {
     $request = Request::create('/', 'GET', ['from' => '2026-04-01']);
     $request->attributes->set('professional', $this->professional);
@@ -56,6 +102,8 @@ it('returns zero totals and empty timeseries when no data exists', function () {
         ->once()
         ->andReturn($queryMock);
 
+    stubOverviewExtras();
+
     $request = Request::create('/', 'GET', ['from' => '2026-04-01', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);
 
@@ -80,6 +128,8 @@ it('defaults to last 30 days when no range params are given', function () {
         ->with('analytics.professional_metrics_daily')
         ->andReturn($queryMock);
 
+    stubOverviewExtras();
+
     $request = Request::create('/', 'GET');
     $request->attributes->set('professional', $this->professional);
 
@@ -91,6 +141,8 @@ it('defaults to last 30 days when no range params are given', function () {
 });
 
 it('returns timeseries from daily rows', function () {
+
+    stubOverviewExtras();
 
     $queryMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
     $queryMock->shouldReceive('where')->andReturnSelf();

@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Analytics\LinkClick;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -127,7 +128,7 @@ class ProfessionalAnalyticsController extends ApiController
                     ->selectRaw('COUNT(DISTINCT COALESCE(visitor_id::text, ip_hash)) as unique_clickers')
                     ->selectRaw('MAX(occurred_at) as last_click_at')
                     ->first();
-            } catch (Throwable) {
+            } catch (QueryException) {
                 $clicksAgg = (object) [
                     'total_clicks' => 0,
                     'unique_clickers' => 0,
@@ -177,7 +178,7 @@ class ProfessionalAnalyticsController extends ApiController
                         ->groupByRaw('DATE(occurred_at)')
                         ->orderBy('day')
                         ->get();
-                } catch (Throwable) {
+                } catch (QueryException) {
                     $clicksByDay = collect();
                 }
             }
@@ -304,7 +305,7 @@ class ProfessionalAnalyticsController extends ApiController
                     },
                     collect()
                 );
-            } catch (Throwable) {
+            } catch (QueryException) {
                 $topLinks = collect();
             }
 
@@ -343,7 +344,7 @@ class ProfessionalAnalyticsController extends ApiController
                     },
                     collect()
                 );
-            } catch (Throwable) {
+            } catch (QueryException) {
                 $topSections = collect();
             }
 
@@ -371,7 +372,7 @@ class ProfessionalAnalyticsController extends ApiController
                     ->where('professional_id', $professional->id)
                     ->whereBetween('occurred_at', [$prevFrom, $prevTo])
                     ->count();
-            } catch (Throwable) {
+            } catch (QueryException) {
             }
 
             $commerceCharts = $this->commerceCharts($professional->id, $from, $to, $useHourlyBuckets);
