@@ -484,9 +484,12 @@ class EmbeddedSetupController extends ApiController
             'connected_via'                  => 'embedded_wizard',
         ]);
 
-        // Track whether this is the first time we're storing a valid access token.
-        // Jobs should only be dispatched once — not on every token refresh call.
-        $wasAlreadyProvisioned = ! empty($existing?->access_token);
+        // Dispatch jobs only on first provision OR when a previous provision had a bad
+        // token (webhook state still 'queued' means the jobs never confirmed success —
+        // e.g. the first run hit a 401 before the token-rotation fix).
+        $existingWebhookState = Arr::get($existingMetadata, 'webhook_registration_state', '');
+        $needsJobDispatch = empty($existing?->access_token)
+            || $existingWebhookState === 'queued';
 
         $integration = ProfessionalIntegration::updateOrCreate(
             [
@@ -506,11 +509,11 @@ class EmbeddedSetupController extends ApiController
             ['setup_complete'  => false],
         );
 
-        // Only dispatch setup jobs on the initial provision — not on token refreshes.
-        // This endpoint is called on every embedded app load to keep the access token
-        // fresh (Shopify rotates expiring offline tokens), so jobs must be idempotent
-        // with respect to repeat calls.
-        if (! $wasAlreadyProvisioned) {
+        // Dispatch setup jobs on initial provision or when the previous attempt
+        // appears incomplete (webhook state still queued = jobs likely failed).
+        // This endpoint fires on every embedded app load for token refreshes, so
+        // guard carefully — successful setups must not re-queue jobs repeatedly.
+        if ($needsJobDispatch) {
             $jobs = [
                 RegisterShopifyWebhooksJob::class,
                 CreateStorefrontAccessTokenJob::class,
