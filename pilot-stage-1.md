@@ -29,7 +29,7 @@ Each session should open the items in its bundle by ID — the full body still l
 - **B4 — Soft-delete filter sweep.** #V5-012, #V5-013, #V5-038, #V5-039, #V5-056. ~4–5h. Identical "add `whereNull('deleted_at')`" pattern across analytics aggregates, observer notifications, public Hydrogen payloads, and 6 raw queries. One reasoning pass; regression tests can share a "soft-delete the parent, assert no leak in any output" fixture. **Watch out:** #V5-012 is GDPR-sensitive — verify the in-flight notification path still tests green.
 - [x] **B5 — Throwable→QueryException narrowing in analytics.** #CR-010, #V5-017. ~1–2h. Same anti-pattern (AUDIT_REPORT.md line 287), two sibling analytics controllers. Lift one helper (catch `QueryException` + check SQLSTATE 42703) across both files.
 - [x] **B6 — Time/currency/money cluster (lens-L).** #V5-024, #V5-025, #V5-026. ~2–3h. All in `CommissionPayoutService` / `CommissionVoidService`. Same domain (UTC vs app-TZ, `occurred_at` vs `created_at`, currency validation). One test: assert cutoffs use UTC, void uses `occurred_at`, currency validates against `shop_currency`. **Don't sweep in:** the broader payout backlog (#V5-007, #V5-008) — different concurrency / idempotency reasoning.
-- **B7 — Cache-key versioning post-deploy.** #CR-008, #V5-036, #V5-037. ~1–2h. All "shape change shipped without bumping cache version." One mental model: enumerate every key impacted, add a version suffix or flush, document the deploy-hygiene rule for next time.
+- [x] **B7 — Cache-key versioning post-deploy.** #CR-008, #V5-036, #V5-037. ~1–2h. All "shape change shipped without bumping cache version." One mental model: enumerate every key impacted, add a version suffix or flush, document the deploy-hygiene rule for next time.
 - **B8 — Stripe Connect webhook hardening.** #V5-009, #V5-010. ~2–4h. Same controller (`StripeConnectWebhookController`). Atomic flush + new `account.deauthorize` handler share a transaction-helper refactor.
 - **B15 — Shopify storefront token hardening.** #V5-003, #V5-004. ~3–5h. Both touch `StorefrontAccessToken` in `provider_metadata`. The encryption-cast change + reinstall-revocation flow share the same model + service touchpoints. **Optional:** #4-04 (encrypted-cast integration test, P3) rides naturally on this PR.
 - **B16 — ServiceObserver hardening.** #CR-005, #CR-006. ~2–3h. Same observer file. Two sibling fixes (catch granularity + `dispatch` vs `dispatchSync`) reasoned about together yield one Pest test that exercises both the bust-failure isolation AND the queued sync path.
@@ -578,7 +578,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** The funding gate is supposed to stop brands inviting affiliates if they can't pay. It only checks whether we have a card on file in our database — not whether the card is still good at Stripe. A brand who removed their card at Stripe still passes our gate.
     - **Source:** Commit-batch review item #8 (commit `3140a63`).
 
-- [ ] **#CR-008** · P1 — Brand commerce-analytics cache key not bumped after schema change adds page_views/unique_visitors
+- [x] **#CR-008** · P1 — Brand commerce-analytics cache key not bumped after schema change adds page_views/unique_visitors
     - **Where:** app/Http/Controllers/Api/Staff/Analytics/BrandCommerceAnalyticsController.php:148-149 (totals appended); app/Services/Cache/CacheKeyGenerator.php (`brandCommerceAnalytics`)
     - **Affects:** Frontend null-deref during 5-min post-deploy window when warm cache returns the old `totals` shape without the new fields.
     - **Effort:** S (~0.25h)
@@ -1025,7 +1025,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Side St delete + Square full sync = service zombie reappears.
     - **Source:** v5 audit (discovery_lens: domain-subagent-5; in_scope_v4: yes).
 
-- [ ] **#V5-036** · P2 — Hydrogen affiliate response shape changed (added id) — Hydrogen cache may be stale
+- [x] **#V5-036** · P2 — Hydrogen affiliate response shape changed (added id) — Hydrogen cache may be stale
     - **Where:** app/Http/Controllers/Api/Internal/HydrogenAffiliateController.php:356 (commit b9de807)
     - **Effort:** S (~0.5-1h)
     - **What to do:**
@@ -1033,7 +1033,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** New `id` field appears in response shape; if Hydrogen has stale cache, the new field is missing for the cache window.
     - **Source:** v5 audit (discovery_lens: domain-subagent-6; in_scope_v4: no).
 
-- [ ] **#V5-037** · P2 — Top_links / top_sections cache version may not be bumped after query fixes
+- [x] **#V5-037** · P2 — Top_links / top_sections cache version may not be bumped after query fixes
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalAnalyticsController.php:88-92 (commits 672aa80, c144ccc)
     - **Effort:** S (~0.5h)
     - **What to do:**
