@@ -1,0 +1,32 @@
+Screen {
+    layout: vertical;
+}
+
+ProgressPanel {
+    height: 5;
+    border: solid $primary;
+    padding: 0 1;
+}
+
+NowRunningPanel {
+    height: 5;
+    border: solid $primary;
+    padding: 0 1;
+}
+
+ActivityLog {
+    height: 1fr;
+    border: solid $primary;
+    padding: 0 1;
+}
+
+QuestionPanel {
+    height: 4;
+    background: $boost;
+    border: solid $accent;
+    padding: 0 1;
+}
+
+QuestionPanel.hidden {
+    display: none;
+}
