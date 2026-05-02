@@ -53,11 +53,12 @@ def _build_classifier_context(config, parse_results) -> ClassifierContext:
 
 
 def _collect_recommended(config, count: int) -> list[str]:
-    """Return up to `count` item IDs classified as RECOMMENDED.
+    """Return up to `count` IDs (bundles AND/OR standalone items) classified as RECOMMENDED.
 
-    Recommended bundles are expanded to their member IDs so callers can queue
-    or display individual items. Standalone (unbundled) recommended items are
-    appended after bundled members.
+    Bundles are returned as bundle IDs (e.g. "B5") — NOT expanded into members.
+    The runner processes a queued bundle as one Claude session that fixes all
+    members together. Expanding here would lose that bundle abstraction.
+    Standalone items (not in any bundle) are appended after bundles.
     """
     sources = _gather_sources(config)
     parse_results = [parse_audit_file(p) for p in sources]
@@ -66,14 +67,11 @@ def _collect_recommended(config, count: int) -> list[str]:
     out: list[str] = []
     for r in parse_results:
         item_by_id = {i.id: i for i in r.items}
-        # Recommended bundles: expand to member IDs in order
         for bundle in r.bundles:
             members = [item_by_id[m] for m in bundle.members if m in item_by_id]
             if classify_bundle(bundle, members, ctx) == Classification.RECOMMENDED:
-                for m in bundle.members:
-                    if m not in out:
-                        out.append(m)
-        # Standalone items not belonging to any bundle
+                if bundle.id not in out:
+                    out.append(bundle.id)
         for item in r.items:
             if item.bundle is not None:
                 continue
