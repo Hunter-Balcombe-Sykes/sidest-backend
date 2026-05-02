@@ -176,6 +176,59 @@ def sweep() -> None:
     click.echo(f"Queue now: {', '.join(kept) if kept else '(empty)'}")
 
 
+@main.command("reconcile")
+def reconcile() -> None:
+    """Re-read all source markdowns and align state.json with reality.
+
+    Use when state.json says blocked/pending but the markdown checkboxes are
+    actually ticked off (e.g., a fix shipped via a manual commit, or the
+    orchestrator's status got stale). Walks every item/bundle in state.items;
+    if the markdown shows it's done, updates status to 'done'.
+
+    Read-only on the markdown — only state.json is modified.
+    """
+    from audit_orchestrator.queue_ops import parse_all
+    from audit_orchestrator.models import ItemStatus
+    from audit_orchestrator.parser import parse_audit_file
+
+    config = load_config(_config_path())
+    sm = StateManager(_state_path())
+    state = sm.load()
+
+    parse_results = parse_all(config, Path.cwd())
+    # Build lookup tables across all sources
+    item_done: dict[str, bool] = {}
+    bundle_members: dict[str, list[str]] = {}
+    for r in parse_results:
+        for it in r.items:
+            item_done[it.id] = (it.status == ItemStatus.DONE)
+        for b in r.bundles:
+            bundle_members[b.id] = list(b.members)
+
+    promoted: list[str] = []
+    for sid, sitem in state.items.items():
+        if sitem.get("status") == "done":
+            continue
+        if sitem.get("is_bundle"):
+            members = sitem.get("members") or bundle_members.get(sid, [])
+            if members and all(item_done.get(m, False) for m in members):
+                sitem["status"] = "done"
+                promoted.append(f"{sid} (bundle, {len(members)} members)")
+        else:
+            if item_done.get(sid):
+                sitem["status"] = "done"
+                promoted.append(f"{sid} (item)")
+
+    sm.save(state)
+
+    if promoted:
+        click.echo(f"Promoted {len(promoted)} items to done:")
+        for p in promoted:
+            click.echo(f"  ✅ {p}")
+    else:
+        click.echo("State already matches markdown — nothing to reconcile.")
+
+
 @main.command("clear")
 def clear() -> None:
     """Empty the queue."""
