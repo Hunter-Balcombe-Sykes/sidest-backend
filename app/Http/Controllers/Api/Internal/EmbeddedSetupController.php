@@ -62,7 +62,14 @@ class EmbeddedSetupController extends ApiController
             'business_type'       => (string) ($brandProfile?->business_type ?? ''),
             'industries'          => (array) ($brandProfile?->industries ?? []),
             'brand_slug'          => (string) ($site?->subdomain ?? ''),
-            'setup_complete'      => (bool) ($brandProfile?->setup_complete ?? false),
+            // Derived: only true when the DB flag is set AND all critical wizard
+            // fields are actually populated. Guards against a deleted/reset
+            // BrandStoreSettings leaving setup_complete=true on BrandProfile.
+            'setup_complete'      => (bool) ($brandProfile?->setup_complete ?? false)
+                && ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token'))
+                && ! empty($storeSettings?->oxygen_storefront_id)
+                && (bool) ($storeSettings?->hydrogen_install_confirmed ?? false)
+                && (bool) ($storeSettings?->domain_wizard_complete ?? false),
             // Storefront settings
             'default_commission_rate' => (string) ($storeSettings?->default_commission_rate ?? ''),
             'theme_id'                => (int) ($storeSettings?->theme_id ?? 1),
