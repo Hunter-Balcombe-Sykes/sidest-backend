@@ -27,7 +27,7 @@ Each session should open the items in its bundle by ID — the full body still l
 - **B2 — Composer dependency updates + audit step.** #10-01, #10-02, #10-03, #10-04, #10-05, #10-06, #10-07. ~2–3h. All `composer update X` plus one CI workflow change. One composer.lock commit, one CI run. Run `composer audit` first to confirm only these advisories surface; defer any new ones to a second pass.
 - [x] **B3 — Platform-link cap fix.** #CR-001, #CR-011. (Optional follow-up: #V5-049.) ~1h. Same method (`StoreLinkBlockRequest:137`); the audit explicitly tags them as companions. One Pest test creates 7 blocks of one category and asserts the 8th is rejected — covers both.
 - **B4 — Soft-delete filter sweep.** #V5-012, #V5-013, #V5-038, #V5-039, #V5-056. ~4–5h. Identical "add `whereNull('deleted_at')`" pattern across analytics aggregates, observer notifications, public Hydrogen payloads, and 6 raw queries. One reasoning pass; regression tests can share a "soft-delete the parent, assert no leak in any output" fixture. **Watch out:** #V5-012 is GDPR-sensitive — verify the in-flight notification path still tests green.
-- **B5 — Throwable→QueryException narrowing in analytics.** #CR-010, #V5-017. ~1–2h. Same anti-pattern (AUDIT_REPORT.md line 287), two sibling analytics controllers. Lift one helper (catch `QueryException` + check SQLSTATE 42703) across both files.
+- [x] **B5 — Throwable→QueryException narrowing in analytics.** #CR-010, #V5-017. ~1–2h. Same anti-pattern (AUDIT_REPORT.md line 287), two sibling analytics controllers. Lift one helper (catch `QueryException` + check SQLSTATE 42703) across both files.
 - [x] **B6 — Time/currency/money cluster (lens-L).** #V5-024, #V5-025, #V5-026. ~2–3h. All in `CommissionPayoutService` / `CommissionVoidService`. Same domain (UTC vs app-TZ, `occurred_at` vs `created_at`, currency validation). One test: assert cutoffs use UTC, void uses `occurred_at`, currency validates against `shop_currency`. **Don't sweep in:** the broader payout backlog (#V5-007, #V5-008) — different concurrency / idempotency reasoning.
 - **B7 — Cache-key versioning post-deploy.** #CR-008, #V5-036, #V5-037. ~1–2h. All "shape change shipped without bumping cache version." One mental model: enumerate every key impacted, add a version suffix or flush, document the deploy-hygiene rule for next time.
 - **B8 — Stripe Connect webhook hardening.** #V5-009, #V5-010. ~2–4h. Same controller (`StripeConnectWebhookController`). Atomic flush + new `account.deauthorize` handler share a transaction-helper refactor.
@@ -600,7 +600,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** When two payouts share the same expiry timestamp, the dashboard picks one of them at random to show the dollar amount. The number can flip between page loads.
     - **Source:** Commit-batch review item #14 (commit `85f2673`).
 
-- [ ] **#CR-010** · P1 — Throwable catches in analytics swallow real bugs after migration ships (extends the AUDIT_REPORT line 287 anti-pattern to a new surface)
+- [x] **#CR-010** · P1 — Throwable catches in analytics swallow real bugs after migration ships (extends the AUDIT_REPORT line 287 anti-pattern to a new surface)
     - **Where:** app/Http/Controllers/Api/Professional/Analytics/AffiliateCommerceAnalyticsController.php (buildGraceSummary, buildPayoutSummary)
     - **Affects:** `/affiliate/commerce-analytics` overview reliability post-migration; Nightwatch noise from real bugs that should fail loud.
     - **Effort:** S (~1h)
@@ -762,7 +762,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** original_filename stored client-as-is (truncated 255). Returned in API response. Future Content-Disposition use without sanitization permits CRLF / spoofing.
     - **Source:** v5 audit (discovery_lens: domain-subagent-7; in_scope_v4: yes).
 
-- [ ] **#V5-017** · P1 — Analytics controller has 4 broad Throwable catches that swallow query failures
+- [x] **#V5-017** · P1 — Analytics controller has 4 broad Throwable catches that swallow query failures
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalAnalyticsController.php:127, 177, 303, 341
     - **Affects:** Operator visibility into analytics query errors.
     - **Effort:** S (~1-2h)
