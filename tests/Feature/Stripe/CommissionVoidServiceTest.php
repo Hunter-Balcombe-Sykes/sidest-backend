@@ -6,6 +6,11 @@ use App\Services\Notifications\NotificationPublisher;
 use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Support\Facades\DB;
 
+afterEach(function () {
+    \Illuminate\Support\Carbon::setTestNow(null);
+    date_default_timezone_set('UTC');
+});
+
 beforeEach(function () {
     setupProfessionalsTable();
 
@@ -253,4 +258,60 @@ it('does not flush a held commission when occurred_at is past the void window ev
 
     expect($count)->toBe(0);
     expect(CommissionLedgerEntry::find('c1')->status)->toBe('pending');
+});
+
+// ============================================================
+// #V5-026 / #V5-025 cluster — Void cutoffs must use UTC
+// ============================================================
+
+it('uses UTC for void cutoff so an app-timezone offset does not void commissions early', function () {
+    // Auckland (UTC+12): now() without .utc() serializes to local time, producing a
+    // cutoff 12h later than the UTC equivalent — entries still within the void window
+    // would be wrongly included. now()->utc()->subDays(N) fixes this.
+    date_default_timezone_set('Pacific/Auckland');
+    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-05-02 00:00:00', 'UTC'));
+
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'not_connected');
+
+    // Sale was 29 days and 18 hours ago (UTC). Still inside the 30-day void window.
+    // UTC cutoff    '2026-04-02 00:00:00' → entry at 06:00 > 00:00 → NOT voided ✓
+    // App-TZ cutoff '2026-04-02 12:00:00' → entry at 06:00 ≤ 12:00 → voided EARLY ✗
+    seedVoidCommission('c1', 'brand-1', 'aff-1', 1000,
+        occurredAt: '2026-04-02 06:00:00',
+    );
+
+    $stats = $service->processVoidableCommissions();
+
+    expect($stats['voided_count'])->toBe(0);
+    expect(CommissionLedgerEntry::find('c1')->status)->toBe('pending');
+});
+
+it('uses UTC for flush cutoff so an app-timezone offset does not exclude commissions still inside the void window', function () {
+    // Same Auckland scenario: now()->subDays(30) without UTC serializes 12h later,
+    // so flushHeldCommissions() would miss entries still within the window.
+    date_default_timezone_set('Pacific/Auckland');
+    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-05-02 00:00:00', 'UTC'));
+
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'active');
+
+    // Same entry: 29d18h old (UTC). Inside the 30-day void window.
+    // UTC cutoff: occurred_at > '2026-04-02 00:00:00' → 06:00 > 00:00 → flushed ✓
+    // App-TZ:     occurred_at > '2026-04-02 12:00:00' → 06:00 NOT > 12:00 → not flushed ✗
+    seedVoidCommission('c1', 'brand-1', 'aff-1', 1000,
+        occurredAt: '2026-04-02 06:00:00',
+    );
+
+    $affiliate = Professional::find('aff-1');
+    $count = $service->flushHeldCommissions($affiliate);
+
+    expect($count)->toBe(1);
+    expect(CommissionLedgerEntry::find('c1')->status)->toBe('approved');
 });

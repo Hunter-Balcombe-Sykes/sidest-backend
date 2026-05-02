@@ -37,7 +37,7 @@ class CommissionVoidService
      */
     public function processVoidableCommissions(): array
     {
-        $cutoff = now()->subDays($this->voidWindowDays);
+        $cutoff = now()->utc()->subDays($this->voidWindowDays);
         $stats = ['voided_count' => 0, 'voided_cents' => 0];
 
         // Chunk to avoid OOM on large result sets. Each entry is voided with
@@ -254,7 +254,7 @@ class CommissionVoidService
             ->where('entry_type', 'accrual')
             ->where('status', 'pending')
             ->where('affiliate_professional_id', $affiliate->id)
-            ->where('occurred_at', '>', now()->subDays($this->voidWindowDays))
+            ->where('occurred_at', '>', now()->utc()->subDays($this->voidWindowDays))
             ->update(['status' => 'approved']);
 
         if ($count > 0) {
