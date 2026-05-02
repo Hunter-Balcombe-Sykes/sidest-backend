@@ -218,7 +218,9 @@ class AuditApp(App):
                 if qfile.exists() and "## Answer" in qfile.read_text(encoding="utf-8"):
                     answer = qfile.read_text(encoding="utf-8").split("## Answer")[-1].strip()
                     self._log_from_thread(f"Resuming {next_id} with answer.")
-                    outcome = runner.resume(next_id, answer)
+                    outcome = runner.resume(
+                        next_id, answer, on_step_change=self._make_on_step(next_id),
+                    )
                     self._log_from_thread(f"{next_id} → {outcome}")
                     if outcome == "skipped":
                         self._log_from_thread(
@@ -239,13 +241,40 @@ class AuditApp(App):
                         continue
 
             self._log_from_thread(f"Starting {next_id}...")
-            outcome = runner.run_one(next_id, mode=mode)
+            outcome = runner.run_one(
+                next_id, mode=mode, on_step_change=self._make_on_step(next_id),
+            )
             self._log_from_thread(f"{next_id} → {outcome}")
             # Defensive: if runner reports skipped, pop the item to avoid loop
             if outcome == "skipped":
                 state = self.state_mgr.load()
                 state.queue = [q for q in state.queue if q != next_id]
                 self.state_mgr.save(state)
+
+    def _make_on_step(self, item_id: str):
+        """Build a callback that logs Claude's step transitions to ActivityLog
+        AND updates NowRunningPanel.step (the existing simple step reactive).
+        """
+        last = {"stage": None}
+
+        def on_step(event_kind):
+            stage = event_kind.value if event_kind is not None else None
+            if stage is None or stage == last["stage"]:
+                return
+            last["stage"] = stage
+            self._log_from_thread(f"  [dim]{item_id}:[/dim] {stage}")
+            try:
+                self.call_from_thread(self._set_running_step, stage)
+            except Exception:
+                pass
+
+        return on_step
+
+    def _set_running_step(self, stage: str) -> None:
+        try:
+            self.query_one(NowRunningPanel).step = stage
+        except Exception:
+            pass
 
     def _log(self, msg: str) -> None:
         try:

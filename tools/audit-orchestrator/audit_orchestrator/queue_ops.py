@@ -17,14 +17,40 @@ from audit_orchestrator.parser import parse_audit_file, ParseResult
 from audit_orchestrator.state import State
 
 
+_COMPANION_PATTERNS = (
+    "*-ledger-*.md",
+    "*-ledger.md",
+    "*-executive-summary.md",
+    "*-summary.md",
+    "*-legal-coding.md",
+    "*-legal-*.md",
+)
+
+
+def _is_companion_file(name: str) -> bool:
+    """Return True for filenames matching a known non-checklist companion pattern."""
+    from fnmatch import fnmatch
+    return any(fnmatch(name, p) for p in _COMPANION_PATTERNS)
+
+
 def gather_sources(config: Config, repo_root: Path) -> list[Path]:
-    """Return ordered, deduplicated list of audit source paths to parse."""
+    """Return ordered, deduplicated list of audit source paths to parse.
+
+    Auto-discover excludes well-known companion files (executive summaries,
+    ledgers, legal cross-cuts) by name pattern. Files explicitly listed in
+    config.sources are NEVER excluded — explicit configuration wins.
+    """
     explicit = [repo_root / s for s in config.sources]
+    explicit_names = {p.name for p in explicit}
+
     discovered: list[Path] = []
     if config.auto_discover:
-        discovered = sorted(set(
-            list(repo_root.glob("pilot-*.md")) + list(repo_root.glob("audit-*.md"))
-        ))
+        raw = list(repo_root.glob("pilot-*.md")) + list(repo_root.glob("audit-*.md"))
+        discovered = sorted({
+            p for p in raw
+            if p.name in explicit_names or not _is_companion_file(p.name)
+        })
+
     seen: set[Path] = set()
     out: list[Path] = []
     for p in explicit + discovered:
@@ -36,8 +62,15 @@ def gather_sources(config: Config, repo_root: Path) -> list[Path]:
 
 
 def parse_all(config: Config, repo_root: Path) -> list[ParseResult]:
-    """Parse every active source file."""
-    return [parse_audit_file(p) for p in gather_sources(config, repo_root)]
+    """Parse every active source file. Drops files that parse to zero items
+    (defensive — a non-checklist file that slipped past the name filter
+    won't pollute the UI)."""
+    results: list[ParseResult] = []
+    for p in gather_sources(config, repo_root):
+        r = parse_audit_file(p)
+        if r.items or r.bundles:
+            results.append(r)
+    return results
 
 
 def populate_item_metadata(

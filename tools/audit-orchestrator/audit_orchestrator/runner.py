@@ -47,8 +47,16 @@ class Runner:
         self.blocked_dir.mkdir(parents=True, exist_ok=True)
         self.completed_dir.mkdir(parents=True, exist_ok=True)
 
-    def run_one(self, item_id: str, *, mode: RunMode) -> str:
-        """Run one queue item end-to-end. Returns outcome string."""
+    def run_one(
+        self, item_id: str, *, mode: RunMode,
+        on_step_change=None,
+    ) -> str:
+        """Run one queue item end-to-end. Returns outcome string.
+
+        on_step_change(EventKind | None) — optional callback fired when Claude
+        transitions between high-level activity phases (planning/editing/
+        testing/committing). Called on the runner thread.
+        """
         state = self.state_mgr.load()
         item = state.items.get(item_id)
         if item is None:
@@ -69,10 +77,10 @@ class Runner:
             repo_root=self.repo_root,
         )
 
-        tracker = self._spawn_claude(prompt)
+        tracker = self._spawn_claude(prompt, on_step_change=on_step_change)
         return self._handle_exit(item_id, tracker, question_file)
 
-    def resume(self, item_id: str, answer: str) -> str:
+    def resume(self, item_id: str, answer: str, *, on_step_change=None) -> str:
         """Resume a session with the user's answer. Returns outcome string."""
         state = self.state_mgr.load()
         item = state.items.get(item_id)
@@ -80,11 +88,17 @@ class Runner:
             return "skipped"
 
         prompt = render_resume_prompt(answer=answer)
-        tracker = self._spawn_claude(prompt, resume_id=item["session_id"])
+        tracker = self._spawn_claude(
+            prompt, resume_id=item["session_id"], on_step_change=on_step_change,
+        )
         question_file = self.questions_dir / f"{_safe_id(item_id)}.md"
         return self._handle_exit(item_id, tracker, question_file)
 
-    def _spawn_claude(self, prompt: str, *, resume_id: str | None = None) -> StreamEventTracker:
+    def _spawn_claude(
+        self, prompt: str, *,
+        resume_id: str | None = None,
+        on_step_change=None,
+    ) -> StreamEventTracker:
         cmd = ["claude", "--print", "--model", self.config.claude_model,
                "--allowedTools", ",".join(self.config.allowed_tools),
                "--output-format", "stream-json", "--verbose"]
@@ -96,9 +110,16 @@ class Runner:
         tracker = StreamEventTracker()
         proc = subprocess.Popen(cmd, cwd=self.repo_root, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, bufsize=1)
+        prev_event = None
         if proc.stdout is not None:
             for line in proc.stdout:
                 tracker.feed_line(line)
+                if on_step_change is not None and tracker.last_event != prev_event:
+                    prev_event = tracker.last_event
+                    try:
+                        on_step_change(tracker.last_event)
+                    except Exception:
+                        pass
         proc.wait()
         tracker.exit_code = proc.returncode
         return tracker
