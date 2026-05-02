@@ -57,28 +57,34 @@ class BrandCommerceAnalyticsController extends ApiController
                 ->where('brand_professional_id', $professionalId)
                 ->pluck('affiliate_professional_id');
 
-            // Display labels keyed by professional id so the leaderboard
-            // can render real names instead of UUIDs. Falls back through
-            // display_name → handle → "Affiliate" so a row never goes
-            // blank even when a professional row is half-populated.
-            $identityRows = DB::table('core.professionals')
-                ->whereIn('id', $linkedAffiliateIds)
-                ->whereNull('deleted_at')
-                ->select('id', 'display_name', 'first_name', 'last_name', 'handle')
-                ->get()
-                ->keyBy('id');
+            // Skip identity and pageview lookups when there are no linked
+            // affiliates — avoids unnecessary DB round-trips and keeps the
+            // PostgreSQL-specific ::int cast out of the query entirely.
+            $identityRows = collect();
+            $pageviewByAffiliate = collect();
 
-            $pageviewByAffiliate = DB::table('analytics.site_metrics_daily')
-                ->whereIn('professional_id', $linkedAffiliateIds)
-                ->whereBetween('day', [$filters['from'], $filters['to']])
-                ->select(
-                    'professional_id',
-                    DB::raw('SUM(visits_count)::int as visits_count'),
-                    DB::raw('SUM(unique_visitors)::int as unique_visitors'),
-                )
-                ->groupBy('professional_id')
-                ->get()
-                ->keyBy('professional_id');
+            if ($linkedAffiliateIds->isNotEmpty()) {
+                // Display labels keyed by professional id so the leaderboard
+                // can render real names instead of UUIDs.
+                $identityRows = DB::table('core.professionals')
+                    ->whereIn('id', $linkedAffiliateIds)
+                    ->whereNull('deleted_at')
+                    ->select('id', 'display_name', 'first_name', 'last_name', 'handle')
+                    ->get()
+                    ->keyBy('id');
+
+                $pageviewByAffiliate = DB::table('analytics.site_metrics_daily')
+                    ->whereIn('professional_id', $linkedAffiliateIds)
+                    ->whereBetween('day', [$filters['from'], $filters['to']])
+                    ->select(
+                        'professional_id',
+                        DB::raw('SUM(visits_count)::int as visits_count'),
+                        DB::raw('SUM(unique_visitors)::int as unique_visitors'),
+                    )
+                    ->groupBy('professional_id')
+                    ->get()
+                    ->keyBy('professional_id');
+            }
 
             $affiliates = $affiliateRows->map(function ($rows, $affiliateId) use ($pageviewByAffiliate, $identityRows) {
                 $affiliateCurrency = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';

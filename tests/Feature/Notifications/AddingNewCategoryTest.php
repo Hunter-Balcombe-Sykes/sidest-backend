@@ -50,7 +50,7 @@ beforeEach(function () {
     // SQLite requires schema prefix on the index name, not the table in ON clause.
     $conn->statement('CREATE UNIQUE INDEX IF NOT EXISTS notifications.notifications_dedupe_key_per_pro_uq
         ON notifications (professional_id, dedupe_key) WHERE dedupe_key IS NOT NULL');
-    $conn->statement('CREATE TABLE IF NOT EXISTS core.professionals (id TEXT PRIMARY KEY, primary_email TEXT)');
+    $conn->statement('CREATE TABLE IF NOT EXISTS core.professionals (id TEXT PRIMARY KEY, primary_email TEXT, deleted_at TEXT NULL)');
     $conn->statement('CREATE TABLE IF NOT EXISTS core.notification_email_policies (id TEXT, professional_id TEXT, category_key TEXT, mode TEXT)');
     $conn->statement('CREATE TABLE IF NOT EXISTS notifications.notification_email_preferences (id TEXT, professional_id TEXT, category_key TEXT, enabled INTEGER)');
 

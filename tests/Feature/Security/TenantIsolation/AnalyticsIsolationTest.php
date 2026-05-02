@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();
+    setupCommissionPayoutsTable();
     Cache::flush();
 
     // Column names must match what the controllers actually query (day, gross_cents, orders_count).
@@ -30,6 +31,7 @@ beforeEach(function () {
         orders_count INTEGER,
         gross_cents INTEGER,
         net_cents INTEGER,
+        commission_accrued_cents INTEGER,
         commission_net_cents INTEGER,
         customers_count INTEGER,
         currency_code TEXT

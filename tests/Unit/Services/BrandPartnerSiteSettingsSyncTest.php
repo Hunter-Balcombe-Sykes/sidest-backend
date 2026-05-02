@@ -1,11 +1,18 @@
 <?php
 
+uses(\Tests\TestCase::class);
+
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Professional\BrandPartnerSiteSettingsSync;
 use Illuminate\Support\Str;
+
+beforeEach(function () {
+    attachTestSchemas();
+    setupProfessionalsTable();
+});
 
 it('sets primary brand and additional brands in site settings from links', function () {
     $site = new Site(['settings' => []]);

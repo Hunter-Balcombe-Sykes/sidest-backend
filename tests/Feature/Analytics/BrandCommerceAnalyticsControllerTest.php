@@ -13,12 +13,14 @@ beforeEach(function () {
 });
 
 // Helper: returns a Mockery query builder that yields an empty collection.
+// Supports all chain methods used across brand analytics queries.
 function emptyQueryMock(): \Illuminate\Database\Query\Builder
 {
     $mock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
     $mock->shouldReceive('where')->andReturnSelf();
     $mock->shouldReceive('whereBetween')->andReturnSelf();
     $mock->shouldReceive('get')->andReturn(collect());
+    $mock->shouldReceive('pluck')->andReturn(collect());
 
     return $mock;
 }
@@ -43,6 +45,7 @@ it('returns correct empty response shape when no data exists', function () {
     DB::shouldReceive('table')->with('analytics.brand_metrics_daily')->andReturn(emptyQueryMock());
     DB::shouldReceive('table')->with('analytics.brand_affiliate_daily')->andReturn(emptyQueryMock());
     DB::shouldReceive('table')->with('analytics.brand_commission_daily')->andReturn(emptyQueryMock());
+    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn(emptyQueryMock());
 
     $request = Request::create('/', 'GET', ['from' => '2026-04-01', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);
@@ -94,6 +97,7 @@ it('groups affiliate breakdown by affiliate_professional_id', function () {
     DB::shouldReceive('table')->with('analytics.brand_metrics_daily')->andReturn(emptyQueryMock());
     DB::shouldReceive('table')->with('analytics.brand_affiliate_daily')->andReturn($affiliateMock);
     DB::shouldReceive('table')->with('analytics.brand_commission_daily')->andReturn(emptyQueryMock());
+    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn(emptyQueryMock());
 
     $request = Request::create('/', 'GET', ['from' => '2026-04-18', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);
@@ -123,6 +127,7 @@ it('summarises commission rows by payout_status', function () {
     DB::shouldReceive('table')->with('analytics.brand_metrics_daily')->andReturn(emptyQueryMock());
     DB::shouldReceive('table')->with('analytics.brand_affiliate_daily')->andReturn(emptyQueryMock());
     DB::shouldReceive('table')->with('analytics.brand_commission_daily')->andReturn($commissionMock);
+    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn(emptyQueryMock());
 
     $request = Request::create('/', 'GET', ['from' => '2026-04-01', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);

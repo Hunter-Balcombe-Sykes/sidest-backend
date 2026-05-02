@@ -36,58 +36,52 @@ it('accepts a newsletter block with full settings', function () {
     $result = validateNewsletterUpsert([
         'block_type' => 'newsletter',
         'settings' => [
-            'headline' => 'Join my newsletter',
-            'description' => 'Weekly tips and exclusive discount codes.',
-            'cta_label' => 'Subscribe',
+            'input_placeholder' => 'Enter your email',
             'list_key' => 'marketing',
         ],
     ]);
 
     expect($result['ok'])->toBeTrue();
-    expect($result['data']['settings']['headline'])->toBe('Join my newsletter');
+    expect($result['data']['settings']['input_placeholder'])->toBe('Enter your email');
 });
 
-it('rejects an overly long headline', function () {
+it('rejects an overly long input_placeholder', function () {
     $result = validateNewsletterUpsert([
         'block_type' => 'newsletter',
         'settings' => [
-            'headline' => str_repeat('a', 81),
+            'input_placeholder' => str_repeat('a', 121),
         ],
     ]);
 
     expect($result['ok'])->toBeFalse();
-    expect($result['errors'])->toHaveKey('settings.headline');
+    expect($result['errors'])->toHaveKey('settings.input_placeholder');
 });
 
-it('rejects an overly long description', function () {
+it('rejects an overly long list_key', function () {
     $result = validateNewsletterUpsert([
         'block_type' => 'newsletter',
         'settings' => [
-            'description' => str_repeat('a', 201),
+            'list_key' => str_repeat('a', 41),
         ],
     ]);
 
     expect($result['ok'])->toBeFalse();
-    expect($result['errors'])->toHaveKey('settings.description');
+    expect($result['errors'])->toHaveKey('settings.list_key');
 });
 
-it('strips HTML tags from newsletter copy fields (defense-in-depth)', function () {
+it('strips HTML tags from newsletter input_placeholder (defense-in-depth)', function () {
     // strip_tags removes tags but preserves inner text — same behavior as the
     // existing settings.text sanitization. The frontend is the primary XSS
     // defense via auto-escaping on render; this is just belt-and-braces.
     $result = validateNewsletterUpsert([
         'block_type' => 'newsletter',
         'settings' => [
-            'headline' => 'Join <b>my</b> newsletter',
-            'description' => 'Weekly tips <em>and</em> codes',
-            'cta_label' => '<img>Go',
+            'input_placeholder' => 'Enter <b>your</b> email',
         ],
     ]);
 
     expect($result['ok'])->toBeTrue();
-    expect($result['data']['settings']['headline'])->toBe('Join my newsletter');
-    expect($result['data']['settings']['description'])->toBe('Weekly tips and codes');
-    expect($result['data']['settings']['cta_label'])->toBe('Go');
+    expect($result['data']['settings']['input_placeholder'])->toBe('Enter your email');
 });
 
 it('rejects a list_key with invalid characters', function () {

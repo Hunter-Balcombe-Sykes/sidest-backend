@@ -67,6 +67,8 @@ class UpsertSectionBlockRequest extends BaseFormRequest
     private function contactRules(): array
     {
         return [
+            'settings.headline' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'settings.description' => ['sometimes', 'nullable', 'string', 'max:300'],
             'settings.notification_email' => ['sometimes', 'nullable', 'email:rfc', 'max:255'],
             'settings.subject_options' => ['sometimes', 'nullable', 'array', 'max:10'],
             'settings.subject_options.*' => ['string', 'max:60', 'distinct'],

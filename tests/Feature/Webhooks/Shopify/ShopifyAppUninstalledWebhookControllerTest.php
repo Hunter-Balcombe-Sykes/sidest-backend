@@ -11,6 +11,8 @@ beforeEach(function () {
     Cache::flush();
     setupProfessionalIntegrationsTable();
     setupAffiliateProductSelectionsTable();
+    setupBrandStoreSettingsTable();
+    setupBrandProfilesTable();
     Config::set('services.shopify.webhook_secret', 'test-shop-secret');
 });
 

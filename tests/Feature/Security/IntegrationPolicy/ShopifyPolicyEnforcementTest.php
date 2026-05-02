@@ -9,6 +9,8 @@ use Illuminate\Support\Str;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();
+    setupBrandStoreSettingsTable();
+    setupBrandProfilesTable();
 
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
         id TEXT PRIMARY KEY,

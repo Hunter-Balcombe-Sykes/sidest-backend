@@ -123,12 +123,12 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 'bad.brand_professional_id',
                 'brand.display_name as brand_display_name',
                 'brand.handle as brand_handle',
-                DB::raw('SUM(bad.orders_count)::int as orders_count'),
-                DB::raw('SUM(bad.gross_cents)::int as gross_cents'),
-                DB::raw('SUM(bad.net_cents)::int as net_cents'),
-                DB::raw('SUM(bad.commission_accrued_cents)::int as commission_accrued_cents'),
-                DB::raw('SUM(bad.commission_net_cents)::int as commission_net_cents'),
-                DB::raw('SUM(bad.customers_count)::int as customers_count'),
+                DB::raw('CAST(SUM(bad.orders_count) AS INTEGER) as orders_count'),
+                DB::raw('CAST(SUM(bad.gross_cents) AS INTEGER) as gross_cents'),
+                DB::raw('CAST(SUM(bad.net_cents) AS INTEGER) as net_cents'),
+                DB::raw('CAST(SUM(bad.commission_accrued_cents) AS INTEGER) as commission_accrued_cents'),
+                DB::raw('CAST(SUM(bad.commission_net_cents) AS INTEGER) as commission_net_cents'),
+                DB::raw('CAST(SUM(bad.customers_count) AS INTEGER) as customers_count'),
             )
             ->groupBy('bad.brand_professional_id', 'brand.display_name', 'brand.handle')
             ->orderByDesc(DB::raw('SUM(bad.gross_cents)'))
@@ -177,7 +177,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 ->where('affiliate_professional_id', $professionalId)
                 ->whereIn('status', ['pending', 'pending_funds', 'collecting', 'transferring'])
                 ->selectRaw('
-                    COALESCE(SUM(net_payout_cents), 0)::int as net_pending_cents,
+                    CAST(COALESCE(SUM(net_payout_cents), 0) AS INTEGER) as net_pending_cents,
                     MIN(eligible_after) as next_eligible_at,
                     MAX(currency_code) as currency_code
                 ')
@@ -264,7 +264,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 ->where('void_at', '>', now())
                 ->selectRaw('
                     COUNT(*) as payout_count,
-                    COALESCE(SUM(net_payout_cents), 0)::int as total_cents,
+                    CAST(COALESCE(SUM(net_payout_cents), 0) AS INTEGER) as total_cents,
                     MIN(void_at) as earliest_at,
                     MAX(currency_code) as currency_code
                 ')

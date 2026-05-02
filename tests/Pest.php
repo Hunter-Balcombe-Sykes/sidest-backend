@@ -542,6 +542,67 @@ function signStripeBody(string $body, string $secret, ?int $timestamp = null): s
 }
 
 /**
+ * brand.brand_store_settings — minimal columns for Shopify connect/disconnect tests.
+ */
+function setupBrandStoreSettingsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS brand.brand_store_settings (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        default_commission_rate TEXT NULL,
+        payout_hold_days INTEGER NULL,
+        theme_id INTEGER NULL,
+        oxygen_deployment_token TEXT NULL,
+        oxygen_storefront_id TEXT NULL,
+        domain_mode TEXT NULL,
+        domain_wizard_complete INTEGER NULL,
+        custom_domain TEXT NULL,
+        custom_domain_verified_at TEXT NULL,
+        custom_domain_tls_provisioned_at TEXT NULL,
+        hydrogen_install_confirmed INTEGER NULL,
+        domain_txt_confirmed INTEGER NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
+ * brand.brand_profiles — minimal columns for Shopify disconnect / brand setup tests.
+ */
+function setupBrandProfilesTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS brand.brand_profiles (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        setup_complete INTEGER NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
+ * commerce.commission_payouts — minimal columns for affiliate analytics payout/grace summary.
+ */
+function setupCommissionPayoutsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
+        id TEXT PRIMARY KEY,
+        affiliate_professional_id TEXT NULL,
+        status TEXT NULL,
+        net_payout_cents INTEGER NULL,
+        eligible_after TEXT NULL,
+        processed_at TEXT NULL,
+        void_at TEXT NULL,
+        currency_code TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
  * commerce.affiliate_product_selections — minimal columns for uninstall webhook tests.
  */
 function setupAffiliateProductSelectionsTable(): void
