@@ -184,6 +184,8 @@ class AuditApp(App):
             if result is None:
                 return
             self._mode = result
+            # Clear any prior pause flag so the runner can actually start
+            self._stop_runner.clear()
             self._log(f"Mode set: {result}. Starting runner...")
             self._start_runner()
         self.push_screen(ModePicker(), handle)
@@ -244,7 +246,10 @@ class AuditApp(App):
                     answer = qfile.read_text(encoding="utf-8").split("## Answer")[-1].strip()
                     self._log_from_thread(f"Resuming {next_id} with answer.")
                     outcome = runner.resume(
-                        next_id, answer, on_step_change=self._make_on_step(next_id),
+                        next_id, answer,
+                        on_step_change=self._make_on_step(next_id),
+                        on_action=self._make_on_action(next_id),
+                        should_stop=lambda: self._stop_runner.is_set(),
                     )
                     self._log_from_thread(f"{next_id} → {outcome}")
                     if outcome == "skipped":
@@ -270,12 +275,25 @@ class AuditApp(App):
                 next_id, mode=mode,
                 on_step_change=self._make_on_step(next_id),
                 on_action=self._make_on_action(next_id),
+                should_stop=lambda: self._stop_runner.is_set(),
             )
             self._end_summary(next_id, item, outcome, runner)
             if outcome == "skipped":
                 state = self.state_mgr.load()
                 state.queue = [q for q in state.queue if q != next_id]
                 self.state_mgr.save(state)
+            elif outcome == "interrupted":
+                # Item stays in queue for resume — but if user pressed pause,
+                # break the loop so the runner stops processing the queue too.
+                if self._stop_runner.is_set():
+                    self._log_from_thread("[dim]Runner paused. Press F3 to resume.[/dim]")
+                    break
+                # Otherwise (usage limit hit but no manual pause): also stop;
+                # there's no point trying the next item if we're rate-limited.
+                self._log_from_thread(
+                    "[yellow]Stopping queue — usage limit hit. Press F3 to resume later.[/yellow]"
+                )
+                break
 
     def _kickoff_banner(self, item_id: str, item: dict, mode) -> None:
         """Log a multi-line header summarising what's about to run."""
@@ -301,6 +319,7 @@ class AuditApp(App):
         emoji = {
             "pushed": "✅", "blocked": "⚠️ ",
             "awaiting_answer": "❓", "skipped": "⏭ ",
+            "interrupted": "⏸ ",
         }.get(outcome, "·")
 
         if outcome == "pushed":
@@ -347,6 +366,19 @@ class AuditApp(App):
         elif outcome == "awaiting_answer":
             self._log_from_thread(f"{emoji} [blue]{item_id} → awaiting answer[/blue] — click question panel above")
 
+        elif outcome == "interrupted":
+            # Pull the reason from state so the message reflects pause vs limit
+            state = self.state_mgr.load()
+            reason = state.items.get(item_id, {}).get("interrupted_reason", "?")
+            label = {
+                "user_paused": "paused by user",
+                "usage_limited": "hit usage limit",
+                "claude_error": "Claude reported an error",
+            }.get(reason, reason)
+            self._log_from_thread(
+                f"{emoji} [cyan]{item_id} → interrupted[/cyan] ({label}) — stays in queue, F3 to resume"
+            )
+
         else:
             self._log_from_thread(f"{emoji} {item_id} → {outcome}")
         self._log_from_thread("")
@@ -377,6 +409,8 @@ class AuditApp(App):
 
     def _cleanup_stale_queue(self) -> list[str]:
         """Remove already-done or already-blocked items from state.queue.
+        Interrupted items (paused / usage-limited) are KEPT — they're
+        meant to be resumed.
 
         Returns the list of removed ids (for logging).
         """
