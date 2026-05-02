@@ -92,7 +92,8 @@ class CacheKeyGenerator
 
     public static function analyticsSummary(string $professionalId, string $startDate, string $endDate): string
     {
-        return "analytics:summary:{$professionalId}:{$startDate}:{$endDate}";
+        // q2: top_links/top_sections query shape changed (commits 672aa80, c144ccc)
+        return "analytics:summary:q2:{$professionalId}:{$startDate}:{$endDate}";
     }
 
     /**
@@ -122,7 +123,8 @@ class CacheKeyGenerator
 
     public static function brandCommerceAnalytics(string $professionalId, string $from, string $to): string
     {
-        return "analytics:commerce:brand:{$professionalId}:{$from}:{$to}";
+        // v2: totals block now includes page_views + unique_visitors (commit a0e12a9)
+        return "analytics:commerce:brand:v2:{$professionalId}:{$from}:{$to}";
     }
 
     public static function brandActiveCatalog(string $brandProfessionalId): string

@@ -83,6 +83,8 @@ class HydrogenAffiliateController extends ApiController
         // into getAffiliateLinks().
         $booking = $this->getAffiliateBooking($site, $sections);
 
+        // no-store: payload shape has evolved (e.g. links.id added in b9de807).
+        // Prevent Oxygen/CDN from caching a stale shape across deploys.
         return $this->success([
             'affiliate_id' => (string) $affiliate->id,
             'name' => $affiliate->display_name,
@@ -101,7 +103,7 @@ class HydrogenAffiliateController extends ApiController
             // the block_id is needed so Hydrogen can fire click tracking when
             // the visitor opens the shop card.
             'shop' => $this->sectionEnvelope($sections, 'shop', fn() => null),
-        ]);
+        ])->header('Cache-Control', 'no-store');
     }
 
     /**
