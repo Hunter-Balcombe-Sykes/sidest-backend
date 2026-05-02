@@ -200,28 +200,11 @@ class Runner:
             self._mark(item_id, status="blocked", blocked_reason=f"push failed: {e}")
             return "blocked"
 
-        # Tick checkboxes in source markdown — for a bundle, tick every member;
-        # for a standalone item, tick the item itself. Then commit + push the
-        # markdown change so the next run starts from a clean working tree.
-        source = item.get("source")
-        if source:
-            source_path = self.repo_root / source
-            ticked: list[str] = []
-            if item.get("is_bundle"):
-                for member_id in item.get("members", []):
-                    if tick_checkbox_for_item(source_path, member_id):
-                        ticked.append(member_id)
-            else:
-                if tick_checkbox_for_item(source_path, item_id):
-                    ticked.append(item_id)
-
-            if ticked:
-                try:
-                    self._commit_and_push_tick(item_id, source, ticked)
-                except Exception:
-                    pass  # Best-effort; the markdown is still ticked locally
-
-        # Write the completion record (Claude's body + our frontmatter + Q&A)
+        # IMPORTANT: write_completion_record FIRST (before any audit-trail commit).
+        # It overwrites the completion file with our frontmatter + Q&A version,
+        # so it must finalize before we stage and commit the file. Doing this
+        # AFTER the commit would leave a tracked-file modification that would
+        # block the next run's pre-push check.
         question_files = [question_file] if question_file.exists() else []
         write_completion_record(
             self.completed_dir,
@@ -239,18 +222,44 @@ class Runner:
             ),
         )
 
+        # Tick checkboxes in source markdown — for a bundle, tick every member;
+        # for a standalone item, tick the item itself.
+        source = item.get("source")
+        ticked: list[str] = []
+        if source:
+            source_path = self.repo_root / source
+            if item.get("is_bundle"):
+                for member_id in item.get("members", []):
+                    if tick_checkbox_for_item(source_path, member_id):
+                        ticked.append(member_id)
+            else:
+                if tick_checkbox_for_item(source_path, item_id):
+                    ticked.append(item_id)
+
+        # Commit BOTH the (now-finalized) completion record AND the markdown
+        # ticks together. Always runs, even if no ticks happened, so the
+        # completion record always lands in git history.
+        try:
+            self._commit_and_push_audit_trail(item_id, source, ticked)
+        except Exception:
+            pass  # Best-effort; the next run's pre-push will retry on the dirty file
+
         self._mark(item_id, status="done", completed_at=now_iso(), session_id=tracker.session_id)
         return "pushed"
 
-    def _commit_and_push_tick(self, item_id: str, source: str, ticked_ids: list[str]) -> None:
-        """Commit the markdown checkbox flips + completion record as a separate
-        `chore(audit): ...` commit and push to the configured branch. Keeps the
-        working tree clean for the next run's pre-push check."""
-        # Stage the audit markdown
-        subprocess.run(
-            ["git", "add", source], cwd=self.repo_root, check=True, capture_output=True,
-        )
-        # Stage the completion record if Claude wrote one (durable audit trail)
+    def _commit_and_push_audit_trail(
+        self, item_id: str, source: str | None, ticked_ids: list[str],
+    ) -> None:
+        """Stage the completion record + any ticked-markdown changes, commit
+        them as a `chore(audit): ...` commit, and push. Always runs after a
+        successful fix push so the working tree is clean for the next run.
+
+        - Completion record (`.audit-work/completed/<id>.md`): always staged
+          if it exists. Designed to be a durable per-fix audit trail.
+        - Source markdown: only staged if `source` is set (we always try, but
+          if nothing actually changed git diff --cached will report empty).
+        """
+        # Stage the completion record (durable audit trail per spec)
         completion_path = self.completed_dir / f"{_safe_id(item_id)}.md"
         if completion_path.exists():
             try:
@@ -259,21 +268,38 @@ class Runner:
                     cwd=self.repo_root, check=True, capture_output=True,
                 )
             except subprocess.CalledProcessError:
-                pass  # If gitignored or otherwise unstageable, skip silently
+                pass  # ignored or otherwise unstageable
 
-        # Skip if nothing actually staged (no real change)
+        # Stage the audit markdown (if a source is set)
+        if source:
+            try:
+                subprocess.run(
+                    ["git", "add", source],
+                    cwd=self.repo_root, check=True, capture_output=True,
+                )
+            except subprocess.CalledProcessError:
+                pass
+
+        # Nothing actually changed? skip
         diff_check = subprocess.run(
             ["git", "diff", "--cached", "--quiet"], cwd=self.repo_root,
         )
         if diff_check.returncode == 0:
-            return  # nothing to commit
+            return
 
-        ids_text = ", ".join(ticked_ids)
-        msg = (
-            f"chore(audit): mark {item_id} done + completion record\n\n"
-            f"Ticks {ids_text} in {source} and commits the per-fix audit trail "
-            f"after the orchestrator-completed fix."
-        )
+        # Build a clear commit message
+        if ticked_ids and source:
+            msg = (
+                f"chore(audit): mark {item_id} done + completion record\n\n"
+                f"Ticks {', '.join(ticked_ids)} in {source} and commits the "
+                f"per-fix audit trail after the orchestrator-completed fix."
+            )
+        else:
+            msg = (
+                f"chore(audit): completion record for {item_id}\n\n"
+                f"Commits the per-fix audit trail "
+                f"({completion_path.relative_to(self.repo_root) if completion_path.exists() else 'see .audit-work/'})."
+            )
         subprocess.run(
             ["git", "commit", "-m", msg], cwd=self.repo_root, check=True, capture_output=True,
         )
