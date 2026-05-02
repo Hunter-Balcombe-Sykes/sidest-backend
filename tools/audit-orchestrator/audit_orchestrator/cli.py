@@ -86,7 +86,10 @@ def _collect_recommended(config, count: int) -> list[str]:
 def main(ctx: click.Context) -> None:
     """Audit orchestrator — run unattended Claude fix sessions across audit checklists."""
     if ctx.invoked_subcommand is None:
-        click.echo("TUI not yet implemented in this build. Run `audit --help` for subcommands.")
+        from audit_orchestrator.tui import AuditApp
+        work = _state_path().parent
+        work.mkdir(parents=True, exist_ok=True)
+        AuditApp(work_dir=work, repo_root=Path.cwd()).run()
 
 
 @main.command("add")
