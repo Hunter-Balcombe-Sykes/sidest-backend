@@ -42,6 +42,7 @@ Artisan::command('sidest:normalize-professional-types {--dry-run : Show count on
 
 Schedule::command('sidest:purge-soft-deletes')
     ->dailyAt('03:20')
+    ->withoutOverlapping(600)
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: purge-soft-deletes');
     });
@@ -89,6 +90,7 @@ Schedule::job(new \App\Jobs\Notifications\SendWeeklyAnalyticsNotificationJob)
 
 Schedule::command('queue:prune-failed --hours=72')
     ->daily()
+    ->withoutOverlapping()
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-failed-jobs');
     });
