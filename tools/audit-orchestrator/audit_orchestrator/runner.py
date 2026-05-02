@@ -43,19 +43,22 @@ class Runner:
         self.questions_dir = work_dir / "questions"
         self.blocked_dir = work_dir / "blocked"
         self.completed_dir = work_dir / "completed"
+        self.logs_dir = work_dir / "logs"
         self.questions_dir.mkdir(parents=True, exist_ok=True)
         self.blocked_dir.mkdir(parents=True, exist_ok=True)
         self.completed_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
     def run_one(
         self, item_id: str, *, mode: RunMode,
         on_step_change=None,
+        on_action=None,
     ) -> str:
         """Run one queue item end-to-end. Returns outcome string.
 
-        on_step_change(EventKind | None) — optional callback fired when Claude
-        transitions between high-level activity phases (planning/editing/
-        testing/committing). Called on the runner thread.
+        Callbacks (called on the runner thread):
+          on_step_change(EventKind | None) — fired on monotonic stage transitions
+          on_action(ToolCallDetail) — fired for every tool use with file/cmd detail
         """
         state = self.state_mgr.load()
         item = state.items.get(item_id)
@@ -77,10 +80,13 @@ class Runner:
             repo_root=self.repo_root,
         )
 
-        tracker = self._spawn_claude(prompt, on_step_change=on_step_change)
+        tracker = self._spawn_claude(
+            prompt, item_id=item_id,
+            on_step_change=on_step_change, on_action=on_action,
+        )
         return self._handle_exit(item_id, tracker, question_file)
 
-    def resume(self, item_id: str, answer: str, *, on_step_change=None) -> str:
+    def resume(self, item_id: str, answer: str, *, on_step_change=None, on_action=None) -> str:
         """Resume a session with the user's answer. Returns outcome string."""
         state = self.state_mgr.load()
         item = state.items.get(item_id)
@@ -89,15 +95,18 @@ class Runner:
 
         prompt = render_resume_prompt(answer=answer)
         tracker = self._spawn_claude(
-            prompt, resume_id=item["session_id"], on_step_change=on_step_change,
+            prompt, item_id=item_id, resume_id=item["session_id"],
+            on_step_change=on_step_change, on_action=on_action,
         )
         question_file = self.questions_dir / f"{_safe_id(item_id)}.md"
         return self._handle_exit(item_id, tracker, question_file)
 
     def _spawn_claude(
         self, prompt: str, *,
+        item_id: str,
         resume_id: str | None = None,
         on_step_change=None,
+        on_action=None,
     ) -> StreamEventTracker:
         cmd = ["claude", "--print", "--model", self.config.claude_model,
                "--allowedTools", ",".join(self.config.allowed_tools),
@@ -107,19 +116,30 @@ class Runner:
         cmd.extend(self.config.claude_extra_args)
         cmd.append(prompt)
 
+        # Tee raw stream-json to .audit-work/logs/<id>.jsonl so users can
+        # `tail -f` it from any terminal for live visibility.
+        log_path = self.logs_dir / f"{_safe_id(item_id)}.jsonl"
         tracker = StreamEventTracker()
         proc = subprocess.Popen(cmd, cwd=self.repo_root, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, bufsize=1)
         prev_event = None
-        if proc.stdout is not None:
-            for line in proc.stdout:
-                tracker.feed_line(line)
-                if on_step_change is not None and tracker.last_event != prev_event:
-                    prev_event = tracker.last_event
-                    try:
-                        on_step_change(tracker.last_event)
-                    except Exception:
-                        pass
+        with log_path.open("a", encoding="utf-8") as logf:
+            if proc.stdout is not None:
+                for line in proc.stdout:
+                    logf.write(line)
+                    logf.flush()
+                    detail = tracker.feed_line(line)
+                    if detail is not None and on_action is not None:
+                        try:
+                            on_action(detail)
+                        except Exception:
+                            pass
+                    if on_step_change is not None and tracker.last_event != prev_event:
+                        prev_event = tracker.last_event
+                        try:
+                            on_step_change(tracker.last_event)
+                        except Exception:
+                            pass
         proc.wait()
         tracker.exit_code = proc.returncode
         return tracker

@@ -1,5 +1,6 @@
 """Textual application root for the audit orchestrator TUI."""
 from __future__ import annotations
+import subprocess
 import threading
 from pathlib import Path
 from textual.app import App, ComposeResult
@@ -25,6 +26,7 @@ class AuditApp(App):
         ("f2", "queue", "Queue"),
         ("f3", "mode", "Mode"),
         ("f5", "pause", "Pause"),
+        ("w", "watch_terminal", "Watch in Terminal"),
     ]
 
     def __init__(self, work_dir: Path, repo_root: Path) -> None:
@@ -240,20 +242,95 @@ class AuditApp(App):
                         self.state_mgr.save(state)
                         continue
 
-            self._log_from_thread(f"Starting {next_id}...")
+            self._kickoff_banner(next_id, item, mode)
             outcome = runner.run_one(
-                next_id, mode=mode, on_step_change=self._make_on_step(next_id),
+                next_id, mode=mode,
+                on_step_change=self._make_on_step(next_id),
+                on_action=self._make_on_action(next_id),
             )
-            self._log_from_thread(f"{next_id} → {outcome}")
-            # Defensive: if runner reports skipped, pop the item to avoid loop
+            self._end_summary(next_id, item, outcome, runner)
             if outcome == "skipped":
                 state = self.state_mgr.load()
                 state.queue = [q for q in state.queue if q != next_id]
                 self.state_mgr.save(state)
 
+    def _kickoff_banner(self, item_id: str, item: dict, mode) -> None:
+        """Log a multi-line header summarising what's about to run."""
+        title = item.get("title", "")
+        is_bundle = bool(item.get("is_bundle"))
+        members = item.get("members") or []
+        source = item.get("source", "?")
+        effort = item.get("effort", "?")
+
+        kind = "BUNDLE" if is_bundle else "ITEM"
+        self._log_from_thread("")
+        self._log_from_thread(f"[bold cyan]━━━ {kind} {item_id} ━━━[/bold cyan]")
+        self._log_from_thread(f"[bold]{title}[/bold]")
+        self._log_from_thread(f"[dim]source: {source}  ·  effort: {effort}  ·  mode: {mode.value}[/dim]")
+        if is_bundle and members:
+            self._log_from_thread(f"[dim]members ({len(members)}): {', '.join(members)}[/dim]")
+        self._log_from_thread(
+            f"[dim]live log: tail -f .audit-work/logs/{item_id.lstrip('#')}.jsonl  ·  press [b]w[/b] for terminal[/dim]"
+        )
+
+    def _end_summary(self, item_id: str, item: dict, outcome: str, runner) -> None:
+        """Log a multi-line footer summarising what happened."""
+        emoji = {
+            "pushed": "✅", "blocked": "⚠️ ",
+            "awaiting_answer": "❓", "skipped": "⏭ ",
+        }.get(outcome, "·")
+
+        if outcome == "pushed":
+            # Get the most recent commit's files + sha
+            try:
+                files = subprocess.run(
+                    ["git", "show", "--name-only", "--pretty=format:", "HEAD"],
+                    cwd=self.repo_root, capture_output=True, text=True, check=True,
+                ).stdout.strip().splitlines()
+                files = [f for f in files if f.strip()]
+                sha = subprocess.run(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    cwd=self.repo_root, capture_output=True, text=True, check=True,
+                ).stdout.strip()
+            except Exception:
+                files, sha = [], "?"
+
+            self._log_from_thread(f"{emoji} [green]{item_id} → pushed[/green] (commit {sha})")
+            if files:
+                self._log_from_thread(f"   files changed ({len(files)}):")
+                for f in files[:8]:
+                    marker = "🗄️ " if "/migrations/" in f else "  "
+                    self._log_from_thread(f"   {marker}{f}")
+                if len(files) > 8:
+                    self._log_from_thread(f"   ... and {len(files) - 8} more")
+
+            # Migration warning
+            migrations = [f for f in files if "/migrations/" in f and f.endswith(".sql")]
+            if migrations:
+                self._log_from_thread(
+                    f"[yellow]⚠️  Migration created — orchestrator did NOT apply it. "
+                    f"Run [b]supabase db push[/b] to apply to remote DB.[/yellow]"
+                )
+
+        elif outcome == "blocked":
+            self._log_from_thread(f"{emoji} [yellow]{item_id} → blocked[/yellow]")
+            self._log_from_thread(
+                f"   diff:  .audit-work/blocked/{item_id.lstrip('#')}.patch"
+            )
+            self._log_from_thread(
+                f"   log:   .audit-work/blocked/{item_id.lstrip('#')}.log"
+            )
+
+        elif outcome == "awaiting_answer":
+            self._log_from_thread(f"{emoji} [blue]{item_id} → awaiting answer[/blue] — click question panel above")
+
+        else:
+            self._log_from_thread(f"{emoji} {item_id} → {outcome}")
+        self._log_from_thread("")
+
     def _make_on_step(self, item_id: str):
-        """Build a callback that logs Claude's step transitions to ActivityLog
-        AND updates NowRunningPanel.step (the existing simple step reactive).
+        """Build a callback that updates NowRunningPanel.step. Stage-monotonic
+        per stream_parser, so it won't bounce back to 'planning'.
         """
         last = {"stage": None}
 
@@ -262,7 +339,6 @@ class AuditApp(App):
             if stage is None or stage == last["stage"]:
                 return
             last["stage"] = stage
-            self._log_from_thread(f"  [dim]{item_id}:[/dim] {stage}")
             try:
                 self.call_from_thread(self._set_running_step, stage)
             except Exception:
@@ -275,6 +351,51 @@ class AuditApp(App):
             self.query_one(NowRunningPanel).step = stage
         except Exception:
             pass
+
+    def _make_on_action(self, item_id: str):
+        """Build a callback that logs every tool call's snippet to the activity
+        log, with a per-file dedup window so we don't spam re-reads of the same file.
+        """
+        recent: list[str] = []  # last few snippets for dedup
+
+        def on_action(detail):
+            snippet = detail.snippet
+            # Dedup: skip if we just logged the exact same snippet 1-3 lines ago
+            if snippet in recent[-3:]:
+                return
+            recent.append(snippet)
+            self._log_from_thread(f"  [dim]{item_id}[/dim]  {snippet}")
+
+        return on_action
+
+    def action_watch_terminal(self) -> None:
+        """Open a new Terminal.app window tailing the current run's log."""
+        state = self.state_mgr.load()
+        run = state.current_run
+        if not run:
+            self.notify("No item is currently running")
+            return
+        item_id = run.get("id", "")
+        log_path = self.work_dir / "logs" / f"{item_id.lstrip('#')}.jsonl"
+        if not log_path.exists():
+            self.notify(f"No log file yet for {item_id}")
+            return
+        # Use AppleScript to open Terminal.app with `tail -f` (pipes through jq
+        # if available for prettier output, falls back to plain tail otherwise).
+        cmd = (
+            f"if command -v jq >/dev/null 2>&1; then "
+            f"tail -f {log_path} | jq -c '. | {{type, subtype, msg: .message.content[0]?.name // .message.content[0]?.text}}'; "
+            f"else tail -f {log_path}; fi"
+        )
+        script = (
+            f'tell application "Terminal" to do script "{cmd}"\n'
+            f'tell application "Terminal" to activate'
+        )
+        try:
+            subprocess.Popen(["osascript", "-e", script])
+            self.notify(f"Opened Terminal tailing {item_id}")
+        except Exception as e:
+            self.notify(f"Failed to open Terminal: {e}")
 
     def _log(self, msg: str) -> None:
         try:
