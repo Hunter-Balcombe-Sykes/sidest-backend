@@ -108,9 +108,7 @@ GRAPHQL;
             throw new \RuntimeException('Brand does not have a connected Shopify store.', 422);
         }
 
-        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-
-        if (trim((string) Arr::get($metadata, 'storefront_access_token', '')) === '') {
+        if (trim((string) ($integration->storefront_token ?? '')) === '') {
             throw new \RuntimeException('Storefront is not yet configured. Please try again shortly.', 503);
         }
 
@@ -494,7 +492,7 @@ GRAPHQL;
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
-        $storefrontToken = trim((string) Arr::get($metadata, 'storefront_access_token', ''));
+        $storefrontToken = trim((string) ($integration->storefront_token ?? ''));
         $collectionHandle = Arr::get($metadata, 'active_collection_handle', 'sidest-active-products');
         $apiVersion = config('services.shopify.api_version', '2025-01');
 

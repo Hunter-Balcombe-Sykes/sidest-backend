@@ -58,7 +58,7 @@ class PublicShopifyStorefrontController extends ApiController
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
-        $storefrontToken = trim((string) Arr::get($metadata, 'storefront_access_token', ''));
+        $storefrontToken = trim((string) ($integration->storefront_token ?? ''));
 
         if ($shopDomain === '') {
             return $this->error('Not found.', 404);

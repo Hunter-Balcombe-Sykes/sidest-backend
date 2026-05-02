@@ -59,7 +59,7 @@ class HydrogenBrandConfigController extends ApiController
             'brand_name' => $professional->display_name,
             'brand_handle' => $professional->handle,
             'shop_domain' => $shopDomain,
-            'storefront_access_token' => Arr::get($metadata, 'storefront_access_token'),
+            'storefront_access_token' => $integration->storefront_token,
             'default_commission_rate' => $storeSettings ? (float) $storeSettings->default_commission_rate : 15.0,
             'currency_code' => Arr::get($metadata, 'shop_currency', 'AUD'),
             'active_collection_handle' => Arr::get($metadata, 'active_collection_handle', 'sidest-active-products'),

@@ -82,20 +82,25 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
+        // Token already provisioned — nothing to do.
+        if ($integration->storefront_token !== null && trim((string) $integration->storefront_token) !== '') {
+            return;
+        }
+
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
         try {
-            // Check if we already have a Side St token
+            // Check if a Side St token already exists in Shopify (e.g. from a previous run).
             $existing = $this->findExistingToken($shopDomain, $accessToken, $apiVersion);
             if ($existing) {
-                $integration->mergeProviderMetadata(['storefront_access_token' => $existing]);
+                $integration->update(['storefront_token' => $existing]);
 
                 return;
             }
 
-            // Create a new one
+            // Create a new one.
             $token = $this->createToken($shopDomain, $accessToken, $apiVersion);
-            $integration->mergeProviderMetadata(['storefront_access_token' => $token]);
+            $integration->update(['storefront_token' => $token]);
 
             Log::info('Shopify Storefront API token created.', [
                 'integration_id' => $this->integrationId,

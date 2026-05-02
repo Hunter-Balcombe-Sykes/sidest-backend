@@ -6,7 +6,7 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-// V2: OAuth integration record (Square, Fresha, Shopify). Stores encrypted tokens and provider_metadata (webhook IDs, storefront tokens).
+// V2: OAuth integration record (Square, Fresha, Shopify). Stores encrypted tokens and provider_metadata (webhook IDs, collection handles, etc.).
 class ProfessionalIntegration extends BaseModel
 {
     use HasUuids;
@@ -26,6 +26,7 @@ class ProfessionalIntegration extends BaseModel
     protected $hidden = [
         'access_token',
         'refresh_token',
+        'storefront_token',
         'provider_metadata',
     ];
 
@@ -35,6 +36,7 @@ class ProfessionalIntegration extends BaseModel
         'external_account_id',
         'access_token',
         'refresh_token',
+        'storefront_token',
         'expires_at',
         'catalog_latest_time',
         'last_catalog_sync_at',
@@ -45,6 +47,7 @@ class ProfessionalIntegration extends BaseModel
     protected $casts = [
         'access_token' => 'encrypted',
         'refresh_token' => 'encrypted',
+        'storefront_token' => 'encrypted',
         'expires_at' => 'datetime',
         'catalog_latest_time' => 'datetime',
         'last_catalog_sync_at' => 'datetime',

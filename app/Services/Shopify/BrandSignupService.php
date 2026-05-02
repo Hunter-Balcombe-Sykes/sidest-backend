@@ -2,6 +2,7 @@
 
 namespace App\Services\Shopify;
 
+use App\Exceptions\Shopify\ShopifyTransportException;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
@@ -13,6 +14,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
+use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
@@ -23,6 +25,7 @@ class BrandSignupService
 
     public function __construct(
         private readonly ShopProfileAutoFillService $autoFill,
+        private readonly ShopifyAdminClient $shopifyClient,
     ) {}
 
     public function handleReinstall(
@@ -32,6 +35,13 @@ class BrandSignupService
         array $scopes,
     ): BrandSignupResult {
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+
+        // Revoke the old storefront token at Shopify before issuing a new one.
+        // A leaked storefront token otherwise survives indefinitely after reinstall.
+        if ($integration->storefront_token !== null) {
+            $this->revokeStorefrontToken($metadata, (string) $integration->access_token);
+            $integration->update(['storefront_token' => null]);
+        }
 
         $integration->update([
             'access_token' => $accessToken,
@@ -120,6 +130,71 @@ class BrandSignupService
             integration: $integration,
             isReinstall: false,
         );
+    }
+
+    /**
+     * Delete this app's storefront access token from Shopify.
+     * Best-effort: any failure is logged and swallowed so the reinstall continues.
+     */
+    private function revokeStorefrontToken(array $metadata, string $oldAccessToken): void
+    {
+        $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
+        if ($shopDomain === '' || $oldAccessToken === '') {
+            return;
+        }
+
+        $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
+
+        try {
+            $response = $this->shopifyClient->rest(
+                method: 'GET',
+                shopDomain: $shopDomain,
+                accessToken: $oldAccessToken,
+                path: "/admin/api/{$apiVersion}/storefront_access_tokens.json",
+                timeoutSeconds: 15,
+            );
+        } catch (ShopifyTransportException $e) {
+            Log::warning('Shopify reinstall: could not list storefront tokens for revocation', [
+                'shop_domain' => $shopDomain,
+                'status' => $e->status,
+            ]);
+
+            return;
+        }
+
+        $tokens = $response->json('storefront_access_tokens', []);
+        if (! is_array($tokens)) {
+            return;
+        }
+
+        foreach ($tokens as $token) {
+            $title = (string) ($token['title'] ?? '');
+            if ($title !== 'Side St' && $title !== 'Side St Hydrogen') {
+                continue;
+            }
+
+            $id = (string) ($token['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+
+            try {
+                $this->shopifyClient->rest(
+                    method: 'DELETE',
+                    shopDomain: $shopDomain,
+                    accessToken: $oldAccessToken,
+                    path: "/admin/api/{$apiVersion}/storefront_access_tokens/{$id}.json",
+                    timeoutSeconds: 15,
+                );
+            } catch (ShopifyTransportException $e) {
+                // 404 = already gone, any other status = best-effort failure — both are acceptable.
+                Log::warning('Shopify reinstall: storefront token revocation failed', [
+                    'shop_domain' => $shopDomain,
+                    'token_id' => $id,
+                    'status' => $e->status,
+                ]);
+            }
+        }
     }
 
     public function dispatchInstallJobs(string $integrationId): void
