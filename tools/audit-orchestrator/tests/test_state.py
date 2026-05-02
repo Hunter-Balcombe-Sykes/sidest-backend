@@ -57,6 +57,9 @@ def test_corrupted_state_backs_up_and_returns_empty(tmp_path):
     assert len(backups) == 1
 
 
+# --- Task 6.2: lock file exclusion + cleanup ---
+
+
 def test_lock_file_excludes_second_holder(tmp_path):
     from audit_orchestrator.state import lock_file
     lock_path = tmp_path / ".run.lock"
