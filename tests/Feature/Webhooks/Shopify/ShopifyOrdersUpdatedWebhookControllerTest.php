@@ -37,12 +37,12 @@ function realShopifyOrderUpdatedPayload(): array
     ];
 }
 
-it('orders/updated — silently acknowledges 200 with bad HMAC, dispatches nothing', function () {
+it('orders/updated — bad HMAC returns 401, dispatches nothing', function () {
     $this->postJson('/api/webhooks/shopify/orders-updated', realShopifyOrderUpdatedPayload(), [
         'X-Shopify-Hmac-SHA256' => 'bogus',
         'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
         'X-Shopify-Webhook-Id' => (string) Str::uuid(),
-    ])->assertOk();
+    ])->assertStatus(401);
 
     Bus::assertNotDispatched(ProcessShopifyOrderUpdatedWebhookJob::class);
 });
@@ -69,6 +69,37 @@ it('orders/updated — accepts valid HMAC and dispatches with real-shape refund 
     ])->assertOk();
 
     Bus::assertDispatched(ProcessShopifyOrderUpdatedWebhookJob::class);
+});
+
+it('orders/updated — already-seen webhook ID deduplicates before HMAC check', function () {
+    $proId = (string) Str::uuid();
+    DB::table('core.professional_integrations')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $proId,
+        'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+        'shopify_shop_domain' => 'brand-a.myshopify.com',
+        'access_token' => 'shpat_token',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $payload = realShopifyOrderUpdatedPayload();
+    $body = json_encode($payload);
+    $webhookId = (string) Str::uuid();
+
+    $this->postJson('/api/webhooks/shopify/orders-updated', $payload, [
+        'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test-shop-secret'),
+        'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
+        'X-Shopify-Webhook-Id' => $webhookId,
+    ])->assertOk();
+
+    $this->postJson('/api/webhooks/shopify/orders-updated', $payload, [
+        'X-Shopify-Hmac-SHA256' => 'bad-hmac',
+        'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
+        'X-Shopify-Webhook-Id' => $webhookId,
+    ])->assertOk()->assertJson(['received' => true, 'duplicate' => true]);
+
+    Bus::assertDispatchedTimes(ProcessShopifyOrderUpdatedWebhookJob::class, 1);
 });
 
 it('orders/updated — unknown shop_domain logs warning and skips dispatch', function () {

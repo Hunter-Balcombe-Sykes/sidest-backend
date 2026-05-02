@@ -24,7 +24,7 @@ function uninstalledPayload(): array
     ];
 }
 
-it('app/uninstalled — bad HMAC silently 200s, leaves integration intact', function () {
+it('app/uninstalled — bad HMAC returns 401 and leaves integration intact', function () {
     $proId = (string) Str::uuid();
     DB::table('core.professional_integrations')->insert([
         'id' => (string) Str::uuid(),
@@ -40,7 +40,7 @@ it('app/uninstalled — bad HMAC silently 200s, leaves integration intact', func
     $this->postJson('/api/webhooks/shopify/app-uninstalled', uninstalledPayload(), [
         'X-Shopify-Hmac-SHA256' => 'bad',
         'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
-    ])->assertOk();
+    ])->assertStatus(401);
 
     $row = DB::table('core.professional_integrations')->where('professional_id', $proId)->first();
     expect($row->access_token)->toBe('shpat_alive');

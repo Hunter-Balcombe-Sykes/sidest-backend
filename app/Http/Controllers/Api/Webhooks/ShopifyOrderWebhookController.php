@@ -23,24 +23,25 @@ class ShopifyOrderWebhookController extends ApiController
         $webhookId = (string) $request->header('X-Shopify-Webhook-Id', '');
         $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop-Domain', '')));
 
-        // HMAC signature validation
+        // Dedup read before HMAC: short-circuit already-processed IDs without recomputing the hash.
+        $dedupeKey = $webhookId !== '' ? "shopify:webhook:order:{$webhookId}" : null;
+        if ($dedupeKey && Cache::has($dedupeKey)) {
+            return $this->success(['received' => true, 'duplicate' => true]);
+        }
+
         if (! $this->isValidShopifyHmac($rawBody, $signature)) {
             Log::warning('Shopify order webhook: invalid HMAC signature', [
                 'shop_domain' => $shopDomain,
             ]);
 
-            return $this->success(['received' => true]);
+            return $this->error('invalid signature', 401);
         }
 
-        // Event deduplication
-        if ($webhookId !== '') {
-            $dedupeKey = "shopify:webhook:order:{$webhookId}";
-            if (! Cache::add($dedupeKey, true, now()->addHours(24))) {
-                return $this->success(['received' => true, 'duplicate' => true]);
-            }
+        // Dedup write after HMAC passes: claim this ID to prevent concurrent double-dispatch.
+        if ($dedupeKey && ! Cache::add($dedupeKey, true, now()->addHours(24))) {
+            return $this->success(['received' => true, 'duplicate' => true]);
         }
 
-        // Identify brand by shop domain
         $integration = ProfessionalIntegration::query()
             ->where('shopify_shop_domain', $shopDomain)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -63,18 +64,10 @@ class ShopifyOrderWebhookController extends ApiController
             return $this->success(['received' => true]);
         }
 
-        // Dispatch processing job
-        try {
-            ProcessShopifyOrderWebhookJob::dispatch(
-                (string) $integration->professional_id,
-                $payload
-            );
-        } catch (\Throwable $e) {
-            Log::error('Shopify order webhook: failed to dispatch processing job', [
-                'shop_domain' => $shopDomain,
-                'error' => $e->getMessage(),
-            ]);
-        }
+        ProcessShopifyOrderWebhookJob::dispatch(
+            (string) $integration->professional_id,
+            $payload
+        );
 
         return $this->success(['received' => true]);
     }

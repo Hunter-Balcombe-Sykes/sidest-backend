@@ -58,14 +58,14 @@ function insertShopifyIntegration(string $proId, string $shopDomain): void
     ]);
 }
 
-it('orders/paid — silently acknowledges 200 with bad HMAC and dispatches nothing', function () {
+it('orders/paid — bad HMAC returns 401 and dispatches nothing', function () {
     $payload = realShopifyOrderPayload();
 
     $this->postJson('/api/webhooks/shopify/orders-paid', $payload, [
         'X-Shopify-Hmac-SHA256' => 'invalid-hmac',
         'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
         'X-Shopify-Webhook-Id' => (string) Str::uuid(),
-    ])->assertOk();
+    ])->assertStatus(401);
 
     Bus::assertNotDispatched(ProcessShopifyOrderWebhookJob::class);
 });
@@ -135,7 +135,32 @@ it('orders/paid — accepts a body signed with the fallback secret during rotati
     Bus::assertDispatched(ProcessShopifyOrderWebhookJob::class);
 });
 
-it('orders/paid — rejects when neither primary nor fallback secret matches', function () {
+it('orders/paid — already-seen webhook ID deduplicates before HMAC check', function () {
+    $proId = (string) Str::uuid();
+    insertShopifyIntegration($proId, 'brand-a.myshopify.com');
+
+    $payload = realShopifyOrderPayload();
+    $body = json_encode($payload);
+    $webhookId = (string) Str::uuid();
+
+    // First delivery: valid HMAC, processes and caches the ID.
+    $this->postJson('/api/webhooks/shopify/orders-paid', $payload, [
+        'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test-shop-secret'),
+        'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
+        'X-Shopify-Webhook-Id' => $webhookId,
+    ])->assertOk();
+
+    // Second delivery: same ID but bad HMAC — dedup fires before HMAC, returns duplicate.
+    $this->postJson('/api/webhooks/shopify/orders-paid', $payload, [
+        'X-Shopify-Hmac-SHA256' => 'bad-hmac',
+        'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
+        'X-Shopify-Webhook-Id' => $webhookId,
+    ])->assertOk()->assertJson(['received' => true, 'duplicate' => true]);
+
+    Bus::assertDispatchedTimes(ProcessShopifyOrderWebhookJob::class, 1);
+});
+
+it('orders/paid — forged signature matching neither secret returns 401', function () {
     Config::set('services.shopify.webhook_secret', 'real-primary');
     Config::set('services.shopify.fallback_secret', 'real-fallback');
 
@@ -146,7 +171,7 @@ it('orders/paid — rejects when neither primary nor fallback secret matches', f
         'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'attacker-guessed-secret'),
         'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
         'X-Shopify-Webhook-Id' => (string) Str::uuid(),
-    ])->assertOk(); // Always 200 (no retry signal), but no dispatch.
+    ])->assertStatus(401);
 
     Bus::assertNotDispatched(ProcessShopifyOrderWebhookJob::class);
 });

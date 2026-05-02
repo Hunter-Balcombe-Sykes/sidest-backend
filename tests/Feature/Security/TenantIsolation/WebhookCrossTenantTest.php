@@ -93,7 +93,7 @@ it('shopify order webhook for brand A domain does not process events for brand B
     expect($aRecord->access_token)->toBe('token-a');
 });
 
-it('shopify order webhook with invalid hmac is silently acknowledged without processing', function () {
+it('shopify order webhook with invalid hmac returns 401 without processing', function () {
     $secret = 'test-webhook-secret-789';
     Config::set('services.shopify.webhook_secret', $secret);
 
@@ -107,6 +107,5 @@ it('shopify order webhook with invalid hmac is silently acknowledged without pro
 
     $response = app(ShopifyOrderWebhookController::class)->__invoke($req);
 
-    // Invalid HMAC: controller returns 200 (no retry signal) but does nothing.
-    expect($response->getStatusCode())->toBe(200);
+    expect($response->getStatusCode())->toBe(401);
 });

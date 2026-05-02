@@ -23,19 +23,21 @@ class ShopifyOrdersUpdatedWebhookController extends ApiController
         $webhookId = (string) $request->header('X-Shopify-Webhook-Id', '');
         $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop-Domain', '')));
 
+        $dedupeKey = $webhookId !== '' ? "shopify:webhook:order-updated:{$webhookId}" : null;
+        if ($dedupeKey && Cache::has($dedupeKey)) {
+            return $this->success(['received' => true, 'duplicate' => true]);
+        }
+
         if (! $this->isValidShopifyHmac($rawBody, $signature)) {
             Log::warning('Shopify orders/updated webhook: invalid HMAC signature', [
                 'shop_domain' => $shopDomain,
             ]);
 
-            return $this->success(['received' => true]);
+            return $this->error('invalid signature', 401);
         }
 
-        if ($webhookId !== '') {
-            $dedupeKey = "shopify:webhook:order-updated:{$webhookId}";
-            if (! Cache::add($dedupeKey, true, now()->addHours(24))) {
-                return $this->success(['received' => true, 'duplicate' => true]);
-            }
+        if ($dedupeKey && ! Cache::add($dedupeKey, true, now()->addHours(24))) {
+            return $this->success(['received' => true, 'duplicate' => true]);
         }
 
         $integration = ProfessionalIntegration::query()
@@ -56,17 +58,10 @@ class ShopifyOrdersUpdatedWebhookController extends ApiController
             return $this->success(['received' => true]);
         }
 
-        try {
-            ProcessShopifyOrderUpdatedWebhookJob::dispatch(
-                (string) $integration->professional_id,
-                $payload
-            );
-        } catch (\Throwable $e) {
-            Log::error('Shopify orders/updated webhook: failed to dispatch processing job', [
-                'shop_domain' => $shopDomain,
-                'error' => $e->getMessage(),
-            ]);
-        }
+        ProcessShopifyOrderUpdatedWebhookJob::dispatch(
+            (string) $integration->professional_id,
+            $payload
+        );
 
         return $this->success(['received' => true]);
     }

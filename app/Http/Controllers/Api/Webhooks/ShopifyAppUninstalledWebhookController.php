@@ -28,7 +28,7 @@ class ShopifyAppUninstalledWebhookController extends ApiController
                 'shop_domain' => $shopDomain,
             ]);
 
-            return $this->success(['received' => true]);
+            return $this->error('invalid signature', 401);
         }
 
         $integration = ProfessionalIntegration::query()
