@@ -334,7 +334,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Verification note:** `isValidSignature` is a private method on each controller (not in `ApiController`). Both implementations: use `hash_equals` (timing-safe), operate on the raw body from `$request->getContent()` (not JSON-decoded), and use HMAC-SHA256 matching each provider's documented algorithm. Square also handles URL normalization candidates. Fresha's implementation notes that the exact signature scheme should be re-confirmed against Fresha docs when integration is live (no public API yet). No code changes needed.
     - **Technical:** No fix required. Implementation is correct.
 
-- [ ] **#1-02** · P1 — Inline `abort(403, ...)` patterns bypass policy system and CI guard
+- [x] **#1-02** · P1 — Inline `abort(403, ...)` patterns bypass policy system and CI guard
     - **Where:** 8 controllers including app/Http/Controllers/Api/Professional/BrandGalleryController.php:211, ProfessionalGalleryController.php:94, ProfessionalSectionBlockController.php:199, ProfessionalLinkBlockController.php:281, Uploads/ProfessionalUploadController.php:324, Store/AffiliateProductPhotoController.php:286, Staff/ProfessionalSiteManagement/StaffLinkBlockManagementController.php:117, Staff/ProfessionalSiteManagement/StaffSectionManagementController.php:120
     - **Affects:** Any future change to these 8 hot-path controllers; CI's value as a guardrail.
     - **Effort:** M (~4–8h)
