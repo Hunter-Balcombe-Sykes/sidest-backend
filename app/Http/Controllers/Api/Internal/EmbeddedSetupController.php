@@ -19,6 +19,7 @@ use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cloudflare\CloudflareDnsService;
 use App\Services\Hydrogen\HydrogenDeploymentService;
+use App\Services\Professional\BrandStatusService;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -96,6 +97,7 @@ class EmbeddedSetupController extends ApiController
             'domain_txt_set'          => (bool) ($storeSettings?->domain_txt_confirmed ?? false),
             'storefront_base_url'     => $storefrontBaseUrl,
             'storefront_status'       => $storefrontStatus,
+            'brand_status'            => $brandProfile?->brand_status ?? 'building',
         ]);
     }
 
@@ -136,6 +138,7 @@ class EmbeddedSetupController extends ApiController
         }
 
         $this->cache->invalidateProfessional($professional);
+        app(BrandStatusService::class)->sync($professional);
 
         return $this->success(['message' => 'Profile saved.']);
     }
@@ -167,6 +170,7 @@ class EmbeddedSetupController extends ApiController
         );
 
         $this->cache->invalidateProfessional($professional);
+        app(BrandStatusService::class)->sync($professional);
 
         return $this->success(['message' => 'Business details saved.']);
     }
@@ -208,6 +212,7 @@ class EmbeddedSetupController extends ApiController
         }
 
         $this->cache->invalidateProfessional($professional);
+        app(BrandStatusService::class)->sync($professional);
 
         return $this->success(['message' => 'Setting saved.']);
     }
@@ -242,6 +247,7 @@ class EmbeddedSetupController extends ApiController
         $settings->save();
 
         $this->cache->invalidateProfessional($professional);
+        app(BrandStatusService::class)->sync($professional);
 
         // Trigger a single-brand Oxygen deployment so the brand's storefront
         // has code on it immediately — they shouldn't have to wait for the
@@ -269,6 +275,7 @@ class EmbeddedSetupController extends ApiController
         );
 
         $this->cache->invalidateProfessional($professional);
+        app(BrandStatusService::class)->sync($professional);
 
         return $this->success([]);
     }
@@ -549,6 +556,7 @@ class EmbeddedSetupController extends ApiController
         );
 
         $this->cache->invalidateProfessional($professional);
+        app(BrandStatusService::class)->sync($professional);
 
         return $this->success(['domain' => "{$subdomain}.sidest.co"]);
     }
@@ -591,6 +599,7 @@ class EmbeddedSetupController extends ApiController
         );
 
         $this->cache->invalidateProfessional($professional);
+        app(BrandStatusService::class)->sync($professional);
 
         return $this->success(['record_name' => "{$recordName}.sidest.co"]);
     }
@@ -705,6 +714,7 @@ class EmbeddedSetupController extends ApiController
         }
 
         $this->cache->invalidateProfessional($professional);
+        app(BrandStatusService::class)->sync($professional);
 
         return $this->success(['provisioned' => true]);
     }
@@ -712,9 +722,12 @@ class EmbeddedSetupController extends ApiController
     /**
      * Check whether the storefront is reachable at its base URL.
      *
-     * Makes a lightweight GET with redirects disabled so we can
-     * distinguish "Hydrogen is serving" (2xx) from "Shopify is
-     * falling through to the primary domain" (3xx redirect).
+     * Makes a lightweight GET with redirects disabled. A 2xx response
+     * means the storefront is serving pages directly. A 3xx redirect
+     * is treated as "live" when it carries Oxygen/Hydrogen response
+     * headers — the app code intentionally redirects the root (e.g.
+     * Mode B redirecting to the Shopify store). Without those headers
+     * the redirect is a domain misconfiguration (not primary).
      *
      * @return 'live'|'redirecting'|'unreachable'
      */
@@ -734,6 +747,14 @@ class EmbeddedSetupController extends ApiController
             }
 
             if ($response->redirect()) {
+                // If the redirect comes from an Oxygen/Hydrogen deployment,
+                // the storefront is live — the redirect is app-level logic
+                // (e.g. root → Shopify store), not a domain misconfig.
+                $poweredBy = $response->header('powered-by') ?? '';
+                if (str_contains($poweredBy, 'Oxygen') || str_contains($poweredBy, 'Hydrogen')) {
+                    return 'live';
+                }
+
                 return 'redirecting';
             }
 
