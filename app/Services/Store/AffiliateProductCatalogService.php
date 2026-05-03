@@ -82,6 +82,67 @@ query collectionProducts($handle: String!, $first: Int!, $after: String) {
 }
 GRAPHQL;
 
+    // All-products fallback query — used when the active collection doesn't exist
+    // on Shopify (e.g. setup pipeline failed). Queries the products() root field
+    // instead of collection(handle: …), so it works without any smart collection.
+    // Response shape is identical to COLLECTION_PRODUCTS_QUERY except the path is
+    // data.products instead of data.collection.products.
+    private const ALL_PRODUCTS_QUERY = <<<'GRAPHQL'
+query allProducts($first: Int!, $after: String) {
+  products(first: $first, after: $after) {
+    edges {
+      node {
+        id
+        title
+        handle
+        availableForSale
+        description
+        featuredImage {
+          url
+          altText
+        }
+        images(first: 5) {
+          edges {
+            node {
+              url
+              altText
+            }
+          }
+        }
+        priceRange {
+          minVariantPrice {
+            amount
+            currencyCode
+          }
+          maxVariantPrice {
+            amount
+            currencyCode
+          }
+        }
+        variants(first: 5) {
+          edges {
+            node {
+              id
+              title
+              availableForSale
+              price {
+                amount
+                currencyCode
+              }
+              metafield(namespace: "sidest", key: "enabled") { value }
+            }
+          }
+        }
+      }
+      cursor
+    }
+    pageInfo {
+      hasNextPage
+    }
+  }
+}
+GRAPHQL;
+
     /**
      * Resolve the affiliate's connected brand and its Shopify integration.
      *
@@ -477,6 +538,10 @@ GRAPHQL;
     /**
      * Query the Shopify Storefront API to fetch all products from the active collection.
      *
+     * If the active collection doesn't exist on Shopify (e.g. setup pipeline failed),
+     * falls back to querying all products via the products() root field so the
+     * affiliate still sees a catalog instead of an empty state.
+     *
      * @return array<int, array<string, mixed>>
      */
     private function queryStorefrontCatalog(string $brandProfessionalId): array
@@ -503,15 +568,24 @@ GRAPHQL;
         $url = "https://{$shopDomain}/api/{$apiVersion}/graphql.json";
         $products = [];
         $cursor = null;
+        $fallback = false;  // true once we switch to ALL_PRODUCTS_QUERY
 
         do {
-            $variables = [
-                'handle' => $collectionHandle,
-                'first' => self::STOREFRONT_PRODUCTS_PER_PAGE,
-            ];
-
-            if ($cursor !== null) {
-                $variables['after'] = $cursor;
+            if ($fallback) {
+                $query = self::ALL_PRODUCTS_QUERY;
+                $variables = ['first' => self::STOREFRONT_PRODUCTS_PER_PAGE];
+                if ($cursor !== null) {
+                    $variables['after'] = $cursor;
+                }
+            } else {
+                $query = self::COLLECTION_PRODUCTS_QUERY;
+                $variables = [
+                    'handle' => $collectionHandle,
+                    'first' => self::STOREFRONT_PRODUCTS_PER_PAGE,
+                ];
+                if ($cursor !== null) {
+                    $variables['after'] = $cursor;
+                }
             }
 
             try {
@@ -521,7 +595,7 @@ GRAPHQL;
                         'X-Shopify-Storefront-Access-Token' => $storefrontToken,
                     ])
                     ->post($url, [
-                        'query' => self::COLLECTION_PRODUCTS_QUERY,
+                        'query' => $query,
                         'variables' => $variables,
                     ]);
 
@@ -544,7 +618,25 @@ GRAPHQL;
                     break;
                 }
 
-                $edges = Arr::get($data, 'data.collection.products.edges', []);
+                // If the collection doesn't exist, data.collection is null and we
+                // get no edges. Switch to the all-products fallback for this and
+                // subsequent pages.
+                if (! $fallback && Arr::get($data, 'data.collection') === null) {
+                    Log::info('Storefront collection not found, falling back to all products.', [
+                        'brand_professional_id' => $brandProfessionalId,
+                        'collection_handle' => $collectionHandle,
+                    ]);
+                    $fallback = true;
+                    // Retry this page with the all-products query — reset the
+                    // cursor so we start from the beginning of all products.
+                    $cursor = null;
+                    continue;
+                }
+
+                $edgesPath = $fallback ? 'data.products.edges' : 'data.collection.products.edges';
+                $pageInfoPath = $fallback ? 'data.products.pageInfo' : 'data.collection.products.pageInfo';
+
+                $edges = Arr::get($data, $edgesPath, []);
 
                 if (! is_array($edges)) {
                     break;
@@ -591,7 +683,7 @@ GRAPHQL;
                     ];
                 }
 
-                $hasNextPage = Arr::get($data, 'data.collection.products.pageInfo.hasNextPage', false);
+                $hasNextPage = Arr::get($data, $pageInfoPath . '.hasNextPage', false);
             } catch (\Throwable $e) {
                 Log::error('Storefront API exception.', [
                     'brand_professional_id' => $brandProfessionalId,
