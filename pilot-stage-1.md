@@ -907,7 +907,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** We trust whatever extension the user's browser sends and put it in the cloud storage path. Stick to a known-safe list.
     - **Evidence:** `getClientOriginalExtension()` is interpolated into R2 key without a safelist.
 
-- [ ] **#5-03** · P2 — Fresha sync job missing `failed()` handler
+- [x] **#5-03** · P2 — Fresha sync job missing `failed()` handler
     - **Where:** app/Jobs/Fresha/SyncFreshaCatalogDeltaJob.php
     - **Affects:** Fresha catalog sync reliability monitoring.
     - **Effort:** S (~1h)
@@ -1370,7 +1370,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.5h)
     - **What to do:** Remove dead code. (Per memory: Fresha integration is link-redirect + Snowflake.)
 
-- [ ] **#5-05** · P3 — Square/Fresha jobs lack explicit `$tries` / `$backoff` configuration
+- [x] **#5-05** · P3 — Square/Fresha jobs lack explicit `$tries` / `$backoff` configuration
     - **Where:** All Square/Fresha jobs
     - **Effort:** S (~1h)
     - **What to do:** Add explicit retry configuration to each.
