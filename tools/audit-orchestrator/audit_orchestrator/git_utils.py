@@ -65,6 +65,58 @@ def pre_push_check(repo: Path, *, item_id: str, base_ref: str = "origin/developm
     return PrePushResult(ok=True, commit_sha=sha)
 
 
+def squash_to_single_commit(
+    repo: Path, *, base_ref: str, item_id: str,
+) -> str | None:
+    """Collapse multiple commits ahead of base_ref into one atomic commit.
+
+    The orchestrator's contract is one item = one commit (so revert maps 1:1
+    to an audit ledger entry). Agents sometimes produce multiple commits
+    (e.g. one per sub-concern in a bundle); this is a backstop that runs
+    BEFORE pre_push_check so well-meaning multi-commit sessions don't get
+    rejected and lose their work.
+
+    Returns the new commit SHA if a squash happened, or None if there were
+    fewer than 2 commits ahead (nothing to do). Raises RuntimeError on git
+    failure — the caller treats that as best-effort and lets pre_push_check
+    surface the underlying problem.
+
+    The squashed commit's subject is the FIRST commit's subject (usually the
+    most descriptive of the overall fix); the body lists every original
+    subject as bullets so the audit trail is preserved. An `Item: <id>` line
+    is appended if not already present, since pre_push_check requires it.
+    """
+    log = _run(repo, "log", "--oneline", f"{base_ref}..HEAD").strip()
+    if not log:
+        return None  # nothing ahead — pre_push_check will report this
+    commits = log.splitlines()
+    if len(commits) < 2:
+        return None  # already a single commit — no-op
+
+    # Capture every commit's subject (oldest first) so the squash body
+    # documents what was rolled together.
+    subjects = _run(
+        repo, "log", "--reverse", "--pretty=%s", f"{base_ref}..HEAD",
+    ).strip().splitlines()
+
+    squash_subject = subjects[0]
+    body = (
+        f"Squashed {len(subjects)} commits during {item_id}:\n\n"
+        + "\n".join(f"- {s}" for s in subjects)
+    )
+    # Always append the explicit `Item:` line — pre_push_check uses substring
+    # match so it's not strictly required when the id appears in the body, but
+    # an explicit trailer keeps the audit trail uniform across squashed and
+    # non-squashed commits.
+    msg = f"{squash_subject}\n\n{body}\n\nItem: {item_id}"
+
+    # Soft reset keeps the working tree + index intact; just rewinds HEAD.
+    _run(repo, "reset", "--soft", base_ref)
+    _run(repo, "commit", "-q", "-m", msg)
+
+    return _run(repo, "rev-parse", "HEAD").strip()
+
+
 def push_to_remote(repo: Path, *, branch: str = "development-v2") -> None:
     """Push the named branch to origin. Raises on failure."""
     _run(repo, "push", "origin", branch)

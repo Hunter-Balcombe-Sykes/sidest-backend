@@ -2,7 +2,9 @@
 import pytest
 import subprocess
 from pathlib import Path
-from audit_orchestrator.git_utils import pre_push_check, PrePushResult
+from audit_orchestrator.git_utils import (
+    pre_push_check, PrePushResult, squash_to_single_commit,
+)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -88,6 +90,62 @@ def test_pre_push_fails_when_commit_missing_item_id(repo: Path):
     result = pre_push_check(repo, item_id="B5", base_ref="origin/development-v2")
     assert not result.ok
     assert "item id" in result.reason.lower()
+
+
+def test_squash_collapses_three_commits_into_one_with_item_id(repo: Path):
+    """Three commits ahead → one commit ahead. Squash body lists each subject."""
+    for i in range(3):
+        (repo / f"f{i}.txt").write_text(str(i))
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", f"fix(scope): part {i}")
+
+    new_sha = squash_to_single_commit(repo, base_ref="origin/development-v2", item_id="B16")
+    assert new_sha is not None
+
+    # Now exactly one commit ahead, and pre_push_check accepts it
+    log = _git(repo, "log", "--oneline", "origin/development-v2..HEAD")
+    assert len(log.splitlines()) == 1
+
+    result = pre_push_check(repo, item_id="B16", base_ref="origin/development-v2")
+    assert result.ok, result.reason
+
+    # Body documents what was rolled together (oldest first)
+    msg = _git(repo, "log", "-1", "--pretty=%B")
+    assert "fix(scope): part 0" in msg
+    assert "fix(scope): part 1" in msg
+    assert "fix(scope): part 2" in msg
+    assert "Item: B16" in msg
+
+
+def test_squash_no_op_when_already_single_commit(repo: Path):
+    """One commit ahead → returns None, doesn't rewrite history."""
+    (repo / "single.txt").write_text("only")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "fix: single\n\nItem: B5")
+    sha_before = _git(repo, "rev-parse", "HEAD")
+
+    result = squash_to_single_commit(repo, base_ref="origin/development-v2", item_id="B5")
+    assert result is None
+    assert _git(repo, "rev-parse", "HEAD") == sha_before
+
+
+def test_squash_no_op_when_zero_commits_ahead(repo: Path):
+    """Nothing to squash → returns None, doesn't error."""
+    result = squash_to_single_commit(repo, base_ref="origin/development-v2", item_id="B5")
+    assert result is None
+
+
+def test_squash_appends_item_id_when_missing_from_subjects(repo: Path):
+    """If neither original commit subject mentions the item id, the squash
+    appends an `Item:` line so pre_push_check passes."""
+    for i in range(2):
+        (repo / f"x{i}.txt").write_text(str(i))
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", f"chore: cleanup pass {i}")  # no Item: anywhere
+
+    squash_to_single_commit(repo, base_ref="origin/development-v2", item_id="B99")
+    msg = _git(repo, "log", "-1", "--pretty=%B")
+    assert "Item: B99" in msg
 
 
 def test_checkbox_tick_flips_only_named_item(tmp_path):

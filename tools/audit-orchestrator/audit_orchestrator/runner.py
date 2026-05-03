@@ -13,6 +13,7 @@ from audit_orchestrator.stream_parser import StreamEventTracker
 from audit_orchestrator.prompts import render_item_prompt, render_resume_prompt
 from audit_orchestrator.git_utils import (
     pre_push_check, push_to_remote, discard_working_changes, tick_checkbox_for_item,
+    squash_to_single_commit,
 )
 from audit_orchestrator.completion import (
     write_completion_record, write_blocked_record, CompletionContext,
@@ -82,6 +83,7 @@ class Runner:
             completion_file_path=completion_file,
             test_command=self.config.test_command,
             repo_root=self.repo_root,
+            push_target=self.config.push_target,
         )
 
         tracker = self._spawn_claude(
@@ -118,9 +120,38 @@ class Runner:
         on_action=None,
         should_stop=None,
     ) -> StreamEventTracker:
-        cmd = ["claude", "--print", "--model", self.config.claude_model,
+        # Per-item model override — falls back to the global default.
+        # Use this in config.yml to route trivial/S-tier items to haiku.
+        model = self.config.overrides.get(item_id, self.config.claude_model)
+
+        cmd = ["claude", "--print", "--model", model,
+               "--permission-mode", "bypassPermissions",
                "--allowedTools", ",".join(self.config.allowed_tools),
                "--output-format", "stream-json", "--verbose"]
+
+        # Strip MCP server tool catalogs (GitHub/Nightwatch/Supabase) from
+        # the system prompt — the orchestrator's fix sessions only need
+        # local file + git tools, and MCP catalogs add ~30k tokens per turn.
+        if self.config.disable_mcp_servers:
+            cmd.extend(["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}'])
+
+        # Restrict the BUILT-IN tool catalog (not just permissions). This is
+        # the biggest single token saving — drops dozens of tool schemas the
+        # orchestrator never uses (NotebookEdit, WebFetch, etc.).
+        if self.config.tool_set:
+            cmd.extend(["--tools", ",".join(self.config.tool_set)])
+
+        # Skip skill auto-loading (Task subagent dispatch still works — that's
+        # a separate mechanism). Saves the ~20-skill superpowers payload.
+        if self.config.disable_skills:
+            cmd.append("--disable-slash-commands")
+
+        # Move per-machine sections (cwd, env, git status) out of the system
+        # prompt so the cached prefix is identical across runs → cache reuse
+        # spans items instead of resetting per session.
+        if self.config.exclude_dynamic_sections:
+            cmd.append("--exclude-dynamic-system-prompt-sections")
+
         if resume_id:
             cmd.extend(["--resume", resume_id])
         cmd.extend(self.config.claude_extra_args)
@@ -228,6 +259,20 @@ class Runner:
                 pass  # artifact-saving best-effort; _mark below is what matters
             self._mark(item_id, status="blocked", blocked_reason="tests failed")
             return "blocked"
+
+        # Backstop for agents that produced multiple commits during the
+        # session (the prompt asks for one, but it's not always honored).
+        # Squash quietly so well-meaning multi-commit work isn't rejected
+        # by pre_push_check. Best-effort: if squash fails, pre_push_check
+        # surfaces the original "N commits ahead" error.
+        try:
+            squash_to_single_commit(
+                self.repo_root,
+                base_ref=f"origin/{self.config.push_target}",
+                item_id=item_id,
+            )
+        except Exception:
+            pass
 
         # Pre-push safety check
         ppc = pre_push_check(self.repo_root, item_id=item_id, base_ref=f"origin/{self.config.push_target}")

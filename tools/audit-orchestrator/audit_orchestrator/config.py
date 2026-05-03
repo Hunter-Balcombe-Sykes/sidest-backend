@@ -25,7 +25,7 @@ class Config:
     claude_model: str = "sonnet"
     claude_extra_args: list[str] = field(default_factory=list)
     allowed_tools: list[str] = field(default_factory=lambda: [
-        "Edit", "Write", "Read",
+        "Edit", "Write", "Read", "Glob", "Grep", "Task", "TodoWrite",
         "Bash(composer test:*)",
         "Bash(git add:*)",
         "Bash(git commit:*)",
@@ -33,8 +33,18 @@ class Config:
         "Bash(git status:*)",
         "Bash(git diff:*)",
     ])
+    # Token-efficiency knobs (all default-on — disable in config.yml if needed).
+    # See _spawn_claude in runner.py for the corresponding CLI flags.
+    disable_mcp_servers: bool = True            # --strict-mcp-config + empty --mcp-config; kills GitHub/Nightwatch/Supabase tool catalogs
+    disable_skills: bool = True                 # --disable-slash-commands; orchestrator session doesn't need skill auto-loading
+    exclude_dynamic_sections: bool = True       # --exclude-dynamic-system-prompt-sections; better cross-run cache reuse
+    tool_set: list[str] = field(default_factory=lambda: [   # --tools restricts the catalog itself (NOT permissions); empty list = leave catalog as-is
+        "Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite",
+    ])
     notify_on_question: bool = True
     notifier_command: str = "terminal-notifier -title 'Audit' -message"
+    # Per-item model override map: {"#B5": "haiku", "#V5-068": "opus"}.
+    # Falls back to claude_model when an id isn't listed.
     overrides: dict[str, str] = field(default_factory=dict)
     classifier: ClassifierConfig = field(default_factory=ClassifierConfig)
 

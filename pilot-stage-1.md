@@ -40,7 +40,7 @@ Each session should open the items in its bundle by ID — the full body still l
 - **B10 — Schedule task `withoutOverlapping`.** #10-08, #10-09. ~0.5–1h. Same file (`routes/console.php`), same one-line modifier.
 - [x] **B11 — R2 orphan cleanup on variant failure.** #V5-043, #V5-044. ~1–2h. Same pattern (cleanup-in-catch or store-after-success), image and video pipelines. One helper, applied twice.
 - [x] **B12 — Image MIME sniff.** #V5-015, #V5-047. ~1–2h. Different files but same defense (finfo MIME check before `getimagesize` / before storage). One helper extracted, two callers updated.
-- **B13 — Retry-After / 429 backoff parity.** #V5-032, #V5-034. ~1–2h. Same fix (parse `Retry-After`, multiply by 1000, default 1000ms floor) across Shopify, Square, Fresha API clients.
+- [x] **B13 — Retry-After / 429 backoff parity.** #V5-032, #V5-034. ~1–2h. Same fix (parse `Retry-After`, multiply by 1000, default 1000ms floor) across Shopify, Square, Fresha API clients.
 - **B14 — Throttle config hardening (P2 only).** #V5-057, #V5-059, #V5-060. ~1–2h. All `AppServiceProvider` rate-limiter config; same reasoning surface. **Do NOT bundle with #V5-001** (P0 TrustProxies) — that needs separate staging verification.
 - **B17 — Square/Fresha job retry hygiene.** #5-03, #5-05. ~1–2h. Both add `$tries` / `$backoff` / `failed()` to Square + Fresha jobs. Mechanical parity work.
 
