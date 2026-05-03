@@ -795,6 +795,15 @@ return [
         ],
     ],
 
+    'hydrogen' => [
+        // GitHub PAT with actions:write scope on the sidest-storefront repo.
+        // Used by HydrogenDeploymentService to trigger single-brand Oxygen
+        // deployments when a brand saves credentials in the wizard.
+        'github_token' => env('SIDEST_HYDROGEN_GITHUB_TOKEN'),
+        'github_repo' => env('SIDEST_HYDROGEN_GITHUB_REPO', 'hunterbalcombesykes/sidest-storefront'),
+        'github_ref' => env('SIDEST_HYDROGEN_GITHUB_REF', 'main'),
+    ],
+
     'image_max_upload_size' => (int) env('SIDEST_IMAGE_MAX_UPLOAD_KB', 10240), // 10 MB
 
     /*

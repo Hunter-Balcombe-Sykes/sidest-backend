@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Professional\Store\BrandStoreSettingsController;
 use App\Http\Requests\Api\Professional\Store\UpdateBrandStoreSettingsRequest;
 use App\Models\Core\Professional\Professional;
+use App\Services\Hydrogen\HydrogenDeploymentService;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -23,7 +24,8 @@ function makeBrandSettingsRequest(string $method = 'GET', array $params = [], ?s
 
 it('returns 403 when non-brand tries to view store settings', function () {
     $service = app(BrandCatalogService::class);
-    $controller = new BrandStoreSettingsController($service);
+    $deployment = app(HydrogenDeploymentService::class);
+    $controller = new BrandStoreSettingsController($service, $deployment);
 
     $response = $controller->show(makeBrandSettingsRequest('GET', [], 'influencer'));
 
@@ -33,7 +35,8 @@ it('returns 403 when non-brand tries to view store settings', function () {
 
 it('returns 403 when non-brand tries to update store settings', function () {
     $service = app(BrandCatalogService::class);
-    $controller = new BrandStoreSettingsController($service);
+    $deployment = app(HydrogenDeploymentService::class);
+    $controller = new BrandStoreSettingsController($service, $deployment);
 
     $request = makeBrandSettingsRequest('PATCH', ['default_commission_rate' => 20], 'influencer');
     $formRequest = UpdateBrandStoreSettingsRequest::createFrom($request);

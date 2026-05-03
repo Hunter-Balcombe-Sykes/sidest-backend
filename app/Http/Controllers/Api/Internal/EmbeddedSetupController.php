@@ -18,6 +18,7 @@ use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cloudflare\CloudflareDnsService;
+use App\Services\Hydrogen\HydrogenDeploymentService;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,6 +36,7 @@ class EmbeddedSetupController extends ApiController
     public function __construct(
         private readonly ProfessionalCacheService $cache,
         private readonly BrandCatalogService $catalog,
+        private readonly HydrogenDeploymentService $deployment,
     ) {}
 
     // ── Brand Profile ────────────────────────────────────────────────────────
@@ -240,6 +242,14 @@ class EmbeddedSetupController extends ApiController
         $settings->save();
 
         $this->cache->invalidateProfessional($professional);
+
+        // Trigger a single-brand Oxygen deployment so the brand's storefront
+        // has code on it immediately — they shouldn't have to wait for the
+        // next push to sidest-storefront. Best-effort; failures are logged
+        // but don't block the wizard.
+        if (! empty($settings->oxygen_deployment_token)) {
+            $this->deployment->dispatchDeployment($professionalId);
+        }
 
         return $this->success([], 'Deployment token saved.');
     }

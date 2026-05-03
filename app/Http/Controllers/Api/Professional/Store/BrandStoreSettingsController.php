@@ -9,6 +9,7 @@ use App\Http\Requests\Api\Professional\Store\UpdateBrandStoreSettingsRequest;
 use App\Http\Resources\BrandStoreSettingsResource;
 use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
+use App\Services\Hydrogen\HydrogenDeploymentService;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,8 @@ class BrandStoreSettingsController extends ApiController
     use ResolveCurrentSite;
 
     public function __construct(
-        private readonly BrandCatalogService $catalogService
+        private readonly BrandCatalogService $catalogService,
+        private readonly HydrogenDeploymentService $deployment,
     ) {}
 
     public function show(Request $request): JsonResponse
@@ -107,6 +109,12 @@ class BrandStoreSettingsController extends ApiController
             if ($hasOxygenToken) {
                 $settings->oxygen_deployment_token = $validated['oxygen_deployment_token'] ?: null;
                 $settings->save();
+
+                // Trigger a single-brand Oxygen deployment. Best-effort —
+                // failures are logged but don't block the wizard.
+                if (! empty($settings->oxygen_deployment_token)) {
+                    $this->deployment->dispatchDeployment($pro->id);
+                }
             }
         }
 

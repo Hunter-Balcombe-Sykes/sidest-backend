@@ -16,15 +16,27 @@ use Illuminate\Http\Request;
 class HydrogenDeploymentController extends ApiController
 {
     /**
-     * Return all brands with a stored Oxygen deployment token.
+     * Return brands with a stored Oxygen deployment token.
+     *
+     * When called from the GitHub Actions workflow_dispatch trigger for a
+     * single-brand deploy, the optional ?professional_id= query parameter
+     * filters to just that brand. Without it, all brands are returned for
+     * the standard push-triggered deploy-everyone run.
      *
      * @return JsonResponse Array of {shop_domain, oxygen_deployment_token, oxygen_storefront_id}
      */
     public function targets(Request $request): JsonResponse
     {
-        $settings = BrandStoreSettings::query()
-            ->whereNotNull('oxygen_deployment_token')
-            ->get(['professional_id', 'oxygen_deployment_token', 'oxygen_storefront_id']);
+        $query = BrandStoreSettings::query()
+            ->whereNotNull('oxygen_deployment_token');
+
+        // Single-brand deploy: the workflow_dispatch trigger passes a
+        // professional_id to filter to just the brand that saved credentials.
+        if ($professionalId = $request->query('professional_id')) {
+            $query->where('professional_id', $professionalId);
+        }
+
+        $settings = $query->get(['professional_id', 'oxygen_deployment_token', 'oxygen_storefront_id']);
 
         $targets = $settings->map(function (BrandStoreSettings $row) {
             // Resolve the shop domain from the brand's Shopify integration
