@@ -25,7 +25,20 @@ class ServiceObserver
     {
         // Eager-load site once — every downstream caller (reevaluateBooking,
         // shouldDispatchSquareSync, shouldDispatchFreshaSync) reads $pro->site.
-        $pro = Professional::query()->with('site')->find($service->professional_id);
+        // DB query has its own catch so a connection error returns null (pipeline
+        // continues) rather than propagating to the outer runHooks catch-all.
+        $pro = null;
+        try {
+            $pro = Professional::query()->with('site')->find($service->professional_id);
+        } catch (\Throwable $e) {
+            Log::warning('Professional lookup failed during cache bust', [
+                'service_id' => $service->id,
+                'professional_id' => $service->professional_id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
 
         try {
             if ($pro) {
@@ -121,8 +134,8 @@ class ServiceObserver
     private function dispatchSquareSync(string $serviceId, string $action): void
     {
         try {
-            // Run immediately so Square updates work even when no worker cluster is running.
-            PushServiceToSquareJob::dispatchSync($serviceId, $action);
+            // Queued on the 'integrations' queue (Horizon required for syncs to process).
+            PushServiceToSquareJob::dispatch($serviceId, $action);
         } catch (\Throwable $e) {
             // Never fail core service CRUD because sync dispatch failed.
             Log::warning('PushServiceToSquareJob dispatch failed', [
@@ -136,8 +149,8 @@ class ServiceObserver
     private function dispatchFreshaSync(string $serviceId, string $action): void
     {
         try {
-            // Run immediately so Fresha updates work even when no worker cluster is running.
-            PushServiceToFreshaJob::dispatchSync($serviceId, $action);
+            // Queued on the 'integrations' queue (Horizon required for syncs to process).
+            PushServiceToFreshaJob::dispatch($serviceId, $action);
         } catch (\Throwable $e) {
             // Never fail core service CRUD because sync dispatch failed.
             Log::warning('PushServiceToFreshaJob dispatch failed', [
