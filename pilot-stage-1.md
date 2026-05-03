@@ -455,7 +455,7 @@ These are best in their own session because bundling would force unrelated archi
         return $this->success(['received' => true]);
         ```
 
-- [ ] **#2-01** · P1 — Brand-partner enrichment trusts affiliate-controlled JSON for brand_professional_id lookup
+- [x] **#2-01** · P1 — Brand-partner enrichment trusts affiliate-controlled JSON for brand_professional_id lookup
     - **Where:** app/Services/Cache/SiteCacheService.php:181-189
     - **Affects:** All affiliate public sites; any brand whose UUID is leaked or guessable.
     - **Effort:** S (~1–2h)
