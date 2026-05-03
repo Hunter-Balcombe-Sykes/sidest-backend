@@ -36,6 +36,12 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::policy(ProfessionalIntegration::class, IntegrationPolicy::class);
 
+        // Refuse to boot in production with throttling disabled — a misconfigured
+        // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.
+        if (app()->isProduction() && ! (bool) config('sidest.throttle.enabled', true)) {
+            throw new \RuntimeException('SIDEST_THROTTLE_ENABLED must not be false in production.');
+        }
+
         $this->configureRateLimiting();
 
         // Scheduler heartbeat — feeds GET /api/health/scheduler so a stopped cron
@@ -53,6 +59,15 @@ class AppServiceProvider extends ServiceProvider
     protected function configureRateLimiting(): void
     {
         $throttleEnabled = (bool) config('sidest.throttle.enabled', true);
+
+        // Health-check and ping endpoints
+        RateLimiter::for('health-check', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(60)->by($request->ip());
+        });
 
         // Public site endpoints (viewing sites, pages)
         RateLimiter::for('public-site', function (Request $request) use ($throttleEnabled) {
@@ -175,8 +190,11 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on affiliate-writes route — JWT middleware not applied');
+
             return Limit::perMinute(60)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->by($uid)
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many selection changes. Please try again later.',
@@ -190,8 +208,11 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on brand-catalog-writes route — JWT middleware not applied');
+
             return Limit::perMinute(30)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->by($uid)
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many catalog changes. Please try again later.',
@@ -205,8 +226,11 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on authenticated route — JWT middleware not applied');
+
             return Limit::perMinute(300)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->by($uid)
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many requests. Please try again later.',
@@ -220,8 +244,11 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on staff route — JWT middleware not applied');
+
             return Limit::perMinute(300)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->by($uid)
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many requests. Please try again later.',
@@ -250,8 +277,11 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on bootstrap route — JWT middleware not applied');
+
             return Limit::perMinute(5)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->by($uid)
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many account creation attempts. Please try again later.',

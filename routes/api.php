@@ -41,7 +41,7 @@ use Illuminate\Support\Facades\Route;
 // TODO(v1): all routes below should be prefixed /v1/ once frontend is ready for the migration
 
 // Ping
-Route::get('/ping', fn () => response()->json(['pong' => true]));
+Route::get('/ping', fn () => response()->json(['pong' => true]))->middleware('throttle:health-check');
 
 // Shopify App OAuth (no auth — Shopify redirects here during install)
 Route::middleware('throttle:60,1')->group(function () {
@@ -92,7 +92,7 @@ Route::get('/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::cla
     ->middleware('throttle:public-site')
     ->name('public.unsubscribe');
 
-Route::get('/health', fn () => response()->json(['ok' => true]));
+Route::get('/health', fn () => response()->json(['ok' => true]))->middleware('throttle:health-check');
 
 // Header-based fallback for path-based frontend routing (e.g. /shloom).
 // When the frontend cannot use subdomain DNS, it sends the subdomain
@@ -204,5 +204,5 @@ Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('inter
     Route::get('/affiliate-products', [HydrogenAffiliateProductsController::class, 'show']);
 });
 
-Route::get('/ready', [HealthController::class, 'check']);
-Route::get('/health/scheduler', [HealthController::class, 'scheduler']);
+Route::get('/ready', [HealthController::class, 'check'])->middleware('throttle:health-check');
+Route::get('/health/scheduler', [HealthController::class, 'scheduler'])->middleware('throttle:health-check');
