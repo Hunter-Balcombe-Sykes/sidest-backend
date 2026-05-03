@@ -9,6 +9,7 @@ use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Block;
+use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\DB;
@@ -33,6 +34,7 @@ class ProfessionalController extends ApiController
 
         $pro = $this->currentProfessional($request);
         $squareIntegration = $pro->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+        $brandStoreSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
         Log::info('/api/me after currentProfessional', ['pro_id' => $pro->id]);
 
         $cache = app(ProfessionalCacheService::class);
@@ -97,6 +99,9 @@ class ProfessionalController extends ApiController
                 'subdomain' => $pro->site->subdomain,
                 'is_published' => (bool) $pro->site->is_published,
                 'settings' => $siteSettings,
+                'storefront_base_url' => $brandStoreSettings
+                    ? $brandStoreSettings->storefrontBaseUrl($pro->site->subdomain)
+                    : 'https://' . $pro->site->subdomain . '.sidest.co',
             ] : null,
         ];
 
