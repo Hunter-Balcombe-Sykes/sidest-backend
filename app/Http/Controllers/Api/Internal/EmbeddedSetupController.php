@@ -22,6 +22,7 @@ use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // Internal endpoints consumed by the Sidest-Embedded Shopify app wizard.
@@ -52,6 +53,13 @@ class EmbeddedSetupController extends ApiController
         $site = $professional->site;
         $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
 
+        $storefrontBaseUrl = $storeSettings && $site
+            ? $storeSettings->storefrontBaseUrl($site->subdomain)
+            : null;
+        $storefrontStatus = $storeSettings && $site
+            ? $this->checkStorefrontStatus($storeSettings, $site->subdomain)
+            : 'unreachable';
+
         return $this->success([
             'name'                => (string) ($professional->display_name ?? ''),
             'logo_url'            => '',
@@ -64,14 +72,15 @@ class EmbeddedSetupController extends ApiController
             'business_type'       => (string) ($brandProfile?->business_type ?? ''),
             'industries'          => (array) ($brandProfile?->industries ?? []),
             'brand_slug'          => (string) ($site?->subdomain ?? ''),
-            // Derived: only true when the DB flag is set AND all critical wizard
-            // fields are actually populated. Guards against a deleted/reset
-            // BrandStoreSettings leaving setup_complete=true on BrandProfile.
+            // Derived: only true when all wizard fields are populated AND the
+            // storefront is actually reachable. Guards against the wizard showing
+            // "complete" when Hydrogen has no production deployment.
             'setup_complete'      => (bool) ($brandProfile?->setup_complete ?? false)
                 && ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token'))
                 && ! empty($storeSettings?->oxygen_storefront_id)
                 && (bool) ($storeSettings?->hydrogen_install_confirmed ?? false)
-                && (bool) ($storeSettings?->domain_wizard_complete ?? false),
+                && (bool) ($storeSettings?->domain_wizard_complete ?? false)
+                && $storefrontStatus === 'live',
             // Storefront settings
             'default_commission_rate' => (string) ($storeSettings?->default_commission_rate ?? ''),
             'theme_id'                => (int) ($storeSettings?->theme_id ?? 1),
@@ -83,6 +92,8 @@ class EmbeddedSetupController extends ApiController
             'hydrogen_confirmed'      => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
             'domain_provisioned'      => (bool) ($storeSettings?->domain_wizard_complete ?? false),
             'domain_txt_set'          => (bool) ($storeSettings?->domain_txt_confirmed ?? false),
+            'storefront_base_url'     => $storefrontBaseUrl,
+            'storefront_status'       => $storefrontStatus,
         ]);
     }
 
@@ -662,5 +673,39 @@ class EmbeddedSetupController extends ApiController
         $this->cache->invalidateProfessional($professional);
 
         return $this->success(['provisioned' => true]);
+    }
+
+    /**
+     * Check whether the storefront is reachable at its base URL.
+     *
+     * Makes a lightweight GET with redirects disabled so we can
+     * distinguish "Hydrogen is serving" (2xx) from "Shopify is
+     * falling through to the primary domain" (3xx redirect).
+     *
+     * @return 'live'|'redirecting'|'unreachable'
+     */
+    private function checkStorefrontStatus(BrandStoreSettings $settings, string $subdomain): string
+    {
+        $url = $settings->storefrontBaseUrl($subdomain);
+
+        try {
+            $response = Http::withOptions([
+                'allow_redirects' => false,
+                'timeout' => 5,
+                'connect_timeout' => 3,
+            ])->get($url);
+
+            if ($response->successful()) {
+                return 'live';
+            }
+
+            if ($response->redirect()) {
+                return 'redirecting';
+            }
+
+            return 'unreachable';
+        } catch (\Throwable) {
+            return 'unreachable';
+        }
     }
 }
