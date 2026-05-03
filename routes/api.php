@@ -191,6 +191,8 @@ Route::middleware(['shopify.session', 'throttle:60,1'])->prefix('internal/embedd
         ->where('shopify_order_id', '[A-Za-z0-9_/.:-]+');
     Route::get('/products/{shopify_product_id}/analytics', [EmbeddedProductAnalyticsController::class, 'show'])
         ->where('shopify_product_id', '[A-Za-z0-9_/.:-]+');
+    Route::get('/product-settings', [EmbeddedProductSettingsController::class, 'show']);
+    Route::patch('/product-settings', [EmbeddedProductSettingsController::class, 'update']);
 });
 
 // Internal Hydrogen endpoints (server-to-server, API key auth)
