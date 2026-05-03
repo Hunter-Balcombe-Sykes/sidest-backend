@@ -126,7 +126,7 @@ class ShopifyAdminClient
             }
 
             if ($response->status() === 429 && $attempt < $maxRetries) {
-                $wait = max(1, (int) $response->header('Retry-After')) * 1000; // header absent → floor to 1 s
+                $wait = max(1000, ((int) ($response->header('Retry-After') ?? 1)) * 1000);
                 $this->metrics->throttled($shopDomain, $wait, $attempt + 1);
                 // Blocks the worker thread — keep max_inprocess_retries low (default 3).
                 usleep($wait * 1000);
