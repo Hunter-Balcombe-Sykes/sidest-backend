@@ -7,9 +7,11 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\Store\UpdateBrandStoreSettingsRequest;
 use App\Http\Resources\BrandStoreSettingsResource;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
 use App\Services\Hydrogen\HydrogenDeploymentService;
+use App\Services\Professional\BrandStatusService;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -48,6 +50,8 @@ class BrandStoreSettingsController extends ApiController
         } catch (\Throwable $e) {
         }
 
+        $brandProfile = BrandProfile::where('professional_id', $pro->id)->first();
+
         return $this->success(new BrandStoreSettingsResource([
             'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
             'payout_hold_days' => $storeSettings?->payout_hold_days,
@@ -67,6 +71,7 @@ class BrandStoreSettingsController extends ApiController
             'storefront_status' => $storeSettings
                 ? $this->checkStorefrontStatus($storeSettings, $site?->subdomain ?? '')
                 : 'unreachable',
+            'brand_status' => $brandProfile?->brand_status ?? 'building',
         ]));
     }
 
@@ -149,6 +154,9 @@ class BrandStoreSettingsController extends ApiController
             $site->settings = $settings;
             $site->save();
         }
+
+        // Sync brand status after local mutations
+        app(BrandStatusService::class)->sync($pro);
 
         // 3. Shopify metafield sync — only when a Shopify-backed field is being updated.
         // Oxygen credentials are DB-only, so skip the Shopify block entirely for those patches
