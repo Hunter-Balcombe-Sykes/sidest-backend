@@ -13,6 +13,7 @@ use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Http;
 
 class BrandStoreSettingsController extends ApiController
 {
@@ -58,6 +59,12 @@ class BrandStoreSettingsController extends ApiController
             'oxygen_token_set' => ! empty($storeSettings?->oxygen_deployment_token),
             'oxygen_storefront_id' => $storeSettings?->oxygen_storefront_id,
             'hydrogen_install_confirmed' => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
+            'storefront_base_url' => $storeSettings
+                ? $storeSettings->storefrontBaseUrl($site?->subdomain ?? '')
+                : 'https://' . ($site?->subdomain ?? '') . '.sidest.co',
+            'storefront_status' => $storeSettings
+                ? $this->checkStorefrontStatus($storeSettings, $site?->subdomain ?? '')
+                : 'unreachable',
         ]));
     }
 
@@ -223,6 +230,46 @@ class BrandStoreSettingsController extends ApiController
             'theme_id' => $storeSettings?->theme_id ?? 1,
             'oxygen_token_set' => ! empty($storeSettings?->oxygen_deployment_token),
             'oxygen_storefront_id' => $storeSettings?->oxygen_storefront_id,
+            'storefront_base_url' => $storeSettings
+                ? $storeSettings->storefrontBaseUrl($site?->subdomain ?? '')
+                : 'https://' . ($site?->subdomain ?? '') . '.sidest.co',
+            'storefront_status' => $storeSettings
+                ? $this->checkStorefrontStatus($storeSettings, $site?->subdomain ?? '')
+                : 'unreachable',
         ]));
+    }
+
+    /**
+     * Check whether the storefront is reachable at its base URL.
+     *
+     * Makes a lightweight GET with redirects disabled so we can
+     * distinguish "Hydrogen is serving" (2xx) from "Shopify is
+     * falling through to the primary domain" (3xx redirect).
+     *
+     * @return 'live'|'redirecting'|'unreachable'
+     */
+    private function checkStorefrontStatus(BrandStoreSettings $settings, string $subdomain): string
+    {
+        $url = $settings->storefrontBaseUrl($subdomain);
+
+        try {
+            $response = Http::withOptions([
+                'allow_redirects' => false,
+                'timeout' => 5,
+                'connect_timeout' => 3,
+            ])->get($url);
+
+            if ($response->successful()) {
+                return 'live';
+            }
+
+            if ($response->redirect()) {
+                return 'redirecting';
+            }
+
+            return 'unreachable';
+        } catch (\Throwable) {
+            return 'unreachable';
+        }
     }
 }
