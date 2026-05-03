@@ -248,6 +248,31 @@ class BrandStoreSettingsController extends ApiController
     }
 
     /**
+     * Trigger an Oxygen deployment for this brand via GitHub Actions workflow_dispatch.
+     *
+     * Called from the dashboard wizard "Redeploy" button after the brand completes
+     * domain setup (connecting the domain + setting it as primary in Shopify Hydrogen).
+     */
+    public function deploy(Request $request): JsonResponse
+    {
+        $pro = $this->currentProfessional($request);
+
+        if (! $pro->isBrand()) {
+            return $this->error('This endpoint is only available for brand accounts.', 403);
+        }
+
+        $storeSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
+
+        if (! $storeSettings || empty($storeSettings->oxygen_deployment_token)) {
+            return $this->error('No Oxygen deployment token saved. Please complete Oxygen setup first.', 400);
+        }
+
+        $this->deployment->dispatchDeployment($pro->id);
+
+        return $this->success([], 'Deployment triggered. It usually takes 1–2 minutes.');
+    }
+
+    /**
      * Check whether the storefront is reachable at its base URL.
      *
      * Makes a lightweight GET with redirects disabled so we can

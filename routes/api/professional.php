@@ -348,6 +348,8 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::get('/brand/store-settings', [BrandStoreSettingsController::class, 'show']);
         Route::patch('/brand/store-settings', [BrandStoreSettingsController::class, 'update'])
             ->middleware('throttle:brand-catalog-writes');
+        Route::post('/brand/store-settings/deploy', [BrandStoreSettingsController::class, 'deploy'])
+            ->middleware('throttle:brand-catalog-writes');
 
         // Brand Design. The unified shape lives in site.settings.design and is
         // edited via the standard /site update endpoint — this controller only

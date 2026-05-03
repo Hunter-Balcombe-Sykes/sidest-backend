@@ -423,6 +423,30 @@ class EmbeddedSetupController extends ApiController
         return $this->success([]);
     }
 
+    /**
+     * Trigger an Oxygen deployment for this brand via GitHub Actions workflow_dispatch.
+     *
+     * Called from the wizard "Redeploy" button after the brand completes domain setup
+     * (connecting the domain + setting it as primary in Shopify Hydrogen). Without a
+     * primary domain, deployments go to the preview environment (private). Once the
+     * domain is primary, deployments go to production (public).
+     */
+    public function deployNow(Request $request): JsonResponse
+    {
+        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = Professional::findOrFail($professionalId);
+
+        $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
+
+        if (! $storeSettings || empty($storeSettings->oxygen_deployment_token)) {
+            return $this->error('No Oxygen deployment token saved. Please complete step 4 first.', 400);
+        }
+
+        $this->deployment->dispatchDeployment($professionalId);
+
+        return $this->success([], 'Deployment triggered. It usually takes 1–2 minutes.');
+    }
+
     // ── Domain Verification ──────────────────────────────────────────────────
 
     /**
