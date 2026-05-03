@@ -8,6 +8,7 @@ use App\Models\Views\AllSiteData;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Http\JsonResponse;
 
+// V2: Staff views site data including unpublished sites. Used by internal staff dashboard.
 class StaffSiteController extends ApiController
 {
     public function __construct(
@@ -20,7 +21,7 @@ class StaffSiteController extends ApiController
             ->whereRaw('lower(subdomain) = lower(?)', [$subdomain])
             ->first();
 
-        if (!$row) {
+        if (! $row) {
             return $this->error('Site not found.', 404);
         }
 
@@ -35,17 +36,17 @@ class StaffSiteController extends ApiController
             'is_published' => (bool) $row->is_published,
 
             'site' => [
-                'id'        => $row->site_id,
+                'id' => $row->site_id,
                 'subdomain' => $row->subdomain,
-                'settings'  => $siteSettings,
+                'settings' => $siteSettings,
             ],
 
             'professional' => [
-                'id'           => $row->professional_id,
-                'handle'       => $row->professional_handle,
+                'id' => $row->professional_id,
+                'handle' => $row->professional_handle,
                 'display_name' => $row->professional_display_name,
                 'professional_type' => $row->professional_type,
-                'bio'          => $row->professional_bio,
+                'bio' => $row->professional_bio,
                 'location_street_address' => $row->professional_location_street_address,
                 'location_city' => $row->professional_location_city,
                 'location_state' => $row->professional_location_state,
@@ -54,9 +55,9 @@ class StaffSiteController extends ApiController
             ],
 
             'theme' => [
-                'id'     => $row->theme_id,
-                'key'    => $row->theme_key,
-                'name'   => $row->theme_name,
+                'id' => $row->theme_id,
+                'key' => $row->theme_key,
+                'name' => $row->theme_name,
                 'config' => $row->theme_config,
             ],
 
@@ -70,7 +71,7 @@ class StaffSiteController extends ApiController
             ->where('professional_id', $professional->id)
             ->first();
 
-        if (!$row) {
+        if (! $row) {
             return $this->error('Site not found for professional.', 404);
         }
 
@@ -84,17 +85,17 @@ class StaffSiteController extends ApiController
             'is_published' => (bool) $row->is_published,
 
             'site' => [
-                'id'        => $row->site_id,
+                'id' => $row->site_id,
                 'subdomain' => $row->subdomain,
-                'settings'  => $siteSettings,
+                'settings' => $siteSettings,
             ],
 
             'professional' => [
-                'id'           => $row->professional_id,
-                'handle'       => $row->professional_handle,
+                'id' => $row->professional_id,
+                'handle' => $row->professional_handle,
                 'display_name' => $row->professional_display_name,
                 'professional_type' => $row->professional_type,
-                'bio'          => $row->professional_bio,
+                'bio' => $row->professional_bio,
                 'location_street_address' => $row->professional_location_street_address,
                 'location_city' => $row->professional_location_city,
                 'location_state' => $row->professional_location_state,
@@ -103,9 +104,9 @@ class StaffSiteController extends ApiController
             ],
 
             'theme' => [
-                'id'     => $row->theme_id,
-                'key'    => $row->theme_key,
-                'name'   => $row->theme_name,
+                'id' => $row->theme_id,
+                'key' => $row->theme_key,
+                'name' => $row->theme_name,
                 'config' => $row->theme_config,
             ],
 

@@ -2,173 +2,68 @@
 
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
-use App\Actions\Subscription\ChangeProfessionalPlanAction;
 use App\Actions\Subscription\CancelProfessionalSubscriptionAction;
+use App\Actions\Subscription\ChangeProfessionalPlanAction;
+use App\Actions\Subscription\ResumeProfessionalSubscriptionAction;
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Resources\SubscriptionResource;
+use App\Models\Billing\Subscription;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 
+// V2: Staff manages professional subscriptions (view, change plan, cancel, resume). Wired to Stripe for paid plans.
 class StaffSubscriptionManagementController extends ApiController
 {
-    /**
-     * GET /api/staff/professionals/{professional}/subscription
-     * View the professional's current subscription
-     */
-    public function show(Professional $professional): JsonResponse
+    public function show(Professional $professional): JsonResponse|SubscriptionResource
     {
-        $subscription = $professional->subscription;
+        $subscription = Subscription::query()
+            ->with('plan')
+            ->where('professional_id', $professional->id)
+            ->whereNull('ended_at')
+            ->latest('created_at')
+            ->first();
 
-        if (!$subscription) {
+        if (! $subscription) {
             return response()->json([
                 'message' => 'No active subscription',
             ], 404);
         }
 
-        return response()->json([
-            'data' => [
-                'id' => $subscription->id,
-                'plan_id' => $subscription->plan_id,
-                'plan' => [
-                    'id' => $subscription->plan->id,
-                    'name' => $subscription->plan->name,
-                    'price_cents' => $subscription->plan->price_cents,
-                    'currency_code' => $subscription->plan->currency_code,
-                    'billing_interval' => $subscription->plan->billing_interval,
-                    'entitlements' => $subscription->plan->entitlements,
-                ],
-                'status' => $subscription->status,
-                'current_period_start' => $subscription->current_period_start,
-                'current_period_end' => $subscription->current_period_end,
-                'trial_ends_at' => $subscription->trial_ends_at,
-                'cancel_at_period_end' => $subscription->cancel_at_period_end,
-                'ended_at' => $subscription->ended_at,
-            ],
-        ]);
+        return new SubscriptionResource($subscription);
     }
 
-    /**
-     * PATCH /api/staff/professionals/{professional}/subscription
-     * Change the professional's subscription plan
-     */
-    public function update(Request $request, Professional $professional): JsonResponse
+    public function update(Request $request, Professional $professional): JsonResponse|SubscriptionResource
     {
         $data = $request->validate([
             'plan_id' => ['required', 'string', 'exists:plans,id'],
+            'success_url' => ['sometimes', 'nullable', 'url'],
+            'cancel_url' => ['sometimes', 'nullable', 'url'],
         ]);
-
-        $subscription = $professional->subscription;
-
-        if (!$subscription) {
-            throw ValidationException::withMessages([
-                'subscription' => ['Professional has no active subscription.'],
-            ]);
-        }
-
-        if (!$subscription->isActive()) {
-            throw ValidationException::withMessages([
-                'subscription' => ['Subscription is not active.'],
-            ]);
-        }
-
-        if ($subscription->plan_id === $data['plan_id']) {
-            throw ValidationException::withMessages([
-                'plan_id' => ['New plan is the same as current plan.'],
-            ]);
-        }
 
         $action = app(ChangeProfessionalPlanAction::class);
-        $subscription = $action->execute($professional, $data);
+        $result = $action->execute($professional, $data);
 
-        return response()->json([
-            'data' => [
-                'id' => $subscription->id,
-                'plan_id' => $subscription->plan_id,
-                'status' => $subscription->status,
-                'current_period_start' => $subscription->current_period_start,
-                'current_period_end' => $subscription->current_period_end,
-            ],
-        ]);
+        if (is_array($result)) {
+            return response()->json(['data' => $result]);
+        }
+
+        return new SubscriptionResource($result->load('plan'));
     }
 
-    /**
-     * POST /api/staff/professionals/{professional}/subscription/cancel
-     * Cancel the professional's subscription at period end
-     */
-    public function cancel(Professional $professional): JsonResponse
+    public function cancel(Professional $professional): SubscriptionResource
     {
-        $subscription = $professional->subscription;
-
-        if (!$subscription) {
-            throw ValidationException::withMessages([
-                'subscription' => ['Professional has no active subscription.'],
-            ]);
-        }
-
-        if (!$subscription->isActive()) {
-            throw ValidationException::withMessages([
-                'subscription' => ['Subscription is not active.'],
-            ]);
-        }
-
         $action = app(CancelProfessionalSubscriptionAction::class);
         $subscription = $action->execute($professional);
 
-        return response()->json([
-            'data' => [
-                'id' => $subscription->id,
-                'status' => $subscription->status,
-                'cancel_at_period_end' => $subscription->cancel_at_period_end,
-                'ended_at' => $subscription->ended_at,
-            ],
-        ]);
+        return new SubscriptionResource($subscription->load('plan'));
     }
 
-    /**
-     * POST /api/staff/professionals/{professional}/subscription/resume
-     * Resume a subscription that was scheduled to be canceled
-     */
-    public function resume(Professional $professional): JsonResponse
+    public function resume(Professional $professional): SubscriptionResource
     {
-        $subscription = $professional->subscription;
+        $action = app(ResumeProfessionalSubscriptionAction::class);
+        $subscription = $action->execute($professional);
 
-        if (!$subscription) {
-            throw ValidationException::withMessages([
-                'subscription' => ['Professional has no subscription to resume.'],
-            ]);
-        }
-
-        if (!$subscription->isActive()) {
-            throw ValidationException::withMessages([
-                'subscription' => ['Subscription is no longer active and cannot be resumed.'],
-            ]);
-        }
-
-        if (!$subscription->cancel_at_period_end) {
-            throw ValidationException::withMessages([
-                'subscription' => ['Subscription is not scheduled for cancellation.'],
-            ]);
-        }
-
-        if ($subscription->current_period_end && $subscription->current_period_end->isPast()) {
-            throw ValidationException::withMessages([
-                'subscription' => ['Subscription period has already ended.'],
-            ]);
-        }
-
-        $subscription->update([
-            'cancel_at_period_end' => false,
-        ]);
-
-        return response()->json([
-            'data' => [
-                'id' => $subscription->id,
-                'status' => $subscription->status,
-                'cancel_at_period_end' => $subscription->cancel_at_period_end,
-                'ended_at' => $subscription->ended_at,
-            ],
-        ]);
+        return new SubscriptionResource($subscription->load('plan'));
     }
 }
-

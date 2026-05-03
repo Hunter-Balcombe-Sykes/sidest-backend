@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Concerns;
 
+// V2: Normalizes Shopify shop domains by stripping protocol, port, and trailing characters to a bare hostname.
 trait NormalizesShopDomain
 {
     private function normalizeShopDomain(string $value): string

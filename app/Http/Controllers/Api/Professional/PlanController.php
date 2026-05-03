@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional;
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Billing\Plan;
 
+// V2: Lists all active subscription plans with pricing and entitlements. Public endpoint (no auth required).
 class PlanController extends ApiController
 {
     /**

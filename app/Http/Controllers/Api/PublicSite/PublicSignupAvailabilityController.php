@@ -7,11 +7,12 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Handle/email/phone availability check during signup. Includes waitlist mode support.
 class PublicSignupAvailabilityController extends ApiController
 {
     public function check(Request $request): JsonResponse
     {
-        $signupsOpen = ! (bool) config('comet.waitlist.enabled', false);
+        $signupsOpen = ! (bool) config('sidest.waitlist.enabled', false);
 
         $validated = $request->validate([
             'email' => ['sometimes', 'nullable', 'email', 'max:255'],
@@ -52,15 +53,15 @@ class PublicSignupAvailabilityController extends ApiController
 
         return $this->success([
             'email' => [
-                'available' => !$emailExists,
+                'available' => ! $emailExists,
                 'exists' => $emailExists,
             ],
             'phone' => [
-                'available' => !$phoneExists,
+                'available' => ! $phoneExists,
                 'exists' => $phoneExists,
             ],
             'handle_lc' => [
-                'available' => !$handleExists,
+                'available' => ! $handleExists,
                 'exists' => $handleExists,
             ],
             'signups_open' => $signupsOpen,

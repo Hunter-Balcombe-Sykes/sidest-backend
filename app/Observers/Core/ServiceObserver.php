@@ -11,6 +11,7 @@ use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Invalidates cache, re-evaluates booking visibility, and dispatches Square/Fresha sync on service changes.
 class ServiceObserver
 {
     public bool $afterCommit = true;
@@ -22,13 +23,27 @@ class ServiceObserver
 
     private function bust(Service $service): ?Professional
     {
+        // Eager-load site once — every downstream caller (reevaluateBooking,
+        // shouldDispatchSquareSync, shouldDispatchFreshaSync) reads $pro->site.
+        // DB query has its own catch so a connection error returns null (pipeline
+        // continues) rather than propagating to the outer runHooks catch-all.
+        $pro = null;
         try {
-            $pro = Professional::query()->find($service->professional_id);
+            $pro = Professional::query()->with('site')->find($service->professional_id);
+        } catch (\Throwable $e) {
+            Log::warning('Professional lookup failed during cache bust', [
+                'service_id' => $service->id,
+                'professional_id' => $service->professional_id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        try {
             if ($pro) {
                 $this->professionalCache->invalidateProfessional($pro);
             }
-
-            return $pro;
         } catch (\Throwable $e) {
             Log::warning('Professional cache invalidation failed on service change', [
                 'service_id' => $service->id,
@@ -37,51 +52,54 @@ class ServiceObserver
             ]);
         }
 
-        return Professional::query()->find($service->professional_id);
+        return $pro;
     }
 
     public function saved(Service $service): void
     {
-        $pro = $this->bust($service);
-
-        $this->reevaluateBooking($service, $pro);
-
-        if ($this->shouldDispatchSquareSync($pro)) {
-            $this->dispatchSquareSync($service->id, 'upsert');
-        }
-
-        if ($this->shouldDispatchFreshaSync($pro)) {
-            $this->dispatchFreshaSync($service->id, 'upsert');
-        }
+        $this->runHooks($service, 'upsert');
     }
 
     public function deleted(Service $service): void
     {
-        $pro = $this->bust($service);
-
-        $this->reevaluateBooking($service, $pro);
-
-        if ($this->shouldDispatchSquareSync($pro)) {
-            $this->dispatchSquareSync($service->id, 'delete');
-        }
-
-        if ($this->shouldDispatchFreshaSync($pro)) {
-            $this->dispatchFreshaSync($service->id, 'delete');
-        }
+        $this->runHooks($service, 'delete');
     }
 
     public function restored(Service $service): void
     {
-        $pro = $this->bust($service);
+        $this->runHooks($service, 'upsert');
+    }
 
-        $this->reevaluateBooking($service, $pro);
+    /**
+     * Side-effect runner. Wraps every step in its own try/catch + a
+     * top-level catch-all so an observer failure can never bubble up
+     * and turn the originating Service::save() into a 500. Logs every
+     * failure with the service id for triage.
+     */
+    private function runHooks(Service $service, string $action): void
+    {
+        try {
+            $pro = $this->bust($service);
+            $this->reevaluateBooking($service, $pro);
 
-        if ($this->shouldDispatchSquareSync($pro)) {
-            $this->dispatchSquareSync($service->id, 'upsert');
-        }
+            if ($this->shouldDispatchSquareSync($pro)) {
+                $this->dispatchSquareSync($service->id, $action);
+            }
 
-        if ($this->shouldDispatchFreshaSync($pro)) {
-            $this->dispatchFreshaSync($service->id, 'upsert');
+            if ($this->shouldDispatchFreshaSync($pro)) {
+                $this->dispatchFreshaSync($service->id, $action);
+            }
+        } catch (\Throwable $e) {
+            // Catch-all so a sync/cache/visibility failure can't trip the
+            // request. Each step has its own try/catch; this wraps the
+            // glue + any unanticipated error in helper resolution.
+            Log::error('ServiceObserver hook failed', [
+                'service_id' => $service->id,
+                'professional_id' => $service->professional_id,
+                'action' => $action,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
     }
 
@@ -93,16 +111,22 @@ class ServiceObserver
                 return;
             }
 
-            $this->visibilityService->reevaluateEnabled(
-                (string) $service->professional_id,
-                (string) $site->id,
-                'booking'
-            );
+            // Both sections gate on "has at least one valid service": booking
+            // requires it for the booking link/integration check, services
+            // requires it directly. Re-evaluate both so is_enabled tracks
+            // reality after add/update/delete/restore.
+            foreach (['booking', 'services'] as $blockType) {
+                $this->visibilityService->reevaluateEnabled(
+                    (string) $service->professional_id,
+                    (string) $site->id,
+                    $blockType,
+                );
+            }
         } catch (\Throwable $e) {
-            Log::warning('Booking section visibility reevaluation failed on service change', [
-                'service_id'      => $service->id,
+            Log::warning('Section visibility reevaluation failed on service change', [
+                'service_id' => $service->id,
                 'professional_id' => $service->professional_id,
-                'message'         => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
@@ -110,8 +134,8 @@ class ServiceObserver
     private function dispatchSquareSync(string $serviceId, string $action): void
     {
         try {
-            // Run immediately so Square updates work even when no worker cluster is running.
-            PushServiceToSquareJob::dispatchSync($serviceId, $action);
+            // Queued on the 'integrations' queue (Horizon required for syncs to process).
+            PushServiceToSquareJob::dispatch($serviceId, $action);
         } catch (\Throwable $e) {
             // Never fail core service CRUD because sync dispatch failed.
             Log::warning('PushServiceToSquareJob dispatch failed', [
@@ -125,8 +149,8 @@ class ServiceObserver
     private function dispatchFreshaSync(string $serviceId, string $action): void
     {
         try {
-            // Run immediately so Fresha updates work even when no worker cluster is running.
-            PushServiceToFreshaJob::dispatchSync($serviceId, $action);
+            // Queued on the 'integrations' queue (Horizon required for syncs to process).
+            PushServiceToFreshaJob::dispatch($serviceId, $action);
         } catch (\Throwable $e) {
             // Never fail core service CRUD because sync dispatch failed.
             Log::warning('PushServiceToFreshaJob dispatch failed', [
@@ -139,6 +163,10 @@ class ServiceObserver
 
     private function shouldDispatchSquareSync(?Professional $professional): bool
     {
+        if (! (bool) config('sidest.features.square_sync', false)) {
+            return false;
+        }
+
         if (! $professional) {
             return false;
         }
@@ -153,6 +181,10 @@ class ServiceObserver
 
     private function shouldDispatchFreshaSync(?Professional $professional): bool
     {
+        if (! (bool) config('sidest.features.fresha_sync', false)) {
+            return false;
+        }
+
         if (! $professional) {
             return false;
         }

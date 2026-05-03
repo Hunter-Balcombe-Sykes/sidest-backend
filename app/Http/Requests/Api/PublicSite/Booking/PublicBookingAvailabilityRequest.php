@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\PublicSite\Booking;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates availability lookup for a booking slot — requires a date and service variation ID, with optional location.
 class PublicBookingAvailabilityRequest extends BaseFormRequest
 {
     public function rules(): array

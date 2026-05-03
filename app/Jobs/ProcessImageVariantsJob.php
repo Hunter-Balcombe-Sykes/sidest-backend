@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Models\Core\Site\SiteMedia;
+use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
+use App\Services\Media\UnprocessableImageException;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -21,6 +23,7 @@ use Throwable;
  *   processing → ready   (all variants created)
  *   processing → failed  (unrecoverable error after all retries)
  */
+// V2: Generates WebP variants for uploaded images. Updates SiteMedia state (pending → ready/failed). Queue: images.
 class ProcessImageVariantsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -31,8 +34,8 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     /**
      * @param  string  $originalPath  Path of the original on the media disk.
-     * @param  string  $imageId       UUID of the SiteMedia row.
-     * @param  string  $basePath      Directory prefix for variant storage.
+     * @param  string  $imageId  UUID of the SiteMedia row.
+     * @param  string  $basePath  Directory prefix for variant storage.
      */
     public function __construct(
         public readonly string $originalPath,
@@ -45,7 +48,7 @@ class ProcessImageVariantsJob implements ShouldQueue
     public function handle(ImageVariantService $service): void
     {
         Log::info('ProcessImageVariantsJob: starting', [
-            'image_id'      => $this->imageId,
+            'image_id' => $this->imageId,
             'original_path' => $this->originalPath,
         ]);
 
@@ -55,6 +58,7 @@ class ProcessImageVariantsJob implements ShouldQueue
             Log::warning('ProcessImageVariantsJob: SiteMedia row no longer exists, skipping.', [
                 'image_id' => $this->imageId,
             ]);
+
             return;
         }
 
@@ -62,6 +66,7 @@ class ProcessImageVariantsJob implements ShouldQueue
             Log::info('ProcessImageVariantsJob: SiteMedia row is soft-deleted, skipping.', [
                 'image_id' => $this->imageId,
             ]);
+
             return;
         }
 
@@ -74,18 +79,19 @@ class ProcessImageVariantsJob implements ShouldQueue
             ]);
 
         $diskName = $service->resolvedDiskName();
-        $disk     = Storage::disk($diskName);
+        $disk = Storage::disk($diskName);
 
         if (! $disk->exists($this->originalPath)) {
             $this->markFailed('Original file not found on media disk.');
             $this->fail(new \RuntimeException('Original file not found on media disk.'));
+
             return;
         }
 
         $localTmp = null;
 
         try {
-            $localTmp = tempnam(sys_get_temp_dir(), 'comet_orig_');
+            $localTmp = tempnam(sys_get_temp_dir(), 'sidest_orig_');
             if (! $localTmp) {
                 throw new \RuntimeException('Failed to create temporary file.');
             }
@@ -109,11 +115,32 @@ class ProcessImageVariantsJob implements ShouldQueue
                     'processing_error' => null,
                 ]);
 
+            // If this was a brand design asset, bust the Hydrogen brand-design
+            // cache so the compressed variants replace the pre-processing URL
+            // (listDesignMedia filters on processing_state=ready, so the
+            // payload changes the moment this row flips to ready).
+            if ($siteMedia->pool === SiteMedia::POOL_DESIGN && $siteMedia->site_id) {
+                app(SiteCacheService::class)->forgetBrandDesign((string) $siteMedia->site_id);
+            }
+
             Log::info('ProcessImageVariantsJob: completed.', ['image_id' => $this->imageId]);
+        } catch (UnprocessableImageException $e) {
+            // Permanent validation failure (e.g. pixel-count guard rejection).
+            // Retrying cannot succeed, so mark failed immediately and skip the
+            // retry machinery that $tries = 3 would otherwise trigger.
+            Log::warning('ProcessImageVariantsJob: unprocessable image, failing without retry.', [
+                'image_id' => $this->imageId,
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->markFailed($e->getMessage());
+            $this->fail($e);
+
+            return;
         } catch (Throwable $e) {
             Log::error('ProcessImageVariantsJob: variant generation failed.', [
-                'image_id'  => $this->imageId,
-                'error'     => $e->getMessage(),
+                'image_id' => $this->imageId,
+                'error' => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
 
@@ -128,10 +155,29 @@ class ProcessImageVariantsJob implements ShouldQueue
     public function failed(Throwable $e): void
     {
         $this->markFailed($e->getMessage());
+        $this->cleanupR2Artifacts();
+    }
+
+    // Delete the original (and any partial variants) from R2 after terminal failure
+    // so orphaned files don't accumulate on the media disk indefinitely.
+    private function cleanupR2Artifacts(): void
+    {
+        try {
+            app(ImageVariantService::class)->deleteVariants($this->imageId, $this->originalPath);
+        } catch (Throwable $e) {
+            Log::warning('ProcessImageVariantsJob: R2 orphan cleanup failed.', [
+                'image_id' => $this->imageId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function markFailed(string $reason): void
     {
+        // Fetch before update so we have site_id for cache bust regardless of
+        // update outcome (row may be soft-deleted by a concurrent delete).
+        $siteMedia = SiteMedia::withTrashed()->where('id', $this->imageId)->first();
+
         $updated = SiteMedia::query()
             ->where('id', $this->imageId)
             ->whereNull('deleted_at')
@@ -141,12 +187,25 @@ class ProcessImageVariantsJob implements ShouldQueue
             ]);
 
         if ($updated === 0) {
-            $siteMedia = SiteMedia::withTrashed()->where('id', $this->imageId)->first();
             Log::info('ProcessImageVariantsJob: failed-state update skipped.', [
-                'image_id'         => $this->imageId,
-                'row_exists'       => $siteMedia !== null,
-                'is_soft_deleted'  => $siteMedia?->trashed() ?? false,
+                'image_id' => $this->imageId,
+                'row_exists' => $siteMedia !== null,
+                'is_soft_deleted' => $siteMedia?->trashed() ?? false,
             ]);
+        }
+
+        // Mirror the success-path cache bust (line 119-121): Hydrogen's
+        // listDesignMedia filters on ready, so a failed design row changes
+        // the payload shape — bust so the dashboard sees it immediately.
+        if ($siteMedia?->pool === SiteMedia::POOL_DESIGN && $siteMedia->site_id) {
+            try {
+                app(SiteCacheService::class)->forgetBrandDesign((string) $siteMedia->site_id);
+            } catch (Throwable $e) {
+                Log::warning('ProcessImageVariantsJob: failed-state cache bust failed.', [
+                    'image_id' => $this->imageId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 }

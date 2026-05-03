@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Services;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates partial service category updates — optional title and sort order.
 class UpdateServiceCategoryRequest extends BaseFormRequest
 {
     public function rules(): array

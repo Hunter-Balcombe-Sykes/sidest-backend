@@ -20,7 +20,7 @@ This document is the single source of truth for backend so the frontend can buil
 - Public Mini-Site API
 - Professional Dashboard API
 - Brand Partnerships and Brand Store API
-- Enterprise API
+- Enterprise API *(not implemented — placeholder)*
 - Staff API
 - Media uploads & processing (images + videos, server-side via queue)
 - Test users and getting tokens
@@ -29,40 +29,52 @@ This document is the single source of truth for backend so the frontend can buil
 - Backend env var checklist
 - Known implementation gotchas
 
+## Companion Docs
+
+- **[docs/brand-catalog-v2.md](./brand-catalog-v2.md)** — full conceptual guide to the v2 brand catalog (`sidest.*` Shopify metafield model, variant gating, brand → affiliate inheritance, Hydrogen integration). Read this before working on anything brand-catalog or product-variant related.
+- **[docs/social-links.md](./social-links.md)** — full conceptual guide to the social link platform registry (8 platforms, handle/URL normalization, security model, frontend integration). Read this before working on link blocks, the affiliate dashboard's social picker, or adding a new social platform.
+
 ## 0) Recent Backend Changes (Commit Log Snapshot)
 
-Snapshot date: **March 20, 2026**.
+Snapshot date: **April 14, 2026**.
 
-### Unreleased (working tree)
+### April 14, 2026
 
-- Add video upload support (`POST /api/uploads` with `video` field); FFmpeg-based MP4 + HLS transcoding on dedicated `redis_video` queue; feature-flagged via `COMET_VIDEO_UPLOADS_ENABLED`.
+- Add brand-controlled variant gating: new `sidest.enabled_variant_gids` JSON metafield restricts which Shopify product variants are offered to affiliates. Empty/missing = all variants enabled (auto-tracks new Shopify variants); non-empty = only those variants offered. Picking one variant = "standalone product" mode. Hydrogen receives an `enabled_variants` map for storefront enforcement. **See [docs/brand-catalog-v2.md](./brand-catalog-v2.md) for the full conceptual model, scenario table, and frontend integration guide.**
+- Add social link platform registry: link blocks now distinguish "social" from "custom" links via a config-driven registry (`config('sidest.social_platforms')`) covering 8 platforms (Instagram, Facebook, LinkedIn, YouTube, TikTok, X, Spotify, SoundCloud). Affiliates can paste either a handle or full URL — backend normalizes either to a canonical https URL with strict ASCII-only handle validation and host allowlist enforcement. New `GET /api/public/config/social-platforms` exposes the registry to frontends. New `sidest:backfill-social-links` artisan command tags existing link blocks with `settings.platform`/`settings.handle`. Zero schema changes — platform identity lives in `settings` JSONB. **See [docs/social-links.md](./social-links.md) for the full conceptual model, security checklist, and frontend integration guide.**
+
+### April 11, 2026
+
+- Add generic/open invite links: `GET /public/join/{handle}` (brand preview), `POST /join/{handle}` (authenticated claim), `join_brand_handle` param on bootstrap for auto-claim on signup. Each claim creates an auditable `BrandAffiliateInvite` with `invite_type=generic`.
+- Deferred Shopify account creation: OAuth callback no longer creates Supabase user or account. Caches credentials with encrypted setup token (1hr TTL), redirects to setup wizard. Brand enters their own email, frontend creates Supabase user, bootstrap consumes token and creates integration. Reinstall and existing-account-connect paths unchanged.
+- Add `GET /api/shopify/setup-prefill?token={token}` — returns non-sensitive shop data for setup wizard prefill.
+- Add brand gallery fallback: `GET/POST/DELETE/PATCH /brand/gallery` — brands upload up to 5 fallback images shown when affiliates haven't uploaded their own. Reuses SiteMedia + R2 + WebP processing pipeline with new `brand_gallery` pool.
+- Add affiliate custom product photos: `GET/POST/DELETE/PATCH /affiliate/products/{gid}/photos` — affiliates upload up to 3 custom lifestyle photos per product. Two-level permission system (global brand toggle + per-affiliate override). Hydrogen endpoint returns photos grouped by product GID with configurable placement (before/after/mixed).
+- Brand logo and placeholder uploads now go through WebP variant processing pipeline (previously stored raw).
+- Add refund notifications: affiliates notified when commissions are cancelled (full refund) or adjusted (partial refund) via `NotificationPublisher`.
+- Consolidate design tokens to `site.settings.design`: moved `accent_color`, `theme_variant`, `product_image_ratio`, `custom_photo_position` from `provider_metadata` to `site.settings.design`. Added new tokens: `background_color`, `text_color`, `button_background`, `button_text_color`, `primary_color`, `secondary_color`, `typography.heading_font`, `typography.body_font`. Hydrogen brand config endpoint now returns a single `design` object.
+- Fix `notification_receipts` schema prefix: raw SQL INSERT was using `core.notification_receipts` instead of `notifications.notification_receipts`.
+
+### Pre-April 11 (working tree)
+
+- Add video upload support (`POST /api/uploads` with `video` field); FFmpeg-based MP4 + HLS transcoding on dedicated `redis_video` queue; feature-flagged via `SIDEST_VIDEO_UPLOADS_ENABLED`.
 - Extend `core.site_images` with `media_type`, `processing_state`, `processing_error`, `duration_ms`, `poster_path`, `original_mime`, `original_size_bytes`.
 - Add `core.media_variants` table for video artifacts (MP4s, HLS playlists, poster).
 - Add `gallery_videos` and `content_videos` arrays to `public_site_payload`; `gallery` / `content_images` remain image-only.
 - Add `media_type` and `ids[]` filter params to `GET /api/images`; add `media_type` param to `POST /api/images/reorder`.
-- Add per-professional legal content storage with generated + manual variants and source toggles.
-- Add `GET /api/site/legal-content` and `PUT|PATCH /api/site/legal-content`.
-- Add public payload `legal` object with active document resolution.
-- Ensure legal defaults to templated content and never renders blank when manual content is empty.
-- Add enterprise architecture: enterprises, memberships, ambassador-promoter contracts, and promoter commerce tables.
-- Add enterprise self-service routes: `GET|POST|PATCH|DELETE /api/enterprise/me`.
-- Expand professional types to: `barber`, `hairdresser`, `ambassador`, `promoter`, `barbershop`, `salon`.
-- Update bootstrap and profile update flows to auto-provision enterprise records for enterprise owner types (`promoter`, `barbershop`, `salon`).
-- Update featured products rules for enterprise linkage and ambassador promoter-contract validation.
+- ~~Add per-professional legal content~~ **REMOVED** — legal content tables dropped, services and controllers removed in V2.
+- ~~Add enterprise architecture~~ **REMOVED** — enterprise tables exist in schema but no controllers, routes, or services implemented. Not part of V2.
+- ~~Expand professional types~~ **NOT IMPLEMENTED** — config enforces 3 types only: `brand`, `professional`, `influencer`. Schema supports additional types but they are not active.
+- Add Shopify post-OAuth setup: auto brand signup, profile auto-fill, sales channel, collections, metafields, logo sync.
+- Add expanded Shopify webhook suite: orders/updated (refunds/cancellations), app/uninstalled, shop/update, GDPR handlers.
+- Add Hydrogen internal API: brand config, affiliate lookup, affiliate products (server-to-server endpoints).
 - Add relational brand partner links (`brand_partner_links`) and move brand-affiliate relationship logic off heavy `site.settings` JSON lookups.
 - Add brand-affiliate invite hardening: transactional claim/decline, expired invite handling, and consistent email matching.
 - Add brand role-gates for brand store endpoints and paginate `GET /api/brand-partners`.
 - Add brand partner + invite endpoints documentation and frontend contract notes.
-- Add brand-approved affiliate commerce schema: `retail.brand_products`, `retail.brand_product_affiliate_overrides`, `core.enterprise_brand_links`, and `distributor` enterprise type support.
-- Hard-cutover `PUT /api/store/featured-products` to `selected_products[{brand_product_id, sort_order}]`; legacy Shopify-id payload is rejected.
-- Add `GET /api/store/available-products` for affiliate-visible products across connected brands (featured-first ordering).
-- Add manager catalog endpoints: `GET /api/store/brand-products`, `PATCH /api/store/brand-products/{brandProductId}`, `PATCH /api/store/brand-products/bulk`.
-- Expand affiliate override endpoints to deny/allow access control (`GET /api/store/affiliate-overrides`, `PUT|DELETE /api/store/affiliate-overrides/{deny|allow}`).
-- Add per-affiliate product pricing endpoints: `GET|PUT|DELETE /api/store/affiliate-product-settings`.
-- Enforce storefront validity via joins: connected brand link + availability + sync-active + deny override restriction.
-- Activate `allow` override behavior to bypass brand-level availability for a specific affiliate while `deny` keeps unconditional precedence.
-- Add selection cleanup flows: unavailability/disconnect/deny now remove invalid selections and create notifications.
-- Add pricing outputs for store payloads: effective commission and discounted price with ceil-to-nearest-5-cents rounding, including affiliate-level override fields.
+- ~~Add brand-approved affiliate commerce schema~~ **REMOVED** — V1 local product tables removed; products live in Shopify.
+- ~~Store catalog/override/pricing endpoints~~ **REMOVED** — V1 endpoints removed; Hydrogen handles product display natively via Shopify Storefront API.
+- Selection cleanup retained for `affiliate_product_selections` using Shopify GIDs (not local brand_product_ids).
 - Add pre-launch waitlist capture endpoint (`POST /api/public/waitlist`) with conditional fields and email-based upsert semantics.
 - Add waitlist-mode gate on `POST /api/bootstrap` for new users only (existing professionals continue to bootstrap).
 
@@ -87,13 +99,13 @@ All endpoints below are served under the Laravel API base URL, with the default 
 
 ### API base URL
 
-- API base URL is your APP_URL (Laravel). Example: https://api.comet.app
-- All API routes live under /api. Example: https://api.comet.app/api/me Public mini-site domain rules Public mini-site routes are domain-scoped. They MUST be called on the mini-site host, not the API host.
-- Host pattern: https://{subdomain}.{COMET_PUBLIC_DOMAIN}
-- Public API base URL: https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api
+- API base URL is your APP_URL (Laravel). Example: https://api.sidest.co
+- All API routes live under /api. Example: https://api.sidest.co/api/me Public mini-site domain rules Public mini-site routes are domain-scoped. They MUST be called on the mini-site host, not the API host.
+- Host pattern: https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}
+- Public API base URL: https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api
 - Example: https://joshbarber.localtest.me/api/public/site Local development tip
 - Use a wildcard-friendly domain such as localtest.me or lvh.me so subdomains resolve to 127.0.0.1.
-- Set COMET_PUBLIC_DOMAIN=localtest.me and APP_URL=http://api.localtest.me (or similar).
+- Set SIDEST_PUBLIC_DOMAIN=localtest.me and APP_URL=http://api.localtest.me (or similar).
 
 ## 2) Authentication (Supabase JWT)
 
@@ -105,19 +117,19 @@ All authenticated requests MUST include the Supabase access token:
 - Also send: Accept: application/json
 - For JSON bodies: Content-Type: application/json Tokens are verified by the supabase.jwt middleware using Supabase JWKS + issuer/audience settings.
 
-### No login endpoint in Comet
+### No login endpoint in Side St
 
-- Comet does not manage passwords or sessions.
+- Side St does not manage passwords or sessions.
 - Frontend signs in with Supabase Auth.
-- Frontend calls Comet API with the returned access_token.
+- Frontend calls Side St API with the returned access_token.
 
 ### Bootstrap required for new users
 
-A Supabase-authenticated user is not automatically a professional in Comet.
+A Supabase-authenticated user is not automatically a professional in Side St.
 
 **For a new user, call:**
 
-- POST /api/bootstrap This creates/updates `core.professionals` and `core.sites` tied to the Supabase user id (sub in JWT), and auto-provisions enterprise records for enterprise owner types.
+- POST /api/bootstrap This creates/updates `core.professionals` and `core.sites` tied to the Supabase user id (sub in JWT).
 
 If you skip bootstrap, professional routes will return 403 with a message prompting bootstrap.
 
@@ -125,8 +137,7 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 
 ### Auth: Required (Supabase JWT)
 
-**Purpose:** Create or refresh the authenticated user profile + site in one call.  
-If the selected `professional_type` is an enterprise-owner type (`promoter`, `barbershop`, or `salon`), an enterprise profile and owner membership are auto-provisioned in the same transaction.
+**Purpose:** Create or refresh the authenticated user profile + site in one call.
 
 **Request body:**
 
@@ -139,7 +150,7 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 "last_name": "Barber",
 "country_code": "AU",
 "timezone": "Australia/Sydney",
-"professional_type": "barber",
+"professional_type": "professional",
 "handle": "joshbarber",
 "invite_token": null,
 "brand_partner_professional_id": null
@@ -157,13 +168,13 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 - `professional_type`:
   - required for first bootstrap of a new Supabase user
   - optional for subsequent bootstrap calls
-  - allowed values: `professional`, `influencer`, `barber`, `hairdresser`, `ambassador`, `promoter`, `brand`, `barbershop`, `salon`
+  - allowed values: `professional`, `influencer`, `brand`
 - `handle` (optional): Unique username/slug (if omitted, auto-generated from display_name)
 - `invite_token` (optional): claim a brand-affiliate invite during bootstrap
 - `brand_partner_professional_id` (optional): connect to a brand partner during bootstrap when no invite token is provided
 
 **Waitlist mode behavior:**
-- If `COMET_WAITLIST_ENABLED=true`, bootstrap is blocked for users who do not already have a professional row.
+- If `SIDEST_WAITLIST_ENABLED=true`, bootstrap is blocked for users who do not already have a professional row.
 - Existing professionals can still call bootstrap normally.
 - Blocked response shape:
   - Status: `403`
@@ -183,7 +194,7 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
         "last_name": "Barber",
         "country_code": "AU",
         "timezone": "Australia/Sydney",
-        "professional_type": "barber",
+        "professional_type": "professional",
         "status": "active",
         "onboarding_step": 0
     },
@@ -192,14 +203,8 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
         "professional_id": "uuid",
         "subdomain": "josh-barber",
         "is_published": false
-    },
-    "enterprise": null
+    }
 }
-```
-
-`enterprise` response behavior:
-- `null` for non-enterprise types (`barber`, `hairdresser`, `ambassador`)
-- object for enterprise-owner types (`promoter`, `barbershop`, `salon`)
 
 **Common status codes:** 200, 401 (invalid JWT), 403 (waitlist-only gate or disabled account), 422 (validation error)
 
@@ -401,15 +406,15 @@ If the selected `professional_type` is an enterprise-owner type (`promoter`, `ba
 
 - Public (anon): no token, can only access public mini-site routes and health routes.
 - Professional: valid Supabase JWT AND a core.professionals row where auth_user_id matches JWT sub.
-- Staff: valid Supabase JWT AND a core.comet_staff row where auth_user_id matches JWT sub.
-- Staff admin: staff plus is_admin = true in core.comet_staff.
+- Staff: valid Supabase JWT AND a core.sidest_staff row where auth_user_id matches JWT sub.
+- Staff admin: staff plus is_admin = true in core.sidest_staff.
 
 ### RLS behavior
 
-Comet reads/writes Postgres through Laravel using the configured database user.
+Side St reads/writes Postgres through Laravel using the configured database user.
 
-- Database table RLS does not gate Comet API calls if the DB user bypasses RLS (typical for server-side roles).
-- Image uploads go through the Comet API (server-side), not through Supabase Storage. Supabase Storage is not used at all — all media is stored on Laravel Cloud Object Storage (Cloudflare R2).
+- Database table RLS does not gate Side St API calls if the DB user bypasses RLS (typical for server-side roles).
+- Image uploads go through the Side St API (server-side), not through Supabase Storage. Supabase Storage is not used at all — all media is stored on Laravel Cloud Object Storage (Cloudflare R2).
 
 ## 4) Data Models
 
@@ -423,8 +428,8 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | handle                  | string   | no       | joshbarber                               | unqiue (case-sensitive), 3-40 char, must start with letter |
 | display_name            | string   | no       | Josh Barber                              | Max 80                                                     |
 | bio                     | string   | yes      | Mobile Barber in Darwin                  | Max 2000, also mirrored from bio section when updated      |
-| professional_type       | string   | no       | barber                                   | One of: professional, influencer, barber, hairdresser, ambassador, promoter, brand, barbershop, salon |
-| primary_enterprise_id   | uuid     | yes      | `10000000-...`                           | Optional pointer to primary enterprise (membership table is source of truth) |
+| about                   | object   | no       | `{ "credentials": [...], "experience": [...] }` | Structured about-me content. See *About payload shape* below. Empty state is `{}`. |
+| professional_type       | string   | no       | professional                             | One of: `professional`, `influencer`, `brand` (enforced via config) |
 | primary_email           | email    | no       | josh@example.copm                        | Max 255                                                    |
 | phone                   | string   | no       | +6140000000                              | Max 40                                                     |
 | first_name              | string   | no       | Josh                                     | Max 80                                                     |
@@ -452,45 +457,7 @@ All ids are UUID strings. Timestamps are ISO 8601 strings when returned by the A
 | fresha_partner_id       | string   | yes      | `partner_456`                            | Fresha partner identifier                                  |
 | fresha_last_synced_at   | datetime | yes      | `2026-02-20T12:00:00Z`                   | Last successful Fresha catalog sync                        |
 
-### Enterprise (core.enterprises)
-| Name                    | Type     | Nullable | Example                | Constraints / Notes |
-|-------------------------|----------|----------|------------------------|---------------------|
-| id                      | uuid     | no       | `10000000-...`         | Primary key |
-| auth_user_id            | uuid     | yes      | `30000000-...`         | Optional owner auth user id (unique among active enterprises) |
-| name                    | string   | no       | `Atlas Promotions`     | Max 255 |
-| handle                  | string   | yes      | `atlas-promotions`     | Unique among active enterprises |
-| enterprise_type         | string   | no       | `promoter`             | One of: `promoter`, `barbershop`, `salon`, `distributor` |
-| status                  | string   | no       | `active`               | One of: `active`, `inactive`, `suspended` |
-| subscription_tier       | string   | yes      | `enterprise`           | Enterprise plan key/label |
-| primary_email           | string   | yes      | `hello@example.com`    | Business contact |
-| phone                   | string   | yes      | `+61400000000`         | Business contact |
-| public_contact_email    | string   | yes      | `bookings@example.com` | Public-facing contact |
-| public_contact_number   | string   | yes      | `+61400000001`         | Public-facing contact |
-| location_*              | string   | yes      | `Melbourne`            | Address fields |
-| metadata                | jsonb    | no       | `{}`                   | Flexible metadata |
-| deleted_at              | datetime | yes      | `null`                 | Soft delete marker |
-
-### Professional Enterprise Membership (core.professional_enterprise_memberships)
-| Name                    | Type     | Nullable | Example        | Constraints / Notes |
-|-------------------------|----------|----------|----------------|---------------------|
-| id                      | uuid     | no       | `40000000-...` | Primary key |
-| professional_id         | uuid     | no       | `20000000-...` | FK to professional |
-| enterprise_id           | uuid     | no       | `10000000-...` | FK to enterprise |
-| relationship_type       | string   | no       | `owner`        | One of: `owner`, `employee`, `chair_renter`, `contractor`, `affiliate`, `member` |
-| is_primary              | boolean  | no       | `true`         | Only one active primary membership per professional |
-| starts_at               | datetime | no       | `...`          | Start timestamp |
-| ends_at                 | datetime | yes      | `null`         | Active when null |
-
-### Ambassador Promoter Contract (core.influencer_promoter_contracts)
-| Name                        | Type     | Nullable | Example        | Constraints / Notes |
-|-----------------------------|----------|----------|----------------|---------------------|
-| id                          | uuid     | no       | `50000000-...` | Primary key |
-| influencer_professional_id  | uuid     | no       | `20000000-...` | Must reference `professional_type = ambassador` |
-| promoter_enterprise_id      | uuid     | no       | `10000000-...` | Must reference `enterprise_type = promoter` |
-| status                      | string   | no       | `active`       | `draft`, `active`, `paused`, `ended`, `terminated` |
-| exclusive                   | boolean  | no       | `true`         | At most one active exclusive contract per ambassador |
-| starts_at                   | datetime | no       | `...`          | Contract start |
-| ends_at                     | datetime | yes      | `null`         | Active when null and status is `active` |
+<!-- Enterprise, Professional Enterprise Membership, and Ambassador Promoter Contract tables removed — schema exists but no controllers/routes/services implemented in V2 -->
 
 
 ### Site
@@ -523,8 +490,8 @@ All images (gallery showcase and content/branding) live in the `site_images` tab
 | deleted_at | datetime | yes      | `null`                                          | Soft delete                                                      |
 
 **Pool limits** (configurable via env):
-- `gallery`: max 5 images (env `COMET_GALLERY_IMAGE_MAX`)
-- `content`: max 5 images (env `COMET_CONTENT_IMAGE_MAX`)
+- `gallery`: max 5 images (env `SIDEST_GALLERY_IMAGE_MAX`)
+- `content`: max 5 images (env `SIDEST_CONTENT_IMAGE_MAX`)
 
 ### ImageVariant (core.image_variants)
 
@@ -549,8 +516,8 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 
 | Variant   | Resolution policy   | Quality policy                                  | Typical use                             |
 |-----------|---------------------|--------------------------------------------------|-----------------------------------------|
-| optimized | Preserve original   | Adaptive quality, targets `COMET_IMAGE_TARGET_KB` (default 500KB) | Fast page loads / default display |
-| maximized | Preserve original   | Highest quality (`COMET_IMAGE_MAXIMIZED_QUALITY`, default 100)    | Zoom/full-detail display          |
+| optimized | Preserve original   | Adaptive quality, targets `SIDEST_IMAGE_TARGET_KB` (default 500KB) | Fast page loads / default display |
+| maximized | Preserve original   | Highest quality (`SIDEST_IMAGE_MAXIMIZED_QUALITY`, default 100)    | Zoom/full-detail display          |
 
 ### Customer
 | Name                      | Type     | Nullable | Example                | Constraints / Notes                                                         |
@@ -714,7 +681,7 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 
 ### Standard error format
 
-**Most Comet errors use:**
+**Most Side St errors use:**
 
 ```json
 {
@@ -763,16 +730,16 @@ All routes below are unauthenticated.
 Frontend can connect in 2 modes:
 
 1. Domain-scoped mini-site host  
-`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/...`
+`https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api/public/...`
 2. Header-based API host fallback (no subdomain DNS needed)  
-`https://api.{COMET_PUBLIC_DOMAIN}/api/public/...` with header `X-Site-Subdomain: {subdomain}`
+`https://api.{SIDEST_PUBLIC_DOMAIN}/api/public/...` with header `X-Site-Subdomain: {subdomain}`
 
 For analytics endpoints, provide either `site_id` in the JSON body OR `X-Site-Subdomain` header.
 
 Frontend quick-start (header-based API host):
 
 ```ts
-const API_BASE = "https://api.<COMET_PUBLIC_DOMAIN>/api/public";
+const API_BASE = "https://api.<SIDEST_PUBLIC_DOMAIN>/api/public";
 const subdomain = "fadez";
 const visitorId = localStorage.getItem("comet_visitor_id") ?? crypto.randomUUID();
 localStorage.setItem("comet_visitor_id", visitorId);
@@ -915,7 +882,7 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 
 ### `POST /api/public/waitlist`
 
-- Purpose: collect pre-launch waitlist submissions for Comet account access
+- Purpose: collect pre-launch waitlist submissions for Side St account access
 - Auth: None
 - Rate limit: waitlist
 - Request body:
@@ -1011,7 +978,7 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 #### Domain-Scoped Booking Endpoints
 
 The following booking endpoints are domain-scoped and accessed via the mini-site subdomain:
-`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/booking/...`
+`https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api/public/booking/...`
 
 #### `GET /api/public/booking/config`
 
@@ -1158,7 +1125,7 @@ The following booking endpoints are domain-scoped and accessed via the mini-site
 #### Domain-Scoped Store Endpoints
 
 The following store endpoints are domain-scoped and accessed via the mini-site subdomain:
-`https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api/public/store/...`
+`https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api/public/store/...`
 
 #### `GET /api/public/store/featured-products`
 
@@ -1198,7 +1165,7 @@ The following store endpoints are domain-scoped and accessed via the mini-site s
 #### Header-Based Slug Routing
 
 For frontends that cannot use subdomain DNS routing, the following endpoints accept the subdomain via the `X-Site-Subdomain` header and are accessed on the API host:
-`https://api.{COMET_PUBLIC_DOMAIN}/api/public/...`
+`https://api.{SIDEST_PUBLIC_DOMAIN}/api/public/...`
 
 #### `GET /api/public/site-by-slug`
 
@@ -1265,20 +1232,63 @@ All routes below require: Authorization header AND a professional profile (curre
 
 - Purpose: bootstrap dashboard UI with current professional, site, blocks, services, and customer count
 - Auth: Required
-- Response (200): `{ "uid": "supabase-user-uuid", "professional": { ..., "professional_type": "barber" }, "site": { ... }, "legal_content": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
-- Enterprise fields in `professional`:
-  - `primary_enterprise_id`
-  - `primary_enterprise` (object or null)
-  - `enterprise_memberships` (array, each with `enterprise` object snapshot)
-  - `active_promoter_contract` (object or null; ambassador-focused)
+- Response (200): `{ "uid": "supabase-user-uuid", "professional": { ..., "professional_type": "professional" }, "site": { ... }, "blocks": [], "services": [], "customers_count": 0 }`
 - Common status codes: 200, 401, 403
+
+### Account Deletion
+
+Self-service lifecycle: email-confirmed grace period → 30-day read-only window → hard delete.
+
+#### `POST /api/me/deletion/request`
+
+Initiates deletion. Sends confirmation email (expires 24h). Rate-limited 3/hour.
+
+- `200` — confirmation email sent
+- `409` — already in grace period (body: `deletes_at`)
+- `403` — account is suspended/disabled
+- `422` — unsettled obligations (body: `reasons: ["unpaid_balance", "pending_payouts", "pending_topups"]`)
+- `429` — rate limited
+- `503` — mail send failed (safe to retry)
+
+#### `POST /api/me/deletion/confirm`
+
+Body: `{ "token": "<from email>" }`. Status → `pending_deletion`, Stripe cancel-at-period-end scheduled, integration credentials deleted.
+
+- `200` — body: `deletes_at` ISO timestamp
+- `410` — token expired (>24h since request)
+- `404` — token invalid or no deletion request
+
+#### `POST /api/me/deletion/cancel`
+
+Restores previous status. Exempt from read-only middleware.
+
+- `200` — account reactivated
+- `409` — no pending deletion
+
+#### Read-only enforcement
+
+During grace period, all non-GET/HEAD/OPTIONS requests return:
+
+```json
+HTTP 423 Locked
+{
+  "message": "Account is pending deletion.",
+  "pending_deletion": true,
+  "deletes_at": "2026-05-19T03:20:00Z"
+}
+```
 
 ### `PATCH /api/me`
 
 - Purpose: update professional profile fields
-- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "barber", "public_contact_email": "bookings@example.com" }`
-- `professional_type` allowed values: `professional`, `influencer`, `barber`, `hairdresser`, `ambassador`, `promoter`, `brand`, `barbershop`, `salon`
-- Behavior: switching to `promoter`, `barbershop`, or `salon` auto-provisions/updates an enterprise profile and owner membership
+- Request body (all fields optional; if provided they are validated): `{ "display_name": "Josh Barber", "bio": "Mobile barber", "professional_type": "professional", "public_contact_email": "bookings@example.com", "about": { "credentials": [...], "experience": [...] } }`
+- `professional_type` allowed values: `professional`, `influencer`, `brand`
+- `about` payload shape:
+  - `credentials`: array of up to 5 entries, each `{ "title": "Advanced Colourist" (required, ≤120), "issuer": "Toni & Guy" (optional, ≤120), "year": 2019 (optional, 1900..current+1) }`
+  - `experience`: array of up to 5 entries, each `{ "role": "Senior Stylist" (required, ≤120), "place": "Rokstar" (optional, ≤120), "start": "2021-03" (optional, YYYY-MM), "end": "2023-01" or null for ongoing (optional, YYYY-MM), "description": "..." (optional, ≤1000) }`
+  - `end` must be on or after `start` when both are set.
+  - Entries with unknown keys are rejected (strict keys via `array:title,issuer,year` / `array:role,place,start,end,description`).
+  - Omit the `about` field on PATCH to leave existing data untouched. Send `{}` to clear.
 - Response (200): `{ "professional": { ... } }`
 - Common status codes: 200, 401, 403, 422
 - Images are managed via `POST /api/uploads` (pool=gallery or pool=content). No image fields are accepted on this endpoint.
@@ -1312,22 +1322,7 @@ All routes below require: Authorization header AND a professional profile (curre
 - Response (200): `{ "google_business_profile": { ... } }`
 - Common status codes: 200, 401, 403, 422
 
-### `GET /api/site/legal-content`
-
-- Purpose: fetch generated/manual legal content and current active sources for the logged-in professional
-- Auth: Required
-- Response (200): `{ "legal_content": { "generated_privacy_policy": "...", "manual_privacy_policy": "...", "active_privacy_source": "templated", "active_privacy_policy": "...", "generated_terms_and_conditions": "...", "manual_terms_and_conditions": "...", "active_terms_source": "templated", "active_terms_and_conditions": "...", "template_variables": { ... }, "generated_at": "...", "updated_at": "..." } }`
-- Common status codes: 200, 401, 403
-
-### `PUT /api/site/legal-content`
-### `PATCH /api/site/legal-content`
-
-- Purpose: save manual legal text, toggle active sources, or regenerate templated documents
-- Auth: Required
-- Request body (all fields optional): `{ "manual_privacy_policy": "...", "manual_terms_and_conditions": "...", "active_privacy_source": "templated|manual", "active_terms_source": "templated|manual", "regenerate_templated": true }`
-- Behavior: if active source is `manual` but manual content is empty, source is forced back to `templated` (never blank output)
-- Response (200): `{ "legal_content": { ... } }`
-- Common status codes: 200, 401, 403, 422
+<!-- Legal content endpoints (GET/PUT/PATCH /api/site/legal-content) removed in V2 — tables dropped -->
 
 ### `PATCH /api/site/visibility`
 
@@ -1502,12 +1497,44 @@ All routes below require: Authorization header AND a professional profile (curre
 ### `GET /api/analytics`
 
 - Purpose: analytics summary for the logged-in professional
-- Query: days=30 or from=YYYY-MM-DD&to=YYYY-MM-DD Response (200): { "range": { "from": "2026-01-01", "to": "2026-01-30" }, "totals": { "visits": 0, "unique_visitors": 0, "clicks": 0, "unique_clickers": 0, "ctr_percent": 0 }, "charts": { "visits_by_day": [], "clicks_by_day": [] }, "top_links": [] } Links (Link blocks)
-- GET /api/links
-- POST /api/links
-- PATCH /api/links/{block}
-- DELETE /api/links/{block}
-- POST /api/links/reorder Store/Update body: { "title": "Book now", "url": "https://booking.example.com", "icon_key": "calendar", "is_active": true, "settings": { "open_in_new_tab": true } } Common status codes: 200, 201, 401, 403, 404, 422 Sections (Section blocks)
+- Query: days=30 or from=YYYY-MM-DD&to=YYYY-MM-DD Response (200): { "range": { "from": "2026-01-01", "to": "2026-01-30" }, "totals": { "visits": 0, "unique_visitors": 0, "clicks": 0, "unique_clickers": 0, "ctr_percent": 0 }, "charts": { "visits_by_day": [], "clicks_by_day": [] }, "top_links": [] }
+
+#### Links (Link blocks)
+
+> **Full conceptual guide:** [docs/social-links.md](./social-links.md)
+>
+> Covers the platform registry, normalization rules, frontend integration expectations, and security considerations.
+
+- `GET /api/links`
+- `POST /api/links`
+- `PATCH /api/links/{block}`
+- `DELETE /api/links/{block}`
+- `POST /api/links/reorder`
+- `GET /api/public/config/social-platforms` (public, no auth — returns the list of supported social platforms with display name, icon key, and placeholder)
+
+**Two write modes** on POST/PATCH (the presence of `platform` is the discriminator):
+
+**Social mode** — accepts either a handle or a URL; backend normalizes either to a canonical https URL and tags `settings.platform`/`settings.handle`:
+```json
+{ "platform": "instagram", "handle": "joshhunter" }
+```
+or
+```json
+{ "platform": "instagram", "url": "https://instagram.com/joshhunter" }
+```
+
+**Custom mode** — legacy contract, requires `title` and `url`:
+```json
+{ "title": "Book now", "url": "https://booking.example.com", "icon_key": "calendar", "is_active": true, "settings": { "open_in_new_tab": true } }
+```
+
+Custom-mode URLs are restricted to `http`/`https` schemes only — `javascript:`, `data:`, `file:`, `ftp:` are rejected with 422.
+
+Supported social platform keys: `instagram`, `facebook`, `linkedin`, `youtube`, `tiktok`, `x`, `spotify`, `soundcloud`. See [docs/social-links.md](./social-links.md) for handle formats, host allowlists, and the full conceptual model.
+
+Common status codes: 200, 201, 401, 403, 404, 422
+
+#### Sections (Section blocks)
 
 Allowed section block types are defined in config: `gallery`, `services`, `shop`, `booking`, `barbershop_info`
 
@@ -1604,139 +1631,80 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
   - `custom_price`, `affiliate_custom_price`
 - Common status codes: 200, 401, 403, 422
 
-### Store: Brand/Distributor Catalog Management
+<!-- V1 Store sections removed: Brand/Distributor Catalog Management, Affiliate Access Overrides, Per-Affiliate Product Pricing Settings.
+     Products live in Shopify; commission rates in Shopify metafields. No local brand_products table. -->
 
-#### `GET /api/store/brand-products`
-- Purpose: full synced catalog + settings state for managed brands
-- Auth: Required (brand account, or professional in an active `distributor` enterprise linked via `core.enterprise_brand_links`)
-- Query params:
-  - `brand_professional_id` (optional uuid): limit to one managed brand
-- Response includes each product's synced fields and settings fields (`is_available`, `is_featured`, `commission_override`, `discount_rate`, `custom_price`, effective pricing/commission outputs).
-- Common status codes: 200, 401, 403, 422
+### Store: Brand Catalog Management (v2)
 
-#### `PATCH /api/store/brand-products/{brandProductId}`
-- Purpose: update one brand product's settings
-- Auth: Required manager access for that brand
-- Allowed fields:
-  - `is_available`, `is_featured`, `sort_order`
-  - `commission_override`, `discount_rate`, `custom_price`
-- Notes:
-  - If a product becomes unavailable, affected affiliate selections are removed and users are notified.
-- Common status codes: 200, 401, 403, 404, 422
+> **Full conceptual guide:** [docs/brand-catalog-v2.md](./brand-catalog-v2.md)
+>
+> Covers the `sidest.*` metafield model, brand → affiliate inheritance, the variant gating scenario table, frontend integration expectations for the brand dashboard and Hydrogen storefront, and implementation pointers.
 
-#### `PATCH /api/store/brand-products/bulk`
-- Purpose: bulk update settings for one brand, one/many/all products
-- Auth: Required manager access for that brand
-- Request body:
-  - `brand_professional_id`: required uuid
-  - `brand_product_ids`: optional uuid[] (omit to target all products for brand)
-  - one or more mutable fields from the single-product PATCH endpoint
-- Notes:
-  - Executes in a transaction with row locking.
-  - If products become unavailable, affected selections are removed + notifications are created.
-- Common status codes: 200, 401, 403, 422
+Brand-controlled product configuration (active flag, commission, discount, custom photos, variant restrictions) lives in Shopify product metafields under the `sidest.*` namespace. There is no local mirror of the brand catalog.
 
-### Store: Affiliate Access Overrides (Deny/Allow)
+#### `GET /api/brand/catalog`
+- Purpose: full Shopify product catalog with `sidest.*` metafields merged in. Used by the brand dashboard catalog UI.
+- Auth: Required (brand-type professional)
+- Response (200): `{ "products": [{ "gid", "title", "handle", "status", "featured_image", "price_range", "variants": [...], "metafields": { "active", "commission_override", "affiliate_discount_pct", "custom_photos_enabled", "enabled_variant_gids" } }] }`
+- Common status codes: 200, 401, 403, 422, 502
 
-#### `GET /api/store/affiliate-overrides`
-- Purpose: list affiliate access overrides for a managed brand
-- Auth: Required manager access for `brand_professional_id`
-- Query params:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (optional uuid)
-  - `override_type` (optional enum: `deny` | `allow`)
-  - `page` (optional integer, default 1)
-  - `per_page` (optional integer, default 100, max 200)
-- Response (200): paginated
-  - `{ "overrides": [...], "meta": { "current_page": 1, "per_page": 100, "total": 42, "last_page": 1, ... } }`
-- Common status codes: 200, 401, 403, 422
+#### `GET /api/brand/catalog/all`
+- Purpose: same shape as above but includes draft and archived products.
+- Auth: Required (brand-type professional)
+- Common status codes: 200, 401, 403, 422, 502
 
-#### `PUT /api/store/affiliate-overrides/deny`
-- Purpose: set deny overrides for one affiliate across one/many brand products
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (required uuid[], min 1)
-- Notes:
-  - Creating deny overrides also removes matching current selections for that affiliate and sends notifications.
-- Common status codes: 200, 401, 403, 422
+#### `PATCH /api/brand/catalog/{productGid}/metafields`
+- Purpose: bulk update any combination of `sidest.*` metafields on one product in a single Shopify GraphQL call.
+- Auth: Required (brand-type professional)
+- Throttle: `brand-catalog-writes`
+- Request body (all fields optional):
+  - `active`: boolean
+  - `commission_override`: nullable numeric (0-100). `null` deletes the override.
+  - `affiliate_discount_pct`: nullable numeric (0-100). `null` deletes the override.
+  - `custom_photos_enabled`: nullable boolean. `null` deletes the per-product override (falls through to brand-level setting).
+  - `enabled_variant_gids`: nullable array of variant GIDs (e.g. `["gid://shopify/ProductVariant/123"]`). `null` or `[]` **deletes** the metafield, restoring the dynamic default (all variants enabled, including any new variants added in Shopify later). Strict validation: every submitted GID must belong to that product's variants — invalid GIDs return 422 with no partial write.
+- Response (200): `{ "updated": true }`
+- Common status codes: 200, 401, 403, 422, 502
 
-#### `DELETE /api/store/affiliate-overrides/deny`
-- Purpose: remove deny overrides for one affiliate/brand pair (all or subset)
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (optional uuid[])
-- Common status codes: 200, 401, 403, 422
+#### `PATCH /api/brand/catalog/{productGid}/active`
+- Purpose: shortcut for toggling `sidest.active` only. Prefer the bulk `metafields` endpoint for any UI editing multiple settings at once.
+- Auth: Required (brand-type professional)
+- Throttle: `brand-catalog-writes`
+- Request body: `{ "active": true }`
+- Response (200): `{ "active": true }`
+- Common status codes: 200, 401, 403, 422, 502
 
-#### `PUT /api/store/affiliate-overrides/allow`
-- Purpose: set allow overrides for one affiliate across one/many brand products
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (required uuid[], min 1)
-- Notes:
-  - `allow` overrides bypass brand-level product availability for that affiliate.
-  - `deny` still takes precedence when present.
-- Common status codes: 200, 401, 403, 422
+#### `PATCH /api/brand/catalog/{productGid}/commission`
+- Purpose: shortcut for `sidest.commission_override` only.
+- Auth: Required (brand-type professional)
+- Throttle: `brand-catalog-writes`
+- Request body: `{ "commission_override": 25.0 }` (or `null` to clear)
+- Response (200): `{ "commission_override": 25.0 }`
+- Common status codes: 200, 401, 403, 422, 502
 
-#### `DELETE /api/store/affiliate-overrides/allow`
-- Purpose: remove allow overrides for one affiliate/brand pair (all or subset)
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (optional uuid[])
-- Common status codes: 200, 401, 403, 422
+#### `PATCH /api/brand/catalog/{productGid}/discount`
+- Purpose: shortcut for `sidest.affiliate_discount_pct` only.
+- Auth: Required (brand-type professional)
+- Throttle: `brand-catalog-writes`
+- Request body: `{ "affiliate_discount_pct": 10.0 }` (or `null` to clear)
+- Response (200): `{ "affiliate_discount_pct": 10.0 }`
+- Common status codes: 200, 401, 403, 422, 502
 
-### Store: Per-Affiliate Product Pricing Settings
+#### Hydrogen internal endpoint
 
-#### `GET /api/store/affiliate-product-settings`
-- Purpose: list per-affiliate product pricing settings for a managed brand
-- Auth: Required manager access for `brand_professional_id`
-- Query params:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (optional uuid)
-  - `page` (optional integer, default 1)
-  - `per_page` (optional integer, default 100, max 200)
-- Response (200): paginated
-  - `{ "settings": [...], "meta": { "current_page": 1, "per_page": 100, "total": 42, "last_page": 1, ... } }`
-- `settings[]` fields:
-  - `brand_product_id`
-  - `commission_override` (nullable, 0-100)
-  - `discount_rate` (nullable, 0-100)
-  - `custom_price` (nullable, >= 0)
-- Common status codes: 200, 401, 403, 422
+`GET /api/internal/hydrogen/affiliate-products?affiliate_id={uuid}` returns:
 
-#### `PUT /api/store/affiliate-product-settings`
-- Purpose: batch upsert per-affiliate product pricing settings
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `settings` (required array, min 1)
-  - `settings[].brand_product_id` (required uuid)
-  - `settings[].commission_override` (nullable number, min 0, max 100)
-  - `settings[].discount_rate` (nullable number, min 0, max 100)
-  - `settings[].custom_price` (nullable number, min 0)
-- Notes:
-  - Duplicate `settings[].brand_product_id` values are rejected with 422.
-  - Effective storefront precedence is:
-    - commission: affiliate override → product override → brand default → system default
-    - discount/custom price: affiliate override → product-level value
-- Common status codes: 200, 401, 403, 422
+```json
+{
+  "gids": ["gid://shopify/Product/111"],
+  "source": "affiliate_selections",
+  "custom_photo_position": "after",
+  "custom_photos": { "gid://shopify/Product/111": [{ "url": "...", "alt_text": "..." }] },
+  "enabled_variants": { "gid://shopify/Product/111": ["gid://shopify/ProductVariant/123"] }
+}
+```
 
-#### `DELETE /api/store/affiliate-product-settings`
-- Purpose: remove per-affiliate product pricing settings (all or subset)
-- Auth: Required manager access for the brand
-- Request body:
-  - `brand_professional_id` (required uuid)
-  - `affiliate_professional_id` (required uuid)
-  - `brand_product_ids` (optional uuid[])
-- Common status codes: 200, 401, 403, 422
+`enabled_variants` keys are **only present** when a product has an active variant restriction. Absent key = no restriction = storefront should offer all variants. See [docs/brand-catalog-v2.md §4.3](./brand-catalog-v2.md) for the full contract.
 
 ### Store: Brand Settings
 
@@ -1747,7 +1715,7 @@ Allowed section block types are defined in config: `gallery`, `services`, `shop`
   - `brand_professional_id` (optional uuid)
 - Behavior:
   - direct brand users default to their own brand when `brand_professional_id` is omitted
-  - non-direct users (enterprise/team) must provide `brand_professional_id`
+  - non-direct users (team) must provide `brand_professional_id`
 - Common status codes: 200, 401, 403
 
 #### `PATCH /api/store/brand-settings`
@@ -1817,11 +1785,11 @@ Rollups:
 
 ### Media Uploads (images and videos, server-side processing)
 
-Images and videos are uploaded through the Comet API (not directly to storage). Each upload stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and enqueues a processing job.
+Images and videos are uploaded through the Side St API (not directly to storage). Each upload stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and enqueues a processing job.
 
 **Processing modes:**
 - **Images:** GD-based WebP transcoding on the `images` queue. Queue `sync` mode processes inline. Async mode: poll until `processing_state = ready`.
-- **Videos:** FFmpeg-based MP4 + HLS transcoding on the dedicated `videos` queue (`redis_video` connection). Always async in production. Requires `COMET_VIDEO_UPLOADS_ENABLED=true`.
+- **Videos:** FFmpeg-based MP4 + HLS transcoding on the dedicated `videos` queue (`redis_video` connection). Always async in production. Requires `SIDEST_VIDEO_UPLOADS_ENABLED=true`.
 
 **Pool limits:** Images and videos share the same per-pool cap (default 5 per pool). A video upload occupies a slot that could hold an image.
 
@@ -1832,8 +1800,8 @@ Images and videos are uploaded through the Comet API (not directly to storage). 
 - Request body:
   - `pool` (required): `gallery` or `content`
   - `image` OR `video` (exactly one required): file upload
-    - `image`: JPEG, PNG, or WebP; max `COMET_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
-    - `video`: MP4, MOV, WebM, or AVI; max `COMET_VIDEO_MAX_UPLOAD_KB` (default 500 MB); max duration `COMET_VIDEO_MAX_DURATION_SECONDS` (default 300s / 5 min); requires `COMET_VIDEO_UPLOADS_ENABLED=true`
+    - `image`: JPEG, PNG, or WebP; max `SIDEST_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
+    - `video`: MP4, MOV, WebM, or AVI; max `SIDEST_VIDEO_MAX_UPLOAD_KB` (default 500 MB); max duration `SIDEST_VIDEO_MAX_DURATION_SECONDS` (default 300s / 5 min); requires `SIDEST_VIDEO_UPLOADS_ENABLED=true`
   - `alt_text` (optional): string, max 255
 - Response (201) — image, sync mode:
 ```json
@@ -1891,9 +1859,9 @@ Images and videos are uploaded through the Comet API (not directly to storage). 
 - `processing_state` lifecycle: `pending → processing → ready | failed`
 - `processing` is a boolean alias for `processing_state IN (pending, processing)` (backward-compatible)
 - Business rules:
-  - Max 5 items per pool per professional, shared across images and videos (configurable via `COMET_GALLERY_IMAGE_MAX` / `COMET_CONTENT_IMAGE_MAX`)
+  - Max 5 items per pool per professional, shared across images and videos (configurable via `SIDEST_GALLERY_IMAGE_MAX` / `SIDEST_CONTENT_IMAGE_MAX`)
   - Race-safe: PostgreSQL advisory locks
-  - Video uploads rejected with 422 if `COMET_VIDEO_UPLOADS_ENABLED=false`
+  - Video uploads rejected with 422 if `SIDEST_VIDEO_UPLOADS_ENABLED=false`
 - Common status codes: 201, 401, 403, 422 (pool limit, validation, feature flag)
 
 #### `GET /api/images`
@@ -1959,6 +1927,57 @@ Gallery-pool images can also be accessed / managed via the legacy gallery routes
 - `POST /api/gallery` — **deprecated (410)**: use `POST /api/uploads` with `pool=gallery` instead
 - `POST /api/gallery/reorder` — reorder gallery images; body: `{ "ids": ["uuid1", "uuid2", ...] }`
 - `DELETE /api/gallery/{image}` — delete a gallery image and its variants
+
+### Brand Design Media (logos & placeholders)
+
+Brand-scoped endpoints for managing design assets (logos and placeholder images). All assets go through the WebP variant processing pipeline and bust the Hydrogen brand-design cache on mutation.
+
+#### `POST /api/uploads/brand-logo`
+
+- Auth: Required (brand professional)
+- Content-Type: `multipart/form-data`
+- Request body:
+  - `logo` (required): JPEG, PNG, or WebP; max 5 MB
+  - `variant` (optional): `full` or `square` — default `full`
+- Upsert semantics: soft-deletes any prior active row with the same purpose
+- Response (201): `{ path, url, media_id, media_purpose, variants, processing_state }`
+
+#### `DELETE /api/uploads/brand-logo?variant=full|square`
+
+- Auth: Required (brand professional)
+- Query param: `variant` (required): `full` or `square`
+- Soft-deletes the matching logo row + cache bust
+- Response (200): `{ "deleted": true }`
+- Common status codes: 200, 401, 403, 404, 422
+
+#### `POST /api/uploads/brand-placeholder-image`
+
+- Auth: Required (brand professional)
+- Content-Type: `multipart/form-data`
+- Request body:
+  - `image` (required): JPEG, PNG, or WebP; max 5 MB
+- Max 5 active placeholders per site (422 if exceeded)
+- Response (201): `{ path, url, media_id, media_purpose, sort_order, variants, processing_state }`
+
+#### `GET /api/uploads/brand-placeholder-images`
+
+- Auth: Required (brand professional)
+- Response (200): `{ "placeholders": [{ id, alt_text, url, sort_order }, ...] }`
+
+#### `POST /api/uploads/brand-placeholder-images/reorder`
+
+- Auth: Required (brand professional)
+- Request body:
+  - `ids` (required): array of UUIDs — must contain every active placeholder id
+- Response (200): `{ "reordered": true }`
+- Common status codes: 200, 401, 403, 422
+
+#### `DELETE /api/uploads/brand-placeholder-images/{media}`
+
+- Auth: Required (brand professional)
+- Soft-deletes the placeholder and repacks remaining sort_order (no gaps)
+- Response (200): `{ "deleted": true }`
+- Common status codes: 200, 401, 403, 404
 
 ### Shopify Integration
 
@@ -2076,9 +2095,9 @@ Square integration manages online booking appointments and service synchronizati
 
 ### Fresha Integration
 
-Fresha integration manages service catalog synchronization between Comet and Fresha.
+Fresha integration manages service catalog synchronization between Side St and Fresha.
 
-Unlike Square (which exposes a full platform API for bookings, payments, and catalog), Fresha restricts third-party integrations to **catalog sync only**. Bookings, payments, and availability remain within the Fresha ecosystem. The Fresha integration therefore focuses on keeping the service catalog in sync between Comet and Fresha. The `FreshaApiClient` does include prepared methods for availability, bookings, and customer creation — these are scaffolded for future use if Fresha opens its API further, but they are not currently wired to any public routes.
+Unlike Square (which exposes a full platform API for bookings, payments, and catalog), Fresha restricts third-party integrations to **catalog sync only**. Bookings, payments, and availability remain within the Fresha ecosystem. The Fresha integration therefore focuses on keeping the service catalog in sync between Side St and Fresha. The `FreshaApiClient` does include prepared methods for availability, bookings, and customer creation — these are scaffolded for future use if Fresha opens its API further, but they are not currently wired to any public routes.
 
 #### `GET /api/fresha/status`
 
@@ -2150,7 +2169,7 @@ Shopify order ingestion endpoints have **no auth middleware**. Signature validat
 #### `POST /api/webhooks/shopify/orders/fallback`
 
 - Purpose: fallback ingestion path when caller only has `shop_domain + order_id` (or cached payload)
-- Auth: Comet fallback HMAC via `X-Comet-Fallback-Signature` (`SHOPIFY_FALLBACK_SECRET`)
+- Auth: Side St fallback HMAC via `X-Side St-Fallback-Signature` (`SHOPIFY_FALLBACK_SECRET`)
 - Request body:
   - `shop_domain` (required)
   - `order_id` (required; numeric id or gid containing numeric id)
@@ -2167,7 +2186,7 @@ Shopify order ingestion endpoints have **no auth middleware**. Signature validat
 
 ### Fresha Webhooks
 
-Fresha sends catalog change notifications to the Comet webhook endpoint. These routes have **no auth middleware** — authentication is performed via HMAC signature validation.
+Fresha sends catalog change notifications to the Side St webhook endpoint. These routes have **no auth middleware** — authentication is performed via HMAC signature validation.
 
 #### `POST /api/webhooks/fresha`
 #### `POST /api/webhooks/fresha/catalog`
@@ -2200,7 +2219,7 @@ Fresha sends catalog change notifications to the Comet webhook endpoint. These r
 | Observer auto-sync       | Yes (on service save/delete)   | Yes (on service save/delete)             |
 | Queue                    | `integrations`                 | `integrations`                           |
 
-**Why they differ:** Square exposes a complete platform API — catalog, bookings, payments, availability, customers, and locations are all accessible to third-party developers. Comet leverages this to offer a full public booking + payment flow embedded in the mini-site. Fresha, by contrast, restricts third-party API access to catalog (service) management. Bookings, payments, availability, and customer data remain within the Fresha ecosystem. The Fresha integration therefore focuses exclusively on keeping the service catalog synchronized. The `FreshaApiClient` includes scaffolded methods for availability, bookings, and customer creation to allow rapid expansion if Fresha opens these APIs in the future.
+**Why they differ:** Square exposes a complete platform API — catalog, bookings, payments, availability, customers, and locations are all accessible to third-party developers. Side St leverages this to offer a full public booking + payment flow embedded in the mini-site. Fresha, by contrast, restricts third-party API access to catalog (service) management. Bookings, payments, availability, and customer data remain within the Fresha ecosystem. The Fresha integration therefore focuses exclusively on keeping the service catalog synchronized. The `FreshaApiClient` includes scaffolded methods for availability, bookings, and customer creation to allow rapid expansion if Fresha opens these APIs in the future.
 
 ---
 
@@ -2214,65 +2233,18 @@ Fresha sends catalog change notifications to the Comet webhook endpoint. These r
 
 ## 8) Enterprise API
 
-Enterprise routes are self-service endpoints for the authenticated user and require a Supabase JWT.
-
-### `GET /api/enterprise/me`
-
-- Purpose: fetch the current user's enterprise profile (if one exists)
-- Response (200): `{ "enterprise": { ... } }`
-- Common status codes: 200, 401, 404
-
-### `POST /api/enterprise/me`
-
-- Purpose: create an enterprise profile for the authenticated user
-- Request body:
-  - `name` (required)
-  - `handle` (optional, unique among active enterprises; auto-slugged from name if omitted)
-  - `enterprise_type` (required): `promoter`, `barbershop`, `salon`, `distributor`
-  - `subscription_tier` (optional)
-  - `primary_email`, `phone`, `public_contact_email`, `public_contact_number` (optional)
-  - `country_code`, `timezone` (optional)
-  - `location_street_address`, `location_city`, `location_state`, `location_postcode`, `location_country` (optional)
-- Behavior:
-  - Requires an existing professional profile (`/api/bootstrap` first).
-  - Creates owner membership in `core.professional_enterprise_memberships`.
-  - Sets `professional.primary_enterprise_id` if empty.
-- Common status codes: 201, 401, 409, 422
-
-### `PATCH /api/enterprise/me`
-
-- Purpose: update current enterprise profile fields
-- Notes:
-  - `enterprise_type` allowed values: `promoter`, `barbershop`, `salon`, `distributor`
-  - `status` allowed values: `active`, `inactive`, `suspended`
-- Response (200): `{ "enterprise": { ... } }`
-- Common status codes: 200, 401, 404, 422
-
-### `DELETE /api/enterprise/me`
-
-- Purpose: soft-delete/deactivate current enterprise profile
-- Behavior:
-  - Ends active memberships for that enterprise (`ends_at = now()`).
-  - Clears `primary_enterprise_id` for professionals pointing to this enterprise.
-  - Marks enterprise as `inactive` and sets `deleted_at`.
-- Response (200): `{ "deleted": true }`
-- Common status codes: 200, 401, 404
-
-### Enterprise + Bootstrap integration
-
-- If `POST /api/bootstrap` is called with `professional_type` = `promoter`, `barbershop`, or `salon`, the enterprise is auto-provisioned.
-- Because of this, many enterprise-owner users will not need to call `POST /api/enterprise/me` manually.
+> **NOT IMPLEMENTED in V2.** Enterprise tables exist in the database schema but no controllers, routes, or services have been built. This section is retained as a placeholder for future work. Do not build against these endpoints.
 
 ## 9) Staff API
 
-Staff routes are for internal staff tooling. They require a staff JWT (user must exist in core.comet_staff).
+Staff routes are for internal staff tooling. They require a staff JWT (user must exist in core.sidest_staff).
 
 ### Staff (non-admin) routes
 
 - GET /api/staff/me
 - GET /api/staff/sites/{subdomain}
 - GET /api/staff/professionals?q=...&status=...&professional_type=...&per_page=...&page=...
-  - `professional_type` filter supports: `professional`, `influencer`, `barber`, `hairdresser`, `ambassador`, `promoter`, `brand`, `barbershop`, `salon`
+  - `professional_type` filter supports: `professional`, `influencer`, `brand`
 - GET /api/staff/professionals/{professional}
 - DELETE /api/staff/professionals/{professional} (soft delete)
 - POST /api/staff/professionals/{professional}/restore
@@ -2288,7 +2260,7 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - GET /api/staff/professionals/{professional}/site
 - GET /api/staff/professionals/{professional}/analytics
 - GET /api/staff/professionals/{professional}/links
-- GET /api/staff/professionals/{professional}/sections Staff-admin routes (requires core.comet_staff.is_admin = true)
+- GET /api/staff/professionals/{professional}/sections Staff-admin routes (requires core.sidest_staff.is_admin = true)
 - PATCH /api/staff/professionals/{professional}/status
 - PATCH /api/staff/professionals/{professional}
 - DELETE /api/staff/professionals/{professional}/force (hard delete)
@@ -2318,14 +2290,93 @@ Staff routes are for internal staff tooling. They require a staff JWT (user must
 - PATCH /api/staff/professionals/{professional}/subscription
 - POST /api/staff/professionals/{professional}/subscription/cancel
 - POST /api/staff/professionals/{professional}/subscription/resume
-- POST /api/staff/notifications Staff analytics summary endpoints Stage 1-2 staff analytics is:
+- POST /api/staff/notifications
+
+#### Staff — Brand-Affiliate Link Management (admin only, `throttle:30,1`)
+
+##### `POST /api/staff/professionals/{brand}/affiliates/{affiliate}`
+
+Staff manually creates a brand-affiliate link, bypassing the invite flow. Used for manual recovery when an affiliate cannot complete the normal invite claim.
+
+**Auth:** `staff.admin` middleware. Rate limit: 30/min per user.
+
+**Request body:** `{ "reason": "string, required, 10–500 chars" }`
+
+**Response 201:** `{ "data": { "link": { "id": "uuid", "slot": 0, "brand_professional_id": "uuid", "affiliate_professional_id": "uuid", "created_at": "iso8601" } } }`
+
+**Errors:** 422 (guard failure or validation), 409 (link already exists).
+
+**Bypassed guards:** `brand.status='active'`, `brand_profile.brand_status`. Enforced guards: type checks, not-deactivated, slot availability.
+
+##### `DELETE /api/staff/professionals/{brand}/affiliates/{affiliate}`
+
+Staff removes a brand-affiliate link. Handles pending commissions per `on_pending_commissions`.
+
+**Auth:** `staff.admin`. Rate limit: 30/min per user.
+
+**Request body:**
+```json
+{
+  "reason": "string, required; min 10 if keep, min 20 if void; max 500",
+  "on_pending_commissions": "keep | void"
+}
+```
+
+**Response 200 (sync):** `{ "data": { "disconnected": true, "voided_commission_count": n, "voided_commission_cents": n, "selections_removed": n } }`
+
+**Response 202 (async overflow):** when `on_pending_commissions=void` and pending > 200, returns `voided_async: true` plus `pending_commission_{count,cents}`. A queued job (`VoidPendingCommissionsForLinkJob`) processes the voiding and sends completion notifications.
+
+**Errors:** 404 (link not found), 422 (validation).
+
+#### Changes to existing professional disconnect endpoints
+
+`DELETE /api/brand-affiliates/{affiliate}` (brand actor) and `DELETE /api/brand-partners/{brandProfessionalId}` (affiliate actor) now:
+
+- Accept optional `reason` in the request body (`nullable, string, max:500`).
+- Write an audit row to `brand.brand_partner_link_events`.
+- Send a `BrandPartnerRemoved` notification to the other party.
+- Include `selections_removed: n` in the success response.
+- Pending commissions are **never voided** on these paths — they follow the normal payout/void lifecycle.
+- Rate-limited to `throttle:30,1`.
+
+#### Breaking change: `POST /api/affiliate/selections`
+
+Now requires `brand_professional_id` (uuid) in the request body. The affiliate must have an active `brand_partner_links` row for that brand; otherwise 422.
+
+Additionally accepts optional `selected_variant_gids: string[] | null` — when present, narrows the affiliate's storefront to that subset of the product's variants. Each GID must belong to the product AND be currently brand-enabled (`sidest.enabled != false`); otherwise 422. Omit or send `null`/`[]` to default to "show every brand-enabled variant" (stored as `NULL`).
+
+#### New: `PATCH /api/affiliate/selections/{productGid}/variants`
+
+Update an existing selection's variant subset in place. Requires `brand_professional_id` (uuid) and optional `variant_gids: string[] | null`:
+- `null` or `[]` → resets back to "show every brand-enabled variant" (stores `NULL`).
+- Populated array → narrows the storefront to exactly those variants. Each GID must currently be brand-enabled; otherwise 422.
+
+Returns the updated `AffiliateProductSelectionResource` with the new `selected_variant_gids` field. Rate-limited by `throttle:affiliate-writes`.
+
+#### Side St Price enforced via Shopify Function + cart attribute
+
+`sidest.affiliate_discount_pct` (product-level, now `PUBLIC_READ`) is read by the `sidest-affiliate-discount` Shopify Function and applied as a line-level percentage discount at checkout. The function fires only when the cart carries the `_sidest_affiliate_id` attribute — set by Hydrogen on `cartCreate` from `$affiliateSlug.tsx` — so brand-direct customers pay the Shopify sticker price.
+
+Hydrogen's `products` engine now applies the discount client-side (via Storefront API) so every affiliate-facing surface shows a single clean price (no strike-through, no reference to the sticker price). First-touch attribution: the first affiliate to claim a cart keeps it until the cart is cleared.
+
+**Auto-install on OAuth:** `CreateShopifyAffiliateDiscountJob` runs after the collections job and calls `discountAutomaticAppCreate`. Idempotent. State tracked on `provider_metadata.sidest_discount_state`: `registered` | `pending` | `failed`. Existing brands backfilled via `php artisan sidest:install-affiliate-discount [--brand=<uuid>]`.
+
+**Commission calculation change (orders/paid webhook):** commission is now computed on post-discount line totals — `(line.price × quantity) − line.total_discount`. `calculation_metadata` keys updated:
+- `line_price` → removed; replaced by `unit_price`, `line_price_pre_discount`, `total_discount`, `line_price_post_discount`.
+- Dollar values on existing entries are unaffected (new shape applies only to new entries).
+
+#### New product metafield: `sidest.has_enabled_variants`
+
+Derived boolean metafield written by the backend (never by brands directly). True when the product has at least one variant with `sidest.enabled != false`, or when the product has no variants at all. The Active Products smart collection now ANDs two conditions — `sidest.active = true` AND `sidest.has_enabled_variants = true` — so products with every variant disabled drop out automatically. Backfilled for existing stores via `php artisan sidest:backfill-has-enabled-variants`.
+
+Staff analytics summary endpoints Stage 1-2 staff analytics is:
 - GET /api/staff/professionals/{professional}/analytics It returns totals, daily charts, and top links for the selected professional.
 
-It requires a staff JWT (core.comet_staff).
+It requires a staff JWT (core.sidest_staff).
 
 ## 10) Media uploads & processing (images + videos)
 
-Images and videos are uploaded through the Comet API and processed entirely server-side. No direct-to-storage uploads from the frontend.
+Images and videos are uploaded through the Side St API and processed entirely server-side. No direct-to-storage uploads from the frontend.
 
 ### Architecture
 
@@ -2360,7 +2411,7 @@ Images and videos share the same per-pool cap.
 
 ### Video processing
 
-- Requires `COMET_VIDEO_UPLOADS_ENABLED=true` and `ffmpeg`/`ffprobe` on the worker's `$PATH`
+- Requires `SIDEST_VIDEO_UPLOADS_ENABLED=true` and `ffmpeg`/`ffprobe` on the worker's `$PATH`
 - Outputs per video:
   - **MP4:** `variants.optimized` (720p / 2 Mbps), `variants.maximized` (1080p / 5 Mbps)
   - **HLS:** `streams.optimized` (720p playlist), `streams.maximized` (1080p playlist), `streams.adaptive` (master playlist for ABR)
@@ -2387,18 +2438,18 @@ Images and videos share the same per-pool cap.
 
 ### Supported file types
 
-**Images:** JPEG, PNG, WebP — max `COMET_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
+**Images:** JPEG, PNG, WebP — max `SIDEST_IMAGE_MAX_UPLOAD_KB` (default 10 MB)
 
-**Videos:** MP4, MOV, WebM, AVI — max `COMET_VIDEO_MAX_UPLOAD_KB` (default 500 MB), max duration `COMET_VIDEO_MAX_DURATION_SECONDS` (default 300s)
+**Videos:** MP4, MOV, WebM, AVI — max `SIDEST_VIDEO_MAX_UPLOAD_KB` (default 500 MB), max duration `SIDEST_VIDEO_MAX_DURATION_SECONDS` (default 300s)
 
 ## 11) Test users and getting tokens
 
-Tokens come from Supabase Auth. Comet does not issue tokens.
+Tokens come from Supabase Auth. Side St does not issue tokens.
 
 ### Create test users
 
 - Professional user: create in Supabase Auth, then call POST /api/bootstrap once.
-- Staff user: create in Supabase Auth, then insert a row into core.comet_staff with auth_user_id = the Supabase user id.
+- Staff user: create in Supabase Auth, then insert a row into core.sidest_staff with auth_user_id = the Supabase user id.
 - Staff admin: same as staff user, but set is_admin = true.
 
 ### Get an access token via Supabase REST
@@ -2409,7 +2460,7 @@ Tokens come from Supabase Auth. Comet does not issue tokens.
 
 ### Body:
 
-Response includes access_token. Use that token as the Authorization Bearer token when calling Comet.
+Response includes access_token. Use that token as the Authorization Bearer token when calling Side St.
 This flow is included in the Insomnia collection as Login requests.
 
 ## 12) Insomnia collection
@@ -2425,8 +2476,8 @@ It contains requests for all Stage 1-2 endpoints plus Supabase login requests.
 
 - SUPABASE_URL
 - SUPABASE_ANON_KEY
-- API_BASE_URL (example: https://api.comet.app/api)
-- PUBLIC_DOMAIN (example: comet.app or localtest.me)
+- API_BASE_URL (example: https://api.sidest.co/api)
+- PUBLIC_DOMAIN (example: sidest.co or localtest.me)
 - Optionally: STAFF_DASHBOARD_ENABLED flag if you ship staff tooling in the same frontend
 
 Note: The frontend does not need any storage credentials — all image URLs come from the API `variants` map.
@@ -2451,32 +2502,32 @@ Note: The frontend does not need any storage credentials — all image URLs come
 - SUPABASE_JWKS_URL
 - SUPABASE_JWKS_CACHE_SECONDS (default: 600)
 
-### Comet app settings
+### Side St app settings
 
-- COMET_PUBLIC_DOMAIN (used for domain-scoped public routes)
-- COMET_MEDIA_DISK (default: media — the Laravel filesystem disk name)
-- COMET_GALLERY_IMAGE_MAX (default: 5)
-- COMET_CONTENT_IMAGE_MAX (default: 5)
-- COMET_IMAGE_MAX_UPLOAD_KB (default: 10240 = 10 MB)
-- COMET_LEGAL_SITE_SCHEME (default: `https`)
-- COMET_LEGAL_DEFAULT_CONTACT_NAME (default: `Customer Support`)
-- COMET_LEGAL_DEFAULT_SUPPORT_EMAIL (default: `support@comet.app`)
-- COMET_LEGAL_DEFAULT_SUPPORT_PHONE (default: `N/A`)
-- COMET_WAITLIST_ENABLED (default: `false`; when true, blocks bootstrap for new users)
+- SIDEST_PUBLIC_DOMAIN (used for domain-scoped public routes)
+- SIDEST_MEDIA_DISK (default: media — the Laravel filesystem disk name)
+- SIDEST_GALLERY_IMAGE_MAX (default: 5)
+- SIDEST_CONTENT_IMAGE_MAX (default: 5)
+- SIDEST_IMAGE_MAX_UPLOAD_KB (default: 10240 = 10 MB)
+- SIDEST_LEGAL_SITE_SCHEME (default: `https`)
+- SIDEST_LEGAL_DEFAULT_CONTACT_NAME (default: `Customer Support`)
+- SIDEST_LEGAL_DEFAULT_SUPPORT_EMAIL (default: `support@sidest.co`)
+- SIDEST_LEGAL_DEFAULT_SUPPORT_PHONE (default: `N/A`)
+- SIDEST_WAITLIST_ENABLED (default: `false`; when true, blocks bootstrap for new users)
 - SOFT_DELETE_RETENTION_DAYS (default: 30)
 
 ### Pre-launch account gating
 
-- Set `COMET_WAITLIST_ENABLED=true` to block new account creation at `POST /api/bootstrap`.
+- Set `SIDEST_WAITLIST_ENABLED=true` to block new account creation at `POST /api/bootstrap`.
 - Existing professionals are unaffected by this gate.
 - Also disable public signups in Supabase Auth (Dashboard -> Authentication -> Providers -> Email -> Disable Signups) to prevent new auth accounts during waitlist-only mode.
 
 ### Media disk (Laravel Cloud Object Storage / Cloudflare R2)
 
 **On Laravel Cloud:** No manual env vars needed. Create a bucket in the Cloud dashboard, and set:
-- `COMET_MEDIA_DISK` = the disk name from `LARAVEL_CLOUD_DISK_CONFIG` (e.g., `public_dev`)
+- `SIDEST_MEDIA_DISK` = the disk name from `LARAVEL_CLOUD_DISK_CONFIG` (e.g., `public_dev`)
 
-Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The image system reads `COMET_MEDIA_DISK` to find the right disk.
+Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The image system reads `SIDEST_MEDIA_DISK` to find the right disk.
 
 **Self-managed (standalone R2 / AWS S3):** Configure the `media` disk manually:
 - MEDIA_DISK_KEY (S3 access key)
@@ -2509,8 +2560,8 @@ Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The imag
 
 ### Domain-scoped public routes
 
-- If you call /api/public/site on the API host instead of {subdomain}.{COMET_PUBLIC_DOMAIN}, the route may not match or may return 404.
-- Always use public_api_base_url = https://{subdomain}.{COMET_PUBLIC_DOMAIN}/api for public routes.
+- If you call /api/public/site on the API host instead of {subdomain}.{SIDEST_PUBLIC_DOMAIN}, the route may not match or may return 404.
+- Always use public_api_base_url = https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api for public routes.
 
 ### Analytics timestamps
 
@@ -2519,7 +2570,7 @@ Laravel Cloud auto-injects credentials via `LARAVEL_CLOUD_DISK_CONFIG`. The imag
 
 ### Gallery limits and ordering
 
-- Gallery pool: max 5 active images (configurable via `COMET_GALLERY_IMAGE_MAX`). Content pool: max 5 (via `COMET_CONTENT_IMAGE_MAX`).
+- Gallery pool: max 5 active images (configurable via `SIDEST_GALLERY_IMAGE_MAX`). Content pool: max 5 (via `SIDEST_CONTENT_IMAGE_MAX`).
 - Pool limits are enforced server-side with PostgreSQL advisory locks for race safety.
 - `POST /api/uploads` validates the pool limit before creating a new image.
 - Reorder endpoint (`POST /api/gallery/reorder`) accepts an `ids` array; any omitted ids will be appended in existing order.

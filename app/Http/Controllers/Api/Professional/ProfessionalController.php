@@ -3,37 +3,39 @@
 namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Block;
+use App\Models\Core\Professional\BrandProfile;
+use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
-use App\Services\Enterprise\EnterpriseProvisioningService;
-use App\Services\Legal\ProfessionalLegalContentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Throwable;
 
+// V2: Returns authenticated professional's full profile with site, services, and blocks. Dashboard entry point.
 class ProfessionalController extends ApiController
 {
     /** @return array<int, string> */
     private function professionalOnlySectionTypes(): array
     {
-        return config('comet.professional_only_section_types', []);
+        return config('sidest.professional_only_section_types', []);
     }
 
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
-    public function show(ProfessionalShowRequest $request, ProfessionalLegalContentService $legalService)
+
+    public function show(ProfessionalShowRequest $request)
     {
         $uid = $request->attributes->get('supabase_uid');
         Log::info('/api/me start');
 
         $pro = $this->currentProfessional($request);
         $squareIntegration = $pro->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+        $brandStoreSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
         Log::info('/api/me after currentProfessional', ['pro_id' => $pro->id]);
 
         $cache = app(ProfessionalCacheService::class);
@@ -50,80 +52,26 @@ class ProfessionalController extends ApiController
         $customersCount = $cache->getCustomerCount($pro->id);
         Log::info('/api/me after customers', ['ms' => (microtime(true) - $t) * 1000]);
 
-        $primaryEnterprisePayload = null;
-        $enterpriseMembershipPayload = [];
-        $activePromoterContractPayload = null;
-
-        try {
-            $pro->loadMissing([
-                'primaryEnterprise',
-                'enterpriseMemberships.enterprise',
-                'activeInfluencerPromoterContract.promoterEnterprise',
-            ]);
-
-            if ($pro->primaryEnterprise) {
-                $primaryEnterprisePayload = [
-                    'id' => $pro->primaryEnterprise->id,
-                    'name' => $pro->primaryEnterprise->name,
-                    'handle' => $pro->primaryEnterprise->handle,
-                    'enterprise_type' => $pro->primaryEnterprise->enterprise_type,
-                    'status' => $pro->primaryEnterprise->status,
-                ];
-            }
-
-            $enterpriseMembershipPayload = $pro->enterpriseMemberships
-                ->map(function ($membership): array {
-                    return [
-                        'id' => $membership->id,
-                        'enterprise_id' => $membership->enterprise_id,
-                        'relationship_type' => $membership->relationship_type,
-                        'is_primary' => (bool) $membership->is_primary,
-                        'starts_at' => optional($membership->starts_at)->toIso8601String(),
-                        'ends_at' => optional($membership->ends_at)->toIso8601String(),
-                        'enterprise' => $membership->enterprise ? [
-                            'id' => $membership->enterprise->id,
-                            'name' => $membership->enterprise->name,
-                            'handle' => $membership->enterprise->handle,
-                            'enterprise_type' => $membership->enterprise->enterprise_type,
-                            'status' => $membership->enterprise->status,
-                        ] : null,
-                    ];
-                })
-                ->values()
-                ->all();
-
-            $activeContract = $pro->activeInfluencerPromoterContract;
-            if ($activeContract) {
-                $activePromoterContractPayload = [
-                    'id' => $activeContract->id,
-                    'promoter_enterprise_id' => $activeContract->promoter_enterprise_id,
-                    'status' => $activeContract->status,
-                    'exclusive' => (bool) $activeContract->exclusive,
-                    'starts_at' => optional($activeContract->starts_at)->toIso8601String(),
-                    'ends_at' => optional($activeContract->ends_at)->toIso8601String(),
-                    'promoter_enterprise' => $activeContract->promoterEnterprise ? [
-                        'id' => $activeContract->promoterEnterprise->id,
-                        'name' => $activeContract->promoterEnterprise->name,
-                        'handle' => $activeContract->promoterEnterprise->handle,
-                        'enterprise_type' => $activeContract->promoterEnterprise->enterprise_type,
-                        'status' => $activeContract->promoterEnterprise->status,
-                    ] : null,
-                ];
-            }
-        } catch (Throwable $e) {
-            Log::warning('/api/me could not load enterprise relationships.', [
-                'professional_id' => (string) $pro->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-
         $siteSettings = [];
+        $primaryBrandStatus = null;
+        $primaryBrandName = null;
         if ($pro->site) {
             $siteSettings = is_array($pro->site->settings) ? $pro->site->settings : [];
             $siteSettings = app(SiteCacheService::class)->hydrateTypographySettings(
                 $siteSettings,
                 (string) $pro->id
             );
+
+            // Resolve primary brand partner status + name so the dashboard can
+            // surface affiliate-facing banners and status dots for non-live brands.
+            if ($pro->professional_type !== 'brand') {
+                $brandPartnerId = $siteSettings['brand_partner']['professional_id'] ?? null;
+                if ($brandPartnerId) {
+                    $brandProfile = BrandProfile::where('professional_id', $brandPartnerId)->first();
+                    $primaryBrandStatus = $brandProfile?->brand_status ?? 'building';
+                    $primaryBrandName = \App\Models\Core\Professional\Professional::find($brandPartnerId)?->display_name ?? null;
+                }
+            }
         }
 
         // Use the already-loaded professional to build payload instead of querying again
@@ -136,16 +84,15 @@ class ProfessionalController extends ApiController
                 'display_name' => $pro->display_name,
                 'first_name' => $pro->first_name,
                 'last_name' => $pro->last_name,
+                'phone' => $pro->phone,
+                'primary_email' => $pro->primary_email,
                 'bio' => $pro->bio,
+                'about' => (object) ($pro->about ?? []),
                 'country_code' => $pro->country_code,
                 'timezone' => $pro->timezone,
                 'professional_type' => $pro->professional_type,
                 'status' => $pro->status,
                 'onboarding_step' => $pro->onboarding_step,
-                'primary_enterprise_id' => $pro->primary_enterprise_id,
-                'primary_enterprise' => $primaryEnterprisePayload,
-                'enterprise_memberships' => $enterpriseMembershipPayload,
-                'active_promoter_contract' => $activePromoterContractPayload,
                 'qr_slug' => $pro->qr_slug,
                 'public_contact_number' => $pro->public_contact_number,
                 'public_contact_email' => $pro->public_contact_email,
@@ -166,10 +113,11 @@ class ProfessionalController extends ApiController
                 'subdomain' => $pro->site->subdomain,
                 'is_published' => (bool) $pro->site->is_published,
                 'settings' => $siteSettings,
+                'storefront_base_url' => $brandStoreSettings
+                    ? $brandStoreSettings->storefrontBaseUrl($pro->site->subdomain)
+                    : 'https://' . $pro->site->subdomain . '.sidest.co',
             ] : null,
         ];
-
-        $legal = $legalService->getOrCreate($pro, $pro->site);
 
         $services = $cache->getActiveServices($pro->id);
         $customersCount = $cache->getCustomerCount($pro->id);
@@ -180,32 +128,25 @@ class ProfessionalController extends ApiController
         return $this->success([
             'uid' => $uid,
             ...$payload,
-            'legal_content' => $legalService->toApiPayload($legal),
             'blocks' => $blocks,
             'services' => $services,
             'customers_count' => $customersCount,
+            'primary_brand_status' => $primaryBrandStatus,
+            'primary_brand_name' => $primaryBrandName,
         ]);
     }
 
-    public function update(
-        UpdateProfessionalRequest $request,
-        EnterpriseProvisioningService $enterpriseProvisioningService
-    )
+    public function update(UpdateProfessionalRequest $request)
     {
         $professional = $this->currentProfessional($request);
         $previousProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
-
-        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService, $previousProfessionalType): void {
+        DB::transaction(function () use ($professional, $request, $previousProfessionalType): void {
             $professional->fill($request->validated());
             $professional->save();
 
             $nextProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
             if ($previousProfessionalType !== 'influencer' && $nextProfessionalType === 'influencer') {
                 $this->disableProfessionalOnlySections($professional->id);
-            }
-
-            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
-                $enterpriseProvisioningService->ensureForProfessional($professional);
             }
         });
 
@@ -229,5 +170,4 @@ class ProfessionalController extends ApiController
                 'is_active' => false,
             ]);
     }
-
 }

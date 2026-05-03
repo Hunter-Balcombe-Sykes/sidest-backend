@@ -1,22 +1,27 @@
 <?php
 
 use App\Http\Middleware\AddPublicCacheHeaders;
-use App\Http\Middleware\Auth\EnsureCometAdmin;
-use App\Http\Middleware\Auth\EnsureCometStaff;
+use App\Http\Middleware\Auth\EnsureSidestAdmin;
+use App\Http\Middleware\Auth\EnsureSidestStaff;
+use App\Http\Middleware\Auth\VerifyEmbeddedApiKey;
+use App\Http\Middleware\Auth\VerifyHydrogenApiKey;
+use App\Http\Middleware\Auth\VerifyShopifySessionToken;
 use App\Http\Middleware\Auth\VerifySupabaseJwt;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
+use App\Http\Middleware\BrandFundingGate;
+use App\Http\Middleware\FeatureGate;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
 use App\Http\Middleware\RequirePlan;
 use App\Http\Middleware\SecureHeaders;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -37,13 +42,29 @@ return Application::configure(basePath: dirname(__DIR__))
         // all other routes pass through untouched.
         $middleware->appendToGroup('api', AddPublicCacheHeaders::class);
 
+        // Pin VerifySupabaseJwt before ThrottleRequests in the middleware priority list.
+        // Without this, Laravel's SortedMiddleware moves ThrottleRequests (priority 6)
+        // ahead of SubstituteBindings (priority 9, injected by the `api` group), which
+        // drags it ahead of every unlisted middleware between them — including the JWT
+        // verifier. The per-uid rate limiters in AppServiceProvider then fire before
+        // `supabase_uid` is set on the request and throw RuntimeException.
+        $middleware->prependToPriorityList(
+            \Illuminate\Routing\Middleware\ThrottleRequests::class,
+            VerifySupabaseJwt::class,
+        );
+
         $middleware->alias([
             'supabase.jwt' => VerifySupabaseJwt::class,
-            'current.pro'  => LoadCurrentProfessional::class,
-            'staff'        => EnsureCometStaff::class,
-            'staff.admin'  => EnsureCometAdmin::class,
-            'lead.log'     => LogLeadRateLimits::class,
-            'plan'         => RequirePlan::class,
+            'current.pro' => LoadCurrentProfessional::class,
+            'staff' => EnsureSidestStaff::class,
+            'staff.admin' => EnsureSidestAdmin::class,
+            'lead.log' => LogLeadRateLimits::class,
+            'plan' => RequirePlan::class,
+            'hydrogen.key' => VerifyHydrogenApiKey::class,
+            'embedded.key' => VerifyEmbeddedApiKey::class,
+            'shopify.session' => VerifyShopifySessionToken::class,
+            'feature' => FeatureGate::class,
+            'brand-funding-gate' => BrandFundingGate::class,
         ]);
     })
 

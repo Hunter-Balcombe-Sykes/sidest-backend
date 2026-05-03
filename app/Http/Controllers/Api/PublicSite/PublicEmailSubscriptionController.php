@@ -8,12 +8,12 @@ use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Http\Requests\Api\PublicSite\PublicEmailSubscribeRequest;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Professional\Customer;
+use App\Services\Public\PublicSiteResolver;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
-use App\Services\Public\PublicSiteResolver;
 
+// V2: Newsletter signup with name inference from email and customer upsert.
 class PublicEmailSubscriptionController extends ApiController
 {
     use HashesClientData;
@@ -41,13 +41,13 @@ class PublicEmailSubscriptionController extends ApiController
         $data = $request->validated();
 
         $subdomain = $this->resolveSiteSubdomain($request);
-        if (!$subdomain) {
+        if (! $subdomain) {
             return $this->error('Could not determine site from URL.', 400);
         }
 
         $site = $resolver->resolvePublishedSite($subdomain);
 
-        if (!$site) {
+        if (! $site) {
             return $this->error('Site not found.', 404);
         }
 
@@ -64,7 +64,7 @@ class PublicEmailSubscriptionController extends ApiController
             ->whereRaw('lower(email) = ?', [$email])
             ->first();
 
-        if (!$subscription) {
+        if (! $subscription) {
             $subscription = new EmailSubscription([
                 'professional_id' => $site->professional_id,
                 'list_key' => $listKey,
@@ -73,7 +73,7 @@ class PublicEmailSubscriptionController extends ApiController
             ]);
         } else {
             $subscription->email = $email;
-            if (!$subscription->unsubscribe_token) {
+            if (! $subscription->unsubscribe_token) {
                 $subscription->unsubscribe_token = EmailSubscription::newUnsubscribeToken();
             }
         }
@@ -112,7 +112,6 @@ class PublicEmailSubscriptionController extends ApiController
             ]);
         }
 
-
         return $this->success([
             'ok' => true,
             'subscribed' => true,
@@ -120,48 +119,12 @@ class PublicEmailSubscriptionController extends ApiController
         ]);
     }
 
-    private function resolveSiteSubdomain(Request $request): ?string
-    {
-        $fromHeader = trim((string) $request->header('X-Site-Subdomain', ''));
-        if ($fromHeader !== '') {
-            return strtolower($fromHeader);
-        }
-
-        $fromQuery = trim((string) $request->query('subdomain', ''));
-        if ($fromQuery !== '') {
-            return strtolower($fromQuery);
-        }
-
-        $fromSlugQuery = trim((string) $request->query('slug', ''));
-        if ($fromSlugQuery !== '') {
-            return strtolower($fromSlugQuery);
-        }
-
-        $fromInput = trim((string) $request->input('subdomain', ''));
-        if ($fromInput !== '') {
-            return strtolower($fromInput);
-        }
-
-        $fromSlugInput = trim((string) $request->input('slug', ''));
-        if ($fromSlugInput !== '') {
-            return strtolower($fromSlugInput);
-        }
-
-        $fromHost = $this->resolveSubdomainFromHost($request);
-        if ($fromHost) {
-            return strtolower($fromHost);
-        }
-
-        return null;
-    }
-
     private function upsertMarketingCustomer(
         string $professionalId,
         string $email,
         ?string $fullName,
         bool $overwriteName = false,
-    ): void
-    {
+    ): void {
         $normalizedEmail = strtolower(trim($email));
         if ($normalizedEmail === '') {
             return;
@@ -190,10 +153,11 @@ class PublicEmailSubscriptionController extends ApiController
             }
 
             $existing->save();
+
             return;
         }
 
-        $customer = new Customer();
+        $customer = new Customer;
         $customer->professional_id = $professionalId;
         $customer->email = $normalizedEmail;
         $customer->full_name = $name !== '' ? $name : null;
@@ -204,7 +168,7 @@ class PublicEmailSubscriptionController extends ApiController
     private function inferNameFromEmail(string $email): ?string
     {
         $normalized = strtolower(trim($email));
-        if ($normalized === '' || !str_contains($normalized, '@')) {
+        if ($normalized === '' || ! str_contains($normalized, '@')) {
             return null;
         }
 
@@ -225,7 +189,7 @@ class PublicEmailSubscriptionController extends ApiController
             }
 
             foreach (self::COMMON_FIRST_NAMES as $candidateFirstName) {
-                if (!str_starts_with($localPart, $candidateFirstName)) {
+                if (! str_starts_with($localPart, $candidateFirstName)) {
                     continue;
                 }
                 $remaining = substr($localPart, strlen($candidateFirstName));
@@ -236,7 +200,7 @@ class PublicEmailSubscriptionController extends ApiController
                     continue;
                 }
 
-                return ucfirst($candidateFirstName) . ' ' . ucfirst($remaining);
+                return ucfirst($candidateFirstName).' '.ucfirst($remaining);
             }
 
             return ucfirst($localPart);
@@ -245,6 +209,7 @@ class PublicEmailSubscriptionController extends ApiController
         $parts = preg_split('/[^a-z]+/', $localPart) ?: [];
         $parts = array_values(array_filter($parts, static function ($part): bool {
             $length = strlen($part);
+
             return $length >= 2 && $length <= 24;
         }));
 
@@ -266,7 +231,7 @@ class PublicEmailSubscriptionController extends ApiController
             return ucfirst($first);
         }
 
-        return ucfirst($first) . ' ' . ucfirst($last);
+        return ucfirst($first).' '.ucfirst($last);
     }
 
     private function emailLcColumnExists(): bool

@@ -2,11 +2,19 @@
 
 namespace App\Providers;
 
+use App\Listeners\RecordScheduledTaskHeartbeat;
+use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Policies\IntegrationPolicy;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Events\ScheduledTaskStarting;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
+// V2: Bootstraps application-wide rate limiters for public, authenticated, webhook, staff, and internal API routes.
 class AppServiceProvider extends ServiceProvider
 {
     /**
@@ -14,7 +22,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyAdminClient::class);
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyBudgetTracker::class);
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyCostTracker::class);
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyMetrics::class);
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyBulkOperationLock::class);
     }
 
     /**
@@ -22,7 +34,23 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Gate::policy(ProfessionalIntegration::class, IntegrationPolicy::class);
+
+        // Refuse to boot in production with throttling disabled — a misconfigured
+        // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.
+        if (app()->isProduction() && ! (bool) config('sidest.throttle.enabled', true)) {
+            throw new \RuntimeException('SIDEST_THROTTLE_ENABLED must not be false in production.');
+        }
+
         $this->configureRateLimiting();
+
+        // Scheduler heartbeat — feeds GET /api/health/scheduler so a stopped cron
+        // runner becomes visible. See RecordScheduledTaskHeartbeat for rationale.
+        Event::listen(ScheduledTaskStarting::class, RecordScheduledTaskHeartbeat::class);
+
+        // Strict-mode N+1 trap: throw on unloaded relation access outside production
+        // so tests/local catch lazy loading instead of leaking slow queries to prod.
+        Model::preventLazyLoading(! app()->isProduction());
     }
 
     /**
@@ -30,10 +58,19 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function configureRateLimiting(): void
     {
-        $throttleEnabled = (bool) config('comet.throttle.enabled', true);
+        $throttleEnabled = (bool) config('sidest.throttle.enabled', true);
+
+        // Health-check and ping endpoints
+        RateLimiter::for('health-check', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(60)->by($request->ip());
+        });
 
         // Public site endpoints (viewing sites, pages)
-        RateLimiter:: for('public-site', function (Request $request) use ($throttleEnabled) {
+        RateLimiter::for('public-site', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {
                 return Limit::none();
             }
@@ -47,8 +84,23 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        // Booking checkout — tighter limit because checkout hits Stripe/Square synchronously
+        RateLimiter::for('booking-checkout', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(10)
+                ->by($request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many booking attempts. Please try again shortly.',
+                    ], 429);
+                });
+        });
+
         // Analytics endpoints (pageviews, clicks)
-        RateLimiter:: for('analytics', function (Request $request) use ($throttleEnabled) {
+        RateLimiter::for('analytics', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {
                 return Limit::none();
             }
@@ -132,14 +184,53 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        // Affiliate selection write operations (create, delete, reorder)
+        RateLimiter::for('affiliate-writes', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on affiliate-writes route — JWT middleware not applied');
+
+            return Limit::perMinute(60)
+                ->by($uid)
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many selection changes. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        // Brand catalog write operations (metafield updates, collection management)
+        RateLimiter::for('brand-catalog-writes', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on brand-catalog-writes route — JWT middleware not applied');
+
+            return Limit::perMinute(30)
+                ->by($uid)
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many catalog changes. Please try again later.',
+                    ], 429);
+                });
+        });
+
         // Authenticated professional routes
         RateLimiter::for('authenticated', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {
                 return Limit::none();
             }
 
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on authenticated route — JWT middleware not applied');
+
             return Limit::perMinute(300)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->by($uid)
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many requests. Please try again later.',
@@ -153,23 +244,11 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on staff route — JWT middleware not applied');
+
             return Limit::perMinute(300)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
-                ->response(function () {
-                    return response()->json([
-                        'message' => 'Too many requests. Please try again later.',
-                    ], 429);
-                });
-        });
-
-        // Enterprise routes
-        RateLimiter::for('enterprise', function (Request $request) use ($throttleEnabled) {
-            if (! $throttleEnabled) {
-                return Limit::none();
-            }
-
-            return Limit::perMinute(120)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->by($uid)
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many requests. Please try again later.',
@@ -198,11 +277,29 @@ class AppServiceProvider extends ServiceProvider
                 return Limit::none();
             }
 
+            $uid = $request->attributes->get('supabase_uid')
+                ?? throw new \RuntimeException('supabase_uid missing on bootstrap route — JWT middleware not applied');
+
             return Limit::perMinute(5)
-                ->by($request->attributes->get('supabase_uid') ?? $request->ip())
+                ->by($uid)
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many account creation attempts. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        // Internal Hydrogen endpoints (server-to-server)
+        RateLimiter::for('hydrogen-internal', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(120)
+                ->by($request->ip())
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many requests.',
                     ], 429);
                 });
         });

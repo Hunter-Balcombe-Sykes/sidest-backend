@@ -2,101 +2,73 @@
 
 namespace App\Http\Controllers\Api\Professional;
 
-use App\Actions\Subscription\CreateProfessionalSubscriptionAction;
-use App\Actions\Subscription\ChangeProfessionalPlanAction;
 use App\Actions\Subscription\CancelProfessionalSubscriptionAction;
+use App\Actions\Subscription\ChangeProfessionalPlanAction;
+use App\Actions\Subscription\CreateProfessionalSubscriptionAction;
+use App\Actions\Subscription\ResumeProfessionalSubscriptionAction;
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Requests\Api\Professional\StorePlanSubscriptionRequest;
 use App\Http\Requests\Api\Professional\UpdatePlanSubscriptionRequest;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Resources\SubscriptionResource;
+use App\Models\Billing\Subscription;
+use App\Services\Stripe\StripeBillingService;
 use Illuminate\Http\Request;
 
+// V2: Subscription lifecycle (create, change plan, cancel, resume, billing portal). Wired to Stripe for paid plans.
 class SubscriptionController extends ApiController
 {
     use ResolveCurrentProfessional;
 
-    /**
-     * Get the professional's current subscription
-     */
     public function show(Request $request)
     {
         $professional = $this->currentProfessional($request);
-        $subscription = $professional->subscription;
+        $subscription = Subscription::query()
+            ->with('plan')
+            ->where('professional_id', $professional->id)
+            ->whereNull('ended_at')
+            ->latest('created_at')
+            ->first();
 
-        if (!$subscription) {
+        if (! $subscription) {
             return response()->json([
                 'message' => 'No active subscription',
             ], 404);
         }
 
-        return response()->json([
-            'data' => [
-                'id' => $subscription->id,
-                'plan_id' => $subscription->plan_id,
-                'plan' => [
-                    'id' => $subscription->plan->id,
-                    'name' => $subscription->plan->name,
-                    'price_cents' => $subscription->plan->price_cents,
-                    'currency_code' => $subscription->plan->currency_code,
-                    'billing_interval' => $subscription->plan->billing_interval,
-                    'entitlements' => $subscription->plan->entitlements,
-                ],
-                'status' => $subscription->status,
-                'current_period_start' => $subscription->current_period_start,
-                'current_period_end' => $subscription->current_period_end,
-                'trial_ends_at' => $subscription->trial_ends_at,
-                'cancel_at_period_end' => $subscription->cancel_at_period_end,
-                'ended_at' => $subscription->ended_at,
-            ],
-        ]);
+        return new SubscriptionResource($subscription);
     }
 
-    /**
-     * Create a new subscription (typically during signup)
-     */
     public function store(StorePlanSubscriptionRequest $request)
     {
         $professional = $this->currentProfessional($request);
 
         $action = app(CreateProfessionalSubscriptionAction::class);
-        $subscription = $action->execute($professional, $request->validated());
+        $result = $action->execute($professional, $request->validated());
 
-        return response()->json([
-            'data' => [
-                'id' => $subscription->id,
-                'plan_id' => $subscription->plan_id,
-                'status' => $subscription->status,
-                'current_period_start' => $subscription->current_period_start,
-                'current_period_end' => $subscription->current_period_end,
-                'trial_ends_at' => $subscription->trial_ends_at,
-            ],
-        ], 201);
+        if (is_array($result)) {
+            return response()->json(['data' => $result]);
+        }
+
+        return (new SubscriptionResource($result->load('plan')))
+            ->response()
+            ->setStatusCode(201);
     }
 
-    /**
-     * Change the professional's subscription plan
-     */
     public function update(UpdatePlanSubscriptionRequest $request)
     {
         $professional = $this->currentProfessional($request);
 
         $action = app(ChangeProfessionalPlanAction::class);
-        $subscription = $action->execute($professional, $request->validated());
+        $result = $action->execute($professional, $request->validated());
 
-        return response()->json([
-            'data' => [
-                'id' => $subscription->id,
-                'plan_id' => $subscription->plan_id,
-                'status' => $subscription->status,
-                'current_period_start' => $subscription->current_period_start,
-                'current_period_end' => $subscription->current_period_end,
-            ],
-        ]);
+        if (is_array($result)) {
+            return response()->json(['data' => $result]);
+        }
+
+        return new SubscriptionResource($result->load('plan'));
     }
 
-    /**
-     * Cancel the professional's subscription
-     */
     public function cancel(Request $request)
     {
         $professional = $this->currentProfessional($request);
@@ -104,59 +76,64 @@ class SubscriptionController extends ApiController
         $action = app(CancelProfessionalSubscriptionAction::class);
         $subscription = $action->execute($professional);
 
-        return response()->json([
-            'data' => [
-                'id' => $subscription->id,
-                'status' => $subscription->status,
-                'cancel_at_period_end' => $subscription->cancel_at_period_end,
-                'ended_at' => $subscription->ended_at,
-            ],
-        ]);
+        return new SubscriptionResource($subscription->load('plan'));
     }
 
-    /**
-     * Resume a canceled subscription (only if cancel_at_period_end and still within period)
-     */
     public function resume(Request $request)
     {
         $professional = $this->currentProfessional($request);
-        $subscription = $professional->subscription;
 
-        if (!$subscription) {
-            return response()->json([
-                'message' => 'No subscription to resume',
-            ], 404);
-        }
+        $action = app(ResumeProfessionalSubscriptionAction::class);
+        $subscription = $action->execute($professional);
 
-        if (!$subscription->isActive()) {
-            return response()->json([
-                'message' => 'Subscription is no longer active and cannot be resumed.',
-            ], 422);
-        }
+        return new SubscriptionResource($subscription->load('plan'));
+    }
 
-        if (!$subscription->cancel_at_period_end) {
-            return response()->json([
-                'message' => 'Subscription is not scheduled for cancellation.',
-            ], 422);
-        }
-
-        if ($subscription->current_period_end && $subscription->current_period_end->isPast()) {
-            return response()->json([
-                'message' => 'Subscription period has already ended.',
-            ], 422);
-        }
-
-        $subscription->update([
-            'cancel_at_period_end' => false,
+    public function billingPortal(Request $request)
+    {
+        $request->validate([
+            'return_url' => ['required', 'url'],
         ]);
+
+        $professional = $this->currentProfessional($request);
+
+        $billing = app(StripeBillingService::class);
+        $portalUrl = $billing->createBillingPortalSession($professional, $request->input('return_url'));
 
         return response()->json([
-            'data' => [
-                'id' => $subscription->id,
-                'status' => $subscription->status,
-                'cancel_at_period_end' => $subscription->cancel_at_period_end,
-                'ended_at' => $subscription->ended_at,
-            ],
+            'data' => ['portal_url' => $portalUrl],
         ]);
+    }
+
+    public function previewPlanChange(Request $request)
+    {
+        $request->validate([
+            'plan_id' => ['required', 'string', 'exists:plans,id'],
+        ]);
+
+        $professional = $this->currentProfessional($request);
+
+        $subscription = Subscription::query()
+            ->with('plan')
+            ->where('professional_id', $professional->id)
+            ->whereNull('ended_at')
+            ->first();
+
+        if (! $subscription || ! $subscription->isStripeManaged()) {
+            return response()->json([
+                'message' => 'No Stripe-managed subscription to preview changes for.',
+            ], 422);
+        }
+
+        $newPlan = \App\Models\Billing\Plan::findOrFail($request->input('plan_id'));
+
+        $billing = app(StripeBillingService::class);
+        $preview = $billing->previewPlanChange(
+            $subscription->stripe_customer_id,
+            $subscription->stripe_subscription_id,
+            $newPlan->stripe_price_id,
+        );
+
+        return response()->json(['data' => $preview]);
     }
 }

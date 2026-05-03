@@ -12,10 +12,17 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
+// V2: Fresha catalog webhook — validates signature, deduplicates events, triggers service sync. Booking integration only.
 class FreshaCatalogWebhookController extends ApiController
 {
     public function __invoke(Request $request, FreshaServiceSyncService $syncService): JsonResponse
     {
+        if (! (bool) config('sidest.features.fresha_sync', false)) {
+            Log::info('Fresha webhook suppressed — fresha_sync feature flag is off');
+
+            return $this->success(['received' => true, 'feature_gated' => true]);
+        }
+
         $rawBody = $request->getContent() ?: '';
         $signature = (string) $request->header('x-fresha-signature', '');
 
@@ -38,7 +45,7 @@ class FreshaCatalogWebhookController extends ApiController
         // returns false when the key already exists, eliminating the has()+put() race.
         $eventId = trim((string) ($payload['event_id'] ?? $payload['id'] ?? ''));
         if ($eventId !== '') {
-            $cacheKey = 'fresha_webhook:' . $eventId;
+            $cacheKey = 'fresha_webhook:'.$eventId;
             if (! Cache::add($cacheKey, true, now()->addHours(24))) {
                 return $this->success(['received' => true, 'duplicate' => true]);
             }
@@ -149,7 +156,7 @@ class FreshaCatalogWebhookController extends ApiController
         // NOTE: Update this hashing logic based on actual Fresha docs.
         // This mirrors Square's approach: HMAC-SHA256 of (notification_url + raw_body) with the signature key.
         $expectedSignature = base64_encode(
-            hash_hmac('sha256', $notificationUrl . $rawBody, $signatureKey, true)
+            hash_hmac('sha256', $notificationUrl.$rawBody, $signatureKey, true)
         );
 
         return hash_equals($expectedSignature, $signature);

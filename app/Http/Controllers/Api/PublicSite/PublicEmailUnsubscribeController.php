@@ -7,6 +7,7 @@ use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Processes token-based email unsubscribe requests from email footer links.
 class PublicEmailUnsubscribeController extends ApiController
 {
     public function unsubscribe(Request $request, string $token): JsonResponse
@@ -15,7 +16,7 @@ class PublicEmailUnsubscribeController extends ApiController
             ->where('unsubscribe_token', $token)
             ->first();
 
-        if (!$sub) {
+        if (! $sub) {
             return $this->error('Invalid or expired unsubscribe link.', 404);
         }
 

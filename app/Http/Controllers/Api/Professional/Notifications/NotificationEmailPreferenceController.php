@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+// V2: Per-category email notification opt-in/out with staff policy overrides support.
 class NotificationEmailPreferenceController extends ApiController
 {
     use ResolveCurrentProfessional;
@@ -19,7 +20,7 @@ class NotificationEmailPreferenceController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        $prefs = DB::table('notification_email_preferences')
+        $prefs = DB::table('notifications.notification_email_preferences')
             ->where('professional_id', $pro->id)
             ->get(['category_key', 'enabled'])
             ->keyBy('category_key');
@@ -37,8 +38,8 @@ class NotificationEmailPreferenceController extends ApiController
         $result = array_map(function (string $category) use ($prefs, $perProPolicies, $globalPolicies): array {
             $perProMode = $perProPolicies->get($category)?->mode;
             $globalMode = $globalPolicies->get($category)?->mode;
-            $prefRow    = $prefs->get($category);
-            $prefValue  = $prefRow !== null ? (bool) $prefRow->enabled : null;
+            $prefRow = $prefs->get($category);
+            $prefValue = $prefRow !== null ? (bool) $prefRow->enabled : null;
 
             if ($perProMode === 'force_on') {
                 $effective = true;
@@ -55,25 +56,25 @@ class NotificationEmailPreferenceController extends ApiController
             }
 
             return [
-                'category'             => $category,
-                'enabled'              => $effective,
-                'preference_set'       => $prefValue !== null,
+                'category' => $category,
+                'enabled' => $effective,
+                'preference_set' => $prefValue !== null,
                 'overridden_by_policy' => in_array($perProMode, ['force_on', 'force_off'], true)
                     || in_array($globalMode, ['force_on', 'force_off'], true),
             ];
-        }, NotificationPublisher::CATEGORIES);
+        }, NotificationPublisher::categories());
 
         return $this->success(['preferences' => array_values($result)]);
     }
 
     public function update(UpdateNotificationEmailPreferencesRequest $request): JsonResponse
     {
-        $pro     = $this->currentProfessional($request);
+        $pro = $this->currentProfessional($request);
         $updates = $request->validated()['preferences'];
 
         foreach ($updates as $update) {
             DB::statement(
-                'INSERT INTO notification_email_preferences (id, professional_id, category_key, enabled, created_at, updated_at)
+                'INSERT INTO notifications.notification_email_preferences (id, professional_id, category_key, enabled, created_at, updated_at)
                  VALUES (?, ?, ?, ?, NOW(), NOW())
                  ON CONFLICT (professional_id, category_key)
                  DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()',

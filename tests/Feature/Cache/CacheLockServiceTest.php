@@ -1,0 +1,349 @@
+<?php
+
+use App\Services\Cache\CacheLockService;
+use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
+use Mockery as M;
+
+beforeEach(function () {
+    Cache::flush();
+    $this->service = new CacheLockService;
+});
+
+afterEach(function () {
+    M::close();
+});
+
+it('returns cached value without acquiring lock on cache hit', function () {
+    Cache::shouldReceive('get')->with('test:key')->andReturn(['cached' => true])->once();
+    Cache::shouldReceive('lock')->never();
+
+    $result = $this->service->rememberLocked(
+        'test:key',
+        60,
+        fn () => throw new RuntimeException('closure should not run'),
+    );
+
+    expect($result)->toBe(['cached' => true]);
+});
+
+it('runs closure and stores result on cache miss', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:miss')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:miss', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->with('test:miss', ['fresh' => 'value'], 60)->once();
+
+    $result = $this->service->rememberLocked(
+        'test:miss',
+        60,
+        fn () => ['fresh' => 'value'],
+    );
+
+    expect($result)->toBe(['fresh' => 'value']);
+});
+
+it('skips closure when cache fills during lock wait (double-check)', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    // First Cache::get returns null (initial miss); second returns filled value
+    // (another process filled it while we were waiting on the lock).
+    Cache::shouldReceive('get')
+        ->with('test:double')
+        ->twice()
+        ->andReturn(null, ['filled' => 'by other']);
+    Cache::shouldReceive('lock')->with('lock:test:double', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->never();
+
+    $closureRan = false;
+    $result = $this->service->rememberLocked(
+        'test:double',
+        60,
+        function () use (&$closureRan) {
+            $closureRan = true;
+
+            return ['fresh' => 'should not run'];
+        },
+    );
+
+    expect($result)->toBe(['filled' => 'by other']);
+    expect($closureRan)->toBeFalse();
+});
+
+it('falls through to closure when lock acquisition times out and cache is still empty', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once()->andThrow(new LockTimeoutException);
+
+    // Initial miss, then re-check after timeout still returns null.
+    Cache::shouldReceive('get')->with('test:timeout')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:timeout', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->never();
+
+    $result = $this->service->rememberLocked(
+        'test:timeout',
+        60,
+        fn () => ['last' => 'resort'],
+    );
+
+    expect($result)->toBe(['last' => 'resort']);
+});
+
+it('returns cached value on lock timeout if cache filled in the meantime', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once()->andThrow(new LockTimeoutException);
+
+    Cache::shouldReceive('get')
+        ->with('test:timeout-filled')
+        ->twice()
+        ->andReturn(null, ['filled' => 'while waiting']);
+    Cache::shouldReceive('lock')->with('lock:test:timeout-filled', 10)->once()->andReturn($lock);
+
+    $closureRan = false;
+    $result = $this->service->rememberLocked(
+        'test:timeout-filled',
+        60,
+        function () use (&$closureRan) {
+            $closureRan = true;
+
+            return ['should' => 'not run'];
+        },
+    );
+
+    expect($result)->toBe(['filled' => 'while waiting']);
+    expect($closureRan)->toBeFalse();
+});
+
+it('releases lock when closure throws', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:throw')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:throw', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->never();
+
+    $call = fn () => $this->service->rememberLocked(
+        'test:throw',
+        60,
+        fn () => throw new RuntimeException('boom'),
+    );
+
+    expect($call)->toThrow(RuntimeException::class, 'boom');
+});
+
+it('honours custom lockSeconds and blockSeconds', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(2)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:custom')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:custom', 30)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->with('test:custom', 'v', 60)->once();
+
+    $result = $this->service->rememberLocked(
+        'test:custom',
+        60,
+        fn () => 'v',
+        lockSeconds: 30,
+        blockSeconds: 2,
+    );
+
+    expect($result)->toBe('v');
+});
+
+// rememberLockedNullable
+
+it('nullable: returns cached non-null value without acquiring lock', function () {
+    Cache::shouldReceive('get')->with('test:n:hit')->andReturn(['v' => 1])->once();
+    Cache::shouldReceive('lock')->never();
+
+    $result = $this->service->rememberLockedNullable(
+        'test:n:hit',
+        60,
+        fn () => throw new RuntimeException('closure should not run'),
+    );
+
+    expect($result)->toBe(['v' => 1]);
+});
+
+it('nullable: returns null without acquiring lock when sentinel is cached', function () {
+    Cache::shouldReceive('get')->with('test:n:sentinel')->andReturn('__cache_lock_null_sentinel__')->once();
+    Cache::shouldReceive('lock')->never();
+
+    $result = $this->service->rememberLockedNullable(
+        'test:n:sentinel',
+        60,
+        fn () => throw new RuntimeException('closure should not run'),
+    );
+
+    expect($result)->toBeNull();
+});
+
+it('nullable: caches non-null callback result with ttl', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:n:miss')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:n:miss', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->with('test:n:miss', 'value', 60)->once();
+
+    $result = $this->service->rememberLockedNullable(
+        'test:n:miss',
+        60,
+        fn () => 'value',
+    );
+
+    expect($result)->toBe('value');
+});
+
+it('nullable: caches sentinel when callback returns null, using ttl by default', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:n:null')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:n:null', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->with('test:n:null', '__cache_lock_null_sentinel__', 60)->once();
+
+    $result = $this->service->rememberLockedNullable(
+        'test:n:null',
+        60,
+        fn () => null,
+    );
+
+    expect($result)->toBeNull();
+});
+
+it('nullable: uses nullTtl when caching the sentinel', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:n:nullttl')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:n:nullttl', 10)->once()->andReturn($lock);
+    // Sentinel uses 30s, NOT the 600s positive ttl.
+    Cache::shouldReceive('put')->with('test:n:nullttl', '__cache_lock_null_sentinel__', 30)->once();
+
+    $result = $this->service->rememberLockedNullable(
+        'test:n:nullttl',
+        600,
+        fn () => null,
+        nullTtl: 30,
+    );
+
+    expect($result)->toBeNull();
+});
+
+it('nullable: uses positive ttl for non-null even when nullTtl is set', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:n:posttl')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:n:posttl', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->with('test:n:posttl', 'fresh', 600)->once();
+
+    $result = $this->service->rememberLockedNullable(
+        'test:n:posttl',
+        600,
+        fn () => 'fresh',
+        nullTtl: 30,
+    );
+
+    expect($result)->toBe('fresh');
+});
+
+it('nullable: skips closure when sentinel was cached during lock wait', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    // Initial miss; second read inside the lock returns sentinel (filled by another process).
+    Cache::shouldReceive('get')
+        ->with('test:n:double-null')
+        ->twice()
+        ->andReturn(null, '__cache_lock_null_sentinel__');
+    Cache::shouldReceive('lock')->with('lock:test:n:double-null', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->never();
+
+    $closureRan = false;
+    $result = $this->service->rememberLockedNullable(
+        'test:n:double-null',
+        60,
+        function () use (&$closureRan) {
+            $closureRan = true;
+
+            return 'should not run';
+        },
+    );
+
+    expect($result)->toBeNull();
+    expect($closureRan)->toBeFalse();
+});
+
+it('nullable: lock-timeout returns null when sentinel cached in the meantime', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once()->andThrow(new LockTimeoutException);
+
+    Cache::shouldReceive('get')
+        ->with('test:n:timeout-sentinel')
+        ->twice()
+        ->andReturn(null, '__cache_lock_null_sentinel__');
+    Cache::shouldReceive('lock')->with('lock:test:n:timeout-sentinel', 10)->once()->andReturn($lock);
+
+    $closureRan = false;
+    $result = $this->service->rememberLockedNullable(
+        'test:n:timeout-sentinel',
+        60,
+        function () use (&$closureRan) {
+            $closureRan = true;
+
+            return 'should not run';
+        },
+    );
+
+    expect($result)->toBeNull();
+    expect($closureRan)->toBeFalse();
+});
+
+it('nullable: throws if closure returns the reserved sentinel string', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:n:reserved')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:n:reserved', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->never();
+
+    $call = fn () => $this->service->rememberLockedNullable(
+        'test:n:reserved',
+        60,
+        fn () => '__cache_lock_null_sentinel__',
+    );
+
+    expect($call)->toThrow(\LogicException::class, 'reserved');
+});
+
+it('nullable: releases lock when closure throws', function () {
+    $lock = M::mock(Lock::class);
+    $lock->shouldReceive('block')->with(5)->once();
+    $lock->shouldReceive('release')->once()->andReturn(true);
+
+    Cache::shouldReceive('get')->with('test:n:throw')->twice()->andReturn(null, null);
+    Cache::shouldReceive('lock')->with('lock:test:n:throw', 10)->once()->andReturn($lock);
+    Cache::shouldReceive('put')->never();
+
+    $call = fn () => $this->service->rememberLockedNullable(
+        'test:n:throw',
+        60,
+        fn () => throw new RuntimeException('boom'),
+    );
+
+    expect($call)->toThrow(RuntimeException::class, 'boom');
+});

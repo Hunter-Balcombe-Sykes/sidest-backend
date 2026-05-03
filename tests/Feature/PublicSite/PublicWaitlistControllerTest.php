@@ -3,19 +3,9 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 beforeEach(function () {
-    $sqlite = config('database.connections.sqlite');
-
-    config([
-        'database.default' => 'sqlite',
-        'database.connections.pgsql' => array_merge($sqlite, ['database' => ':memory:']),
-        'comet.throttle.enabled' => true,
-    ]);
-
-    DB::purge('pgsql');
-    DB::reconnect('pgsql');
+    config(['sidest.throttle.enabled' => true]);
 
     Cache::flush();
     setupWaitlistSchema();
@@ -37,7 +27,7 @@ it('stores a waitlist submission with normalized fields', function () {
 
     $response->assertCreated()->assertJson(['ok' => true]);
 
-    $row = DB::connection('pgsql')->table('waitlist_signups')->where('email_lc', 'alex@example.com')->first();
+    $row = DB::connection('pgsql')->table('core.waitlist_signups')->where('email_lc', 'alex@example.com')->first();
     expect($row)->not->toBeNull();
     expect($row->applicant_type)->toBe('professional');
     expect($row->industry)->toBe('mens_grooming');
@@ -74,10 +64,10 @@ it('upserts waitlist submissions by normalized email', function () {
     $this->postJson('/api/public/waitlist', $first)->assertCreated();
     $this->postJson('/api/public/waitlist', $second)->assertOk();
 
-    $count = DB::connection('pgsql')->table('waitlist_signups')->where('email_lc', $email)->count();
+    $count = DB::connection('pgsql')->table('core.waitlist_signups')->where('email_lc', $email)->count();
     expect($count)->toBe(1);
 
-    $row = DB::connection('pgsql')->table('waitlist_signups')->where('email_lc', $email)->first();
+    $row = DB::connection('pgsql')->table('core.waitlist_signups')->where('email_lc', $email)->first();
     expect($row->name)->toBe('Brand One Updated');
     expect($row->phone)->toBe('+61422222222');
     expect($row->industry)->toBe('services_and_software');
@@ -96,7 +86,11 @@ it('applies waitlist throttle middleware to the waitlist endpoint', function () 
 
 function setupWaitlistSchema(): void
 {
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS waitlist_signups (
+    // The WaitlistSignup model uses 'core.waitlist_signups' as its table.
+    // Attach the 'core' schema and create the table under it so the model
+    // (and any raw DB::table('core.waitlist_signups') call) resolves.
+    attachTestSchemas();
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.waitlist_signups (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         email TEXT NOT NULL,

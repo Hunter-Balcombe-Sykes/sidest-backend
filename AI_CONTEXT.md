@@ -1,26 +1,28 @@
-# AI_CONTEXT.md — OneLink Platform
+# AI_CONTEXT.md — Side St Platform (V2)
 
 > **Source of truth for AI tools working on this codebase.**
 > Read this before making changes. Update after meaningful progress.
+> For detailed per-file V2 role descriptions, see `V2_BACKEND_REFERENCE.md`.
 
 ---
 
 ## Project Overview
 
-**OneLink** is a multi-tenant SaaS affiliate platform that gives influencers and beauty/barbering professionals a branded one-page personal website, connected to a specific brand partner. It replaces link-in-bio tools (like Linktree), adds an affiliate e-commerce shop, booking integrations, and detailed analytics — all within the brand's theme and identity.
+**Side St** (codebase still references "Comet" / "OneLink" in places) is a multi-tenant SaaS affiliate platform that gives influencers and beauty/barbering professionals a branded one-page personal website, connected to a specific brand partner. It replaces link-in-bio tools (like Linktree), adds an affiliate e-commerce shop powered by Shopify Hydrogen storefronts, booking integrations, and detailed analytics.
+
+**V2 Architecture:** Product data lives entirely in Shopify (Storefront API + metafields). Affiliate storefronts are Hydrogen apps deployed on Shopify Oxygen. Commission rates come from Shopify product metafields. Payouts flow through Stripe Connect (80% to affiliate, 20% platform fee). Each affiliate is scoped to a single brand.
 
 **What problem it solves:**
-Brands want influencers and professionals to sell their products without managing separate storefronts. Professionals/influencers want a polished all-in-one presence without design effort. Comet sits in the middle, handling the site, commerce, analytics, and commission accounting workflows.
+Brands want influencers and professionals to sell their products without managing separate storefronts. Professionals/influencers want a polished all-in-one presence without design effort. Side St sits in the middle, handling the site, commerce, analytics, and commission accounting workflows.
 
 **Main goals:**
 1. Give each professional/influencer a published one-page site on a subdomain
-2. Connect that site to a specific brand's products, theme, and identity
-3. Process commission-based sales — brand fulfils, Comet takes a cut, professional earns commission
+2. Connect that site to a brand's Shopify store via Hydrogen storefronts
+3. Process commission-based sales — brand fulfils via Shopify, Side St records commissions, Stripe Connect handles payouts
 4. Provide booking integrations (Square, Fresha) for service professionals
 5. Give brands and professionals actionable analytics (views, clicks, sales, earnings)
-6. Enable brands to promote specific products via commission adjustments and price overrides
 
-**Current status:** Active development. Core professional features (sites, services, media, integrations) are production-ready. The affiliate commerce foundation is implemented (brand-scoped catalog, availability controls, deny/allow overrides, per-affiliate pricing settings, strict selections, manager APIs), plus Shopify-canonical order ingestion, attribution, commission ledgering, and brand/self analytics APIs. Unified brand RBAC now resolves access from direct brand ownership, enterprise links, and `retail.brand_team_memberships`. Video uploads remain feature-flagged off. Export/schedule analytics runtime and payout transfer execution are still in progress.
+**Current status:** Active development (V2 pre-beta). V1 dead code has been removed. Core professional features (sites, services, media, integrations) are production-ready. Shopify integration (OAuth, Storefront API tokens, order webhooks) is implemented. Stripe Connect onboarding and commission payout processing are implemented. V2 database migration is in progress.
 
 ---
 
@@ -28,42 +30,48 @@ Brands want influencers and professionals to sell their products without managin
 
 ### Plain-English Explanation
 
-- A **brand** (e.g., a haircare company) signs up and connects their product catalogue.
-- They invite **influencers/professionals** (barbers, hairdressers, Instagram influencers) as affiliates.
-- Each affiliate gets their own subdomain site (e.g., `john.comet.app`) auto-themed in the brand's colours and branding.
-- The affiliate can add their own media, links, and bio — but cannot change the brand's theme/palette.
-- Customers visit the site, browse products, and purchase. The brand fulfils the order.
-- Comet mints a deterministic checkout-session token, the token is written into Shopify order metadata, and confirmed Shopify order webhooks become the canonical analytics source.
-- Commission entries are posted to an append-only ledger (accrual/reversal/payout states). Automated payout transfer execution is not yet enabled.
-- Commission rates and product prices can be adjusted per affiliate by the brand (e.g., run a sale only on an influencer's site, or boost commission on slow-moving stock).
-- **An affiliate can be connected to multiple brands.** One primary brand may be designated in future.
-- Service professionals (barbers, hairdressers) can also take bookings via **Square or Fresha** through the same site. No in-house booking system is planned.
-- Brands and affiliates both see analytics: page views, link clicks, products sold, revenue earned.
+- A **brand** signs up and connects their **Shopify store** via OAuth.
+- Side St auto-creates Storefront API tokens and registers order webhooks.
+- The brand invites **affiliates** (barbers, hairdressers, Instagram influencers).
+- Each affiliate gets their own subdomain site (e.g., `john.sidest.co`) auto-themed in the brand's colours.
+- The affiliate's **Hydrogen storefront** fetches products directly from Shopify's Storefront API — no local product tables.
+- Customers visit the storefront, browse products, and purchase via Shopify native checkout.
+- The `orders/paid` webhook fires → commission recorded in the ledger based on Shopify metafield rates.
+- After a hold period, `ProcessCommissionPayoutsJob` transfers 80% of commission to the affiliate via Stripe Connect. Side St takes 20%.
+- **Each affiliate belongs to one brand** (single-brand model in V2).
+- Service professionals can also take bookings via **Square or Fresha** through the same site.
 
 ### How the System Works
 
 ```
-Brand sets up catalogue + theme
+Brand connects Shopify store (OAuth)
+    ↓
+Side St creates Storefront API token + registers order webhooks
     ↓
 Brand invites affiliate (token-based invite)
     ↓
 Affiliate claims invite → site auto-provisioned on subdomain
     ↓
-Affiliate customises content (media, links, bio) within brand theme
+Hydrogen storefront fetches products from Shopify Storefront API
     ↓
-Customer visits subdomain → sees brand-themed site
+Customer visits {brand}.sidest.co/{affiliate} → sees brand-themed storefront
     ↓
-Customer buys product → checkout-session token attached to Shopify order
+Customer buys product → Shopify native checkout
     ↓
-Shopify webhook ingested → canonical order + ledger normalized
+orders/paid webhook → commission ledger entry created
     ↓
-Daily aggregates rebuilt for brand and affiliate dashboards
+Daily payout job (tries=3, 60s/180s backoff) → Stripe Connect transfer (80/20 split: 20% platform fee, 80% to affiliate)
+    ↓
+CommissionPayoutObserver → context-aware notifications to affiliate + brand
+    ↓
+Stuck failed batches → POST /staff/commission-payouts/{payout}/retry (staff admin)
 ```
 
 ### Key Assumptions
 
-- Multi-brand affiliation is enabled; product selection cap is global (10) per professional across all connected brands.
-- Brands control the theme, colours, logo, and product catalogue.
+- Single-brand affiliation per affiliate (V2 constraint).
+- Product data lives in Shopify — no local product tables. Commission rates from Shopify metafields.
+- Brands control the theme, colours, logo, and product visibility via Shopify collections/metafields.
 - Professionals control their own media pool, links, bio, and service listings.
 - Booking integrations (Square, Fresha) are per-professional, not per-brand.
 - Supabase handles all authentication (JWT-based). Laravel does not manage passwords.
@@ -73,9 +81,11 @@ Daily aggregates rebuilt for brand and affiliate dashboards
 
 ## Codebase Summary
 
-**Repositories:**
-- **Backend (this repo):** `https://github.com/Hunter-Balcombe-Sykes/Comet-Backend` — branch `develop`
-- **Frontend:** `https://github.com/hunterbalcombesykes/Commet-web` — branch `main`, deployed on Vercel
+**Repositories (V2 — 4 repos, no duplication):**
+1. **`sidest-backend` (this repo, Laravel)** — API, Shopify OAuth, webhooks, Stripe, commission ledger, migrations
+2. **`sidest-embedded` (Remix)** — Shopify admin embedded app (wizard, product catalog, affiliate management)
+3. **`sidest-hydrogen` (Hydrogen/Remix)** — Customer-facing affiliate storefronts (per-brand Oxygen deployment)
+4. **`sidest-dashboard` (Next.js)** — Brand/affiliate dashboards (analytics, payout, customization)
 
 **Stack:** Laravel 12 · PHP 8.2+ · PostgreSQL (Supabase) · Redis · Cloudflare R2 · Supabase Auth (JWT)
 
@@ -85,163 +95,247 @@ Daily aggregates rebuilt for brand and affiliate dashboards
 /
 ├── app/
 │   ├── Models/
-│   │   ├── Core/           — Main domain models (Professional, Site, Service, Customer, Block, SiteMedia, etc.)
-│   │   ├── Retail/         — Commerce models (BrandStoreSettings, EnterpriseProduct, ProfessionalSelection, etc.)
+│   │   ├── Core/
+│   │   │   ├── Professional/ — Professional, BrandProfile, BrandPartnerLink, BrandAffiliateInvite, Customer, Service, ServiceCategory, ProfessionalIntegration, ProfessionalConfirmationPreference
+│   │   │   ├── Site/         — Site, Block, SiteMedia, SiteSubdomainAlias, Theme
+│   │   │   ├── Notifications/ — Notification, NotificationReceipt, EmailSubscription, NotificationEmailPolicy, NotificationEmailPreference
+│   │   │   ├── Staff/        — SidestStaff
+│   │   │   ├── Waitlist/     — WaitlistSignup
+│   │   │   └── MediaVariant
+│   │   ├── Retail/         — CommissionLedgerEntry, CommissionPayout, CommissionPayoutItem, BrandStoreSettings, BrandCommissionTopup, BrandTeamMembership
+│   │   ├── Commerce/       — AffiliateProductSelection (V2 new — Shopify GID-based)
 │   │   ├── Billing/        — Plan, Subscription
 │   │   ├── Analytics/      — SiteVisit, LinkClick, LeadSubmission
-│   │   └── Views/          — Read-only aggregation models (PublicSitePayload, AllSiteData)
+│   │   └── Views/          — PublicSitePayload, AllSiteData (read-only views)
 │   ├── Http/
 │   │   ├── Controllers/Api/
-│   │   │   ├── Professional/  — Authenticated professional endpoints
-│   │   │   ├── PublicSite/    — Unauthenticated mini-site endpoints
+│   │   │   ├── Professional/  — Authenticated professional/brand/affiliate endpoints
+│   │   │   ├── PublicSite/    — Unauthenticated mini-site + storefront endpoints
 │   │   │   ├── Staff/         — Internal staff/admin endpoints
-│   │   │   ├── Enterprise/    — Enterprise self-service management endpoints
-│   │   │   └── Webhooks/      — Square, Fresha, Shopify webhook receivers
-│   │   ├── Middleware/        — JWT auth, role guards, plan gates
+│   │   │   ├── Shopify/       — Shopify OAuth controller
+│   │   │   ├── Webhooks/      — Shopify (orders/paid, orders/updated, app/uninstalled, shop/update, GDPR), Stripe Connect, Square, Fresha
+│   │   │   └── Internal/      — Hydrogen server-to-server endpoints (brand config, affiliate lookup, affiliate products)
+│   │   ├── Middleware/        — JWT auth, role guards, plan gates, cache headers
 │   │   ├── Requests/          — Form request validation classes
-│   │   └── Controllers/Concerns/ — Shared traits (ResolveCurrentProfessional, ResolveCurrentSite)
-│   ├── Services/              — External integrations, caching, media processing
-│   ├── Actions/               — Single-responsibility action classes (subscriptions, site ops)
-│   ├── Jobs/                  — Queue workers (image/video processing, email, cache warming)
-│   └── Observers/             — Eloquent model lifecycle hooks
+│   │   └── Resources/         — API response transformers
+│   ├── Services/
+│   │   ├── Analytics/         — Site + booking analytics aggregation
+│   │   ├── Auth/              — SupabaseAdminService (admin auth operations)
+│   │   ├── Billing/           — Entitlements / plan tier checks
+│   │   ├── Cache/             — Site, professional, analytics caching
+│   │   ├── Fresha/            — Fresha API client, token management, service sync
+│   │   ├── Media/             — Image + video variant processing
+│   │   ├── Notifications/     — Notification publishing, commerce notifications, email dispatch
+│   │   ├── Professional/      — Brand onboarding, invites, partner links, defaults, site provisioning, section visibility
+│   │   ├── Public/            — Public site resolution
+│   │   ├── Shopify/           — Brand signup, shop profile auto-fill
+│   │   ├── Square/            — Square API client, token management, service sync
+│   │   ├── Store/             — Brand access RBAC, pricing, selection cleanup
+│   │   └── Stripe/            — Stripe Connect + commission payouts
+│   ├── Actions/               — UpdateSiteAction, subscription actions
+│   ├── Jobs/                  — Analytics, Cache, Notifications, Shopify, Stripe, Square, Fresha + root-level media jobs
+│   ├── Observers/             — Cache invalidation, notifications, integration sync triggers
+│   └── Console/Commands/      — Analytics backfill/compact/purge, notification pruning, soft-delete purge
 ├── routes/
-│   ├── api.php                — Main router (includes sub-files)
-│   ├── api/professional.php   — 40+ professional routes
+│   ├── api.php                — Main router (health, webhooks, Shopify OAuth, bootstrap, public)
+│   ├── api/professional.php   — Professional dashboard routes
 │   ├── api/publicSite.php     — Public mini-site routes (subdomain-scoped)
-│   ├── api/staff.php          — Staff/admin routes
-│   ├── api/enterprise.php     — Enterprise self-service routes
-│   └── web.php                — QR code redirect only
+│   └── api/staff.php          — Staff/admin routes
 ├── supabase/migrations/       — All DB migrations (SQL, NOT Laravel migrations)
-├── database/
-│   ├── factories/
-│   └── seeders/
-├── config/                    — Laravel config files
+├── config/sidest.php           — Feature flags and limits
 ├── tests/                     — Pest framework tests
 ├── docs/api.md                — Comprehensive API reference
-├── composer.json
-├── .env.example
+├── V2_BACKEND_REFERENCE.md    — Detailed per-file V2 role descriptions
+├── PLAN.md                    — V2 platform architecture
+├── V2-REMOVAL-PLAN.md         — V1 removal checklist
 └── AI_CONTEXT.md              — This file
 ```
 
-### Core Models
+### Core Models (V2)
 
-| Model | Table | Purpose |
+| Model | Table | V2 Role |
 |-------|-------|---------|
-| `Professional` | `core.professionals` | User account — barber, influencer, brand owner, promoter, etc. |
-| `Site` | `core.sites` | Published mini-site per professional (subdomain, theme, publish state) |
-| `Service` | `core.services` | Service offering with price, duration, Square/Fresha sync IDs |
-| `ServiceCategory` | `core.service_categories` | Groups services |
-| `Customer` | `core.customers` | Client/lead records per professional |
-| `Block` | `core.blocks` | Modular site sections (links, gallery, text, etc.) |
-| `SiteMedia` | `core.site_media` | Images/videos uploaded by professional (gallery or content pool) |
-| `MediaVariant` | `core.media_variants` | Processed media artifacts (WebP, MP4, HLS) |
-| `BrandPartnerLink` | `core.brand_partner_links` | Brand ↔ affiliate relationship with slot numbering |
-| `BrandAffiliateInvite` | `core.brand_affiliate_invites` | Token-based invite (expiring) for affiliate onboarding |
-| `ProfessionalIntegration` | `core.professional_integrations` | Encrypted OAuth/provider metadata for Square/Fresha/Shopify |
-| `BrandProduct` | `retail.brand_products` | Full Shopify-synced product catalog per brand |
-| `BrandProductSetting` | `retail.brand_product_settings` | Global brand availability/featured/commission/discount settings per brand product |
-| `BrandProductAffiliateOverride` | `retail.brand_product_affiliate_overrides` | Per-affiliate access overrides (`deny` blocks; `allow` can bypass availability, with deny precedence) |
-| `BrandProductAffiliateSetting` | `retail.brand_product_affiliate_settings` | Per-affiliate commission/discount/custom-price overrides on brand products |
-| `BrandStoreSettings` | `retail.brand_store_settings` | Commission rate config per brand |
-| `ProfessionalSelection` | `retail.professional_selections` | Featured product list per professional |
-| `CheckoutSession` | `retail.checkout_sessions` | Tokenized checkout attribution context for deterministic order ownership |
-| `OrderEventInbox` | `retail.order_event_inbox` | Idempotent Shopify/fallback event inbox with processing status |
-| `RetailOrder` | `retail.orders` | Canonical normalized order header used for analytics |
-| `OrderItem` | `retail.order_items` | Canonical normalized order line items |
-| `CommissionLedgerEntry` | `retail.commission_ledger_entries` | Append-only commission accrual/reversal/payout accounting |
-| `EnterpriseBrandLink` | `core.enterprise_brand_links` | Links distributor enterprises to managed brand professional accounts |
-| `BrandTeamMembership` | `retail.brand_team_memberships` | Brand-scoped role assignments (`owner`, `finance`, `marketing`, `analyst`, `read_only`) |
+| `Professional` | `core.professionals` | Central identity — brands and affiliates distinguished by `professional_type` |
+| `Site` | `core.sites` | Mini-site config (subdomain, theme, settings, publish state) |
+| `Service` | `core.services` | Bookable service with Square/Fresha sync |
+| `ServiceCategory` | `core.service_categories` | Groups services for display |
+| `Customer` | `core.customers` | Contact/lead records per professional |
+| `Block` | `core.blocks` | Site content blocks (links, sections) |
+| `SiteMedia` | `core.site_media` | Images/videos with processing states |
+| `MediaVariant` | `core.media_variants` | Processed variants (WebP, MP4, HLS, poster) |
+| `BrandProfile` | `core.brand_profiles` | Brand business details; `brand_status` gates activation |
+| `BrandPartnerLink` | `core.brand_partner_links` | Brand-affiliate connection (V2: single-brand model) |
+| `BrandAffiliateInvite` | `core.brand_affiliate_invites` | Token-based invite for affiliate onboarding |
+| `ProfessionalIntegration` | `core.professional_integrations` | OAuth connections (Square, Fresha, Shopify) |
+| `CommissionLedgerEntry` | `retail.commission_ledger_entries` | Commission per order line from Shopify webhook |
+| `CommissionPayout` | `retail.commission_payouts` | Payout lifecycle (pending → completed/failed) |
+| `CommissionPayoutItem` | `retail.commission_payout_items` | Links payouts to ledger entries |
+| `BrandStoreSettings` | `retail.brand_store_settings` | V2: only `default_commission_rate` + `payout_hold_days` |
+| `BrandCommissionTopup` | `retail.brand_commission_topups` | Manual wallet top-ups via Stripe Checkout |
+| `BrandTeamMembership` | `retail.brand_team_memberships` | Brand team roles for RBAC |
+| `AffiliateProductSelection` | `retail.affiliate_product_selections` | V2 new — uses `shopify_product_gid` (not local UUID) |
+| `SidestStaff` | `core.sidest_staff` | Staff/admin accounts for internal dashboard |
+| `Notification` | `core.notifications` | In-app notification records |
+| `NotificationReceipt` | `core.notification_receipts` | Notification delivery tracking |
+| `EmailSubscription` | `core.email_subscriptions` | Notification preference per professional |
+| `NotificationEmailPolicy` | `core.notification_email_policies` | Staff-managed email notification policies |
+| `NotificationEmailPreference` | `core.notification_email_preferences` | Per-category email preferences |
+| `ProfessionalConfirmationPreference` | `core.professional_confirmation_preferences` | UI dialog suppression preferences |
+| `SiteSubdomainAlias` | `core.site_subdomain_aliases` | Subdomain alias management |
+| `Theme` | `core.themes` | Site theme definitions |
+| `WaitlistSignup` | `core.waitlist_signups` | Waitlist feature for pre-launch |
 | `Plan` | `billing.plans` | Subscription tiers with entitlements |
 | `Subscription` | `billing.subscriptions` | Professional's current plan status |
-| `SiteVisit` | `analytics.site_visits` | Page view events with UTM, device, geo |
-| `LinkClick` | `analytics.link_clicks` | Block/link click events |
-| `LeadSubmission` | `analytics.lead_submissions` | Form/lead capture events |
+| `SiteVisit` | `analytics.site_visits` | Page view events |
+| `LinkClick` | `analytics.link_clicks` | Link/section click events |
+| `LeadSubmission` | `analytics.lead_submissions` | Lead form submissions |
 
-### Key Services
+### Key Services (V2)
 
-| Service | Purpose |
+| Service | V2 Role |
 |---------|---------|
-| `ProfessionalCacheService` | Redis cache for professional payload, services, customer count |
-| `SiteCacheService` | Redis cache for blocks, links, sections |
-| `ImageVariantService` | Generate WebP image variants (optimised + maximised) |
-| `VideoVariantService` | FFmpeg MP4 + HLS transcoding (feature-flagged off) |
-| `SquareApiClient` / `SquareServiceSyncService` | Square OAuth + service catalogue sync |
-| `FreshaApiClient` / `FreshaServiceSyncService` | Fresha OAuth + service sync |
-| `BrandAffiliateInviteService` | Invite token generation, claiming, expiry |
-| `BrandPartnerLinkService` | Connect/disconnect brand-affiliate relationships |
-| `BrandAccessService` | Capability-based brand RBAC resolver across direct brand ownership, enterprise links, and brand-team memberships |
-| `BrandProductCatalogService` | Builds affiliate-visible, manager-catalog, and storefront-selected product payloads |
-| `BrandProductSettingsService` | Ensures synced `brand_products` always have settings rows |
-| `BrandPricingService` | Effective commission + discount price calculation (ceil to nearest 5 cents) |
-| `SelectionCleanupService` | Removes invalid selections, notifies affected professionals, invalidates site cache |
-| `ShopifyOrderProcessingService` | Validates session token, normalizes Shopify events, writes canonical orders/items/ledger |
-| `OrderAnalyticsAggregateService` | Deterministic rebuild of brand/self daily analytics tables from canonical data |
-| `EnterpriseProvisioningService` | Auto-provision enterprise for owner-type professionals |
-| `FeaturedProductsPayloadService` | Format product list for public API response |
-| `ProfessionalLegalContentService` | Auto-generate T&Cs and privacy policy |
-| `PublicSiteResolver` | Resolve public site by subdomain header or ID |
-
-### Key Dependencies
-
-| Package | Use |
-|---------|-----|
-| `laravel/framework` 12.x | Core framework |
-| `predis/predis` | Redis client (cache + queue) |
-| `aws/aws-sdk-php` | Cloudflare R2 (S3-compatible) media storage |
-| `simplesoftwareio/simple-qrcode` | QR code generation per professional |
-| `php-open-source-saver/php-jwt` | Supabase JWT validation |
-| `spatie/laravel-data` | Typed data objects |
-| `pestphp/pest` | Test framework |
+| `StripeConnectService` | Stripe Connect Express onboarding, payment methods, wallet top-ups |
+| `CommissionPayoutService` | Hybrid-funded commission payouts (wallet + card → Stripe transfer) |
+| `BrandAccessService` | Role-based brand RBAC (5 roles, capability-based) |
+| `BrandPricingService` | Commission rate defaults + effective rate calc (per-product overrides in Shopify metafields) |
+| `SelectionCleanupService` | Cleans affiliate selections on disconnect (Shopify GID-based) |
+| `BrandAffiliateInviteService` | Invite lifecycle (create, bulk, CSV, claim, decline) |
+| `BrandPartnerLinkService` | Brand-affiliate connection management |
+| `BrandOnboardingReadinessService` | Brand activation checklist (images, Shopify, Stripe) |
+| `BrandSignupService` | Shopify brand signup workflow (OAuth → provisioning) |
+| `ShopProfileAutoFillService` | Auto-populate brand profile from Shopify shop data |
+| `SiteProvisioningService` | Site provisioning workflow for new affiliates |
+| `AccountTypeDefaultsService` | Applies type-based defaults on affiliate onboarding |
+| `SectionVisibilityService` | Section visibility logic for site builder |
+| `ConfirmationPreferenceService` | UI confirmation dialog preference management |
+| `SiteCacheService` | Public site payload caching with single-flight locking |
+| `ProfessionalCacheService` | Multi-lookup professional caching |
+| `AnalyticsCacheService` | Analytics-specific caching layer |
+| `SiteAnalyticsAggregateService` | Site analytics aggregation (hourly/daily) |
+| `BookingAnalyticsAggregateService` | Booking analytics aggregation (hourly/daily) |
+| `Entitlements` | Plan entitlement / tier checking |
+| `SupabaseAdminService` | Admin Supabase auth operations |
+| `ImageVariantService` | WebP variant generation |
+| `VideoVariantService` | MP4 + HLS transcoding (feature-flagged) |
+| `SquareApiClient` / `SquareServiceSyncService` | Square booking integration |
+| `FreshaApiClient` / `FreshaServiceSyncService` | Fresha booking integration |
+| `NotificationPublisher` | Core notification engine with dedup and email dispatch |
+| `CommerceNotificationService` | Commerce-specific notifications (orders, commissions) |
+| `PublicSiteResolver` | Subdomain → site resolution |
 
 ---
 
-## How It Works
+## How It Works (V2)
 
-### End-to-End Flow
+### V2 Critical Paths
 
-#### Professional Onboarding
-1. Professional authenticates via Supabase → frontend sends `POST /api/bootstrap` with JWT.
-2. Laravel creates `Professional` and `Site` records. Enterprise provisioned if applicable.
-3. Professional configures site (theme from brand, custom media, links, services).
-4. Site published → available at `{handle}.{COMET_PUBLIC_DOMAIN}`.
+#### 1. Brand Onboarding
+```
+Shopify OAuth → ShopifyAppOAuthController (HMAC, token exchange)
+  → BrandSignupService (creates professional, brand profile, site)
+  → ShopProfileAutoFillService (auto-populates brand profile from Shopify shop data)
+  → Post-OAuth setup jobs (dispatched in parallel):
+    → CreateStorefrontAccessTokenJob (Storefront API token for Hydrogen)
+    → RegisterShopifyWebhooksJob (orders/paid, orders/updated, app/uninstalled, shop/update, GDPR)
+    → CreateShopifySalesChannelJob (Hydrogen sales channel)
+    → CreateShopifyCollectionsJob (default collections)
+    → CreateShopifyMetafieldsJob (commission rate metafields)
+    → SyncShopifyBrandLogoJob (pulls logo from Shopify)
+    → SetShopifySetupCompleteJob (marks setup complete after all jobs finish)
+  → BrandOnboardingReadinessService (checklist: 5+ images, Shopify, Stripe)
+  → StripeConnectController@onboard (Stripe Express setup)
+```
 
-#### Brand Affiliate Invite Flow
-1. Brand professional calls `POST /api/brand-affiliate-invites` → generates token.
-2. Invite sent to affiliate (email/link).
-3. Affiliate calls `POST /api/brand-affiliate-invites/{token}/claim` → `BrandPartnerLink` created.
-4. Affiliate's site now inherits brand theme, shows brand products.
+#### 2. Affiliate Onboarding
+```
+BrandAffiliateInviteController@store (brand sends invite)
+  → BrandAffiliateInviteService (creates invite, sends email)
+  → PublicBrandAffiliateInviteController@show (affiliate views invite)
+  → BrandAffiliateInviteController@claim (affiliate accepts)
+  → BrandPartnerLinkService (creates brand-affiliate link)
+  → AccountTypeDefaultsService (applies affiliate site defaults)
+```
 
-#### Public Site Visit
-1. Request hits `{subdomain}.comet.app` → `PublicSiteResolver` identifies professional.
-2. `GET /api/public/site` returns full site payload (cached in Redis).
-3. Analytics events (`POST /api/public/analytics/*`) recorded asynchronously.
+#### 3. Commission Flow
+```
+Shopify orders/paid webhook → ShopifyOrderWebhookController
+  → ProcessShopifyOrderWebhookJob
+  → CommissionLedgerEntry created (status: approved, rate from metafields)
+  → CommissionLedgerEntryObserver → notification to affiliate
+  → ProcessCommissionPayoutsJob (daily cron, tries=3, 60s/180s backoff)
+    → CommissionPayoutService
+        → Phase 1: retry any 'pending' batches from prior runs
+        → Phase 2: create new batches per brand with brand-selected hold
+          window (7/14/28 days, stored on brand_store_settings.payout_hold_days)
+        → processPayoutBatch: hybrid funding (wallet first, card for shortfall)
+        → Stripe Connect transfer (80/20 split: 20% platform fee, 80% to affiliate)
+  → CommissionPayoutObserver → context-aware notifications:
+        - completed: affiliate "Payout sent"
+        - failed (affiliate_not_connected): affiliate "Stripe Connect setup required"
+        - pending (charge_failed / charge_requires_action / brand_payment_method_missing):
+          brand "Payment method required" + affiliate "Payout delayed"
+  → Staff manual retry for stuck 'failed' batches:
+        POST /staff/commission-payouts/{payout}/retry
 
-#### Product Purchase Flow
-1. Public storefront requests `POST /api/public/store/checkout-session` (or `.../checkout-session-by-slug`) and receives `comet_session` token.
-2. Frontend/server writes `comet_session` into Shopify order metadata (note attributes).
-3. Shopify sends `POST /api/webhooks/shopify/orders` (or fallback endpoint) to Comet.
-4. Event is deduplicated in `retail.order_event_inbox`, resolved to brand integration, and processed async.
-5. Processor validates token + brand consistency, writes canonical `retail.orders` / `retail.order_items`. Attribution is implicit via `affiliate_professional_id` set from the checkout session — no separate attribution table.
-6. Commission accrual/reversal entries are appended in `retail.commission_ledger_entries`.
-7. Aggregate rebuild jobs update daily brand/self analytics tables for dashboard APIs.
+Shopify orders/updated webhook → ShopifyOrdersUpdatedWebhookController
+  → ProcessShopifyOrderUpdatedWebhookJob
+  → Handles refunds and cancellations
+  → Updates or reverses CommissionLedgerEntry accordingly
+```
 
-#### Booking Flow
-1. Customer calls `POST /api/public/booking/availability` → proxied to Square/Fresha.
-2. Customer calls `POST /api/public/booking/checkout` → appointment created in integration.
+#### 4. Storefront Data
+```
+Hydrogen storefront → PublicShopifyStorefrontController
+  → Returns Shopify domain + Storefront API token
+  → Hydrogen fetches products directly from Shopify Storefront API
+  → No local product data involved
 
-#### Media Upload Flow
-1. Professional calls `POST /api/uploads` → server validates, uploads to R2, records `SiteMedia`.
-2. `ProcessImageVariantsJob` dispatched → generates WebP variants → records `MediaVariant`.
-3. Video path: `ProcessVideoVariantsJob` → FFmpeg MP4 + HLS (currently feature-flagged off).
+Hydrogen internal API (server-to-server, token-authenticated):
+  → HydrogenBrandConfigController — brand theme, logo, colours for storefront rendering
+  → HydrogenAffiliateController — affiliate lookup by slug/identifier
+  → HydrogenAffiliateProductsController — affiliate's selected products list
+```
+
+#### 4a. Shopify Webhook Lifecycle
+```
+Registered webhooks (via RegisterShopifyWebhooksJob):
+  orders/paid    → ShopifyOrderWebhookController → commission ledger entry
+  orders/updated → ShopifyOrdersUpdatedWebhookController → refund/cancellation handling
+  app/uninstalled → ShopifyAppUninstalledWebhookController → cleanup brand integration
+  shop/update    → ShopifyShopUpdateWebhookController → ProcessShopifyShopUpdateJob → sync shop data
+  GDPR (customers/redact, customers/data_request, shop/redact) → ShopifyGdprWebhookController
+
+All Shopify webhooks validated via HMAC signature (ValidatesShopifyWebhookHmac concern).
+```
+
+#### 5. Public Site Visit
+```
+Request hits {subdomain}.sidest.co → PublicSiteResolver identifies professional
+GET /api/public/site → full site payload (cached in Redis, 15-min TTL)
+Analytics events (POST /api/public/analytics/*) recorded asynchronously
+```
+
+#### 6. Booking Flow
+```
+Customer calls POST /api/public/booking/availability → proxied to Square/Fresha
+Customer calls POST /api/public/booking/checkout → appointment created in integration
+```
+
+#### 7. Media Upload
+```
+POST /api/uploads → server validates, uploads to R2, records SiteMedia
+ProcessImageVariantsJob → generates WebP variants → records MediaVariant
+Video: ProcessVideoVariantsJob → FFmpeg MP4 + HLS (feature-flagged off)
+```
 
 ### Authentication & Middleware Stack
 
 ```
-Request → supabase.jwt (validate JWT, extract supabase_uid)
-        → current.pro (load Professional from supabase_uid)
-        → [staff] (require staff role)
-        → [staff.admin] (require staff admin role)
-        → [require.plan] (check entitlement)
+Request → VerifySupabaseJwt (validate JWT via JWKS, extract supabase_uid)
+        → LoadCurrentProfessional (load Professional from cache)
+        → [EnsureSidestStaff] (require staff role)
+        → [EnsureSidestAdmin] (require admin role)
+        → [RequirePlan] (check subscription entitlement)
         → Controller
 ```
 
@@ -250,100 +344,95 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 | Schema | Contents |
 |--------|----------|
 | `public` | Laravel infrastructure (cache, jobs, failed_jobs) |
-| `core` | Main domain (professionals, sites, services, customers, blocks, media, integrations, brand links) |
-| `analytics` | Event tracking (site_visits, link_clicks, lead_submissions) |
+| `core` | Professionals, sites, services, customers, blocks, media, integrations, brand links, invites, notifications |
+| `analytics` | Site visits, link clicks, lead submissions, hourly/daily metrics |
 | `billing` | Plans, subscriptions |
-| `retail` | Brand catalog/settings (`brand_products`, `brand_product_settings`, affiliate settings/overrides), store settings, selections, commerce tables |
+| `retail` | Commission ledger, payouts, brand store settings, team memberships, affiliate product selections |
 
-`DB_SEARCH_PATH=public,core,analytics,billing,retail` — queries can reference tables without schema prefix.
+`DB_SEARCH_PATH=public,core,analytics,billing,retail`
 
-### Caching Strategy
-- Professional payload + services cached on read, invalidated on write.
-- Public site blocks, links, sections cached per site.
-- Cache keys generated by `CacheKeyGenerator` using professional/site ID.
-- Cache driver: Redis via Predis.
+### Queue Architecture
+
+| Queue | Connection | Purpose |
+|-------|-----------|---------|
+| `default` | redis | Notifications, cache warm, payouts |
+| `analytics` | redis | Hourly/daily analytics rebuilds |
+| `images` | redis | Image variant processing |
+| `videos` | redis_video | Video transcoding (dedicated connection) |
+| `integrations` | redis | Shopify, Square, Fresha API calls |
+| `mail` | redis | Individual email delivery |
 
 ---
 
-## Current Progress
+## What Was Removed in V2
+
+The following V1 code has been deleted. Do NOT recreate these:
+
+- **12 controllers**: BrandProducts, BrandProductMedia, BrandProductAffiliateSetting, BrandProductAffiliateOverride, FeaturedProducts, BrandPromotion, BrandAffiliateSegment, BrandAffiliateSettings, BrandAffiliateDefaults, BrandStore, StoreAnalyticsV2, PublicStore, EnterpriseController
+- **9 services**: BrandProductCatalog, BrandProductSettings, ShopifyCatalogSync, PromotionResolution, SegmentEvaluation, FeaturedProductsPayload, PublicStripeCheckout, OrderAnalyticsAggregate, OrderAnalyticsHourlyAggregate
+- **10 models**: BrandProduct, BrandProductSetting, BrandProductMedia, BrandProductAffiliateSetting, BrandProductAffiliateOverride, BrandAffiliateSegment, BrandAffiliateSegmentMember, BrandAffiliateSettings, BrandPromotion, ProfessionalSelection
+- **7 jobs**: RebuildBrand/ProfessionalDailyAggregates, RebuildBrand/ProfessionalHourlyAggregates, SendPromotionStart/EndNotifications, RefreshActiveSegmentMembers
+- **15 database tables** dropped, **60+ routes** removed
+
+**V1 concepts that no longer exist:**
+- Local product catalog (`brand_products` table) — products live in Shopify
+- Per-affiliate product pricing overrides — commission rates in Shopify metafields
+- Promotions and segments — removed entirely
+- Multi-brand affiliates — V2 is single-brand per affiliate
+- Public store/checkout endpoints — Hydrogen handles checkout natively
+- Shopify webhook order processing controller — order processing via Stripe Connect now
+- Legal content (auto-generated T&Cs + privacy) — tables dropped, services and controllers removed
+
+---
+
+## Current Progress (V2)
 
 ### Fully Implemented
-- Professional profile CRUD (types: barber, hairdresser, influencer, promoter, brand, etc.)
-- Mini-site builder (subdomain routing, blocks, sections, links, themes)
-- Service and category management with Square/Fresha sync field support
+- Professional profile CRUD (types enforced via config: brand, professional, influencer; schema supports additional types)
+- Mini-site builder (subdomain routing, blocks, sections, links, themes, subdomain aliases)
+- Service and category management with Square/Fresha bidirectional sync
 - Customer database (soft delete, restore, marketing preferences)
 - Email marketing subscriptions (opt-in/out with token-based unsubscribe)
 - Image upload + WebP variant processing (optimised/maximised)
 - Gallery and content media pools
 - QR code generation per professional
-- Square OAuth integration + service catalogue sync
+- Square OAuth integration + service sync
 - Fresha OAuth integration + service sync
 - Brand partner link management (connect/disconnect affiliates)
-- Brand affiliate invite system (token, expiry, claim flow)
-- Brand affiliate commerce foundation:
-  - `brand_products` full catalog + `brand_product_settings`
-  - global availability rules with per-affiliate deny/allow access overrides
-  - per-affiliate commission/discount/custom price overrides
-  - enterprise brand-management links (`distributor` enterprise type)
-  - strict selection validation by `brand_product_id`
-  - global 10-product cap per professional across brands
-  - featured cap 10 per brand
-- Store API cutover and catalog controls:
-  - `PUT /api/store/featured-products` hard-cutover payload (`selected_products[{brand_product_id,...}]`)
-  - `GET /api/store/available-products` affiliate-visible catalog
-  - `GET/PATCH /api/store/brand-products` + bulk patch
-  - affiliate override management endpoints (`deny` + `allow`)
-  - per-affiliate product pricing endpoints (`GET|PUT|DELETE /api/store/affiliate-product-settings`)
-  - legacy product-settings write flow removed (`PUT /api/store/brand-product-settings`)
-  - featured-products reads no longer fall back to `site.settings.selected_products`
-- Shopify-canonical order analytics pipeline:
-  - public checkout-session attribution endpoint (`POST /api/public/store/checkout-session`)
-  - Shopify orders webhook ingestion (`POST /api/webhooks/shopify/orders`)
-  - secure fallback ingestion path (`POST /api/webhooks/shopify/orders/fallback`)
-  - canonical order normalization (`retail.orders`, `retail.order_items`)
-  - append-only commission ledger accrual/reversal handling
-  - deterministic daily aggregate rebuild jobs (brand + professional)
-- Professional analytics cutover:
-  - new brand endpoints `/api/store/brand-analytics/*`
-  - new self endpoints `/api/store/my-analytics/*`
-- Shopify integration management endpoints for brand accounts:
-  - `/api/shopify/status`, `/api/shopify/connect`, `/api/shopify/disconnect`, `/api/shopify/token`, `/api/shopify/webhooks/register`
-- Selection auto-cleanup + notification on unavailability/deny/disconnect
-- Subscription and plan management (Stripe-backed)
-- Site analytics (page views, link clicks, leads)
-- Legal content (auto-generated T&Cs + privacy, manual override)
+- Brand affiliate invite system (token, expiry, claim, bulk, CSV import)
+- Shopify integration:
+  - OAuth flow with auto brand signup and profile auto-fill
+  - Storefront API token creation
+  - Full webhook suite (orders/paid, orders/updated, app/uninstalled, shop/update, GDPR)
+  - Post-OAuth setup: sales channel, collections, metafields, logo sync
+  - Refund/cancellation handling via orders/updated webhook
+- Hydrogen internal API (brand config, affiliate lookup, affiliate products)
+- Stripe Connect Express onboarding and payment method management
+- Commission payout processing (hybrid funding: wallet + card → Stripe transfer)
+- Commission wallet top-ups via Stripe Checkout
+- Brand team RBAC (5 roles with capability-based access)
+- Brand onboarding readiness checklist
+- Subscription and plan management
+- Site analytics (page views, link clicks, leads) with hourly/daily aggregation
 - Google Business Profile sync
-- Staff dashboard (browse, search, edit, soft delete, restore, hard delete)
-- Soft delete + restore on all major entities
-- In-app notifications system
-- Redis caching across professional and public site layers
+- Staff dashboard (browse, search, edit, archive, restore, hard delete)
+- In-app notification system with email preferences and policies
+- Waitlist signup system
+- UI confirmation preference management
+- Redis caching with single-flight locking across professional and public site layers
+- V1 dead code removal (controllers, services, models, jobs, routes)
+- V2 comments added to all surviving backend classes
 
-### Partially Implemented / In Progress
-- **Video uploads** — Code exists (`ProcessVideoVariantsJob`, FFmpeg), feature-flagged off (`COMET_VIDEO_UPLOADS_ENABLED=false`). Needs video workers running before enabling.
-- **Frontend checkout-session bridge** — Public checkout clients must call checkout-session and write `comet_session` into Shopify order metadata in all flows.
-- **Shopify product ingest runtime** — Catalog ingest/sync into `retail.brand_products` is still not fully automated end-to-end.
+### In Progress
+- **V2 database migration** — Dropping V1 tables, creating `affiliate_product_selections`, renaming analytics tables
+- **Hydrogen storefront** — Separate repo (`sidest-hydrogen`), not part of this backend
+- **Embedded Shopify app** — Separate repo (`sidest-embedded`), brand setup wizard
+- **Video uploads** — Code exists, feature-flagged off (`SIDEST_VIDEO_UPLOADS_ENABLED=false`)
 
 ### Known Issues / Notes
 - Laravel database migrations are intentionally disabled (guarded in composer). All schema changes go through `supabase/migrations/`.
 - Video upload worker queue (`redis_video`) must be running separately from the default queue.
-- `COMET_VIDEO_UPLOADS_ENABLED` must be set to `true` to enable video upload endpoints.
-
----
-
-## Next Tasks
-
-### Highest Priority
-1. **Frontend checkout token wiring** — Ensure every storefront order path calls checkout-session and persists `comet_session` on Shopify orders.
-2. **Shopify product ingest runtime** — Implement/finish production ingest + sync bootstrap for brand product catalog rows.
-3. **Enable video uploads** — Ensure `redis_video` queue worker is running, then set feature flag.
-
-### Suggested Implementation Order
-1. Frontend checkout-session + token write integration
-2. Shopify catalog sync service/runtime bootstrap
-3. Video upload enablement (infrastructure task)
-
-### Open Questions
-- [TBD: Should fallback webhook ingestion be enabled in production permanently or restricted to break-glass use only?]
+- Some V1 references may still exist in model relationships and service code that need cleanup (see V2-REMOVAL-PLAN.md Phase 2).
 
 ---
 
@@ -353,21 +442,24 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 - **Never use Laravel migrations.** All schema changes use `supabase/migrations/` (plain SQL). There is a composer guard enforcing this.
 - **Supabase JWT only for auth.** Never add password-based auth or Laravel Sanctum. Tokens come from Supabase.
 - **Multi-schema PostgreSQL.** Always respect schema namespaces (`core.`, `retail.`, `analytics.`, `billing.`). The search path handles bare table names in queries, but migrations must be fully qualified.
-- **R2 for all media.** Never store media in local filesystem or Supabase Storage (legacy, being phased out).
+- **R2 for all media.** Never store media in local filesystem or Supabase Storage.
+- **Products live in Shopify.** Do not create local product tables. Use Storefront API and metafields.
+- **Single-brand affiliates.** Each affiliate belongs to one brand only.
 
 ### Coding Conventions
 - Follow **Laravel conventions** — Eloquent relationships, Form Requests for validation, Service classes for business logic, Action classes for single operations.
 - Use **Pest** for all tests. No PHPUnit-style test classes.
 - Format with **Laravel Pint** (`./vendor/bin/pint`) before committing.
 - Controllers should be thin — delegate to Services and Actions.
-- Use `Concerns\ResolveCurrentProfessional` and `Concerns\ResolveCurrentSite` traits in controllers, don't query the professional directly.
+- All API responses use **Resource classes** — never return raw Eloquent models.
 - Sensitive data (OAuth tokens) must be encrypted at rest (use `encrypted:` Eloquent casting).
 - Soft deletes on any user-generated content model.
 - Cache invalidation must happen in Observers or after write operations — never leave stale cache.
+- Every class has a `// V2:` comment above the class declaration explaining its role.
 
 ### API Conventions
 - All routes require `Accept: application/json`.
-- Public mini-site routes are domain-scoped to `{subdomain}.{COMET_PUBLIC_DOMAIN}`.
+- Public mini-site routes are domain-scoped to `{subdomain}.{SIDEST_PUBLIC_DOMAIN}`.
 - Professional/staff routes are on the API host (`APP_URL`).
 - Rate limiting: `throttle:public-site` for public, `throttle:analytics` for analytics endpoints.
 - Return consistent JSON responses — use Laravel's resource/collection pattern.
@@ -376,19 +468,19 @@ Request → supabase.jwt (validate JWT, extract supabase_uid)
 - Redis cache is the primary read layer for public site payload — keep cache warm.
 - Image variants must be processed asynchronously (queue), never inline.
 - Video jobs run on the `redis_video` queue — do not mix with the default queue.
+- Single-flight locking on cache warm prevents thundering herd.
 
 ---
 
 ## AI Working Instructions
 
 When another AI reads this file, it should:
-- Read this document before making any changes to the codebase.
-- Preserve the existing architecture (multi-schema DB, action/service pattern, Supabase JWT) unless there is a strong, discussed reason not to.
-- Explain proposed changes before large refactors — write the plan in a comment or update this file.
-- Update this file (specifically **Current Progress** and **Decisions Log**) after meaningful implementation.
-- Keep notes concise and factual.
-- Avoid duplicating outdated information — update existing entries rather than appending.
-- Add new architectural decisions to the **Decisions Log** below.
+- Read this document and `V2_BACKEND_REFERENCE.md` before making changes.
+- Check `// V2:` comments on classes for per-file context.
+- Preserve the V2 architecture (Shopify-native products, Stripe Connect, single-brand affiliates) unless explicitly told to change it.
+- Never recreate V1 concepts (local product tables, promotions, segments, multi-brand affiliates).
+- Explain proposed changes before large refactors.
+- Update this file after meaningful implementation.
 - Never run `php artisan migrate` — use `supabase/migrations/` for schema changes.
 - Check `docs/api.md` for the authoritative API reference before adding or modifying endpoints.
 
@@ -399,26 +491,32 @@ When another AI reads this file, it should:
 | Date | Decision | Reason |
 |------|----------|--------|
 | Pre-2026 | Use Supabase for auth (JWT) instead of Laravel Sanctum | Supabase handles cross-platform auth; avoids managing passwords |
-| Pre-2026 | Use Supabase PostgreSQL with multiple schemas (core, retail, analytics, billing) | Clean domain separation; maps to business layers |
-| Pre-2026 | Disable Laravel migrations; use supabase/migrations (SQL) only | Supabase manages DB schema; avoids conflicts with RLS and extensions |
+| Pre-2026 | Use Supabase PostgreSQL with multiple schemas | Clean domain separation; maps to business layers |
+| Pre-2026 | Disable Laravel migrations; use supabase/migrations only | Supabase manages DB schema; avoids conflicts with RLS and extensions |
 | Pre-2026 | Use Cloudflare R2 for all media storage | Cost-effective, S3-compatible, CDN-native |
-| Pre-2026 | Feature-flag video uploads (`COMET_VIDEO_UPLOADS_ENABLED`) | FFmpeg workers must be provisioned separately before enabling |
-| Pre-2026 | Professional follows brand theme (no free-range customisation) | Brand identity consistency is the core value proposition for brands |
-| Pre-2026 | Commission and price overrides are set by brand, not affiliate | Brands control pricing strategy for their affiliate channel |
+| Pre-2026 | Feature-flag video uploads | FFmpeg workers must be provisioned separately |
+| Pre-2026 | Professional follows brand theme | Brand identity consistency is the core value proposition |
 | 2026-03-19 | Created AI_CONTEXT.md as shared AI source of truth | Multiple AI tools working on codebase need a shared orientation document |
-| 2026-03-19 | Order fulfilment is handled entirely by brand via Shopify app | Comet records the order and pushes it to the brand's Shopify store; Comet never ships product |
-| 2026-03-19 | Commission distribution via Stripe Connect (automatic) | Automated payouts to affiliates; Comet takes platform fee from the brand's monthly subscription (~$200/mo), not from the transaction |
-| 2026-03-19 | Platform fee model: brand pays monthly subscription (~$200/mo) | Simpler billing — brand pays for access, not per-transaction fees on affiliate side |
-| 2026-03-19 | Affiliates can connect to multiple brands | One affiliate can represent multiple brands; one "primary" brand may be designated in future but not yet decided |
-| 2026-03-19 | No in-house booking system — Square and Fresha integrations only | Reduces scope; may revisit native booking in future |
-| 2026-03-20 | Featured selection contract is hard-cutover to `brand_product_id` payload | Prevents cross-brand Shopify ID ambiguity and enforces strict brand-scoped selection validation |
-| 2026-03-20 | Availability model is global + per-affiliate deny/allow access overrides (deny precedence) | Keeps governance centralized at brand level while allowing affiliate-specific exceptions |
-| 2026-03-22 | Added `retail.brand_product_affiliate_settings` and API support for per-affiliate commission/discount/custom price | Brands can run affiliate-specific pricing and commission strategies without changing global brand product settings |
-| 2026-03-20 | Product selection cap is global 10 per professional across brands; featured cap is 10 per brand | Maintains consistent storefront limits while supporting multi-brand catalogs |
-| 2026-03-20 | Distributor enterprises can manage linked brands via `core.enterprise_brand_links` | Enables parent/distributor operating model without transferring brand ownership |
-| 2026-03-20 | Removed legacy brand product-settings flow and site-settings product fallback | Prevents legacy writes from deleting modern catalog settings and keeps read/write paths strictly brand-product scoped |
-| 2026-03-22 | Shopify confirmed order events are canonical for store analytics | Prevents client-side tampering and supports lifecycle-accurate refunds/cancellations for financial metrics |
-| 2026-03-22 | Added signed fallback Shopify order ingestion endpoint (`/api/webhooks/shopify/orders/fallback`) | Provides controlled recovery path while still fetching canonical order data from Shopify |
+| 2026-03-19 | Commission distribution via Stripe Connect (80/20 split) | Automated payouts to affiliates; platform takes 20% |
+| 2026-03-19 | No in-house booking system — Square and Fresha only | Reduces scope; may revisit native booking in future |
+| 2026-04-03 | **V2 architecture transition** | Products move to Shopify Storefront API, storefronts to Hydrogen, payouts to Stripe Connect |
+| 2026-04-03 | Single-brand affiliate model | Simplifies affiliate management; each affiliate belongs to one brand |
+| 2026-04-03 | Remove local product tables | Products live in Shopify; `affiliate_product_selections` uses Shopify GIDs |
+| 2026-04-03 | Remove promotions and segments | Commission rates handled via Shopify metafields; no need for complex targeting |
+| 2026-04-03 | V1 dead code removal | 12 controllers, 9 services, 10 models, 7 jobs, 60+ routes removed |
+| 2026-04-03 | Added V2 comments to all surviving backend classes | Enables developers and AI agents to understand each class's V2 role without prior V1 context |
+| 2026-04-03 | Created V2_BACKEND_REFERENCE.md | Quick-context document for navigating the backend without reading every file |
+| 2026-04-03 | Removed legal content feature | Legal content tables dropped; services and controllers removed. Not needed in V2 affiliate model |
+| 2026-04-03 | Expanded Shopify webhook suite | Added orders/updated (refunds), app/uninstalled, shop/update, GDPR webhooks beyond initial orders/paid |
+| 2026-04-03 | Post-OAuth Shopify setup pipeline | Auto-creates sales channel, collections, metafields, syncs logo, and marks setup complete after OAuth |
+| 2026-04-03 | Hydrogen internal API | Server-to-server endpoints for brand config, affiliate lookup, and affiliate products |
+| 2026-04-03 | Brand signup auto-fill | ShopProfileAutoFillService populates brand profile from Shopify shop data during OAuth |
+| 2026-04-03 | Renamed Comet → Side St | Full codebase rename across config, routes, middleware, models |
+| 2026-04-11 | Shopify OAuth defers account creation | Shop owner email (e.g., CEO) was being used as login. Now caches credentials with encrypted setup token (1hr TTL); brand enters own email in setup wizard |
+| 2026-04-11 | Design tokens in `site.settings.design` | Design belongs to the brand, not the Shopify integration. Persists across disconnect/reconnect. Only Shopify-specific data in `provider_metadata` |
+| 2026-04-11 | All images through WebP variant pipeline | Consistent CDN delivery. Brand logo/placeholder were previously stored raw — now all go through SiteMedia → R2 → ProcessImageVariantsJob → MediaVariant |
+| 2026-04-11 | Open invite links for all active brands | `/join/{handle}` works if brand exists and is active. No toggle needed — `affiliate_visibility` controls directory listing, not link access |
+| 2026-04-11 | Custom product photos: two-level toggle | Global brand setting (default: true) → per-affiliate override (nullable, inherits when null). Per-product rejected as over-complex |
 
 ---
 
@@ -426,23 +524,19 @@ When another AI reads this file, it should:
 
 ### What Another AI Should Know Before Continuing
 
-1. **This is a Laravel 12 API only.** There is no Blade frontend. The frontend is a separate repo (`https://github.com/hunterbalcombesykes/Commet-web`, branch `main`, deployed on Vercel) and communicates via JSON API.
-2. **Database is Supabase PostgreSQL.** Use `supabase/migrations/` for all schema changes. Eloquent models map to tables in non-public schemas — check the model's `$table` and `$connection` properties.
-3. **Auth flow is JWT-first.** Every professional API request must pass `Authorization: Bearer <supabase_jwt>`. The `supabase.jwt` middleware validates against JWKS.
-4. **Media is async.** After upload, variants are queued. Don't expect variants to exist immediately after upload.
-5. **The retail/commerce layer is mid-flight.** Brand-scoped catalog/availability/selection governance is implemented, and Shopify-canonical order recording + attribution + analytics ingestion are in place. Export runtime and payout transfer execution are still pending.
-6. **Video uploads are disabled by default.** Set `COMET_VIDEO_UPLOADS_ENABLED=true` and ensure the `redis_video` queue worker is running before testing video flows.
+1. **This is a Laravel 12 API backend.** Storefronts are Hydrogen (separate repo). Dashboard is Next.js (separate repo). Embedded app is Remix (separate repo).
+2. **Database is Supabase PostgreSQL.** Use `supabase/migrations/` for all schema changes. Eloquent models map to tables in non-public schemas.
+3. **Auth flow is JWT-first.** Every professional API request must pass `Authorization: Bearer <supabase_jwt>`. The `VerifySupabaseJwt` middleware validates against JWKS.
+4. **Products live in Shopify, not locally.** The `AffiliateProductSelection` model references `shopify_product_gid`, not a local UUID. Commission rates come from Shopify metafields.
+5. **V1 dead code is gone.** Do not recreate BrandProduct, ProfessionalSelection, BrandPromotion, BrandAffiliateSegment, or any of the other removed V1 models/services/controllers.
+6. **Every class has a `// V2:` comment** above its declaration explaining its role. Read these for quick context.
+7. **`V2_BACKEND_REFERENCE.md`** has a complete per-file reference with V2 critical paths, queue architecture, and what was removed.
+8. **Video uploads are disabled by default.** Set `SIDEST_VIDEO_UPLOADS_ENABLED=true` and ensure the `redis_video` queue worker is running.
 
 ### Fragile Parts
-- `PublicSiteResolver` — resolves site by subdomain from HTTP header or query param. Changing subdomain resolution logic affects all public site functionality.
-- `SiteCacheService` / `ProfessionalCacheService` — cache invalidation logic must stay in sync with write operations. Missing an invalidation call causes stale public data.
-- `ProfessionalIntegration` encrypted token storage — changing the encryption key or casting will break existing OAuth sessions.
-- `BrandPartnerLink` slot numbering — slot assignment logic must remain consistent or brand affiliate ordering breaks.
-- `supabase/migrations/` — migrations run against a live Supabase project. Always test in a staging environment first. Irreversible migrations must include a rollback plan.
-
-### Unfinished Work In Progress (as of 2026-03-22)
-- Video upload workers and enabling the feature flag
-- Frontend checkout-session token wiring across all checkout paths
-- Shopify brand catalogue ingest/sync runtime completion
-- Analytics exports/report schedule APIs + generation jobs
-- [NEEDS INPUT: payout rail/account model for commission transfer execution]
+- `PublicSiteResolver` — resolves site by subdomain. Changing resolution logic affects all public site functionality.
+- `SiteCacheService` — single-flight locking and cache invalidation must stay in sync with write operations.
+- `ProfessionalIntegration` encrypted token storage — changing encryption or casting breaks existing OAuth sessions.
+- `CommissionPayoutService` — hybrid funding logic (wallet + card) with Stripe Connect transfers. Complex error handling.
+- `BrandPartnerLink` slot numbering — slot assignment must remain consistent.
+- `supabase/migrations/` — migrations run against a live Supabase project. Always test in staging first.

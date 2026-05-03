@@ -8,13 +8,15 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
-use App\Services\Cache\ProfessionalCacheService;
+use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\BrandPartnerLinkService;
-use App\Services\Store\SelectionCleanupService;
+use App\Services\Professional\BrandPartnerSiteSettingsSync;
+use App\Services\Professional\DTO\DisconnectRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
 
+// V2: Affiliate connects to/disconnects from brand partners. Simplified to single-brand model in V2.
 class BrandPartnerController extends ApiController
 {
     use NormalizesPerPage;
@@ -24,7 +26,8 @@ class BrandPartnerController extends ApiController
     public function connect(
         Request $request,
         string $brandProfessionalId,
-        BrandPartnerLinkService $brandPartnerLinks
+        BrandPartnerLinkService $brandPartnerLinks,
+        BrandPartnerSiteSettingsSync $sync,
     ): JsonResponse {
         $professional = $this->currentProfessional($request);
 
@@ -48,14 +51,10 @@ class BrandPartnerController extends ApiController
         }
 
         $brandProfile = $brand->brandProfile;
-        $visibility = $brandProfile?->affiliate_visibility ?? 'invite_only';
-        if ($visibility === 'invite_only') {
-            return $this->error('This brand is invite-only. You must accept an invitation to connect.', 403);
-        }
 
-        $brandStatus = $brandProfile?->brand_status ?? 'deactivated';
-        if ($brandStatus === 'deactivated') {
-            return $this->error('This brand is not currently accepting new connections.', 403);
+        $brandStatus = $brandProfile?->brand_status ?? 'systems_down';
+        if ($brandStatus === 'systems_down') {
+            return $this->error('This brand is temporarily unavailable due to a platform issue.', 403);
         }
 
         try {
@@ -64,8 +63,8 @@ class BrandPartnerController extends ApiController
             return $this->error($exception->getMessage(), 422);
         }
 
-        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
-        $this->invalidateAffiliateCaches($site);
+        $sync->sync($site, (string) $professional->id);
+        $sync->invalidateAffiliateCaches($site);
 
         return $this->success([
             'connected' => true,
@@ -74,46 +73,46 @@ class BrandPartnerController extends ApiController
         ]);
     }
 
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, BrandPartnerLinkService $brandPartnerLinks): JsonResponse
     {
+        $professional = $this->currentProfessional($request);
         $perPage = $this->normalizePerPage($request, 25, 100);
 
         $page = Professional::query()
             ->where('professional_type', 'brand')
             ->where('status', 'active')
-            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public')->where('brand_status', 'active'))
+            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public')->where('brand_status', 'live'))
             ->with('site')
             ->orderByRaw('COALESCE(display_name, handle) asc')
             ->paginate($perPage)
             ->appends($request->query());
 
         $brands = $page->getCollection()
-            ->map(function (Professional $professional): array {
-                $siteSettings = is_array($professional->site?->settings ?? null) ? $professional->site->settings : [];
-                $designSettings = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
-                $mediaSettings = is_array($designSettings['media'] ?? null) ? $designSettings['media'] : [];
+            ->map(fn (Professional $p): array => $this->brandToArray($p))
+            ->keyBy('id');
 
-                return [
-                    'id' => $professional->id,
-                    'display_name' => $professional->display_name,
-                    'handle' => $professional->handle,
-                    'subdomain' => $professional->site?->subdomain,
-                    'brand_logo_url' => is_string($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'] ?? null)
-                        ? ($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'])
-                        : null,
-                    'brand_color' => is_string($designSettings['dark_color'] ?? $designSettings['darkColor'] ?? null)
-                        ? ($designSettings['dark_color'] ?? $designSettings['darkColor'])
-                        : null,
-                    'brand_contrast_color' => is_string($designSettings['white_color'] ?? $designSettings['whiteColor'] ?? null)
-                        ? ($designSettings['white_color'] ?? $designSettings['whiteColor'])
-                        : null,
-                ];
-            })
-            ->values()
-            ->all();
+        // Always include brands the caller is already connected to, regardless of visibility,
+        // so the frontend can display their logo and name on the settings card.
+        $connectedIds = $brandPartnerLinks->getLinksForAffiliate((string) $professional->id)
+            ->pluck('brand_professional_id')
+            ->map(fn ($id): string => (string) $id)
+            ->unique()
+            ->diff($brands->keys())
+            ->values();
+
+        if ($connectedIds->isNotEmpty()) {
+            Professional::query()
+                ->whereIn('id', $connectedIds->all())
+                ->where('professional_type', 'brand')
+                ->with('site')
+                ->get()
+                ->each(function (Professional $p) use ($brands): void {
+                    $brands->put((string) $p->id, $this->brandToArray($p));
+                });
+        }
 
         $payload = $this->paginatedResponse($page, 'brands');
-        $payload['brands'] = $brands;
+        $payload['brands'] = $brands->values()->all();
 
         return $this->success($payload);
     }
@@ -121,7 +120,8 @@ class BrandPartnerController extends ApiController
     public function promote(
         Request $request,
         string $brandProfessionalId,
-        BrandPartnerLinkService $brandPartnerLinks
+        BrandPartnerLinkService $brandPartnerLinks,
+        BrandPartnerSiteSettingsSync $sync,
     ): JsonResponse {
         $professional = $this->currentProfessional($request);
 
@@ -139,8 +139,8 @@ class BrandPartnerController extends ApiController
             return $this->error('Brand partner not found in your additional partners.', 404);
         }
 
-        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
-        $this->invalidateAffiliateCaches($site);
+        $sync->sync($site, (string) $professional->id);
+        $sync->invalidateAffiliateCaches($site);
 
         return $this->success([
             'promoted' => true,
@@ -151,8 +151,7 @@ class BrandPartnerController extends ApiController
     public function disconnect(
         Request $request,
         string $brandProfessionalId,
-        BrandPartnerLinkService $brandPartnerLinks,
-        SelectionCleanupService $selectionCleanup
+        BrandPartnerLinkLifecycleService $lifecycle,
     ): JsonResponse {
         $professional = $this->currentProfessional($request);
 
@@ -160,125 +159,58 @@ class BrandPartnerController extends ApiController
             return $this->error('Brand accounts cannot manage brand partner connections.', 403);
         }
 
-        $site = Site::query()->where('professional_id', $professional->id)->first();
-        if (! $site) {
-            return $this->error('Site not found.', 404);
+        $data = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $brand = Professional::query()->whereKey($brandProfessionalId)->first();
+        if (! $brand) {
+            return $this->error('Brand partner not found.', 404);
         }
 
-        $affiliateProfessionalId = (string) $professional->id;
-        $disconnected = $brandPartnerLinks->disconnectBrandFromAffiliate($affiliateProfessionalId, (string) $brandProfessionalId);
+        $result = $lifecycle->disconnect(DisconnectRequest::forAffiliate(
+            brand: $brand,
+            affiliate: $professional,
+            reason: $data['reason'] ?? null,
+        ));
 
-        if (! $disconnected) {
-            $cleanedStaleSettings = $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
-            if (! $this->settingsStillReferenceBrand($site, (string) $brandProfessionalId) && $cleanedStaleSettings) {
-                $this->invalidateAffiliateCaches($site);
-
-                return $this->success([
-                    'disconnected' => true,
-                    'brand_professional_id' => $brandProfessionalId,
-                    'stale_settings_cleaned' => true,
-                ]);
-            }
-
+        if (! $result->disconnected) {
             return $this->error('Brand partner not found in your connections.', 404);
         }
 
-        $selectionCleanup->removeSelectionsForAffiliateBrand(
-            $affiliateProfessionalId,
-            (string) $brandProfessionalId,
-            'Brand connection removed',
-            '{count} selected product(s) were removed because this brand connection ended.'
-        );
-
-        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateProfessionalId);
-        $this->invalidateAffiliateCaches($site);
-
-        return $this->success([
+        $response = [
             'disconnected' => true,
             'brand_professional_id' => $brandProfessionalId,
-        ]);
-    }
+            'selections_removed' => $result->selectionsRemoved,
+        ];
 
-    private function syncSiteBrandPartnerSettings(
-        Site $site,
-        BrandPartnerLinkService $brandPartnerLinks,
-        string $affiliateProfessionalId
-    ): bool {
-        $links = $brandPartnerLinks->getLinksForAffiliate($affiliateProfessionalId);
-        $settings = is_array($site->settings) ? $site->settings : [];
-        $originalSettings = $settings;
-
-        $brandPartner = is_array($settings['brand_partner'] ?? null)
-            ? $settings['brand_partner']
-            : [];
-
-        $primaryLink = $links->firstWhere('slot', BrandPartnerLinkService::PRIMARY_SLOT);
-        if ($primaryLink) {
-            $brandPartner['professional_id'] = (string) $primaryLink->brand_professional_id;
-        } else {
-            unset($brandPartner['professional_id'], $brandPartner['professionalId']);
+        if ($result->staleSettingsCleaned) {
+            $response['stale_settings_cleaned'] = true;
         }
 
-        $settings['brand_partner'] = $brandPartner;
-        $settings['additional_brand_partners'] = $links
-            ->filter(static fn ($link): bool => (int) $link->slot > BrandPartnerLinkService::PRIMARY_SLOT)
-            ->sortBy('slot')
-            ->map(static fn ($link): array => [
-                'professional_id' => (string) $link->brand_professional_id,
-            ])
-            ->values()
-            ->all();
-
-        if ($settings === $originalSettings) {
-            return false;
-        }
-
-        $site->settings = $settings;
-        $site->save();
-
-        return true;
+        return $this->success($response);
     }
 
-    private function settingsStillReferenceBrand(Site $site, string $brandProfessionalId): bool
+    private function brandToArray(Professional $professional): array
     {
-        $settings = is_array($site->settings) ? $site->settings : [];
-        $primaryId = trim((string) (
-            $settings['brand_partner']['professional_id']
-            ?? $settings['brand_partner']['professionalId']
-            ?? ''
-        ));
+        $siteSettings = is_array($professional->site?->settings ?? null) ? $professional->site->settings : [];
+        $designSettings = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
+        $mediaSettings = is_array($designSettings['media'] ?? null) ? $designSettings['media'] : [];
 
-        if ($primaryId === $brandProfessionalId) {
-            return true;
-        }
-
-        $additional = $settings['additional_brand_partners'] ?? $settings['additionalBrandPartners'] ?? [];
-        if (! is_array($additional)) {
-            return false;
-        }
-
-        foreach ($additional as $entry) {
-            if (! is_array($entry)) {
-                continue;
-            }
-
-            $entryId = trim((string) ($entry['professional_id'] ?? $entry['professionalId'] ?? ''));
-            if ($entryId === $brandProfessionalId) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function invalidateAffiliateCaches(Site $site): void
-    {
-        $site->loadMissing('professional');
-        $professional = $site->professional;
-        if (! $professional) {
-            return;
-        }
-
-        app(ProfessionalCacheService::class)->invalidateProfessional($professional);
+        return [
+            'id' => $professional->id,
+            'display_name' => $professional->display_name,
+            'handle' => $professional->handle,
+            'subdomain' => $professional->site?->subdomain,
+            'brand_logo_url' => is_string($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'] ?? null)
+                ? ($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'])
+                : null,
+            'brand_color' => is_string($designSettings['dark_color'] ?? $designSettings['darkColor'] ?? null)
+                ? ($designSettings['dark_color'] ?? $designSettings['darkColor'])
+                : null,
+            'brand_contrast_color' => is_string($designSettings['white_color'] ?? $designSettings['whiteColor'] ?? null)
+                ? ($designSettings['white_color'] ?? $designSettings['whiteColor'])
+                : null,
+        ];
     }
 }

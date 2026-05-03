@@ -6,17 +6,13 @@ use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
 use App\Models\BaseModel;
 use App\Models\Billing\Subscription;
-use App\Models\Core\Enterprise\Enterprise;
-use App\Models\Core\Enterprise\InfluencerPromoterContract;
-use App\Models\Core\Enterprise\ProfessionalEnterpriseMembership;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -28,13 +24,15 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int $onboarding_step
  */
 
+// V2: Central identity model. Both brands and affiliates are professionals distinguished by professional_type. Owns site, services, customers, integrations.
 class Professional extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'professionals';
+    protected $table = 'core.professionals';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $hidden = [
@@ -45,18 +43,19 @@ class Professional extends BaseModel
         'stripe_commission_funding_mode',
         'stripe_manual_balance_cents',
         'stripe_manual_balance_currency',
+        'deletion_token_hash',
     ];
 
     protected $fillable = [
         'handle',
         'display_name',
         'bio',
+        'about',
         'country_code',
         'timezone',
         'professional_type',
         'status',
         'onboarding_step',
-        'primary_enterprise_id',
         'qr_slug',
         'phone',
         'primary_email',
@@ -84,15 +83,25 @@ class Professional extends BaseModel
         'stripe_commission_funding_mode',
         'stripe_manual_balance_cents',
         'stripe_manual_balance_currency',
+        'stripe_grace_period_ends_at',
 
+        // Account deletion lifecycle
+        'deletion_token_hash',
+        'deletion_requested_at',
+        'deletion_confirmed_at',
+        'deletion_previous_status',
     ];
 
     protected $casts = [
         'onboarding_step' => 'integer',
         'stripe_manual_balance_cents' => 'integer',
-        'created_at'      => 'datetime',
-        'updated_at'      => 'datetime',
-        'deleted_at'      => 'datetime',
+        'stripe_grace_period_ends_at' => 'datetime',
+        'about' => 'array',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+        'deleted_at' => 'datetime',
+        'deletion_requested_at' => 'datetime',
+        'deletion_confirmed_at' => 'datetime',
     ];
 
     public function isInfluencer(): bool
@@ -110,6 +119,14 @@ class Professional extends BaseModel
         return mb_strtolower(trim((string) ($this->professional_type ?? ''))) === 'professional';
     }
 
+    // Account is in the post-confirm grace period: read-only HTTP, write-blocked
+    // policies. Canonical predicate — middleware and Policies both consult this
+    // so the literal status string lives in exactly one place.
+    public function isPendingDeletion(): bool
+    {
+        return mb_strtolower(trim((string) ($this->status ?? ''))) === 'pending_deletion';
+    }
+
     public function brandProfile(): HasOne
     {
         return $this->hasOne(BrandProfile::class, 'professional_id');
@@ -118,40 +135,6 @@ class Professional extends BaseModel
     public function site(): HasOne
     {
         return $this->hasOne(Site::class, 'professional_id');
-    }
-
-    public function primaryEnterprise(): BelongsTo
-    {
-        return $this->belongsTo(Enterprise::class, 'primary_enterprise_id');
-    }
-
-    public function enterpriseMemberships(): HasMany
-    {
-        return $this->hasMany(ProfessionalEnterpriseMembership::class, 'professional_id')
-            ->orderByDesc('starts_at');
-    }
-
-    public function influencerPromoterContracts(): HasMany
-    {
-        return $this->hasMany(InfluencerPromoterContract::class, 'influencer_professional_id')
-            ->orderByDesc('starts_at');
-    }
-
-    public function activeInfluencerPromoterContract(): HasOne
-    {
-        return $this->hasOne(InfluencerPromoterContract::class, 'influencer_professional_id')
-            ->where('status', 'active')
-            ->where('starts_at', '<=', now())
-            ->where(function ($query) {
-                $query->whereNull('ends_at')
-                    ->orWhere('ends_at', '>', now());
-            })
-            ->latest('starts_at');
-    }
-
-    public function legalContent(): HasOne
-    {
-        return $this->hasOne(ProfessionalLegalContent::class, 'professional_id');
     }
 
     public function blocks(): HasMany
@@ -211,6 +194,65 @@ class Professional extends BaseModel
             ->orderByDesc('created_at');
     }
 
+    /**
+     * All brand connections where this professional is the affiliate.
+     * Empty for brand accounts (brands connect TO affiliates, not the reverse).
+     */
+    public function brandPartnerLinks(): HasMany
+    {
+        return $this->hasMany(BrandPartnerLink::class, 'affiliate_professional_id');
+    }
+
+    /**
+     * The affiliate's primary brand connection (slot 0). V2 uses a single-brand
+     * model, so this is effectively "the brand" for an affiliate, or null for
+     * an affiliate that hasn't connected yet / a brand account.
+     */
+    public function primaryBrandPartnerLink(): HasOne
+    {
+        return $this->hasOne(BrandPartnerLink::class, 'affiliate_professional_id')
+            ->where('slot', 0);
+    }
+
+    /**
+     * Return the industries that drive this professional's experience.
+     *
+     * - Brand: its own BrandProfile.industries (primary at index 0).
+     * - Affiliate (professional/influencer): the primary (slot=0) connected
+     *   brand's industries. If multi-brand lands later, the "union across
+     *   brands" decision is deferred — see docs/brand-industries.md §7.
+     *
+     * Always returns a clean array of string slugs; empty strings and
+     * non-strings are filtered defensively (legacy free-form data could
+     * contain either).
+     *
+     * @return array<int, string>
+     */
+    public function effectiveIndustries(): array
+    {
+        $industries = $this->isBrand()
+            ? ($this->brandProfile?->industries ?? [])
+            : ($this->primaryBrandPartnerLink?->brandProfessional?->brandProfile?->industries ?? []);
+
+        if (! is_array($industries)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $industries,
+            static fn ($value) => is_string($value) && $value !== ''
+        ));
+    }
+
+    /**
+     * First-is-primary convention: the first industry in the list is the
+     * primary. Null when no industries are set.
+     */
+    public function primaryIndustry(): ?string
+    {
+        return $this->effectiveIndustries()[0] ?? null;
+    }
+
     public function subscription(): HasOne
     {
         return $this->hasOne(Subscription::class, 'professional_id');
@@ -237,12 +279,6 @@ class Professional extends BaseModel
     {
         return $this->hasOne(ProfessionalIntegration::class, 'professional_id')
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY);
-    }
-
-    public function productSelections(): HasMany
-    {
-        return $this->hasMany(\App\Models\Retail\ProfessionalSelection::class, 'professional_id')
-            ->orderBy('sort_order');
     }
 
     public function integrationForProvider(string $provider): ?ProfessionalIntegration
@@ -275,5 +311,4 @@ class Professional extends BaseModel
 
         return $query;
     }
-
 }

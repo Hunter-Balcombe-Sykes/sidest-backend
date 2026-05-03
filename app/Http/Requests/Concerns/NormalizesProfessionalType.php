@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Concerns;
 
+// V2: Normalizes professional_type input to canonical values (professional, influencer, brand), handling typos and casing.
 trait NormalizesProfessionalType
 {
     protected function normalizeProfessionalTypeInput(mixed $value): mixed

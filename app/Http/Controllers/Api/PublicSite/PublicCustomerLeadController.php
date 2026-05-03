@@ -8,11 +8,12 @@ use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Http\Requests\Api\PublicSite\CustomerLeads\PublicCustomerLeadRequest;
 use App\Models\Analytics\LeadSubmission;
 use App\Models\Core\Notifications\EmailSubscription;
+use App\Services\Public\PublicSiteResolver;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Services\Public\PublicSiteResolver;
 
+// V2: Captures lead form submissions with spam detection (honeypot, timing). Creates/updates customers with marketing subscription handling.
 class PublicCustomerLeadController extends ApiController
 {
     use HashesClientData;
@@ -21,7 +22,7 @@ class PublicCustomerLeadController extends ApiController
     public function store(PublicCustomerLeadRequest $request, PublicSiteResolver $resolver): JsonResponse
     {
         $data = $request->validated();
-        $marketingOptIn = (bool)($data['marketing_opt_in'] ?? false);
+        $marketingOptIn = (bool) ($data['marketing_opt_in'] ?? false);
 
         $subdomain = $this->resolveSiteSubdomain($request);
 
@@ -29,45 +30,51 @@ class PublicCustomerLeadController extends ApiController
         $honeypot = $data['website'] ?? null;
         if (is_string($honeypot) && trim($honeypot) !== '') {
             $this->logLead($request, $subdomain, null, null, null, 'honeypot', $data['form_started_at_ms'] ?? null);
+
             return $this->success(['ok' => true], 201);
         }
 
         // 2) Timing check (optional field, but enforced if provided)
         $startedMs = $data['form_started_at_ms'] ?? null;
         if (is_int($startedMs)) {
-            $nowMs = (int)floor(microtime(true) * 1000);
+            $nowMs = (int) floor(microtime(true) * 1000);
             $delta = $nowMs - $startedMs;
 
-            $minMs = (int) config('comet.form_timing.min_ms', 2500);
-            $maxMs = (int) config('comet.form_timing.max_ms', 12 * 60 * 60 * 1000);
+            $minMs = (int) config('sidest.form_timing.min_ms', 2500);
+            $maxMs = (int) config('sidest.form_timing.max_ms', 12 * 60 * 60 * 1000);
 
             if ($delta < $minMs || $delta > $maxMs) {
                 $this->logLead($request, $subdomain, null, null, null, 'too_fast', $startedMs);
+
                 return $this->error('Invalid submission.', 422);
             }
         }
 
-        if (!$subdomain) {
+        if (! $subdomain) {
             $this->logLead($request, null, null, null, null, 'no_subdomain', $startedMs);
+
             return $this->error('Could not determine site from URL.', 400);
         }
 
         $site = $resolver->resolvePublishedSite($subdomain);
 
-        if (!$site) {
+        if (! $site) {
             $this->logLead($request, $subdomain, null, null, null, 'site_not_found', $startedMs);
+
             return $this->error('Site not found.', 404);
         }
 
-        if (!$site->professional_id) {
+        if (! $site->professional_id) {
             $this->logLead($request, $subdomain, $site->id, null, null, 'site_unlinked', $startedMs);
+
             return $this->error('Site is not linked to a professional.', 422);
         }
 
         $site->loadMissing('professional');
 
-        if (!$site->professional) {
+        if (! $site->professional) {
             $this->logLead($request, $subdomain, $site->id, null, null, 'site_unlinked', $startedMs);
+
             return $this->error('Site is not linked to a professional.', 422);
         }
 
@@ -96,11 +103,11 @@ class PublicCustomerLeadController extends ApiController
                 'notes' => $data['notes'] ?? null,
                 'external_id' => $data['external_id'] ?? null,
                 'source' => 'site',
-                'marketing_opt_in_cached' => !$marketingOptIn ? false : null, // only set to false if explicitly opted out
+                'marketing_opt_in_cached' => ! $marketingOptIn ? false : null, // only set to false if explicitly opted out
             ]);
         }
 
-        if ($marketingOptIn && !empty($data['email'])) {
+        if ($marketingOptIn && ! empty($data['email'])) {
             $this->upsertMarketingSubscription(
                 professionalId: $pro->id,
                 email: (string) $data['email'],
@@ -110,45 +117,11 @@ class PublicCustomerLeadController extends ApiController
         }
 
         $this->logLead($request, $subdomain, $site->id, $pro->id, $customer->id, 'created', $startedMs);
+
         return $this->success([
             'ok' => true,
             'customer_id' => $customer->id,
         ], 201);
-    }
-
-    private function resolveSiteSubdomain(Request $request): ?string
-    {
-        $fromHeader = trim((string) $request->header('X-Site-Subdomain', ''));
-        if ($fromHeader !== '') {
-            return strtolower($fromHeader);
-        }
-
-        $fromQuery = trim((string) $request->query('subdomain', ''));
-        if ($fromQuery !== '') {
-            return strtolower($fromQuery);
-        }
-
-        $fromSlugQuery = trim((string) $request->query('slug', ''));
-        if ($fromSlugQuery !== '') {
-            return strtolower($fromSlugQuery);
-        }
-
-        $fromInput = trim((string) $request->input('subdomain', ''));
-        if ($fromInput !== '') {
-            return strtolower($fromInput);
-        }
-
-        $fromSlugInput = trim((string) $request->input('slug', ''));
-        if ($fromSlugInput !== '') {
-            return strtolower($fromSlugInput);
-        }
-
-        $fromHost = $this->resolveSubdomainFromHost($request);
-        if ($fromHost) {
-            return strtolower($fromHost);
-        }
-
-        return null;
     }
 
     private function logLead(
@@ -157,10 +130,9 @@ class PublicCustomerLeadController extends ApiController
         ?string $siteId,
         ?string $professionalId,
         ?string $customerId,
-        string  $outcome,
-        ?int    $formStartedAtMs
-    ): void
-    {
+        string $outcome,
+        ?int $formStartedAtMs
+    ): void {
         LeadSubmission::query()->create([
             'occurred_at' => now(),
             'subdomain' => $subdomain,
@@ -178,7 +150,9 @@ class PublicCustomerLeadController extends ApiController
     private function upsertMarketingSubscription(string $professionalId, string $email, ?string $fullName, Request $request): void
     {
         $email = strtolower(trim($email));
-        if ($email === '') return;
+        if ($email === '') {
+            return;
+        }
 
         $listKey = 'marketing';
 
@@ -189,7 +163,7 @@ class PublicCustomerLeadController extends ApiController
                 ->where('email_lc', $email)
                 ->first();
 
-            if (!$sub) {
+            if (! $sub) {
                 $sub = new EmailSubscription([
                     'professional_id' => $professionalId,
                     'list_key' => $listKey,
@@ -202,7 +176,7 @@ class PublicCustomerLeadController extends ApiController
                 if ($fullName) {
                     $sub->full_name = $fullName;
                 }
-                if (!$sub->unsubscribe_token) {
+                if (! $sub->unsubscribe_token) {
                     $sub->unsubscribe_token = EmailSubscription::newUnsubscribeToken();
                 }
             }
@@ -221,6 +195,4 @@ class PublicCustomerLeadController extends ApiController
             }
         }
     }
-
-
 }

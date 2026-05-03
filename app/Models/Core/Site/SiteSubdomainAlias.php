@@ -6,13 +6,15 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Historical subdomain alias that still resolves to a site after the professional changes their subdomain.
 class SiteSubdomainAlias extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'site_subdomain_aliases';
+    protected $table = 'site.site_subdomain_aliases';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     public $timestamps = false;

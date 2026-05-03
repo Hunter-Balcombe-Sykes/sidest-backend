@@ -7,6 +7,9 @@ use App\Models\Core\Site\SiteMedia;
 use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Re-evaluates section visibility when media rows are saved, deleted, or restored.
+// Currently handles gallery images and documents — each maps to a distinct section
+// block type; mapping is defined in poolToBlockType().
 class SiteMediaObserver
 {
     public bool $afterCommit = true;
@@ -17,30 +20,26 @@ class SiteMediaObserver
 
     public function saved(SiteMedia $media): void
     {
-        if ($media->pool !== SiteMedia::POOL_GALLERY) {
-            return;
-        }
-        $this->reevaluateGallery($media);
+        $this->reevaluateIfRelevant($media);
     }
 
     public function deleted(SiteMedia $media): void
     {
-        if ($media->pool !== SiteMedia::POOL_GALLERY) {
-            return;
-        }
-        $this->reevaluateGallery($media);
+        $this->reevaluateIfRelevant($media);
     }
 
     public function restored(SiteMedia $media): void
     {
-        if ($media->pool !== SiteMedia::POOL_GALLERY) {
-            return;
-        }
-        $this->reevaluateGallery($media);
+        $this->reevaluateIfRelevant($media);
     }
 
-    private function reevaluateGallery(SiteMedia $media): void
+    private function reevaluateIfRelevant(SiteMedia $media): void
     {
+        $blockType = $this->poolToBlockType($media->pool);
+        if ($blockType === null) {
+            return;
+        }
+
         try {
             $site = Site::query()->find($media->site_id);
             if (! $site || ! $site->professional_id) {
@@ -50,14 +49,29 @@ class SiteMediaObserver
             $this->visibilityService->reevaluateEnabled(
                 (string) $site->professional_id,
                 (string) $media->site_id,
-                'gallery'
+                $blockType
             );
         } catch (\Throwable $e) {
-            Log::warning('Gallery section visibility reevaluation failed', [
+            Log::warning('Section visibility reevaluation failed on SiteMedia event', [
                 'site_media_id' => $media->id,
-                'site_id'       => $media->site_id,
-                'message'       => $e->getMessage(),
+                'site_id' => $media->site_id,
+                'pool' => $media->pool,
+                'block_type' => $blockType,
+                'message' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Map a site_media pool to the section block_type it feeds. Returns null
+     * for pools that don't drive a section (brand gallery, design, product).
+     */
+    private function poolToBlockType(?string $pool): ?string
+    {
+        return match ($pool) {
+            SiteMedia::POOL_GALLERY => 'gallery',
+            SiteMedia::POOL_DOCUMENTS => 'documents',
+            default => null,
+        };
     }
 }

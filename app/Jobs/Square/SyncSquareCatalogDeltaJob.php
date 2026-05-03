@@ -12,9 +12,14 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
+// V2: Delta/full catalog sync from Square to Side St. Booking integration only. Queue: integrations.
 class SyncSquareCatalogDeltaJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public int $tries = 3;
+
+    public array $backoff = [30, 60];
 
     public function __construct(
         public string $merchantId,
@@ -26,6 +31,10 @@ class SyncSquareCatalogDeltaJob implements ShouldQueue
 
     public function handle(SquareServiceSyncService $syncService): void
     {
+        if (! (bool) config('sidest.features.square_sync', false)) {
+            return;
+        }
+
         $integration = ProfessionalIntegration::query()
             ->where('provider', ProfessionalIntegration::PROVIDER_SQUARE)
             ->where('external_account_id', $this->merchantId)

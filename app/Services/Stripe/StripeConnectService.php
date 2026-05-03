@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
 
+// V2: Core. Stripe Connect Express onboarding, payment method collection, wallet management, and manual top-up checkout sessions. Required for affiliate payout flow.
 class StripeConnectService
 {
     private StripeClient $stripe;
@@ -19,26 +20,43 @@ class StripeConnectService
 
     /**
      * Create a Stripe Connect Express account for a professional/influencer/brand.
+     *
+     * Requires country_code to be set on the professional. Without it the
+     * account would silently default to 'AU' and Stripe would later reject
+     * the KYC form for non-AU users. Fail fast instead so the frontend can
+     * prompt for country before onboarding.
      */
     public function createConnectAccount(Professional $professional): string
     {
+        if (! is_string($professional->country_code) || trim($professional->country_code) === '') {
+            abort(
+                422,
+                'Cannot create a Stripe Connect account without a country. Please set your country on your profile before connecting Stripe.'
+            );
+        }
+
         $account = $this->stripe->accounts->create([
             'type' => 'express',
             'country' => $this->mapCountryCode($professional->country_code),
             'email' => $professional->primary_email,
+            // Affiliates are individuals/sole traders — pre-selects the individual
+            // KYC path so Stripe doesn't prompt with a business-type selector.
+            'business_type' => 'individual',
             'metadata' => [
-                'comet_professional_id' => $professional->id,
+                'sidest_professional_id' => $professional->id,
                 'professional_type' => $professional->professional_type,
             ],
             'capabilities' => [
                 'transfers' => ['requested' => true],
                 'card_payments' => ['requested' => true],
             ],
-        ]);
+        ], ['idempotency_key' => "acct_{$professional->id}"]);
 
         $professional->update([
             'stripe_connect_account_id' => $account->id,
             'stripe_connect_status' => 'onboarding',
+            'stripe_grace_period_ends_at' => $professional->stripe_grace_period_ends_at
+                ?? now()->addDays((int) config('sidest.store.grace_period_days', 30)),
         ]);
 
         return $account->id;
@@ -46,6 +64,12 @@ class StripeConnectService
 
     /**
      * Generate an onboarding link for a Connect Express account.
+     *
+     * If the professional previously soft-disconnected (status='disconnected'
+     * but account_id preserved), reset their status to 'onboarding' so the
+     * webhook handler stops skipping updates and the next account.updated
+     * event flows through normally. Stripe KYC is preserved on the account,
+     * so reconnecting is typically a one-click flow.
      */
     public function createOnboardingLink(Professional $professional, string $returnUrl, string $refreshUrl): string
     {
@@ -53,6 +77,22 @@ class StripeConnectService
 
         if (! $accountId) {
             $accountId = $this->createConnectAccount($professional);
+        } else {
+            if ($professional->stripe_connect_status === 'disconnected') {
+                $professional->update(['stripe_connect_status' => 'onboarding']);
+            }
+
+            // Patch business_type to 'individual' on any existing account that
+            // hasn't finished onboarding yet. Stripe permits this update while
+            // details_submitted is false — once submitted it's locked in.
+            try {
+                $existing = $this->stripe->accounts->retrieve($accountId);
+                if (! $existing->details_submitted && $existing->business_type !== 'individual') {
+                    $this->stripe->accounts->update($accountId, ['business_type' => 'individual']);
+                }
+            } catch (ApiErrorException) {
+                // Non-fatal — continue with existing account as-is.
+            }
         }
 
         $link = $this->stripe->accountLinks->create([
@@ -67,6 +107,11 @@ class StripeConnectService
 
     /**
      * Check the status of a Connect account and sync it locally.
+     *
+     * If the professional is in the locally-disconnected state, we skip the
+     * Stripe round-trip entirely — their account still exists at Stripe and
+     * would return 'active', but the user has explicitly opted out. Let them
+     * stay disconnected until they reconnect via createOnboardingLink.
      */
     public function syncAccountStatus(Professional $professional): array
     {
@@ -75,6 +120,15 @@ class StripeConnectService
         if (! $accountId) {
             return [
                 'status' => 'not_connected',
+                'charges_enabled' => false,
+                'payouts_enabled' => false,
+                'details_submitted' => false,
+            ];
+        }
+
+        if ($professional->stripe_connect_status === 'disconnected') {
+            return [
+                'status' => 'disconnected',
                 'charges_enabled' => false,
                 'payouts_enabled' => false,
                 'details_submitted' => false,
@@ -111,6 +165,7 @@ class StripeConnectService
 
         try {
             $link = $this->stripe->accounts->createLoginLink($accountId);
+
             return $link->url;
         } catch (ApiErrorException) {
             return null;
@@ -118,13 +173,23 @@ class StripeConnectService
     }
 
     /**
-     * Disconnect a professional's Stripe Connect account.
+     * Soft-disconnect a professional's Stripe Connect account.
+     *
+     * We preserve the stripe_connect_account_id so reconnection reuses the
+     * existing Express account — no Stripe orphan accumulation, no lost KYC
+     * data for the affiliate, reconnection is a one-click flow. Express
+     * doesn't support a clean "reject/delete" API call for accounts with
+     * history, so this local-flag approach is the canonical pattern.
+     *
+     * The payout service already guards on stripe_connect_status === 'active',
+     * so disconnected affiliates don't receive payouts. The webhook handler
+     * skips account.updated events for disconnected accounts to prevent
+     * late Stripe events from silently re-activating them.
      */
     public function disconnectAccount(Professional $professional): void
     {
         $professional->update([
-            'stripe_connect_account_id' => null,
-            'stripe_connect_status' => 'not_connected',
+            'stripe_connect_status' => 'disconnected',
         ]);
     }
 
@@ -137,10 +202,10 @@ class StripeConnectService
             'email' => $brand->primary_email,
             'name' => $brand->display_name,
             'metadata' => [
-                'comet_professional_id' => $brand->id,
+                'sidest_professional_id' => $brand->id,
                 'professional_type' => $brand->professional_type,
             ],
-        ]);
+        ], ['idempotency_key' => "customer_{$brand->id}"]);
 
         $brand->update([
             'stripe_customer_id' => $customer->id,
@@ -164,7 +229,7 @@ class StripeConnectService
             'customer' => $customerId,
             'payment_method_types' => ['card', 'au_becs_debit'],
             'metadata' => [
-                'comet_professional_id' => $brand->id,
+                'sidest_professional_id' => $brand->id,
             ],
         ]);
 
@@ -196,7 +261,7 @@ class StripeConnectService
             'cancel_url' => $cancelUrl,
             'metadata' => [
                 'purpose' => 'brand_commission_payment_method',
-                'comet_professional_id' => $brand->id,
+                'sidest_professional_id' => $brand->id,
             ],
         ]);
 
@@ -223,7 +288,7 @@ class StripeConnectService
             throw new \RuntimeException('Setup session is not complete yet.');
         }
 
-        $metadataProId = $session->metadata?->comet_professional_id ?? null;
+        $metadataProId = $session->metadata?->sidest_professional_id ?? null;
         if ($metadataProId && $metadataProId !== $brand->id) {
             throw new \RuntimeException('Setup session does not belong to this account.');
         }
@@ -390,7 +455,7 @@ class StripeConnectService
             ]],
             'metadata' => [
                 'purpose' => 'brand_commission_topup',
-                'comet_professional_id' => $brand->id,
+                'sidest_professional_id' => $brand->id,
                 'currency' => $currency,
             ],
         ]);
@@ -432,7 +497,7 @@ class StripeConnectService
             throw new \RuntimeException('Top-up payment is not completed yet.');
         }
 
-        $metadataProId = $session->metadata?->comet_professional_id ?? null;
+        $metadataProId = $session->metadata?->sidest_professional_id ?? null;
         if ($metadataProId && $metadataProId !== $brand->id) {
             throw new \RuntimeException('Top-up session does not belong to this account.');
         }
@@ -512,6 +577,7 @@ class StripeConnectService
     private function appendCheckoutSessionParam(string $url, string $param): string
     {
         $separator = str_contains($url, '?') ? '&' : '?';
+
         return $url.$separator.$param.'={CHECKOUT_SESSION_ID}';
     }
 

@@ -19,9 +19,8 @@ beforeEach(function () {
  * we pre-warm the SiteCacheService cache before making the HTTP request. The
  * service checks the cache first and returns early without ever querying the DB.
  */
-
 it('public site-by-slug route returns Cache-Control: public with CDN TTL when response is 200', function () {
-    $subdomain = 'test-cache-' . Str::random(6);
+    $subdomain = 'test-cache-'.Str::random(6);
     prewarmSiteCache($subdomain);
 
     $response = $this
@@ -37,7 +36,7 @@ it('public site-by-slug route returns Cache-Control: public with CDN TTL when re
 });
 
 it('public site-by-slug route includes Vary: X-Site-Subdomain in response headers', function () {
-    $subdomain = 'test-vary-' . Str::random(6);
+    $subdomain = 'test-vary-'.Str::random(6);
     prewarmSiteCache($subdomain);
 
     $response = $this
@@ -51,7 +50,7 @@ it('public site-by-slug route includes Vary: X-Site-Subdomain in response header
 });
 
 it('public booking config-by-slug route returns Cache-Control: public', function () {
-    $subdomain = 'test-booking-' . Str::random(6);
+    $subdomain = 'test-booking-'.Str::random(6);
     prewarmSiteCache($subdomain);
 
     $response = $this
@@ -82,7 +81,7 @@ it('unsubscribe route returns Cache-Control: no-store regardless of response cod
 });
 
 it('brand-affiliate-invites route returns Cache-Control: no-store regardless of response code', function () {
-    $response = $this->getJson('/api/public/brand-affiliate-invites/' . Str::uuid());
+    $response = $this->getJson('/api/public/brand-affiliate-invites/'.Str::uuid());
 
     $cacheControl = (string) $response->headers->get('Cache-Control', '');
     expect($cacheControl)->toContain('no-store');
@@ -112,27 +111,27 @@ function prewarmSiteCache(string $subdomain): void
     $key = CacheKeyGenerator::publicSitePayload($subdomain);
 
     Cache::put($key, [
-        'published'    => true,
-        'site'         => [
-            'id'           => (string) Str::uuid(),
-            'subdomain'    => $subdomain,
+        'published' => true,
+        'site' => [
+            'id' => (string) Str::uuid(),
+            'subdomain' => $subdomain,
             'is_published' => true,
-            'settings'     => [],
-            'gallery'      => [],
+            'settings' => [],
+            'gallery' => [],
             'content_images' => [],
         ],
         'professional' => [
-            'id'                => (string) Str::uuid(),
-            'handle'            => $subdomain,
-            'display_name'      => 'Test Pro',
+            'id' => (string) Str::uuid(),
+            'handle' => $subdomain,
+            'display_name' => 'Test Pro',
             'professional_type' => 'solo',
         ],
-        'theme'    => null,
+        'theme' => null,
         'services' => [],
-        'links'    => [],
+        'links' => [],
         'sections' => [],
-        'blocks'   => [],
-        'legal'    => null,
-        'store'    => null,
+        'blocks' => [],
+        'legal' => null,
+        'store' => null,
     ], now()->addMinutes(15));
 }

@@ -7,21 +7,20 @@ use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
-use App\Models\Retail\BrandStoreSettings;
-use App\Models\Retail\ProfessionalSelection;
-use App\Services\Professional\SectionVisibilityService;
 
+// V2: Applies account-type defaults (influencer, professional, brand, affiliate) to new professionals and their sites. Handles config inheritance and affiliate-specific overlays.
 class AccountTypeDefaultsService
 {
     public function __construct(
         private readonly SectionVisibilityService $visibilityService,
     ) {}
+
     /**
      * Resolve the effective config for a professional type, handling inheritance.
      */
     public function resolveDefaults(string $professionalType): array
     {
-        $all = config('comet.account_type_defaults', []);
+        $all = config('sidest.account_type_defaults', []);
         $typeConfig = $all[$professionalType] ?? $all['influencer'] ?? [];
 
         if (isset($typeConfig['inherits'])) {
@@ -67,15 +66,15 @@ class AccountTypeDefaultsService
             Block::query()->firstOrCreate(
                 [
                     'professional_id' => $professional->id,
-                    'site_id'         => $site->id,
-                    'block_group'     => 'sections',
-                    'block_type'      => $blockType,
+                    'site_id' => $site->id,
+                    'block_group' => 'sections',
+                    'block_type' => $blockType,
                 ],
                 [
-                    'sort_order'  => $sortOrder,
-                    'is_enabled'  => $isEnabled,
-                    'is_active'   => false,
-                    'settings'    => [],
+                    'sort_order' => $sortOrder,
+                    'is_enabled' => $isEnabled,
+                    'is_active' => false,
+                    'settings' => [],
                 ]
             );
         }
@@ -94,20 +93,20 @@ class AccountTypeDefaultsService
         Site $site,
         string $brandProfessionalId
     ): void {
-        $config = config('comet.account_type_defaults.affiliate', []);
+        $config = config('sidest.account_type_defaults.affiliate', []);
 
         // 1. Auto-enable shop section
         $autoSections = $config['auto_enable_sections'] ?? [];
         foreach ($autoSections as $blockType) {
             $block = Block::query()->firstOrNew([
                 'professional_id' => $professional->id,
-                'site_id'         => $site->id,
-                'block_group'     => 'sections',
-                'block_type'      => $blockType,
+                'site_id' => $site->id,
+                'block_group' => 'sections',
+                'block_type' => $blockType,
             ]);
 
             $block->is_enabled = true;
-            $block->is_active  = true;
+            $block->is_active = true;
 
             if (! $block->exists) {
                 $maxSort = Block::query()
@@ -116,25 +115,12 @@ class AccountTypeDefaultsService
                     ->max('sort_order');
 
                 $block->sort_order = is_null($maxSort) ? 0 : ((int) $maxSort + 1);
-                $block->settings   = [];
+                $block->settings = [];
             }
 
             $block->save();
         }
 
-        // 2. Set theme from brand's affiliate default
-        if ($config['use_brand_affiliate_theme'] ?? false) {
-            $brandSettings = BrandStoreSettings::where('professional_id', $brandProfessionalId)->first();
-            if ($brandSettings && $brandSettings->default_affiliate_theme_id) {
-                $site->theme_id = $brandSettings->default_affiliate_theme_id;
-                $site->save();
-            }
-        }
-
-        // 3. Sync product defaults from brand
-        if ($config['use_brand_affiliate_products'] ?? false) {
-            $this->syncBrandAffiliateProducts($professional, $brandProfessionalId);
-        }
     }
 
     private function createDefaultContact(Professional $professional, array $contactData): void
@@ -152,9 +138,9 @@ class AccountTypeDefaultsService
         if (! $exists) {
             $customer = new Customer([
                 'full_name' => $contactData['full_name'] ?? null,
-                'email'     => $email,
-                'phone'     => $contactData['phone'] ?? null,
-                'source'    => $contactData['source'] ?? 'system_default',
+                'email' => $email,
+                'phone' => $contactData['phone'] ?? null,
+                'source' => $contactData['source'] ?? 'system_default',
             ]);
             $customer->professional_id = $professional->id;
             $customer->save();
@@ -164,43 +150,17 @@ class AccountTypeDefaultsService
         if ($contactData['subscribed'] ?? false) {
             $sub = EmailSubscription::query()->firstOrNew([
                 'professional_id' => $professional->id,
-                'list_key'        => 'marketing',
-                'email_lc'        => strtolower($email),
+                'list_key' => 'marketing',
+                'email_lc' => strtolower($email),
             ]);
 
             if (! $sub->exists) {
-                $sub->email             = $email;
-                $sub->full_name         = $contactData['full_name'] ?? null;
+                $sub->email = $email;
+                $sub->full_name = $contactData['full_name'] ?? null;
                 $sub->unsubscribe_token = EmailSubscription::newUnsubscribeToken();
                 $sub->markSubscribed(['source' => 'account_default']);
                 $sub->save();
             }
-        }
-    }
-
-    private function syncBrandAffiliateProducts(Professional $professional, string $brandProfessionalId): void
-    {
-        $brandSettings = BrandStoreSettings::where('professional_id', $brandProfessionalId)->first();
-        if (! $brandSettings) {
-            return;
-        }
-
-        $productIds = $brandSettings->default_affiliate_product_ids;
-        if (empty($productIds)) {
-            return;
-        }
-
-        foreach ($productIds as $sortOrder => $productId) {
-            ProfessionalSelection::query()->firstOrCreate(
-                [
-                    'professional_id'      => $professional->id,
-                    'brand_professional_id' => $brandProfessionalId,
-                    'brand_product_id'      => $productId,
-                ],
-                [
-                    'sort_order' => $sortOrder,
-                ]
-            );
         }
     }
 }

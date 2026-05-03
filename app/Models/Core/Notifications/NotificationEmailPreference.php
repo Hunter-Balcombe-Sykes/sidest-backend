@@ -5,12 +5,15 @@ namespace App\Models\Core\Notifications;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
+// V2: User-facing toggle for enabling or disabling email notifications per category. Works alongside NotificationEmailPolicy.
 class NotificationEmailPreference extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'notification_email_preferences';
+    protected $table = 'notifications.notification_email_preferences';
+
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -20,7 +23,7 @@ class NotificationEmailPreference extends BaseModel
     ];
 
     protected $casts = [
-        'enabled'    => 'boolean',
+        'enabled' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

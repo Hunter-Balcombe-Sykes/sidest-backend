@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+// V2: Staff manages notification email policies (force_on, force_off, default) at global and per-professional level.
 class StaffNotificationEmailPolicyController extends ApiController
 {
     public function indexGlobal(): JsonResponse
@@ -21,8 +22,8 @@ class StaffNotificationEmailPolicyController extends ApiController
 
         $result = array_map(fn (string $cat): array => [
             'category' => $cat,
-            'mode'     => $policies->get($cat)?->mode ?? 'default',
-        ], NotificationPublisher::CATEGORIES);
+            'mode' => $policies->get($cat)?->mode ?? 'default',
+        ], NotificationPublisher::categories());
 
         return $this->success(['policies' => array_values($result)]);
     }
@@ -51,8 +52,8 @@ class StaffNotificationEmailPolicyController extends ApiController
 
         $result = array_map(fn (string $cat): array => [
             'category' => $cat,
-            'mode'     => $policies->get($cat)?->mode ?? 'default',
-        ], NotificationPublisher::CATEGORIES);
+            'mode' => $policies->get($cat)?->mode ?? 'default',
+        ], NotificationPublisher::categories());
 
         return $this->success(['policies' => array_values($result)]);
     }

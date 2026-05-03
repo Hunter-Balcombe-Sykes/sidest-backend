@@ -3,11 +3,12 @@
 namespace App\Http\Controllers\Api\Staff\StaffSite;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Jobs\Notifications\SendStaffBroadcastEmailsJob;
 use App\Models\Core\Notifications\Notification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Jobs\Notifications\SendStaffBroadcastEmailsJob;
 
+// V2: Staff creates global or targeted notifications with optional email broadcast.
 class StaffNotificationController extends ApiController
 {
     /** POST /staff/notifications */
@@ -32,11 +33,13 @@ class StaffNotificationController extends ApiController
         $data['type'] = Notification::normalizeFrontendType($data['type'] ?? null, $data['severity'] ?? null);
         $data['severity'] = Notification::severityForFrontendType($data['type']);
 
+        // Staff broadcasts have no semantic category to key retention against (the
+        // sidest.notification_retention_days map uses keys like 'invite' / 'brand_status',
+        // not frontend severity labels), so default to the map's 'default' lifetime when
+        // the caller hasn't explicitly set ends_at. A null default is intentional —
+        // it means "keep until manually ended/dismissed", so leave ends_at unset.
         if (empty($data['ends_at'])) {
-            $map = config('comet.notification_retention_days', []);
-            $days = $map[$data['type']] ?? ($map['default'] ?? 30);
-
-            // null means "keep until manually ended/dismissed"
+            $days = config('sidest.notification_retention_days.default', 30);
             if ($days !== null) {
                 $data['ends_at'] = now()->addDays((int) $days);
             }
@@ -44,8 +47,8 @@ class StaffNotificationController extends ApiController
 
         $notification = Notification::query()->create($data);
 
-        $sendEmail = (bool)($data['send_email'] ?? false);
-        $emailListKey = $data['email_list_key'] ?? 'comet_updates';
+        $sendEmail = (bool) ($data['send_email'] ?? false);
+        $emailListKey = $data['email_list_key'] ?? 'sidest_updates';
 
         if ($sendEmail) {
             // Only broadcast emails for global notifications (professional_id null)
@@ -54,7 +57,6 @@ class StaffNotificationController extends ApiController
                 SendStaffBroadcastEmailsJob::dispatch($notification->id, $emailListKey);
             }
         }
-
 
         return $this->success(['notification' => $notification], 201);
     }

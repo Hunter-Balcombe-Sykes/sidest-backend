@@ -7,17 +7,20 @@ use App\Models\Analytics\SiteVisit;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 
+// V2: Visit/click stats caching with version-token invalidation for bulk cache busting.
 class AnalyticsCacheService
 {
+    public function __construct(private CacheLockService $cacheLock) {}
+
     public function getVisitStats(string $professionalId, Carbon $startDate, Carbon $endDate): array
     {
-        $cacheKey = CacheKeyGenerator:: analyticsVisits(
+        $cacheKey = CacheKeyGenerator::analyticsVisits(
             $professionalId,
             $startDate->format('Ymd'),
             $endDate->format('Ymd')
         );
 
-        return Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
+        return $this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
             return SiteVisit::where('professional_id', $professionalId)
                 ->whereBetween('occurred_at', [$startDate, $endDate])
                 ->selectRaw('
@@ -28,7 +31,13 @@ class AnalyticsCacheService
                     COUNT(DISTINCT device_type) as device_types
                 ')
                 ->first()
-                ->toArray();
+                ?->toArray() ?? [
+                    'total_visits' => 0,
+                    'unique_visitors' => 0,
+                    'days_with_visits' => 0,
+                    'unique_countries' => 0,
+                    'device_types' => 0,
+                ];
         });
     }
 
@@ -40,7 +49,7 @@ class AnalyticsCacheService
             $endDate->format('Ymd')
         );
 
-        return Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
+        return $this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
             return LinkClick::runForBlockForeignKey(
                 function (string $blockColumn) use ($professionalId, $startDate, $endDate) {
                     return LinkClick::where('professional_id', $professionalId)

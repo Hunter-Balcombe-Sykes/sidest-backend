@@ -7,6 +7,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
+// V2: Fresha Partner API client for services, bookings, and availability. Automatic token refresh on 401.
 class FreshaApiClient
 {
     public function __construct(
@@ -188,8 +189,21 @@ class FreshaApiClient
         ?array $body = null
     ): array {
         $token = $this->tokenService->getAccessToken($professional);
+        $attempt = 0;
+        $maxRetries = 3;
 
-        $response = $this->makeRequest($token, $method, $path, $query, $body);
+        while (true) {
+            $response = $this->makeRequest($token, $method, $path, $query, $body);
+
+            if ($response->status() === 429 && $attempt < $maxRetries) {
+                $wait = max(1000, ((int) ($response->header('Retry-After') ?? 1)) * 1000);
+                usleep($wait * 1000);
+                $attempt++;
+                continue;
+            }
+
+            break;
+        }
 
         // Access token might have been revoked/expired unexpectedly; refresh once.
         if ($response->status() === 401) {

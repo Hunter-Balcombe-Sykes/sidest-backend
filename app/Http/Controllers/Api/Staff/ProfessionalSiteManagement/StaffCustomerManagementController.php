@@ -12,6 +12,7 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Staff manages a professional's customers (view, update, archive, restore, hard delete).
 class StaffCustomerManagementController extends ApiController
 {
     use HandlesSearchQueries;
@@ -28,7 +29,7 @@ class StaffCustomerManagementController extends ApiController
             ?? $this->prepareSearchLike($request, 'search');
 
         $includeArchived = $request->boolean('include_archived');
-        $onlyArchived    = $request->boolean('only_archived');
+        $onlyArchived = $request->boolean('only_archived');
 
         $query = Customer::query()
             ->where('professional_id', $professional->id)
@@ -63,9 +64,15 @@ class StaffCustomerManagementController extends ApiController
      */
     public function show(Request $request, Professional $professional, Customer $customer): JsonResponse
     {
+        // Defence in depth: route group already scopes via ->scopeBindings() and
+        // Professional::customers(). The explicit check survives a future refactor
+        // that drops scopeBindings, and matches the pattern used by sibling staff
+        // controllers (StaffServiceManagementController etc).
+        abort_unless($customer->professional_id === $professional->id, 404);
+
         $includeArchived = $request->boolean('include_archived');
 
-        if (!$includeArchived && $customer->trashed()) {
+        if (! $includeArchived && $customer->trashed()) {
             abort(404);
         }
 
@@ -77,7 +84,11 @@ class StaffCustomerManagementController extends ApiController
      */
     public function update(StaffUpdateCustomerRequest $request, Professional $professional, Customer $customer): JsonResponse
     {
-        if ($customer->trashed()) { abort(404); }
+        abort_unless($customer->professional_id === $professional->id, 404);
+
+        if ($customer->trashed()) {
+            abort(404);
+        }
 
         $customer->fill($request->validated());
         $customer->save();
@@ -90,23 +101,32 @@ class StaffCustomerManagementController extends ApiController
      */
     public function destroy(Professional $professional, Customer $customer): JsonResponse
     {
-        if (!$customer->trashed()) { $customer->delete(); }
+        abort_unless($customer->professional_id === $professional->id, 404);
+
+        if (! $customer->trashed()) {
+            $customer->delete();
+        }
 
         return $this->success(['archived' => true]);
     }
 
     public function restore(Professional $professional, Customer $customer): JsonResponse
     {
-        if ($customer->trashed()) { $customer->restore(); }
+        abort_unless($customer->professional_id === $professional->id, 404);
+
+        if ($customer->trashed()) {
+            $customer->restore();
+        }
 
         return $this->success(['restored' => true, 'customer' => $customer->fresh()]);
     }
 
     public function forceDestroy(Professional $professional, Customer $customer): JsonResponse
     {
+        abort_unless($customer->professional_id === $professional->id, 404);
+
         $customer->forceDelete();
 
         return $this->success(['deleted' => true]);
     }
-
 }

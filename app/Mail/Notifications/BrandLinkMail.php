@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends brand affiliate link notifications (new links, link updates) using the Notification model and the brand_links template.
 class BrandLinkMail extends Mailable
 {
     use Queueable, SerializesModels;

@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\PublicSite\Booking;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates public booking checkout — requires service variation, team member, start time, and customer contact details with optional payment source.
 class PublicBookingCheckoutRequest extends BaseFormRequest
 {
     public function rules(): array
@@ -20,7 +21,7 @@ class PublicBookingCheckoutRequest extends BaseFormRequest
             'customer' => ['required', 'array'],
             'customer.firstName' => ['required', 'string', 'max:120'],
             'customer.lastName' => ['required', 'string', 'max:120'],
-            'customer.email' => ['required', 'email', 'max:190'],
+            'customer.email' => ['required', 'email:rfc', 'max:190'],
             'customer.phone' => ['nullable', 'string', 'max:60'],
             'customer.note' => ['nullable', 'string', 'max:1000'],
         ];

@@ -4,39 +4,40 @@ namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\BootstrapRequest;
-use App\Models\Core\Professional\Professional;
-use App\Models\Core\Site\Site;
-use App\Services\Cache\ProfessionalCacheService;
-use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
-use RuntimeException;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
-use App\Models\Billing\Plan;
-use App\Models\Billing\Subscription;
+use App\Models\Core\Professional\BrandProfile;
+use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Core\Site\Site;
+use App\Services\Cache\ProfessionalCacheService;
+use App\Services\Professional\AccountTypeDefaultsService;
 use App\Services\Professional\BrandAffiliateInviteService;
 use App\Services\Professional\BrandPartnerLinkService;
-use App\Services\Enterprise\EnterpriseProvisioningService;
-use App\Services\Legal\ProfessionalLegalContentService;
-use App\Services\Professional\AccountTypeDefaultsService;
+use App\Services\Professional\SiteProvisioningService;
+use App\Services\Shopify\BrandSignupService;
+use App\Services\Shopify\ShopifySetupTokenService;
+use App\Services\Shopify\ShopProfileAutoFillService;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
-
-
+// V2: Account signup/update. Creates professional + site, applies type defaults, handles affiliate invite claims and brand partner connections. Entry point for affiliate/professional signup.
 class BootstrapController extends ApiController
 {
+    public function __construct(
+        private readonly SiteProvisioningService $siteProvisioning,
+    ) {}
+
     public function bootstrap(
         BootstrapRequest $request,
-        ProfessionalLegalContentService $legalContentService,
-        EnterpriseProvisioningService $enterpriseProvisioningService,
         BrandAffiliateInviteService $brandAffiliateInviteService,
         BrandPartnerLinkService $brandPartnerLinks,
         AccountTypeDefaultsService $accountTypeDefaultsService
-    )
-    {
+    ) {
         $uid = $request->attributes->get('supabase_uid');
-        if (!is_string($uid) || $uid === '') {
+        if (! is_string($uid) || $uid === '') {
             return $this->error('Unauthenticated', 401);
         }
 
@@ -51,7 +52,7 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $allowedProfessionalTypes = array_keys(config('comet.professional_types', []));
+            $allowedProfessionalTypes = array_keys(config('sidest.professional_types', []));
             $resolveProfessionalType = static function (mixed $candidate) use ($allowedProfessionalTypes): string {
                 if (is_string($candidate)) {
                     $normalized = mb_strtolower(trim($candidate));
@@ -63,99 +64,100 @@ class BootstrapController extends ApiController
                 return 'professional';
             };
 
-            $result = DB::transaction(function () use ($uid, $data, $legalContentService, $enterpriseProvisioningService, $brandAffiliateInviteService, $brandPartnerLinks, $accountTypeDefaultsService, $resolveProfessionalType) {
-            $createdProfessional = false;
-            $provisionedEnterprise = null;
+            $result = DB::transaction(function () use ($uid, $data, $brandAffiliateInviteService, $brandPartnerLinks, $accountTypeDefaultsService, $resolveProfessionalType) {
+                $createdProfessional = false;
 
-            $professional = Professional::query()->where('auth_user_id', $uid)->first();
+                $professional = Professional::query()->where('auth_user_id', $uid)->first();
 
-            if (!$professional) {
-                $createdProfessional = true;
-                $professional = new Professional([
-                    'handle'          => $data['handle'],
-                    'display_name'    => $data['display_name'],
-                    'bio'             => null,
-                    'country_code'    => $data['country_code'] ?? null,
-                    'timezone'        => $data['timezone'] ?? null,
-                    'professional_type' => $resolveProfessionalType($data['professional_type'] ?? null),
-                    'status'          => 'active',
-                    'onboarding_step' => 0,
-                    'qr_slug'         => $this->generateQrSlug($data['handle'] ?? null),
-                    'phone' => $data['phone'] ?? null,
-                    'primary_email'   => $data['primary_email'],
-                    'first_name'      => $data['first_name'] ?? '',
-                    'last_name'       => $data['last_name'] ?? null,
+                if (! $professional) {
+                    $createdProfessional = true;
+                    $professional = new Professional([
+                        'handle' => $data['handle'],
+                        'display_name' => $data['display_name'],
+                        'bio' => null,
+                        'country_code' => $data['country_code'] ?? null,
+                        'timezone' => $data['timezone'] ?? null,
+                        'professional_type' => $resolveProfessionalType($data['professional_type'] ?? null),
+                        'status' => 'active',
+                        'onboarding_step' => 0,
+                        'qr_slug' => $this->siteProvisioning->generateQrSlug($data['handle'] ?? null),
+                        'phone' => $data['phone'] ?? null,
+                        'primary_email' => $data['primary_email'],
+                        'first_name' => $data['first_name'] ?? '',
+                        'last_name' => $data['last_name'] ?? null,
 
-                    'public_contact_number' => null,
-                    'public_contact_email' => null,
-                    'handle_lc' => $data['handle_lc'],
-                ]);
-                $professional->auth_user_id = $uid;
-            } else {
+                        'public_contact_number' => null,
+                        'public_contact_email' => null,
+                        'handle_lc' => $data['handle_lc'],
+                    ]);
+                    $professional->auth_user_id = $uid;
+                } else {
 
-                if (in_array($professional->status, ['disabled', 'suspended'], true)) {
-                    return $this->error('Account is disabled. Contact support.', 403);
+                    if (in_array($professional->status, ['disabled', 'suspended', 'pending_deletion'], true)) {
+                        return $this->error('Account is disabled. Contact support.', 403);
+                    }
+
+                    $fill = [
+                        'handle' => $data['handle'],
+                        'display_name' => $data['display_name'],
+                        'primary_email' => $data['primary_email'],
+                        'phone' => $data['phone'] ?? $professional->phone,
+                        'first_name' => $data['first_name'] ?? $professional->first_name,
+                        'last_name' => $data['last_name'] ?? $professional->last_name,
+                        'country_code' => $data['country_code'] ?? $professional->country_code,
+                        'timezone' => $data['timezone'] ?? $professional->timezone,
+                        'professional_type' => $resolveProfessionalType($data['professional_type'] ?? $professional->professional_type),
+                        'handle_lc' => $data['handle_lc'],
+                    ];
+
+                    if (array_key_exists('phone', $data)) {
+                        $fill['phone'] = $data['phone'];
+                    }
+
+                    $professional->fill($fill);
+                }
+                if (! is_string($professional->qr_slug) || $professional->qr_slug === '') {
+                    $professional->qr_slug = $this->siteProvisioning->generateQrSlug($professional->handle ?? null);
+                }
+                $professional->save();
+
+                // Add to Side St updates list once (global list). Do NOT overwrite if they already unsubscribed.
+                $this->ensureSidestUpdatesSubscription($professional->primary_email);
+
+                $site = Site::query()->where('professional_id', $professional->id)->first();
+
+                if (! $site) {
+                    $base = $this->siteProvisioning->subdomainBaseFromHandle($data['handle']);
+
+                    $site = $this->siteProvisioning->createSiteWithRetry($professional->id, $base);
                 }
 
-                $fill = [
-                    'handle'        => $data['handle'],
-                    'display_name'  => $data['display_name'],
-                    'primary_email' => $data['primary_email'],
-                    'phone'         => $data['phone'] ?? $professional->phone,
-                    'first_name'    => $data['first_name'] ?? $professional->first_name,
-                    'last_name'     => $data['last_name'] ?? $professional->last_name,
-                    'country_code'  => $data['country_code'] ?? $professional->country_code,
-                    'timezone'      => $data['timezone'] ?? $professional->timezone,
-                    'professional_type' => $resolveProfessionalType($data['professional_type'] ?? $professional->professional_type),
-                    'handle_lc' => $data['handle_lc'],
-                ];
+                // Apply account-type defaults for new professionals
+                if ($createdProfessional) {
+                    $accountTypeDefaultsService->applyDefaults($professional, $site);
 
-                if (array_key_exists('phone', $data)) {
-                    $fill['phone'] = $data['phone'];
+                    if ($professional->professional_type === 'brand') {
+                        BrandProfile::firstOrCreate(
+                            ['professional_id' => (string) $professional->id],
+                            ['setup_complete' => false]
+                        );
+                    }
                 }
-
-                $professional->fill($fill);
-            }
-            if (!is_string($professional->qr_slug) || $professional->qr_slug === '') {
-                $professional->qr_slug = $this->generateQrSlug($professional->handle ?? null);
-            }
-            $professional->save();
-
-            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
-                $provisionedEnterprise = $enterpriseProvisioningService->ensureForProfessional($professional);
-            }
-
-            // Add to Comet updates list once (global list). Do NOT overwrite if they already unsubscribed.
-            $this->ensureCometUpdatesSubscription($professional->primary_email);
-
-
-            $site = Site::query()->where('professional_id', $professional->id)->first();
-
-            if (!$site) {
-                $base = $this->subdomainBaseFromHandle($data['handle']);
-
-                $site = $this->createSiteWithRetry($professional->id, $base);
-            }
-
-            // Apply account-type defaults for new professionals
-            if ($createdProfessional) {
-                $accountTypeDefaultsService->applyDefaults($professional, $site);
-            }
 
                 if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
                     $invite = $brandAffiliateInviteService->findByToken((string) $data['invite_token']);
                     if (! $invite) {
-                    throw new RuntimeException('Invite not found.');
-                }
+                        throw new RuntimeException('Invite not found.');
+                    }
 
-                $brandAffiliateInviteService->claimInvite($invite, $professional);
-                $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
-                $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, (string) $invite->brand_professional_id);
+                    $brandAffiliateInviteService->claimInvite($invite, $professional);
+                    $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, (string) $invite->brand_professional_id);
                 } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
                     $brandPartnerProfessional = Professional::query()
                         ->whereKey((string) $data['brand_partner_professional_id'])
-                    ->where('professional_type', 'brand')
-                    ->first();
+                        ->where('professional_type', 'brand')
+                        ->first();
 
                     if (! $brandPartnerProfessional) {
                         throw new RuntimeException('Brand partner not found.');
@@ -171,22 +173,81 @@ class BootstrapController extends ApiController
                     $brandPartnerLinks->promoteBrandToPrimary($affiliateId, $brandId);
                     $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
                     $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, $brandId);
+                } elseif (is_string($data['join_brand_handle'] ?? null) && trim((string) $data['join_brand_handle']) !== '') {
+                    $joinBrand = Professional::query()
+                        ->where('handle_lc', strtolower(trim((string) $data['join_brand_handle'])))
+                        ->where('professional_type', 'brand')
+                        ->with('brandProfile')
+                        ->first();
+
+                    if ($joinBrand) {
+                        $joinBrandStatus = $joinBrand->brandProfile?->brand_status ?? 'systems_down';
+
+                        if ($joinBrandStatus !== 'systems_down') {
+                            $affiliateId = (string) $professional->id;
+                            $brandId = (string) $joinBrand->id;
+
+                            if (! $brandPartnerLinks->isConnected($affiliateId, $brandId)) {
+                                $brandAffiliateInviteService->claimOpenInvite($joinBrand, $professional);
+                                $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
+                                $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, $brandId);
+                            }
+                        }
+                    }
                 }
 
-            $legalContentService->refreshGenerated($professional, $site);
-            app(ProfessionalCacheService::class)->invalidateProfessional($professional);
+                // Shopify setup token: create integration from cached OAuth credentials
+                $shopifyIntegrationId = null;
+                $shopifySetupToken = is_string($data['shopify_setup_token'] ?? null) ? trim((string) $data['shopify_setup_token']) : '';
+                if ($shopifySetupToken !== '') {
+                    // Peek first — consume only after transaction succeeds (prevents token loss on rollback)
+                    $shopifyData = app(ShopifySetupTokenService::class)->peek($shopifySetupToken);
+                    if ($shopifyData === null) {
+                        throw new RuntimeException('Shopify setup session is invalid or expired. Please reinstall the app from Shopify.');
+                    }
 
-            // Ensure the professional has a subscription – seed the free plan if none exists
-            $this->ensureFreeSubscription($professional);
+                    $shopDomain = $shopifyData['shop_domain'];
+                    $shopId = trim((string) Arr::get($shopifyData['shop_data'], 'id', ''));
+                    $shopCurrency = strtoupper(trim((string) Arr::get($shopifyData['shop_data'], 'currency', '')));
 
-            if ($createdProfessional) {
-                $this->createWelcomeNotification($professional);
-            }
+                    $integration = ProfessionalIntegration::create([
+                        'professional_id' => (string) $professional->id,
+                        'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+                        'external_account_id' => $shopDomain,
+                        'access_token' => $shopifyData['access_token'],
+                        'provider_metadata' => [
+                            'shop_domain' => $shopDomain,
+                            'shop_id' => $shopId !== '' ? "gid://shopify/Shop/{$shopId}" : null,
+                            'shop_currency' => $shopCurrency !== '' ? $shopCurrency : null,
+                            'scopes' => $shopifyData['scopes'],
+                            'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
+                            'connected_at' => now()->toIso8601String(),
+                            'webhook_registration_state' => 'queued',
+                        ],
+                    ]);
+
+                    $shopifyIntegrationId = (string) $integration->id;
+
+                    // Auto-fill profile from Shopify shop data (address, phone, etc. — not email)
+                    $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
+                    app(ShopProfileAutoFillService::class)->fillFromShopData(
+                        $professional, $site, $brandProfile, $shopifyData['shop_data']
+                    );
+                }
+
+                app(ProfessionalCacheService::class)->invalidateProfessional($professional);
+
+                // Ensure the professional has a subscription – seed the free plan if none exists
+                $this->siteProvisioning->ensureFreeSubscription($professional);
+
+                if ($createdProfessional) {
+                    $this->createWelcomeNotification($professional);
+                }
 
                 return [
                     'professional' => $professional->fresh(),
                     'site' => $site->fresh(),
-                    'enterprise' => $provisionedEnterprise?->fresh(),
+                    'shopify_integration_id' => $shopifyIntegrationId,
                 ];
             });
         } catch (\Exception $e) {
@@ -197,144 +258,29 @@ class BootstrapController extends ApiController
             throw $e;
         }
 
+        // Consume Shopify setup token AFTER transaction succeeds (prevents token loss on rollback)
+        if (is_string($result['shopify_integration_id'] ?? null)) {
+            $shopifySetupToken = trim((string) ($data['shopify_setup_token'] ?? ''));
+            if ($shopifySetupToken !== '') {
+                app(ShopifySetupTokenService::class)->consume($shopifySetupToken);
+            }
+            app(BrandSignupService::class)->dispatchInstallJobs($result['shopify_integration_id']);
+        }
+
+        // Strip internal ID before returning
+        unset($result['shopify_integration_id']);
+
         return $this->success($result);
     }
 
-    private function createSiteWithRetry(string $professionalId, string $base): Site
-    {
-        $reserved = array_map('strtolower', config('comet.reserved_subdomains', []));
-        $base = strtolower($base);
-        $baseIsReserved = in_array($base, $reserved, true);
-
-        // If reserved: only try base-1...base-20
-        if ($baseIsReserved) {
-            for ($i = 1; $i <= 20; $i++) {
-                $candidate = $this->buildCandidate($base, (string) $i);
-                $site = $this->tryCreateSite($professionalId, $candidate);
-                if ($site) return $site;
-            }
-        } else {
-            // Not reserved: base, base-1...base-19
-            for ($i = 0; $i < 20; $i++) {
-                $suffix = $i === 0 ? null : (string) $i;
-                $candidate = $this->buildCandidate($base, $suffix);
-                $site = $this->tryCreateSite($professionalId, $candidate);
-                if ($site) return $site;
-            }
-        }
-
-        // Fallback: random suffix
-        for ($i = 0; $i < 10; $i++) {
-            $rand = Str::lower(Str::random(6));
-            $candidate = $this->buildCandidate($base, $rand);
-            $site = $this->tryCreateSite($professionalId, $candidate);
-            if ($site) return $site;
-        }
-
-        throw new RuntimeException('Could not allocate a unique subdomain.');
-    }
-
-    private function isUniqueViolation(QueryException $e): bool
-    {
-        // Postgres unique_violation
-        return $e->getCode() === '23505';
-    }
-
-    private function buildCandidate(string $base, ?string $suffix): string
-    {
-        if ($suffix === null) {
-            return $base;
-        }
-
-        $base = $this->limitSubdomainBase($base, '-' . $suffix);
-        return $base . '-' . $suffix;
-    }
-
-    private function limitSubdomainBase(string $base, string $suffixIncludingHyphen): string
-    {
-        // max subdomain length is 63
-        $max = 63 - strlen($suffixIncludingHyphen);
-        if ($max < 1) {
-            return substr($base, 0, 1);
-        }
-        return substr($base, 0, $max);
-    }
-
-    private function subdomainBaseFromHandle(string $handle): string
-    {
-        $v = mb_strtolower(trim($handle));
-        $v = preg_replace('/[^a-z0-9]+/', '-', $v);
-        $v = trim($v, '-');
-
-        // Generate UUID-based fallback if handle is empty
-        if ($v === '') {
-            $v = 'user-' . substr(Str::uuid()->toString(), 0, 8);
-        }
-
-        return $v;
-    }
-
-    private function tryCreateSite(string $professionalId, string $candidate): ?Site
-    {
-        try {
-            $site = new Site([
-                'subdomain'    => $candidate,
-                'theme_id'     => null,
-                'is_published' => false,
-                'settings'     => [],
-            ]);
-
-            $site->professional_id = $professionalId;
-            $site->save();
-
-            return $site;
-        } catch (QueryException $e) {
-            if ($this->isUniqueViolation($e)) {
-                return null; // collision -> caller retries
-            }
-            throw $e;
-        }
-    }
-
-    /**
-     * Seed the free plan subscription if the professional has none.
-     */
-    private function ensureFreeSubscription(Professional $professional): void
-    {
-        // Reload the relationship in case it was cached as null during this transaction
-        $professional->load('subscription');
-
-        // Already has a current (non-ended) subscription – nothing to do
-        if ($professional->subscription && $professional->subscription->ended_at === null) {
-            return;
-        }
-
-        $freePlan = Plan::where('plan_key', 'free')->where('is_active', true)->first();
-        if (!$freePlan) {
-            Log::warning('No active free plan found – skipping subscription seed', [
-                'professional_id' => $professional->id,
-            ]);
-            return;
-        }
-
-        Subscription::create([
-            'id' => Str::uuid()->toString(),
-            'professional_id' => $professional->id,
-            'plan_id' => $freePlan->id,
-            'provider' => 'internal',
-            'status' => 'active',
-            'current_period_start' => now(),
-            'current_period_end' => null,
-            'cancel_at_period_end' => false,
-        ]);
-    }
-
-    private function ensureCometUpdatesSubscription(?string $email): void
+    private function ensureSidestUpdatesSubscription(?string $email): void
     {
         $email = is_string($email) ? strtolower(trim($email)) : '';
-        if ($email === '') return;
+        if ($email === '') {
+            return;
+        }
 
-        $listKey = 'comet_updates';
+        $listKey = 'sidest_updates';
 
         $existing = EmailSubscription::query()
             ->whereNull('professional_id')
@@ -377,36 +323,6 @@ class BootstrapController extends ApiController
         );
     }
 
-    private function generateQrSlug(?string $handle): string
-    {
-        $base = is_string($handle) ? Str::slug($handle) : '';
-        if ($base === '') {
-            $base = 'pro';
-        }
-
-        // Retry with exponential backoff to handle race conditions
-        $maxAttempts = 10;
-        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
-            $suffix = Str::lower(Str::random(6));
-            $slug = $base . '-' . $suffix;
-
-            try {
-                // Check if slug exists (optimistic check before insert)
-                if (!Professional::query()->where('qr_slug', $slug)->exists()) {
-                    return $slug;
-                }
-            } catch (QueryException $e) {
-                // If unique violation occurs during insert, keep retrying
-                if ($this->isUniqueViolation($e)) {
-                    continue;
-                }
-                throw $e;
-            }
-        }
-
-        throw new RuntimeException('Could not generate a unique QR slug.');
-    }
-
     private function syncSiteBrandPartnerSettings(
         Site $site,
         BrandPartnerLinkService $brandPartnerLinks,
@@ -442,7 +358,7 @@ class BootstrapController extends ApiController
 
     private function isWaitlistModeEnabled(): bool
     {
-        return (bool) config('comet.waitlist.enabled', false);
+        return (bool) config('sidest.waitlist.enabled', false);
     }
 
     private function hasExistingProfessional(string $uid): bool

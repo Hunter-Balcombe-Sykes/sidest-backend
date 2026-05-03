@@ -8,13 +8,15 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
+// V2: Marketing email opt-in/out record per professional+email. Source of truth for consent; caches status on Customer for performance.
 class EmailSubscription extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'email_subscriptions';
+    protected $table = 'notifications.email_subscriptions';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $hidden = [
@@ -56,9 +58,15 @@ class EmailSubscription extends BaseModel
         $this->subscribed_at = $this->subscribed_at ?? now();
         $this->unsubscribed_at = null;
 
-        if (isset($meta['source'])) $this->consent_source = $meta['source'];
-        if (isset($meta['ip_hash'])) $this->consent_ip_hash = $meta['ip_hash'];
-        if (isset($meta['user_agent'])) $this->consent_user_agent = $meta['user_agent'];
+        if (isset($meta['source'])) {
+            $this->consent_source = $meta['source'];
+        }
+        if (isset($meta['ip_hash'])) {
+            $this->consent_ip_hash = $meta['ip_hash'];
+        }
+        if (isset($meta['user_agent'])) {
+            $this->consent_user_agent = $meta['user_agent'];
+        }
     }
 
     public function markUnsubscribed(): void

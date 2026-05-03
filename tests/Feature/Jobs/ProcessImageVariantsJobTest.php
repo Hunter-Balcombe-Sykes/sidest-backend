@@ -1,0 +1,184 @@
+<?php
+
+/** @phpstan-ignore-all */
+
+use App\Jobs\ProcessImageVariantsJob;
+use App\Models\Core\Site\SiteMedia;
+use App\Services\Cache\SiteCacheService;
+use App\Services\Media\ImageVariantService;
+use App\Services\Media\UnprocessableImageException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+
+beforeEach(function () {
+    setupMediaTables();
+
+    $testRoot = storage_path('framework/testing/disks/process-image-variants-job');
+    config([
+        'sidest.media_disk' => 'local',
+        'filesystems.disks.local.root' => $testRoot,
+    ]);
+
+    if (! is_dir($testRoot)) {
+        mkdir($testRoot, 0777, true);
+    }
+});
+
+function seedJobTestMediaRow(string $pool = 'gallery', ?string $siteId = null): string
+{
+    $id = (string) Str::uuid();
+    DB::connection('pgsql')->table('site.site_media')->insert([
+        'id' => $id,
+        'site_id' => $siteId ?? (string) Str::uuid(),
+        'pool' => $pool,
+        'path' => '',
+        'sort_order' => 0,
+        'is_active' => true,
+        'media_type' => SiteMedia::MEDIA_TYPE_IMAGE,
+        'processing_state' => SiteMedia::PROCESSING_STATE_PENDING,
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
+
+    return $id;
+}
+
+it('marks the SiteMedia row as ready on successful processing', function () {
+    $imageId = seedJobTestMediaRow();
+    $originalPath = "images/test/{$imageId}/original.jpg";
+    Storage::disk('local')->put($originalPath, 'image-bytes');
+
+    $service = Mockery::mock(ImageVariantService::class);
+    $service->shouldReceive('resolvedDiskName')->once()->andReturn('local');
+    $service->shouldReceive('processVariants')->once()->andReturn([
+        'optimized' => new \stdClass,
+        'maximized' => new \stdClass,
+    ]);
+
+    $job = new ProcessImageVariantsJob($originalPath, $imageId, "images/test/{$imageId}");
+    $job->handle($service);
+
+    $row = SiteMedia::query()->findOrFail($imageId);
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_READY);
+    expect($row->processing_error)->toBeNull();
+});
+
+it('fails immediately without retrying when processVariants throws UnprocessableImageException', function () {
+    $imageId = seedJobTestMediaRow();
+    $originalPath = "images/test/{$imageId}/original.jpg";
+    Storage::disk('local')->put($originalPath, 'image-bytes');
+
+    $service = Mockery::mock(ImageVariantService::class);
+    $service->shouldReceive('resolvedDiskName')->once()->andReturn('local');
+    $service->shouldReceive('processVariants')->once()->andThrow(
+        new UnprocessableImageException('Image dimensions exceed safe processing limit (6000 x 5000 = 30000000 pixels, max 24000000).')
+    );
+
+    $job = new ProcessImageVariantsJob($originalPath, $imageId, "images/test/{$imageId}");
+    $job->withFakeQueueInteractions();
+    $job->handle($service);
+
+    // The job must call $this->fail() internally — assertFailed() verifies that.
+    $job->assertFailed();
+
+    $row = SiteMedia::query()->findOrFail($imageId);
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_FAILED);
+    expect((string) $row->processing_error)->toContain('exceed safe processing limit');
+    expect((string) $row->processing_error)->toContain('6000');
+});
+
+it('rethrows transient failures so Laravel retries them normally', function () {
+    $imageId = seedJobTestMediaRow();
+    $originalPath = "images/test/{$imageId}/original.jpg";
+    Storage::disk('local')->put($originalPath, 'image-bytes');
+
+    $service = Mockery::mock(ImageVariantService::class);
+    $service->shouldReceive('resolvedDiskName')->once()->andReturn('local');
+    $service->shouldReceive('processVariants')->once()->andThrow(
+        new RuntimeException('transient boom')
+    );
+
+    $job = new ProcessImageVariantsJob($originalPath, $imageId, "images/test/{$imageId}");
+
+    // Generic Throwable is rethrown, which Laravel's queue worker would catch
+    // and reschedule. We verify the rethrow and the in-progress processing state.
+    expect(fn () => $job->handle($service))->toThrow(RuntimeException::class, 'transient boom');
+
+    $row = SiteMedia::query()->findOrFail($imageId);
+    // State stays PROCESSING because markFailed only runs in the terminal failed() handler
+    // for transient errors — the row moves to FAILED only after $tries is exhausted.
+    expect($row->processing_state)->toBe(SiteMedia::PROCESSING_STATE_PROCESSING);
+});
+
+it('records the guard error message in processing_error so the frontend can surface it', function () {
+    $imageId = seedJobTestMediaRow();
+    $originalPath = "images/test/{$imageId}/original.jpg";
+    Storage::disk('local')->put($originalPath, 'image-bytes');
+
+    $service = Mockery::mock(ImageVariantService::class);
+    $service->shouldReceive('resolvedDiskName')->once()->andReturn('local');
+    $service->shouldReceive('processVariants')->once()->andThrow(
+        new UnprocessableImageException('Image dimensions exceed safe processing limit (8000 x 8000 = 64000000 pixels, max 24000000).')
+    );
+
+    $job = new ProcessImageVariantsJob($originalPath, $imageId, "images/test/{$imageId}");
+    $job->withFakeQueueInteractions();
+    $job->handle($service);
+
+    $job->assertFailed();
+
+    $row = SiteMedia::query()->findOrFail($imageId);
+    $error = (string) $row->processing_error;
+    expect($error)->not->toBeEmpty();
+    expect($error)->toContain('8000');
+    expect($error)->toContain('64000000');
+    expect($error)->toContain('24000000');
+});
+
+it('busts the Hydrogen brand-design cache when a design-pool image fails', function () {
+    $siteId = (string) Str::uuid();
+    $imageId = seedJobTestMediaRow(SiteMedia::POOL_DESIGN, $siteId);
+    $originalPath = "images/test/{$imageId}/original.jpg";
+    Storage::disk('local')->put($originalPath, 'image-bytes');
+
+    $cache = Mockery::mock(SiteCacheService::class);
+    $cache->shouldReceive('forgetBrandDesign')
+        ->once()
+        ->with($siteId);
+    app()->instance(SiteCacheService::class, $cache);
+
+    $service = Mockery::mock(ImageVariantService::class);
+    $service->shouldReceive('resolvedDiskName')->once()->andReturn('local');
+    $service->shouldReceive('processVariants')->once()->andThrow(
+        new UnprocessableImageException('Bad image.')
+    );
+
+    $job = new ProcessImageVariantsJob($originalPath, $imageId, "images/test/{$imageId}");
+    $job->withFakeQueueInteractions();
+    $job->handle($service);
+
+    $job->assertFailed();
+});
+
+it('does not bust brand-design cache when a gallery-pool image fails', function () {
+    $imageId = seedJobTestMediaRow('gallery');
+    $originalPath = "images/test/{$imageId}/original.jpg";
+    Storage::disk('local')->put($originalPath, 'image-bytes');
+
+    $cache = Mockery::mock(SiteCacheService::class);
+    $cache->shouldNotReceive('forgetBrandDesign');
+    app()->instance(SiteCacheService::class, $cache);
+
+    $service = Mockery::mock(ImageVariantService::class);
+    $service->shouldReceive('resolvedDiskName')->once()->andReturn('local');
+    $service->shouldReceive('processVariants')->once()->andThrow(
+        new UnprocessableImageException('Bad image.')
+    );
+
+    $job = new ProcessImageVariantsJob($originalPath, $imageId, "images/test/{$imageId}");
+    $job->withFakeQueueInteractions();
+    $job->handle($service);
+
+    $job->assertFailed();
+});

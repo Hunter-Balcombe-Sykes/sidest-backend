@@ -4,18 +4,19 @@ namespace App\Console\Commands;
 
 use App\Jobs\Analytics\RebuildBookingHourlyAggregatesJob;
 use App\Jobs\Analytics\RebuildSiteHourlyAggregatesJob;
-use App\Jobs\Store\RebuildBrandHourlyAggregatesJob;
-use App\Jobs\Store\RebuildProfessionalHourlyAggregatesJob;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 
+// V2: Backfills hourly analytics aggregates for trailing N hours. Used after outages or data corrections.
 class BackfillHourlyAnalytics extends Command
 {
-    protected $signature = 'comet:analytics:backfill-hourly
+    protected $signature = 'sidest:analytics:backfill-hourly
         {--hours=24 : Number of trailing hours to backfill (1-168)}
-        {--domains=all : all,commerce,site,booking (comma-separated)}';
+        {--domains=all : all,commerce,site,booking (comma-separated)}
+        {--chunk-size=500 : Max professionals per batch (default 500)}';
 
     protected $description = 'Backfills hourly analytics aggregates from source-of-truth event/order data.';
 
@@ -23,6 +24,7 @@ class BackfillHourlyAnalytics extends Command
     {
         $hours = max(1, min(168, (int) $this->option('hours')));
         $domains = $this->resolveDomains((string) $this->option('domains'));
+        $chunkSize = max(1, (int) $this->option('chunk-size'));
 
         $start = Carbon::now()->utc()->subHours($hours - 1)->startOfHour();
         $endExclusive = Carbon::now()->utc()->addHour()->startOfHour();
@@ -38,15 +40,15 @@ class BackfillHourlyAnalytics extends Command
         $this->line('Domains: '.implode(', ', $domains));
 
         if (in_array('commerce', $domains, true)) {
-            $this->backfillCommerce($hourBuckets, $start, $endExclusive);
+            $this->backfillCommerce($hourBuckets, $start, $endExclusive, $chunkSize);
         }
 
         if (in_array('site', $domains, true)) {
-            $this->backfillSite($hourBuckets, $start, $endExclusive);
+            $this->backfillSite($hourBuckets, $start, $endExclusive, $chunkSize);
         }
 
         if (in_array('booking', $domains, true)) {
-            $this->backfillBooking($hourBuckets, $start, $endExclusive);
+            $this->backfillBooking($hourBuckets, $start, $endExclusive, $chunkSize);
         }
 
         $this->info('Hourly backfill jobs dispatched.');
@@ -78,63 +80,17 @@ class BackfillHourlyAnalytics extends Command
     }
 
     /**
-     * @param  Collection<int, string>  $hourBuckets ISO8601 strings
+     * @param  Collection<int, string>  $hourBuckets  ISO8601 strings
      */
-    private function backfillCommerce(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
+    private function backfillCommerce(Collection $hourBuckets, Carbon $start, Carbon $endExclusive, int $chunkSize): void
     {
-        $brandIds = DB::table('retail.orders')
-            ->select('brand_professional_id')
-            ->whereBetween('ordered_at', [$start, $endExclusive])
-            ->whereNotNull('brand_professional_id')
-            ->union(
-                DB::table('retail.commission_ledger_entries')
-                    ->select('brand_professional_id')
-                    ->whereBetween('occurred_at', [$start, $endExclusive])
-                    ->whereNotNull('brand_professional_id')
-            )
-            ->distinct()
-            ->lazy()
-            ->map(static fn ($row): string => trim((string) $row->brand_professional_id))
-            ->filter();
-
-        $affiliateIds = DB::table('retail.orders')
-            ->select('affiliate_professional_id')
-            ->whereBetween('ordered_at', [$start, $endExclusive])
-            ->whereNotNull('affiliate_professional_id')
-            ->union(
-                DB::table('retail.commission_ledger_entries')
-                    ->select('affiliate_professional_id')
-                    ->whereBetween('occurred_at', [$start, $endExclusive])
-                    ->whereNotNull('affiliate_professional_id')
-            )
-            ->distinct()
-            ->lazy()
-            ->map(static fn ($row): string => trim((string) $row->affiliate_professional_id))
-            ->filter();
-
-        $brandCount = 0;
-        foreach ($brandIds as $brandId) {
-            foreach ($hourBuckets as $hour) {
-                RebuildBrandHourlyAggregatesJob::dispatch($brandId, $hour);
-            }
-            $brandCount++;
-        }
-
-        $affiliateCount = 0;
-        foreach ($affiliateIds as $affiliateId) {
-            foreach ($hourBuckets as $hour) {
-                RebuildProfessionalHourlyAggregatesJob::dispatch($affiliateId, $hour);
-            }
-            $affiliateCount++;
-        }
-
-        $this->line("Commerce jobs dispatched: brands={$brandCount}, affiliates={$affiliateCount}");
+        $this->line('Commerce backfill: V2 rebuild jobs not yet implemented, skipping.');
     }
 
     /**
-     * @param  Collection<int, string>  $hourBuckets ISO8601 strings
+     * @param  Collection<int, string>  $hourBuckets  ISO8601 strings
      */
-    private function backfillSite(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
+    private function backfillSite(Collection $hourBuckets, Carbon $start, Carbon $endExclusive, int $chunkSize): void
     {
         $professionalIds = DB::table('analytics.site_visits')
             ->select('professional_id')
@@ -145,42 +101,72 @@ class BackfillHourlyAnalytics extends Command
                     ->whereBetween('occurred_at', [$start, $endExclusive])
             )
             ->distinct()
-            ->lazy()
-            ->map(static fn ($row): string => trim((string) $row->professional_id))
-            ->filter();
+            ->pluck('professional_id')
+            ->map(static fn ($id): string => trim((string) $id))
+            ->filter()
+            ->values();
 
-        $count = 0;
-        foreach ($professionalIds as $professionalId) {
-            foreach ($hourBuckets as $hour) {
-                RebuildSiteHourlyAggregatesJob::dispatch($professionalId, $hour);
-            }
-            $count++;
+        if ($professionalIds->isEmpty()) {
+            $this->line('Site backfill: no professionals found in range, skipping.');
+
+            return;
         }
 
-        $this->line("Site jobs dispatched: professionals={$count}");
+        $batchCount = 0;
+        foreach ($hourBuckets as $hour) {
+            $professionalIds->chunk($chunkSize)->each(function (Collection $chunk, int $chunkIndex) use ($hour, &$batchCount): void {
+                $jobs = $chunk->map(
+                    static fn (string $id) => new RebuildSiteHourlyAggregatesJob($id, $hour)
+                )->all();
+
+                Bus::batch($jobs)
+                    ->name("site-hourly-backfill:{$hour}:chunk-{$chunkIndex}")
+                    ->allowFailures()
+                    ->dispatch();
+
+                $batchCount++;
+            });
+        }
+
+        $this->line("Site batches dispatched: hours={$hourBuckets->count()}, professionals={$professionalIds->count()}, batches={$batchCount}");
     }
 
     /**
-     * @param  Collection<int, string>  $hourBuckets ISO8601 strings
+     * @param  Collection<int, string>  $hourBuckets  ISO8601 strings
      */
-    private function backfillBooking(Collection $hourBuckets, Carbon $start, Carbon $endExclusive): void
+    private function backfillBooking(Collection $hourBuckets, Carbon $start, Carbon $endExclusive, int $chunkSize): void
     {
         $professionalIds = DB::table('analytics.booking_events')
             ->select('professional_id')
             ->whereBetween('occurred_at', [$start, $endExclusive])
             ->distinct()
-            ->lazy()
-            ->map(static fn ($row): string => trim((string) $row->professional_id))
-            ->filter();
+            ->pluck('professional_id')
+            ->map(static fn ($id): string => trim((string) $id))
+            ->filter()
+            ->values();
 
-        $count = 0;
-        foreach ($professionalIds as $professionalId) {
-            foreach ($hourBuckets as $hour) {
-                RebuildBookingHourlyAggregatesJob::dispatch($professionalId, $hour);
-            }
-            $count++;
+        if ($professionalIds->isEmpty()) {
+            $this->line('Booking backfill: no professionals found in range, skipping.');
+
+            return;
         }
 
-        $this->line("Booking jobs dispatched: professionals={$count}");
+        $batchCount = 0;
+        foreach ($hourBuckets as $hour) {
+            $professionalIds->chunk($chunkSize)->each(function (Collection $chunk, int $chunkIndex) use ($hour, &$batchCount): void {
+                $jobs = $chunk->map(
+                    static fn (string $id) => new RebuildBookingHourlyAggregatesJob($id, $hour)
+                )->all();
+
+                Bus::batch($jobs)
+                    ->name("booking-hourly-backfill:{$hour}:chunk-{$chunkIndex}")
+                    ->allowFailures()
+                    ->dispatch();
+
+                $batchCount++;
+            });
+        }
+
+        $this->line("Booking batches dispatched: hours={$hourBuckets->count()}, professionals={$professionalIds->count()}, batches={$batchCount}");
     }
 }

@@ -2,7 +2,9 @@
 
 namespace App\Jobs\Analytics;
 
+use App\Models\Core\Professional\Professional;
 use App\Services\Analytics\SiteAnalyticsAggregateService;
+use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -11,9 +13,10 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-class RebuildSiteHourlyAggregatesJob implements ShouldQueue, ShouldBeUnique
+// V2: Rebuilds site visit/click metrics for a professional's hour via SiteAnalyticsAggregateService. Queue: analytics.
+class RebuildSiteHourlyAggregatesJob implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Batchable, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 2;
 
@@ -40,6 +43,10 @@ class RebuildSiteHourlyAggregatesJob implements ShouldQueue, ShouldBeUnique
             return;
         }
 
+        if (! Professional::find($professionalId)) {
+            return;
+        }
+
         $aggregates->rebuildProfessionalHour($professionalId, $this->hourStart);
     }
 
@@ -52,4 +59,3 @@ class RebuildSiteHourlyAggregatesJob implements ShouldQueue, ShouldBeUnique
         ]);
     }
 }
-

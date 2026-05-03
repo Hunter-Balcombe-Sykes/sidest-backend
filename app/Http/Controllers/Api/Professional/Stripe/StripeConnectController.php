@@ -9,6 +9,7 @@ use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+// V2: Stripe Connect Express onboarding, payment methods, commission wallet top-ups, and payout history. Required for the 80/20 affiliate payout split.
 class StripeConnectController extends Controller
 {
     public function __construct(
@@ -303,6 +304,19 @@ class StripeConnectController extends Controller
     /**
      * GET /stripe/payouts
      * Lists payout history for the professional.
+     *
+     * TODO: expose commission ledger entries as a sibling endpoint so brands
+     * can reconcile "why is this payout $X?" against individual commission
+     * rows. The CommissionLedgerEntry model, commerce.commission_ledger_entries
+     * table, and CommissionPayoutService already exist — the only thing
+     * missing is the HTTP layer (controller method + route + resource + test).
+     * Deferred until a real brand asks; when promoting, decide between:
+     *   a) nested under a specific payout ID (GET /stripe/payouts/{id}/entries)
+     *      — simplest, answers the "reconcile this one payout" question.
+     *   b) a top-level list with filter params (GET /stripe/commissions?
+     *      payout_id=&date_from=&date_to=&status=) — more flexible but more
+     *      surface area to validate.
+     * Option (a) is probably the right first move; (b) can grow from it.
      */
     public function payouts(Request $request): JsonResponse
     {
@@ -333,6 +347,11 @@ class StripeConnectController extends Controller
                 'failure_reason' => $p->failure_reason,
                 'eligible_after' => $p->eligible_after?->toIso8601String(),
                 'processed_at' => $p->processed_at?->toIso8601String(),
+                // Per-payout grace deadline. Affiliate side renders this as
+                // "expires in N days" badge on rows where the affiliate
+                // hasn't connected Stripe yet; brand side uses it for
+                // reporting visibility.
+                'void_at' => $p->void_at?->toIso8601String(),
                 'created_at' => $p->created_at?->toIso8601String(),
                 'brand' => $p->brandProfessional ? [
                     'id' => $p->brandProfessional->id,

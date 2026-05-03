@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional\SquareIntegration;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Square\SyncSquareCatalogDeltaJob;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Services\Square\SquareApiException;
@@ -13,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
+// V2: Square POS connection for booking/service sync. Unrelated to V2 commerce — booking integration only.
 class SquareIntegrationController extends ApiController
 {
     use ResolveCurrentProfessional;
@@ -27,7 +29,7 @@ class SquareIntegrationController extends ApiController
     /**
      * Check if the professional has Square connected.
      */
-    private function ensureSquareConnected(Request $request): JsonResponse|null
+    private function ensureSquareConnected(Request $request): ?JsonResponse
     {
         $integration = $this->currentSquareIntegration($request);
         if (! $integration) {
@@ -39,6 +41,18 @@ class SquareIntegrationController extends ApiController
         }
 
         return null; // Success: connection exists
+    }
+
+    /**
+     * Build an unsaved ProfessionalIntegration carrying just professional_id +
+     * provider. Used for connect-style policy checks where no row exists yet.
+     */
+    private function squareSkeletonFor(Professional $pro): ProfessionalIntegration
+    {
+        return new ProfessionalIntegration([
+            'professional_id' => $pro->id,
+            'provider' => ProfessionalIntegration::PROVIDER_SQUARE,
+        ]);
     }
 
     /**
@@ -92,13 +106,14 @@ class SquareIntegrationController extends ApiController
     public function connect(Request $request, SquareServiceSyncService $syncService)
     {
         $request->validate([
-            'access_token'  => 'required|string',
+            'access_token' => 'required|string',
             'refresh_token' => 'required|string',
-            'merchant_id'   => 'required|string',
-            'expires_at'    => 'required|string',
+            'merchant_id' => 'required|string',
+            'expires_at' => 'required|string',
         ]);
 
         $pro = $this->currentProfessional($request);
+        $this->authorizeForUser($pro, 'manage', $this->squareSkeletonFor($pro));
         $merchantId = trim((string) $request->input('merchant_id'));
         if ($merchantId === '') {
             return $this->error('merchant_id is required.', 422);
@@ -147,13 +162,13 @@ class SquareIntegrationController extends ApiController
 
         Log::info('Square connected', [
             'professional_id' => $pro->id,
-            'merchant_id'     => $integration->external_account_id,
+            'merchant_id' => $integration->external_account_id,
         ]);
 
         return $this->success([
-            'connected'   => true,
+            'connected' => true,
             'merchant_id' => $integration->external_account_id,
-            'expires_at'  => $integration->expires_at?->toIso8601String(),
+            'expires_at' => $integration->expires_at?->toIso8601String(),
             'sync_queued' => $syncQueued,
             'sync_fallback_inline' => $syncFallbackInline,
         ]);
@@ -166,6 +181,7 @@ class SquareIntegrationController extends ApiController
     public function disconnect(Request $request)
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeForUser($pro, 'manage', $this->squareSkeletonFor($pro));
         $pro->integrations()
             ->where('provider', ProfessionalIntegration::PROVIDER_SQUARE)
             ->delete();
@@ -190,9 +206,11 @@ class SquareIntegrationController extends ApiController
         }
 
         $integration = $this->currentSquareIntegration($request);
+        $pro = $this->currentProfessional($request);
+        $this->authorizeForUser($pro, 'view', $integration);
 
         return $this->success([
-            'connected'  => $integration?->access_token !== null,
+            'connected' => $integration?->access_token !== null,
             'expires_at' => $integration?->expires_at
                 ? $integration->expires_at->toIso8601String()
                 : null,
@@ -212,6 +230,7 @@ class SquareIntegrationController extends ApiController
 
         $pro = $this->currentProfessional($request);
         $integration = $this->currentSquareIntegration($request);
+        $this->authorizeForUser($pro, 'manage', $integration);
 
         try {
             $stats = $syncService->syncFromSquare($pro, fullSync: true);
@@ -260,6 +279,9 @@ class SquareIntegrationController extends ApiController
         if ($error = $this->ensureSquareConnected($request)) {
             return $error;
         }
+
+        $integration = $this->currentSquareIntegration($request);
+        $this->authorizeForUser($pro, 'manage', $integration);
 
         try {
             $syncService->pushServiceToSquare($service, 'upsert');

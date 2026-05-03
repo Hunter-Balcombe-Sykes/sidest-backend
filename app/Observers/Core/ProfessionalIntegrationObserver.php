@@ -8,6 +8,7 @@ use App\Services\Notifications\NotificationPublisher;
 use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
 
+// V2: Publishes integration connect/disconnect notifications and re-evaluates booking section visibility.
 class ProfessionalIntegrationObserver
 {
     public bool $afterCommit = true;
@@ -40,7 +41,7 @@ class ProfessionalIntegrationObserver
         } catch (\Throwable $e) {
             Log::warning('ProfessionalIntegration created notification failed', [
                 'integration_id' => $integration->id,
-                'message'        => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
 
@@ -70,7 +71,7 @@ class ProfessionalIntegrationObserver
         } catch (\Throwable $e) {
             Log::warning('ProfessionalIntegration deleted notification failed', [
                 'integration_id' => $integration->id,
-                'message'        => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
 
@@ -80,7 +81,7 @@ class ProfessionalIntegrationObserver
     private function reevaluateBooking(ProfessionalIntegration $integration): void
     {
         try {
-            $pro = Professional::query()->find($integration->professional_id);
+            $pro = Professional::query()->with('site')->find($integration->professional_id);
             $site = $pro?->site;
             if (! $pro || ! $site) {
                 return;
@@ -93,9 +94,9 @@ class ProfessionalIntegrationObserver
             );
         } catch (\Throwable $e) {
             Log::warning('Booking section visibility reevaluation failed on integration change', [
-                'integration_id'  => $integration->id,
+                'integration_id' => $integration->id,
                 'professional_id' => $integration->professional_id,
-                'message'         => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }

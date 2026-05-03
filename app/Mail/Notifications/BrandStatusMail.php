@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends brand status change notifications (approved, rejected, suspended) using the Notification model and the brand_status template.
 class BrandStatusMail extends Mailable
 {
     use Queueable, SerializesModels;

@@ -2,21 +2,22 @@
 
 namespace App\Services\Cache;
 
+// V2: Central cache key naming convention. All cache keys across the application flow through this class.
 class CacheKeyGenerator
 {
     public static function publicSite(string $subdomain): string
     {
-        return "site:public:" . strtolower($subdomain);
+        return 'site:public:'.strtolower($subdomain);
     }
 
     public static function publicSitePayload(string $subdomain): string
     {
-        return "site:payload:" . strtolower($subdomain);
+        return 'site:payload:'.strtolower($subdomain);
     }
 
     public static function professionalByHandle(string $handle): string
     {
-        return "pro:handle:" . strtolower($handle);
+        return 'pro:handle:'.strtolower($handle);
     }
 
     public static function professionalById(string $id): string
@@ -71,7 +72,7 @@ class CacheKeyGenerator
 
     public static function professionalPayloadByHandle(string $handleLc): string
     {
-        return "pro:payload:handle:" . strtolower($handleLc);
+        return 'pro:payload:handle:'.strtolower($handleLc);
     }
 
     public static function professionalPayloadByAuthId(string $authUserId): string
@@ -81,7 +82,7 @@ class CacheKeyGenerator
 
     public static function professionalIdByHandle(string $handleLc): string
     {
-        return "pro:map:handle:" . strtolower($handleLc);
+        return 'pro:map:handle:'.strtolower($handleLc);
     }
 
     public static function professionalIdByAuthId(string $authUserId): string
@@ -91,7 +92,8 @@ class CacheKeyGenerator
 
     public static function analyticsSummary(string $professionalId, string $startDate, string $endDate): string
     {
-        return "analytics:summary:{$professionalId}:{$startDate}:{$endDate}";
+        // q2: top_links/top_sections query shape changed (commits 672aa80, c144ccc)
+        return "analytics:summary:q2:{$professionalId}:{$startDate}:{$endDate}";
     }
 
     /**
@@ -114,4 +116,45 @@ class CacheKeyGenerator
         return "analytics:booking:{$professionalId}:{$from}:{$to}:{$groupBy}";
     }
 
+    public static function affiliateCommerceAnalytics(string $professionalId, string $from, string $to): string
+    {
+        return "analytics:commerce:affiliate:{$professionalId}:{$from}:{$to}";
+    }
+
+    public static function brandCommerceAnalytics(string $professionalId, string $from, string $to): string
+    {
+        // v2: totals block now includes page_views + unique_visitors (commit a0e12a9)
+        return "analytics:commerce:brand:v2:{$professionalId}:{$from}:{$to}";
+    }
+
+    public static function brandActiveCatalog(string $brandProfessionalId): string
+    {
+        return "brand:{$brandProfessionalId}:catalog:active";
+    }
+
+    public static function brandAdminCatalog(string $brandProfessionalId): string
+    {
+        return "brand:{$brandProfessionalId}:catalog:admin";
+    }
+
+    public static function brandCollectionGid(string $brandProfessionalId, string $handle): string
+    {
+        return "brand:{$brandProfessionalId}:collection_gid:{$handle}";
+    }
+
+    // Hydrogen brand-design response cache. Keyed by site_id (not professional)
+    // so BrandDesignMediaService can bust with just the site handle. The `v1`
+    // segment lets us bust every entry at once by bumping to v2 if the payload
+    // shape changes. TTL is intentionally tight (5s) so Hydrogen sees dashboard
+    // saves within its staleWhileRevalidate window — invalidation keeps the
+    // stale window near zero in practice.
+    public static function hydrogenBrandDesign(string $siteId): string
+    {
+        return "hydrogen:brand-design:v1:{$siteId}";
+    }
+
+    public static function brandProductCustomPhotos(string $brandProfessionalId, string $productGid): string
+    {
+        return "brand:{$brandProfessionalId}:product:{$productGid}:custom_photos";
+    }
 }

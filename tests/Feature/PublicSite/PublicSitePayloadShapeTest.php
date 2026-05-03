@@ -7,7 +7,8 @@ use Illuminate\Support\Str;
 
 beforeEach(function () {
     setupPublicPayloadSchema();
-    DB::table('public_site_payload')->delete();
+    setupProfessionalsTable();
+    DB::connection('pgsql')->table('site.public_site_payload')->delete();
 })->group('public-site-payload');
 
 it('includes featured products and combined blocks in the public payload', function () {
@@ -59,8 +60,8 @@ it('includes featured products and combined blocks in the public payload', funct
                     'sort_order' => 0,
                 ],
             ],
-            'default_commission_rate' => (float) config('comet.store.default_commission_rate', 15),
-            'max_featured_products' => (int) config('comet.store.max_featured_products', 10),
+            'default_commission_rate' => (float) config('sidest.store.default_commission_rate', 15),
+            'max_featured_products' => (int) config('sidest.store.max_featured_products', 10),
         ],
         'legal' => [
             'privacy_policy' => 'Privacy policy',
@@ -70,7 +71,7 @@ it('includes featured products and combined blocks in the public payload', funct
         ],
     ];
 
-    DB::table('public_site_payload')->insert([
+    DB::connection('pgsql')->table('site.public_site_payload')->insert([
         'site_id' => $siteId,
         'professional_id' => $professionalId,
         'subdomain' => 'fadez',
@@ -83,8 +84,11 @@ it('includes featured products and combined blocks in the public payload', funct
 
     $response->assertOk();
     $response->assertJsonPath('selected_products.0.shopify_product_id', 'gid://shopify/Product/111');
-    $response->assertJsonPath('default_commission_rate', (float) config('comet.store.default_commission_rate', 15));
-    $response->assertJsonPath('max_featured_products', (int) config('comet.store.max_featured_products', 10));
+    // Don't cast to float — PHP's json_encode strips trailing zeros from "15.0",
+    // so by the time assertJsonPath decodes the response, the numeric becomes
+    // an int. Expecting an int matches what the wire actually carries.
+    $response->assertJsonPath('default_commission_rate', (int) config('sidest.store.default_commission_rate', 15));
+    $response->assertJsonPath('max_featured_products', (int) config('sidest.store.max_featured_products', 10));
     $response->assertJsonPath('store.selected_products.0.shopify_product_id', 'gid://shopify/Product/111');
 
     $response->assertJsonCount(2, 'blocks');
@@ -96,16 +100,22 @@ it('includes featured products and combined blocks in the public payload', funct
 
 function setupPublicPayloadSchema(): void
 {
-    $driver = DB::getDriverName();
+    // Run on the pgsql connection (forced by BaseModel) so models see the
+    // tables we create. ATTACH DATABASE is per-PDO-handle, so it must run
+    // on the same handle the models will use.
+    $conn = DB::connection('pgsql');
+    $driver = $conn->getDriverName();
 
     if ($driver === 'sqlite') {
         try {
-            DB::statement("ATTACH DATABASE ':memory:' AS core");
+            $conn->statement("ATTACH DATABASE ':memory:' AS site");
         } catch (\Throwable $e) {
             // Ignore if already attached.
         }
 
-        DB::statement('CREATE TABLE IF NOT EXISTS core.public_site_payload (
+        // public_site_payload is a Postgres VIEW in production but treated as
+        // a plain table in tests — easier to seed with raw inserts.
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.public_site_payload (
             site_id TEXT PRIMARY KEY,
             professional_id TEXT NULL,
             subdomain TEXT NULL,
@@ -115,9 +125,9 @@ function setupPublicPayloadSchema(): void
         return;
     }
 
-    DB::statement('CREATE SCHEMA IF NOT EXISTS core');
+    $conn->statement('CREATE SCHEMA IF NOT EXISTS site');
 
-    DB::statement('CREATE TABLE IF NOT EXISTS core.public_site_payload (
+    $conn->statement('CREATE TABLE IF NOT EXISTS site.public_site_payload (
         site_id uuid PRIMARY KEY,
         professional_id uuid NULL,
         subdomain varchar(63) NULL,

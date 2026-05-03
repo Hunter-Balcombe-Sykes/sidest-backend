@@ -27,6 +27,7 @@ use Throwable;
  * Worker invocation:
  *   php artisan queue:work redis_video --queue=videos --timeout=3600
  */
+// V2: Transcodes video to MP4 + HLS variants with poster. Feature-flagged. Uses dedicated redis_video connection. Queue: videos.
 class ProcessVideoVariantsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -36,23 +37,23 @@ class ProcessVideoVariantsJob implements ShouldQueue
     public int $backoff = 60;
 
     /**
-     * @param  string  $mediaId       UUID of the SiteMedia row.
+     * @param  string  $mediaId  UUID of the SiteMedia row.
      * @param  string  $originalPath  Storage path of the uploaded original.
-     * @param  string  $basePath      Directory prefix under media disk (videos/{proId}/{mediaId}).
+     * @param  string  $basePath  Directory prefix under media disk (videos/{proId}/{mediaId}).
      */
     public function __construct(
         public readonly string $mediaId,
         public readonly string $originalPath,
         public readonly string $basePath,
     ) {
-        $this->onConnection((string) config('comet.video_queue.connection', 'redis_video'));
-        $this->onQueue((string) config('comet.video_queue.name', 'videos'));
+        $this->onConnection((string) config('sidest.video_queue.connection', 'redis_video'));
+        $this->onQueue((string) config('sidest.video_queue.name', 'videos'));
     }
 
     public function handle(VideoVariantService $service): void
     {
         Log::info('ProcessVideoVariantsJob: starting', [
-            'media_id'      => $this->mediaId,
+            'media_id' => $this->mediaId,
             'original_path' => $this->originalPath,
         ]);
 
@@ -62,6 +63,7 @@ class ProcessVideoVariantsJob implements ShouldQueue
             Log::warning('ProcessVideoVariantsJob: SiteMedia row no longer exists, skipping.', [
                 'media_id' => $this->mediaId,
             ]);
+
             return;
         }
 
@@ -69,6 +71,7 @@ class ProcessVideoVariantsJob implements ShouldQueue
             Log::info('ProcessVideoVariantsJob: SiteMedia row is soft-deleted, skipping.', [
                 'media_id' => $this->mediaId,
             ]);
+
             return;
         }
 
@@ -81,11 +84,12 @@ class ProcessVideoVariantsJob implements ShouldQueue
             ]);
 
         $diskName = $service->resolvedDiskName();
-        $disk     = Storage::disk($diskName);
+        $disk = Storage::disk($diskName);
 
         if (! $disk->exists($this->originalPath)) {
             $this->markFailed('Original video file not found on media disk.');
             $this->fail(new \RuntimeException('Original video file not found on media disk.'));
+
             return;
         }
 
@@ -93,8 +97,8 @@ class ProcessVideoVariantsJob implements ShouldQueue
 
         try {
             // Stream the original to a local temp file for FFmpeg processing.
-            $ext      = pathinfo($this->originalPath, PATHINFO_EXTENSION) ?: 'mp4';
-            $localTmp = tempnam(sys_get_temp_dir(), 'comet_vid_') . '.' . $ext;
+            $ext = pathinfo($this->originalPath, PATHINFO_EXTENSION) ?: 'mp4';
+            $localTmp = tempnam(sys_get_temp_dir(), 'sidest_vid_').'.'.$ext;
 
             $stream = $disk->readStream($this->originalPath);
             if (! $stream) {
@@ -120,8 +124,8 @@ class ProcessVideoVariantsJob implements ShouldQueue
             Log::info('ProcessVideoVariantsJob: completed.', ['media_id' => $this->mediaId]);
         } catch (Throwable $e) {
             Log::error('ProcessVideoVariantsJob: processing failed.', [
-                'media_id'  => $this->mediaId,
-                'error'     => $e->getMessage(),
+                'media_id' => $this->mediaId,
+                'error' => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
 
@@ -136,6 +140,21 @@ class ProcessVideoVariantsJob implements ShouldQueue
     public function failed(Throwable $e): void
     {
         $this->markFailed($e->getMessage());
+        $this->cleanupR2Artifacts();
+    }
+
+    // Delete the original (and any partial variants) from R2 after terminal failure
+    // so orphaned files don't accumulate on the media disk indefinitely.
+    private function cleanupR2Artifacts(): void
+    {
+        try {
+            app(VideoVariantService::class)->deleteVariants($this->mediaId, $this->basePath);
+        } catch (Throwable $e) {
+            Log::warning('ProcessVideoVariantsJob: R2 orphan cleanup failed.', [
+                'media_id' => $this->mediaId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function markFailed(string $reason): void
@@ -151,9 +170,9 @@ class ProcessVideoVariantsJob implements ShouldQueue
         if ($updated === 0) {
             $siteMedia = SiteMedia::withTrashed()->where('id', $this->mediaId)->first();
             Log::info('ProcessVideoVariantsJob: failed-state update skipped.', [
-                'media_id'         => $this->mediaId,
-                'row_exists'       => $siteMedia !== null,
-                'is_soft_deleted'  => $siteMedia?->trashed() ?? false,
+                'media_id' => $this->mediaId,
+                'row_exists' => $siteMedia !== null,
+                'is_soft_deleted' => $siteMedia?->trashed() ?? false,
             ]);
         }
     }

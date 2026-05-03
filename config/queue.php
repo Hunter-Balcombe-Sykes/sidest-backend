@@ -85,8 +85,20 @@ return [
         'redis_video' => [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
-            'queue' => env('COMET_VIDEO_QUEUE_NAME', 'videos'),
-            'retry_after' => (int) env('COMET_VIDEO_QUEUE_RETRY_AFTER', 3600),
+            'queue' => env('SIDEST_VIDEO_QUEUE_NAME', 'videos'),
+            'retry_after' => (int) env('SIDEST_VIDEO_QUEUE_RETRY_AFTER', 3600),
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
+        // Dedicated connection for GDPR jobs. retry_after must exceed RedactShopJob::$timeout
+        // (600s) so Redis does not re-queue the job while it is still chunking through customers.
+        // Run workers with: php artisan queue:work redis_gdpr --queue=gdpr --timeout=660
+        'redis_gdpr' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => env('GDPR_QUEUE', 'gdpr'),
+            'retry_after' => (int) env('GDPR_QUEUE_RETRY_AFTER', 660),
             'block_for' => null,
             'after_commit' => false,
         ],

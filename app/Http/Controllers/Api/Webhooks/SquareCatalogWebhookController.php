@@ -12,10 +12,17 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
+// V2: Square catalog webhook — validates HMAC, deduplicates events, triggers service sync. Booking integration only.
 class SquareCatalogWebhookController extends ApiController
 {
     public function __invoke(Request $request, SquareServiceSyncService $syncService): JsonResponse
     {
+        if (! (bool) config('sidest.features.square_sync', false)) {
+            Log::info('Square webhook suppressed — square_sync feature flag is off');
+
+            return $this->success(['received' => true, 'feature_gated' => true]);
+        }
+
         $rawBody = $request->getContent() ?: '';
         $signature = (string) $request->header('x-square-hmacsha256-signature', '');
 
@@ -130,7 +137,7 @@ class SquareCatalogWebhookController extends ApiController
             str_ends_with($requestUrl, '/catalog') ? substr($requestUrl, 0, -8) : null,
             str_ends_with($requestUrl, '/catalog') ? null : rtrim($requestUrl, '/').'/catalog',
             $configuredUrl !== '' && str_ends_with($configuredUrl, '/catalog') ? substr($configuredUrl, 0, -8) : null,
-            $configuredUrl !== '' && !str_ends_with($configuredUrl, '/catalog') ? rtrim($configuredUrl, '/').'/catalog' : null,
+            $configuredUrl !== '' && ! str_ends_with($configuredUrl, '/catalog') ? rtrim($configuredUrl, '/').'/catalog' : null,
         ])));
 
         foreach ($candidateUrls as $notificationUrl) {

@@ -4,6 +4,7 @@ namespace App\Services\Analytics\Concerns;
 
 use App\Models\Core\Professional\Professional;
 
+// V2: Resolves a professional's IANA timezone from the database with caching and fallback to UTC.
 trait ResolvesTimezone
 {
     /** @var array<string, string> */

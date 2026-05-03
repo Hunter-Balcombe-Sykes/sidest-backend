@@ -10,6 +10,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
+// V2: Bidirectional service sync between Square and Side St. Booking integration — not V2 commerce.
 class SquareServiceSyncService
 {
     public function __construct(
@@ -235,6 +236,7 @@ class SquareServiceSyncService
 
                 if ($category->trashed()) {
                     $trashedCategoryByKey[$key] = $category;
+
                     continue;
                 }
 
@@ -406,8 +408,7 @@ class SquareServiceSyncService
         array &$activeCategoryIdByKey,
         array &$trashedCategoryByKey,
         int &$nextCategorySort
-    ): ?string
-    {
+    ): ?string {
         $categoryName = trim((string) ($row['square_category_name'] ?? ''));
         if ($categoryName === '') {
             return null;
@@ -464,6 +465,7 @@ class SquareServiceSyncService
         }
 
         $hash = substr(str_replace('-', '', $serviceId), 0, 18);
+
         return sprintf('#commet-%s-%s', $prefix, $hash);
     }
 }

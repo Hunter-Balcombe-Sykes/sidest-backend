@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends weekly analytics summary digest emails using the Notification model for subject and the analytics_weekly template.
 class AnalyticsWeeklyMail extends Mailable
 {
     use Queueable, SerializesModels;

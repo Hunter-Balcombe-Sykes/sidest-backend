@@ -2,13 +2,18 @@
 
 namespace App\Http\Controllers\Api\Shopify;
 
+use App\Exceptions\Shopify\ShopifyTransportException;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
-use App\Jobs\Shopify\RegisterShopifyOrderWebhooksJob;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Services\Shopify\BrandSignupService;
+use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\ShopifySetupTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -16,10 +21,12 @@ class ShopifyAppOAuthController extends ApiController
 {
     use NormalizesShopDomain;
 
-    /**
-     * Step 1 — Shopify hits this URL when the merchant clicks install.
-     * We validate the request and redirect to Shopify's OAuth consent screen.
-     */
+    public function __construct(
+        private readonly BrandSignupService $brandSignup,
+        private readonly ShopifySetupTokenService $setupTokens,
+        private readonly ShopifyAdminClient $shopifyClient,
+    ) {}
+
     public function install(Request $request): RedirectResponse|JsonResponse
     {
         $shop = $this->normalizeShopDomain((string) $request->query('shop', ''));
@@ -33,17 +40,22 @@ class ShopifyAppOAuthController extends ApiController
         }
 
         $apiKey = (string) config('services.shopify.api_key');
-        $scopes = (string) config('services.shopify.app_scopes', 'read_products,read_orders,write_orders');
-        $redirectUri = rtrim((string) config('app.url'), '/') . '/api/shopify/callback';
+        $redirectUri = rtrim((string) config('app.url'), '/').'/api/shopify/callback';
         $nonce = bin2hex(random_bytes(16));
 
-        // Store nonce in cache for 10 minutes to validate on callback
         cache()->put("shopify_oauth_nonce_{$shop}", $nonce, now()->addMinutes(10));
 
+        // Managed installation: omit the `scope` parameter so Shopify grants
+        // every scope declared in Sidest-Embedded/shopify.app.toml
+        // access_scopes block (pushed via `shopify app deploy`). Passing a
+        // narrower scope= here would override the toml and short-grant the
+        // merchant — that's how previous installs ended up without
+        // read_products despite the toml listing it.
+        //
+        // Ref: https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/authorization-code-grant
         $authUrl = "https://{$shop}/admin/oauth/authorize?"
-            . http_build_query([
+            .http_build_query([
                 'client_id' => $apiKey,
-                'scope' => $scopes,
                 'redirect_uri' => $redirectUri,
                 'state' => $nonce,
             ]);
@@ -51,10 +63,6 @@ class ShopifyAppOAuthController extends ApiController
         return redirect()->away($authUrl);
     }
 
-    /**
-     * Step 2 — Shopify redirects back here with a code after the merchant approves.
-     * We exchange the code for an access token and store it.
-     */
     public function callback(Request $request): RedirectResponse|JsonResponse
     {
         $shop = $this->normalizeShopDomain((string) $request->query('shop', ''));
@@ -66,20 +74,19 @@ class ShopifyAppOAuthController extends ApiController
             return $this->error('Missing required OAuth parameters.', 400);
         }
 
-        // Validate HMAC
         if (! $this->isValidHmac($request->query(), (string) config('services.shopify.api_secret'))) {
             Log::warning('Shopify OAuth: invalid HMAC', ['shop' => $shop]);
+
             return $this->error('Invalid HMAC signature.', 400);
         }
 
-        // Validate nonce
         $expectedNonce = cache()->pull("shopify_oauth_nonce_{$shop}");
         if ($expectedNonce === null || ! hash_equals($expectedNonce, $state)) {
             Log::warning('Shopify OAuth: invalid nonce', ['shop' => $shop]);
+
             return $this->error('Invalid state parameter.', 400);
         }
 
-        // Exchange code for access token
         $tokenResponse = Http::post("https://{$shop}/admin/oauth/access_token", [
             'client_id' => config('services.shopify.api_key'),
             'client_secret' => config('services.shopify.api_secret'),
@@ -91,6 +98,7 @@ class ShopifyAppOAuthController extends ApiController
                 'shop' => $shop,
                 'status' => $tokenResponse->status(),
             ]);
+
             return $this->error('Failed to exchange OAuth code for access token.', 502);
         }
 
@@ -101,66 +109,110 @@ class ShopifyAppOAuthController extends ApiController
             return $this->error('Empty access token received from Shopify.', 502);
         }
 
-        // Fetch shop details
-        $shopResponse = Http::withHeaders([
-            'X-Shopify-Access-Token' => $accessToken,
-        ])->get("https://{$shop}/admin/api/" . config('services.shopify.api_version') . "/shop.json");
-
-        $shopId = null;
-        if ($shopResponse->successful()) {
-            $shopId = (string) ($shopResponse->json('shop.id') ?? '');
+        $shopData = [];
+        try {
+            $apiVersion = (string) config('services.shopify.api_version', '2025-01');
+            $shopResponse = $this->shopifyClient->rest(
+                method: 'GET',
+                shopDomain: $shop,
+                accessToken: $accessToken,
+                path: "/admin/api/{$apiVersion}/shop.json",
+            );
+            $shopData = (array) ($shopResponse->json('shop') ?? []);
+        } catch (ShopifyTransportException $e) {
+            Log::warning('Shopify OAuth: shop fetch failed', ['shop' => $shop, 'status' => $e->status]);
         }
 
-        // Store the integration — find by shop domain, create or update
-        $integration = ProfessionalIntegration::query()
-            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
-            ->where('external_account_id', $shop)
-            ->first();
+        $shopEmail = strtolower(trim((string) Arr::get($shopData, 'email', '')));
+        $shopHandle = str_replace('.myshopify.com', '', $shop);
+        $appHandle = (string) config('services.shopify.app_handle', 'side-st');
+        $basePath = "https://admin.shopify.com/store/{$shopHandle}/apps/{$appHandle}";
 
-        $existingMetadata = is_array($integration?->provider_metadata) ? $integration->provider_metadata : [];
-
-        $metadata = array_merge($existingMetadata, [
-            'shop_domain' => $shop,
-            'shop_id' => $shopId ?: ($existingMetadata['shop_id'] ?? null),
-            'scopes' => array_values(array_filter(array_map('trim', $scopes))),
-            'webhook_orders_topic' => (string) config('services.shopify.webhook_orders_topic', 'orders/paid'),
-            'connected_at' => now()->toIso8601String(),
-            'oauth_install' => true,
-            'webhook_registration_state' => 'queued',
-        ]);
-
-        $integration = ProfessionalIntegration::query()->updateOrCreate(
-            [
-                'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
-                'external_account_id' => $shop,
-            ],
-            [
-                'access_token' => $accessToken,
-                'provider_metadata' => $metadata,
-            ]
-        );
-
-        // Queue webhook registration
         try {
-            RegisterShopifyOrderWebhooksJob::dispatch((string) $integration->id);
+            // Path A: Reinstall — existing integration for this shop domain
+            $existingIntegration = ProfessionalIntegration::query()
+                ->where('shopify_shop_domain', $shop)
+                ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+                ->first();
+
+            if ($existingIntegration) {
+                $result = $this->brandSignup->handleReinstall($existingIntegration, $accessToken, $shopData, $scopes);
+
+                Log::info('Shopify OAuth: reinstall', [
+                    'professional_id' => (string) $result->professional->id,
+                    'shop_domain' => $shop,
+                ]);
+
+                return redirect()->away($basePath);
+            }
+
+            // Path B: Existing account — shop email matches a Professional's primary_email (indexed local lookup).
+            // Users whose Shopify email differs from their Side St email fall through to Path C.
+            if ($shopEmail !== '') {
+                $existingProfessional = Professional::whereRaw('lower(primary_email) = ?', [$shopEmail])->first();
+
+                if ($existingProfessional) {
+                    $result = $this->brandSignup->handleExistingBrandConnect(
+                        $existingProfessional, $shop, $accessToken, $shopData, $scopes
+                    );
+
+                    Log::info('Shopify OAuth: existing account connect', [
+                        'professional_id' => (string) $result->professional->id,
+                        'shop_domain' => $shop,
+                    ]);
+
+                    return redirect()->away($basePath);
+                }
+            }
+
+            // Path C: Fresh install — cache credentials and redirect to setup wizard
+            $setupToken = $this->setupTokens->create($shop, $accessToken, $shopData, $scopes, $shopEmail);
+
+            Log::info('Shopify OAuth: fresh install, redirecting to setup', [
+                'shop_domain' => $shop,
+            ]);
+
+            return redirect()->away("{$basePath}/setup?shopify_setup_token={$setupToken}");
         } catch (\Throwable $e) {
-            Log::warning('Shopify OAuth: failed to queue webhook registration', [
+            Log::error('Shopify OAuth: callback failed', [
                 'shop' => $shop,
-                'integration_id' => (string) $integration->id,
                 'error' => $e->getMessage(),
             ]);
+
+            return $this->error('Failed to process Shopify app installation.', 500);
+        }
+    }
+
+    public function setupPrefill(Request $request): JsonResponse
+    {
+        $token = trim((string) $request->query('token', ''));
+
+        if ($token === '') {
+            return $this->error('Missing token.', 400);
         }
 
-        Log::info('Shopify app installed via OAuth', [
-            'shop' => $shop,
-            'shop_id' => $shopId,
-            'integration_id' => (string) $integration->id,
+        $data = $this->setupTokens->peek($token);
+
+        if ($data === null) {
+            return $this->error('Setup session not found or expired.', 404);
+        }
+
+        $shopData = $data['shop_data'] ?? [];
+
+        return $this->success([
+            'shop_name' => trim((string) Arr::get($shopData, 'name', '')),
+            'shop_domain' => $data['shop_domain'] ?? '',
+            'phone' => trim((string) Arr::get($shopData, 'phone', '')),
+            'address' => [
+                'address1' => trim((string) Arr::get($shopData, 'address1', '')),
+                'city' => trim((string) Arr::get($shopData, 'city', '')),
+                'province' => trim((string) Arr::get($shopData, 'province', '')),
+                'zip' => trim((string) Arr::get($shopData, 'zip', '')),
+                'country' => trim((string) Arr::get($shopData, 'country_name', '')),
+            ],
+            'country_code' => trim((string) Arr::get($shopData, 'country_code', '')),
+            'timezone' => trim((string) Arr::get($shopData, 'iana_timezone', '')),
         ]);
-
-        // Redirect to the Side St dashboard
-        $dashboardUrl = rtrim((string) config('app.frontend_url', env('FRONTEND_URL', 'https://sidest.co')), '/');
-
-        return redirect()->away("{$dashboardUrl}/account/commerce");
     }
 
     private function isValidShopDomain(string $shop): bool
@@ -168,17 +220,14 @@ class ShopifyAppOAuthController extends ApiController
         return (bool) preg_match('/^[a-zA-Z0-9\-]+\.myshopify\.com$/', $shop);
     }
 
-    /**
-     * Validates the HMAC signature Shopify sends with OAuth callbacks.
-     */
     private function isValidHmac(array $params, string $secret): bool
     {
-        $params = array_filter($params, static fn ($key) => $key !== 'hmac', ARRAY_FILTER_USE_KEY);
-        ksort($params);
-        $message = http_build_query($params);
+        $actual = (string) ($params['hmac'] ?? '');
+        $filtered = array_filter($params, static fn ($key) => $key !== 'hmac', ARRAY_FILTER_USE_KEY);
+        ksort($filtered);
+        $message = http_build_query($filtered);
         $expected = hash_hmac('sha256', $message, $secret);
-        $actual = (string) ($params['hmac'] ?? request()->query('hmac', ''));
 
-        return hash_equals($expected, $actual);
+        return $actual !== '' && hash_equals($expected, $actual);
     }
 }

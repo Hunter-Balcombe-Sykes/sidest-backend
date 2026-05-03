@@ -6,13 +6,15 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// V2: Invitation token for affiliate onboarding. Tracks status (pending/accepted/declined/expired) and links to claimed professional.
 class BrandAffiliateInvite extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'brand_affiliate_invites';
+    protected $table = 'brand.brand_affiliate_invites';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -29,6 +31,19 @@ class BrandAffiliateInvite extends BaseModel
         'claimed_professional_id',
         'accepted_at',
         'expires_at',
+    ];
+
+    // PII + token are hidden from default model serialization. Controllers/Resources hand-pick
+    // fields explicitly when responses need to include them; this guards against accidental
+    // exposure via toArray() in queue payloads, broadcast events, or future endpoints.
+    protected $hidden = [
+        'token',
+        'email',
+        'email_lc',
+        'phone',
+        'first_name',
+        'last_name',
+        'message',
     ];
 
     protected $casts = [

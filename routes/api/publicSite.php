@@ -1,20 +1,21 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-
-use App\Http\Controllers\Api\PublicSite\PublicSiteController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
+use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
+use App\Http\Controllers\Api\PublicSite\PublicEnquiryController;
 use App\Http\Controllers\Api\PublicSite\PublicMarketingPreferenceController;
-use App\Http\Controllers\Api\PublicSite\PublicBookingController;
-use App\Http\Controllers\Api\PublicSite\PublicStoreController;
+use App\Http\Controllers\Api\PublicSite\PublicSiteController;
+use Illuminate\Support\Facades\Route;
 
-$publicDomain = config('comet.public_domain');
+// TODO(v1): all routes in this file should be prefixed /v1/ once frontend is ready for the migration
+
+$publicDomain = config('sidest.public_domain');
 
 // Public/Anon
 Route::group([
-    'domain' => '{subdomain}.' . $publicDomain,
+    'domain' => '{subdomain}.'.$publicDomain,
     'where' => ['subdomain' => '[A-Za-z0-9-]+'],
     'prefix' => 'public',
 ], function () {
@@ -23,24 +24,17 @@ Route::group([
     Route::get('/site', [PublicSiteController::class, 'show'])
         ->middleware('throttle:public-site');
 
-    // Public booking flow
-    Route::get('/booking/config', [PublicBookingController::class, 'config'])
-        ->middleware('throttle:public-site');
-    Route::get('/booking/services', [PublicBookingController::class, 'services'])
-        ->middleware('throttle:public-site');
-    Route::post('/booking/availability', [PublicBookingController::class, 'availability'])
-        ->middleware('throttle:public-site');
-    Route::post('/booking/checkout', [PublicBookingController::class, 'checkout'])
-        ->middleware('throttle:public-site');
-
-    Route::get('/store/featured-products', [PublicStoreController::class, 'featuredProducts'])
-        ->middleware('throttle:public-site');
-    Route::post('/store/checkout-session', [PublicStoreController::class, 'createCheckoutSession'])
-        ->middleware('throttle:public-site');
-    Route::post('/store/stripe-checkout', [PublicStoreController::class, 'createStripeCheckout'])
-        ->middleware('throttle:public-site');
-    Route::post('/store/payment-intent', [PublicStoreController::class, 'createPaymentIntent'])
-        ->middleware('throttle:public-site');
+    // Public booking flow — gated behind smart_booking feature flag
+    Route::middleware('feature:smart_booking')->group(function () {
+        Route::get('/booking/config', [PublicBookingController::class, 'config'])
+            ->middleware('throttle:public-site');
+        Route::get('/booking/services', [PublicBookingController::class, 'services'])
+            ->middleware('throttle:public-site');
+        Route::post('/booking/availability', [PublicBookingController::class, 'availability'])
+            ->middleware('throttle:public-site');
+        Route::post('/booking/checkout', [PublicBookingController::class, 'checkout'])
+            ->middleware('throttle:booking-checkout');
+    });
 
     // Page View Analytics
     Route::post('/analytics/pageviews', [AnalyticsController::class, 'pageview'])
@@ -54,6 +48,10 @@ Route::group([
     Route::post('/customers', [PublicCustomerLeadController::class, 'store'])
         ->middleware(['lead.log', 'throttle:leads']);
 
+    // Contact Section Enquiries
+    Route::post('/enquiry', [PublicEnquiryController::class, 'submit'])
+        ->middleware(['lead.log', 'throttle:leads']);
+
     Route::post('/subscribe', [PublicEmailSubscriptionController::class, 'subscribe'])
         ->middleware('throttle:public-site');
 
@@ -64,6 +62,7 @@ Route::group([
     Route::post('/unsubscribe/{token}', [PublicMarketingPreferenceController::class, 'unsubscribe'])
         ->middleware('throttle:public-site');
 
-    Route::post('/resubscribe/{token}', [PublicMarketingPreferenceController::class, 'resubscribe'])
-        ->middleware('throttle:public-site');
+    // Resubscribe via token was removed — tokens rotate on unsubscribe to block
+    // email-link replay. Re-subscribing requires explicit opt-in via
+    // POST /api/public/subscribe (PublicEmailSubscriptionController).
 });

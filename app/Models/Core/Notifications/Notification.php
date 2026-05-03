@@ -3,12 +3,13 @@
 namespace App\Models\Core\Notifications;
 
 use App\Models\BaseModel;
+use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use App\Models\Core\Professional\Professional;
 
+// V2: In-app notification with typed severity, optional time window, and CTA actions. Can be global (professional_id null) or targeted to one professional.
 class Notification extends BaseModel
 {
     use HasUuids;
@@ -22,9 +23,10 @@ class Notification extends BaseModel
         'Info',
     ];
 
-    protected $table = 'notifications';
+    protected $table = 'notifications.notifications';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -45,8 +47,8 @@ class Notification extends BaseModel
     protected $casts = [
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
-        'starts_at'  => 'datetime',
-        'ends_at'    => 'datetime',
+        'starts_at' => 'datetime',
+        'ends_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo
@@ -122,7 +124,7 @@ class Notification extends BaseModel
     {
         return match (self::normalizeFrontendType($value)) {
             'Critical' => 'critical',
-            'Warning' => 'warning',
+            'Warning', 'BrandPartnerRemoved' => 'warning',
             'To do' => 'warning',
             'Success', 'Info', 'Invitation' => 'info',
             default => 'info',

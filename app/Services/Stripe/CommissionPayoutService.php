@@ -2,6 +2,7 @@
 
 namespace App\Services\Stripe;
 
+use App\Jobs\Stripe\ExecuteCommissionPayoutJob;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionLedgerEntry;
@@ -9,42 +10,49 @@ use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Stripe\Exception\ApiConnectionException;
 use Stripe\Exception\ApiErrorException;
+use Stripe\Exception\RateLimitException;
 use Stripe\StripeClient;
 
+// V2: Core. Processes eligible commission payouts with hybrid funding (wallet balance first, card charge for shortfall). Transfers net amount to affiliate via Stripe Connect (80/20 split).
 class CommissionPayoutService
 {
     private StripeClient $stripe;
+
     private float $platformFeePercent;
+
     private int $systemHoldDays;
+
     private int $minHoldDays;
 
-    public function __construct()
+    public function __construct(?StripeClient $stripe = null)
     {
-        $this->stripe = new StripeClient(config('services.stripe.secret_key'));
-        $this->platformFeePercent = config('comet.store.platform_fee_percent', 3);
-        $this->systemHoldDays = max(0, (int) config('comet.store.payout_hold_days', 7));
-        $this->minHoldDays = (int) config('comet.store.min_payout_hold_days', 7);
+        $this->stripe = $stripe ?? new StripeClient(config('services.stripe.secret_key'));
+        $this->platformFeePercent = config('sidest.store.platform_fee_percent', 3);
+        $this->systemHoldDays = max(0, (int) config('sidest.store.payout_hold_days', 7));
+        $this->minHoldDays = (int) config('sidest.store.min_payout_hold_days', 7);
     }
 
     /**
      * Main entry point: find all eligible unpaid commissions, batch them,
-     * and process payouts.
+     * and dispatch a per-payout job for each. Returns dispatch counts only —
+     * actual results are reported per-job via Horizon.
+     *
+     * @return array{batches_dispatched: int, batches_created: int, batches_requeued: int}
      */
     public function processEligiblePayouts(): array
     {
         $stats = [
+            'batches_dispatched' => 0,
             'batches_created' => 0,
-            'existing_batches_retried' => 0,
-            'batches_processed' => 0,
-            'batches_failed' => 0,
-            'batches_pending_funding' => 0,
-            'total_cents' => 0,
+            'batches_requeued' => 0,
         ];
 
-        // Retry previously created batches that are still unresolved.
+        // Re-dispatch any in-flight batches. ExecuteCommissionPayoutJob's idempotent
+        // resume logic handles collecting/transferring states safely.
         $existingPending = CommissionPayout::query()
-            ->where('status', 'pending')
+            ->whereIn('status', ['pending', 'collecting', 'transferring'])
             ->whereNull('processed_at')
             ->where('eligible_after', '<=', now())
             ->orderBy('eligible_after')
@@ -52,29 +60,9 @@ class CommissionPayoutService
             ->get();
 
         foreach ($existingPending as $pendingPayout) {
-            try {
-                $stats['existing_batches_retried']++;
-                $result = $this->processPayoutBatch($pendingPayout);
-
-                if ($result === true) {
-                    $stats['batches_processed']++;
-                    $stats['total_cents'] += $pendingPayout->net_payout_cents;
-                    continue;
-                }
-
-                if ($result === null) {
-                    $stats['batches_pending_funding']++;
-                    continue;
-                }
-
-                $stats['batches_failed']++;
-            } catch (\Throwable $e) {
-                Log::error('Retrying existing commission payout batch failed', [
-                    'payout_id' => $pendingPayout->id,
-                    'error' => $e->getMessage(),
-                ]);
-                $stats['batches_failed']++;
-            }
+            ExecuteCommissionPayoutJob::dispatch($pendingPayout->id);
+            $stats['batches_dispatched']++;
+            $stats['batches_requeued']++;
         }
 
         // Find all brands that have unpaid approved accruals, then apply
@@ -93,83 +81,48 @@ class CommissionPayoutService
 
         foreach ($brandIds as $brandId) {
             $holdDays = $this->resolveHoldDays($brandSettings[$brandId] ?? null);
+            $cutoff = now()->utc()->subDays($holdDays);
 
-            $groupDefinitions = [
-                [
-                    'funding_kind' => 'brand_charge',
-                    'cutoff' => now()->subDays($holdDays),
-                ],
-                [
-                    // Stripe-direct storefront commissions are prefunded at sale time.
-                    // Keep these immediately eligible so affiliate payouts aren't delayed.
-                    'funding_kind' => 'stripe_sale_hold',
-                    'cutoff' => now(),
-                ],
-            ];
+            $groups = CommissionLedgerEntry::query()
+                ->whereNull('payout_id')
+                ->where('entry_type', 'accrual')
+                ->where('status', 'approved')
+                ->where('brand_professional_id', $brandId)
+                ->where('occurred_at', '<=', $cutoff)
+                ->select([
+                    'brand_professional_id',
+                    'affiliate_professional_id',
+                    'currency_code',
+                    DB::raw('SUM(amount_cents) as total_cents'),
+                    DB::raw('COUNT(*) as entry_count'),
+                ])
+                ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code')
+                ->having(DB::raw('SUM(amount_cents)'), '>', 0)
+                ->get();
 
-            foreach ($groupDefinitions as $definition) {
-                $fundingKind = (string) $definition['funding_kind'];
-                $cutoff = $definition['cutoff'];
+            foreach ($groups as $group) {
+                try {
+                    $payout = $this->createPayoutBatch(
+                        $group->brand_professional_id,
+                        $group->affiliate_professional_id,
+                        $group->currency_code,
+                        $cutoff,
+                    );
 
-                $groups = CommissionLedgerEntry::query()
-                    ->whereNull('payout_id')
-                    ->where('entry_type', 'accrual')
-                    ->where('status', 'approved')
-                    ->where('brand_professional_id', $brandId)
-                    ->where('occurred_at', '<=', $cutoff)
-                    ->where(function ($query) use ($fundingKind): void {
-                        $this->applyFundingKindFilter($query, $fundingKind);
-                    })
-                    ->select([
-                        'brand_professional_id',
-                        'affiliate_professional_id',
-                        'currency_code',
-                        DB::raw('SUM(amount_cents) as total_cents'),
-                        DB::raw('COUNT(*) as entry_count'),
-                    ])
-                    ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code')
-                    ->having(DB::raw('SUM(amount_cents)'), '>', 0)
-                    ->get();
-
-                foreach ($groups as $group) {
-                    try {
-                        $payout = $this->createPayoutBatch(
-                            $group->brand_professional_id,
-                            $group->affiliate_professional_id,
-                            $group->currency_code,
-                            $fundingKind,
-                            $cutoff,
-                        );
-
-                        if (! $payout) {
-                            continue;
-                        }
-
-                        $stats['batches_created']++;
-                        $result = $this->processPayoutBatch($payout);
-
-                        if ($result === true) {
-                            $stats['batches_processed']++;
-                            $stats['total_cents'] += $payout->net_payout_cents;
-                            continue;
-                        }
-
-                        if ($result === null) {
-                            $stats['batches_pending_funding']++;
-                            continue;
-                        }
-
-                        $stats['batches_failed']++;
-                    } catch (\Throwable $e) {
-                        Log::error('Commission payout batch failed', [
-                            'brand_id' => $group->brand_professional_id,
-                            'affiliate_id' => $group->affiliate_professional_id,
-                            'currency' => $group->currency_code,
-                            'funding_kind' => $fundingKind,
-                            'error' => $e->getMessage(),
-                        ]);
-                        $stats['batches_failed']++;
+                    if (! $payout) {
+                        continue;
                     }
+
+                    $stats['batches_created']++;
+                    ExecuteCommissionPayoutJob::dispatch($payout->id);
+                    $stats['batches_dispatched']++;
+                } catch (\Throwable $e) {
+                    Log::error('Commission payout batch creation failed', [
+                        'brand_id' => $group->brand_professional_id,
+                        'affiliate_id' => $group->affiliate_professional_id,
+                        'currency' => $group->currency_code,
+                        'error' => $e->getMessage(),
+                    ]);
                 }
             }
         }
@@ -195,10 +148,9 @@ class CommissionPayoutService
         string $brandId,
         string $affiliateId,
         string $currency,
-        string $fundingKind,
         \DateTimeInterface $cutoff,
     ): ?CommissionPayout {
-        return DB::transaction(function () use ($brandId, $affiliateId, $currency, $fundingKind, $cutoff) {
+        return DB::transaction(function () use ($brandId, $affiliateId, $currency, $cutoff) {
             $entries = CommissionLedgerEntry::query()
                 ->whereNull('payout_id')
                 ->where('entry_type', 'accrual')
@@ -207,9 +159,6 @@ class CommissionPayoutService
                 ->where('affiliate_professional_id', $affiliateId)
                 ->where('currency_code', $currency)
                 ->where('occurred_at', '<=', $cutoff)
-                ->where(function ($query) use ($fundingKind): void {
-                    $this->applyFundingKindFilter($query, $fundingKind);
-                })
                 ->lockForUpdate()
                 ->get();
 
@@ -222,7 +171,11 @@ class CommissionPayoutService
                 return null;
             }
 
-            $reversalCents = CommissionLedgerEntry::query()
+            // Single locked fetch — reused for both the net-commission sum
+            // below and the foreach that links these entries to the payout.
+            // lockForUpdate matches the accrual fetch above and closes the
+            // race where a reversal could land between SUM and GET.
+            $reversals = CommissionLedgerEntry::query()
                 ->whereNull('payout_id')
                 ->where('entry_type', 'reversal')
                 ->where('status', 'approved')
@@ -230,30 +183,30 @@ class CommissionPayoutService
                 ->where('affiliate_professional_id', $affiliateId)
                 ->where('currency_code', $currency)
                 ->where('occurred_at', '<=', $cutoff)
-                ->where(function ($query) use ($fundingKind): void {
-                    $this->applyFundingKindFilter($query, $fundingKind);
-                })
-                ->sum('amount_cents');
+                ->lockForUpdate()
+                ->get();
 
+            $reversalCents = (int) $reversals->sum('amount_cents');
             $netCommission = $grossCents + $reversalCents;
             if ($netCommission <= 0) {
                 return null;
             }
 
-            // For Stripe direct sales the platform fee is already collected at charge time
-            // via the destination charge split, so no additional deduction is needed.
-            if ($fundingKind === 'stripe_sale_hold') {
-                $platformFeeCents = 0;
-            } else {
-                $platformFeeCents = (int) round($netCommission * $this->platformFeePercent / 100);
-            }
+            $platformFeeCents = (int) round($netCommission * $this->platformFeePercent / 100);
             $netPayoutCents = $netCommission - $platformFeeCents;
 
             if ($netPayoutCents <= 0) {
                 return null;
             }
 
-            $payout = CommissionPayout::create([
+            // Per-payout grace window — 60d from creation. If the affiliate
+            // hasn't activated Stripe Connect by then, VoidExpiredPayoutsJob
+            // cancels this payout and voids its ledger entries.
+            // grace_period_days lives in config/sidest.php so ops can tune
+            // the policy without a code release.
+            $graceDays = (int) config('sidest.store.grace_period_days', 60);
+
+            $payout = CommissionPayout::forceCreate([
                 'brand_professional_id' => $brandId,
                 'affiliate_professional_id' => $affiliateId,
                 'status' => 'pending',
@@ -263,7 +216,8 @@ class CommissionPayoutService
                 'currency_code' => strtoupper($currency),
                 'ledger_entry_count' => $entries->count(),
                 'eligible_after' => $cutoff,
-                'funding_source' => $fundingKind === 'stripe_sale_hold' ? 'stripe_sale_hold' : null,
+                'void_at' => now()->addDays($graceDays),
+                'funding_source' => null,
             ]);
 
             foreach ($entries as $entry) {
@@ -272,21 +226,8 @@ class CommissionPayoutService
                     'commission_ledger_entry_id' => $entry->id,
                     'amount_cents' => $entry->amount_cents,
                 ]);
-                $entry->update(['payout_id' => $payout->id]);
+                $entry->forceFill(['payout_id' => $payout->id])->save();
             }
-
-            $reversals = CommissionLedgerEntry::query()
-                ->whereNull('payout_id')
-                ->where('entry_type', 'reversal')
-                ->where('status', 'approved')
-                ->where('brand_professional_id', $brandId)
-                ->where('affiliate_professional_id', $affiliateId)
-                ->where('currency_code', $currency)
-                ->where('occurred_at', '<=', $cutoff)
-                ->where(function ($query) use ($fundingKind): void {
-                    $this->applyFundingKindFilter($query, $fundingKind);
-                })
-                ->get();
 
             foreach ($reversals as $reversal) {
                 CommissionPayoutItem::create([
@@ -294,7 +235,7 @@ class CommissionPayoutService
                     'commission_ledger_entry_id' => $reversal->id,
                     'amount_cents' => $reversal->amount_cents,
                 ]);
-                $reversal->update(['payout_id' => $payout->id]);
+                $reversal->forceFill(['payout_id' => $payout->id])->save();
             }
 
             return $payout;
@@ -302,60 +243,49 @@ class CommissionPayoutService
     }
 
     /**
-     * Apply funding kind filter using a subquery instead of JOIN (avoids FOR UPDATE + LEFT JOIN conflict).
-     */
-    private function applyFundingKindFilter($query, string $fundingKind): void
-    {
-        if ($fundingKind === 'stripe_sale_hold') {
-            $query->where('rate_source', 'stripe_storefront');
-        } else {
-            $query->where(function ($q) {
-                $q->whereNull('rate_source')
-                  ->orWhere('rate_source', '<>', 'stripe_storefront');
-            });
-        }
-    }
-
-    /**
-     * Process payout with hybrid funding:
-     * 1) Debit wallet balance first (partial OK).
-     * 2) Charge brand's card for any shortfall.
-     * 3) Transfer net amount to affiliate.
+     * Process a single payout through the full 3-step flow with idempotent resume:
+     *   1) Debit wallet balance (atomic with status update — crash-safe).
+     *   2) Charge brand's card for any shortfall.
+     *   3) Transfer net amount to affiliate via Stripe Connect.
      *
-     * Card is required. Wallet is optional but used as priority.
+     * Each step checks the payout's current status before executing, so retries
+     * (both Horizon automatic and admin manual) resume from where they left off
+     * rather than restarting from scratch. This prevents double-debiting the wallet
+     * and double-charging the brand's card.
      *
      * Return values:
-     * - true: completed
-     * - null: pending for funding/retry
+     * - true:  completed
+     * - null:  pending for funding/retry
      * - false: failed
      */
-    private function processPayoutBatch(CommissionPayout $payout): ?bool
+    public function processPayoutBatch(CommissionPayout $payout): ?bool
     {
+        if ($payout->status === 'completed') {
+            return true;
+        }
+
         $brand = Professional::find($payout->brand_professional_id);
         $affiliate = Professional::find($payout->affiliate_professional_id);
-        $isPrefundedStripeSale = trim((string) ($payout->funding_source ?? '')) === 'stripe_sale_hold';
 
         if (! $affiliate?->stripe_connect_account_id || $affiliate->stripe_connect_status !== 'active') {
-            $this->failPayout($payout, 'affiliate_not_connected', 'Affiliate Stripe Connect account is not active');
-            return false;
+            $this->markPendingFunding($payout, 'affiliate_not_connected', 'Affiliate Stripe Connect account is not active — holding for grace period');
+
+            return null;
         }
 
         if (! $brand) {
             $this->failPayout($payout, 'brand_missing', 'Brand account was not found.');
+
             return false;
         }
 
-        if ($isPrefundedStripeSale) {
-            return $this->completePrefundedPayout($payout, $brand, $affiliate);
-        }
-
-        // Card is required for all non-prefunded payouts.
         if (! $brand->stripe_customer_id || ! $brand->stripe_payment_method_id) {
             $this->markPendingFunding(
                 $payout,
                 'brand_payment_method_missing',
                 'No payment method on file. Please add a card in your Stripe settings.',
             );
+
             return null;
         }
 
@@ -363,29 +293,57 @@ class CommissionPayoutService
         $currencyLower = strtolower($currencyUpper);
         $amountToCollect = $payout->gross_commission_cents;
 
-        // Step 1: Debit wallet balance (as much as available, partial OK)
-        $walletDebitCents = $this->debitBrandManualBalancePartial($brand->id, $amountToCollect, $currencyUpper);
-        $chargeAmountCents = $amountToCollect - $walletDebitCents;
+        // Idempotency key suffix — retry_count is incremented on each admin manual retry
+        // so fresh Stripe objects are created rather than returning a refunded/failed one
+        // from within the 24-hour idempotency TTL window.
+        $retryKey = '_r'.$payout->retry_count;
 
-        $fundingSource = 'card';
-        if ($walletDebitCents > 0 && $chargeAmountCents > 0) {
-            $fundingSource = 'wallet_and_card';
-        } elseif ($walletDebitCents > 0 && $chargeAmountCents <= 0) {
-            $fundingSource = 'wallet';
+        // Step 1: Wallet debit — or resume from recorded state
+        //
+        // The debit and the status update are wrapped in a single DB::transaction
+        // so a process crash between them can't leave the wallet reduced but the
+        // payout record still showing 'pending' (which would cause a double-debit on retry).
+        $walletDebitCents = 0;
+        $chargeAmountCents = $amountToCollect;
+
+        if (in_array($payout->status, ['collecting', 'collected', 'transferring'], true)) {
+            // Wallet debit already committed in a previous run — read from DB, don't re-debit.
+            $walletDebitCents = (int) ($payout->wallet_debit_cents ?? 0);
+            $chargeAmountCents = (int) ($payout->charge_cents ?? $amountToCollect);
+        } else {
+            DB::transaction(function () use ($payout, $brand, $amountToCollect, $currencyUpper, &$walletDebitCents, &$chargeAmountCents): void {
+                $walletDebitCents = $this->debitBrandManualBalancePartial($brand->id, $amountToCollect, $currencyUpper);
+                $chargeAmountCents = $amountToCollect - $walletDebitCents;
+
+                $fundingSource = 'card';
+                if ($walletDebitCents > 0 && $chargeAmountCents > 0) {
+                    $fundingSource = 'wallet_and_card';
+                } elseif ($walletDebitCents > 0) {
+                    $fundingSource = 'wallet';
+                }
+
+                $payout->forceFill([
+                    'status' => 'collecting',
+                    'funding_source' => $fundingSource,
+                    'wallet_debit_cents' => $walletDebitCents,
+                    'charge_cents' => $chargeAmountCents,
+                    'failure_code' => null,
+                    'failure_reason' => null,
+                ])->save();
+            });
         }
-
-        $payout->update([
-            'status' => 'collecting',
-            'funding_source' => $fundingSource,
-            'wallet_debit_cents' => $walletDebitCents,
-            'charge_cents' => $chargeAmountCents,
-            'failure_code' => null,
-            'failure_reason' => null,
-        ]);
 
         // Step 2: Charge brand's card for the shortfall (if any)
         $latestChargeId = null;
-        if ($chargeAmountCents > 0) {
+
+        if (in_array($payout->status, ['collected', 'transferring'], true)) {
+            // PaymentIntent already succeeded in a previous run.
+            // Retrieve the charge ID so we can use source_transaction on the transfer.
+            if ($payout->stripe_payment_intent_id && $chargeAmountCents > 0) {
+                $pi = $this->stripe->paymentIntents->retrieve($payout->stripe_payment_intent_id);
+                $latestChargeId = $this->extractLatestChargeId($pi);
+            }
+        } elseif ($chargeAmountCents > 0) {
             try {
                 $paymentIntent = $this->stripe->paymentIntents->create([
                     'amount' => $chargeAmountCents,
@@ -396,43 +354,60 @@ class CommissionPayoutService
                     'off_session' => true,
                     'description' => "Commission payout #{$payout->id}",
                     'metadata' => [
-                        'comet_payout_id' => $payout->id,
+                        'sidest_payout_id' => $payout->id,
                         'brand_id' => $brand->id,
                         'affiliate_id' => $affiliate->id,
                     ],
-                ]);
+                ], ['idempotency_key' => 'pi_'.$payout->id.$retryKey]);
 
                 if ($paymentIntent->status !== 'succeeded') {
-                    // SCA required — refund wallet debit and mark pending
+                    // SCA required — cancel the PI so the idempotency key is freed for the next
+                    // attempt. Without cancellation the same key returns this stuck PI for 24h.
+                    try {
+                        $this->stripe->paymentIntents->cancel($paymentIntent->id);
+                    } catch (\Throwable) {
+                        // Non-critical: PI may already be in a terminal state
+                    }
                     if ($walletDebitCents > 0) {
                         $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
                     }
                     $this->markPendingFunding($payout, 'charge_requires_action', 'Card charge requires authentication.');
+
                     return null;
                 }
 
                 $latestChargeId = $this->extractLatestChargeId($paymentIntent);
 
-                $payout->update([
+                $payout->forceFill([
                     'stripe_payment_intent_id' => $paymentIntent->id,
                     'status' => 'collected',
-                ]);
+                ])->save();
+            } catch (ApiConnectionException|RateLimitException $e) {
+                // Transient error — re-throw so Horizon retries with backoff.
+                // Wallet debit is already committed in 'collecting' status; the
+                // idempotent resume will skip re-debiting on the next attempt.
+                throw $e;
             } catch (ApiErrorException $e) {
-                // Card charge failed — refund wallet debit
+                // Terminal card failure (declined, invalid PM, SCA permanently blocked, etc.)
                 if ($walletDebitCents > 0) {
                     $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
                 }
                 $this->markPendingFunding($payout, 'charge_failed', $e->getMessage());
+
                 return null;
             }
         } else {
-            // Fully funded by wallet
-            $payout->update(['status' => 'collected']);
+            // Fully funded by wallet — only advance status if not already past this step
+            if (! in_array($payout->status, ['collected', 'transferring'], true)) {
+                $payout->forceFill(['status' => 'collected'])->save();
+            }
         }
 
         // Step 3: Transfer net amount to the affiliate's Connect account
         try {
-            $payout->update(['status' => 'transferring']);
+            if ($payout->status !== 'transferring') {
+                $payout->forceFill(['status' => 'transferring'])->save();
+            }
 
             $transferPayload = [
                 'amount' => $payout->net_payout_cents,
@@ -440,7 +415,7 @@ class CommissionPayoutService
                 'destination' => $affiliate->stripe_connect_account_id,
                 'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
                 'metadata' => [
-                    'comet_payout_id' => $payout->id,
+                    'sidest_payout_id' => $payout->id,
                     'brand_id' => $brand->id,
                     'affiliate_id' => $affiliate->id,
                 ],
@@ -450,15 +425,18 @@ class CommissionPayoutService
                 $transferPayload['source_transaction'] = $latestChargeId;
             }
 
-            $transfer = $this->stripe->transfers->create($transferPayload);
+            $transfer = $this->stripe->transfers->create(
+                $transferPayload,
+                ['idempotency_key' => 'tr_'.$payout->id.$retryKey]
+            );
 
-            $payout->update([
+            $payout->forceFill([
                 'stripe_transfer_id' => $transfer->id,
                 'status' => 'completed',
                 'processed_at' => now(),
                 'failure_code' => null,
                 'failure_reason' => null,
-            ]);
+            ])->save();
 
             Log::info('Commission payout completed', [
                 'payout_id' => $payout->id,
@@ -467,81 +445,58 @@ class CommissionPayoutService
                 'charge_cents' => $chargeAmountCents,
                 'platform_fee_cents' => $payout->platform_fee_cents,
                 'net_cents' => $payout->net_payout_cents,
-                'funding_source' => $fundingSource,
+                'funding_source' => $payout->funding_source,
                 'currency' => $payout->currency_code,
             ]);
 
+            // Rebuild commerce aggregates so commission_paid_cents is reflected.
+            // Guard against null FKs (SET NULL on professional hard-delete).
+            if ($payout->brand_professional_id && $payout->affiliate_professional_id) {
+                \App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob::dispatch(
+                    (string) $payout->brand_professional_id,
+                    (string) $payout->affiliate_professional_id,
+                    now()->toDateString()
+                );
+            }
+
             return true;
+        } catch (ApiConnectionException|RateLimitException $e) {
+            // Transient error — re-throw so Horizon retries from 'transferring' status.
+            // Wallet and charge are NOT reversed: if the transfer succeeded on Stripe's side
+            // but the response was lost in transit, the idempotency key returns the same
+            // transfer on retry rather than creating a duplicate.
+            throw $e;
         } catch (ApiErrorException $e) {
-            // Transfer failed — refund wallet debit if used
-            // (card refund would need a separate Stripe refund which is more complex,
-            //  so we mark failed for manual resolution)
+            // Terminal transfer failure — credit wallet back, then attempt to auto-refund.
             if ($walletDebitCents > 0) {
                 $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
             }
 
-            $this->failPayout($payout, 'transfer_failed', $e->getMessage());
-            return false;
-        }
-    }
+            $failureCode = 'transfer_failed';
 
-    private function completePrefundedPayout(
-        CommissionPayout $payout,
-        Professional $brand,
-        Professional $affiliate,
-    ): bool {
-        $currencyLower = strtolower((string) $payout->currency_code);
+            if ($payout->stripe_payment_intent_id && $chargeAmountCents > 0) {
+                try {
+                    $this->stripe->refunds->create([
+                        'payment_intent' => $payout->stripe_payment_intent_id,
+                    ], ['idempotency_key' => "rf_{$payout->id}_{$payout->stripe_payment_intent_id}"]);
+                    $failureCode = 'transfer_failed_refunded';
+                    // Clear PI ID so an admin retry can create a fresh PaymentIntent
+                    // (same idempotency key within 24h would return the now-refunded PI).
+                    $payout->forceFill(['stripe_payment_intent_id' => null])->save();
+                } catch (\Throwable $refundEx) {
+                    // Auto-refund failed — the brand may still be charged. Flag for manual resolution.
+                    $failureCode = 'transfer_failed_refund_needed';
+                    Log::error('Auto-refund after transfer failure failed — manual action required', [
+                        'payout_id' => $payout->id,
+                        'payment_intent_id' => $payout->stripe_payment_intent_id,
+                        'transfer_error' => $e->getMessage(),
+                        'refund_error' => $refundEx->getMessage(),
+                    ]);
+                }
+            }
 
-        Log::info('Preparing prefunded affiliate transfer from platform balance', [
-            'payout_id' => $payout->id,
-            'net_payout_cents' => $payout->net_payout_cents,
-            'affiliate_connect_id' => $affiliate->stripe_connect_account_id,
-        ]);
+            $this->failPayout($payout, $failureCode, $e->getMessage());
 
-        try {
-            $payout->update([
-                'status' => 'transferring',
-                'charge_cents' => 0,
-                'wallet_debit_cents' => 0,
-                'failure_code' => null,
-                'failure_reason' => null,
-            ]);
-
-            // With direct charges, the application_fee_amount is already in the platform balance.
-            // Transfer the affiliate's commission from platform balance to their connected account.
-            $transfer = $this->stripe->transfers->create([
-                'amount' => $payout->net_payout_cents,
-                'currency' => $currencyLower,
-                'destination' => $affiliate->stripe_connect_account_id,
-                'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
-                'metadata' => [
-                    'comet_payout_id' => $payout->id,
-                    'brand_id' => $brand->id,
-                    'affiliate_id' => $affiliate->id,
-                    'funding_source' => 'stripe_sale_hold',
-                ],
-            ]);
-
-            $payout->update([
-                'stripe_transfer_id' => $transfer->id,
-                'status' => 'completed',
-                'processed_at' => now(),
-                'failure_code' => null,
-                'failure_reason' => null,
-            ]);
-
-            Log::info('Commission payout completed from prefunded Stripe sale hold', [
-                'payout_id' => $payout->id,
-                'gross_cents' => $payout->gross_commission_cents,
-                'platform_fee_cents' => $payout->platform_fee_cents,
-                'net_cents' => $payout->net_payout_cents,
-                'transfer_id' => $transfer->id,
-                'currency' => $payout->currency_code,
-            ]);
-
-            return true;
-        } catch (ApiErrorException $e) {
-            $this->failPayout($payout, 'prefunded_transfer_failed', $e->getMessage());
             return false;
         }
     }
@@ -627,12 +582,12 @@ class CommissionPayoutService
 
     private function markPendingFunding(CommissionPayout $payout, string $code, string $reason): void
     {
-        $payout->update([
+        $payout->forceFill([
             'status' => 'pending',
             'failure_code' => $code,
             'failure_reason' => $reason,
             'processed_at' => null,
-        ]);
+        ])->save();
 
         Log::notice('Commission payout pending funding', [
             'payout_id' => $payout->id,
@@ -643,11 +598,11 @@ class CommissionPayoutService
 
     private function failPayout(CommissionPayout $payout, string $code, string $reason): void
     {
-        $payout->update([
+        $payout->forceFill([
             'status' => 'failed',
             'failure_code' => $code,
             'failure_reason' => $reason,
-        ]);
+        ])->save();
 
         Log::warning('Commission payout failed', [
             'payout_id' => $payout->id,
@@ -657,7 +612,15 @@ class CommissionPayoutService
     }
 
     /**
-     * Retry a failed payout batch.
+     * Manually retry a stuck payout batch (admin endpoint).
+     *
+     * Increments retry_count so a fresh Stripe idempotency key is used —
+     * prevents Stripe returning a refunded/failed PI from within the 24h TTL window.
+     *
+     * Blocked for transfer_failed_refund_needed: the auto-refund itself failed, so
+     * the brand may still be charged. Manual verification is required before retrying.
+     *
+     * Runs synchronously so the admin sees the result immediately.
      */
     public function retryPayout(CommissionPayout $payout): bool
     {
@@ -665,11 +628,22 @@ class CommissionPayoutService
             return false;
         }
 
-        $payout->update([
-            'status' => 'pending',
+        // Auto-refund failed — manual verification required before retrying to avoid double-charging.
+        if ($payout->failure_code === 'transfer_failed_refund_needed') {
+            return false;
+        }
+
+        // If the wallet was already debited in a previous run, resume from 'collecting'
+        // so processPayoutBatch() enters its idempotent resume branch and skips
+        // re-debiting. Resetting to 'pending' would bypass that branch and double-debit.
+        $resumeStatus = ((int) ($payout->wallet_debit_cents ?? 0)) > 0 ? 'collecting' : 'pending';
+
+        $payout->forceFill([
+            'status' => $resumeStatus,
             'failure_code' => null,
             'failure_reason' => null,
-        ]);
+            'retry_count' => ($payout->retry_count ?? 0) + 1,
+        ])->save();
 
         return $this->processPayoutBatch($payout) === true;
     }
@@ -681,14 +655,14 @@ class CommissionPayoutService
     {
         $asBrand = CommissionPayout::query()
             ->where('brand_professional_id', $professional->id)
-            ->selectRaw("status, COUNT(*) as count, SUM(gross_commission_cents) as total_cents")
+            ->selectRaw('status, COUNT(*) as count, SUM(gross_commission_cents) as total_cents')
             ->groupBy('status')
             ->get()
             ->keyBy('status');
 
         $asAffiliate = CommissionPayout::query()
             ->where('affiliate_professional_id', $professional->id)
-            ->selectRaw("status, COUNT(*) as count, SUM(net_payout_cents) as total_cents")
+            ->selectRaw('status, COUNT(*) as count, SUM(net_payout_cents) as total_cents')
             ->groupBy('status')
             ->get()
             ->keyBy('status');

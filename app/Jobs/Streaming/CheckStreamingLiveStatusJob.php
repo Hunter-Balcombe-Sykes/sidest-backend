@@ -1,0 +1,90 @@
+<?php
+
+namespace App\Jobs\Streaming;
+
+use App\Models\Core\Site\Block;
+use App\Services\Streaming\LiveStatusPoller;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
+
+// Polls Twitch and Kick every 2 minutes for live status of all blocks with live_check_enabled=true.
+class CheckStreamingLiveStatusJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public int $tries = 1;
+
+    public int $timeout = 90;
+
+    public function handle(LiveStatusPoller $poller): void
+    {
+        try {
+            $kickRateLimited = Redis::exists('streaming:kick:rate_limited');
+        } catch (\Throwable $e) {
+            Log::critical('streaming.redis_unavailable', ['message' => $e->getMessage()]);
+
+            return;
+        }
+
+        if ($kickRateLimited) {
+            Log::warning('streaming: skipping Kick — rate limited from previous cycle');
+        }
+
+        $streamingPlatforms = config('sidest.streaming_platforms', []);
+
+        /** @var array<string, list<string>> $handlesByPlatform */
+        $handlesByPlatform = array_fill_keys($streamingPlatforms, []);
+
+        // block_group='links' (NOT block_type='link') is the links/sections discriminator
+        // in site.blocks. All other queries in the codebase use block_group.
+        Block::query()
+            ->where('block_group', 'links')
+            ->whereRaw("settings->>'live_check_enabled' = 'true'")
+            ->whereNull('deleted_at')
+            ->where('is_active', true)
+            ->chunkById(500, function ($blocks) use (&$handlesByPlatform, $streamingPlatforms): void {
+                foreach ($blocks as $block) {
+                    $settings = is_array($block->settings) ? $block->settings : [];
+                    $platform = $settings['platform'] ?? null;
+                    $handle = $settings['handle'] ?? null;
+
+                    if (
+                        $platform
+                        && $handle
+                        && in_array($platform, $streamingPlatforms, true)
+                    ) {
+                        $handlesByPlatform[$platform][] = $handle;
+                    }
+                }
+            });
+
+        foreach ($handlesByPlatform as $platform => $handles) {
+            if (empty($handles)) {
+                continue;
+            }
+
+            if ($platform === 'kick' && $kickRateLimited) {
+                continue;
+            }
+
+            try {
+                $poller->poll($platform, $handles);
+            } catch (\Throwable $e) {
+                Log::error('streaming.poll_error', [
+                    'platform' => $platform,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::error('streaming.job_failed', ['message' => $e->getMessage()]);
+    }
+}

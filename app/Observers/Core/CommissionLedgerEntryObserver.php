@@ -6,6 +6,7 @@ use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;
 
+// V2: Core. Publishes commission earned/reversed notifications to affiliates when ledger entries are created or status changes.
 class CommissionLedgerEntryObserver
 {
     public bool $afterCommit = true;
@@ -20,10 +21,11 @@ class CommissionLedgerEntryObserver
             }
 
             $this->notifyEarned($entry);
+            $this->notifyBrandSale($entry);
         } catch (\Throwable $e) {
             Log::warning('CommissionLedgerEntry created notification failed', [
                 'entry_id' => $entry->id,
-                'message'  => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
@@ -37,16 +39,23 @@ class CommissionLedgerEntryObserver
 
             if ($entry->status === 'approved' && $entry->getOriginal('status') !== 'approved') {
                 $this->notifyEarned($entry);
+
                 return;
             }
 
             if ($entry->status === 'reversed') {
                 $this->notifyReversed($entry);
+
+                return;
+            }
+
+            if ($entry->status === 'voided') {
+                $this->notifyVoided($entry);
             }
         } catch (\Throwable $e) {
             Log::warning('CommissionLedgerEntry updated notification failed', [
                 'entry_id' => $entry->id,
-                'message'  => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
@@ -93,16 +102,60 @@ class CommissionLedgerEntryObserver
         );
     }
 
+    private function notifyVoided(CommissionLedgerEntry $entry): void
+    {
+        $affiliateId = trim((string) ($entry->affiliate_professional_id ?? ''));
+        if ($affiliateId === '') {
+            return;
+        }
+
+        $amount = $this->formatMoney((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
+
+        $this->publisher->publish(
+            professionalId: $affiliateId,
+            frontendType: 'Warning',
+            category: 'commissions',
+            title: 'Commission forfeited',
+            body: "A commission of {$amount} has been forfeited because your Stripe account was not connected in time.",
+            dedupeKey: "commission.voided.{$entry->id}",
+            ctaUrl: '/account/settings?section=stripe',
+            retentionConfigKey: 'commission',
+        );
+    }
+
+    // V2: Notifies the brand when an affiliate sale generates commission.
+    private function notifyBrandSale(CommissionLedgerEntry $entry): void
+    {
+        $brandId = trim((string) ($entry->brand_professional_id ?? ''));
+        if ($brandId === '') {
+            return;
+        }
+
+        $amount = $this->formatMoney((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
+        $affiliateName = $entry->affiliateProfessional?->display_name ?? 'An affiliate';
+
+        $this->publisher->publish(
+            professionalId: $brandId,
+            frontendType: 'Success',
+            category: 'commissions',
+            title: 'Affiliate sale',
+            body: "{$affiliateName} generated a sale — {$amount} commission accrued.",
+            dedupeKey: "commission.brand_sale.{$entry->id}",
+            ctaUrl: '/account/store?section=analytics',
+            retentionConfigKey: 'commission',
+        );
+    }
+
     private function formatMoney(int $cents, string $currencyCode): string
     {
         $prefix = match (strtoupper($currencyCode)) {
-            'USD'   => '$',
-            'GBP'   => '£',
-            'EUR'   => '€',
-            'AUD'   => 'A$',
-            default => strtoupper($currencyCode) . ' ',
+            'USD' => '$',
+            'GBP' => '£',
+            'EUR' => '€',
+            'AUD' => 'A$',
+            default => strtoupper($currencyCode).' ',
         };
 
-        return $prefix . number_format($cents / 100, 2, '.', ',');
+        return $prefix.number_format($cents / 100, 2, '.', ',');
     }
 }

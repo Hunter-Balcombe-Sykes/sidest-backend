@@ -18,6 +18,13 @@ return [
         'key' => env('POSTMARK_API_KEY'),
     ],
 
+    // Google Maps / Places — used client-side by the Hydrogen storefront
+    // for address autocomplete. Key is HTTP-referrer-restricted in
+    // Google Cloud, so it's safe to expose via /public/config/integrations.
+    'google_maps' => [
+        'api_key' => env('GOOGLE_MAPS_API_KEY'),
+    ],
+
     'resend' => [
         'key' => env('RESEND_API_KEY'),
     ],
@@ -58,14 +65,59 @@ return [
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
     ],
 
+    'hydrogen' => [
+        'api_key' => env('HYDROGEN_API_KEY'),
+    ],
+
+    // Cloudflare DNS API — used to provision platform subdomains (brand.sidest.co)
+    // for Hydrogen storefronts. Zone must correspond to the sidest.co domain.
+    'cloudflare' => [
+        'zone_id'   => env('CLOUDFLARE_ZONE_ID'),
+        'api_token' => env('CLOUDFLARE_API_TOKEN'),
+    ],
+
+    // Shared key for Sidest-Embedded Shopify app → backend calls.
+    // Set in both .env (Laravel) and SIDEST_EMBEDDED_API_KEY env var in the Remix app.
+    'embedded' => [
+        'api_key' => env('SIDEST_EMBEDDED_API_KEY'),
+    ],
+
+    'twitch' => [
+        'client_id' => env('TWITCH_CLIENT_ID'),
+        'client_secret' => env('TWITCH_CLIENT_SECRET'),
+    ],
+    'kick' => [
+        'client_id' => env('KICK_CLIENT_ID'),
+        'client_secret' => env('KICK_CLIENT_SECRET'),
+    ],
+
     'shopify' => [
         'api_key' => env('SHOPIFY_API_KEY'),
         'api_secret' => env('SHOPIFY_API_SECRET'),
         'api_version' => env('SHOPIFY_API_VERSION', '2025-01'),
         'app_scopes' => env('SHOPIFY_APP_SCOPES', ''),
-        'webhook_secret' => env('SHOPIFY_WEBHOOK_SECRET'),
+        'webhook_secret' => env('SHOPIFY_WEBHOOK_SECRET', env('SHOPIFY_API_SECRET')),
         'fallback_secret' => env('SHOPIFY_FALLBACK_SECRET'),
         'webhook_orders_topic' => env('SHOPIFY_WEBHOOK_ORDERS_TOPIC', 'orders/paid'),
+        // Must match `handle` in Sidest-Embedded/shopify.app.toml. Shopify's
+        // admin routes apps under /store/<shop>/apps/<app_handle>, so a
+        // mismatch 404s the post-install redirect. Override via env when
+        // multiple app builds share this codebase.
+        'app_handle' => env('SHOPIFY_APP_HANDLE', 'side-st-hydrogen'),
+
+        // Admin API throttle client config. Shopify standard-plan GraphQL
+        // bucket is 1000 points, restoring at 100 pts/sec. Plus is 2000/200.
+        // We learn the actual values from throttleStatus on every response.
+        'throttle' => [
+            'default_max_capacity' => (int) env('SHOPIFY_THROTTLE_MAX', 1000),
+            'default_restore_rate' => (int) env('SHOPIFY_THROTTLE_RESTORE_RATE', 100),
+            'default_estimated_cost' => (int) env('SHOPIFY_THROTTLE_DEFAULT_COST', 10),
+            'max_inprocess_retries' => (int) env('SHOPIFY_THROTTLE_MAX_RETRIES', 3),
+            'max_wait_ms' => (int) env('SHOPIFY_THROTTLE_MAX_WAIT_MS', 5000),
+            'default_timeout' => (int) env('SHOPIFY_HTTP_TIMEOUT', 20),
+            'bucket_ttl_seconds' => 60,
+            'bulk_lock_ttl_seconds' => 3600,
+        ],
     ],
 
 ];

@@ -9,18 +9,18 @@ use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateProfessionalRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
-use App\Services\Enterprise\EnterpriseProvisioningService;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+// V2: Staff browses, searches, and manages professionals (status updates, archive, restore, hard delete). Primary staff dashboard entry point.
 class StaffProfessionalController extends ApiController
 {
     /** @return array<int, string> */
     private function professionalOnlySectionTypes(): array
     {
-        return config('comet.professional_only_section_types', []);
+        return config('sidest.professional_only_section_types', []);
     }
 
     use HandlesSearchQueries;
@@ -72,23 +72,23 @@ class StaffProfessionalController extends ApiController
             $theme = $site?->theme;
 
             return [
-                'id'            => $p->id,
-                'handle'        => $p->handle,
-                'display_name'  => $p->display_name,
+                'id' => $p->id,
+                'handle' => $p->handle,
+                'display_name' => $p->display_name,
                 'professional_type' => $p->professional_type,
-                'status'        => $p->status,
+                'status' => $p->status,
                 'primary_email' => $p->primary_email,
-                'phone'         => $p->phone,
-                'created_at'    => optional($p->created_at)->toISOString(),
-                'updated_at'    => optional($p->updated_at)->toISOString(),
+                'phone' => $p->phone,
+                'created_at' => optional($p->created_at)->toISOString(),
+                'updated_at' => optional($p->updated_at)->toISOString(),
 
                 'site' => $site ? [
-                    'id'           => $site->id,
-                    'subdomain'    => $site->subdomain,
+                    'id' => $site->id,
+                    'subdomain' => $site->subdomain,
                     'is_published' => (bool) $site->is_published,
-                    'theme'        => $theme ? [
-                        'id'   => $theme->id,
-                        'key'  => $theme->key ?? null,
+                    'theme' => $theme ? [
+                        'id' => $theme->id,
+                        'key' => $theme->key ?? null,
                         'name' => $theme->name ?? null,
                     ] : null,
                 ] : null,
@@ -110,18 +110,18 @@ class StaffProfessionalController extends ApiController
 
         return $this->success([
             'professional' => [
-                'id'            => $professional->id,
-                'auth_user_id'  => $professional->auth_user_id,
-                'handle'        => $professional->handle,
-                'display_name'  => $professional->display_name,
-                'bio'           => $professional->bio,
-                'country_code'  => $professional->country_code,
-                'timezone'      => $professional->timezone,
+                'id' => $professional->id,
+                'auth_user_id' => $professional->auth_user_id,
+                'handle' => $professional->handle,
+                'display_name' => $professional->display_name,
+                'bio' => $professional->bio,
+                'country_code' => $professional->country_code,
+                'timezone' => $professional->timezone,
                 'professional_type' => $professional->professional_type,
-                'status'        => $professional->status,
+                'status' => $professional->status,
                 'onboarding_step' => $professional->onboarding_step,
                 'primary_email' => $professional->primary_email,
-                'phone'         => $professional->phone,
+                'phone' => $professional->phone,
                 'public_contact_number' => $professional->public_contact_number,
                 'public_contact_email' => $professional->public_contact_email,
                 'location_street_address' => $professional->location_street_address,
@@ -129,18 +129,18 @@ class StaffProfessionalController extends ApiController
                 'location_state' => $professional->location_state,
                 'location_postcode' => $professional->location_postcode,
                 'location_country' => $professional->location_country,
-                'first_name'    => $professional->first_name,
-                'last_name'     => $professional->last_name,
-                'created_at'    => optional($professional->created_at)->toISOString(),
-                'updated_at'    => optional($professional->updated_at)->toISOString(),
+                'first_name' => $professional->first_name,
+                'last_name' => $professional->last_name,
+                'created_at' => optional($professional->created_at)->toISOString(),
+                'updated_at' => optional($professional->updated_at)->toISOString(),
             ],
             'site' => $professional->site ? [
-                'id'           => $professional->site->id,
-                'subdomain'    => $professional->site->subdomain,
+                'id' => $professional->site->id,
+                'subdomain' => $professional->site->subdomain,
                 'is_published' => (bool) $professional->site->is_published,
-                'theme'        => $professional->site->theme ? [
-                    'id'   => $professional->site->theme->id,
-                    'key'  => $professional->site->theme->key ?? null,
+                'theme' => $professional->site->theme ? [
+                    'id' => $professional->site->theme->id,
+                    'key' => $professional->site->theme->key ?? null,
                     'name' => $professional->site->theme->name ?? null,
                 ] : null,
             ] : null,
@@ -168,22 +168,16 @@ class StaffProfessionalController extends ApiController
     public function update(
         StaffUpdateProfessionalRequest $request,
         Professional $professional,
-        EnterpriseProvisioningService $enterpriseProvisioningService
-    )
-    {
+    ) {
         $previousProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
 
-        DB::transaction(function () use ($professional, $request, $enterpriseProvisioningService, $previousProfessionalType): void {
+        DB::transaction(function () use ($professional, $request, $previousProfessionalType): void {
             $professional->fill($request->validated());
             $professional->save();
 
             $nextProfessionalType = mb_strtolower(trim((string) ($professional->professional_type ?? '')));
             if ($previousProfessionalType !== 'influencer' && $nextProfessionalType === 'influencer') {
                 $this->disableProfessionalOnlySections($professional->id);
-            }
-
-            if ($enterpriseProvisioningService->isEnterpriseProfessionalType($professional->professional_type)) {
-                $enterpriseProvisioningService->ensureForProfessional($professional);
             }
         });
 
@@ -221,7 +215,7 @@ class StaffProfessionalController extends ApiController
 
         return $this->success([
             'message' => 'Professional archived successfully',
-            'archived' => true
+            'archived' => true,
         ]);
     }
 
@@ -233,7 +227,7 @@ class StaffProfessionalController extends ApiController
 
         return $this->success([
             'message' => 'Professional restored successfully',
-            'professional' => $professional->fresh()
+            'professional' => $professional->fresh(),
         ]);
     }
 
@@ -248,7 +242,7 @@ class StaffProfessionalController extends ApiController
 
             return $this->success([
                 'message' => "Professional '{$handle}' permanently deleted",
-                'permanently_deleted' => true
+                'permanently_deleted' => true,
             ]);
         } catch (Exception $e) {
             return $this->error(
@@ -257,5 +251,4 @@ class StaffProfessionalController extends ApiController
             );
         }
     }
-
 }

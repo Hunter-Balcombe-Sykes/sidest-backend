@@ -5,6 +5,7 @@ namespace App\Models\Core\Waitlist;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
+// V2: Pre-launch waitlist entry. Captures applicant type, industry, team size, and consent metadata for pilot program outreach.
 class WaitlistSignup extends BaseModel
 {
     use HasUuids;
@@ -12,6 +13,7 @@ class WaitlistSignup extends BaseModel
     protected $table = 'core.waitlist_signups';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $hidden = [

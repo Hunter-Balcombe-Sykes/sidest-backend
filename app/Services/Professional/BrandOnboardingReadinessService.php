@@ -7,9 +7,9 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
-use App\Models\Retail\BrandProduct;
-use App\Models\Retail\BrandStoreSettings;
+use App\Services\Professional\BrandStatusService;
 
+// V2: Brand activation gate. Evaluates checklist (5+ images, Shopify connected, Stripe connected) and syncs brand_status accordingly.
 class BrandOnboardingReadinessService
 {
     public function getChecklist(Professional $professional): array
@@ -21,10 +21,7 @@ class BrandOnboardingReadinessService
         $checks = [
             $this->checkSiteImages($siteId),
             $this->checkShopifyConnected($professionalId),
-            $this->checkActiveProducts($professionalId),
-            $this->checkDefaultProducts($professionalId),
             $this->checkStripeConnected($professional),
-            $this->checkCheckoutMethod($professionalId),
         ];
 
         $completedCount = collect($checks)->filter(fn (array $c): bool => $c['complete'])->count();
@@ -43,14 +40,14 @@ class BrandOnboardingReadinessService
 
     private function syncBrandStatus(Professional $professional, bool $onboardingComplete): string
     {
-        $newStatus = $onboardingComplete ? 'active' : 'deactivated';
+        // Delegate to BrandStatusService — it evaluates the full lifecycle
+        // (building → preview → live) instead of just the binary active/deactivated
+        // that the readiness checklist previously set.
+        $statusService = app(BrandStatusService::class);
+        $newStatus = $statusService->sync($professional);
 
-        BrandProfile::updateOrCreate(
-            ['professional_id' => $professional->id],
-            ['brand_status' => $newStatus]
-        );
-
-        return $newStatus;
+        return $newStatus ?? BrandProfile::where('professional_id', $professional->id)
+            ->value('brand_status') ?? 'building';
     }
 
     private function checkSiteImages(string $siteId): array
@@ -90,37 +87,6 @@ class BrandOnboardingReadinessService
         ];
     }
 
-    private function checkActiveProducts(string $professionalId): array
-    {
-        $count = BrandProduct::query()
-            ->where('brand_professional_id', $professionalId)
-            ->where('shopify_status', 'active')
-            ->where('is_sync_active', true)
-            ->count();
-
-        return [
-            'key' => 'active_products',
-            'label' => 'Select 3+ active products',
-            'complete' => $count >= 3,
-            'current' => $count,
-            'required' => 3,
-        ];
-    }
-
-    private function checkDefaultProducts(string $professionalId): array
-    {
-        $settings = BrandStoreSettings::where('professional_id', $professionalId)->first();
-        $count = $settings ? count($settings->default_affiliate_product_ids) : 0;
-
-        return [
-            'key' => 'default_products',
-            'label' => 'Set 3+ default affiliate products',
-            'complete' => $count >= 3,
-            'current' => $count,
-            'required' => 3,
-        ];
-    }
-
     private function checkStripeConnected(Professional $professional): array
     {
         $connected = mb_strtolower(trim((string) $professional->stripe_connect_status)) === 'active';
@@ -129,20 +95,6 @@ class BrandOnboardingReadinessService
             'key' => 'stripe_connected',
             'label' => 'Connect Stripe integration',
             'complete' => $connected,
-        ];
-    }
-
-    private function checkCheckoutMethod(string $professionalId): array
-    {
-        $settings = BrandStoreSettings::where('professional_id', $professionalId)->first();
-        $hasMethod = $settings
-            && is_string($settings->checkout_mode)
-            && in_array($settings->checkout_mode, ['shopify', 'stripe'], true);
-
-        return [
-            'key' => 'checkout_method',
-            'label' => 'Select a checkout method',
-            'complete' => $hasMethod,
         ];
     }
 }

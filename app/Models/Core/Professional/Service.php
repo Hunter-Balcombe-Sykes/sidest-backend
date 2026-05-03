@@ -7,13 +7,15 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+// V2: A bookable service offered by a professional. Stores pricing, duration, and optional Square/Fresha sync metadata for POS integration.
 class Service extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'services';
+    protected $table = 'site.services';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

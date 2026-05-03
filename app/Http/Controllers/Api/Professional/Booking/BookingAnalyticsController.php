@@ -5,22 +5,40 @@ namespace App\Http\Controllers\Api\Professional\Booking;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
+// V2: Booking analytics (counts, revenue, customers) from Square/Fresha integrations. Unrelated to V2 commerce.
 class BookingAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
+
+    public function __construct(private CacheLockService $cacheLock) {}
 
     public function myOverview(Request $request): JsonResponse
     {
         $professional = $this->currentProfessional($request);
         $professionalId = (string) $professional->id;
+
+        // Booking analytics are only available in smart mode — manual mode
+        // affiliates don't route payments through Square via Side St.
+        $site = $professional->site;
+        $siteSettings = is_array($site?->settings) ? $site->settings : [];
+        $bookingMode = strtolower((string) ($siteSettings['booking_mode'] ?? ''));
+        $isSmartMode = $bookingMode === 'smart' || (bool) ($siteSettings['services_auto_sync_enabled'] ?? false);
+
+        if (! $isSmartMode) {
+            return $this->success([
+                'smart_mode_required' => true,
+                'message' => 'Enable smart mode to view and collect booking analytics.',
+            ]);
+        }
+
         $timezone = trim((string) ($professional->timezone ?? '')) ?: 'UTC';
 
         $filters = $this->resolveFilters($request);
@@ -34,7 +52,7 @@ class BookingAnalyticsController extends ApiController
             (string) $metricsContext['group_by']
         );
 
-        return $this->success(Cache::remember($cacheKey, $ttl, function () use ($professionalId, $timezone, $metricsContext): array {
+        return $this->success($this->cacheLock->rememberLocked($cacheKey, $ttl, function () use ($professionalId, $timezone, $metricsContext): array {
             if ($metricsContext['use_hourly']) {
                 $aggregateBase = DB::table('analytics.booking_metrics_hourly as h')
                     ->where('h.professional_id', $professionalId)
@@ -65,7 +83,7 @@ class BookingAnalyticsController extends ApiController
                     $totals = (clone $rawBase)
                         ->selectRaw('COUNT(*) as bookings_count')
                         ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
-                        ->selectRaw("COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count")
+                        ->selectRaw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count')
                         ->selectRaw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count")
                         ->first();
 
@@ -107,7 +125,7 @@ class BookingAnalyticsController extends ApiController
                     $totals = (clone $rawBase)
                         ->selectRaw('COUNT(*) as bookings_count')
                         ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
-                        ->selectRaw("COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count")
+                        ->selectRaw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count')
                         ->selectRaw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count")
                         ->first();
 
@@ -271,7 +289,7 @@ class BookingAnalyticsController extends ApiController
 
         $hourlyFrom = $from->copy()->utc();
         $hourlyTo = $to->copy()->min(now())->utc();
-        if ($forceHourly && !($filters['explicit_range'] ?? false)) {
+        if ($forceHourly && ! ($filters['explicit_range'] ?? false)) {
             $hourlyTo = now()->utc();
             $hourlyFrom = $hourlyTo->copy()->subHours(24)->startOfHour();
         }

@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends staff broadcast emails to professionals with an unsubscribe link, using the Notification model and the staff_broadcast template.
 class StaffBroadcastMail extends Mailable
 {
     use Queueable, SerializesModels;

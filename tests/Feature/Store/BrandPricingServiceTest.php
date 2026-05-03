@@ -2,21 +2,23 @@
 
 use App\Services\Store\BrandPricingService;
 
-it('applies discount and rounds up to nearest five cents', function () {
+it('returns system default commission rate from config', function () {
     $service = new BrandPricingService;
 
-    expect($service->discountedPriceCents(101, 10.0))->toBe(95);
-    expect($service->discountedPriceCents(100, 10.0))->toBe(90);
-    expect($service->discountedPriceCents(99, 50.0))->toBe(50);
+    expect($service->defaultCommissionRate())->toBe((float) config('sidest.store.default_commission_rate', 15));
 });
 
-it('resolves effective commission with override fallback', function () {
+it('resolves effective commission with override and default fallback', function () {
     $service = new BrandPricingService;
 
-    expect($service->effectiveCommissionRate(null, 22.4, 15.0, 11.0))->toBe(22.4);
-    expect($service->effectiveCommissionRate(null, 17.5, 11.0, null))->toBe(17.5);
-    expect($service->effectiveCommissionRate(null, null, 12.5, null))->toBe(12.5);
-    expect($service->effectiveCommissionRate(null, null, null, null))->toBe((float) config('comet.store.default_commission_rate', 15));
-    expect($service->effectiveCommissionRate(30.0, 17.5, 11.0, null))->toBe(30.0);
-    expect($service->effectiveCommissionRate(10.0, 17.5, 11.0, null))->toBe(17.5);
+    expect($service->effectiveCommissionRate(25.0, 15.0))->toBe(25.0);
+    expect($service->effectiveCommissionRate(null, 20.0))->toBe(20.0);
+    expect($service->effectiveCommissionRate(null, null))->toBe($service->defaultCommissionRate());
+});
+
+it('clamps commission rate between 0 and 100', function () {
+    $service = new BrandPricingService;
+
+    expect($service->effectiveCommissionRate(150.0, null))->toBe(100.0);
+    expect($service->effectiveCommissionRate(-5.0, null))->toBe(0.0);
 });

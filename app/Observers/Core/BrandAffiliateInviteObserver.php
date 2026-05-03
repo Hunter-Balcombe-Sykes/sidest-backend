@@ -6,6 +6,7 @@ use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;
 
+// V2: Publishes invite notifications — "invited" to affiliate, "accepted"/"declined" to brand.
 class BrandAffiliateInviteObserver
 {
     public bool $afterCommit = true;
@@ -35,7 +36,7 @@ class BrandAffiliateInviteObserver
         } catch (\Throwable $e) {
             Log::warning('BrandAffiliateInvite created notification failed', [
                 'invite_id' => $invite->id,
-                'message'   => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
@@ -71,7 +72,7 @@ class BrandAffiliateInviteObserver
                     frontendType: 'Info',
                     category: 'invites',
                     title: 'Invite declined',
-                    body: "Your affiliate invite was declined.",
+                    body: 'Your affiliate invite was declined.',
                     dedupeKey: "invite.declined.{$invite->id}",
                     ctaUrl: '/account/affiliates',
                     retentionConfigKey: 'invite',
@@ -80,7 +81,7 @@ class BrandAffiliateInviteObserver
         } catch (\Throwable $e) {
             Log::warning('BrandAffiliateInvite updated notification failed', [
                 'invite_id' => $invite->id,
-                'message'   => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }
@@ -89,6 +90,7 @@ class BrandAffiliateInviteObserver
     {
         return (string) (\Illuminate\Support\Facades\DB::table('core.professionals')
             ->where('id', $brandProfessionalId)
+            ->whereNull('deleted_at')
             ->value(\Illuminate\Support\Facades\DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), 'Brand')")));
     }
 
@@ -97,6 +99,7 @@ class BrandAffiliateInviteObserver
         if ($invite->claimed_professional_id) {
             $name = \Illuminate\Support\Facades\DB::table('core.professionals')
                 ->where('id', $invite->claimed_professional_id)
+                ->whereNull('deleted_at')
                 ->value(\Illuminate\Support\Facades\DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), NULL)"));
             if ($name) {
                 return (string) $name;
@@ -104,7 +107,7 @@ class BrandAffiliateInviteObserver
         }
 
         $firstName = trim((string) ($invite->first_name ?? ''));
-        $email     = trim((string) ($invite->email ?? ''));
+        $email = trim((string) ($invite->email ?? ''));
 
         return $firstName !== '' ? $firstName : ($email !== '' ? $email : 'Someone');
     }

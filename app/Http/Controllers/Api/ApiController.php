@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 
+// V2: Abstract base controller. Provides success(), error(), and paginated() response helpers for all API endpoints.
 abstract class ApiController extends Controller
 {
     /**

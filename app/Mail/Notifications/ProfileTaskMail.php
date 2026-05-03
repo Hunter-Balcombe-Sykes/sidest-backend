@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends profile task reminder emails (incomplete setup steps, action items) using the Notification model and the profile_tasks template.
 class ProfileTaskMail extends Mailable
 {
     use Queueable, SerializesModels;

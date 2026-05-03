@@ -12,9 +12,14 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
+// V2: Delta/full catalog sync from Fresha to Side St. Booking integration only. Queue: integrations.
 class SyncFreshaCatalogDeltaJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public int $tries = 3;
+
+    public array $backoff = [30, 60];
 
     public function __construct(
         public string $businessId,
@@ -26,6 +31,10 @@ class SyncFreshaCatalogDeltaJob implements ShouldQueue
 
     public function handle(FreshaServiceSyncService $syncService): void
     {
+        if (! (bool) config('sidest.features.fresha_sync', false)) {
+            return;
+        }
+
         $integration = ProfessionalIntegration::query()
             ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA)
             ->where('external_account_id', $this->businessId)
@@ -46,5 +55,15 @@ class SyncFreshaCatalogDeltaJob implements ShouldQueue
             fullSync: $this->fullSync,
             beginTimeOverride: $this->beginTime
         );
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::warning('Fresha catalog sync job failed', [
+            'business_id' => $this->businessId,
+            'begin_time' => $this->beginTime,
+            'full_sync' => $this->fullSync,
+            'message' => $e->getMessage(),
+        ]);
     }
 }

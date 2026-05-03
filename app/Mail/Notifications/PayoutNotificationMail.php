@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends payout notifications (initiated, completed, failed) using the Notification model and the payouts template.
 class PayoutNotificationMail extends Mailable
 {
     use Queueable, SerializesModels;

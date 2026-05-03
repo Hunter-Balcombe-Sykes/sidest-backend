@@ -1,0 +1,91 @@
+<?php
+
+/** @phpstan-ignore-all */
+
+use App\Services\Streaming\StreamingTokenManager;
+use App\Services\Streaming\TwitchApiClient;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Tests\TestCase;
+
+uses(TestCase::class)->in(__FILE__);
+
+it('returns handles that are currently live', function () {
+    $manager = Mockery::mock(StreamingTokenManager::class);
+    $manager->shouldReceive('getToken')->with('twitch')->andReturn('test-token');
+
+    Http::fake([
+        'api.twitch.tv/helix/streams*' => Http::response([
+            'data' => [
+                ['user_login' => 'shroud', 'type' => 'live'],
+                ['user_login' => 'ninja', 'type' => 'live'],
+            ],
+        ], 200),
+    ]);
+
+    $client = new TwitchApiClient($manager);
+    $liveHandles = $client->getLiveHandles(['shroud', 'ninja', 'offlineuser']);
+
+    expect($liveHandles)->toBe(['shroud', 'ninja']);
+});
+
+it('returns empty array when no handles are live', function () {
+    $manager = Mockery::mock(StreamingTokenManager::class);
+    $manager->shouldReceive('getToken')->with('twitch')->andReturn('test-token');
+
+    Http::fake([
+        'api.twitch.tv/helix/streams*' => Http::response(['data' => []], 200),
+    ]);
+
+    $client = new TwitchApiClient($manager);
+    $liveHandles = $client->getLiveHandles(['offline1', 'offline2']);
+
+    expect($liveHandles)->toBe([]);
+});
+
+it('logs an error and returns empty array on 5xx response', function () {
+    $manager = Mockery::mock(StreamingTokenManager::class);
+    $manager->shouldReceive('getToken')->with('twitch')->andReturn('test-token');
+
+    Http::fake([
+        'api.twitch.tv/helix/streams*' => Http::response([], 500),
+    ]);
+
+    Log::shouldReceive('error')->once()->with('streaming.api_error', Mockery::any());
+
+    $client = new TwitchApiClient($manager);
+    $liveHandles = $client->getLiveHandles(['someuser']);
+
+    expect($liveHandles)->toBe([]);
+});
+
+it('logs critical and returns empty array when token is unavailable', function () {
+    $manager = Mockery::mock(StreamingTokenManager::class);
+    $manager->shouldReceive('getToken')->with('twitch')->andReturn(null);
+
+    Log::shouldReceive('critical')->once()->with('streaming.auth_failure', Mockery::any());
+
+    $client = new TwitchApiClient($manager);
+    $liveHandles = $client->getLiveHandles(['someuser']);
+
+    expect($liveHandles)->toBe([]);
+});
+
+it('sends the correct authorization headers', function () {
+    $manager = Mockery::mock(StreamingTokenManager::class);
+    $manager->shouldReceive('getToken')->with('twitch')->andReturn('bearer-token');
+
+    config(['services.twitch.client_id' => 'my-client-id']);
+
+    Http::fake([
+        'api.twitch.tv/helix/streams*' => Http::response(['data' => []], 200),
+    ]);
+
+    $client = new TwitchApiClient($manager);
+    $client->getLiveHandles(['anyuser']);
+
+    Http::assertSent(function ($request) {
+        return $request->hasHeader('Authorization', 'Bearer bearer-token')
+            && $request->hasHeader('Client-ID', 'my-client-id');
+    });
+});

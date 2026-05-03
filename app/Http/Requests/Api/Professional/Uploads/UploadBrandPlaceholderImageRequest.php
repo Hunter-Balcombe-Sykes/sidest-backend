@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Uploads;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates brand placeholder image upload — JPEG, PNG, or WebP image file up to 5 MB.
 class UploadBrandPlaceholderImageRequest extends BaseFormRequest
 {
     public function rules(): array

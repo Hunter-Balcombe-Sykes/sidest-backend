@@ -4,14 +4,16 @@ namespace App\Models\Billing;
 
 use App\Models\BaseModel;
 
+// V2: Defines a billing plan with Stripe price mapping, entitlements JSON, and pricing metadata. Read by Subscription to determine active features.
 class Plan extends BaseModel
 {
     protected $table = 'billing.plans';
+
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
-        'id',
         'plan_key',
         'name',
         'description',

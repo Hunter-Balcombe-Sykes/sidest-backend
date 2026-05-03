@@ -1,25 +1,55 @@
 <?php
 
+use App\Http\Controllers\Api\HealthController;
+use App\Http\Controllers\Api\Internal\HydrogenAffiliateController;
+use App\Http\Controllers\Api\Internal\HydrogenAffiliateProductsController;
+use App\Http\Controllers\Api\Internal\HydrogenBrandConfigController;
+use App\Http\Controllers\Api\Internal\HydrogenBrandDesignController;
+use App\Http\Controllers\Api\Internal\EmbeddedConnectController;
+use App\Http\Controllers\Api\Internal\EmbeddedOrderAnalyticsController;
+use App\Http\Controllers\Api\Internal\EmbeddedProductAnalyticsController;
+use App\Http\Controllers\Api\Internal\EmbeddedSetupController;
+use App\Http\Controllers\Api\Internal\HydrogenDeploymentController;
+use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
-use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
-use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
-use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\PublicSite\PublicBrandAffiliateInviteController;
+use App\Http\Controllers\Api\PublicSite\PublicConfigController;
+use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
+use App\Http\Controllers\Api\PublicSite\PublicDocumentDownloadController;
+use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
+use App\Http\Controllers\Api\PublicSite\PublicEmailUnsubscribeController;
+use App\Http\Controllers\Api\PublicSite\PublicEnquiryController;
+use App\Http\Controllers\Api\PublicSite\PublicOpenInviteController;
+use App\Http\Controllers\Api\PublicSite\PublicShopifyStorefrontController;
 use App\Http\Controllers\Api\PublicSite\PublicSignupAvailabilityController;
-use App\Http\Controllers\Api\PublicSite\PublicWaitlistController;
-use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicSiteController;
-use App\Http\Controllers\Api\PublicSite\PublicStoreController;
-use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
+use App\Http\Controllers\Api\PublicSite\PublicWaitlistController;
+use App\Http\Controllers\Api\Shopify\ShopifyAppOAuthController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyAppUninstalledWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyGdprWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyOrdersUpdatedWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyShopUpdateWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyThemePublishedWebhookController;
+use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
+use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\HealthController;
+
+// TODO(v1): all routes below should be prefixed /v1/ once frontend is ready for the migration
 
 // Ping
-Route::get('/ping', fn () => response()->json(['pong' => true]));
+Route::get('/ping', fn () => response()->json(['pong' => true]))->middleware('throttle:health-check');
+
+// Shopify App OAuth (no auth — Shopify redirects here during install)
+Route::middleware('throttle:60,1')->group(function () {
+    Route::get('/shopify/install', [ShopifyAppOAuthController::class, 'install']);
+    Route::get('/shopify/callback', [ShopifyAppOAuthController::class, 'callback']);
+    Route::get('/shopify/setup-prefill', [ShopifyAppOAuthController::class, 'setupPrefill'])
+        ->middleware('throttle:10,15');
+});
 
 // Webhooks (no auth middleware — signature validated in controller)
 Route::middleware('throttle:webhooks')->group(function () {
@@ -28,29 +58,41 @@ Route::middleware('throttle:webhooks')->group(function () {
     Route::post('/webhooks/fresha', FreshaCatalogWebhookController::class);
     Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
     Route::post('/webhooks/stripe-connect', StripeConnectWebhookController::class);
-});
-
-// Shopify webhooks (no auth middleware)
-Route::middleware('throttle:shopify-webhooks')->group(function () {
-    Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class);
-    Route::post('/webhooks/shopify/orders/fallback', [ShopifyOrderWebhookController::class, 'fallback']);
+    Route::post('/webhooks/stripe', StripeWebhookController::class);
+    Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/orders-paid', ShopifyOrderWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/orders-updated', ShopifyOrdersUpdatedWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/app-uninstalled', ShopifyAppUninstalledWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/shop-update', ShopifyShopUpdateWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/themes-publish', ShopifyThemePublishedWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/gdpr/customers-data-request', [ShopifyGdprWebhookController::class, 'customersDataRequest'])
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/gdpr/customers-redact', [ShopifyGdprWebhookController::class, 'customersRedact'])
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/gdpr/shop-redact', [ShopifyGdprWebhookController::class, 'shopRedact'])
+        ->middleware('throttle:shopify-webhooks');
 });
 
 // bootstrap uses ONLY JWT middleware
 Route::middleware(['supabase.jwt', 'throttle:bootstrap'])->post('/bootstrap', [BootstrapController::class, 'bootstrap']);
 
 // Split route files (keeps api.php tidy)
-require __DIR__ . '/api/professional.php';
-require __DIR__ . '/api/enterprise.php';
-require __DIR__ . '/api/staff.php';
-require __DIR__ . '/api/publicSite.php';
+require __DIR__.'/api/professional.php';
+require __DIR__.'/api/staff.php';
+require __DIR__.'/api/publicSite.php';
 
 Route::get('/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::class, 'unsubscribe'])
     ->where('token', '[A-Za-z0-9]+')
     ->middleware('throttle:public-site')
     ->name('public.unsubscribe');
 
-Route::get('/health', fn () => response()->json(['ok' => true]));
+Route::get('/health', fn () => response()->json(['ok' => true]))->middleware('throttle:health-check');
 
 // Header-based fallback for path-based frontend routing (e.g. /shloom).
 // When the frontend cannot use subdomain DNS, it sends the subdomain
@@ -58,27 +100,43 @@ Route::get('/health', fn () => response()->json(['ok' => true]));
 Route::get('/public/site-by-slug', [PublicSiteController::class, 'showByHeader'])
     ->middleware('throttle:public-site');
 
-Route::get('/public/booking/config-by-slug', [PublicBookingController::class, 'config'])
+Route::middleware('feature:smart_booking')->group(function () {
+    Route::get('/public/booking/config-by-slug', [PublicBookingController::class, 'config'])
+        ->middleware('throttle:public-site');
+    Route::get('/public/booking/services-by-slug', [PublicBookingController::class, 'services'])
+        ->middleware('throttle:public-site');
+    Route::post('/public/booking/availability-by-slug', [PublicBookingController::class, 'availability'])
+        ->middleware('throttle:public-site');
+    Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
+        ->middleware('throttle:booking-checkout');
+});
+Route::get('/public/shopify/storefront-config', [PublicShopifyStorefrontController::class, 'storefrontConfig'])
     ->middleware('throttle:public-site');
-Route::get('/public/booking/services-by-slug', [PublicBookingController::class, 'services'])
+
+// Public document download — 302-redirects to a short-TTL R2 presigned URL
+// with a response-content-disposition=attachment override so the browser
+// forces a download instead of rendering inline.
+Route::get('/public/documents/{document}/download', PublicDocumentDownloadController::class)
+    ->whereUuid('document')
     ->middleware('throttle:public-site');
-Route::post('/public/booking/availability-by-slug', [PublicBookingController::class, 'availability'])
+
+// Static frontend config (social platform registry, etc). Aggressively cacheable.
+// See docs/social-links.md for the social platforms contract.
+Route::get('/public/config/social-platforms', [PublicConfigController::class, 'socialPlatforms'])
     ->middleware('throttle:public-site');
-Route::post('/public/booking/checkout-by-slug', [PublicBookingController::class, 'checkout'])
-    ->middleware('throttle:public-site');
-Route::get('/public/store/featured-products-by-slug', [PublicStoreController::class, 'featuredProducts'])
-    ->middleware('throttle:public-site');
-Route::post('/public/store/checkout-session-by-slug', [PublicStoreController::class, 'createCheckoutSession'])
-    ->middleware('throttle:public-site');
-Route::post('/public/store/stripe-checkout-by-slug', [PublicStoreController::class, 'createStripeCheckout'])
-    ->middleware('throttle:public-site');
-Route::post('/public/store/payment-intent-by-slug', [PublicStoreController::class, 'createPaymentIntent'])
+
+// Client-safe third-party integration keys (Google Maps, etc). Consumed by
+// the Hydrogen storefront — provider-side restrictions (HTTP referrer, etc)
+// keep exposure safe.
+Route::get('/public/config/integrations', [PublicConfigController::class, 'integrations'])
     ->middleware('throttle:public-site');
 
 // Header/site-id based fallback for path-based frontend routing.
 Route::post('/public/analytics/pageviews', [AnalyticsController::class, 'pageview'])
     ->middleware('throttle:analytics');
 Route::post('/public/analytics/clicks', [AnalyticsController::class, 'click'])
+    ->middleware('throttle:analytics');
+Route::post('/public/analytics/cart-events', [AnalyticsController::class, 'cartEvent'])
     ->middleware('throttle:analytics');
 
 Route::post('/public/subscribe', [PublicEmailSubscriptionController::class, 'subscribe'])
@@ -90,8 +148,63 @@ Route::post('/public/waitlist', [PublicWaitlistController::class, 'store'])
     ->middleware('throttle:waitlist');
 Route::get('/public/brand-affiliate-invites/{token}', [PublicBrandAffiliateInviteController::class, 'show'])
     ->middleware('throttle:public-site');
+Route::get('/public/join/{handle}', [PublicOpenInviteController::class, 'show'])
+    ->where('handle', '[A-Za-z0-9][A-Za-z0-9_-]*')
+    ->middleware('throttle:public-site');
 
 Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])
     ->middleware(['lead.log', 'throttle:leads']);
 
-Route::get('/ready', [HealthController::class, 'check']);
+Route::post('/public/enquiry', [PublicEnquiryController::class, 'submit'])
+    ->middleware(['lead.log', 'throttle:leads']);
+
+// Account-linking endpoint — called before a shop is associated with any brand,
+// so it cannot use the embedded.key middleware (which requires the shop to exist).
+// Validates the API key manually and consumes a Redis-backed connection code.
+Route::post('/internal/embedded/connect-account', [EmbeddedConnectController::class, 'connect'])
+    ->middleware('throttle:10,1');
+
+// Internal Shopify embedded app endpoints — consumed by Sidest-Embedded setup wizard
+Route::middleware(['embedded.key', 'throttle:60,1'])->prefix('internal/embedded')->group(function () {
+    Route::get('/brand-profile', [EmbeddedSetupController::class, 'brandProfile']);
+    Route::post('/brand-identity', [EmbeddedSetupController::class, 'saveIdentity']);
+    Route::post('/brand-details', [EmbeddedSetupController::class, 'saveBusinessDetails']);
+    Route::patch('/brand-settings', [EmbeddedSetupController::class, 'updateSetting']);
+    Route::post('/deployment-token', [EmbeddedSetupController::class, 'saveDeploymentToken']);
+    Route::post('/deploy', [EmbeddedSetupController::class, 'deployNow']);
+    Route::get('/domain-status', [EmbeddedSetupController::class, 'domainStatus']);
+    Route::get('/overview', [EmbeddedSetupController::class, 'overview']);
+    Route::get('/products', [EmbeddedSetupController::class, 'embeddedProducts']);
+    Route::post('/sync-design', [EmbeddedSetupController::class, 'syncDesign']);
+    Route::post('/domain/setup', [EmbeddedSetupController::class, 'setupDomain']);
+    Route::post('/domain/provision-txt', [EmbeddedSetupController::class, 'provisionDomainTxt']);
+    Route::post('/provision-integration', [EmbeddedSetupController::class, 'provisionShopifyIntegration']);
+    Route::post('/confirm-hydrogen', [EmbeddedSetupController::class, 'confirmHydrogenInstall']);
+});
+
+// Shopify admin UI extensions (block extensions on order/product pages).
+// Auth via session-token JWT (signed with the app's API secret) — extensions
+// can't ship the embedded API key, so each request brings a freshly minted
+// token from App Bridge that we verify against the shared client secret.
+Route::middleware(['shopify.session', 'throttle:60,1'])->prefix('internal/embedded')->group(function () {
+    Route::get('/orders/{shopify_order_id}', [EmbeddedOrderAnalyticsController::class, 'show'])
+        ->where('shopify_order_id', '[A-Za-z0-9_/.:-]+');
+    Route::get('/products/{shopify_product_id}/analytics', [EmbeddedProductAnalyticsController::class, 'show'])
+        ->where('shopify_product_id', '[A-Za-z0-9_/.:-]+');
+    Route::get('/product-settings', [EmbeddedProductSettingsController::class, 'show']);
+    Route::patch('/product-settings', [EmbeddedProductSettingsController::class, 'update']);
+});
+
+// Internal Hydrogen endpoints (server-to-server, API key auth)
+Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('internal/hydrogen')->group(function () {
+    Route::get('/brand-config', [HydrogenBrandConfigController::class, 'show']);
+    Route::get('/deployment-targets', [HydrogenDeploymentController::class, 'targets']);
+    Route::get('/brand-design/{slug}', [HydrogenBrandDesignController::class, 'show'])
+        ->where('slug', '[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}');
+    Route::get('/affiliate', [HydrogenAffiliateController::class, 'show']);
+    Route::get('/affiliate-services', [HydrogenAffiliateController::class, 'services']);
+    Route::get('/affiliate-products', [HydrogenAffiliateProductsController::class, 'show']);
+});
+
+Route::get('/ready', [HealthController::class, 'check'])->middleware('throttle:health-check');
+Route::get('/health/scheduler', [HealthController::class, 'scheduler'])->middleware('throttle:health-check');

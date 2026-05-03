@@ -6,25 +6,23 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
+// V2: Deletes raw analytics events older than retention window (min 30 days). Aggregate data preserved in hourly/daily tables.
 class PurgeRawAnalyticsEvents extends Command
 {
-    protected $signature = 'comet:analytics:purge-raw-events
+    protected $signature = 'sidest:analytics:purge-raw-events
                             {--days= : Retain events newer than N days (default from config, minimum 30)}
                             {--dry-run : Report row counts without deleting}';
 
     protected $description = 'Delete raw analytics event rows older than the retention window. '
-        . 'Aggregate data is preserved in the hourly/daily tables. '
-        . 'Runs in batches to avoid long-running transactions.';
+        .'Aggregate data is preserved in the hourly/daily tables. '
+        .'Runs in batches to avoid long-running transactions.';
 
     private const BATCH_SIZE = 10_000;
 
     private const TABLES = [
-        // Child tables first (FK cascades prevent reverse order).
-        'analytics.store_order_event_items' => 'created_at',
-        'analytics.store_order_events'      => 'occurred_at',
-        'analytics.link_clicks'             => 'occurred_at',
-        'analytics.site_visits'             => 'occurred_at',
-        'analytics.lead_submissions'        => 'occurred_at',
+        'analytics.link_clicks' => 'occurred_at',
+        'analytics.site_visits' => 'occurred_at',
+        'analytics.lead_submissions' => 'occurred_at',
     ];
 
     public function handle(): int
@@ -62,10 +60,10 @@ class PurgeRawAnalyticsEvents extends Command
             $totalDeleted
         ));
 
-        Log::info('comet:analytics:purge-raw-events completed', [
-            'dry_run'    => $dryRun,
-            'days'       => $days,
-            'cutoff'     => $cutoff->toIso8601String(),
+        Log::info('sidest:analytics:purge-raw-events completed', [
+            'dry_run' => $dryRun,
+            'days' => $days,
+            'cutoff' => $cutoff->toIso8601String(),
             'total_rows' => $totalDeleted,
         ]);
 
@@ -74,13 +72,13 @@ class PurgeRawAnalyticsEvents extends Command
 
     private function retentionDays(): ?int
     {
-        $raw = $this->option('days') ?? config('comet.analytics_raw_event_retention_days', 90);
+        $raw = $this->option('days') ?? config('sidest.analytics_raw_event_retention_days', 90);
         $days = (int) $raw;
 
         if ($days < 30) {
             $this->error(sprintf(
                 'Retention window must be at least 30 days (got %d). '
-                . 'Set ANALYTICS_RAW_EVENT_RETENTION_DAYS or pass --days=N.',
+                .'Set ANALYTICS_RAW_EVENT_RETENTION_DAYS or pass --days=N.',
                 $days
             ));
 

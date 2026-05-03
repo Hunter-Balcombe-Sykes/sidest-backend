@@ -2,15 +2,14 @@
 
 namespace App\Http\Requests\Api\Staff\ProfessionalSite;
 
-use App\Models\Core\Site\Site;
 use App\Http\Requests\BaseFormRequest;
+use App\Models\Core\Site\Site;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
+// V2: Validates staff update of a site — supports theme, subdomain (with uniqueness and reserved-word checks), publish status, and deeply nested design/settings fields with PATCH semantics.
 class StaffUpdateSiteRequest extends BaseFormRequest
 {
-
-
     protected function prepareForValidation(): void
     {
         if (is_string($this->subdomain ?? null)) {
@@ -31,7 +30,6 @@ class StaffUpdateSiteRequest extends BaseFormRequest
                 'sometimes',
                 'nullable',
                 'uuid',
-                // IMPORTANT: using Rule::exists avoids the "connection.table" parsing issue.
                 Rule::exists('themes', 'id'),
             ],
 
@@ -46,9 +44,10 @@ class StaffUpdateSiteRequest extends BaseFormRequest
                 'max:63',
                 'regex:/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/',
                 function ($attribute, $value, $fail) use ($currentSiteId) {
-                    $reserved = array_map('strtolower', config('comet.reserved_subdomains', []));
+                    $reserved = array_map('strtolower', config('sidest.reserved_subdomains', []));
                     if (in_array(strtolower($value), $reserved, true)) {
-                        $fail('The subdomain "' . $value . '" is reserved and cannot be used.');
+                        $fail('The subdomain "'.$value.'" is reserved and cannot be used.');
+
                         return;
                     }
 
@@ -60,10 +59,11 @@ class StaffUpdateSiteRequest extends BaseFormRequest
 
                     if ($exists) {
                         $fail('This subdomain is already taken.');
+
                         return;
                     }
 
-                    $aliasExists = DB::table('site_subdomain_aliases')
+                    $aliasExists = DB::table('site.site_subdomain_aliases')
                         ->whereRaw('lower(subdomain) = ?', [strtolower($value)])
                         ->exists();
 
@@ -91,7 +91,18 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.design.border_radius' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.border_width' => ['sometimes', 'nullable', 'string', 'max:32'],
             'settings.design.general_spacing_padding' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'settings.design.background_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.design.text_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.design.button_background' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.design.button_text_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.design.primary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.design.secondary_color' => ['sometimes', 'nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'settings.design.theme_variant' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'settings.design.product_image_ratio' => ['sometimes', 'nullable', 'string', 'in:1/1,4/5'],
+            'settings.design.custom_photo_position' => ['sometimes', 'nullable', 'string', 'in:before,after,mixed'],
             'settings.design.typography' => ['sometimes', 'array'],
+            'settings.design.typography.heading_font' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'settings.design.typography.body_font' => ['sometimes', 'nullable', 'string', 'max:255'],
             'settings.design.typography.font_file_name' => ['prohibited'],
             'settings.design.typography.font_file_path' => ['prohibited'],
             'settings.design.typography.font_file_url' => ['prohibited'],
@@ -101,16 +112,19 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.design.media.brand_logo_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'settings.design.media.brand_logo_path' => ['sometimes', 'nullable', 'string', 'max:2048'],
             'settings.design.media.brand_logo_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
-            'settings.design.media.placeholder_sitepage_images' => ['sometimes', 'array', 'max:5'],
-            'settings.design.media.placeholder_sitepage_images.*.name' => ['required_with:settings.design.media.placeholder_sitepage_images', 'string', 'max:255'],
-            'settings.design.media.placeholder_sitepage_images.*.path' => ['required_with:settings.design.media.placeholder_sitepage_images', 'string', 'max:2048'],
-            'settings.design.media.placeholder_sitepage_images.*.url' => ['required_with:settings.design.media.placeholder_sitepage_images', 'url', 'max:2048'],
+            'settings.design.media.placeholder_sitepage_images' => ['prohibited'],
+            'settings.design.media.placeholder_sitepage_images.*' => ['prohibited'],
+            'settings.design.logo' => ['prohibited'],
             'settings.brand_partner' => ['prohibited'],
             'settings.brandPartner' => ['prohibited'],
             'settings.additional_brand_partners' => ['prohibited'],
             'settings.show_branding' => ['sometimes', 'boolean'],
             'settings.services_auto_sync_enabled' => ['sometimes', 'boolean'],
-            'settings.booking_mode' => ['sometimes', 'string', Rule::in(['manual', 'smart'])],
+            'settings.booking_mode' => [
+                'sometimes',
+                'string',
+                Rule::in(config('sidest.features.smart_booking') ? ['manual', 'smart'] : ['manual']),
+            ],
             'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'settings.selected_products' => ['prohibited'],
 

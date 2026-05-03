@@ -2,13 +2,13 @@
 
 namespace App\Services\Professional;
 
+use App\Jobs\Store\SeedAffiliateDefaultSelectionsJob;
 use App\Models\Core\Professional\BrandPartnerLink;
-use App\Models\Retail\BrandProductAffiliateOverride;
-use App\Models\Retail\BrandProductAffiliateSetting;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
+// V2: Manages brand-affiliate connections (up to 1 primary + 3 additional slots). V2 simplifies to single-brand model.
 class BrandPartnerLinkService
 {
     public const PRIMARY_SLOT = 0;
@@ -71,6 +71,10 @@ class BrandPartnerLinkService
                 'slot' => $slot,
             ]);
 
+            // Seed default product selections after the transaction commits
+            SeedAffiliateDefaultSelectionsJob::dispatch($affiliateProfessionalId, $brandProfessionalId)
+                ->afterCommit();
+
             return $link;
         });
     }
@@ -91,14 +95,6 @@ class BrandPartnerLinkService
             }
 
             $target->delete();
-            BrandProductAffiliateOverride::query()
-                ->where('affiliate_professional_id', $affiliateProfessionalId)
-                ->where('brand_professional_id', $brandProfessionalId)
-                ->delete();
-            BrandProductAffiliateSetting::query()
-                ->where('affiliate_professional_id', $affiliateProfessionalId)
-                ->where('brand_professional_id', $brandProfessionalId)
-                ->delete();
 
             $remaining = BrandPartnerLink::query()
                 ->where('affiliate_professional_id', $affiliateProfessionalId)
@@ -193,5 +189,13 @@ class BrandPartnerLinkService
                 $link->save();
             }
         }
+    }
+
+    public function getLinkForPair(string $affiliateProfessionalId, string $brandProfessionalId): ?BrandPartnerLink
+    {
+        return BrandPartnerLink::query()
+            ->where('affiliate_professional_id', $affiliateProfessionalId)
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->first();
     }
 }

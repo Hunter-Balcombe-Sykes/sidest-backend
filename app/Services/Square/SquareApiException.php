@@ -4,6 +4,7 @@ namespace App\Services\Square;
 
 use RuntimeException;
 
+// V2: Typed exception for Square API failures, carrying HTTP status and response payload.
 class SquareApiException extends RuntimeException
 {
     public function __construct(
@@ -14,4 +15,3 @@ class SquareApiException extends RuntimeException
         parent::__construct($message, $status);
     }
 }
-

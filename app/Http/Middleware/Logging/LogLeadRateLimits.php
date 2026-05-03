@@ -2,14 +2,16 @@
 
 namespace App\Http\Middleware\Logging;
 
-use App\Models\Analytics\LeadSubmission;
 use App\Http\Controllers\Concerns\HashesClientData;
+use App\Models\Analytics\LeadSubmission;
 use Closure;
 use Illuminate\Http\Request;
 
+// V2: Logs rate-limited lead submissions to analytics.lead_submissions for abuse monitoring.
 class LogLeadRateLimits
 {
     use HashesClientData;
+
     public function handle(Request $request, Closure $next)
     {
         $response = $next($request);

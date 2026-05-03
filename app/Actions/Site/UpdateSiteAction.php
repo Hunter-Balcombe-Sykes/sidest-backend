@@ -3,15 +3,17 @@
 namespace App\Actions\Site;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Core\Site\Theme;
+use App\Services\Cache\SiteCacheService;
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
-use App\Models\Core\Site\Site;
 
+// V2: Site update with business logic — subdomain cooldown (30-day), theme defaults, PATCH-style settings merge, publish validation.
 class UpdateSiteAction
 {
     /**
@@ -25,7 +27,7 @@ class UpdateSiteAction
         $professional->loadMissing('site');
 
         $site = $professional->site;
-        if (!$site) {
+        if (! $site) {
             throw ValidationException::withMessages([
                 'site' => ['Professional has no site.'],
             ]);
@@ -46,17 +48,17 @@ class UpdateSiteAction
                 if ($incoming === $current) {
                     unset($data['subdomain']);
                 } else {
-                    if (!$allowSubdomainOverride && $site->subdomain_changed_at) {
+                    if (! $allowSubdomainOverride && $site->subdomain_changed_at) {
                         $nextAllowed = $site->subdomain_changed_at->copy()->addDays(30);
 
                         if (Carbon::now()->lt($nextAllowed)) {
                             throw ValidationException::withMessages([
-                                'subdomain' => ['You can change your subdomain again on ' . $nextAllowed->toDateString() . '.'],
+                                'subdomain' => ['You can change your subdomain again on '.$nextAllowed->toDateString().'.'],
                             ]);
                         }
                     }
 
-                    $conflictInSites = DB::table('sites')
+                    $conflictInSites = DB::table('site.sites')
                         ->whereRaw('lower(subdomain) = ?', [$incoming])
                         ->where('id', '!=', $site->id)
                         ->exists();
@@ -67,7 +69,7 @@ class UpdateSiteAction
                         ]);
                     }
 
-                    $conflictInAliases = DB::table('site_subdomain_aliases')
+                    $conflictInAliases = DB::table('site.site_subdomain_aliases')
                         ->whereRaw('lower(subdomain) = ?', [$incoming])
                         ->exists();
 
@@ -77,10 +79,10 @@ class UpdateSiteAction
                         ]);
                     }
 
-                    if (!empty($site->subdomain)) {
+                    if (! empty($site->subdomain)) {
                         try {
                             SiteSubdomainAlias::query()->create([
-                                'site_id'   => $site->id,
+                                'site_id' => $site->id,
                                 'subdomain' => $site->subdomain,
                                 'created_at' => now(),
                             ]);
@@ -97,65 +99,77 @@ class UpdateSiteAction
                 }
             }
 
-        // Allow sending theme_id=null to reset to default (same behavior as current pro-controller)
-        if (array_key_exists('theme_id', $data) && $data['theme_id'] === null) {
-            $defaultId = Theme::query()
-                ->where('is_default', true)
-                ->value('id');
+            // Allow sending theme_id=null to reset to default (same behavior as current pro-controller)
+            if (array_key_exists('theme_id', $data) && $data['theme_id'] === null) {
+                $defaultId = Theme::query()
+                    ->where('is_default', true)
+                    ->value('id');
 
-            if (!$defaultId) {
-                throw ValidationException::withMessages([
-                    'theme_id' => ['No default theme configured.'],
-                ]);
-            }
-
-            $data['theme_id'] = $defaultId;
-        }
-
-        // Merge settings for PATCH semantics (don’t overwrite the whole JSON)
-        if (array_key_exists('settings', $data)) {
-            $existing = is_array($site->settings) ? $site->settings : [];
-            $incoming = is_array($data['settings']) ? $data['settings'] : [];
-            // Product selections are stored in retail.professional_selections, not site settings JSON.
-            unset($incoming['selected_products']);
-            Arr::forget($incoming, 'design.typography.font_file_name');
-            Arr::forget($incoming, 'design.typography.font_file_path');
-            Arr::forget($incoming, 'design.typography.font_file_url');
-            $data['settings'] = array_replace_recursive($existing, $incoming);
-        }
-
-        // If publishing, enforce completeness unless staff force_publish is allowed + true
-        if (($data['is_published'] ?? null) === true) {
-            $canBypass = $allowForcePublish && $forcePublish;
-
-            if (!$canBypass) {
-                // Must have display name
-                if (empty($professional->display_name)) {
+                if (! $defaultId) {
                     throw ValidationException::withMessages([
-                        'is_published' => ['Cannot publish: professional must have a display name.'],
+                        'theme_id' => ['No default theme configured.'],
                     ]);
                 }
 
-
+                $data['theme_id'] = $defaultId;
             }
-        }
 
-        // Future: staff-only overrides could go here (options['allow_force_publish'] etc.)
+            // Merge settings for PATCH semantics (don’t overwrite the whole JSON)
+            if (array_key_exists('settings', $data)) {
+                $existing = is_array($site->settings) ? $site->settings : [];
+                $incoming = is_array($data['settings']) ? $data['settings'] : [];
+                // Product selections are stored in commerce.affiliate_product_selections, not site settings JSON.
+                unset($incoming['selected_products']);
+                Arr::forget($incoming, 'design.typography.font_file_name');
+                Arr::forget($incoming, 'design.typography.font_file_path');
+                Arr::forget($incoming, 'design.typography.font_file_url');
+                $merged = array_replace_recursive($existing, $incoming);
 
-        $site->fill($data);
-        try {
-            $site->save();
-        } catch (QueryException $e) {
-            // If you have a unique index on subdomain, this is your final safety net.
-            if ($e->getCode() === '23505') {
-                throw ValidationException::withMessages([
-                    'subdomain' => ['This subdomain is already taken.'],
-                ]);
+                // Indexed list special-casing was historically needed for
+                // settings.design.media.placeholder_sitepage_images, which has
+                // since moved to site.site_media. No remaining indexed lists live
+                // under settings, so the recursive merge is sufficient.
+
+                $data['settings'] = $merged;
             }
-            throw $e;
-        }
 
-        return $site->fresh();
+            // If publishing, enforce completeness unless staff force_publish is allowed + true
+            if (($data['is_published'] ?? null) === true) {
+                $canBypass = $allowForcePublish && $forcePublish;
+
+                if (! $canBypass) {
+                    // Must have display name
+                    if (empty($professional->display_name)) {
+                        throw ValidationException::withMessages([
+                            'is_published' => ['Cannot publish: professional must have a display name.'],
+                        ]);
+                    }
+
+                }
+            }
+
+            // Future: staff-only overrides could go here (options['allow_force_publish'] etc.)
+
+            $site->fill($data);
+            try {
+                $site->save();
+            } catch (QueryException $e) {
+                // If you have a unique index on subdomain, this is your final safety net.
+                if ($e->getCode() === '23505') {
+                    throw ValidationException::withMessages([
+                        'subdomain' => ['This subdomain is already taken.'],
+                    ]);
+                }
+                throw $e;
+            }
+
+            // Bust the Hydrogen brand-design cache so dashboard saves surface
+            // inside Hydrogen's 5s staleWhileRevalidate window. Deferred until
+            // commit so a rolled-back transaction doesn't wipe a warm cache.
+            $siteId = (string) $site->id;
+            DB::afterCommit(fn () => app(SiteCacheService::class)->forgetBrandDesign($siteId));
+
+            return $site->fresh();
         });
     }
 }

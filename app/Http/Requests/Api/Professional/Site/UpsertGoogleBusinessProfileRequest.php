@@ -4,6 +4,7 @@ namespace App\Http\Requests\Api\Professional\Site;
 
 use App\Http\Requests\BaseFormRequest;
 
+// V2: Validates Google Business Profile upsert — place ID, name, address, coordinates, phone, website, and hours array.
 class UpsertGoogleBusinessProfileRequest extends BaseFormRequest
 {
     protected function prepareForValidation(): void
@@ -44,4 +45,3 @@ class UpsertGoogleBusinessProfileRequest extends BaseFormRequest
         ];
     }
 }
-

@@ -1,0 +1,92 @@
+<?php
+
+namespace App\Services\Auth;
+
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
+
+// V2: Server-side Supabase user management via the GoTrue Admin API. Creates users server-side for the setup wizard flow.
+class SupabaseAdminService
+{
+    private string $baseUrl;
+
+    private string $serviceRoleKey;
+
+    public function __construct()
+    {
+        $this->baseUrl = rtrim((string) config('supabase.url'), '/');
+        $this->serviceRoleKey = (string) config('supabase.service_role_key');
+
+        if ($this->baseUrl === '' || $this->serviceRoleKey === '') {
+            throw new RuntimeException('Supabase URL and service role key must be configured.');
+        }
+    }
+
+    /**
+     * Create a Supabase user server-side (no password — magic link auth).
+     *
+     * @return array{id: string, email: string, created: bool}
+     */
+    public function createUser(string $email, array $metadata = []): array
+    {
+        $email = strtolower(trim($email));
+
+        if ($email === '') {
+            throw new RuntimeException('Email is required to create a Supabase user.');
+        }
+
+        $response = Http::withHeaders($this->headers())
+            ->timeout(10)
+            ->post("{$this->baseUrl}/auth/v1/admin/users", [
+                'email' => $email,
+                'email_confirm' => true,
+                'user_metadata' => $metadata ?: (object) [],
+            ]);
+
+        if ($response->successful()) {
+            $user = $response->json();
+
+            return [
+                'id' => (string) ($user['id'] ?? ''),
+                'email' => (string) ($user['email'] ?? $email),
+                'created' => true,
+            ];
+        }
+
+        // User already exists — GoTrue v2 includes the existing user object in the error response.
+        if ($response->status() === 422 || $response->status() === 409) {
+            $body = $response->json();
+            $existingId = $body['user']['id'] ?? null;
+
+            if ($existingId) {
+                return [
+                    'id' => (string) $existingId,
+                    'email' => (string) ($body['user']['email'] ?? $email),
+                    'created' => false,
+                ];
+            }
+        }
+
+        Log::error('Supabase admin: failed to create user', [
+            'email' => $email,
+            'status' => $response->status(),
+            'error_code' => $response->json('code'),
+            'error_msg' => $response->json('msg'),
+        ]);
+
+        throw new RuntimeException('Failed to create Supabase user.');
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function headers(): array
+    {
+        return [
+            'Authorization' => 'Bearer '.$this->serviceRoleKey,
+            'apikey' => $this->serviceRoleKey,
+            'Content-Type' => 'application/json',
+        ];
+    }
+}

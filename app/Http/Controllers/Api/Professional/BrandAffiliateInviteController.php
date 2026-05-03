@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use RuntimeException;
 
+// V2: Brand creates/manages affiliate invitations (single, bulk, CSV). Affiliates claim or decline via token. Core V2 onboarding flow.
 class BrandAffiliateInviteController extends ApiController
 {
     use ResolveCurrentProfessional;
@@ -168,8 +169,7 @@ class BrandAffiliateInviteController extends ApiController
         string $token,
         BrandAffiliateInviteService $inviteService,
         BrandPartnerLinkService $brandPartnerLinks
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $professional = $this->currentProfessional($request);
         $invite = $inviteService->findByToken($token);
 

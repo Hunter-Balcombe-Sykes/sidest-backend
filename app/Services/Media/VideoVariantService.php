@@ -4,9 +4,9 @@ namespace App\Services\Media;
 
 use App\Models\Core\MediaVariant;
 use App\Models\Core\Site\SiteMedia;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\Process\Process;
 
 /**
  * Transcodes a video original into MP4 + HLS variants and a poster image,
@@ -34,12 +34,13 @@ use Illuminate\Support\Facades\Storage;
  *       adaptive.m3u8             (master playlist)
  *     poster.jpg
  *
- * Requires ffmpeg and ffprobe to be available (configured via config/comet.php).
+ * Requires ffmpeg and ffprobe to be available (configured via config/sidest.php).
  */
+// V2: Transcodes videos to MP4 + HLS via FFmpeg. Feature-flagged (SIDEST_VIDEO_UPLOADS_ENABLED). Uses dedicated redis_video connection.
 class VideoVariantService
 {
     /* ------------------------------------------------------------------ */
-    /*  Public API                                                         */
+    /*  Public API */
     /* ------------------------------------------------------------------ */
 
     /**
@@ -51,13 +52,13 @@ class VideoVariantService
     public function probe(string $localPath): array
     {
         $ffprobe = $this->ffprobeBinary();
-        $cmd     = sprintf(
+        $cmd = sprintf(
             '%s -v quiet -print_format json -show_format -show_streams %s 2>&1',
             escapeshellcmd($ffprobe),
             escapeshellarg($localPath),
         );
 
-        $output = $this->exec($cmd, $exitCode);
+        $output = $this->runCommand($cmd, $exitCode);
 
         if ($exitCode !== 0) {
             throw new \RuntimeException("ffprobe failed (exit {$exitCode}): {$output}");
@@ -82,14 +83,14 @@ class VideoVariantService
         string $basePath,
     ): void {
         Log::info('VideoVariantService: starting', [
-            'media_id'  => $mediaId,
+            'media_id' => $mediaId,
             'base_path' => $basePath,
         ]);
 
         // --- 1. Probe metadata ---
-        $probe      = $this->probe($localOriginalPath);
+        $probe = $this->probe($localOriginalPath);
         $durationMs = $this->extractDurationMs($probe);
-        $maxDur     = (int) config('comet.video_max_duration_seconds', 300);
+        $maxDur = (int) config('sidest.video_max_duration_seconds', 300);
 
         if ($durationMs > $maxDur * 1000) {
             throw new \RuntimeException(
@@ -97,14 +98,14 @@ class VideoVariantService
             );
         }
 
-        $variantDefs = (array) config('comet.video_variants', []);
-        $tmpDirs     = [];
+        $variantDefs = (array) config('sidest.video_variants', []);
+        $tmpDirs = [];
 
         try {
             // --- 2 & 3. Encode MP4 variants ---
             $mp4Paths = [];
             foreach ($variantDefs as $variantKey => $def) {
-                $tmpMp4 = $this->makeTmpFile("comet_mp4_{$variantKey}_", '.mp4');
+                $tmpMp4 = $this->makeTmpFile("sidest_mp4_{$variantKey}_", '.mp4');
                 $this->encodeMp4($localOriginalPath, $tmpMp4, $def);
                 $mp4Paths[$variantKey] = $tmpMp4;
             }
@@ -112,12 +113,12 @@ class VideoVariantService
             // --- 4. Package HLS from each MP4 ---
             $hlsDirs = [];
             foreach ($mp4Paths as $variantKey => $mp4) {
-                $tmpHlsDir = sys_get_temp_dir() . '/comet_hls_' . $variantKey . '_' . uniqid();
+                $tmpHlsDir = sys_get_temp_dir().'/sidest_hls_'.$variantKey.'_'.uniqid();
                 if (! mkdir($tmpHlsDir, 0755, true)) {
                     throw new \RuntimeException("Failed to create HLS temp dir: {$tmpHlsDir}");
                 }
-                $tmpDirs[]            = $tmpHlsDir;
-                $this->packageHls($mp4, $tmpHlsDir . '/playlist.m3u8');
+                $tmpDirs[] = $tmpHlsDir;
+                $this->packageHls($mp4, $tmpHlsDir.'/playlist.m3u8');
                 $hlsDirs[$variantKey] = $tmpHlsDir;
             }
 
@@ -125,17 +126,17 @@ class VideoVariantService
             $adaptiveContent = $this->buildAdaptivePlaylist($variantDefs);
 
             // --- 6. Extract poster ---
-            $tmpPoster = $this->makeTmpFile('comet_poster_', '.jpg');
+            $tmpPoster = $this->makeTmpFile('sidest_poster_', '.jpg');
             $this->extractPoster($localOriginalPath, $tmpPoster);
 
             // --- 7. Upload all artifacts ---
-            $disk     = $this->disk();
+            $disk = $this->disk();
             $diskName = $this->resolvedDiskName();
 
             // Upload MP4s
             foreach ($mp4Paths as $variantKey => $mp4) {
                 $remotePath = "{$basePath}/{$variantKey}.mp4";
-                $stream     = fopen($mp4, 'rb');
+                $stream = fopen($mp4, 'rb');
                 $disk->put($remotePath, $stream, 'public');
                 if (is_resource($stream)) {
                     fclose($stream);
@@ -146,13 +147,13 @@ class VideoVariantService
                 MediaVariant::updateOrCreate(
                     ['media_id' => $mediaId, 'variant_key' => $variantKey, 'artifact_type' => 'mp4'],
                     [
-                        'disk'            => $diskName,
-                        'path'            => $remotePath,
-                        'mime'            => 'video/mp4',
-                        'bitrate_kbps'    => (int) ($def['video_bitrate_kbps'] ?? 0) + (int) ($def['audio_bitrate_kbps'] ?? 0),
+                        'disk' => $diskName,
+                        'path' => $remotePath,
+                        'mime' => 'video/mp4',
+                        'bitrate_kbps' => (int) ($def['video_bitrate_kbps'] ?? 0) + (int) ($def['audio_bitrate_kbps'] ?? 0),
                         'file_size_bytes' => filesize($mp4) ?: null,
-                        'duration_ms'     => $durationMs,
-                        'metadata'        => ['resolution' => $def['resolution'] ?? null],
+                        'duration_ms' => $durationMs,
+                        'metadata' => ['resolution' => $def['resolution'] ?? null],
                     ]
                 );
             }
@@ -164,10 +165,10 @@ class VideoVariantService
                     if ($file === '.' || $file === '..') {
                         continue;
                     }
-                    $localFile  = "{$hlsDir}/{$file}";
+                    $localFile = "{$hlsDir}/{$file}";
                     $remotePath = "{$remoteHlsBase}/{$file}";
-                    $mime       = str_ends_with($file, '.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp2t';
-                    $stream     = fopen($localFile, 'rb');
+                    $mime = str_ends_with($file, '.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp2t';
+                    $stream = fopen($localFile, 'rb');
                     $disk->put($remotePath, $stream, ['visibility' => 'public', 'ContentType' => $mime]);
                     if (is_resource($stream)) {
                         fclose($stream);
@@ -175,15 +176,15 @@ class VideoVariantService
                 }
 
                 $playlistPath = "{$remoteHlsBase}/playlist.m3u8";
-                $def          = $variantDefs[$variantKey] ?? [];
+                $def = $variantDefs[$variantKey] ?? [];
                 MediaVariant::updateOrCreate(
                     ['media_id' => $mediaId, 'variant_key' => $variantKey, 'artifact_type' => 'hls_playlist'],
                     [
-                        'disk'        => $diskName,
-                        'path'        => $playlistPath,
-                        'mime'        => 'application/vnd.apple.mpegurl',
+                        'disk' => $diskName,
+                        'path' => $playlistPath,
+                        'mime' => 'application/vnd.apple.mpegurl',
                         'duration_ms' => $durationMs,
-                        'metadata'    => ['resolution' => $def['resolution'] ?? null],
+                        'metadata' => ['resolution' => $def['resolution'] ?? null],
                     ]
                 );
             }
@@ -191,7 +192,7 @@ class VideoVariantService
             // Upload adaptive master playlist
             $adaptiveRemotePath = "{$basePath}/hls/adaptive.m3u8";
             $disk->put($adaptiveRemotePath, $adaptiveContent, [
-                'visibility'  => 'public',
+                'visibility' => 'public',
                 'ContentType' => 'application/vnd.apple.mpegurl',
             ]);
 
@@ -206,7 +207,7 @@ class VideoVariantService
 
             // Upload poster
             $posterRemotePath = "{$basePath}/poster.jpg";
-            $stream           = fopen($tmpPoster, 'rb');
+            $stream = fopen($tmpPoster, 'rb');
             $disk->put($posterRemotePath, $stream, ['visibility' => 'public', 'ContentType' => 'image/jpeg']);
             if (is_resource($stream)) {
                 fclose($stream);
@@ -215,9 +216,9 @@ class VideoVariantService
             MediaVariant::updateOrCreate(
                 ['media_id' => $mediaId, 'variant_key' => 'poster', 'artifact_type' => 'poster'],
                 [
-                    'disk'            => $diskName,
-                    'path'            => $posterRemotePath,
-                    'mime'            => 'image/jpeg',
+                    'disk' => $diskName,
+                    'path' => $posterRemotePath,
+                    'mime' => 'image/jpeg',
                     'file_size_bytes' => filesize($tmpPoster) ?: null,
                 ]
             );
@@ -229,12 +230,12 @@ class VideoVariantService
                 ->update([
                     'processing_state' => SiteMedia::PROCESSING_STATE_READY,
                     'processing_error' => null,
-                    'duration_ms'      => $durationMs,
-                    'poster_path'      => $posterRemotePath,
+                    'duration_ms' => $durationMs,
+                    'poster_path' => $posterRemotePath,
                 ]);
 
             Log::info('VideoVariantService: completed', [
-                'media_id'    => $mediaId,
+                'media_id' => $mediaId,
                 'duration_ms' => $durationMs,
             ]);
         } finally {
@@ -259,7 +260,7 @@ class VideoVariantService
      */
     public function deleteVariants(string $mediaId, string $basePath): void
     {
-        $disk       = $this->disk();
+        $disk = $this->disk();
         $basePrefix = $this->normalizeVideoCleanupBasePath($basePath);
 
         // Delete all files under the normalized video prefix.
@@ -303,12 +304,12 @@ class VideoVariantService
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Private helpers                                                    */
+    /*  Private helpers */
     /* ------------------------------------------------------------------ */
 
     private function encodeMp4(string $input, string $output, array $def): void
     {
-        $ffmpeg     = $this->ffmpegBinary();
+        $ffmpeg = $this->ffmpegBinary();
         $resolution = (string) ($def['resolution'] ?? '1280x720');
         [$width, $height] = array_map('intval', explode('x', $resolution, 2));
         $videoBitrate = (int) ($def['video_bitrate_kbps'] ?? 2000);
@@ -320,8 +321,8 @@ class VideoVariantService
 
         $cmd = sprintf(
             '%s -y -i %s -vf %s -c:v libx264 -b:v %dk -maxrate %dk -bufsize %dk '
-            . '-profile:v main -level 4.0 -movflags +faststart '
-            . '-c:a aac -b:a %dk -ar 44100 %s 2>&1',
+            .'-profile:v main -level 4.0 -movflags +faststart '
+            .'-c:a aac -b:a %dk -ar 44100 %s 2>&1',
             escapeshellcmd($ffmpeg),
             escapeshellarg($input),
             escapeshellarg($scaleFilter),
@@ -332,7 +333,7 @@ class VideoVariantService
             escapeshellarg($output),
         );
 
-        $output_str = $this->exec($cmd, $exitCode);
+        $output_str = $this->runCommand($cmd, $exitCode);
 
         if ($exitCode !== 0) {
             throw new \RuntimeException("ffmpeg MP4 encoding failed (exit {$exitCode}): {$output_str}");
@@ -341,20 +342,20 @@ class VideoVariantService
 
     private function packageHls(string $mp4Input, string $playlistOutput): void
     {
-        $ffmpeg    = $this->ffmpegBinary();
+        $ffmpeg = $this->ffmpegBinary();
         $outputDir = dirname($playlistOutput);
-        $segmentPattern = $outputDir . '/seg_%03d.ts';
+        $segmentPattern = $outputDir.'/seg_%03d.ts';
 
         $cmd = sprintf(
             '%s -y -i %s -c copy -f hls -hls_time 6 -hls_playlist_type vod '
-            . '-hls_segment_filename %s %s 2>&1',
+            .'-hls_segment_filename %s %s 2>&1',
             escapeshellcmd($ffmpeg),
             escapeshellarg($mp4Input),
             escapeshellarg($segmentPattern),
             escapeshellarg($playlistOutput),
         );
 
-        $output = $this->exec($cmd, $exitCode);
+        $output = $this->runCommand($cmd, $exitCode);
 
         if ($exitCode !== 0) {
             throw new \RuntimeException("ffmpeg HLS packaging failed (exit {$exitCode}): {$output}");
@@ -372,7 +373,7 @@ class VideoVariantService
             escapeshellarg($output),
         );
 
-        $outputStr = $this->exec($cmd, $exitCode);
+        $outputStr = $this->runCommand($cmd, $exitCode);
 
         if ($exitCode !== 0 || ! file_exists($output)) {
             // Non-fatal: try frame at 0s as fallback
@@ -382,7 +383,7 @@ class VideoVariantService
                 escapeshellarg($input),
                 escapeshellarg($output),
             );
-            $this->exec($cmd2, $exitCode2);
+            $this->runCommand($cmd2, $exitCode2);
 
             if ($exitCode2 !== 0 || ! file_exists($output)) {
                 Log::warning('VideoVariantService: could not extract poster frame.', [
@@ -406,14 +407,14 @@ class VideoVariantService
         foreach ($variantDefs as $variantKey => $def) {
             $videoBitrate = (int) ($def['video_bitrate_kbps'] ?? 2000);
             $audioBitrate = (int) ($def['audio_bitrate_kbps'] ?? 128);
-            $bandwidth    = ($videoBitrate + $audioBitrate) * 1000;
-            $resolution   = strtoupper((string) ($def['resolution'] ?? '1280x720'));
+            $bandwidth = ($videoBitrate + $audioBitrate) * 1000;
+            $resolution = strtoupper((string) ($def['resolution'] ?? '1280x720'));
 
             $lines[] = "#EXT-X-STREAM-INF:BANDWIDTH={$bandwidth},RESOLUTION={$resolution}";
             $lines[] = "{$variantKey}/playlist.m3u8";
         }
 
-        return implode("\n", $lines) . "\n";
+        return implode("\n", $lines)."\n";
     }
 
     private function extractDurationMs(array $probe): int
@@ -440,24 +441,30 @@ class VideoVariantService
         }
 
         // Rename to add the desired extension so FFmpeg knows the container.
-        $withExt = $path . $suffix;
+        $withExt = $path.$suffix;
         rename($path, $withExt);
 
         return $withExt;
     }
 
     /**
-     * Execute a shell command and return its output.
+     * Run a pre-escaped shell command via Symfony Process and return its output.
      * $exitCode is set by reference.
+     *
+     * All arguments in $cmd must be escaped by the caller via
+     * escapeshellcmd()/escapeshellarg() before this method is called.
+     * No timeout is applied — video encoding can be arbitrarily long.
      */
-    private function exec(string $cmd, ?int &$exitCode = null): string
+    private function runCommand(string $cmd, ?int &$exitCode = null): string
     {
-        $output   = [];
-        $exitCode = 0;
+        $process = Process::fromShellCommandline($cmd);
+        $process->setTimeout(null);
+        $process->run();
 
-        exec($cmd, $output, $exitCode);
+        $exitCode = $process->getExitCode() ?? 0;
 
-        return implode("\n", $output);
+        // Callers append 2>&1, so all output (including stderr) is in stdout
+        return $process->getOutput();
     }
 
     private function removeDir(string $dir): void
@@ -503,15 +510,18 @@ class VideoVariantService
 
     private function diskName(): string
     {
-        $configured = (string) config('comet.media_disk', 'media');
+        $configured = (string) config('sidest.media_disk', 'media');
 
-        $explicit = $_ENV['COMET_MEDIA_DISK'] ?? $_SERVER['COMET_MEDIA_DISK'] ?? null;
+        // $_ENV/$_SERVER are intentional here — Laravel Cloud caches config at deploy time
+        // but injects platform env vars directly into the process environment at runtime,
+        // so env()/config() won't see them. Direct superglobal access bypasses that cache.
+        $explicit = $_ENV['SIDEST_MEDIA_DISK'] ?? $_SERVER['SIDEST_MEDIA_DISK'] ?? null;
         if (is_string($explicit) && trim($explicit) !== '') {
             return $configured;
         }
 
         if ($configured === 'media') {
-            $default       = (string) config('filesystems.default', 'local');
+            $default = (string) config('filesystems.default', 'local');
             $defaultConfig = config("filesystems.disks.{$default}");
 
             if (
@@ -535,11 +545,11 @@ class VideoVariantService
 
     private function ffmpegBinary(): string
     {
-        return (string) config('comet.ffmpeg_binary', 'ffmpeg');
+        return (string) config('sidest.ffmpeg_binary', 'ffmpeg');
     }
 
     private function ffprobeBinary(): string
     {
-        return (string) config('comet.ffprobe_binary', 'ffprobe');
+        return (string) config('sidest.ffprobe_binary', 'ffprobe');
     }
 }

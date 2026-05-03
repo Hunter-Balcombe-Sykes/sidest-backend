@@ -3,22 +3,24 @@
 namespace App\Http\Controllers\Api\Professional\Notifications;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Core\Notifications\Notification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use Illuminate\Support\Str;
 
+// V2: In-app notification listing, mark-as-read, and dismiss for the authenticated professional.
 class NotificationController extends ApiController
 {
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
+
     /**
      * GET /me/notifications
      * Returns notifications targeted to the current pro + broadcasts.
-     * Read/dismiss state is stored per-user in core.notification_receipts.
+     * Read/dismiss state is stored per-user in notifications.notification_receipts.
      */
     public function index(Request $request): JsonResponse
     {
@@ -33,7 +35,7 @@ class NotificationController extends ApiController
         $base = $this->baseQuery($pro->id, $now);
 
         $listQuery = clone $base;
-        if (!$includeDismissed) {
+        if (! $includeDismissed) {
             $listQuery->whereNull('r.dismissed_at');
         }
 
@@ -89,21 +91,20 @@ class NotificationController extends ApiController
 
     private function upsertReceipt(string $notificationId, string $professionalId, array $set): void
     {
+        // Whitelist — only read_at / dismissed_at can be set, no other columns.
         $set = array_intersect_key($set, array_flip(self::RECEIPT_COLUMNS));
-        $id = (string) Str::uuid();
 
-        $cols = array_keys($set);
-        $placeholders = implode(', ', array_fill(0, count($cols), '?'));
-        $updates = implode(', ', array_map(fn($c) => "{$c} = EXCLUDED.{$c}", $cols));
-
-        $sql = "
-        INSERT INTO core.notification_receipts (id, notification_id, professional_id, ".implode(', ', $cols).", created_at, updated_at)
-        VALUES (?, ?, ?, {$placeholders}, NOW(), NOW())
-        ON CONFLICT (notification_id, professional_id)
-        DO UPDATE SET {$updates}, updated_at = NOW()
-        ";
-
-        DB::statement($sql, array_merge([$id, $notificationId, $professionalId], array_values($set)));
+        DB::table('notifications.notification_receipts')->upsert(
+            [array_merge([
+                'id' => (string) Str::uuid(),
+                'notification_id' => $notificationId,
+                'professional_id' => $professionalId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ], $set)],
+            ['notification_id', 'professional_id'],  // unique-by columns
+            [...array_keys($set), 'updated_at'],     // columns to overwrite on conflict
+        );
     }
 
     public function markRead(Request $request, Notification $notification): JsonResponse
@@ -126,11 +127,10 @@ class NotificationController extends ApiController
         return $this->success(['ok' => true]);
     }
 
-
     private function baseQuery(string $professionalId, $now)
     {
-        return DB::table('notifications as n')
-            ->leftJoin('notification_receipts as r', function ($join) use ($professionalId) {
+        return DB::table('notifications.notifications as n')
+            ->leftJoin('notifications.notification_receipts as r', function ($join) use ($professionalId) {
                 $join->on('r.notification_id', '=', 'n.id')
                     ->where('r.professional_id', '=', $professionalId);
             })

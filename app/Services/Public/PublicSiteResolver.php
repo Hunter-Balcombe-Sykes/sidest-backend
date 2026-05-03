@@ -5,6 +5,7 @@ namespace App\Services\Public;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 
+// V2: Resolves published sites by subdomain with fallback to subdomain aliases. Requires professional active status.
 class PublicSiteResolver
 {
     public function resolvePublishedSite(string $subdomain): ?Site
@@ -13,6 +14,7 @@ class PublicSiteResolver
 
         $siteQuery = Site::query()
             ->where('is_published', true)
+            ->with('professional')
             ->whereHas('professional', function ($q) {
                 $q->where('status', 'active');
             });
@@ -21,13 +23,17 @@ class PublicSiteResolver
             ->whereRaw('lower(subdomain) = ?', [$subdomain])
             ->first();
 
-        if ($site) return $site;
+        if ($site) {
+            return $site;
+        }
 
         $alias = SiteSubdomainAlias::query()
             ->whereRaw('lower(subdomain) = ?', [$subdomain])
             ->first();
 
-        if (!$alias) return null;
+        if (! $alias) {
+            return null;
+        }
 
         return (clone $siteQuery)
             ->where('id', $alias->site_id)

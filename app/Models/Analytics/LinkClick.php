@@ -11,16 +11,19 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
+// V2: Records clicks on link blocks within a site. Handles block_id/link_block_id column migration gracefully with runtime column resolution.
 class LinkClick extends BaseModel
 {
     use HasUuids;
 
     private static bool $blockForeignKeyResolved = false;
+
     private static ?string $blockForeignKeyColumn = null;
 
     protected $table = 'analytics.link_clicks';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     // analytics tables don't have updated_at
@@ -40,7 +43,7 @@ class LinkClick extends BaseModel
 
     protected $casts = [
         'occurred_at' => 'datetime',
-        'created_at'  => 'datetime',
+        'created_at' => 'datetime',
     ];
 
     public static function resolveBlockForeignKeyColumn(): ?string
@@ -105,7 +108,7 @@ class LinkClick extends BaseModel
 
                 return $result;
             } catch (QueryException $e) {
-                if (!self::isUndefinedColumnException($e)) {
+                if (! self::isUndefinedColumnException($e)) {
                     throw $e;
                 }
             }
@@ -135,15 +138,14 @@ class LinkClick extends BaseModel
     {
         $foreignKey = self::resolveBlockForeignKeyColumn();
 
-        if (!$foreignKey && array_key_exists('link_block_id', $this->attributes)) {
+        if (! $foreignKey && array_key_exists('link_block_id', $this->attributes)) {
             $foreignKey = 'link_block_id';
         }
 
-        if (!$foreignKey && array_key_exists('block_id', $this->attributes)) {
+        if (! $foreignKey && array_key_exists('block_id', $this->attributes)) {
             $foreignKey = 'block_id';
         }
 
         return $this->belongsTo(Block::class, $foreignKey ?? 'link_block_id');
     }
-
 }

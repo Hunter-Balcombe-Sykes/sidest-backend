@@ -9,31 +9,60 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+// V2: An uploaded image or video belonging to a site. Tracks processing state (pending/processing/ready/failed) and owns MediaVariant children.
 class SiteMedia extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'site_media';
+    protected $table = 'site.site_media';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
-    public const POOL_GALLERY  = 'gallery';
-    public const POOL_CONTENT  = 'content';
-    public const POOL_PRODUCT  = 'product';
+    public const POOL_GALLERY = 'gallery';
+
+    public const POOL_CONTENT = 'content';
+
+    public const POOL_PRODUCT = 'product';
+
+    public const POOL_BRAND_GALLERY = 'brand_gallery';
+
+    // One downloadable document per site (PDF/JPG/PNG). See
+    // docs/superpowers/specs/2026-04-22-document-upload-design.md.
+    public const POOL_DOCUMENTS = 'documents';
+
+    // Singleton brand design assets (logo, placeholder). No ordering semantics —
+    // the per-pool sort_order unique index excludes this pool deliberately.
+    public const POOL_DESIGN = 'design';
+
+    // Brand-design slot discriminator inside POOL_DESIGN. Replaces the old
+    // alt_text='logo'|'placeholder' string match — alt_text is now reserved
+    // for accessibility text. Set to NULL for non-design rows.
+    public const PURPOSE_LOGO_FULL = 'logo_full';
+
+    public const PURPOSE_LOGO_SQUARE = 'logo_square';
+
+    public const PURPOSE_PLACEHOLDER = 'placeholder';
 
     public const MEDIA_TYPE_IMAGE = 'image';
+
     public const MEDIA_TYPE_VIDEO = 'video';
 
-    public const PROCESSING_STATE_PENDING    = 'pending';
+    public const MEDIA_TYPE_DOCUMENT = 'document';
+
+    public const PROCESSING_STATE_PENDING = 'pending';
+
     public const PROCESSING_STATE_PROCESSING = 'processing';
-    public const PROCESSING_STATE_READY      = 'ready';
-    public const PROCESSING_STATE_FAILED     = 'failed';
+
+    public const PROCESSING_STATE_READY = 'ready';
+
+    public const PROCESSING_STATE_FAILED = 'failed';
 
     protected $attributes = [
-        'is_active'        => true,
-        'pool'             => self::POOL_GALLERY,
-        'media_type'       => self::MEDIA_TYPE_IMAGE,
+        'is_active' => true,
+        'pool' => self::POOL_GALLERY,
+        'media_type' => self::MEDIA_TYPE_IMAGE,
         'processing_state' => self::PROCESSING_STATE_PENDING,
     ];
 
@@ -42,28 +71,32 @@ class SiteMedia extends BaseModel
         'pool',
         'path',
         'alt_text',
+        'caption',
+        'purpose',
         'sort_order',
         'is_active',
         'media_type',
         'processing_state',
         'processing_error',
         'original_mime',
+        'original_filename',
         'original_size_bytes',
         'duration_ms',
         'poster_path',
+        'product_gid',
     ];
 
     protected $casts = [
-        'sort_order'          => 'integer',
-        'is_active'           => 'boolean',
+        'sort_order' => 'integer',
+        'is_active' => 'boolean',
         'original_size_bytes' => 'integer',
-        'duration_ms'         => 'integer',
-        'created_at'          => 'datetime',
-        'updated_at'          => 'datetime',
+        'duration_ms' => 'integer',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     /* ------------------------------------------------------------------ */
-    /*  Relationships                                                      */
+    /*  Relationships */
     /* ------------------------------------------------------------------ */
 
     public function site(): BelongsTo
@@ -77,7 +110,7 @@ class SiteMedia extends BaseModel
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Helpers                                                            */
+    /*  Helpers */
     /* ------------------------------------------------------------------ */
 
     /**

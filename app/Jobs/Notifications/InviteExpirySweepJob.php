@@ -11,25 +11,32 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
+// V2: Marks expired affiliate invites and publishes expiry notifications to brand managers.
 class InviteExpirySweepJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
+
     public int $timeout = 120;
+
+    public function __construct()
+    {
+        $this->onQueue('notifications');
+    }
 
     public function handle(NotificationPublisher $publisher): void
     {
         $now = now();
 
-        $expired = DB::table('brand_affiliate_invites')
+        $expired = DB::table('brand.brand_affiliate_invites')
             ->where('status', 'pending')
             ->where('expires_at', '<', $now)
             ->get(['id', 'brand_professional_id', 'email', 'first_name']);
 
         foreach ($expired as $invite) {
             try {
-                DB::table('brand_affiliate_invites')
+                DB::table('brand.brand_affiliate_invites')
                     ->where('id', $invite->id)
                     ->where('status', 'pending') // guard against concurrent updates
                     ->update(['status' => 'expired', 'updated_at' => $now]);
@@ -60,7 +67,7 @@ class InviteExpirySweepJob implements ShouldQueue
             } catch (\Throwable $e) {
                 Log::warning('InviteExpirySweepJob failed for invite', [
                     'invite_id' => $invite->id,
-                    'message'   => $e->getMessage(),
+                    'message' => $e->getMessage(),
                 ]);
             }
         }

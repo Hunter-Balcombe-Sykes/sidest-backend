@@ -8,7 +8,7 @@ it('marks authenticated api responses as private and non-cacheable', function ()
     $request = Request::create('/api/customers', 'GET');
     $request->headers->set('Authorization', 'Bearer test-token');
 
-    $middleware = new AddPublicCacheHeaders();
+    $middleware = new AddPublicCacheHeaders;
     $response = $middleware->handle($request, fn () => new Response('ok', 200));
 
     $cacheControl = (string) $response->headers->get('Cache-Control', '');
@@ -26,7 +26,7 @@ it('marks authenticated api responses as private and non-cacheable', function ()
 it('adds cache headers to successful public get api responses', function () {
     $request = Request::create('/api/public/site-by-slug', 'GET');
 
-    $middleware = new AddPublicCacheHeaders();
+    $middleware = new AddPublicCacheHeaders;
     $response = $middleware->handle($request, fn () => new Response('ok', 200));
 
     $cacheControl = (string) $response->headers->get('Cache-Control', '');
@@ -45,7 +45,7 @@ it('adds Vary: X-Site-Subdomain to allow-listed public cacheable routes', functi
         '/api/public/store/featured-products-by-slug',
     ];
 
-    $middleware = new AddPublicCacheHeaders();
+    $middleware = new AddPublicCacheHeaders;
 
     foreach ($cacheablePaths as $path) {
         $request = Request::create($path, 'GET');
@@ -59,7 +59,7 @@ it('adds Vary: X-Site-Subdomain to allow-listed public cacheable routes', functi
 it('returns no-store for tokenized unsubscribe endpoint', function () {
     $request = Request::create('/api/public/unsubscribe/abc123token', 'GET');
 
-    $middleware = new AddPublicCacheHeaders();
+    $middleware = new AddPublicCacheHeaders;
     $response = $middleware->handle($request, fn () => new Response('ok', 200));
 
     $cacheControl = (string) $response->headers->get('Cache-Control', '');
@@ -70,7 +70,7 @@ it('returns no-store for tokenized unsubscribe endpoint', function () {
 it('returns no-store for tokenized brand-affiliate-invites endpoint', function () {
     $request = Request::create('/api/public/brand-affiliate-invites/sometoken123', 'GET');
 
-    $middleware = new AddPublicCacheHeaders();
+    $middleware = new AddPublicCacheHeaders;
     $response = $middleware->handle($request, fn () => new Response('ok', 200));
 
     $cacheControl = (string) $response->headers->get('Cache-Control', '');
@@ -87,7 +87,7 @@ it('does not add public cache headers to non-allow-listed public paths', functio
         '/api/public/analytics/pageviews',
     ];
 
-    $middleware = new AddPublicCacheHeaders();
+    $middleware = new AddPublicCacheHeaders;
 
     foreach ($nonCacheablePaths as $path) {
         $request = Request::create($path, 'GET');
@@ -101,7 +101,7 @@ it('does not add public cache headers to non-allow-listed public paths', functio
 it('does not cache failed responses', function () {
     $request = Request::create('/api/public/site-by-slug', 'GET');
 
-    $middleware = new AddPublicCacheHeaders();
+    $middleware = new AddPublicCacheHeaders;
     $response = $middleware->handle($request, fn () => new Response('not found', 404));
 
     $cacheControl = (string) $response->headers->get('Cache-Control', '');
@@ -111,7 +111,7 @@ it('does not cache failed responses', function () {
 it('does not cache POST requests to public paths', function () {
     $request = Request::create('/api/public/site-by-slug', 'POST');
 
-    $middleware = new AddPublicCacheHeaders();
+    $middleware = new AddPublicCacheHeaders;
     $response = $middleware->handle($request, fn () => new Response('ok', 200));
 
     $cacheControl = (string) $response->headers->get('Cache-Control', '');

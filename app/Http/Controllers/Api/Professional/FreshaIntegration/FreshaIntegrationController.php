@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional\FreshaIntegration;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Jobs\Fresha\SyncFreshaCatalogDeltaJob;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Services\Fresha\FreshaApiException;
@@ -13,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
+// V2: Fresha POS connection for booking/service sync. Unrelated to V2 commerce — booking integration only.
 class FreshaIntegrationController extends ApiController
 {
     use ResolveCurrentProfessional;
@@ -27,7 +29,7 @@ class FreshaIntegrationController extends ApiController
     /**
      * Check if the professional has Fresha connected.
      */
-    private function ensureFreshaConnected(Request $request): JsonResponse|null
+    private function ensureFreshaConnected(Request $request): ?JsonResponse
     {
         $integration = $this->currentFreshaIntegration($request);
         if (! $integration) {
@@ -39,6 +41,18 @@ class FreshaIntegrationController extends ApiController
         }
 
         return null; // Success: connection exists
+    }
+
+    /**
+     * Build an unsaved ProfessionalIntegration carrying just professional_id +
+     * provider. Used for connect-style policy checks where no row exists yet.
+     */
+    private function freshaSkeletonFor(Professional $pro): ProfessionalIntegration
+    {
+        return new ProfessionalIntegration([
+            'professional_id' => $pro->id,
+            'provider' => ProfessionalIntegration::PROVIDER_FRESHA,
+        ]);
     }
 
     /**
@@ -92,13 +106,14 @@ class FreshaIntegrationController extends ApiController
     public function connect(Request $request, FreshaServiceSyncService $syncService)
     {
         $request->validate([
-            'access_token'  => 'required|string',
+            'access_token' => 'required|string',
             'refresh_token' => 'required|string',
-            'business_id'   => 'required|string',
-            'expires_at'    => 'required|string',
+            'business_id' => 'required|string',
+            'expires_at' => 'required|string',
         ]);
 
         $pro = $this->currentProfessional($request);
+        $this->authorizeForUser($pro, 'manage', $this->freshaSkeletonFor($pro));
         $businessId = trim((string) $request->input('business_id'));
         if ($businessId === '') {
             return $this->error('business_id is required.', 422);
@@ -167,6 +182,7 @@ class FreshaIntegrationController extends ApiController
     public function disconnect(Request $request)
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeForUser($pro, 'manage', $this->freshaSkeletonFor($pro));
         $pro->integrations()
             ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA)
             ->delete();
@@ -191,9 +207,10 @@ class FreshaIntegrationController extends ApiController
         }
 
         $integration = $this->currentFreshaIntegration($request);
+        $this->authorizeForUser($this->currentProfessional($request), 'view', $integration);
 
         return $this->success([
-            'connected'  => $integration?->access_token !== null,
+            'connected' => $integration?->access_token !== null,
             'expires_at' => $integration?->expires_at
                 ? $integration->expires_at->toIso8601String()
                 : null,
@@ -212,6 +229,7 @@ class FreshaIntegrationController extends ApiController
 
         $pro = $this->currentProfessional($request);
         $integration = $this->currentFreshaIntegration($request);
+        $this->authorizeForUser($pro, 'manage', $integration);
 
         try {
             $stats = $syncService->syncFromFresha($pro, fullSync: true);
@@ -244,6 +262,9 @@ class FreshaIntegrationController extends ApiController
         if ($error = $this->ensureFreshaConnected($request)) {
             return $error;
         }
+
+        $integration = $this->currentFreshaIntegration($request);
+        $this->authorizeForUser($pro, 'manage', $integration);
 
         try {
             $syncService->pushServiceToFresha($service, 'upsert');

@@ -5,17 +5,15 @@ namespace App\Services\Cache;
 use App\Models\Core\MediaVariant;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Views\PublicSitePayload;
-use App\Services\Branding\BrandFontResolver;
-use App\Services\Legal\ProfessionalLegalContentService;
-use App\Services\Store\FeaturedProductsPayloadService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
+// V2: Public site payload caching with single-flight locking (prevents thundering herd). Handles 95% of traffic. Simplified in V2 — no more product payload caching.
 class SiteCacheService
 {
     private const MISS_SENTINEL = '__MISS__';
@@ -23,10 +21,7 @@ class SiteCacheService
     /** @var array<string, array<string, string|null>|null> */
     private array $brandPartnerEnrichmentCache = [];
 
-    public function __construct(
-        private readonly FeaturedProductsPayloadService $featuredProductsPayloads,
-        private readonly BrandFontResolver $brandFonts
-    ) {}
+    public function __construct() {}
 
     /**
      * Get public site payload (MOST CRITICAL - 95% of traffic)
@@ -83,7 +78,7 @@ class SiteCacheService
 
         // Cache miss — acquire a per-subdomain fill lock so only one process rebuilds
         // the payload from the DB view while concurrent requests wait (single-flight).
-        $fillLock = Cache::lock('site:fill:' . $subdomain, 10);
+        $fillLock = Cache::lock('site:fill:'.$subdomain, 10);
 
         try {
             // Block up to 5 s for the lock; raises LockTimeoutException if it can't.
@@ -95,6 +90,7 @@ class SiteCacheService
             if ($warm === self::MISS_SENTINEL) {
                 return null;
             }
+
             return is_array($warm) ? $warm : null;
         }
 
@@ -121,13 +117,10 @@ class SiteCacheService
             }
 
             $payload = $row->payload ?? [];
-            if (is_array($payload) && ! $this->hasRenderableLegalContent($payload)) {
-                $payload = $this->backfillLegalContentPayload($row, $payload);
-            }
 
-            $services = is_array($payload['services'] ?? null)
-                ? $payload['services']
-                : $this->buildServicesPayload((string) ($row->professional_id ?? ''));
+            // The view's COALESCE guarantees services is always a jsonb array,
+            // so a missing key is the only thing we have to defend against.
+            $services = $payload['services'] ?? [];
 
             $site = $payload['site'] ?? null;
             if (is_array($site)) {
@@ -154,6 +147,13 @@ class SiteCacheService
                 'sections' => $sections,
                 'blocks' => $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks),
                 'legal' => $payload['legal'] ?? null,
+                // Preserve the store sub-object from the source payload so that
+                // withStorePayload() below can lift selected_products + commission
+                // settings out of payload.store. Without this, the rebuilt $data
+                // has no 'store' key and withStorePayload falls through to empty
+                // defaults — the front-end would see no featured products even
+                // though the view row contains them.
+                'store' => $payload['store'] ?? null,
             ];
             $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
             $data = $this->safeWithStorePayload($data, (string) ($row->professional_id ?? ''), $subdomain);
@@ -168,42 +168,78 @@ class SiteCacheService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function applyBrandImageFallbacks(array $payload): array
     {
         $professional = $payload['professional'] ?? null;
-        if (!is_array($professional) || ($professional['professional_type'] ?? null) === 'brand') {
+        if (! is_array($professional) || ($professional['professional_type'] ?? null) === 'brand') {
             return $payload;
         }
 
+        $affiliateId = (string) ($professional['id'] ?? '');
+        if (empty($affiliateId)) {
+            return $payload;
+        }
+
+        // JSON column is affiliate-controlled; use it only as a hint for which brand is configured.
         $brandPartner = $payload['site']['settings']['brand_partner'] ?? null;
-        if (!is_array($brandPartner) || empty($brandPartner['professional_id'])) {
+        if (! is_array($brandPartner) || empty($brandPartner['professional_id'])) {
             return $payload;
         }
 
-        $brandId = $brandPartner['professional_id'];
+        $claimedBrandId = (string) $brandPartner['professional_id'];
+
+        // BrandPartnerLink is the consent record — verify before using any brand data.
+        $link = BrandPartnerLink::where('affiliate_professional_id', $affiliateId)
+            ->where('brand_professional_id', $claimedBrandId)
+            ->first();
+
+        if (! $link) {
+            Log::warning('Brand-partner enrichment skipped: no verified link in consent table.', [
+                'affiliate_id' => $affiliateId,
+                'brand_id' => $claimedBrandId,
+            ]);
+
+            return $payload;
+        }
+
+        // Resolve brand_id from the verified link record, never from the mutable JSON.
+        $brandId = (string) $link->brand_professional_id;
         $brandSite = Site::query()
             ->where('professional_id', $brandId)
             ->first();
 
-        if (!$brandSite) {
+        if (! $brandSite) {
             return $payload;
         }
 
-        $placeholderImages = $brandSite->settings['design']['media']['placeholder_sitepage_images'] ?? [];
-        if (empty($placeholderImages)) {
+        // Brand placeholders now live in site_media (pool=design, purpose=placeholder).
+        // The service resolves variant URLs; we project them to { url, alt_text }
+        // to match the new Hydrogen brand-design response shape.
+        $designMedia = app(\App\Services\Media\BrandDesignMediaService::class)
+            ->listDesignMedia((string) $brandSite->id);
+
+        if (empty($designMedia['placeholders'])) {
             return $payload;
         }
+
+        $placeholderImages = array_map(
+            fn (array $p) => [
+                'url' => $p['url'],
+                'alt_text' => $p['alt_text'],
+            ],
+            $designMedia['placeholders']
+        );
 
         $imageKeys = ['gallery', 'content_images'];
 
         foreach ($imageKeys as $key) {
-            if (!isset($payload['site'][$key]) || !is_array($payload['site'][$key])) {
+            if (! isset($payload['site'][$key]) || ! is_array($payload['site'][$key])) {
                 continue;
             }
-            
+
             if (empty($payload['site'][$key])) {
                 $payload['site'][$key] = $placeholderImages;
             }
@@ -291,7 +327,7 @@ class SiteCacheService
      */
     public function hydrateTypographySettings(array $settings, string $brandProfessionalId): array
     {
-        return $this->brandFonts->hydrateTypographySettings($settings, $brandProfessionalId);
+        return $settings;
     }
 
     /**
@@ -378,8 +414,6 @@ class SiteCacheService
         $partnerSettings = is_array($partnerSite?->settings ?? null) ? $partnerSite->settings : [];
         $design = is_array($partnerSettings['design'] ?? null) ? $partnerSettings['design'] : [];
         $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
-        $fontFileUrl = $this->brandFonts->activeFontUrl($professionalId);
-
         $resolved = [
             'username' => $this->normalizeString($partnerProfessional?->handle ?? null),
             'first_name' => $this->normalizeString($partnerProfessional?->first_name ?? null),
@@ -388,7 +422,7 @@ class SiteCacheService
             'border_radius' => $this->normalizeString($design['border_radius'] ?? $design['borderRadius'] ?? null),
             'border_width' => $this->normalizeString($design['border_width'] ?? $design['borderWidth'] ?? null),
             'general_spacing_padding' => $this->normalizeString($design['general_spacing_padding'] ?? $design['generalSpacingPadding'] ?? null),
-            'font_file_url' => $this->normalizeString($fontFileUrl),
+            'font_file_url' => null,
             'logo_letter_spacing' => $this->normalizeString($typography['logo_letter_spacing'] ?? $typography['logoLetterSpacing'] ?? null),
             'logo_font_size' => $this->normalizeString($typography['logo_font_size'] ?? $typography['logoFontSize'] ?? null),
         ];
@@ -577,10 +611,12 @@ class SiteCacheService
         }
 
         if ($store === null) {
-            $store = $this->featuredProductsPayloads->build(
-                professionalId: $professionalId,
-                logContext: 'public_site_payload'
-            );
+            $store = [
+                'selected_products' => [],
+                'default_commission_rate' => (float) config('sidest.store.default_commission_rate', 15),
+                'max_featured_products' => (int) config('sidest.store.max_featured_products', 12),
+                'checkout_mode' => 'shopify',
+            ];
         }
 
         $payload['store'] = $store;
@@ -698,101 +734,26 @@ class SiteCacheService
         $site['gallery_videos'] = $site['gallery_videos'] ?? [];
         $site['content_videos'] = $site['content_videos'] ?? [];
 
+        // --- Document: resolve preview_url from storage path to full CDN URL ---
+        if (isset($site['document']) && is_array($site['document']) && ! empty($site['document']['preview_url'])) {
+            $rawPath = (string) $site['document']['preview_url'];
+            $site['document']['preview_url'] = Storage::disk(config('sidest.media_disk'))->url($rawPath);
+        }
+
         return $site;
     }
 
     /**
-     * Fallback builder for services when the public payload view is missing them.
+     * Bust the Hydrogen brand-design cache for a site. Call from every write
+     * path that touches design tokens or design media (logo, placeholders).
      *
-     * @return array<int, array<string, mixed>>
+     * Why explicit per-action: the stale window is 5s, so a forgotten bust
+     * isn't catastrophic — but the user sees their own saves on Hydrogen
+     * immediately only when every write path fires this.
      */
-    private function buildServicesPayload(string $professionalId): array
+    public function forgetBrandDesign(string $siteId): void
     {
-        if ($professionalId === '') {
-            return [];
-        }
-
-        return Service::query()
-            ->with('category:id,title')
-            ->where('professional_id', $professionalId)
-            ->where('is_active', true)
-            ->whereNull('deleted_at')
-            ->orderBy('sort_order')
-            ->orderBy('created_at')
-            ->get()
-            ->map(fn (Service $service): array => [
-                'id' => $service->id,
-                'title' => $service->title,
-                'description' => $service->description,
-                'price_cents' => $service->price_cents,
-                'currency_code' => $service->currency_code,
-                'duration_minutes' => $service->duration_minutes,
-                'is_active' => (bool) $service->is_active,
-                'sort_order' => $service->sort_order,
-                'category' => $service->category?->title ?? 'Services',
-            ])
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Backfill templated legal content for older professionals whose legal row has not been generated yet.
-     *
-     * @param  array<string, mixed>  $payload
-     * @return array<string, mixed>
-     */
-    private function backfillLegalContentPayload(PublicSitePayload $row, array $payload): array
-    {
-        $professionalId = (string) ($row->professional_id ?? '');
-        if ($professionalId === '') {
-            return $payload;
-        }
-
-        try {
-            $professional = Professional::query()
-                ->with('site')
-                ->find($professionalId);
-
-            if (! $professional || ! $professional->site) {
-                return $payload;
-            }
-
-            app(ProfessionalLegalContentService::class)->refreshGenerated($professional, $professional->site);
-
-            $freshRow = PublicSitePayload::query()
-                ->where('site_id', $row->site_id)
-                ->first();
-
-            $freshPayload = $freshRow?->payload;
-            if (is_array($freshPayload) && $this->hasRenderableLegalContent($freshPayload)) {
-                return $freshPayload;
-            }
-        } catch (\Throwable $e) {
-            Log::warning('Unable to backfill legal content for public payload.', [
-                'site_id' => $row->site_id,
-                'professional_id' => $professionalId,
-                'message' => $e->getMessage(),
-            ]);
-        }
-
-        return $payload;
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     */
-    private function hasRenderableLegalContent(array $payload): bool
-    {
-        $legal = $payload['legal'] ?? null;
-
-        if (! is_array($legal)) {
-            return false;
-        }
-
-        $privacy = trim((string) ($legal['privacy_policy'] ?? ''));
-        $terms = trim((string) ($legal['terms_and_conditions'] ?? ''));
-
-        return $privacy !== '' && $terms !== '';
+        Cache::forget(CacheKeyGenerator::hydrogenBrandDesign($siteId));
     }
 
     /**
@@ -801,9 +762,6 @@ class SiteCacheService
     public function invalidateSite(Site $site): void
     {
         $professionalId = (string) ($site->professional_id ?? '');
-        if ($professionalId !== '') {
-            $this->brandFonts->forget($professionalId);
-        }
 
         $keys = [
             CacheKeyGenerator::publicSitePayload($site->subdomain),

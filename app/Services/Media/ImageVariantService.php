@@ -18,10 +18,13 @@ use Illuminate\Support\Facades\Storage;
  *
  * Requires the GD extension with WebP support (ships with PHP 8.2+).
  */
+// V2: Generates WebP image variants from uploads via GD. Content-hashed storage on Cloudflare R2 with adaptive quality targeting.
 class ImageVariantService
 {
+    private const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+
     /* ------------------------------------------------------------------ */
-    /*  Public API                                                         */
+    /*  Public API */
     /* ------------------------------------------------------------------ */
 
     /**
@@ -29,9 +32,9 @@ class ImageVariantService
      * on the media disk, and persist ImageVariant rows for the given image.
      *
      * @param  string  $originalTmpPath  Absolute path to the temp original.
-     * @param  string  $imageId          UUID of the SiteMedia row.
-     * @param  string  $basePath         e.g. "images/<proId>/<imageId>"
-     * @return array<string, MediaVariant>  keyed by variant name
+     * @param  string  $imageId  UUID of the SiteMedia row.
+     * @param  string  $basePath  e.g. "images/<proId>/<imageId>"
+     * @return array<string, MediaVariant> keyed by variant name
      */
     public function processVariants(
         string $originalTmpPath,
@@ -39,11 +42,11 @@ class ImageVariantService
         string $basePath,
     ): array {
         // Ensure GD extension is available with WebP support
-        if (!extension_loaded('gd')) {
+        if (! extension_loaded('gd')) {
             throw new \RuntimeException('GD extension is not loaded. Cannot process image variants.');
         }
-        
-        if (!function_exists('imagewebp')) {
+
+        if (! function_exists('imagewebp')) {
             throw new \RuntimeException('GD WebP support is not available. Cannot generate WebP variants.');
         }
 
@@ -52,34 +55,34 @@ class ImageVariantService
             'base_path' => $basePath,
         ]);
 
-        $disk        = $this->disk();
+        $disk = $this->disk();
         $definitions = $this->variantDefinitions();
 
         $sourceImage = $this->loadImage($originalTmpPath);
 
-        if (!$sourceImage) {
+        if (! $sourceImage) {
             throw new \RuntimeException('Failed to create GD image from the uploaded file.');
         }
 
-        $sourceWidth  = imagesx($sourceImage);
+        $sourceWidth = imagesx($sourceImage);
         $sourceHeight = imagesy($sourceImage);
 
         $created = [];
 
         try {
             foreach ($definitions as $variantName => $def) {
-                $quality    = max(1, min(100, (int) ($def['quality'] ?? 92)));
+                $quality = max(1, min(100, (int) ($def['quality'] ?? 92)));
                 $minQuality = max(1, min($quality, (int) ($def['min_quality'] ?? 60)));
-                $targetKb   = max(0, (int) ($def['target_kb'] ?? 0));
+                $targetKb = max(0, (int) ($def['target_kb'] ?? 0));
                 $targetBytes = $targetKb > 0 ? ($targetKb * 1024) : null;
-                $fit        = (string) ($def['fit'] ?? 'inside');
+                $fit = (string) ($def['fit'] ?? 'inside');
 
                 $preserveResolution = filter_var(
-                    $def['preserve_resolution'] ?? true,
+                    $def['preserve_resolution'] ?? false,
                     FILTER_VALIDATE_BOOLEAN,
                     FILTER_NULL_ON_FAILURE,
                 );
-                $preserveResolution = $preserveResolution ?? true;
+                $preserveResolution = $preserveResolution ?? false;
 
                 if ($preserveResolution) {
                     [$cropX, $cropY, $cropW, $cropH, $dstW, $dstH] = [0, 0, $sourceWidth, $sourceHeight, $sourceWidth, $sourceHeight];
@@ -104,8 +107,8 @@ class ImageVariantService
                 );
 
                 // --- Encode to WebP ---
-                $tmpFile = tempnam(sys_get_temp_dir(), 'comet_img_');
-                if (!is_string($tmpFile) || $tmpFile === '') {
+                $tmpFile = tempnam(sys_get_temp_dir(), 'sidest_img_');
+                if (! is_string($tmpFile) || $tmpFile === '') {
                     throw new \RuntimeException('Failed to create temp file for WebP encoding.');
                 }
 
@@ -139,7 +142,7 @@ class ImageVariantService
                     }
 
                     $hash = hash_file('sha256', $tmpFile);
-                    if (!is_string($hash)) {
+                    if (! is_string($hash)) {
                         throw new \RuntimeException('Failed to hash encoded WebP variant.');
                     }
                     $hash = substr($hash, 0, 16);
@@ -157,18 +160,18 @@ class ImageVariantService
                     // --- Upsert DB row ---
                     $variant = MediaVariant::updateOrCreate(
                         [
-                            'media_id'      => $imageId,
-                            'variant_key'   => $variantName,
+                            'media_id' => $imageId,
+                            'variant_key' => $variantName,
                             'artifact_type' => 'webp',
                         ],
                         [
-                            'disk'            => $this->diskName(),
-                            'path'            => $storagePath,
-                            'mime'            => 'image/webp',
-                            'width'           => $dstW,
-                            'height'          => $dstH,
+                            'disk' => $this->diskName(),
+                            'path' => $storagePath,
+                            'mime' => 'image/webp',
+                            'width' => $dstW,
+                            'height' => $dstH,
                             'file_size_bytes' => $fileBytes,
-                            'content_hash'    => $hash,
+                            'content_hash' => $hash,
                         ],
                     );
 
@@ -198,7 +201,7 @@ class ImageVariantService
      */
     public function storeOriginal(UploadedFile $file, string $basePath): string
     {
-        $ext  = $file->getClientOriginalExtension() ?: 'jpg';
+        $ext = $file->getClientOriginalExtension() ?: 'jpg';
         $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
         $path = "{$basePath}/original_{$hash}.{$ext}";
 
@@ -252,15 +255,17 @@ class ImageVariantService
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Internal helpers                                                    */
+    /*  Internal helpers */
     /* ------------------------------------------------------------------ */
 
     private function diskName(): string
     {
-        $configured = (string) config('comet.media_disk', 'media');
+        $configured = (string) config('sidest.media_disk', 'media');
 
-        // If COMET_MEDIA_DISK is explicitly set, always honour it.
-        $explicit = $_ENV['COMET_MEDIA_DISK'] ?? $_SERVER['COMET_MEDIA_DISK'] ?? null;
+        // $_ENV/$_SERVER are intentional here — Laravel Cloud caches config at deploy time
+        // but injects platform env vars directly into the process environment at runtime,
+        // so env()/config() won't see them. Direct superglobal access bypasses that cache.
+        $explicit = $_ENV['SIDEST_MEDIA_DISK'] ?? $_SERVER['SIDEST_MEDIA_DISK'] ?? null;
         if (is_string($explicit) && trim($explicit) !== '') {
             return $configured;
         }
@@ -279,7 +284,7 @@ class ImageVariantService
                 is_array($defaultConfig) &&
                 (($defaultConfig['driver'] ?? null) === 's3')
             ) {
-                Log::warning('COMET_MEDIA_DISK not set; using filesystems.default disk for media operations.', [
+                Log::warning('SIDEST_MEDIA_DISK not set; using filesystems.default disk for media operations.', [
                     'configured_media_disk' => $configured,
                     'fallback_disk' => $default,
                 ]);
@@ -301,43 +306,81 @@ class ImageVariantService
      */
     private function variantDefinitions(): array
     {
-        $definitions = (array) config('comet.image_variants', []);
+        $definitions = (array) config('sidest.image_variants', []);
 
         if ($definitions !== []) {
             return $definitions;
         }
 
+        // NOTE: this fallback MUST mirror config/sidest.php image_variants exactly.
+        // It runs only when config is empty (sparse test environments).
         return [
             'optimized' => [
                 'format' => 'webp',
-                'preserve_resolution' => true,
+                'width' => 2400,
+                'height' => 2400,
+                'fit' => 'inside',
                 'quality' => 92,
                 'min_quality' => 60,
                 'target_kb' => 500,
             ],
             'maximized' => [
                 'format' => 'webp',
-                'preserve_resolution' => true,
-                'quality' => 100,
+                'width' => 4000,
+                'height' => 4000,
+                'fit' => 'inside',
+                'quality' => 92,
             ],
         ];
     }
 
     /**
      * Load an image file into a GD resource regardless of source format.
+     *
+     * Refuses images whose pixel count exceeds sidest.image_max_pixels by
+     * throwing UnprocessableImageException BEFORE any bitmap memory is
+     * allocated. This is the defense against image-bomb uploads — a tiny
+     * JPEG/PNG file can decode to a huge bitmap (4 bytes per pixel), which
+     * the worker cannot survive even with the canvas caps applied.
+     *
+     * The getimagesize() call reads only the file header (a few KB), not
+     * the pixel data, so the guard is effectively free.
      */
     private function loadImage(string $path): \GdImage|false
     {
+        // Sniff actual bytes before getimagesize — prevents a crafted file from
+        // claiming a safe format while hiding a decompression bomb in its content stream.
+        $actualMime = (new \finfo(FILEINFO_MIME_TYPE))->file($path);
+        if (! in_array($actualMime, self::ALLOWED_IMAGE_MIMES, true)) {
+            throw new UnprocessableImageException(
+                "Rejected: MIME type '{$actualMime}' is not an accepted image format."
+            );
+        }
+
         $info = @getimagesize($path);
-        if (!$info) {
+        if (! $info) {
             return false;
+        }
+
+        $width = (int) $info[0];
+        $height = (int) $info[1];
+        $maxPixels = (int) config('sidest.image_max_pixels', 24_000_000);
+
+        if ($width * $height > $maxPixels) {
+            throw new UnprocessableImageException(sprintf(
+                'Image dimensions exceed safe processing limit (%d x %d = %d pixels, max %d).',
+                $width,
+                $height,
+                $width * $height,
+                $maxPixels,
+            ));
         }
 
         return match ($info[2]) {
             IMAGETYPE_JPEG => @imagecreatefromjpeg($path),
-            IMAGETYPE_PNG  => @imagecreatefrompng($path),
+            IMAGETYPE_PNG => @imagecreatefrompng($path),
             IMAGETYPE_WEBP => @imagecreatefromwebp($path),
-            default        => false,
+            default => false,
         };
     }
 
@@ -383,6 +426,7 @@ class ImageVariantService
             if ($size <= $targetBytes) {
                 $bestQuality = $mid;
                 $lower = $mid + 1;
+
                 continue;
             }
 
@@ -391,6 +435,7 @@ class ImageVariantService
 
         if ($bestQuality !== null) {
             $this->encodeWebp($image, $tmpFile, $bestQuality);
+
             return $bestQuality;
         }
 
@@ -431,8 +476,8 @@ class ImageVariantService
 
         // "inside" – fit within bounds, no crop, never upscale
         $ratio = min($maxW / $srcW, $maxH / $srcH, 1);
-        $dstW  = (int) round($srcW * $ratio);
-        $dstH  = (int) round($srcH * $ratio);
+        $dstW = (int) round($srcW * $ratio);
+        $dstH = (int) round($srcH * $ratio);
 
         return [0, 0, $srcW, $srcH, $dstW, $dstH];
     }

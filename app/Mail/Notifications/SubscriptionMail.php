@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends subscription lifecycle emails (created, renewed, cancelled, payment failed) using the Notification model and the subscriptions template.
 class SubscriptionMail extends Mailable
 {
     use Queueable, SerializesModels;

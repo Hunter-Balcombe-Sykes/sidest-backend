@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+// V2: Cache-Control headers — public GET endpoints get 15min cache; authenticated requests get no-store. Varies on X-Site-Subdomain for multi-tenant safety.
 class AddPublicCacheHeaders
 {
     /**
@@ -18,6 +19,7 @@ class AddPublicCacheHeaders
         'api/public/booking/config-by-slug',
         'api/public/booking/services-by-slug',
         'api/public/store/featured-products-by-slug',
+        'api/public/shopify/storefront-config',
     ];
 
     /**
@@ -39,6 +41,7 @@ class AddPublicCacheHeaders
             $response->headers->set('Cache-Control', 'private, no-store, max-age=0');
             $response->headers->set('Pragma', 'no-cache');
             $this->mergeVary($response, ['Authorization', 'Cookie', 'Accept-Encoding']);
+
             return $response;
         }
 
@@ -49,6 +52,7 @@ class AddPublicCacheHeaders
             if (str_starts_with($path, $prefix)) {
                 $response->headers->set('Cache-Control', 'private, no-store, max-age=0');
                 $response->headers->set('Pragma', 'no-cache');
+
                 return $response;
             }
         }
@@ -64,6 +68,7 @@ class AddPublicCacheHeaders
                     if (! $response->headers->has('X-Cache-Status')) {
                         $response->headers->set('X-Cache-Status', 'MISS');
                     }
+
                     return $response;
                 }
             }

@@ -1,4 +1,7 @@
 *.log
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 .DS_Store
 .env
 .env.backup
@@ -19,8 +22,18 @@
 /storage/*.key
 /storage/pail
 /vendor
+/.worktrees
 Homestead.json
 Homestead.yaml
 Thumbs.db
 .DS_Store
 ._*
+
+# Audit orchestrator runtime state
+.audit-work/state.json
+.audit-work/questions/
+.audit-work/blocked/
+.audit-work/logs/
+.audit-work/.run.lock
+# .audit-work/config.yml is intentionally NOT ignored (committed)
+# .audit-work/completed/ is intentionally NOT ignored (durable audit trail)

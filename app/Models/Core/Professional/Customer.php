@@ -7,13 +7,15 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+// V2: A professional's customer record. Supports soft deletes, marketing opt-in caching from EmailSubscription, and external ID for POS integrations.
 class Customer extends BaseModel
 {
     use HasUuids, SoftDeletes;
 
-    protected $table = 'customers';
+    protected $table = 'core.customers';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $hidden = [
@@ -21,6 +23,7 @@ class Customer extends BaseModel
     ];
 
     protected $fillable = [
+        'professional_id',
         'email',
         'phone',
         'full_name',
@@ -28,6 +31,7 @@ class Customer extends BaseModel
         'notes',
         'external_id',
         'marketing_opt_in_cached',
+        'redacted_at',
     ];
 
     protected $casts = [
@@ -35,6 +39,7 @@ class Customer extends BaseModel
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
         'marketing_opt_in_cached' => 'boolean',
+        'redacted_at' => 'datetime',
     ];
 
     /**
@@ -67,6 +72,7 @@ class Customer extends BaseModel
     {
         if (empty($this->email)) {
             $this->marketing_opt_in_cached = null;
+
             return;
         }
 

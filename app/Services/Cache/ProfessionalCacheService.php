@@ -2,17 +2,15 @@
 
 namespace App\Services\Cache;
 
-use App\Services\Branding\BrandFontResolver;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
+// V2: Multi-lookup professional caching (by ID, handle, auth_user_id). Defensive validation prevents returning stale data after handle/auth changes.
 class ProfessionalCacheService
 {
-    public function __construct(
-        private readonly BrandFontResolver $brandFonts
-    ) {}
+    public function __construct(private CacheLockService $cacheLock) {}
 
     /* ---------------------------
      |  ID mapping (fast lookups)
@@ -20,12 +18,15 @@ class ProfessionalCacheService
 
     public function getIdByAuthId(string $authUserId): ?string
     {
-        return Cache::remember(
+        // Auth-path cache hit on every authenticated request — single-flight is critical.
+        // Short null-TTL (30s) so a freshly-signed-up user doesn't see "not found" for 30 minutes.
+        return $this->cacheLock->rememberLockedNullable(
             CacheKeyGenerator::professionalIdByAuthId($authUserId),
             now()->addMinutes(30),
             fn () => Professional::query()
                 ->where('auth_user_id', $authUserId)
-                ->value('id')
+                ->value('id'),
+            nullTtl: now()->addSeconds(30),
         );
     }
 
@@ -33,12 +34,13 @@ class ProfessionalCacheService
     {
         $handleLc = strtolower($handle);
 
-        return Cache::remember(
+        return $this->cacheLock->rememberLockedNullable(
             CacheKeyGenerator::professionalIdByHandle($handleLc),
             now()->addHour(),
             fn () => Professional::query()
                 ->where('handle_lc', $handleLc)
-                ->value('id')
+                ->value('id'),
+            nullTtl: now()->addSeconds(30),
         );
     }
 
@@ -48,13 +50,15 @@ class ProfessionalCacheService
 
     public function getPayloadById(string $id): ?array
     {
-        return Cache::remember(
+        return $this->cacheLock->rememberLockedNullable(
             CacheKeyGenerator::professionalPayloadById($id),
             now()->addHour(),
             function () use ($id) {
                 $pro = Professional::query()->with('site')->find($id);
+
                 return $pro ? $this->toPayload($pro) : null;
-            }
+            },
+            nullTtl: now()->addSeconds(30),
         );
     }
 
@@ -69,6 +73,7 @@ class ProfessionalCacheService
     public function getPayloadByAuthId(string $authUserId): ?array
     {
         $id = $this->getIdByAuthId($authUserId);
+
         return $id ? $this->getPayloadById($id) : null;
     }
 
@@ -78,11 +83,7 @@ class ProfessionalCacheService
         $site = $pro->site;
         $siteSettings = [];
         if ($site) {
-            $siteSettingsRaw = is_array($site->settings) ? $site->settings : [];
-            $siteSettings = $this->brandFonts->hydrateTypographySettings(
-                $siteSettingsRaw,
-                (string) $pro->id
-            );
+            $siteSettings = is_array($site->settings) ? $site->settings : [];
         }
 
         return [
@@ -164,7 +165,7 @@ class ProfessionalCacheService
 
     public function getActiveServices(string $professionalId): array
     {
-        return Cache::remember(
+        return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::professionalServices($professionalId),
             now()->addMinutes(30),
             fn () => Service::query()
@@ -179,10 +180,10 @@ class ProfessionalCacheService
 
     public function getCustomerCount(string $professionalId): int
     {
-        return Cache::remember(
+        return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::customerCount($professionalId),
             now()->addMinutes(15),
-            fn () => DB::table('customers')
+            fn () => DB::table('core.customers')
                 ->where('professional_id', $professionalId)
                 ->whereNull('deleted_at')
                 ->count()

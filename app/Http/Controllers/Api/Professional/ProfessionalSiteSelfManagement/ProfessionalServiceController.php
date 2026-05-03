@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+// V2: Service CRUD + reorder. Integrates with Square/Fresha bidirectional sync via observers.
 class ProfessionalServiceController extends ApiController
 {
     use ResolveCurrentProfessional;
@@ -23,9 +24,9 @@ class ProfessionalServiceController extends ApiController
         $pro = $this->currentProfessional($request);
 
         $includeArchived = $request->boolean('include_archived');
-        $onlyArchived    = $request->boolean('only_archived');
-        $grouped         = $request->boolean('grouped');
-        $source          = strtolower((string) $request->query('source', 'all'));
+        $onlyArchived = $request->boolean('only_archived');
+        $grouped = $request->boolean('grouped');
+        $source = strtolower((string) $request->query('source', 'all'));
 
         $servicesQuery = Service::query()
             ->where('professional_id', $pro->id);
@@ -44,7 +45,7 @@ class ProfessionalServiceController extends ApiController
 
         $services = $servicesQuery->orderBy('sort_order')->orderBy('created_at')->get();
 
-        if (!$grouped) {
+        if (! $grouped) {
             return $this->success([
                 'services' => $services,
                 'filters' => [
@@ -62,7 +63,7 @@ class ProfessionalServiceController extends ApiController
         if ($source !== 'all') {
             $categoryIds = $services
                 ->pluck('category_id')
-                ->filter(fn ($id) => !is_null($id))
+                ->filter(fn ($id) => ! is_null($id))
                 ->unique()
                 ->values()
                 ->all();
@@ -114,32 +115,54 @@ class ProfessionalServiceController extends ApiController
 
         $this->assertCategoryBelongsToProfessional($pro->id, $data['category_id'] ?? null);
 
-        $service = DB::transaction(function () use ($pro, $data) {
-            DB::select('select pg_advisory_xact_lock(hashtext(?))', ["services:{$pro->id}"]);
+        try {
+            $service = DB::transaction(function () use ($pro, $data) {
+                DB::select('select pg_advisory_xact_lock(hashtext(?))', ["services:{$pro->id}"]);
 
-            if (!array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
-                $max = Service::query()
-                    ->where('professional_id', $pro->id)
-                    ->where('category_id', $data['category_id'] ?? null)
-                    ->max('sort_order');
+                if (! array_key_exists('sort_order', $data) || $data['sort_order'] === null) {
+                    // The unique constraint
+                    //   services_professional_sort_order_uq
+                    //   ON (professional_id, sort_order) WHERE deleted_at IS NULL
+                    // is global per professional — it does NOT include
+                    // category_id. So the max-lookup must consider EVERY live
+                    // service for this professional regardless of category,
+                    // otherwise a new service in a different category (or with
+                    // null category) would compute sort_order=0 and collide
+                    // with an existing live row at sort_order=0.
+                    $max = Service::query()
+                        ->where('professional_id', $pro->id)
+                        ->whereNull('deleted_at')
+                        ->max('sort_order');
 
-                $data['sort_order'] = is_null($max) ? 0 : ((int)$max + 1);
-            }
+                    $data['sort_order'] = is_null($max) ? 0 : ((int) $max + 1);
+                }
 
-            $service = Service::query()->create([
-                'professional_id'   => $pro->id,
-                'category_id'       => $data['category_id'] ?? null,
-                'title'             => $data['title'],
-                'description'       => $data['description'] ?? null,
-                'price_cents'       => $data['price_cents'],
-                'currency_code'     => $data['currency_code'] ?? 'AUD',
-                'duration_minutes'  => $data['duration_minutes'] ?? null,
-                'is_active'         => $data['is_active'] ?? true,
-                'sort_order'        => $data['sort_order'],
+                $service = Service::query()->create([
+                    'professional_id' => $pro->id,
+                    'category_id' => $data['category_id'] ?? null,
+                    'title' => $data['title'],
+                    'description' => $data['description'] ?? null,
+                    'price_cents' => $data['price_cents'],
+                    'currency_code' => $data['currency_code'] ?? 'AUD',
+                    'duration_minutes' => $data['duration_minutes'] ?? null,
+                    'is_active' => $data['is_active'] ?? true,
+                    'sort_order' => $data['sort_order'],
+                ]);
+
+                return $service->fresh();
+            });
+        } catch (\Throwable $e) {
+            // Log the actual cause so the user sees the real error in server
+            // logs instead of the generic "An error occurred" wrapper from
+            // bootstrap/app.php. Re-throws so the wrapper still returns 500.
+            \Illuminate\Support\Facades\Log::error('Service store failed', [
+                'professional_id' => $pro->id,
+                'payload' => $data,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
-
-            return $service->fresh();
-        });
+            throw $e;
+        }
 
         return $this->success(['service' => $service], 201);
     }
@@ -201,7 +224,7 @@ class ProfessionalServiceController extends ApiController
 
             $allSet = array_flip($allIds);
             foreach ($ids as $id) {
-                if (!isset($allSet[$id])) {
+                if (! isset($allSet[$id])) {
                     abort(422, 'One or more service IDs are invalid.');
                 }
             }
@@ -248,14 +271,14 @@ class ProfessionalServiceController extends ApiController
                 $catId = $catBlock['id'] ?? null;
 
                 if ($catId !== null) {
-                    if (!isset($activeCategorySet[$catId])) {
+                    if (! isset($activeCategorySet[$catId])) {
                         abort(422, 'One or more category IDs are invalid.');
                     }
                     $providedCategoryIds[] = $catId;
                 }
 
                 foreach ($catBlock['service_ids'] as $sid) {
-                    if (!isset($activeServiceSet[$sid])) {
+                    if (! isset($activeServiceSet[$sid])) {
                         abort(422, 'One or more service IDs are invalid.');
                     }
                     $providedServiceIds[] = $sid;
@@ -314,7 +337,7 @@ class ProfessionalServiceController extends ApiController
 
         abort_unless($service->professional_id === $pro->id, 404);
 
-        if (!$service->trashed()) {
+        if (! $service->trashed()) {
             return $this->success(['restored' => true, 'service' => $service->fresh()]);
         }
 
@@ -326,7 +349,7 @@ class ProfessionalServiceController extends ApiController
                 ->where('category_id', $service->category_id)
                 ->max('sort_order');
 
-            $service->sort_order = is_null($max) ? 0 : ((int)$max + 1);
+            $service->sort_order = is_null($max) ? 0 : ((int) $max + 1);
             $service->save();
         });
 
@@ -345,7 +368,7 @@ class ProfessionalServiceController extends ApiController
             ->whereNull('deleted_at')
             ->exists();
 
-        if (!$ok) {
+        if (! $ok) {
             abort(422, 'Category is invalid.');
         }
     }

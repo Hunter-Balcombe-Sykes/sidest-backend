@@ -10,8 +10,8 @@ beforeEach(function () {
 
 it('accepts the first occurrence of a fresha webhook event', function () {
     $response = $this->postJson('/api/webhooks/fresha', [
-        'event_id'  => 'evt-dedup-001',
-        'type'      => 'catalog.version.updated',
+        'event_id' => 'evt-dedup-001',
+        'type' => 'catalog.version.updated',
         'business_id' => 'biz-123',
     ], [
         // Signature validation is enabled; pass an empty key so the controller
@@ -31,9 +31,9 @@ it('accepts the first occurrence of a fresha webhook event', function () {
 });
 
 it('cache::add is atomic — second call returns false for same key', function () {
-    $key = 'fresha_webhook:evt-atomic-' . uniqid();
+    $key = 'fresha_webhook:evt-atomic-'.uniqid();
 
-    $first  = Cache::add($key, true, now()->addHours(1));
+    $first = Cache::add($key, true, now()->addHours(1));
     $second = Cache::add($key, true, now()->addHours(1));
 
     expect($first)->toBeTrue();
@@ -49,8 +49,8 @@ it('different event ids are treated as independent events', function () {
 });
 
 it('rejects a duplicate fresha webhook when event_id matches a cached key', function () {
-    $eventId  = 'evt-dup-check-' . uniqid();
-    $cacheKey = 'fresha_webhook:' . $eventId;
+    $eventId = 'evt-dup-check-'.uniqid();
+    $cacheKey = 'fresha_webhook:'.$eventId;
 
     // Simulate a first request that already stored the dedupe key.
     Cache::put($cacheKey, true, now()->addHours(24));

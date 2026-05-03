@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 
+// V2: Sends catalog change notifications (product additions, removals, updates) using the Notification model and the catalog_changes template.
 class CatalogChangeMail extends Mailable
 {
     use Queueable, SerializesModels;

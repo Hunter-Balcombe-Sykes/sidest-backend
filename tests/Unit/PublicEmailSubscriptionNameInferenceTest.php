@@ -4,12 +4,13 @@ use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
 
 function infer_name_from_email(string $email): ?string
 {
-    $controller = new PublicEmailSubscriptionController();
+    $controller = new PublicEmailSubscriptionController;
     $reflection = new ReflectionClass($controller);
     $method = $reflection->getMethod('inferNameFromEmail');
     $method->setAccessible(true);
 
     $value = $method->invoke($controller, $email);
+
     return is_string($value) ? $value : null;
 }
 

@@ -8,34 +8,19 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+// V2: Core. Tracks payout lifecycle (pending → processing → completed/failed). Links brand, affiliate, Stripe transfer, and funding details.
 class CommissionPayout extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'retail.commission_payouts';
+    protected $table = 'commerce.commission_payouts';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
-    protected $fillable = [
-        'brand_professional_id',
-        'affiliate_professional_id',
-        'stripe_payment_intent_id',
-        'stripe_transfer_id',
-        'status',
-        'gross_commission_cents',
-        'platform_fee_cents',
-        'net_payout_cents',
-        'currency_code',
-        'failure_reason',
-        'failure_code',
-        'ledger_entry_count',
-        'eligible_after',
-        'processed_at',
-        'funding_source',
-        'wallet_debit_cents',
-        'charge_cents',
-    ];
+    // All writes are server-side (CommissionPayoutService). Use forceFill() at callsites.
+    protected $guarded = ['*'];
 
     protected $casts = [
         'gross_commission_cents' => 'integer',
@@ -44,8 +29,10 @@ class CommissionPayout extends BaseModel
         'wallet_debit_cents' => 'integer',
         'charge_cents' => 'integer',
         'ledger_entry_count' => 'integer',
+        'retry_count' => 'integer',
         'eligible_after' => 'datetime',
         'processed_at' => 'datetime',
+        'void_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

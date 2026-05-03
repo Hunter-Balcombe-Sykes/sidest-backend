@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+// V2: A single content block (link, section, etc.) on a site. Typed by block_type and block_group, sortable, with a JSON settings bag.
 class Block extends BaseModel
 {
     use HasUuids;
@@ -16,9 +17,10 @@ class Block extends BaseModel
     /**
      * @var false|mixed
      */
-    protected $table = 'blocks';
+    protected $table = 'site.blocks';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -36,12 +38,12 @@ class Block extends BaseModel
     ];
 
     protected $casts = [
-        'sort_order'  => 'integer',
-        'is_active'   => 'boolean',
-        'is_enabled'  => 'boolean',
-        'settings'    => 'array',
-        'created_at'  => 'datetime',
-        'updated_at'  => 'datetime',
+        'sort_order' => 'integer',
+        'is_active' => 'boolean',
+        'is_enabled' => 'boolean',
+        'settings' => 'array',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo
