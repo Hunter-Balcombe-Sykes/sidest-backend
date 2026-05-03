@@ -38,6 +38,8 @@ beforeEach(function () {
     setupProfessionalsTable();
     setupSitesTable();
     setupMediaTables();
+    setupBrandProfilesTable();
+    setupBrandStoreSettingsTable();
 
     Storage::fake('media');
     Bus::fake();

@@ -52,9 +52,9 @@ class BrandPartnerController extends ApiController
 
         $brandProfile = $brand->brandProfile;
 
-        $brandStatus = $brandProfile?->brand_status ?? 'deactivated';
-        if ($brandStatus === 'deactivated') {
-            return $this->error('This brand is not currently accepting new connections.', 403);
+        $brandStatus = $brandProfile?->brand_status ?? 'systems_down';
+        if ($brandStatus === 'systems_down') {
+            return $this->error('This brand is temporarily unavailable due to a platform issue.', 403);
         }
 
         try {
@@ -81,7 +81,7 @@ class BrandPartnerController extends ApiController
         $page = Professional::query()
             ->where('professional_type', 'brand')
             ->where('status', 'active')
-            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public')->where('brand_status', 'active'))
+            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public')->where('brand_status', 'live'))
             ->with('site')
             ->orderByRaw('COALESCE(display_name, handle) asc')
             ->paginate($perPage)

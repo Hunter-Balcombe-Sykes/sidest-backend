@@ -17,6 +17,14 @@ beforeEach(function () {
         // already attached
     }
 
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS brand.brand_profiles (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        brand_status TEXT NULL DEFAULT "building",
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS brand.brand_store_settings (
         id TEXT PRIMARY KEY,
         professional_id TEXT,

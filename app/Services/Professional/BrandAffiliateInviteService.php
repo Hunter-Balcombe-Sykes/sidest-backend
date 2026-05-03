@@ -7,6 +7,7 @@ use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Services\Professional\BrandStatusService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -230,9 +231,9 @@ class BrandAffiliateInviteService
             }
 
             $brandProfile = $brandProfessional->brandProfile;
-            $brandStatus = $brandProfile?->brand_status ?? 'deactivated';
-            if ($brandStatus === 'deactivated') {
-                throw new RuntimeException('This brand is not currently accepting new connections.');
+            $brandStatus = $brandProfile?->brand_status ?? 'systems_down';
+            if ($brandStatus === 'systems_down') {
+                throw new RuntimeException('This brand is temporarily unavailable due to a platform issue.');
             }
 
             $affiliateId = (string) $affiliate->id;
@@ -276,9 +277,9 @@ class BrandAffiliateInviteService
             }
 
             $brandProfile = $invite->brandProfessional?->brandProfile;
-            $brandStatus = $brandProfile?->brand_status ?? 'deactivated';
-            if ($brandStatus === 'deactivated') {
-                throw new RuntimeException('This brand is not currently accepting new connections.');
+            $brandStatus = $brandProfile?->brand_status ?? 'systems_down';
+            if ($brandStatus === 'systems_down') {
+                throw new RuntimeException('This brand is temporarily unavailable due to a platform issue.');
             }
 
             $lockedInvite = BrandAffiliateInvite::query()
@@ -382,6 +383,11 @@ class BrandAffiliateInviteService
      */
     private function upsertInvite(Professional $brand, array $attributes): array
     {
+        $brandStatus = $brand->brandProfile?->brand_status ?? 'building';
+        if (! BrandStatusService::canSendInvites($brandStatus)) {
+            throw new RuntimeException('Your brand must be fully set up before sending invites.');
+        }
+
         $attributes = $this->normalizeInviteAttributes($attributes);
         $normalizedEmail = $this->normalizeEmail($attributes['email'] ?? null);
 

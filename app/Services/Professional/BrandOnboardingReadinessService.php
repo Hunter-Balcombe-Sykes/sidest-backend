@@ -7,6 +7,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
+use App\Services\Professional\BrandStatusService;
 
 // V2: Brand activation gate. Evaluates checklist (5+ images, Shopify connected, Stripe connected) and syncs brand_status accordingly.
 class BrandOnboardingReadinessService
@@ -39,14 +40,14 @@ class BrandOnboardingReadinessService
 
     private function syncBrandStatus(Professional $professional, bool $onboardingComplete): string
     {
-        $newStatus = $onboardingComplete ? 'active' : 'deactivated';
+        // Delegate to BrandStatusService — it evaluates the full lifecycle
+        // (building → preview → live) instead of just the binary active/deactivated
+        // that the readiness checklist previously set.
+        $statusService = app(BrandStatusService::class);
+        $newStatus = $statusService->sync($professional);
 
-        BrandProfile::updateOrCreate(
-            ['professional_id' => $professional->id],
-            ['brand_status' => $newStatus]
-        );
-
-        return $newStatus;
+        return $newStatus ?? BrandProfile::where('professional_id', $professional->id)
+            ->value('brand_status') ?? 'building';
     }
 
     private function checkSiteImages(string $siteId): array

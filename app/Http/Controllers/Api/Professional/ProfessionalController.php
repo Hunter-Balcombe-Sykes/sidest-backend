@@ -9,6 +9,7 @@ use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Block;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
@@ -52,12 +53,25 @@ class ProfessionalController extends ApiController
         Log::info('/api/me after customers', ['ms' => (microtime(true) - $t) * 1000]);
 
         $siteSettings = [];
+        $primaryBrandStatus = null;
+        $primaryBrandName = null;
         if ($pro->site) {
             $siteSettings = is_array($pro->site->settings) ? $pro->site->settings : [];
             $siteSettings = app(SiteCacheService::class)->hydrateTypographySettings(
                 $siteSettings,
                 (string) $pro->id
             );
+
+            // Resolve primary brand partner status + name so the dashboard can
+            // surface affiliate-facing banners and status dots for non-live brands.
+            if ($pro->professional_type !== 'brand') {
+                $brandPartnerId = $siteSettings['brand_partner']['professional_id'] ?? null;
+                if ($brandPartnerId) {
+                    $brandProfile = BrandProfile::where('professional_id', $brandPartnerId)->first();
+                    $primaryBrandStatus = $brandProfile?->brand_status ?? 'building';
+                    $primaryBrandName = \App\Models\Core\Professional\Professional::find($brandPartnerId)?->display_name ?? null;
+                }
+            }
         }
 
         // Use the already-loaded professional to build payload instead of querying again
@@ -117,6 +131,8 @@ class ProfessionalController extends ApiController
             'blocks' => $blocks,
             'services' => $services,
             'customers_count' => $customersCount,
+            'primary_brand_status' => $primaryBrandStatus,
+            'primary_brand_name' => $primaryBrandName,
         ]);
     }
 

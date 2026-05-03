@@ -2,11 +2,11 @@
 
 namespace App\Models\Retail;
 
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 
 // V2: Simplified. Now only holds default_commission_rate and payout_hold_days. Per-product overrides moved to Shopify metafields.
-class BrandStoreSettings extends Model
+class BrandStoreSettings extends BaseModel
 {
     use HasUuids;
 

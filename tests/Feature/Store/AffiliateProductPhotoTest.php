@@ -247,45 +247,22 @@ function insertProductPhoto(string $siteId, string $gid, int $sortOrder = 0): Si
 
 // --- Permission Service Tests ---
 
-it('allows custom photos when global is true and per-affiliate is null', function () {
-    [$brand, $affiliate] = setupBrandAndAffiliate(['custom_photos_enabled' => true]);
+it('allows custom photos when global is true', function () {
+    [$brand] = setupBrandAndAffiliate(['custom_photos_enabled' => true]);
 
     $service = app(CustomPhotoPermissionService::class);
-    expect($service->isAllowed($brand->id, $affiliate->id))->toBeTrue();
+    expect($service->isAllowed($brand->id))->toBeTrue();
 });
 
 it('blocks custom photos when global is false', function () {
-    [$brand, $affiliate] = setupBrandAndAffiliate(['custom_photos_enabled' => false]);
+    [$brand] = setupBrandAndAffiliate(['custom_photos_enabled' => false]);
 
     $service = app(CustomPhotoPermissionService::class);
-    expect($service->isAllowed($brand->id, $affiliate->id))->toBeFalse();
+    expect($service->isAllowed($brand->id))->toBeFalse();
 });
 
-it('per-affiliate override wins over global', function () {
-    [$brand, $affiliate] = setupBrandAndAffiliate(['custom_photos_enabled' => true]);
-
-    // Set per-affiliate to false
-    BrandPartnerLink::where('affiliate_professional_id', $affiliate->id)
-        ->where('brand_professional_id', $brand->id)
-        ->update(['custom_photos_enabled' => false]);
-
-    $service = app(CustomPhotoPermissionService::class);
-    expect($service->isAllowed($brand->id, $affiliate->id))->toBeFalse();
-});
-
-it('per-affiliate true overrides global false', function () {
-    [$brand, $affiliate] = setupBrandAndAffiliate(['custom_photos_enabled' => false]);
-
-    BrandPartnerLink::where('affiliate_professional_id', $affiliate->id)
-        ->where('brand_professional_id', $brand->id)
-        ->update(['custom_photos_enabled' => true]);
-
-    $service = app(CustomPhotoPermissionService::class);
-    expect($service->isAllowed($brand->id, $affiliate->id))->toBeTrue();
-});
-
-it('per-product false overrides global true', function () {
-    [$brand, $affiliate] = setupBrandAndAffiliate(['custom_photos_enabled' => true]);
+it('per-product opt-out blocks upload when global is on', function () {
+    [$brand] = setupBrandAndAffiliate(['custom_photos_enabled' => true]);
     $gid = 'gid://shopify/Product/999';
 
     $catalog = Mockery::mock(BrandCatalogService::class);
@@ -295,25 +272,24 @@ it('per-product false overrides global true', function () {
     app()->instance(BrandCatalogService::class, $catalog);
 
     $service = app(CustomPhotoPermissionService::class);
-    expect($service->isAllowed($brand->id, $affiliate->id, $gid))->toBeFalse();
+    expect($service->isAllowed($brand->id, $gid))->toBeFalse();
 });
 
-it('per-product true overrides global false', function () {
-    [$brand, $affiliate] = setupBrandAndAffiliate(['custom_photos_enabled' => false]);
+it('per-product opt-out is ignored when global is off', function () {
+    [$brand] = setupBrandAndAffiliate(['custom_photos_enabled' => false]);
     $gid = 'gid://shopify/Product/999';
 
     $catalog = Mockery::mock(BrandCatalogService::class);
-    $catalog->shouldReceive('fetchProductCustomPhotosMetafield')
-        ->with(Mockery::any(), $gid)
-        ->andReturn(true);
+    // Should not reach per-product check since global is off first
+    $catalog->shouldNotReceive('fetchProductCustomPhotosMetafield');
     app()->instance(BrandCatalogService::class, $catalog);
 
     $service = app(CustomPhotoPermissionService::class);
-    expect($service->isAllowed($brand->id, $affiliate->id, $gid))->toBeTrue();
+    expect($service->isAllowed($brand->id, $gid))->toBeFalse();
 });
 
 it('per-product unset falls through to global', function () {
-    [$brand, $affiliate] = setupBrandAndAffiliate(['custom_photos_enabled' => true]);
+    [$brand] = setupBrandAndAffiliate(['custom_photos_enabled' => true]);
     $gid = 'gid://shopify/Product/999';
 
     $catalog = Mockery::mock(BrandCatalogService::class);
@@ -323,28 +299,11 @@ it('per-product unset falls through to global', function () {
     app()->instance(BrandCatalogService::class, $catalog);
 
     $service = app(CustomPhotoPermissionService::class);
-    expect($service->isAllowed($brand->id, $affiliate->id, $gid))->toBeTrue();
-});
-
-it('per-affiliate false beats per-product true', function () {
-    [$brand, $affiliate] = setupBrandAndAffiliate(['custom_photos_enabled' => true]);
-    $gid = 'gid://shopify/Product/999';
-
-    BrandPartnerLink::where('affiliate_professional_id', $affiliate->id)
-        ->where('brand_professional_id', $brand->id)
-        ->update(['custom_photos_enabled' => false]);
-
-    $catalog = Mockery::mock(BrandCatalogService::class);
-    $catalog->shouldNotReceive('fetchProductCustomPhotosMetafield');
-    app()->instance(BrandCatalogService::class, $catalog);
-
-    $service = app(CustomPhotoPermissionService::class);
-    expect($service->isAllowed($brand->id, $affiliate->id, $gid))->toBeFalse();
+    expect($service->isAllowed($brand->id, $gid))->toBeTrue();
 });
 
 it('defaults to true when no integration exists', function () {
     $service = app(CustomPhotoPermissionService::class);
-    // Non-existent brand — should default to true but return false because no link exists
     expect($service->getGlobalSetting((string) Str::uuid()))->toBeTrue();
 });
 

@@ -27,8 +27,8 @@ class PublicOpenInviteController extends ApiController
             return $this->error('Brand not found.', 404);
         }
 
-        $brandStatus = $brand->brandProfile?->brand_status ?? 'deactivated';
-        if ($brandStatus === 'deactivated') {
+        $brandStatus = $brand->brandProfile?->brand_status ?? 'systems_down';
+        if ($brandStatus === 'systems_down') {
             return $this->error('Brand not found.', 404);
         }
 

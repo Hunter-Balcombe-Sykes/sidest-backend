@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Professional\BrandProfile;
+use App\Services\Professional\BrandStatusService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -65,6 +66,8 @@ class BrandProfileController extends ApiController
             ['professional_id' => $professional->id],
             $validator->validated()
         );
+
+        app(BrandStatusService::class)->sync($professional);
 
         return $this->success([
             'brand_profile' => $profile->fresh(),

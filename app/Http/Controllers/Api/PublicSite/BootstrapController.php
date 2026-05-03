@@ -181,9 +181,9 @@ class BootstrapController extends ApiController
                         ->first();
 
                     if ($joinBrand) {
-                        $joinBrandStatus = $joinBrand->brandProfile?->brand_status ?? 'deactivated';
+                        $joinBrandStatus = $joinBrand->brandProfile?->brand_status ?? 'systems_down';
 
-                        if ($joinBrandStatus !== 'deactivated') {
+                        if ($joinBrandStatus !== 'systems_down') {
                             $affiliateId = (string) $professional->id;
                             $brandId = (string) $joinBrand->id;
 

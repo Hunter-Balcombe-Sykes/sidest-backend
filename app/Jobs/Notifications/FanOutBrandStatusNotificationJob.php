@@ -12,7 +12,9 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-// V2: Fans out brand status change notifications (active/deactivated) to all connected affiliates.
+// V2: Fans out brand status change notifications to all connected affiliates.
+// Only fires for affiliate-facing status transitions (live, building, systems_down).
+// preview transitions are internal wizard state and don't notify affiliates.
 class FanOutBrandStatusNotificationJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -21,7 +23,7 @@ class FanOutBrandStatusNotificationJob implements ShouldQueue
 
     public function __construct(
         public readonly string $brandProfessionalId,
-        public readonly string $brandStatus, // 'active' | 'deactivated'
+        public readonly string $brandStatus, // 'live' | 'building' | 'systems_down'
     ) {
         $this->onQueue('notifications');
     }
@@ -48,29 +50,38 @@ class FanOutBrandStatusNotificationJob implements ShouldQueue
 
         foreach ($affiliateIds as $affiliateId) {
             try {
-                if ($this->brandStatus === 'deactivated') {
-                    $publisher->publish(
+                match ($this->brandStatus) {
+                    'building' => $publisher->publish(
                         professionalId: $affiliateId,
                         frontendType: 'Warning',
                         category: 'brand_status',
-                        title: 'Brand program deactivated',
-                        body: "{$brandName}'s affiliate program has been deactivated.",
-                        dedupeKey: "brand.deactivated.{$this->brandProfessionalId}.{$yearWeek}",
+                        title: 'Brand program paused',
+                        body: "{$brandName}'s affiliate program is no longer active.",
+                        dedupeKey: "brand.building.{$this->brandProfessionalId}.{$yearWeek}",
                         ctaUrl: '/account/store',
                         retentionConfigKey: 'brand_status',
-                    );
-                } else {
-                    $publisher->publish(
+                    ),
+                    'systems_down' => $publisher->publish(
+                        professionalId: $affiliateId,
+                        frontendType: 'Warning',
+                        category: 'brand_status',
+                        title: 'Brand program temporarily unavailable',
+                        body: "{$brandName}'s affiliate program is temporarily unavailable due to a platform issue.",
+                        dedupeKey: "brand.systems_down.{$this->brandProfessionalId}.{$yearWeek}",
+                        ctaUrl: '/account/store',
+                        retentionConfigKey: 'brand_status',
+                    ),
+                    default => $publisher->publish(
                         professionalId: $affiliateId,
                         frontendType: 'Info',
                         category: 'brand_status',
-                        title: 'Brand program reactivated',
+                        title: 'Brand program now active',
                         body: "{$brandName}'s affiliate program is now active.",
-                        dedupeKey: "brand.reactivated.{$this->brandProfessionalId}.{$yearWeek}",
+                        dedupeKey: "brand.live.{$this->brandProfessionalId}.{$yearWeek}",
                         ctaUrl: '/account/store',
                         retentionConfigKey: 'brand_status',
-                    );
-                }
+                    ),
+                };
             } catch (\Throwable $e) {
                 Log::warning('FanOutBrandStatusNotificationJob affiliate notify failed', [
                     'affiliate_id' => $affiliateId,

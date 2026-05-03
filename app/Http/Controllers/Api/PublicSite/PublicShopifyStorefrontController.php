@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\PublicSite;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use Illuminate\Http\JsonResponse;
@@ -81,10 +82,14 @@ class PublicShopifyStorefrontController extends ApiController
             ], 202);
         }
 
+        $brandProfile = BrandProfile::where('professional_id', $integration->professional_id)->first();
+
         return $this->success([
             'shop_domain' => $shopDomain,
             'storefront_access_token' => $storefrontToken,
             'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'sidest-default-products'),
+            'brand_status' => $brandProfile?->brand_status ?? 'building',
+            'business_website' => $brandProfile?->business_website,
         ]);
     }
 

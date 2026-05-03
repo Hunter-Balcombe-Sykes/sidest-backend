@@ -17,6 +17,7 @@ use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\BrandDesignMediaService;
 use App\Services\Media\ImageVariantService;
+use App\Services\Professional\BrandStatusService;
 use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -203,6 +204,10 @@ class ProfessionalUploadController extends ApiController
         }
 
         app(SiteCacheService::class)->invalidateSite($site);
+
+        if ($pool === SiteMedia::POOL_CONTENT) {
+            app(BrandStatusService::class)->sync($pro);
+        }
 
         // Refresh model state (sync mode may have updated processing_state to 'ready').
         $media->refresh();
@@ -404,6 +409,10 @@ class ProfessionalUploadController extends ApiController
 
         app(SiteCacheService::class)->invalidateSite($site);
 
+        if ($image->pool === SiteMedia::POOL_CONTENT) {
+            app(BrandStatusService::class)->sync($pro);
+        }
+
         return $this->success(['deleted' => true]);
     }
 
@@ -468,7 +477,13 @@ class ProfessionalUploadController extends ApiController
             return $this->error('Placeholder image uploads are only available for brand accounts.', 403);
         }
 
-        return $this->storeBrandDesignImage($pro, $site, $request->file('image'), 'placeholder');
+        $response = $this->storeBrandDesignImage($pro, $site, $request->file('image'), 'placeholder');
+
+        if ($response->getStatusCode() < 300) {
+            app(BrandStatusService::class)->sync($pro);
+        }
+
+        return $response;
     }
 
     /**
@@ -509,6 +524,7 @@ class ProfessionalUploadController extends ApiController
         }
 
         $this->brandDesign->deletePlaceholder($site, $media);
+        app(BrandStatusService::class)->sync($pro);
 
         return $this->success(['deleted' => true]);
     }

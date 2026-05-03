@@ -9,6 +9,7 @@ use App\Jobs\ProcessImageVariantsJob;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
+use App\Services\Professional\BrandStatusService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -135,6 +136,7 @@ class BrandGalleryController extends ApiController
         $this->dispatchImageJob($media->id, $originalPath, $basePath);
 
         app(SiteCacheService::class)->invalidateSite($site);
+        app(BrandStatusService::class)->sync($pro);
 
         $media->refresh();
         $media->load('mediaVariants');
@@ -167,6 +169,7 @@ class BrandGalleryController extends ApiController
         $media->delete();
 
         app(SiteCacheService::class)->invalidateSite($site);
+        app(BrandStatusService::class)->sync($pro);
 
         return $this->success(['ok' => true]);
     }

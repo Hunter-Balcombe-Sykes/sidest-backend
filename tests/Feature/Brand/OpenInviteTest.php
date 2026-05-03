@@ -226,8 +226,8 @@ it('returns 404 for nonexistent handle', function () {
     expect($response->status())->toBe(404);
 });
 
-it('returns 404 for deactivated brand', function () {
-    createBrand('deadbrand', 'deactivated');
+it('returns 404 for systems_down brand', function () {
+    createBrand('deadbrand', 'systems_down');
 
     $controller = new PublicOpenInviteController;
     $response = $controller->show('deadbrand');
@@ -373,8 +373,8 @@ it('returns 422 when affiliate is already connected', function () {
     expect($response->getData(true)['message'])->toContain('already connected');
 });
 
-it('returns 422 when brand is deactivated', function () {
-    createBrand('deactivatedbrand', 'deactivated');
+it('returns 422 when brand is systems_down', function () {
+    createBrand('deactivatedbrand', 'systems_down');
     $affiliate = createAffiliate('eageraffiliate');
 
     $inviteService = new BrandAffiliateInviteService(new BrandPartnerLinkService);
@@ -388,7 +388,7 @@ it('returns 422 when brand is deactivated', function () {
     $response = $controller->claim($request, 'deactivatedbrand', $inviteService, $brandPartnerLinks, $accountDefaults);
 
     expect($response->status())->toBe(422);
-    expect($response->getData(true)['message'])->toContain('not currently accepting');
+    expect($response->getData(true)['message'])->toContain('temporarily unavailable');
 });
 
 // --- Service Unit Tests ---

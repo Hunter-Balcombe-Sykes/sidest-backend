@@ -113,6 +113,35 @@ beforeEach(function () {
         updated_at TEXT
     )');
 
+    $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_profiles (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        brand_status TEXT NULL DEFAULT "building",
+        setup_complete INTEGER NULL,
+        business_website TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_store_settings (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        default_commission_rate TEXT NULL,
+        payout_hold_days INTEGER NULL,
+        theme_id INTEGER NULL,
+        oxygen_deployment_token TEXT NULL,
+        oxygen_storefront_id TEXT NULL,
+        domain_mode TEXT NULL,
+        domain_wizard_complete INTEGER NULL,
+        custom_domain TEXT NULL,
+        custom_domain_verified_at TEXT NULL,
+        custom_domain_tls_provisioned_at TEXT NULL,
+        hydrogen_install_confirmed INTEGER NULL,
+        domain_txt_confirmed INTEGER NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+
     Storage::fake('media');
 
     // Mock SiteCacheService to avoid querying tables not in test schema

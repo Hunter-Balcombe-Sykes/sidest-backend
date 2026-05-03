@@ -69,7 +69,7 @@ class HydrogenAffiliateProductsController extends ApiController
 
         if (! empty($selections)) {
             $permissions = app(CustomPhotoPermissionService::class);
-            $customPhotos = $permissions->isAllowed($brandId, $affiliateId)
+            $customPhotos = $permissions->isAllowed($brandId)
                 ? $this->getCustomPhotos($affiliateId, $selections)
                 : [];
 

@@ -2,7 +2,6 @@
 
 namespace App\Services\Store;
 
-use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Support\Arr;
 
@@ -12,44 +11,35 @@ class CustomPhotoPermissionService
         private readonly BrandCatalogService $catalogService,
     ) {}
 
-    public function isAllowed(string $brandProfessionalId, string $affiliateProfessionalId, ?string $productGid = null): bool
+    // Simplified 2-tier permission model:
+    //   1. Global toggle (provider_metadata.custom_photos_enabled) — master switch
+    //   2. Per-product opt-out (Shopify metafield) — when global is ON, individual
+    //      products can be disabled by setting the metafield to false.
+    public function isAllowed(string $brandProfessionalId, ?string $productGid = null): bool
     {
-        // Level 1: Per-affiliate override (wins if set)
-        $link = BrandPartnerLink::query()
-            ->where('brand_professional_id', $brandProfessionalId)
-            ->where('affiliate_professional_id', $affiliateProfessionalId)
-            ->first();
-
-        if (! $link) {
-            return false;
-        }
-
-        if ($link->custom_photos_enabled !== null) {
-            return (bool) $link->custom_photos_enabled;
-        }
-
-        // Load integration once for both per-product and global checks
         $integration = ProfessionalIntegration::query()
             ->where('professional_id', $brandProfessionalId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->first();
 
-        // Level 2: Per-product setting (wins over global when set)
-        if ($productGid !== null && $integration !== null) {
-            $productSetting = $this->catalogService->fetchProductCustomPhotosMetafield($integration, $productGid);
-            if ($productSetting !== null) {
-                return $productSetting;
+        // Tier 1: Global master switch — when OFF, nothing is allowed.
+        if ($integration) {
+            $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+            if (! Arr::get($metadata, 'custom_photos_enabled', true)) {
+                return false;
             }
         }
 
-        // Level 3: Global brand setting (defaults to true when no integration)
-        if ($integration === null) {
-            return true;
+        // Tier 2: Per-product opt-out — when global is ON, a product can be
+        // explicitly disabled via its Shopify metafield. null = no opt-out (enabled).
+        if ($productGid !== null && $integration !== null) {
+            $productSetting = $this->catalogService->fetchProductCustomPhotosMetafield($integration, $productGid);
+            if ($productSetting === false) {
+                return false;
+            }
         }
 
-        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-
-        return (bool) Arr::get($metadata, 'custom_photos_enabled', true);
+        return true;
     }
 
     public function getGlobalSetting(string $brandProfessionalId): bool
