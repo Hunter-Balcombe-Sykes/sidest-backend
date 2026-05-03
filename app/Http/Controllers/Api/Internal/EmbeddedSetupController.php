@@ -63,6 +63,31 @@ class EmbeddedSetupController extends ApiController
             ? $this->checkStorefrontStatus($storeSettings, $site->subdomain)
             : 'unreachable';
 
+        // Auto-heal wizard flags when infrastructure is already live (e.g.
+        // after a reinstall). If the storefront responds, domain provisioning
+        // and DNS must be in place — backfill the wizard bookkeeping so the
+        // brand isn't stuck on already-completed steps.
+        if ($storefrontStatus === 'live' && $storeSettings) {
+            $heal = [];
+            if (! $storeSettings->hydrogen_install_confirmed) {
+                $heal['hydrogen_install_confirmed'] = true;
+            }
+            if (empty($storeSettings->oxygen_storefront_id)) {
+                // Can't heal without the storefront ID — but if we got here,
+                // the storefront is live so the ID must exist somewhere.
+            }
+            if (! $storeSettings->domain_wizard_complete) {
+                $heal['domain_wizard_complete'] = true;
+            }
+            if (! $storeSettings->domain_txt_confirmed) {
+                $heal['domain_txt_confirmed'] = true;
+            }
+            if (! empty($heal)) {
+                $storeSettings->update($heal);
+                $storeSettings->refresh();
+            }
+        }
+
         return $this->success([
             'name'                => (string) ($professional->display_name ?? ''),
             'logo_url'            => '',
