@@ -42,6 +42,17 @@ return Application::configure(basePath: dirname(__DIR__))
         // all other routes pass through untouched.
         $middleware->appendToGroup('api', AddPublicCacheHeaders::class);
 
+        // Pin VerifySupabaseJwt before ThrottleRequests in the middleware priority list.
+        // Without this, Laravel's SortedMiddleware moves ThrottleRequests (priority 6)
+        // ahead of SubstituteBindings (priority 9, injected by the `api` group), which
+        // drags it ahead of every unlisted middleware between them — including the JWT
+        // verifier. The per-uid rate limiters in AppServiceProvider then fire before
+        // `supabase_uid` is set on the request and throw RuntimeException.
+        $middleware->prependToPriorityList(
+            \Illuminate\Routing\Middleware\ThrottleRequests::class,
+            VerifySupabaseJwt::class,
+        );
+
         $middleware->alias([
             'supabase.jwt' => VerifySupabaseJwt::class,
             'current.pro' => LoadCurrentProfessional::class,
