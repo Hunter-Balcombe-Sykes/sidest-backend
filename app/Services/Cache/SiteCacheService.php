@@ -178,12 +178,35 @@ class SiteCacheService
             return $payload;
         }
 
+        $affiliateId = (string) ($professional['id'] ?? '');
+        if (empty($affiliateId)) {
+            return $payload;
+        }
+
+        // JSON column is affiliate-controlled; use it only as a hint for which brand is configured.
         $brandPartner = $payload['site']['settings']['brand_partner'] ?? null;
         if (! is_array($brandPartner) || empty($brandPartner['professional_id'])) {
             return $payload;
         }
 
-        $brandId = $brandPartner['professional_id'];
+        $claimedBrandId = (string) $brandPartner['professional_id'];
+
+        // BrandPartnerLink is the consent record — verify before using any brand data.
+        $link = BrandPartnerLink::where('affiliate_professional_id', $affiliateId)
+            ->where('brand_professional_id', $claimedBrandId)
+            ->first();
+
+        if (! $link) {
+            Log::warning('Brand-partner enrichment skipped: no verified link in consent table.', [
+                'affiliate_id' => $affiliateId,
+                'brand_id' => $claimedBrandId,
+            ]);
+
+            return $payload;
+        }
+
+        // Resolve brand_id from the verified link record, never from the mutable JSON.
+        $brandId = (string) $link->brand_professional_id;
         $brandSite = Site::query()
             ->where('professional_id', $brandId)
             ->first();
