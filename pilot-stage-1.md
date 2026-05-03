@@ -1184,7 +1184,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Bundled lens-G finding. lensG-004 (the email job) is broken out as #V5-012 because it's P1 (sends to deleted users); the rest are P2 (correctness, not delivery).
     - **Source:** v5 audit (discovery_lens: lens-G-soft-delete-sweep; in_scope_v4: no).
 
-- [ ] **#V5-057** · P2 — Health-check endpoints unthrottled
+- [x] **#V5-057** · P2 — Health-check endpoints unthrottled
     - **Where:** routes/api.php:39, 88, 163-164
     - **Effort:** S (~0.5h)
     - **What to do:**
@@ -1192,7 +1192,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Health-check endpoints can be hammered without limit.
     - **Source:** v5 audit (discovery_lens: lens-H-rate-limit-posture; in_scope_v4: yes).
 
-- [ ] **#V5-059** · P2 — Throttle disabled flag bypasses everything globally
+- [x] **#V5-059** · P2 — Throttle disabled flag bypasses everything globally
     - **Where:** app/Providers/AppServiceProvider.php:55
     - **Effort:** S (~0.5h)
     - **What to do:**
@@ -1200,7 +1200,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** A misconfigured `THROTTLE_DISABLED=true` in prod silently disables all rate limits.
     - **Source:** v5 audit (discovery_lens: lens-H-rate-limit-posture; in_scope_v4: yes).
 
-- [ ] **#V5-060** · P2 — Authenticated throttle keys fall back to IP if supabase_uid missing
+- [x] **#V5-060** · P2 — Authenticated throttle keys fall back to IP if supabase_uid missing
     - **Where:** app/Providers/AppServiceProvider.php:179, 194, etc.
     - **Effort:** S (~1-2h)
     - **What to do:**
