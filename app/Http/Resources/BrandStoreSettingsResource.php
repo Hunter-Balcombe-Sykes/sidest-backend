@@ -24,6 +24,7 @@ class BrandStoreSettingsResource extends JsonResource
             'hydrogen_install_confirmed' => (bool) ($this->resource['hydrogen_install_confirmed'] ?? false),
             'storefront_base_url' => $this->resource['storefront_base_url'] ?? null,
             'storefront_status' => $this->resource['storefront_status'] ?? 'unreachable',
+            'brand_status' => $this->resource['brand_status'] ?? 'building',
         ];
     }
 }
