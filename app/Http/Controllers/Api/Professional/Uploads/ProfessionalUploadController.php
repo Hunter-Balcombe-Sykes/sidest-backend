@@ -321,7 +321,7 @@ class ProfessionalUploadController extends ApiController
 
             foreach ($ids as $id) {
                 if (! isset($targetSet[$id])) {
-                    abort(403, 'One or more items do not belong to your site.');
+                    abort(422, 'One or more media items are invalid.');
                 }
             }
 

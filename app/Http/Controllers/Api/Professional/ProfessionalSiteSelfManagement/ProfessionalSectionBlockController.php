@@ -196,7 +196,7 @@ class ProfessionalSectionBlockController extends ApiController
 
             foreach ($ids as $id) {
                 if (! isset($allSet[$id])) {
-                    abort(403, 'One or more sections do not belong to you');
+                    abort(422, 'One or more sections are invalid');
                 }
             }
 

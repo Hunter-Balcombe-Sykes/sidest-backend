@@ -283,7 +283,7 @@ class AffiliateProductPhotoController extends ApiController
             $ownedIds = $images->pluck('id')->flip();
             foreach ($ids as $id) {
                 if (! isset($ownedIds[$id])) {
-                    abort(403, 'One or more items do not belong to your product photos.');
+                    abort(422, 'One or more product photos are invalid.');
                 }
             }
 

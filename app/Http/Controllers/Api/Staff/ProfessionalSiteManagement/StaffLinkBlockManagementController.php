@@ -114,7 +114,7 @@ class StaffLinkBlockManagementController extends ApiController
 
             foreach ($ids as $id) {
                 if (! isset($allSet[$id])) {
-                    abort(403, 'One or more blocks do not belong to professional');
+                    abort(422, 'One or more blocks are invalid');
                 }
             }
 

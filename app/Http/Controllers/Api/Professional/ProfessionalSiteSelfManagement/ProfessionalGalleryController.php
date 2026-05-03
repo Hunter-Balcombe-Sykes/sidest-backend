@@ -91,7 +91,7 @@ class ProfessionalGalleryController extends ApiController
             $allSet = array_flip($allIds);
             foreach ($ids as $id) {
                 if (! isset($allSet[$id])) {
-                    abort(403, 'One or more images do not belong to your site.');
+                    abort(422, 'One or more gallery images are invalid.');
                 }
             }
 
