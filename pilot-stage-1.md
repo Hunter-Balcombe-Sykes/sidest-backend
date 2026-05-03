@@ -327,21 +327,12 @@ These are best in their own session because bundling would force unrelated archi
         -- 20260420 added brand_professional_id but did not redefine the unique key.
         ```
 
-- [ ] **#5-07** · P1 — Square/Fresha webhook signature verification — implementation in parent ApiController not audited
-    - **Where:** app/Http/Controllers/Api/Webhooks/SquareCatalogWebhookController.php:29; app/Http/Controllers/Api/Webhooks/FreshaCatalogWebhookController.php:29 (call `$this->isValidSignature(...)` defined in `ApiController`)
+- [x] **#5-07** · P3 — Square/Fresha webhook signature verification — verified correct *(downgraded from P1 — implementation confirmed safe, 2026-05-03)*
+    - **Where:** app/Http/Controllers/Api/Webhooks/SquareCatalogWebhookController.php:124; app/Http/Controllers/Api/Webhooks/FreshaCatalogWebhookController.php:141
     - **Affects:** SquareCatalogWebhookController, FreshaCatalogWebhookController.
     - **Effort:** S (~0.5–1h)
-    - **What to do:**
-        - Read `app/Http/Controllers/Api/ApiController.php` (or wherever `isValidSignature` is defined) and confirm it uses `hash_equals` and the raw body (not JSON-decoded).
-        - Confirm the algorithm matches each provider (Square = HMAC-SHA256, Fresha = HMAC-SHA256 typically).
-        - If implementation is fine, downgrade this finding to P3 with a verification note.
-    - **Technical:** Verification only. If implementation is correct (hash_equals on raw body), no fix needed.
-    - **Plain English:** The webhook controllers call a shared method to check signatures, but I couldn't see inside that method during the audit. Need a human to confirm the comparison is implemented safely.
-    - **Evidence:**
-        ```php
-        // SquareCatalogWebhookController.php:29
-        if (! $this->isValidSignature($request, $rawBody, $signature)) { ... }
-        ```
+    - **Verification note:** `isValidSignature` is a private method on each controller (not in `ApiController`). Both implementations: use `hash_equals` (timing-safe), operate on the raw body from `$request->getContent()` (not JSON-decoded), and use HMAC-SHA256 matching each provider's documented algorithm. Square also handles URL normalization candidates. Fresha's implementation notes that the exact signature scheme should be re-confirmed against Fresha docs when integration is live (no public API yet). No code changes needed.
+    - **Technical:** No fix required. Implementation is correct.
 
 - [ ] **#1-02** · P1 — Inline `abort(403, ...)` patterns bypass policy system and CI guard
     - **Where:** 8 controllers including app/Http/Controllers/Api/Professional/BrandGalleryController.php:211, ProfessionalGalleryController.php:94, ProfessionalSectionBlockController.php:199, ProfessionalLinkBlockController.php:281, Uploads/ProfessionalUploadController.php:324, Store/AffiliateProductPhotoController.php:286, Staff/ProfessionalSiteManagement/StaffLinkBlockManagementController.php:117, Staff/ProfessionalSiteManagement/StaffSectionManagementController.php:120
