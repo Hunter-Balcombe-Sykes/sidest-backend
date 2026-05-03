@@ -137,7 +137,7 @@ class EmbeddedSetupController extends ApiController
 
         $this->cache->invalidateProfessional($professional);
 
-        return $this->success([], 'Profile saved.');
+        return $this->success(['message' => 'Profile saved.']);
     }
 
     /**
@@ -168,7 +168,7 @@ class EmbeddedSetupController extends ApiController
 
         $this->cache->invalidateProfessional($professional);
 
-        return $this->success([], 'Business details saved.');
+        return $this->success(['message' => 'Business details saved.']);
     }
 
     // ── Store Settings ───────────────────────────────────────────────────────
@@ -209,7 +209,7 @@ class EmbeddedSetupController extends ApiController
 
         $this->cache->invalidateProfessional($professional);
 
-        return $this->success([], 'Setting saved.');
+        return $this->success(['message' => 'Setting saved.']);
     }
 
     // ── Deployment Token ─────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ class EmbeddedSetupController extends ApiController
             $this->deployment->dispatchDeployment($professionalId);
         }
 
-        return $this->success([], 'Deployment token saved.');
+        return $this->success(['message' => 'Deployment token saved.']);
     }
 
     /**
@@ -444,7 +444,7 @@ class EmbeddedSetupController extends ApiController
 
         $this->deployment->dispatchDeployment($professionalId);
 
-        return $this->success([], 'Deployment triggered. It usually takes 1–2 minutes.');
+        return $this->success(['message' => 'Deployment triggered. It usually takes 1–2 minutes.']);
     }
 
     // ── Domain Verification ──────────────────────────────────────────────────

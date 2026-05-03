@@ -269,7 +269,7 @@ class BrandStoreSettingsController extends ApiController
 
         $this->deployment->dispatchDeployment($pro->id);
 
-        return $this->success([], 'Deployment triggered. It usually takes 1–2 minutes.');
+        return $this->success(['message' => 'Deployment triggered. It usually takes 1–2 minutes.']);
     }
 
     /**
