@@ -156,7 +156,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** A check that's supposed to stop affiliates adding more than 7 platform links never runs. They can add as many as they want.
     - **Source:** Commit-batch review item #1 (commit `162cb4a`).
 
-- [ ] **#CR-002** · P0 — Wrong config key in CommissionPayoutService — env var has zero effect on grace window
+- [x] **#CR-002** · P0 — Wrong config key in CommissionPayoutService — env var has zero effect on grace window
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:207
     - **Affects:** Per-payout grace timer (`void_at = now() + grace_period_days`); ops ability to tune the policy via `SIDEST_STORE_GRACE_PERIOD_DAYS` env var.
     - **Effort:** S (~0.25h)
@@ -167,7 +167,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** A typo in a config lookup means the env var that's supposed to control the payout grace window has no effect. Always uses the hardcoded fallback.
     - **Source:** Commit-batch review item #2 (commit `85f2673`).
 
-- [ ] **#CR-003** · P0 — UI promises 60-day payout grace; no job actually voids expired payouts (still using legacy 30d ledger-entry path)
+- [x] **#CR-003** · P0 — UI promises 60-day payout grace; no job actually voids expired payouts (still using legacy 30d ledger-entry path)
     - **Where:** app/Jobs/Stripe/ (no `VoidExpiredPayoutsJob` exists); referenced by model docblock + commit message of `85f2673`; consumed for display only by `AffiliateCommerceAnalyticsController::overview` `grace_summary` block
     - **Affects:** Affiliate trust on payout grace banner. UI surface displays "60 days remaining"; real enforcement is the older `commission_void_window_days` (30d) path against `commission_ledger_entries`.
     - **Effort:** M (~3–4h)
@@ -984,7 +984,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** When the transfer fails AND the auto-refund also fails, the brand is left charged with no operational surface to detect or remediate.
     - **Source:** v5 audit (discovery_lens: domain-subagent-3; in_scope_v4: yes).
 
-- [ ] **#V5-032** · P2 — REST Retry-After defaults to 1ms (not 1s) when header missing
+- [x] **#V5-032** · P2 — REST Retry-After defaults to 1ms (not 1s) when header missing
     - **Where:** app/Services/Shopify/Client/ShopifyAdminClient.php:128-129
     - **Effort:** S (~0.25h)
     - **What to do:**
@@ -1000,7 +1000,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Untrusted webhook payload constructs a GraphQL identifier without validation.
     - **Source:** v5 audit (discovery_lens: domain-subagent-4; in_scope_v4: yes).
 
-- [ ] **#V5-034** · P2 — SquareApiClient and FreshaApiClient don't honor 429 Retry-After
+- [x] **#V5-034** · P2 — SquareApiClient and FreshaApiClient don't honor 429 Retry-After
     - **Where:** app/Services/Square/SquareApiClient.php, app/Services/Fresha/FreshaApiClient.php
     - **Effort:** S (~1-2h)
     - **What to do:**
