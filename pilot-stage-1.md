@@ -725,7 +725,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** rebuildProfessionalHour/Day query analytics tables without joining/filtering professionals.deleted_at.
     - **Source:** v5 audit (discovery_lens: domain-subagent-6; in_scope_v4: no).
 
-- [ ] **#V5-014** · P1 — ClickRequest validates block_id against unprefixed 'blocks' table
+- [x] **#V5-014** · P1 — ClickRequest validates block_id against unprefixed 'blocks' table
     - **Where:** app/Http/Requests/Api/PublicSite/Analytics/ClickRequest.php:22
     - **Affects:** Click validation; behavior depends on Postgres search_path.
     - **Effort:** S (~0.5h)
@@ -743,7 +743,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Pixel check trusts file header; format never verified before getimagesize. Crafted file can claim safe dims, contain bomb.
     - **Source:** v5 audit (discovery_lens: domain-subagent-7; in_scope_v4: yes).
 
-- [ ] **#V5-016** · P1 — Document filename not sanitized — Content-Disposition CRLF / path traversal risk
+- [x] **#V5-016** · P1 — Document filename not sanitized — Content-Disposition CRLF / path traversal risk
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalDocumentController.php:68
     - **Affects:** Document upload/download; future Content-Disposition use.
     - **Effort:** S (~0.5h)
@@ -772,7 +772,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Dispatch wrapped in try/catch (Throwable); on failure, logs warning + returns 200. Shopify never retries → orders silently disappear. Different from #4-01 (which covers the HMAC step) — this is the dispatch step after HMAC succeeds.
     - **Source:** v5 audit (discovery_lens: lens-D-error-handling; in_scope_v4: yes).
 
-- [ ] **#V5-019** · P1 — Shopify webhook registration job swallows per-topic failures, marks setup complete
+- [x] **#V5-019** · P1 — Shopify webhook registration job swallows per-topic failures, marks setup complete
     - **Where:** app/Jobs/Shopify/RegisterShopifyWebhooksJob.php:137
     - **Affects:** Shopify install completeness — partial registration silently succeeds.
     - **Effort:** S (~1-2h)
@@ -781,7 +781,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Per-topic Throwable catch logs and continues; job succeeds with `$allSucceeded=false`.
     - **Source:** v5 audit (discovery_lens: lens-D-error-handling; in_scope_v4: yes).
 
-- [ ] **#V5-020** · P1 — Webhook signature validation in-controller, not middleware-enforced
+- [x] **#V5-020** · P1 — Webhook signature validation in-controller, not middleware-enforced
     - **Where:** All webhook controllers (Shopify, Stripe, Square, Fresha)
     - **Affects:** Webhook signature enforcement architecture; future controllers.
     - **Effort:** M (~3-4h)
@@ -868,7 +868,7 @@ These are best in their own session because bundling would force unrelated archi
 
 ## P2 — Fix during pilot if seen
 
-- [ ] **#9-005** · P2 — Streaming live-status job whereRaw uses unparameterized literal
+- [x] **#9-005** · P2 — Streaming live-status job whereRaw uses unparameterized literal
     - **Where:** app/Jobs/Streaming/CheckStreamingLiveStatusJob.php:47
     - **Affects:** Streaming live-status detection job.
     - **Effort:** S (~0.5h)
@@ -888,7 +888,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** Companion to the soft-delete cleanup task — also missing the "don't run twice" guard.
     - **Evidence:** Same file, same omission as #10-08.
 
-- [ ] **#7-03** · P2 — Filename extension taken from client and used in R2 object key
+- [x] **#7-03** · P2 — Filename extension taken from client and used in R2 object key
     - **Where:** app/Services/Media/ImageVariantService.php:200-208; app/Http/Controllers/Api/Professional/Uploads/ProfessionalUploadController.php:140-142
     - **Affects:** All image upload endpoints.
     - **Effort:** S (~1h)
@@ -908,7 +908,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** Same job, two providers — one logs failures, the other doesn't.
     - **Evidence:** Square's equivalent has a `failed()` log; Fresha's doesn't.
 
-- [ ] **#4-07** · P2 — Partial Shopify install failure — no setup-state tracking, no retry path
+- [x] **#4-07** · P2 — Partial Shopify install failure — no setup-state tracking, no retry path
     - **Where:** app/Services/Shopify/BrandSignupService.php (dispatchInstallJobs ~125-147)
     - **Affects:** Brand onboarding completeness.
     - **Effort:** M (~4h)
@@ -928,7 +928,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Either app-side time-box or trust Stripe's lifecycle. `past_due` is in `GRACE_STATUSES` so a brand with a failing card retains plan features until the subscription transitions to canceled — could be many days.
     - **Plain English:** A brand whose payment fails keeps their plan working forever, until Stripe gives up. We should cut off access after a few days of failed payments.
 
-- [ ] **#CR-012** · P2 — PHP `now()` vs DB `NOW()` clock drift on `void_at` stamping
+- [x] **#CR-012** · P2 — PHP `now()` vs DB `NOW()` clock drift on `void_at` stamping
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:219
     - **Affects:** Per-payout `void_at` correctness vs `created_at`; sub-minute drift under transaction-snapshot vs app-clock skew.
     - **Effort:** S (~0.5h)
@@ -960,7 +960,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** A new "shop" tracking block can return without an ID before it's set up. The frontend silently drops events with no ID, so a brand that hasn't finished setup sees zero shop clicks instead of an obvious error.
     - **Source:** Commit-batch review item #22 (commit `f9bcd89`).
 
-- [ ] **#V5-028** · P2 — laravel/tinker ships in production require, not require-dev
+- [x] **#V5-028** · P2 — laravel/tinker ships in production require, not require-dev
     - **Where:** composer.json:18
     - **Effort:** S (~0.25h)
     - **What to do:**
@@ -968,7 +968,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Tinker is a development REPL; shipping it in production widens the attack surface unnecessarily.
     - **Source:** v5 audit (discovery_lens: domain-subagent-10; in_scope_v4: yes).
 
-- [ ] **#V5-029** · P2 — grace_period_days config not bounds-validated
+- [x] **#V5-029** · P2 — grace_period_days config not bounds-validated
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:207
     - **Effort:** S (~1h)
     - **What to do:**
@@ -976,7 +976,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Misconfigured grace_period_days could produce nonsensical void_at timestamps.
     - **Source:** v5 audit (discovery_lens: domain-subagent-3; in_scope_v4: yes).
 
-- [ ] **#V5-030** · P2 — Failed-refund-after-failed-transfer leaves brand overcharged with no surface
+- [x] **#V5-030** · P2 — Failed-refund-after-failed-transfer leaves brand overcharged with no surface
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:477-496
     - **Effort:** M (~2h)
     - **What to do:**
@@ -992,7 +992,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Default `1` is interpreted as 1ms not 1s; effectively no backoff against Shopify rate-limit.
     - **Source:** v5 audit (discovery_lens: domain-subagent-4; in_scope_v4: yes).
 
-- [ ] **#V5-033** · P2 — Order line product_id used unsanitized in GraphQL GID
+- [x] **#V5-033** · P2 — Order line product_id used unsanitized in GraphQL GID
     - **Where:** app/Jobs/Shopify/ProcessShopifyOrderWebhookJob.php:100-105
     - **Effort:** S (~0.5h)
     - **What to do:**
@@ -1008,7 +1008,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** No 429 handling; under load the clients hammer the provider.
     - **Source:** v5 audit (discovery_lens: domain-subagent-5-pass2; in_scope_v4: no).
 
-- [ ] **#V5-035** · P2 — Full sync may restore manually-deleted services within retention window
+- [x] **#V5-035** · P2 — Full sync may restore manually-deleted services within retention window
     - **Where:** app/Services/Square/SquareServiceSyncService.php
     - **Effort:** M (~3h)
     - **What to do:**
@@ -1048,7 +1048,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Analytics aggregates include click rows for blocks that have been soft-deleted.
     - **Source:** v5 audit (discovery_lens: domain-subagent-6-pass2; in_scope_v4: no).
 
-- [ ] **#V5-041** · P2 — Custom from/to date range bypasses 365-day cap
+- [x] **#V5-041** · P2 — Custom from/to date range bypasses 365-day cap
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalAnalyticsController.php:42-49
     - **Effort:** S (~0.5h)
     - **What to do:**
@@ -1056,7 +1056,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Custom date range logic skips the day-count cap, enabling full-decade scans.
     - **Source:** v5 audit (discovery_lens: domain-subagent-6-pass2; in_scope_v4: no).
 
-- [ ] **#V5-042** · P2 — Video container not probed before transcode
+- [x] **#V5-042** · P2 — Video container not probed before transcode
     - **Where:** app/Jobs/ProcessVideoVariantsJob.php:117-122, app/Services/Media/VideoVariantService.php:80-100
     - **Effort:** M (~2h)
     - **What to do:**
@@ -1080,7 +1080,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Same pattern as #V5-043 but on the video pipeline (much larger files).
     - **Source:** v5 audit (discovery_lens: domain-subagent-7; in_scope_v4: yes).
 
-- [ ] **#V5-045** · P2 — HLS playlist built from config without escaping
+- [x] **#V5-045** · P2 — HLS playlist built from config without escaping
     - **Where:** app/Services/Media/VideoVariantService.php:125-127
     - **Effort:** S (~1h)
     - **What to do:**
@@ -1088,7 +1088,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Config values interpolated into HLS playlist string without validation.
     - **Source:** v5 audit (discovery_lens: domain-subagent-7; in_scope_v4: yes).
 
-- [ ] **#V5-046** · P2 — Video duration check happens inside transcode job, not on upload
+- [x] **#V5-046** · P2 — Video duration check happens inside transcode job, not on upload
     - **Where:** app/Services/Media/VideoVariantService.php:92-99
     - **Effort:** M (~2h)
     - **What to do:**
@@ -1104,7 +1104,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Different code path from #7-01's UploadBrandLogoRequest; same MIME-spoof exposure.
     - **Source:** v5 audit (discovery_lens: domain-subagent-7-pass2; in_scope_v4: no).
 
-- [ ] **#V5-048** · P2 — Staff middleware doesn't differentiate fine-grained permissions
+- [x] **#V5-048** · P2 — Staff middleware doesn't differentiate fine-grained permissions
     - **Where:** app/Http/Middleware/Auth/EnsureSidestStaff.php:22
     - **Effort:** M (~2h)
     - **What to do:**
@@ -1112,7 +1112,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** All staff have full admin; no support-only role.
     - **Source:** v5 audit (discovery_lens: domain-subagent-8; in_scope_v4: no).
 
-- [ ] **#V5-049** · P2 — Platform-link cap is a write-time check; existing over-limit data not remediated
+- [x] **#V5-049** · P2 — Platform-link cap is a write-time check; existing over-limit data not remediated
     - **Where:** app/Http/Requests/Api/Professional/Site/StoreLinkBlockRequest.php
     - **Effort:** S (~1h)
     - **What to do:**
@@ -1207,7 +1207,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Violates CLAUDE.md's "Resource classes for all API responses" rule. Most endpoints return raw Eloquent models.
     - **Source:** v5 audit (discovery_lens: lens-J-resource-shape; in_scope_v4: no).
 
-- [ ] **#V5-062** · P2 — Asymmetric Professional shape across endpoints
+- [x] **#V5-062** · P2 — Asymmetric Professional shape across endpoints
     - **Where:** Multiple controllers returning Professional in different shapes
     - **Effort:** M (~4h)
     - **What to do:**
@@ -1215,7 +1215,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Different endpoints return different Professional fields; no canonical Resource defines the shape per audience.
     - **Source:** v5 audit (discovery_lens: lens-J-resource-shape; in_scope_v4: no).
 
-- [ ] **#V5-063** · P2 — Image pool values hardcoded in two upload Form Requests
+- [x] **#V5-063** · P2 — Image pool values hardcoded in two upload Form Requests
     - **Where:** app/Http/Requests/Api/Professional/Uploads/UploadImageRequest.php:21, ReorderPoolImagesRequest.php:17,23
     - **Effort:** S (~0.5h)
     - **What to do:**
@@ -1223,7 +1223,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** DRY violation; pool list lives in two places.
     - **Source:** v5 audit (discovery_lens: lens-K-validation-and-json; in_scope_v4: no).
 
-- [ ] **#V5-064** · P2 — Phone field max length divergent across 7 Form Requests
+- [x] **#V5-064** · P2 — Phone field max length divergent across 7 Form Requests
     - **Where:** 7 Form Request classes
     - **Effort:** S (~1-2h)
     - **What to do:**
@@ -1231,7 +1231,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Inconsistent phone validation rules across endpoints.
     - **Source:** v5 audit (discovery_lens: lens-K-validation-and-json; in_scope_v4: no).
 
-- [ ] **#V5-065** · P2 — Grace warning windows are 3-day-wide (off-by-one risk)
+- [x] **#V5-065** · P2 — Grace warning windows are 3-day-wide (off-by-one risk)
     - **Where:** app/Services/Stripe/CommissionVoidService.php:135-146
     - **Effort:** S (~1h)
     - **What to do:**
@@ -1239,7 +1239,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** 3-day window catches the same row 3 times; tighter window cleaner.
     - **Source:** v5 audit (discovery_lens: lens-L-time-money-tz-currency; in_scope_v4: no).
 
-- [ ] **#V5-066** · P2 — Wallet currency switch on empty balance has no audit trail
+- [x] **#V5-066** · P2 — Wallet currency switch on empty balance has no audit trail
     - **Where:** app/Services/Stripe/StripeConnectService.php:525-537
     - **Effort:** S (~1h)
     - **What to do:**
@@ -1247,7 +1247,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Currency change is a financially meaningful event; no log captures it.
     - **Source:** v5 audit (discovery_lens: lens-L-time-money-tz-currency; in_scope_v4: no).
 
-- [ ] **#V5-067** · P2 — stripe_manual_balance_currency defaults to AUD without validation
+- [x] **#V5-067** · P2 — stripe_manual_balance_currency defaults to AUD without validation
     - **Where:** app/Services/Stripe/StripeConnectService.php:414, 498, 523
     - **Effort:** S (~1h)
     - **What to do:**
@@ -1255,7 +1255,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Hard-coded AUD default doesn't match the shop's actual currency.
     - **Source:** v5 audit (discovery_lens: lens-L-time-money-tz-currency; in_scope_v4: no).
 
-- [ ] **#V5-071** · P2 — success() helper accepts $status without validation — class of bug that's easy to miss
+- [x] **#V5-071** · P2 — success() helper accepts $status without validation — class of bug that's easy to miss
     - **Where:** app/Http/Controllers/Api/ApiController.php:14
     - **Effort:** S (~1-2h)
     - **What to do:**
@@ -1271,12 +1271,12 @@ These are best in their own session because bundling would force unrelated archi
 
 ## P3 — Nice to have
 
-- [ ] **#10-14** · P3 — User-supplied subject text not truncated in SiteEnquiryNotification
+- [x] **#10-14** · P3 — User-supplied subject text not truncated in SiteEnquiryNotification
     - **Where:** app/Mail/SiteEnquiryNotification.php:24
     - **Effort:** S (~0.5h)
     - **What to do:** Truncate or use ref number. (Coordinate with #10-11/12 in legal report.)
 
-- [ ] **#10-13** · P3 — StaffBroadcastMail does not pass `$unsubscribeUrl` to view
+- [x] **#10-13** · P3 — StaffBroadcastMail does not pass `$unsubscribeUrl` to view
     - **Where:** app/Mail/StaffBroadcastMail.php (build)
     - **Effort:** S (~0.5h)
     - **What to do:** Pass `$unsubscribeUrl` when rendering the view.
