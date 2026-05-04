@@ -292,6 +292,7 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/shopify/disconnect', [ShopifyIntegrationController::class, 'disconnect']);
         Route::get('/shopify/token', [ShopifyIntegrationController::class, 'token']);
         Route::post('/shopify/webhooks/register', [ShopifyIntegrationController::class, 'registerWebhooks']);
+        Route::post('/shopify/setup/retry', [ShopifyIntegrationController::class, 'retrySetup']);
         // Generates a one-time code for linking a Shopify store via the embedded app.
         Route::post('/shopify/embedded-connection-code', [ShopifyEmbeddedConnectionController::class, 'generate'])
             ->middleware('throttle:10,1');

@@ -175,6 +175,8 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
         // through that service, so this catches them.
         app(SiteCacheService::class)->forgetBrandDesign((string) $site->id);
 
+        $integration->mergeProviderMetadata(['brand_design_state' => 'synced']);
+
         Log::info('Brand design synced.', [
             'integration_id' => $this->integrationId,
             'professional_id' => (string) $integration->professional_id,
@@ -187,6 +189,9 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
             'integration_id' => $this->integrationId,
             'error' => $e->getMessage(),
         ]);
+
+        $integration = ProfessionalIntegration::find($this->integrationId);
+        $integration?->mergeProviderMetadata(['brand_design_state' => 'failed']);
     }
 
     /**

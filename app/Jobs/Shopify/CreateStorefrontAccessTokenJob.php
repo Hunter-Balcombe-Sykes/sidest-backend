@@ -84,6 +84,8 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
 
         // Token already provisioned — nothing to do.
         if ($integration->storefront_token !== null && trim((string) $integration->storefront_token) !== '') {
+            $integration->mergeProviderMetadata(['storefront_token_state' => 'registered']);
+
             return;
         }
 
@@ -101,6 +103,7 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
             // Create a new one.
             $token = $this->createToken($shopDomain, $accessToken, $apiVersion);
             $integration->update(['storefront_token' => $token]);
+            $integration->mergeProviderMetadata(['storefront_token_state' => 'registered']);
 
             Log::info('Shopify Storefront API token created.', [
                 'integration_id' => $this->integrationId,
@@ -123,6 +126,9 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
             'integration_id' => $this->integrationId,
             'error' => $e->getMessage(),
         ]);
+
+        $integration = ProfessionalIntegration::find($this->integrationId);
+        $integration?->mergeProviderMetadata(['storefront_token_state' => 'failed']);
     }
 
     private function findExistingToken(string $shopDomain, string $accessToken, string $apiVersion): ?string

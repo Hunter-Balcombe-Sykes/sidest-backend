@@ -136,6 +136,8 @@ class ShopifyIntegrationController extends ApiController
         $connected = $integration !== null && $shopDomain !== '';
         $tokenProvisioned = $connected && ! empty($integration?->access_token);
 
+        $installStatus = $tokenProvisioned ? $integration->shopifyInstallStatus() : null;
+
         return $this->success([
             'eligible' => true,
             'connected' => $connected,
@@ -151,6 +153,8 @@ class ShopifyIntegrationController extends ApiController
             'webhook_orders_topic' => $tokenProvisioned
                 ? (string) Arr::get($metadata, 'webhook_orders_topic', config('services.shopify.webhook_orders_topic', 'orders/paid'))
                 : null,
+            'setup_state' => $installStatus ? $installStatus['state'] : null,
+            'setup_steps' => $installStatus ? $installStatus['steps'] : null,
         ]);
     }
 
@@ -457,6 +461,94 @@ class ShopifyIntegrationController extends ApiController
             'queued' => true,
             'integration_id' => (string) $integration->id,
             'brand_professional_id' => $targetBrandId,
+        ]);
+    }
+
+    /**
+     * Re-dispatch any install jobs that haven't reached a success state.
+     * Safe to call multiple times — ShouldBeUnique deduplicates in-flight jobs.
+     * Returns immediately; callers poll /shopify/status for progress.
+     */
+    public function retrySetup(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'brand_professional_id' => ['sometimes', 'uuid'],
+        ]);
+
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        [$targetBrandId, $error] = $this->resolveTargetBrandProfessionalId(
+            $request,
+            isset($validator->validated()['brand_professional_id']) ? (string) $validator->validated()['brand_professional_id'] : null,
+            true
+        );
+
+        if ($error !== null) {
+            return $error;
+        }
+
+        $integration = $this->currentShopifyIntegrationForBrand($targetBrandId);
+        if ($error = $this->ensureShopifyConnected($integration)) {
+            return $error;
+        }
+
+        $installStatus = $integration->shopifyInstallStatus();
+
+        if ($installStatus['state'] === 'complete') {
+            return $this->success([
+                'queued' => false,
+                'setup_state' => 'complete',
+                'retried_steps' => [],
+            ]);
+        }
+
+        // Map step name → job class and metadata state key
+        $stepMap = [
+            'webhooks'         => ['job' => RegisterShopifyWebhooksJob::class,     'state_key' => 'webhooks_state'],
+            'metafields'       => ['job' => CreateShopifyMetafieldsJob::class,     'state_key' => 'metafield_definitions_state'],
+            'sales_channel'    => ['job' => CreateShopifySalesChannelJob::class,   'state_key' => 'sales_channel_state'],
+            'storefront_token' => ['job' => CreateStorefrontAccessTokenJob::class, 'state_key' => 'storefront_token_state'],
+            'brand_design'     => ['job' => SyncShopifyBrandDesignJob::class,      'state_key' => 'brand_design_state'],
+        ];
+
+        $successValues = ['registered', 'synced'];
+        $toRetry = array_filter(
+            $installStatus['steps'],
+            static fn (?string $state): bool => ! in_array($state, $successValues, true)
+        );
+
+        // Reset failed steps to 'queued' so the frontend sees 'pending' while jobs run.
+        $resetMetadata = [];
+        foreach (array_keys($toRetry) as $step) {
+            $resetMetadata[$stepMap[$step]['state_key']] = 'queued';
+        }
+        if ($resetMetadata !== []) {
+            $integration->mergeProviderMetadata($resetMetadata);
+        }
+
+        $actorProfessional = $this->currentProfessional($request);
+
+        foreach (array_keys($toRetry) as $step) {
+            $jobClass = $stepMap[$step]['job'];
+            try {
+                $jobClass::dispatch((string) $integration->id);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to dispatch Shopify setup retry job', [
+                    'actor_professional_id' => (string) $actorProfessional->id,
+                    'brand_professional_id' => $targetBrandId,
+                    'integration_id' => (string) $integration->id,
+                    'step' => $step,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $this->success([
+            'queued' => true,
+            'setup_state' => 'pending',
+            'retried_steps' => array_keys($toRetry),
         ]);
     }
 

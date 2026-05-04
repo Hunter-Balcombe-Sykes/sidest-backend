@@ -5,6 +5,7 @@ namespace App\Models\Core\Professional;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Arr;
 
 // V2: OAuth integration record (Square, Fresha, Shopify). Stores encrypted tokens and provider_metadata (webhook IDs, collection handles, etc.).
 class ProfessionalIntegration extends BaseModel
@@ -62,6 +63,47 @@ class ProfessionalIntegration extends BaseModel
     public function scopeProvider($query, string $provider)
     {
         return $query->where('provider', mb_strtolower(trim($provider)));
+    }
+
+    /**
+     * Summarise the Shopify post-install pipeline state from provider_metadata.
+     *
+     * Each of the 5 install jobs writes a per-step state key on success ('registered'
+     * or 'synced') and 'failed' on permanent failure. Missing keys mean the job is
+     * still pending (queued or in-flight).
+     *
+     * @return array{state: string, steps: array<string, string|null>}
+     *   state  — 'complete' | 'incomplete' | 'pending'
+     *   steps  — per-job state values keyed by step name
+     */
+    public function shopifyInstallStatus(): array
+    {
+        $metadata = is_array($this->provider_metadata) ? $this->provider_metadata : [];
+
+        $steps = [
+            'webhooks'         => Arr::get($metadata, 'webhooks_state'),
+            'metafields'       => Arr::get($metadata, 'metafield_definitions_state'),
+            'sales_channel'    => Arr::get($metadata, 'sales_channel_state'),
+            'storefront_token' => Arr::get($metadata, 'storefront_token_state'),
+            'brand_design'     => Arr::get($metadata, 'brand_design_state'),
+        ];
+
+        $allComplete = true;
+        $anyFailed = false;
+
+        foreach ($steps as $state) {
+            if ($state !== 'registered' && $state !== 'synced') {
+                $allComplete = false;
+                if ($state === 'failed' || $state === 'partial') {
+                    $anyFailed = true;
+                }
+            }
+        }
+
+        return [
+            'state' => $allComplete ? 'complete' : ($anyFailed ? 'incomplete' : 'pending'),
+            'steps' => $steps,
+        ];
     }
 
     /**
