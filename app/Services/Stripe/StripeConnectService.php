@@ -3,7 +3,10 @@
 namespace App\Services\Stripe;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Core\Professional\WalletCurrencySwitchAudit;
 use App\Models\Retail\BrandCommissionTopup;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
@@ -52,12 +55,21 @@ class StripeConnectService
             ],
         ], ['idempotency_key' => "acct_{$professional->id}"]);
 
-        $professional->update([
+        $update = [
             'stripe_connect_account_id' => $account->id,
             'stripe_connect_status' => 'onboarding',
             'stripe_grace_period_ends_at' => $professional->stripe_grace_period_ends_at
                 ?? now()->addDays((int) config('sidest.store.grace_period_days', 30)),
-        ]);
+        ];
+
+        // Seed wallet currency from Shopify's shop_currency so brands with
+        // non-AUD stores don't get locked into the AUD DB default.
+        $shopCurrency = $this->resolveShopCurrency($professional);
+        if ($shopCurrency) {
+            $update['stripe_manual_balance_currency'] = $shopCurrency;
+        }
+
+        $professional->update($update);
 
         return $account->id;
     }
@@ -549,7 +561,9 @@ class StripeConnectService
                 );
             }
 
-            if ($currentCurrency !== $currency) {
+            $currencyChanged = $currentCurrency !== $currency;
+
+            if ($currencyChanged) {
                 $lockedBrand->stripe_manual_balance_currency = $currency;
             }
 
@@ -564,6 +578,17 @@ class StripeConnectService
                 'currency_code' => $currency,
                 'status' => 'completed',
             ]);
+
+            if ($currencyChanged) {
+                WalletCurrencySwitchAudit::create([
+                    'professional_id' => $lockedBrand->id,
+                    'previous_currency' => $currentCurrency,
+                    'new_currency' => $currency,
+                    'actor_type' => WalletCurrencySwitchAudit::ACTOR_TYPE_SYSTEM,
+                    'topup_id' => $topup->id,
+                    'metadata' => ['trigger' => 'top_up_empty_balance'],
+                ]);
+            }
 
             return [
                 'status' => 'applied',
@@ -596,6 +621,26 @@ class StripeConnectService
         }
 
         return 'onboarding';
+    }
+
+    /**
+     * Resolve the shop currency from the professional's Shopify integration, if present.
+     * Returns null when no Shopify integration exists or shop_currency is not yet set.
+     */
+    private function resolveShopCurrency(Professional $professional): ?string
+    {
+        $integration = ProfessionalIntegration::query()
+            ->where('professional_id', $professional->id)
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->first();
+
+        if (! $integration) {
+            return null;
+        }
+
+        $currency = Arr::get($integration->provider_metadata ?? [], 'shop_currency');
+
+        return ($currency && is_string($currency)) ? strtoupper(trim($currency)) : null;
     }
 
     private function mapCountryCode(?string $code): string
