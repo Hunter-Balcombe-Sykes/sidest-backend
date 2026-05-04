@@ -116,9 +116,13 @@ QueueBrowser {
 }
 
 #qb-dialog {
-    width: 95%;
-    height: 90%;
-    padding: 1 2;
+    /* Fill the full terminal so as many rows as possible fit on screen.
+       Was 95%/90% which lost ~10% of vertical space to dialog margins.
+       100%/100% trades the visible app behind the modal for ~3 extra
+       table rows, which is the right call for a queue browser. */
+    width: 100%;
+    height: 100%;
+    padding: 0 1;
     border: thick $primary;
     background: $surface;
 }

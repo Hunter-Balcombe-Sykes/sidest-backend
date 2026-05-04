@@ -317,6 +317,22 @@ class QueueBrowser(ModalScreen[None]):
         queued = set(state.queue)
 
         table = self.query_one("#qb-table", DataTable)
+
+        # Capture cursor + scroll position so they survive the rebuild below.
+        # Without this, every space/Enter toggle (which calls _populate to
+        # refresh the ✓ column) snapped the user back to row 0, column 0 —
+        # awful UX when toggling items 30 rows down a long queue.
+        try:
+            saved_cursor_row = table.cursor_row
+            saved_cursor_col = table.cursor_column
+        except Exception:
+            saved_cursor_row, saved_cursor_col = 0, 0
+        try:
+            saved_scroll_x = table.scroll_x
+            saved_scroll_y = table.scroll_y
+        except Exception:
+            saved_scroll_x, saved_scroll_y = 0, 0
+
         table.clear()
         self._row_ids.clear()
 
@@ -373,6 +389,18 @@ class QueueBrowser(ModalScreen[None]):
             f"queue: {len(queued)} · {skip_label} · {done_label}"
         )
 
+        # Restore cursor + scroll. move_cursor scrolls to make the cursor
+        # visible (which can yank the viewport), so we set scroll AFTER —
+        # last write wins. Clamp cursor to surviving rows in case a filter
+        # change shrank the table.
+        try:
+            if self._row_ids:
+                clamped_row = min(saved_cursor_row or 0, len(self._row_ids) - 1)
+                table.move_cursor(row=clamped_row, column=saved_cursor_col or 0)
+            table.scroll_to(x=saved_scroll_x, y=saved_scroll_y, animate=False)
+        except Exception:
+            pass
+
     def _add_row(
         self, table: DataTable, item_id: str, title: str, src: str,
         tier: str, effort: str, cls: Classification, queued: set[str],
@@ -416,11 +444,10 @@ class QueueBrowser(ModalScreen[None]):
             if populate_item_metadata(state, item_id, parse_results):
                 state.queue.append(item_id)
         self.state_mgr.save(state)
+        # _populate handles cursor + scroll preservation now; an extra
+        # move_cursor here would re-scroll the cursor into view and undo
+        # the scroll_to() restore.
         self._populate()
-        try:
-            table.move_cursor(row=row)
-        except Exception:
-            pass
 
     def action_close(self) -> None:
         self.dismiss(None)
