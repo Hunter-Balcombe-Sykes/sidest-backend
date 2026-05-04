@@ -124,7 +124,7 @@ These are best in their own session because bundling would force unrelated archi
         Gate::policy(ProfessionalIntegration::class, IntegrationPolicy::class);
         ```
 
-- [ ] **#PR-001** · P0 — VerifyHydrogenApiKey middleware silently bypasses auth when api_key config is empty
+- [x] **#PR-001** · P0 — VerifyHydrogenApiKey middleware silently bypasses auth when api_key config is empty
     - **Where:** app/Http/Middleware/Auth/VerifyHydrogenApiKey.php:14-19
     - **Affects:** All routes under `/internal/hydrogen/*` (5 controllers); deployment tokens, brand config, affiliate metadata, custom photos.
     - **Effort:** S (~0.5–1h)

@@ -42,6 +42,13 @@ class AppServiceProvider extends ServiceProvider
             throw new \RuntimeException('SIDEST_THROTTLE_ENABLED must not be false in production.');
         }
 
+        // Refuse to boot in production without a Hydrogen API key — VerifyHydrogenApiKey
+        // already fails closed at request time, but a boot-time crash makes the
+        // misconfiguration visible at deploy rather than on the first incoming request.
+        if (app()->isProduction() && (string) config('services.hydrogen.api_key') === '') {
+            throw new \RuntimeException('HYDROGEN_API_KEY must be set in production.');
+        }
+
         $this->configureRateLimiting();
 
         // Scheduler heartbeat — feeds GET /api/health/scheduler so a stopped cron

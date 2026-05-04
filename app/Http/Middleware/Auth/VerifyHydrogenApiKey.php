@@ -13,9 +13,20 @@ class VerifyHydrogenApiKey
     {
         $expected = (string) config('services.hydrogen.api_key');
 
-        // Skip validation in dev if no key is configured
         if ($expected === '') {
-            return $next($request);
+            // Dev/test bypass: missing config is acceptable when running locally
+            // or under the test suite. Anywhere else (production, staging, any
+            // unrecognized env) we fail closed — without this gate, an empty
+            // HYDROGEN_API_KEY on a production deploy would silently open every
+            // /internal/hydrogen/* route, including the deployment-token endpoint
+            // that can rewrite a brand's storefront, to anonymous traffic.
+            if (app()->environment(['local', 'testing'])) {
+                return $next($request);
+            }
+
+            throw new \RuntimeException(
+                'services.hydrogen.api_key is not configured — refusing to fall through to bypass outside local/testing.'
+            );
         }
 
         $provided = (string) $request->header('X-Hydrogen-Api-Key', '');
