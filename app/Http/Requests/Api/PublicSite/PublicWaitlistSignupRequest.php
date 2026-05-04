@@ -34,7 +34,7 @@ class PublicWaitlistSignupRequest extends BaseFormRequest
         return [
             'email' => ['required', 'email:rfc', 'max:255'],
             'name' => ['nullable', 'string', 'max:200'],
-            'phone' => ['nullable', 'string', 'regex:/^\+?[0-9]{7,20}$/'],
+            'phone' => ['nullable', ...$this->phoneRule(), 'regex:/^\+?[0-9]{7,20}$/'],
             'type' => ['nullable', 'string', Rule::in(array_keys(config('sidest.waitlist.types', [])))],
             'type_other_text' => ['nullable', 'string', 'max:200', 'required_if:type,other', 'prohibited_unless:type,other'],
             'industry' => ['nullable', 'string', Rule::in(array_keys(config('sidest.waitlist.industries', [])))],

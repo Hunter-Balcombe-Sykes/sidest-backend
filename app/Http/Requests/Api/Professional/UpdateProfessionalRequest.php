@@ -28,8 +28,8 @@ class UpdateProfessionalRequest extends BaseFormRequest
                 Rule::unique('professionals', 'primary_email')
                     ->ignore($this->attributes->get('professional')?->id, 'id'),
             ],
-            'phone' => ['sometimes', 'required', 'string', 'max:50'],
-            'public_contact_number' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'phone' => ['sometimes', 'required', ...$this->phoneRule()],
+            'public_contact_number' => ['sometimes', 'nullable', ...$this->phoneRule()],
             'public_contact_email' => ['sometimes', 'nullable', 'email:rfc', 'max:255'],
 
             // ISO 3166-1 alpha-2 only. Normalised to upper-case in

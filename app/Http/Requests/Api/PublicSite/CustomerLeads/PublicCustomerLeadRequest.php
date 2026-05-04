@@ -30,7 +30,7 @@ class PublicCustomerLeadRequest extends BaseFormRequest
         return [
             'full_name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email:rfc', 'max:255'],
-            'phone' => ['required', 'string', 'max:50'],
+            'phone' => ['required', ...$this->phoneRule()],
             'notes' => ['nullable', 'string', 'max:2000'],
             'external_id' => ['nullable', 'string', 'max:255'],
             'marketing_opt_in' => ['boolean'],

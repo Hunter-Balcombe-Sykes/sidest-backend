@@ -12,7 +12,7 @@ class StoreCustomerRequest extends BaseFormRequest
         return [
             'full_name' => ['required', 'string', 'max:255'],
             'email' => ['nullable', 'email:rfc', 'max:255'],
-            'phone' => ['nullable', 'string', 'max:50'],
+            'phone' => ['nullable', ...$this->phoneRule()],
             'notes' => ['nullable', 'string', 'max:5000'],
             'source' => ['nullable', 'string', 'max:225'],
             'external_id' => ['nullable', 'string', 'max:255'],

@@ -25,7 +25,7 @@ class PublicEnquiryRequest extends BaseFormRequest
         return [
             'name' => ['required', 'string', 'max:100'],
             'email' => ['required', 'email:rfc', 'max:255'],
-            'phone' => ['nullable', 'string', 'max:30'],
+            'phone' => ['nullable', ...$this->phoneRule()],
             'subject' => ['required', 'string', 'max:100'],
             'message' => ['required', 'string', 'min:10', 'max:2000'],
 

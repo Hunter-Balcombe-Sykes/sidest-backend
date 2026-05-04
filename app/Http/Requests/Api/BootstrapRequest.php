@@ -36,7 +36,7 @@ class BootstrapRequest extends BaseFormRequest
                 'required', 'email:rfc', 'max:255',
                 Rule::unique('professionals', 'primary_email')->ignore($existingProfessionalId, 'id'),
             ],
-            'phone' => ['required', 'string', 'max:40'],
+            'phone' => ['required', ...$this->phoneRule()],
             'first_name' => ['required', 'string', 'max:80'],
             'last_name' => ['nullable', 'string', 'max:80'],
             // ISO 3166-1 alpha-2 only. Lower-case and whitespace are normalised

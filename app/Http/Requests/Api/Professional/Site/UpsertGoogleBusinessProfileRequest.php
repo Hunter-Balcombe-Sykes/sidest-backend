@@ -38,7 +38,7 @@ class UpsertGoogleBusinessProfileRequest extends BaseFormRequest
             'address' => ['nullable', 'string', 'max:500'],
             'latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'longitude' => ['nullable', 'numeric', 'between:-180,180'],
-            'phone' => ['nullable', 'string', 'max:64'],
+            'phone' => ['nullable', ...$this->phoneRule()],
             'website' => ['nullable', 'url', 'max:2048'],
             'hours' => ['sometimes', 'array', 'max:14'],
             'hours.*' => ['string', 'max:120'],

@@ -67,6 +67,16 @@ abstract class BaseFormRequest extends FormRequest
     }
 
     /**
+     * Canonical phone validation rule — shared `string + max` constraints.
+     * Callers prepend required/nullable/sometimes for their own semantics:
+     *   'phone' => ['required', ...$this->phoneRule()]
+     */
+    protected function phoneRule(): array
+    {
+        return ['string', 'max:50'];
+    }
+
+    /**
      * Normalize phone-like inputs to digits and a leading `+` only.
      * Strips whitespace, parens, dashes, and any other punctuation. Empty
      * results coerce to null so downstream code never has to distinguish
