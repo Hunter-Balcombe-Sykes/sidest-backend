@@ -136,7 +136,9 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
 
                 $webhookId = $this->createWebhook($shopDomain, $accessToken, $apiVersion, $topic, $callbackUrl);
                 $results[$topic] = ['state' => 'registered', 'webhook_id' => $webhookId, 'existed' => false];
-            } catch (\Throwable $e) {
+            } catch (\RuntimeException $e) {
+                // Covers ShopifyClientException (transport/throttle/GraphQL errors) and RuntimeException
+                // thrown by createWebhook (userErrors, missing ID). Anything else propagates and fails the job immediately.
                 Log::error('Failed to register Shopify webhook.', [
                     'integration_id' => $this->integrationId,
                     'shop_domain' => $shopDomain,
@@ -165,6 +167,13 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
             'topics_registered' => collect($results)->where('state', 'registered')->count(),
             'topics_failed' => collect($results)->where('state', 'failed')->count(),
         ]);
+
+        // Throw to trigger job retry when any topic failed. Already-registered webhooks are
+        // idempotent (findExistingWebhook skips them), so retries only re-attempt failed topics.
+        if (! $allSucceeded) {
+            $failedTopics = implode(', ', array_keys(array_filter($results, fn ($r) => $r['state'] === 'failed')));
+            throw new \RuntimeException("Shopify webhook registration incomplete for {$shopDomain}: failed topics: {$failedTopics}");
+        }
     }
 
     private function findExistingWebhook(string $shopDomain, string $accessToken, string $apiVersion, string $topic, string $callbackUrl): ?string
