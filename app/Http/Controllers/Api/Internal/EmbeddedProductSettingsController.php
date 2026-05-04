@@ -57,8 +57,11 @@ class EmbeddedProductSettingsController extends ApiController
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
         $productId = $this->extractId($productGid);
 
-        // Fetch the product's metafields from Shopify Admin API
-        $metafields = $this->fetchProductMetafields($integration, $productId);
+        // Single Admin API call — metafields and variants are fetched in one
+        // GraphQL query to avoid an extra round-trip.
+        $result = $this->fetchProductMetafields($integration, $productId);
+        $metafields = $result['metafields'];
+        $variants = $result['variants'];
 
         // Check collection membership
         $inFavourites = $this->isInCollection($metadata, 'favourites_collection_handle', $productGid, $integration);
@@ -68,9 +71,6 @@ class EmbeddedProductSettingsController extends ApiController
         $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
         $defaultCommissionRate = (float) ($storeSettings?->default_commission_rate ?? 15);
         $globalCustomPhotosEnabled = (bool) Arr::get($metadata, 'custom_photos_enabled', false);
-
-        // Variant list with enabled state
-        $variants = $this->fetchVariants($integration, $productId);
 
         return $this->success([
             'active' => $metafields['active'] ?? true,
@@ -160,9 +160,10 @@ class EmbeddedProductSettingsController extends ApiController
     }
 
     /**
-     * Fetch sidest.* metafields for a single product via Shopify Admin API.
+     * Fetch sidest.* metafields and variants for a single product via Shopify
+     * Admin API in a single GraphQL call.
      *
-     * @return array{ active?: bool, commission_override?: float, affiliate_discount_pct?: float, custom_photos_enabled?: bool }
+     * @return array{metafields: array, variants: array}
      */
     private function fetchProductMetafields(ProfessionalIntegration $integration, string $productId): array
     {
@@ -170,8 +171,10 @@ class EmbeddedProductSettingsController extends ApiController
         $adminToken = trim((string) ($integration->access_token ?? ''));
         $apiVersion = config('services.shopify.api_version', '2025-01');
 
+        $empty = ['metafields' => [], 'variants' => []];
+
         if ($shopDomain === '' || $adminToken === '') {
-            return [];
+            return $empty;
         }
 
         $query = <<<'GRAPHQL'
@@ -213,20 +216,38 @@ GRAPHQL;
                     'errors' => Arr::get($data, 'errors', []),
                 ]);
 
-                return [];
+                return $empty;
             }
 
             $product = Arr::get($data, 'data.product', []);
 
             if (empty($product)) {
-                return [];
+                return $empty;
+            }
+
+            // Extract variant data from the same response instead of making a
+            // second API call in fetchVariants().
+            $variantEdges = Arr::get($product, 'variants.edges', []);
+            $variants = [];
+            if (is_array($variantEdges)) {
+                foreach ($variantEdges as $edge) {
+                    $node = $edge['node'] ?? [];
+                    $variants[] = [
+                        'gid' => (string) ($node['id'] ?? ''),
+                        'title' => (string) ($node['title'] ?? ''),
+                        'enabled' => $this->parseBool(Arr::get($node, 'enabled.value'), true),
+                    ];
+                }
             }
 
             return [
-                'active' => $this->parseBool(Arr::get($product, 'active.value')),
-                'commission_override' => $this->parseFloat(Arr::get($product, 'commissionOverride.value')),
-                'affiliate_discount_pct' => $this->parseFloat(Arr::get($product, 'affiliateDiscountPct.value')),
-                'custom_photos_enabled' => $this->parseBool(Arr::get($product, 'customPhotosEnabled.value')),
+                'metafields' => [
+                    'active' => $this->parseBool(Arr::get($product, 'active.value')),
+                    'commission_override' => $this->parseFloat(Arr::get($product, 'commissionOverride.value')),
+                    'affiliate_discount_pct' => $this->parseFloat(Arr::get($product, 'affiliateDiscountPct.value')),
+                    'custom_photos_enabled' => $this->parseBool(Arr::get($product, 'customPhotosEnabled.value')),
+                ],
+                'variants' => $variants,
             ];
         } catch (\Throwable $e) {
             Log::error('Shopify Admin API exception fetching product metafields.', [
@@ -235,7 +256,7 @@ GRAPHQL;
                 'error' => $e->getMessage(),
             ]);
 
-            return [];
+            return $empty;
         }
     }
 
