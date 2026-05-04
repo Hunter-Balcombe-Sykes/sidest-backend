@@ -9,6 +9,7 @@ use App\Http\Requests\Api\Professional\Store\UpdateSelectionVariantsRequest;
 use App\Http\Resources\AffiliateProductResource;
 use App\Http\Resources\AffiliateProductSelectionResource;
 use App\Models\Commerce\AffiliateProductSelection;
+use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Media\ImageVariantService;
@@ -83,8 +84,8 @@ class AffiliateProductController extends ApiController
     /**
      * POST /affiliate/selections
      *
-     * Add a product to the affiliate's selections. Requires brand_professional_id
-     * to scope the selection to a specific brand the affiliate is linked to.
+     * Add a product to the affiliate's selections. brand_professional_id is derived
+     * server-side from the affiliate's BrandPartnerLink — not accepted from the client.
      */
     public function store(Request $request): JsonResponse
     {
@@ -95,7 +96,6 @@ class AffiliateProductController extends ApiController
         }
 
         $validated = $request->validate([
-            'brand_professional_id' => ['required', 'uuid'],
             'shopify_product_gid' => ['required', 'string', 'max:100', 'regex:/^gid:\/\/shopify\/Product\/\d+$/'],
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:999'],
             // Optional on create — most affiliates start with all variants shown
@@ -105,18 +105,23 @@ class AffiliateProductController extends ApiController
             'selected_variant_gids.*' => ['string', 'regex:/^gid:\/\/shopify\/ProductVariant\/\d+$/'],
         ]);
 
-        $linked = DB::table('brand.brand_partner_links')
-            ->where('affiliate_professional_id', $pro->id)
-            ->where('brand_professional_id', $validated['brand_professional_id'])
-            ->exists();
+        // Derive brand from the affiliate's established link — not from the client request.
+        $brandProfessionalId = (string) BrandPartnerLink::where('affiliate_professional_id', $pro->id)
+            ->value('brand_professional_id');
 
-        if (! $linked) {
-            return $this->error('You are not linked to this brand.', 422);
+        if ($brandProfessionalId === '') {
+            return $this->error('You are not linked to any brand.', 422);
         }
+
+        $skeleton = new AffiliateProductSelection([
+            'affiliate_professional_id' => $pro->id,
+            'brand_professional_id' => $brandProfessionalId,
+        ]);
+        $this->authorizeForUser($pro, 'create', $skeleton);
 
         // Verify product exists in the brand's active catalog
         try {
-            if (! $this->catalogService->isProductInCatalog($validated['brand_professional_id'], $validated['shopify_product_gid'])) {
+            if (! $this->catalogService->isProductInCatalog($brandProfessionalId, $validated['shopify_product_gid'])) {
                 return $this->error('This product is not available for selection.', 422);
             }
         } catch (\Throwable $e) {
@@ -128,7 +133,7 @@ class AffiliateProductController extends ApiController
         // override" and stored as NULL so a future brand-side re-enable is picked
         // up automatically.
         $selectedVariantGids = $this->resolveSelectedVariantGidsOrFail(
-            $validated['brand_professional_id'],
+            $brandProfessionalId,
             $validated['shopify_product_gid'],
             $validated['selected_variant_gids'] ?? null,
             $errorResponse
@@ -141,7 +146,7 @@ class AffiliateProductController extends ApiController
         $max = (int) config('sidest.store.max_featured_products', 10);
 
         try {
-            $selection = DB::transaction(function () use ($pro, $validated, $selectedVariantGids, $max) {
+            $selection = DB::transaction(function () use ($pro, $validated, $brandProfessionalId, $selectedVariantGids, $max) {
                 // Advisory lock serializes concurrent selections per affiliate. Postgres only;
                 // SQLite (tests) skips this — the UNIQUE constraint still prevents duplicates.
                 if (DB::connection()->getDriverName() === 'pgsql') {
@@ -151,7 +156,7 @@ class AffiliateProductController extends ApiController
                 // Count check INSIDE the lock — authoritative against concurrent inserts.
                 $currentCount = AffiliateProductSelection::query()
                     ->where('affiliate_professional_id', $pro->id)
-                    ->where('brand_professional_id', $validated['brand_professional_id'])
+                    ->where('brand_professional_id', $brandProfessionalId)
                     ->count();
 
                 if ($currentCount >= $max) {
@@ -160,7 +165,7 @@ class AffiliateProductController extends ApiController
 
                 return AffiliateProductSelection::create([
                     'affiliate_professional_id' => $pro->id,
-                    'brand_professional_id' => $validated['brand_professional_id'],
+                    'brand_professional_id' => $brandProfessionalId,
                     'shopify_product_gid' => $validated['shopify_product_gid'],
                     'sort_order' => $validated['sort_order'] ?? 0,
                     'selected_variant_gids' => $selectedVariantGids,
@@ -201,17 +206,20 @@ class AffiliateProductController extends ApiController
         }
 
         $validated = $request->validated();
-        $brandId = $validated['brand_professional_id'];
 
         $selection = AffiliateProductSelection::query()
             ->where('affiliate_professional_id', $pro->id)
-            ->where('brand_professional_id', $brandId)
             ->where('shopify_product_gid', $productGid)
             ->first();
 
         if (! $selection) {
             return $this->error('Selection not found.', 404);
         }
+
+        $this->authorizeForUser($pro, 'update', $selection);
+
+        // Brand is read from the persisted selection — not from the client request.
+        $brandId = (string) $selection->brand_professional_id;
 
         $selectedVariantGids = $this->resolveSelectedVariantGidsOrFail(
             $brandId,

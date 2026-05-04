@@ -275,8 +275,8 @@ it('validates shape in UpdateSelectionVariantsRequest', function () {
     $request = new UpdateSelectionVariantsRequest;
     $rules = $request->rules();
 
-    expect($rules['brand_professional_id'])->toContain('required');
-    expect($rules['brand_professional_id'])->toContain('uuid');
+    // brand_professional_id is now derived server-side — not accepted from the client
+    expect($rules)->not->toHaveKey('brand_professional_id');
     expect($rules['variant_gids'])->toContain('sometimes');
     expect($rules['variant_gids'])->toContain('nullable');
     expect($rules['variant_gids'])->toContain('array');
@@ -288,7 +288,6 @@ it('rejects 403 on updateVariants for brand accounts', function () {
     $controller = new AffiliateProductController($service);
 
     $request = makeBrandRequest('PATCH', [
-        'brand_professional_id' => (string) Str::uuid(),
         'variant_gids' => null,
     ]);
     $formRequest = UpdateSelectionVariantsRequest::createFrom($request);
@@ -304,7 +303,6 @@ it('rejects malformed product GID on updateVariants', function () {
     $controller = new AffiliateProductController($service);
 
     $request = makeAffiliateRequest('PATCH', [
-        'brand_professional_id' => (string) Str::uuid(),
         'variant_gids' => null,
     ]);
     $formRequest = UpdateSelectionVariantsRequest::createFrom($request);
