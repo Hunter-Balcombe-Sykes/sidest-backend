@@ -1,0 +1,104 @@
+<?php
+
+use App\Models\Analytics\LinkClick;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
+
+beforeEach(function () {
+    tenantHelpersEnsureTables();
+    setupBlocksTable();
+    setupLinkClicksTable();
+    Queue::fake();
+
+    // The static column cache persists across tests in the same process; reset it
+    // so each test starts with fresh column resolution against the SQLite schema.
+    $ref = new ReflectionClass(LinkClick::class);
+    foreach (['blockForeignKeyResolved', 'blockForeignKeyColumn'] as $prop) {
+        $p = $ref->getProperty($prop);
+        $p->setAccessible(true);
+        $p->setValue(null, $prop === 'blockForeignKeyResolved' ? false : null);
+    }
+});
+
+it('deduplicates rapid double-clicks from the same visitor on the same block', function () {
+    $tenant = createBrandTenant('dedup-visitor');
+    $block = createLinkBlockFor($tenant);
+    $visitorId = (string) Str::uuid();
+
+    $payload = [
+        'site_id' => $tenant->site->id,
+        'block_id' => $block->id,
+        'visitor_id' => $visitorId,
+    ];
+
+    $first = $this->postJson('/api/public/analytics/clicks', $payload);
+    $second = $this->postJson('/api/public/analytics/clicks', $payload);
+
+    $first->assertStatus(201);
+    $second->assertStatus(201);
+
+    expect(DB::connection('pgsql')->table('analytics.link_clicks')->count())->toBe(1);
+});
+
+it('deduplicates rapid double-clicks identified only by session_id', function () {
+    $tenant = createBrandTenant('dedup-session');
+    $block = createLinkBlockFor($tenant);
+    $sessionId = (string) Str::uuid();
+
+    $payload = [
+        'site_id' => $tenant->site->id,
+        'block_id' => $block->id,
+        'session_id' => $sessionId,
+    ];
+
+    $this->postJson('/api/public/analytics/clicks', $payload)->assertStatus(201);
+    $this->postJson('/api/public/analytics/clicks', $payload)->assertStatus(201);
+
+    expect(DB::connection('pgsql')->table('analytics.link_clicks')->count())->toBe(1);
+});
+
+it('allows a second click after the 3-second dedup window has expired', function () {
+    $tenant = createBrandTenant('dedup-window');
+    $block = createLinkBlockFor($tenant);
+    $visitorId = (string) Str::uuid();
+
+    // Seed a "stale" click older than the dedup window.
+    DB::connection('pgsql')->table('analytics.link_clicks')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $tenant->id,
+        'site_id' => $tenant->site->id,
+        'block_id' => $block->id,
+        'visitor_id' => $visitorId,
+        'occurred_at' => now()->subSeconds(4)->toDateTimeString(),
+        'created_at' => now()->subSeconds(4)->toDateTimeString(),
+    ]);
+
+    $response = $this->postJson('/api/public/analytics/clicks', [
+        'site_id' => $tenant->site->id,
+        'block_id' => $block->id,
+        'visitor_id' => $visitorId,
+    ]);
+
+    $response->assertStatus(201);
+    expect(DB::connection('pgsql')->table('analytics.link_clicks')->count())->toBe(2);
+});
+
+it('records clicks from different visitors on the same block independently', function () {
+    $tenant = createBrandTenant('dedup-multi-visitor');
+    $block = createLinkBlockFor($tenant);
+
+    $this->postJson('/api/public/analytics/clicks', [
+        'site_id' => $tenant->site->id,
+        'block_id' => $block->id,
+        'visitor_id' => (string) Str::uuid(),
+    ])->assertStatus(201);
+
+    $this->postJson('/api/public/analytics/clicks', [
+        'site_id' => $tenant->site->id,
+        'block_id' => $block->id,
+        'visitor_id' => (string) Str::uuid(),
+    ])->assertStatus(201);
+
+    expect(DB::connection('pgsql')->table('analytics.link_clicks')->count())->toBe(2);
+});

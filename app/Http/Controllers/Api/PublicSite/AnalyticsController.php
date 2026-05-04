@@ -140,6 +140,26 @@ class AnalyticsController extends ApiController
 
         $click = LinkClick::runForBlockForeignKey(
             function (string $blockColumn) use ($request, $data, $site, $block) {
+                // Dedup: return existing click if same visitor/session hit this block within 3 seconds.
+                $hasIdentifier = ! empty($data['visitor_id']) || ! empty($data['session_id']);
+                if ($hasIdentifier) {
+                    $duplicate = LinkClick::where($blockColumn, $block->id)
+                        ->where(function ($q) use ($data) {
+                            if (! empty($data['visitor_id'])) {
+                                $q->orWhere('visitor_id', $data['visitor_id']);
+                            }
+                            if (! empty($data['session_id'])) {
+                                $q->orWhere('session_id', $data['session_id']);
+                            }
+                        })
+                        ->where('occurred_at', '>=', now()->subSeconds(3))
+                        ->first();
+
+                    if ($duplicate) {
+                        return $duplicate;
+                    }
+                }
+
                 $click = new LinkClick([
                     'occurred_at' => now(),
                     'session_id' => $data['session_id'] ?? null,

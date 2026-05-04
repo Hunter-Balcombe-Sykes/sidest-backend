@@ -963,6 +963,30 @@ function createDocumentFor(Professional $pro, array $overrides = []): \App\Model
 }
 
 /**
+ * analytics.link_clicks — minimal columns for click dedup and analytics tests.
+ */
+function setupLinkClicksTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.link_clicks (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        site_id TEXT NULL,
+        block_id TEXT NULL,
+        occurred_at TEXT NULL,
+        session_id TEXT NULL,
+        visitor_id TEXT NULL,
+        ip_hash TEXT NULL,
+        user_agent TEXT NULL,
+        referrer TEXT NULL,
+        utm_source TEXT NULL,
+        utm_medium TEXT NULL,
+        utm_campaign TEXT NULL,
+        created_at TEXT NULL
+    )');
+}
+
+/**
  * site.site_subdomain_aliases — minimal columns for cache-invalidation paths
  * that iterate over historical aliases for a site.
  */
