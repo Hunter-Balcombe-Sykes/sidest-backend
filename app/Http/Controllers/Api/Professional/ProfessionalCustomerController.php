@@ -109,7 +109,7 @@ class ProfessionalCustomerController extends ApiController
     public function show(Request $request, Customer $customer)
     {
         $pro = $this->currentProfessional($request);
-        abort_unless($customer->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'view', $customer);
 
         $includeArchived = $request->boolean('include_archived');
         if (! $includeArchived && method_exists($customer, 'trashed') && $customer->trashed()) {
@@ -123,7 +123,7 @@ class ProfessionalCustomerController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($customer->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'update', $customer);
         if (method_exists($customer, 'trashed') && $customer->trashed()) {
             abort(404);
         }
@@ -138,7 +138,7 @@ class ProfessionalCustomerController extends ApiController
     public function destroy(Request $request, Customer $customer)
     {
         $pro = $this->currentProfessional($request);
-        abort_unless($customer->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'delete', $customer);
 
         if (! $customer->trashed()) {
             $customer->delete(); // soft delete (archive)
@@ -158,7 +158,7 @@ class ProfessionalCustomerController extends ApiController
     public function restore(Request $request, Customer $customer): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-        abort_unless($customer->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'update', $customer);
 
         if (method_exists($customer, 'trashed') && $customer->trashed()) {
             $customer->restore();

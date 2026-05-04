@@ -5,7 +5,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalEnquiryController;
 use App\Models\Core\Professional\Customer;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpKernel\Exception\HttpException;
+use Illuminate\Auth\Access\AuthorizationException;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();
@@ -72,8 +72,13 @@ it('customer show refuses a customer belonging to another professional', functio
     $req = tenantRequestAs($b);
     $customer = Customer::query()->findOrFail($customerId);
 
-    expect(fn () => app(ProfessionalCustomerController::class)->show($req, $customer))
-        ->toThrow(HttpException::class);
+    // Policy now throws AuthorizationException (404) instead of abort_unless HttpException.
+    try {
+        app(ProfessionalCustomerController::class)->show($req, $customer);
+        expect(false)->toBeTrue('Expected AuthorizationException');
+    } catch (AuthorizationException $e) {
+        expect($e->status())->toBe(404);
+    }
 });
 
 it('enquiry update refuses an enquiry belonging to another professional', function () {

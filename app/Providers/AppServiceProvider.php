@@ -35,6 +35,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Gate::policy(ProfessionalIntegration::class, IntegrationPolicy::class);
+        Gate::policy(\App\Models\Core\Professional\Customer::class, \App\Policies\CustomerPolicy::class);
 
         // Refuse to boot in production with throttling disabled — a misconfigured
         // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.

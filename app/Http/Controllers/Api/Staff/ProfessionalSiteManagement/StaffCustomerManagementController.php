@@ -68,7 +68,7 @@ class StaffCustomerManagementController extends ApiController
         // Professional::customers(). The explicit check survives a future refactor
         // that drops scopeBindings, and matches the pattern used by sibling staff
         // controllers (StaffServiceManagementController etc).
-        abort_unless($customer->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'view', $customer);
 
         $includeArchived = $request->boolean('include_archived');
 
@@ -84,7 +84,7 @@ class StaffCustomerManagementController extends ApiController
      */
     public function update(StaffUpdateCustomerRequest $request, Professional $professional, Customer $customer): JsonResponse
     {
-        abort_unless($customer->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'update', $customer);
 
         if ($customer->trashed()) {
             abort(404);
@@ -101,7 +101,7 @@ class StaffCustomerManagementController extends ApiController
      */
     public function destroy(Professional $professional, Customer $customer): JsonResponse
     {
-        abort_unless($customer->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'delete', $customer);
 
         if (! $customer->trashed()) {
             $customer->delete();
@@ -112,7 +112,7 @@ class StaffCustomerManagementController extends ApiController
 
     public function restore(Professional $professional, Customer $customer): JsonResponse
     {
-        abort_unless($customer->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'update', $customer);
 
         if ($customer->trashed()) {
             $customer->restore();
@@ -123,7 +123,7 @@ class StaffCustomerManagementController extends ApiController
 
     public function forceDestroy(Professional $professional, Customer $customer): JsonResponse
     {
-        abort_unless($customer->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'delete', $customer);
 
         $customer->forceDelete();
 

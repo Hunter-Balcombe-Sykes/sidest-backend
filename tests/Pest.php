@@ -696,3 +696,53 @@ function setupAffiliateProductSelectionsTable(): void
         updated_at TEXT NULL
     )');
 }
+
+/**
+ * core.customers — all columns nullable, mirrors the production schema.
+ */
+function setupCustomersTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.customers (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        email TEXT NULL,
+        phone TEXT NULL,
+        full_name TEXT NULL,
+        source TEXT NULL,
+        notes TEXT NULL,
+        external_id TEXT NULL,
+        marketing_opt_in_cached INTEGER NULL,
+        redacted_at TEXT NULL,
+        deleted_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
+ * Insert a Customer row for $pro and return the Eloquent model.
+ *
+ * @param  array<string, mixed>  $overrides
+ */
+function createCustomerFor(Professional $pro, array $overrides = []): \App\Models\Core\Professional\Customer
+{
+    setupCustomersTable();
+
+    $id = (string) \Illuminate\Support\Str::uuid();
+    $now = now()->toDateTimeString();
+
+    $row = array_merge([
+        'id' => $id,
+        'professional_id' => $pro->id,
+        'email' => 'customer-'.\Illuminate\Support\Str::random(6).'@example.test',
+        'full_name' => 'Test Customer',
+        'source' => 'manual',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ], $overrides);
+
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('core.customers')->insert($row);
+
+    return \App\Models\Core\Professional\Customer::query()->findOrFail($id);
+}

@@ -1,0 +1,101 @@
+<?php
+
+use App\Models\Core\Professional\Customer;
+use App\Models\Core\Professional\Professional;
+use App\Policies\CustomerPolicy;
+
+beforeEach(function () {
+    $this->policy = new CustomerPolicy;
+});
+
+// --- view ---
+
+it('allows view when the actor owns the customer', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $customer = new Customer(['professional_id' => 'pro-1']);
+
+    expect($this->policy->view($actor, $customer))->toBeTrue();
+});
+
+it('denies view with 404 when the actor does not own the customer', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $customer = new Customer(['professional_id' => 'pro-2']);
+
+    $result = $this->policy->view($actor, $customer);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
+});
+
+// --- create ---
+
+it('allows create when the actor owns the skeleton and is active', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $skeleton = new Customer(['professional_id' => 'pro-1']);
+
+    expect($this->policy->create($actor, $skeleton))->toBeTrue();
+});
+
+it('denies create with 423 when the actor is pending deletion', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'pending_deletion']);
+    $skeleton = new Customer(['professional_id' => 'pro-1']);
+
+    $result = $this->policy->create($actor, $skeleton);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(423);
+    expect($result->message())->toBe('Account is pending deletion.');
+});
+
+// --- update ---
+
+it('allows update when the actor owns the customer and is active', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $customer = new Customer(['professional_id' => 'pro-1']);
+
+    expect($this->policy->update($actor, $customer))->toBeTrue();
+});
+
+it('denies update with 404 when the actor does not own the customer', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $customer = new Customer(['professional_id' => 'pro-2']);
+
+    $result = $this->policy->update($actor, $customer);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
+});
+
+it('denies update with 423 when the actor is pending deletion', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'pending_deletion']);
+    $customer = new Customer(['professional_id' => 'pro-1']);
+
+    $result = $this->policy->update($actor, $customer);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(423);
+    expect($result->message())->toBe('Account is pending deletion.');
+});
+
+// --- delete (delegates to update) ---
+
+it('denies delete with 404 when the actor does not own the customer', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $customer = new Customer(['professional_id' => 'pro-2']);
+
+    $result = $this->policy->delete($actor, $customer);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
+});
+
+it('denies delete with 423 when the actor is pending deletion', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'pending_deletion']);
+    $customer = new Customer(['professional_id' => 'pro-1']);
+
+    $result = $this->policy->delete($actor, $customer);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(423);
+    expect($result->message())->toBe('Account is pending deletion.');
+});
