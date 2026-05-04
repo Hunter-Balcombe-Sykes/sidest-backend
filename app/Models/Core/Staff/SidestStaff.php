@@ -11,6 +11,10 @@ class SidestStaff extends BaseModel
 {
     use HasFactory, HasUuids;
 
+    const ROLE_SUPPORT = 'support';
+
+    const ROLE_ADMIN = 'admin';
+
     protected $table = 'core.sidest_staff';
 
     public $incrementing = false;
@@ -32,4 +36,9 @@ class SidestStaff extends BaseModel
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    public function isAdmin(): bool
+    {
+        return $this->role === self::ROLE_ADMIN;
+    }
 }

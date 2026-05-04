@@ -25,7 +25,7 @@ class EnsureSidestAdmin
             $staff = SidestStaff::query()->where('auth_user_id', $uid)->first();
         }
 
-        if (! $staff || $staff->role !== 'admin') {
+        if (! $staff || ! $staff->isAdmin()) {
             return response()->json(['message' => 'Admin access required'], 403);
         }
 

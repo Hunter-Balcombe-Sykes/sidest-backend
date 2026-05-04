@@ -31,7 +31,7 @@ class StaffDataExportController extends ApiController
         // send_to is validated by RequestStaffDataExportRequest; default is 'professional'.
         $sendTo = (string) $request->query('send_to', 'professional');
 
-        if ($sendTo === 'staff' && $staff->role !== 'admin') {
+        if ($sendTo === 'staff' && ! $staff->isAdmin()) {
             return $this->error('Only admin staff can receive exports directly.', 403);
         }
 
