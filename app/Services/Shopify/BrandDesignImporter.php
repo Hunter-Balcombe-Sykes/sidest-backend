@@ -2,9 +2,11 @@
 
 namespace App\Services\Shopify;
 
+use App\Exceptions\Shopify\ShopifyGraphQLException;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 
 // Imports the brand-design shape from Shopify for a single integration.
 //
@@ -173,12 +175,27 @@ class BrandDesignImporter
      */
     private function fetchBrand(string $shopDomain, string $accessToken, string $apiVersion): array
     {
-        $response = $this->client->graphql(
-            $shopDomain,
-            $accessToken,
-            $apiVersion,
-            self::SHOP_BRAND_QUERY,
-        );
+        try {
+            $response = $this->client->graphql(
+                $shopDomain,
+                $accessToken,
+                $apiVersion,
+                self::SHOP_BRAND_QUERY,
+            );
+        } catch (ShopifyGraphQLException $e) {
+            Log::warning('Brand query failed — brand data will be skipped (theme tokens still import).', [
+                'shop_domain' => $shopDomain,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'slogan' => null,
+                'logo' => [],
+                'squareLogo' => [],
+                'colors' => [],
+                'shop_gid' => null,
+            ];
+        }
 
         return [
             'slogan' => $response->json('data.shop.brand.slogan'),
