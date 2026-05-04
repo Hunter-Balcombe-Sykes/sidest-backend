@@ -209,9 +209,20 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
                 }
             }
 
-            // Publish collections to the app's sales channel so they're visible via Storefront API
+            // Publish collections so they're visible via the Storefront API.
+            // Embedded apps can't always publish to arbitrary publications — the
+            // mutation may be rejected at the GraphQL platform level. Collections
+            // and their handle metafields are still created; publishing failures
+            // are non-fatal so the affiliate catalog can work without it.
             if ($publicationId && ! empty($collectionGids)) {
-                $this->publishCollections($shopDomain, $accessToken, $apiVersion, $collectionGids, $publicationId);
+                try {
+                    $this->publishCollections($shopDomain, $accessToken, $apiVersion, $collectionGids, $publicationId);
+                } catch (\Throwable $e) {
+                    Log::warning('Collection publishing failed (non-fatal)', [
+                        'integration_id' => $this->integrationId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
             // Write collection handles to shop metafields
