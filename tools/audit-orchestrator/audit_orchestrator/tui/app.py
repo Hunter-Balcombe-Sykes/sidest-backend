@@ -127,7 +127,18 @@ class AuditApp(App):
 
         try:
             questions_dir = self.work_dir / "questions"
-            pending = list(questions_dir.glob("*.md")) if questions_dir.exists() else []
+            # A question is "pending" only if it doesn't yet have an answer
+            # appended. Once the runner consumes the answer (detected by
+            # "## Answer" in the file), the file stays on disk for history
+            # but should disappear from the pending count + summary.
+            pending = []
+            if questions_dir.exists():
+                for f in questions_dir.glob("*.md"):
+                    try:
+                        if "## Answer" not in f.read_text(encoding="utf-8"):
+                            pending.append(f)
+                    except Exception:
+                        pending.append(f)  # fallback: count it if unreadable
             qp = self.query_one(QuestionPanel)
             qp.pending_count = len(pending)
             if pending:
@@ -147,7 +158,17 @@ class AuditApp(App):
     def _handle_question_click(self) -> None:
         import re
         questions_dir = self.work_dir / "questions"
-        pending = list(questions_dir.glob("*.md"))
+        # Only open files without an answer yet — matches the panel's
+        # pending count (see _refresh_panels). Otherwise clicking the panel
+        # right after writing an answer via the file would re-open the modal
+        # for an already-answered question.
+        pending = []
+        for f in questions_dir.glob("*.md"):
+            try:
+                if "## Answer" not in f.read_text(encoding="utf-8"):
+                    pending.append(f)
+            except Exception:
+                pending.append(f)
         if not pending:
             return
         qfile = pending[0]
@@ -365,7 +386,7 @@ class AuditApp(App):
             )
 
         elif outcome == "awaiting_answer":
-            self._log_from_thread(f"{emoji} [blue]{item_id} → awaiting answer[/blue] — click question panel above")
+            self._log_from_thread(f"{emoji} [blue]{item_id} → awaiting answer[/blue] — click question panel below")
 
         elif outcome == "interrupted":
             # Pull the reason from state so the message reflects pause vs limit

@@ -38,7 +38,18 @@ class ModePicker(ModalScreen[str]):
 
 
 class QuestionModal(ModalScreen[str | None]):
-    """Show a pending question + accept the user's answer."""
+    """Show a pending question + accept the user's answer.
+
+    Layout: title + scrollable body + sticky input row + sticky button row.
+    The body scrolls internally so a long question can't push the buttons
+    off-screen (which used to hide the Cancel button entirely on multi-section
+    questions). Esc dismisses without touching the file — useful when the
+    answer was written via the file directly.
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "Close (no changes)", show=True),
+    ]
 
     def __init__(self, item_id: str, question_body: str) -> None:
         super().__init__()
@@ -48,15 +59,23 @@ class QuestionModal(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         yield Vertical(
             Static(f"Question for {self.item_id}", id="q-title"),
-            Static(self.question_body, id="q-body"),
-            Input(placeholder="Type your answer and press Enter to submit...", id="q-input"),
+            VerticalScroll(
+                Static(self.question_body, id="q-body"),
+                id="q-body-scroll",
+            ),
+            Input(placeholder="Type your answer and press Enter to submit (or Esc to close)…", id="q-input"),
             Horizontal(
                 Button("Submit", id="q-submit", variant="primary"),
                 Button("Skip Item", id="q-skip"),
                 Button("Cancel", id="q-cancel"),
+                id="q-buttons",
             ),
             id="q-dialog",
         )
+
+    def action_dismiss_cancel(self) -> None:
+        """Esc → close modal without writing or deleting anything."""
+        self.dismiss(None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "q-submit":
