@@ -60,9 +60,11 @@ function callReorderController(Professional $professional, array $body): \Illumi
     $formRequest->validateResolved();
 
     $mediaService = Mockery::mock(ImageVariantService::class);
+    $videoVariant = Mockery::mock(\App\Services\Media\VideoVariantService::class);
     $controller = new ProfessionalUploadController(
         $mediaService,
         new BrandDesignMediaService($mediaService),
+        $videoVariant,
     );
 
     return $controller->reorder($formRequest);

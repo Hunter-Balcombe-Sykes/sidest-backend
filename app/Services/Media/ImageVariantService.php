@@ -23,6 +23,9 @@ class ImageVariantService
 {
     private const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 
+    /** Safe extensions for R2 object keys — anything else falls back to the canonical default. */
+    private const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'mp4', 'mov', 'webm'];
+
     /* ------------------------------------------------------------------ */
     /*  Public API */
     /* ------------------------------------------------------------------ */
@@ -194,6 +197,17 @@ class ImageVariantService
     }
 
     /**
+     * Normalize a client-supplied extension against the allowlist.
+     * Falls back to $default if the value is empty or not on the list.
+     */
+    public function safeExtension(string $clientExt, string $default = 'jpg'): string
+    {
+        $normalized = strtolower(ltrim($clientExt, '.'));
+
+        return in_array($normalized, self::ALLOWED_EXTENSIONS, true) ? $normalized : $default;
+    }
+
+    /**
      * Store the original upload to a location on the media disk
      * (kept for disaster-recovery / re-processing).
      *
@@ -201,7 +215,7 @@ class ImageVariantService
      */
     public function storeOriginal(UploadedFile $file, string $basePath): string
     {
-        $ext = $file->getClientOriginalExtension() ?: 'jpg';
+        $ext = $this->safeExtension($file->getClientOriginalExtension() ?? '', 'jpg');
         $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
         $path = "{$basePath}/original_{$hash}.{$ext}";
 

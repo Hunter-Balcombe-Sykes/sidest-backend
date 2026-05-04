@@ -124,8 +124,9 @@ function makeMockedUploadController(): ProfessionalUploadController
     $mediaService->shouldReceive('resolvedDiskName')->andReturn('media');
 
     $brandDesign = new \App\Services\Media\BrandDesignMediaService($mediaService);
+    $videoVariant = Mockery::mock(\App\Services\Media\VideoVariantService::class);
 
-    return new ProfessionalUploadController($mediaService, $brandDesign);
+    return new ProfessionalUploadController($mediaService, $brandDesign, $videoVariant);
 }
 
 it('stores a brand logo in the design pool', function () {

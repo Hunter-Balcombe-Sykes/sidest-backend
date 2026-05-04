@@ -17,6 +17,7 @@ use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\BrandDesignMediaService;
 use App\Services\Media\ImageVariantService;
+use App\Services\Media\VideoVariantService;
 use App\Services\Professional\BrandStatusService;
 use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Http\JsonResponse;
@@ -36,6 +37,7 @@ class ProfessionalUploadController extends ApiController
     public function __construct(
         private readonly ImageVariantService $mediaService,
         private readonly BrandDesignMediaService $brandDesign,
+        private readonly VideoVariantService $videoVariant,
     ) {}
 
     /**
@@ -79,6 +81,18 @@ class ProfessionalUploadController extends ApiController
             return $this->error(
                 ucfirst($pool)." media limit reached (max {$maxItems}).", 422
             );
+        }
+
+        // --- Probe video container before touching DB or storage ---
+        // Validates the container with ffprobe while the file is still in PHP's temp dir.
+        // Rejects unreadable containers or files with no video stream immediately,
+        // before we spend a DB row, R2 storage, or a worker queue slot on them.
+        if ($isVideo) {
+            try {
+                $this->videoVariant->probeAndValidate($file->getRealPath());
+            } catch (\RuntimeException $e) {
+                return $this->error('Invalid video file: '.$e->getMessage(), 422);
+            }
         }
 
         // --- Create SiteMedia row (with advisory lock for race safety) ---
@@ -138,7 +152,7 @@ class ProfessionalUploadController extends ApiController
 
             if ($isVideo) {
                 // Stream large video files to avoid loading full content into memory.
-                $ext = $file->getClientOriginalExtension() ?: 'mp4';
+                $ext = $this->mediaService->safeExtension($file->getClientOriginalExtension() ?? '', 'mp4');
                 $hash = substr(hash_file('sha256', $file->getRealPath()), 0, 16);
                 $path = "{$basePath}/original_{$hash}.{$ext}";
                 $stream = fopen($file->getRealPath(), 'rb');

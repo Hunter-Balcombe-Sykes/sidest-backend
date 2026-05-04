@@ -73,6 +73,46 @@ class VideoVariantService
     }
 
     /**
+     * Probe a local file and validate it contains at least one video stream
+     * and does not exceed the configured maximum duration.
+     *
+     * Call this in the upload controller before storing to R2 so malformed
+     * containers and over-length videos are rejected at the HTTP boundary,
+     * not on the worker.
+     *
+     * @return array<string, mixed> Raw ffprobe data (reuse to avoid a second probe).
+     * @throws \RuntimeException if the container is unreadable, has no video stream, or exceeds max duration.
+     */
+    public function probeAndValidate(string $localPath): array
+    {
+        $probe = $this->probe($localPath);
+
+        $hasVideoStream = false;
+        foreach ($probe['streams'] ?? [] as $stream) {
+            if (($stream['codec_type'] ?? '') === 'video') {
+                $hasVideoStream = true;
+                break;
+            }
+        }
+
+        if (! $hasVideoStream) {
+            throw new \RuntimeException('File does not contain a recognisable video stream.');
+        }
+
+        $durationMs = $this->extractDurationMs($probe);
+        $maxDurSec = (int) config('sidest.video_max_duration_seconds', 300);
+
+        if ($durationMs > $maxDurSec * 1000) {
+            $actualSec = (int) round($durationMs / 1000);
+            throw new \RuntimeException(
+                "Video is too long ({$actualSec}s). Maximum allowed duration is {$maxDurSec}s."
+            );
+        }
+
+        return $probe;
+    }
+
+    /**
      * Process a video original into all configured artifacts.
      *
      * @throws \RuntimeException on unrecoverable processing errors
@@ -405,10 +445,21 @@ class VideoVariantService
         $lines = ['#EXTM3U'];
 
         foreach ($variantDefs as $variantKey => $def) {
+            // Guard against config values containing newlines or special chars
+            // that would corrupt the line-based M3U8 format.
+            if (! preg_match('/^[a-zA-Z0-9_-]+$/', (string) $variantKey)) {
+                throw new \RuntimeException("Invalid video variant key: {$variantKey}");
+            }
+
             $videoBitrate = (int) ($def['video_bitrate_kbps'] ?? 2000);
             $audioBitrate = (int) ($def['audio_bitrate_kbps'] ?? 128);
             $bandwidth = ($videoBitrate + $audioBitrate) * 1000;
             $resolution = strtoupper((string) ($def['resolution'] ?? '1280x720'));
+
+            // Resolution must be WxH (digits only) — e.g. 1280x720, 1920X1080.
+            if (! preg_match('/^\d+X\d+$/', $resolution)) {
+                throw new \RuntimeException("Invalid video resolution for variant '{$variantKey}': {$resolution}");
+            }
 
             $lines[] = "#EXT-X-STREAM-INF:BANDWIDTH={$bandwidth},RESOLUTION={$resolution}";
             $lines[] = "{$variantKey}/playlist.m3u8";

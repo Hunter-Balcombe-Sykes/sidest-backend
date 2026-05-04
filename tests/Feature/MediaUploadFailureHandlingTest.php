@@ -10,6 +10,7 @@ use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Media\ImageVariantService;
+use App\Services\Media\VideoVariantService;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -60,7 +61,8 @@ it('dispatches video cleanup with directory base path when deleting media', func
     app()->instance('request', $request);
 
     $mediaService = Mockery::mock(ImageVariantService::class);
-    $controller = new ProfessionalUploadController($mediaService, new \App\Services\Media\BrandDesignMediaService($mediaService));
+    $videoVariant = Mockery::mock(VideoVariantService::class);
+    $controller = new ProfessionalUploadController($mediaService, new \App\Services\Media\BrandDesignMediaService($mediaService), $videoVariant);
     $siteImage = SiteMedia::query()->findOrFail($mediaId);
 
     // Controller signature was changed to (Request, SiteMedia) — test was
@@ -111,8 +113,13 @@ it('returns 503 and soft-deletes media when video dispatch fails', function () {
 
     $mediaService = Mockery::mock(ImageVariantService::class);
     $mediaService->shouldReceive('resolvedDiskName')->andReturn('local');
+    $mediaService->shouldReceive('safeExtension')->andReturn('mp4');
 
-    $controller = new ProfessionalUploadController($mediaService, new \App\Services\Media\BrandDesignMediaService($mediaService));
+    $videoVariant = Mockery::mock(VideoVariantService::class);
+    // Probe passes so we reach the dispatch step (where the 503 originates).
+    $videoVariant->shouldReceive('probeAndValidate')->once()->andReturn([]);
+
+    $controller = new ProfessionalUploadController($mediaService, new \App\Services\Media\BrandDesignMediaService($mediaService), $videoVariant);
     $response = $controller->upload($request);
 
     expect($response->getStatusCode())->toBe(503);
@@ -124,6 +131,120 @@ it('returns 503 and soft-deletes media when video dispatch fails', function () {
     expect($media->trashed())->toBeTrue();
     expect(SiteMedia::query()->count())->toBe(0);
     expect(Storage::disk('local')->exists($media->path))->toBeFalse();
+});
+
+it('returns 422 and creates no DB row when probe finds no video stream', function () {
+    [$professional] = createProfessionalAndSiteForMediaUploadTests();
+
+    config([
+        'queue.default' => 'sync',
+        'sidest.video_uploads_enabled' => true,
+    ]);
+
+    $video = UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4');
+    $baseRequest = Request::create('/api/uploads', 'POST', [
+        'pool' => 'gallery',
+        'alt_text' => 'Clip',
+    ], [], ['video' => $video]);
+
+    /** @var UploadImageRequest $request */
+    $request = UploadImageRequest::createFromBase($baseRequest);
+    $request->attributes->set('professional', $professional);
+
+    $validator = Mockery::mock(Validator::class);
+    $validator->shouldReceive('validated')->andReturn(['pool' => 'gallery', 'alt_text' => 'Clip']);
+    $request->setValidator($validator);
+
+    $mediaService = Mockery::mock(ImageVariantService::class);
+
+    $videoVariant = Mockery::mock(VideoVariantService::class);
+    $videoVariant->shouldReceive('probeAndValidate')
+        ->once()
+        ->andThrow(new \RuntimeException('File does not contain a recognisable video stream.'));
+
+    $controller = new ProfessionalUploadController($mediaService, new \App\Services\Media\BrandDesignMediaService($mediaService), $videoVariant);
+    $response = $controller->upload($request);
+
+    expect($response->getStatusCode())->toBe(422);
+    expect($response->getData(true)['message'] ?? null)
+        ->toContain('Invalid video file');
+    expect(SiteMedia::query()->count())->toBe(0);
+});
+
+it('returns 422 and creates no DB row when video exceeds maximum duration', function () {
+    [$professional] = createProfessionalAndSiteForMediaUploadTests();
+
+    config([
+        'queue.default' => 'sync',
+        'sidest.video_uploads_enabled' => true,
+    ]);
+
+    $video = UploadedFile::fake()->create('long.mp4', 512, 'video/mp4');
+    $baseRequest = Request::create('/api/uploads', 'POST', [
+        'pool' => 'gallery',
+        'alt_text' => 'Long clip',
+    ], [], ['video' => $video]);
+
+    /** @var UploadImageRequest $request */
+    $request = UploadImageRequest::createFromBase($baseRequest);
+    $request->attributes->set('professional', $professional);
+
+    $validator = Mockery::mock(Validator::class);
+    $validator->shouldReceive('validated')->andReturn(['pool' => 'gallery', 'alt_text' => 'Long clip']);
+    $request->setValidator($validator);
+
+    $mediaService = Mockery::mock(ImageVariantService::class);
+
+    $videoVariant = Mockery::mock(VideoVariantService::class);
+    $videoVariant->shouldReceive('probeAndValidate')
+        ->once()
+        ->andThrow(new \RuntimeException('Video is too long (400s). Maximum allowed duration is 300s.'));
+
+    $controller = new ProfessionalUploadController($mediaService, new \App\Services\Media\BrandDesignMediaService($mediaService), $videoVariant);
+    $response = $controller->upload($request);
+
+    expect($response->getStatusCode())->toBe(422);
+    expect($response->getData(true)['message'] ?? null)
+        ->toContain('Invalid video file');
+    expect(SiteMedia::query()->count())->toBe(0);
+});
+
+it('returns 422 and creates no DB row when ffprobe cannot parse the container', function () {
+    [$professional] = createProfessionalAndSiteForMediaUploadTests();
+
+    config([
+        'queue.default' => 'sync',
+        'sidest.video_uploads_enabled' => true,
+    ]);
+
+    $video = UploadedFile::fake()->create('corrupt.mp4', 512, 'video/mp4');
+    $baseRequest = Request::create('/api/uploads', 'POST', [
+        'pool' => 'gallery',
+        'alt_text' => 'Bad file',
+    ], [], ['video' => $video]);
+
+    /** @var UploadImageRequest $request */
+    $request = UploadImageRequest::createFromBase($baseRequest);
+    $request->attributes->set('professional', $professional);
+
+    $validator = Mockery::mock(Validator::class);
+    $validator->shouldReceive('validated')->andReturn(['pool' => 'gallery', 'alt_text' => 'Bad file']);
+    $request->setValidator($validator);
+
+    $mediaService = Mockery::mock(ImageVariantService::class);
+
+    $videoVariant = Mockery::mock(VideoVariantService::class);
+    $videoVariant->shouldReceive('probeAndValidate')
+        ->once()
+        ->andThrow(new \RuntimeException('ffprobe failed (exit 1): Invalid data found when processing input'));
+
+    $controller = new ProfessionalUploadController($mediaService, new \App\Services\Media\BrandDesignMediaService($mediaService), $videoVariant);
+    $response = $controller->upload($request);
+
+    expect($response->getStatusCode())->toBe(422);
+    expect($response->getData(true)['message'] ?? null)
+        ->toContain('Invalid video file');
+    expect(SiteMedia::query()->count())->toBe(0);
 });
 
 function bootstrapMediaUploadFailureSchema(): void
