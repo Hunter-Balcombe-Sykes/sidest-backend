@@ -141,7 +141,7 @@
 
 ## P3 — Nice to have
 
-- [ ] **#AUTH-5** · P3 — `SitePolicyTest` missing coverage for 3 of 7 registered models and the spoofing-defense path
+- [x] **#AUTH-5** · P3 — `SitePolicyTest` missing coverage for 3 of 7 registered models and the spoofing-defense path
     - **Where:** tests/Unit/Policies/SitePolicyTest.php (covers Site, SiteMedia, Block; missing SiteSubdomainAlias, Enquiry, LeadSubmission, and the `setRelation` spoofing test)
     - **Affects:** Test confidence. The policy ships with a known-correct ownership-resolution algorithm and a non-obvious spoofing defense (the resource's `site_id` must match the preloaded site's `id`) — neither is exercised for half the models registered against it.
     - **Effort:** S (~1h)

@@ -1,9 +1,12 @@
 <?php
 
+use App\Models\Analytics\LeadSubmission;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
+use App\Models\Core\Site\Enquiry;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
+use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Policies\SitePolicy;
 
 beforeEach(function () {
@@ -142,6 +145,101 @@ describe('Block', function () {
         $block = new Block(['professional_id' => 'pro-other']);
 
         $result = $this->policy->view($actor, $block);
+
+        expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+        expect($result->status())->toBe(404);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// SiteSubdomainAlias — ownership resolved via preloaded site relation (same as SiteMedia)
+// ---------------------------------------------------------------------------
+
+describe('SiteSubdomainAlias', function () {
+    it('allows view when the site relation is owned by the actor', function () {
+        $actor = (new Professional)->forceFill(['id' => 'pro-actor', 'status' => 'active']);
+        $site = (new Site)->forceFill(['id' => 'site-1', 'professional_id' => 'pro-actor']);
+        $alias = new SiteSubdomainAlias(['site_id' => 'site-1']);
+        $alias->setRelation('site', $site);
+
+        expect($this->policy->view($actor, $alias))->toBeTrue();
+    });
+
+    it('denies view with 404 when the site relation belongs to a different owner', function () {
+        $actor = (new Professional)->forceFill(['id' => 'pro-actor', 'status' => 'active']);
+        $site = (new Site)->forceFill(['id' => 'site-2', 'professional_id' => 'pro-other']);
+        $alias = new SiteSubdomainAlias(['site_id' => 'site-2']);
+        $alias->setRelation('site', $site);
+
+        $result = $this->policy->view($actor, $alias);
+
+        expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+        expect($result->status())->toBe(404);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Enquiry — denormalized professional_id (same pathway as Block)
+// ---------------------------------------------------------------------------
+
+describe('Enquiry', function () {
+    it('allows view when the actor owns the enquiry', function () {
+        $actor = (new Professional)->forceFill(['id' => 'pro-actor', 'status' => 'active']);
+        $enquiry = new Enquiry(['professional_id' => 'pro-actor']);
+
+        expect($this->policy->view($actor, $enquiry))->toBeTrue();
+    });
+
+    it('denies view with 404 when the actor does not own the enquiry', function () {
+        $actor = (new Professional)->forceFill(['id' => 'pro-actor', 'status' => 'active']);
+        $enquiry = new Enquiry(['professional_id' => 'pro-other']);
+
+        $result = $this->policy->view($actor, $enquiry);
+
+        expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+        expect($result->status())->toBe(404);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// LeadSubmission — denormalized professional_id (same pathway as Block)
+// ---------------------------------------------------------------------------
+
+describe('LeadSubmission', function () {
+    it('allows view when the actor owns the lead submission', function () {
+        $actor = (new Professional)->forceFill(['id' => 'pro-actor', 'status' => 'active']);
+        $lead = new LeadSubmission(['professional_id' => 'pro-actor']);
+
+        expect($this->policy->view($actor, $lead))->toBeTrue();
+    });
+
+    it('denies view with 404 when the actor does not own the lead submission', function () {
+        $actor = (new Professional)->forceFill(['id' => 'pro-actor', 'status' => 'active']);
+        $lead = new LeadSubmission(['professional_id' => 'pro-other']);
+
+        $result = $this->policy->view($actor, $lead);
+
+        expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+        expect($result->status())->toBe(404);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Spoofing defense — injected site relation whose id doesn't match resource's site_id
+// ---------------------------------------------------------------------------
+
+describe('spoofing defense', function () {
+    // The policy cross-checks resource->getAttributes()['site_id'] against the
+    // preloaded site's id. If an attacker injects a relation to their own site
+    // on a resource they don't own, the site_id mismatch fires and denies access.
+    it('denies view when injected site relation id does not match resource site_id', function () {
+        $actor = (new Professional)->forceFill(['id' => 'pro-attacker', 'status' => 'active']);
+        $attackerSite = (new Site)->forceFill(['id' => 'site-attacker', 'professional_id' => 'pro-attacker']);
+        // Resource belongs to a different site, but attacker injects their own site relation
+        $media = new SiteMedia(['site_id' => 'site-real']);
+        $media->setRelation('site', $attackerSite);
+
+        $result = $this->policy->view($actor, $media);
 
         expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
         expect($result->status())->toBe(404);
