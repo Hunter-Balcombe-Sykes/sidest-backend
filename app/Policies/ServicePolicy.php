@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Model;
  *
  * Both models carry professional_id directly (Shape A — simple direct ownership).
  * Denials on route-bound resources return 404 to avoid leaking existence to non-owners.
+ * Uses `Model` for parameter types to cover both Service and ServiceCategory with one policy class —
+ * narrowing to concrete types would require separate policies.
  */
 class ServicePolicy extends BasePolicy
 {

@@ -85,6 +85,7 @@ class StaffServiceManagementController extends ApiController
 
     public function store(StaffStoreServiceRequest $request, Professional $professional): JsonResponse
     {
+        $this->authorizeForUser($professional, 'create', new Service(['professional_id' => $professional->id]));
         $data = $request->validated();
 
         $this->assertCategoryBelongsToProfessional($professional->id, $data['category_id'] ?? null);

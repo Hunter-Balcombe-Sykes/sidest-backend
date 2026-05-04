@@ -155,6 +155,30 @@ it('blocks a non-owner from deleting another tenants service category with 404',
     }
 });
 
+it('blocks a pending-deletion owner from creating a service with 423', function () {
+    $owner = createTenant('pro-pending-create-svc');
+    DB::connection('pgsql')->table('core.professionals')->where('id', $owner->id)->update([
+        'status' => 'pending_deletion',
+    ]);
+    $owner->refresh();
+
+    $req = tenantRequestAs($owner, [
+        'name' => 'Test Service',
+        'duration_minutes' => 30,
+        'price' => 50,
+    ], 'POST');
+
+    try {
+        app(\App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController::class)->store(
+            \App\Http\Requests\Api\Professional\Services\StoreServiceRequest::createFrom($req)
+        );
+        expect(false)->toBeTrue('Expected AuthorizationException');
+    } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+        expect($e->status())->toBe(423);
+        expect($e->getMessage())->toBe('Account is pending deletion.');
+    }
+});
+
 it('blocks a pending-deletion owner from updating a service category with 423', function () {
     $owner = createTenant('cat-pending-update');
     DB::connection('pgsql')->table('core.professionals')->where('id', $owner->id)->update([

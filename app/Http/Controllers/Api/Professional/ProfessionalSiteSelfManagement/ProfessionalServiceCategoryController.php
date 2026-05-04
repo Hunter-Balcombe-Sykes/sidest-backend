@@ -48,6 +48,7 @@ class ProfessionalServiceCategoryController extends ApiController
     public function store(StoreServiceCategoryRequest $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeForUser($pro, 'create', new ServiceCategory(['professional_id' => $pro->id]));
         $data = $request->validated();
 
         $category = DB::transaction(function () use ($pro, $data) {

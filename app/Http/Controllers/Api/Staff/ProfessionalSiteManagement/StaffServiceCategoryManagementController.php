@@ -43,6 +43,7 @@ class StaffServiceCategoryManagementController extends ApiController
 
     public function store(StaffStoreServiceCategoryRequest $request, Professional $professional): JsonResponse
     {
+        $this->authorizeForUser($professional, 'create', new ServiceCategory(['professional_id' => $professional->id]));
         $data = $request->validated();
 
         $category = DB::transaction(function () use ($professional, $data) {

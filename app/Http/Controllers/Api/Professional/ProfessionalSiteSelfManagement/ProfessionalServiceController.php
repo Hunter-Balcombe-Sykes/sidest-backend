@@ -111,6 +111,7 @@ class ProfessionalServiceController extends ApiController
     public function store(StoreServiceRequest $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
+        $this->authorizeForUser($pro, 'create', new Service(['professional_id' => $pro->id]));
         $data = $request->validated();
 
         $this->assertCategoryBelongsToProfessional($pro->id, $data['category_id'] ?? null);
