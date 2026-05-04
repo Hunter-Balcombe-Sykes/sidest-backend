@@ -30,17 +30,27 @@ class StaffCommissionPayoutController extends ApiController
     /**
      * GET /staff/commission-payouts
      *
-     * List all payouts platform-wide. Query params: status (pending|processing|completed|failed|...), per_page (default 25, max 100).
+     * List all payouts platform-wide. Query params:
+     *   status            — pending|processing|completed|failed|...
+     *   needs_manual_refund — true|false (filter for stuck double-failure cases)
+     *   per_page          — default 25, max 100
      */
     public function index(Request $request): JsonResponse
     {
         $perPage = $this->normalizePerPage($request, 25, 100);
         $status = $request->query('status');
+        $needsManualRefund = $request->query('needs_manual_refund');
 
         $query = DB::table('commerce.commission_payouts')->orderByDesc('created_at');
 
         if (is_string($status) && $status !== '') {
             $query->where('status', $status);
+        }
+
+        if ($needsManualRefund === 'true') {
+            $query->where('needs_manual_refund', true);
+        } elseif ($needsManualRefund === 'false') {
+            $query->where('needs_manual_refund', false);
         }
 
         return $this->paginated($query->paginate($perPage));
@@ -53,6 +63,9 @@ class StaffCommissionPayoutController extends ApiController
      * are retryable — `completed` / `collecting` / `collected` / `transferring`
      * return 422.
      *
+     * Payouts with needs_manual_refund=true must be acknowledged first via
+     * POST /staff/commission-payouts/{payout}/acknowledge-manual-refund.
+     *
      * The retry runs synchronously: by the time the response comes back, the
      * batch has either completed, moved back to pending (with a new failure
      * code), or failed again. The refreshed state is in the response so staff
@@ -64,6 +77,7 @@ class StaffCommissionPayoutController extends ApiController
      *                      status: 'completed'|'pending'|'failed'|...,
      *                      failure_code: string|null,
      *                      failure_reason: string|null,
+     *                      needs_manual_refund: bool,
      *                      processed_at: string|null,
      *                      net_payout_cents: int,
      *                      currency_code: string
@@ -75,6 +89,15 @@ class StaffCommissionPayoutController extends ApiController
         if (! in_array($payout->status, ['failed', 'pending'], true)) {
             return $this->error(
                 "Payout is in status '{$payout->status}' and cannot be retried. Only 'failed' or 'pending' batches are retryable.",
+                422
+            );
+        }
+
+        // The auto-refund failed, so the brand may still be charged. Staff must
+        // verify in Stripe and call the acknowledge endpoint before retrying.
+        if ($payout->needs_manual_refund) {
+            return $this->error(
+                'This payout requires manual refund verification. Confirm the brand has been refunded in Stripe, then call POST /staff/commission-payouts/{payout}/acknowledge-manual-refund before retrying.',
                 422
             );
         }
@@ -94,9 +117,55 @@ class StaffCommissionPayoutController extends ApiController
             'status' => $payout->status,
             'failure_code' => $payout->failure_code,
             'failure_reason' => $payout->failure_reason,
+            'needs_manual_refund' => (bool) $payout->needs_manual_refund,
             'processed_at' => $payout->processed_at?->toIso8601String(),
             'net_payout_cents' => (int) $payout->net_payout_cents,
             'currency_code' => (string) $payout->currency_code,
+        ]);
+    }
+
+    /**
+     * POST /staff/commission-payouts/{payout}/acknowledge-manual-refund
+     *
+     * Staff acknowledges they have manually issued (or confirmed the absence of)
+     * the Stripe refund for a payout where the auto-refund failed after a transfer
+     * failure. This clears the needs_manual_refund block and makes the payout
+     * retryable via the /retry endpoint.
+     *
+     * The stripe_payment_intent_id is cleared so the retry creates a fresh
+     * PaymentIntent — reusing the same PI after a manual refund would hit
+     * Stripe's 24h idempotency window and return the already-refunded intent.
+     *
+     * @return JsonResponse {
+     *                      data: {
+     *                      id: string,
+     *                      status: string,
+     *                      failure_code: string|null,
+     *                      needs_manual_refund: false
+     *                      }
+     *                      }
+     */
+    public function acknowledgeManualRefund(Request $request, CommissionPayout $payout): JsonResponse
+    {
+        if (! $payout->needs_manual_refund) {
+            return $this->error('This payout does not have a pending manual refund flag.', 422);
+        }
+
+        $payout->forceFill([
+            'needs_manual_refund' => false,
+            // failure_code stays 'transfer_failed_refund_needed' → change to
+            // 'transfer_failed' so retryPayout() no longer has a code-based block.
+            'failure_code' => 'transfer_failed',
+            // Clear PI so retry creates a fresh PaymentIntent (avoids Stripe
+            // returning the already-refunded PI within the 24h idempotency TTL).
+            'stripe_payment_intent_id' => null,
+        ])->save();
+
+        return $this->success([
+            'id' => $payout->id,
+            'status' => $payout->status,
+            'failure_code' => $payout->failure_code,
+            'needs_manual_refund' => false,
         ]);
     }
 }

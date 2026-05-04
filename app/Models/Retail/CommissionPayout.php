@@ -30,6 +30,7 @@ class CommissionPayout extends BaseModel
         'charge_cents' => 'integer',
         'ledger_entry_count' => 'integer',
         'retry_count' => 'integer',
+        'needs_manual_refund' => 'boolean',
         'eligible_after' => 'datetime',
         'processed_at' => 'datetime',
         'void_at' => 'datetime',

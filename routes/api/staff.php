@@ -208,6 +208,10 @@ Route::prefix('staff')
         // professional would be misleading.
         Route::post('/commission-payouts/{payout}/retry', [StaffCommissionPayoutController::class, 'retry'])
             ->whereUuid('payout');
+        // Acknowledge a manual Stripe refund after double-failure (transfer failed + auto-refund failed).
+        // Staff must call this before /retry is unblocked for the payout.
+        Route::post('/commission-payouts/{payout}/acknowledge-manual-refund', [StaffCommissionPayoutController::class, 'acknowledgeManualRefund'])
+            ->whereUuid('payout');
 
         // Expire a stuck invite (admin only)
         Route::delete('/professionals/{professional}/invites/{invite}', [StaffInviteController::class, 'cancel'])

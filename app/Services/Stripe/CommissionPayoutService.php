@@ -26,12 +26,16 @@ class CommissionPayoutService
 
     private int $minHoldDays;
 
+    private int $gracePeriodDays;
+
     public function __construct(?StripeClient $stripe = null)
     {
         $this->stripe = $stripe ?? new StripeClient(config('services.stripe.secret_key'));
         $this->platformFeePercent = config('sidest.store.platform_fee_percent', 3);
         $this->systemHoldDays = max(0, (int) config('sidest.store.payout_hold_days', 7));
         $this->minHoldDays = (int) config('sidest.store.min_payout_hold_days', 7);
+        // Clamp to [1, 365] — values outside this range produce nonsensical void_at timestamps.
+        $this->gracePeriodDays = max(1, min(365, (int) config('sidest.store.grace_period_days', 60)));
     }
 
     /**
@@ -204,8 +208,6 @@ class CommissionPayoutService
             // cancels this payout and voids its ledger entries.
             // grace_period_days lives in config/sidest.php so ops can tune
             // the policy without a code release.
-            $graceDays = (int) config('sidest.store.grace_period_days', 60);
-
             $payout = CommissionPayout::forceCreate([
                 'brand_professional_id' => $brandId,
                 'affiliate_professional_id' => $affiliateId,
@@ -216,7 +218,7 @@ class CommissionPayoutService
                 'currency_code' => strtoupper($currency),
                 'ledger_entry_count' => $entries->count(),
                 'eligible_after' => $cutoff,
-                'void_at' => now()->addDays($graceDays),
+                'void_at' => DB::raw("NOW() + INTERVAL '{$this->gracePeriodDays} days'"),
                 'funding_source' => null,
             ]);
 
@@ -486,6 +488,7 @@ class CommissionPayoutService
                 } catch (\Throwable $refundEx) {
                     // Auto-refund failed — the brand may still be charged. Flag for manual resolution.
                     $failureCode = 'transfer_failed_refund_needed';
+                    $payout->forceFill(['needs_manual_refund' => true])->save();
                     Log::error('Auto-refund after transfer failure failed — manual action required', [
                         'payout_id' => $payout->id,
                         'payment_intent_id' => $payout->stripe_payment_intent_id,
@@ -642,6 +645,7 @@ class CommissionPayoutService
             'status' => $resumeStatus,
             'failure_code' => null,
             'failure_reason' => null,
+            'needs_manual_refund' => false,
             'retry_count' => ($payout->retry_count ?? 0) + 1,
         ])->save();
 
