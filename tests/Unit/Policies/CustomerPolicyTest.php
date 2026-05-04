@@ -36,6 +36,13 @@ it('allows create when the actor owns the skeleton and is active', function () {
     expect($this->policy->create($actor, $skeleton))->toBeTrue();
 });
 
+it('denies create as false (not 404) when the skeleton targets another professional', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $skeleton = new Customer(['professional_id' => 'pro-other']);
+
+    expect($this->policy->create($actor, $skeleton))->toBeFalse();
+});
+
 it('denies create with 423 when the actor is pending deletion', function () {
     $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'pending_deletion']);
     $skeleton = new Customer(['professional_id' => 'pro-1']);
@@ -78,6 +85,13 @@ it('denies update with 423 when the actor is pending deletion', function () {
 });
 
 // --- delete (delegates to update) ---
+
+it('allows delete when the actor owns the customer', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $customer = new Customer(['professional_id' => 'pro-1']);
+
+    expect($this->policy->delete($actor, $customer))->toBeTrue();
+});
 
 it('denies delete with 404 when the actor does not own the customer', function () {
     $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
