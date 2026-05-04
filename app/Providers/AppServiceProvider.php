@@ -55,6 +55,11 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Professional\WalletCurrencySwitchAudit::class, \App\Policies\ProfessionalSelfPolicy::class);
         Gate::policy(\App\Models\Core\Professional\ProfessionalDeletionAuditEntry::class, \App\Policies\ProfessionalSelfPolicy::class);
         Gate::policy(\App\Models\Billing\Subscription::class, \App\Policies\SubscriptionPolicy::class);
+        Gate::policy(\App\Models\Core\Notifications\Notification::class, \App\Policies\NotificationPolicy::class);
+        Gate::policy(\App\Models\Core\Notifications\NotificationEmailPreference::class, \App\Policies\NotificationPolicy::class);
+        Gate::policy(\App\Models\Core\Notifications\NotificationEmailPolicy::class, \App\Policies\NotificationPolicy::class);
+        Gate::policy(\App\Models\Core\Notifications\NotificationReceipt::class, \App\Policies\NotificationPolicy::class);
+        Gate::policy(\App\Models\Core\Notifications\EmailSubscription::class, \App\Policies\NotificationPolicy::class);
 
         // Refuse to boot in production with throttling disabled — a misconfigured
         // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.

@@ -2,9 +2,9 @@
 
 use App\Http\Controllers\Api\Professional\Notifications\NotificationController;
 use App\Models\Core\Notifications\Notification;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpKernel\Exception\HttpException;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();
@@ -58,9 +58,9 @@ it('notification markRead returns 404 when the notification targets another prof
     $notification = Notification::query()->findOrFail($notifId);
     $req = tenantRequestAs($b, [], 'POST');
 
-    // assertVisibleToPro() aborts 404 when professional_id is set and does not match.
+    // NotificationPolicy denies with 404 when professional_id does not match the actor.
     expect(fn () => app(NotificationController::class)->markRead($req, $notification))
-        ->toThrow(HttpException::class);
+        ->toThrow(AuthorizationException::class);
 
     // No receipt row must be written for Brand B against Brand A's notification.
     $receiptCount = DB::table('notifications.notification_receipts')
@@ -89,7 +89,7 @@ it('notification dismiss returns 404 when the notification targets another profe
     $req = tenantRequestAs($b, [], 'POST');
 
     expect(fn () => app(NotificationController::class)->dismiss($req, $notification))
-        ->toThrow(HttpException::class);
+        ->toThrow(AuthorizationException::class);
 
     $receiptCount = DB::table('notifications.notification_receipts')
         ->where('notification_id', $notifId)

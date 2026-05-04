@@ -865,6 +865,44 @@ function createServiceCategoryFor(Professional $pro, array $overrides = []): \Ap
 }
 
 /**
+ * notifications.notifications — minimal columns for notification policy enforcement tests.
+ */
+function setupNotificationsTable(): void
+{
+    attachTestSchemas();
+    $conn = \Illuminate\Support\Facades\DB::connection('pgsql');
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS notifications.notifications (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        type TEXT NULL,
+        category TEXT NULL,
+        title TEXT NULL,
+        body TEXT NULL,
+        cta_url TEXT NULL,
+        primary_action_label TEXT NULL,
+        secondary_action_label TEXT NULL,
+        secondary_action_url TEXT NULL,
+        severity TEXT NULL,
+        starts_at TEXT NULL,
+        ends_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS notifications.notification_receipts (
+        id TEXT PRIMARY KEY,
+        notification_id TEXT NULL,
+        professional_id TEXT NULL,
+        read_at TEXT NULL,
+        dismissed_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL,
+        UNIQUE(notification_id, professional_id)
+    )');
+}
+
+/**
  * site.site_subdomain_aliases — minimal columns for cache-invalidation paths
  * that iterate over historical aliases for a site.
  */

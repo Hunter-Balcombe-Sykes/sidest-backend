@@ -110,7 +110,8 @@ class NotificationController extends ApiController
     public function markRead(Request $request, Notification $notification): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-        $this->assertVisibleToPro($notification, $pro->id);
+        $this->authorizeForUser($pro, 'view', $notification);
+        $this->assertNotificationActive($notification);
 
         $this->upsertReceipt($notification->id, $pro->id, ['read_at' => now()]);
 
@@ -120,7 +121,8 @@ class NotificationController extends ApiController
     public function dismiss(Request $request, Notification $notification): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-        $this->assertVisibleToPro($notification, $pro->id);
+        $this->authorizeForUser($pro, 'view', $notification);
+        $this->assertNotificationActive($notification);
 
         $this->upsertReceipt($notification->id, $pro->id, ['dismissed_at' => now()]);
 
@@ -146,12 +148,12 @@ class NotificationController extends ApiController
             });
     }
 
-    private function assertVisibleToPro(Notification $notification, string $professionalId): void
+    /**
+     * Abort 404 if the notification's time window is not currently active.
+     * Ownership is handled by the policy; this covers starts_at/ends_at business logic.
+     */
+    private function assertNotificationActive(Notification $notification): void
     {
-        if ($notification->professional_id !== null && $notification->professional_id !== $professionalId) {
-            abort(404);
-        }
-
         $now = now();
         if ($notification->starts_at && $now->lt($notification->starts_at)) {
             abort(404);
