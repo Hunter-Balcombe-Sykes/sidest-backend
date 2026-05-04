@@ -44,7 +44,7 @@ class CheckStreamingLiveStatusJob implements ShouldQueue
         // in site.blocks. All other queries in the codebase use block_group.
         Block::query()
             ->where('block_group', 'links')
-            ->whereRaw("settings->>'live_check_enabled' = 'true'")
+            ->whereRaw("settings->>'live_check_enabled' = ?", ['true'])
             ->whereNull('deleted_at')
             ->where('is_active', true)
             ->chunkById(500, function ($blocks) use (&$handlesByPlatform, $streamingPlatforms): void {
