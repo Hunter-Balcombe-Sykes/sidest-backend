@@ -6,10 +6,10 @@ Source: `audit-ledger-2026-05-01.md`. Ordering inside each tier: **least urgent 
 
 ## Progress
 
-- P0 Blockers: 3 of 10 complete
-- P1 High: 6 of 51 complete
-- P2 Medium: 0 of 46 complete
-- P3 Low: 3 of 30 complete
+- P0 Blockers: 7 of 10 complete
+- P1 High: 30 of 51 complete
+- P2 Medium: 41 of 46 complete
+- P3 Low: 9 of 30 complete
 
 > Items prefixed `CR-` come from the Apr 27–28 commit-batch review and were appended to the bottom of each tier (most-urgent position in the bottom-up read order). Source review covered commits `b9de807..c144ccc` on `development-v2`.
 
@@ -31,18 +31,18 @@ Each session should open the items in its bundle by ID — the full body still l
 - [x] **B6 — Time/currency/money cluster (lens-L).** #V5-024, #V5-025, #V5-026. ~2–3h. All in `CommissionPayoutService` / `CommissionVoidService`. Same domain (UTC vs app-TZ, `occurred_at` vs `created_at`, currency validation). One test: assert cutoffs use UTC, void uses `occurred_at`, currency validates against `shop_currency`. **Don't sweep in:** the broader payout backlog (#V5-007, #V5-008) — different concurrency / idempotency reasoning.
 - [x] **B7 — Cache-key versioning post-deploy.** #CR-008, #V5-036, #V5-037. ~1–2h. All "shape change shipped without bumping cache version." One mental model: enumerate every key impacted, add a version suffix or flush, document the deploy-hygiene rule for next time.
 - [x] **B8 — Stripe Connect webhook hardening.** #V5-009, #V5-010. ~2–4h. Same controller (`StripeConnectWebhookController`). Atomic flush + new `account.deauthorize` handler share a transaction-helper refactor.
-- **B15 — Shopify storefront token hardening.** #V5-003, #V5-004. ~3–5h. Both touch `StorefrontAccessToken` in `provider_metadata`. The encryption-cast change + reinstall-revocation flow share the same model + service touchpoints. **Optional:** #4-04 (encrypted-cast integration test, P3) rides naturally on this PR.
-- **B16 — ServiceObserver hardening.** #CR-005, #CR-006. ~2–3h. Same observer file. Two sibling fixes (catch granularity + `dispatch` vs `dispatchSync`) reasoned about together yield one Pest test that exercises both the bust-failure isolation AND the queued sync path.
+- [x] **B15 — Shopify storefront token hardening.** #V5-003, #V5-004. ~3–5h. Both touch `StorefrontAccessToken` in `provider_metadata`. The encryption-cast change + reinstall-revocation flow share the same model + service touchpoints. **Optional:** #4-04 (encrypted-cast integration test, P3) rides naturally on this PR.
+- [x] **B16 — ServiceObserver hardening.** #CR-005, #CR-006. ~2–3h. Same observer file. Two sibling fixes (catch granularity + `dispatch` vs `dispatchSync`) reasoned about together yield one Pest test that exercises both the bust-failure isolation AND the queued sync path.
 
 ### Mechanical / low-risk bundles (P2/P3)
 
-- **B9 — `$fillable` mass-assignment cleanup.** #V5-052, #V5-053, #V5-054, #V5-055, #9-001, #9-002, #9-003, #9-004. ~2–3h. Mechanical "remove sensitive cols from `$fillable`" or `$guarded = ['*']`. One Pest test per model asserting un-fillable columns are rejected. **Excludes:** #V5-023 (WebhookEvent payload) — needs schema validation, different reasoning.
+- [x] **B9 — `$fillable` mass-assignment cleanup.** #V5-052, #V5-053, #V5-054, #V5-055, #9-001, #9-002, #9-003, #9-004. ~2–3h. Mechanical "remove sensitive cols from `$fillable`" or `$guarded = ['*']`. One Pest test per model asserting un-fillable columns are rejected. **Excludes:** #V5-023 (WebhookEvent payload) — needs schema validation, different reasoning.
 - **B10 — Schedule task `withoutOverlapping`.** #10-08, #10-09. ~0.5–1h. Same file (`routes/console.php`), same one-line modifier.
 - [x] **B11 — R2 orphan cleanup on variant failure.** #V5-043, #V5-044. ~1–2h. Same pattern (cleanup-in-catch or store-after-success), image and video pipelines. One helper, applied twice.
 - [x] **B12 — Image MIME sniff.** #V5-015, #V5-047. ~1–2h. Different files but same defense (finfo MIME check before `getimagesize` / before storage). One helper extracted, two callers updated.
 - [x] **B13 — Retry-After / 429 backoff parity.** #V5-032, #V5-034. ~1–2h. Same fix (parse `Retry-After`, multiply by 1000, default 1000ms floor) across Shopify, Square, Fresha API clients.
-- **B14 — Throttle config hardening (P2 only).** #V5-057, #V5-059, #V5-060. ~1–2h. All `AppServiceProvider` rate-limiter config; same reasoning surface. **Do NOT bundle with #V5-001** (P0 TrustProxies) — that needs separate staging verification.
-- **B17 — Square/Fresha job retry hygiene.** #5-03, #5-05. ~1–2h. Both add `$tries` / `$backoff` / `failed()` to Square + Fresha jobs. Mechanical parity work.
+- [x] **B14 — Throttle config hardening (P2 only).** #V5-057, #V5-059, #V5-060. ~1–2h. All `AppServiceProvider` rate-limiter config; same reasoning surface. **Do NOT bundle with #V5-001** (P0 TrustProxies) — that needs separate staging verification.
+- [x] **B17 — Square/Fresha job retry hygiene.** #5-03, #5-05. ~1–2h. Both add `$tries` / `$backoff` / `failed()` to Square + Fresha jobs. Mechanical parity work.
 
 ### Standalone — do NOT bundle
 
@@ -1321,7 +1321,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~1h)
     - **What to do:** Add a FormRequest validation for any update endpoint touching commission_rate; consider `$guarded = ['*']` on the model for defense in depth.
 
-- [ ] **#9-001/2/3** · P3 — Sensitive cols in `$fillable` on CommissionPayout / CommissionLedgerEntry / BrandTeamMembership
+- [x] **#9-001/2/3** · P3 — Sensitive cols in `$fillable` on CommissionPayout / CommissionLedgerEntry / BrandTeamMembership
     - **Where:** app/Models/Billing/CommissionPayout.php; app/Models/Billing/CommissionLedgerEntry.php; app/Models/Core/BrandTeamMembership.php
     - **Effort:** S (~1–2h)
     - **What to do:** Switch to `$guarded = ['*']` for defense in depth. **Verified no exploitable callsite** (server-side computed values only) — DOWNGRADED from P0 in audit. Pure hardening.
