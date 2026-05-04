@@ -768,6 +768,48 @@ function createCustomerFor(Professional $pro, array $overrides = []): \App\Model
 }
 
 /**
+ * brand.brand_partner_link_events — append-only audit log for link lifecycle events.
+ */
+function setupBrandPartnerLinkEventsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS brand.brand_partner_link_events (
+        id TEXT PRIMARY KEY,
+        brand_professional_id TEXT NULL,
+        affiliate_professional_id TEXT NULL,
+        actor_professional_id TEXT NULL,
+        event_type TEXT NULL,
+        metadata TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
+ * brand.brand_affiliate_invites — invitation tokens for affiliate onboarding.
+ * Mirrors the production table including both claimed_by_professional_id (legacy)
+ * and claimed_professional_id (current FK column used by BrandAffiliateInvite model).
+ */
+function setupBrandAffiliateInvitesTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS brand.brand_affiliate_invites (
+        id TEXT PRIMARY KEY,
+        brand_professional_id TEXT NULL,
+        invite_type TEXT NULL,
+        token TEXT NULL,
+        handle TEXT NULL,
+        email TEXT NULL,
+        status TEXT NULL,
+        claimed_by_professional_id TEXT NULL,
+        claimed_professional_id TEXT NULL,
+        expires_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
  * site.site_subdomain_aliases — minimal columns for cache-invalidation paths
  * that iterate over historical aliases for a site.
  */
