@@ -933,6 +933,36 @@ function setupNotificationsTable(): void
 }
 
 /**
+ * Insert a SiteMedia document-pool row for $pro's site and return the model.
+ */
+function createDocumentFor(Professional $pro, array $overrides = []): \App\Models\Core\Site\SiteMedia
+{
+    setupMediaTables();
+
+    $id = (string) \Illuminate\Support\Str::uuid();
+    $site = $pro->relationLoaded('site') ? $pro->site : $pro->load('site')->site;
+    $now = now()->toDateTimeString();
+
+    $row = array_merge([
+        'id' => $id,
+        'site_id' => $site->id,
+        'pool' => \App\Models\Core\Site\SiteMedia::POOL_DOCUMENTS,
+        'media_type' => 'application/pdf',
+        'processing_state' => \App\Models\Core\Site\SiteMedia::PROCESSING_STATE_READY,
+        'is_active' => 1,
+        'alt_text' => 'Test Document',
+        'original_filename' => 'test.pdf',
+        'path' => 'documents/test.pdf',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ], $overrides);
+
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.site_media')->insert($row);
+
+    return \App\Models\Core\Site\SiteMedia::query()->findOrFail($id);
+}
+
+/**
  * site.site_subdomain_aliases — minimal columns for cache-invalidation paths
  * that iterate over historical aliases for a site.
  */

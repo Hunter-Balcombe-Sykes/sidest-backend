@@ -11,7 +11,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpKernel\Exception\HttpException;
+use Illuminate\Auth\Access\AuthorizationException;
 use Tests\Feature\Documents\DocumentTestCase;
 
 /**
@@ -215,8 +215,14 @@ it('PATCH /api/documents/{id} returns 404 for a document belonging to another si
 
     $controller = app(ProfessionalDocumentController::class);
 
-    expect(fn () => $controller->update($req, $doc))
-        ->toThrow(HttpException::class);
+    // SitePolicy throws AuthorizationException(404) — not HttpException — since
+    // ownership now resolves through denyAsNotFound() rather than abort_unless().
+    try {
+        $controller->update($req, $doc);
+        expect(false)->toBeTrue('Expected AuthorizationException');
+    } catch (AuthorizationException $e) {
+        expect($e->status())->toBe(404);
+    }
 });
 
 it('PATCH /api/documents/{id} allows editing an inactive (is_active=false) document', function () {

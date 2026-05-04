@@ -193,14 +193,13 @@ class ProfessionalDocumentController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        // Ownership check. Route model binding already 404s on soft-deleted rows
-        // (SoftDeletes trait). We intentionally allow is_active = false so the
-        // publish toggle can flip a draft document back to live.
-        abort_unless(
-            $document->site_id === $site->id
-            && $document->pool === SiteMedia::POOL_DOCUMENTS,
-            404
-        );
+        // Pool check: only operate on document-pool media (not gallery, etc).
+        // Route model binding already 404s on soft-deleted rows.
+        abort_unless($document->pool === SiteMedia::POOL_DOCUMENTS, 404);
+        // Ownership via SitePolicy — must setRelation so the policy resolves through
+        // the already-loaded site instead of lazy-loading.
+        $document->setRelation('site', $site);
+        $this->authorizeForUser($pro, 'update', $document);
 
         $data = $request->validated();
         $update = [];
@@ -244,13 +243,10 @@ class ProfessionalDocumentController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        // Ownership check — allows deleting draft (is_active = false) docs too.
-        // Route model binding already 404s on soft-deleted rows.
-        abort_unless(
-            $document->site_id === $site->id
-            && $document->pool === SiteMedia::POOL_DOCUMENTS,
-            404
-        );
+        // Pool check: only operate on document-pool media.
+        abort_unless($document->pool === SiteMedia::POOL_DOCUMENTS, 404);
+        $document->setRelation('site', $site);
+        $this->authorizeForUser($pro, 'delete', $document);
 
         try {
             Storage::disk(config('sidest.media_disk'))->delete((string) $document->path);
