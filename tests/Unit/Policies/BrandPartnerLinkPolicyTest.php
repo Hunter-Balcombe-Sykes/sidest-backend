@@ -9,6 +9,8 @@ use Illuminate\Auth\Access\Response;
 
 beforeEach(function () {
     $this->policy = new BrandPartnerLinkPolicy;
+    $this->brand = (new Professional)->forceFill(['id' => 'brand-actor', 'status' => 'active', 'professional_type' => 'brand']);
+    $this->affiliate = (new Professional)->forceFill(['id' => 'affiliate-actor', 'status' => 'active', 'professional_type' => 'professional']);
 });
 
 // ---------------------------------------------------------------------------
@@ -85,6 +87,29 @@ describe('BrandPartnerLink update', function () {
         expect($result)->toBeInstanceOf(Response::class);
         expect($result->status())->toBe(423);
         expect($result->message())->toBe('Account is pending deletion.');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// BrandPartnerLink — create
+// ---------------------------------------------------------------------------
+
+describe('BrandPartnerLink create', function () {
+    it('allows create when the actor is the brand owner', function () {
+        $link = (new BrandPartnerLink)->forceFill(['brand_professional_id' => 'brand-actor']);
+        expect($this->policy->create($this->brand, $link))->toBeTrue();
+    });
+
+    it('blocks create with 423 when the brand is pending deletion', function () {
+        $this->brand->status = 'pending_deletion';
+        $link = (new BrandPartnerLink)->forceFill(['brand_professional_id' => 'brand-actor']);
+        $result = $this->policy->create($this->brand, $link);
+        expect($result->status())->toBe(423);
+    });
+
+    it('denies create when the actor is not the brand', function () {
+        $link = (new BrandPartnerLink)->forceFill(['brand_professional_id' => 'brand-other']);
+        expect($this->policy->create($this->brand, $link))->toBeFalse();
     });
 });
 
@@ -173,5 +198,15 @@ describe('BrandAffiliateInvite update', function () {
         expect($result)->toBeInstanceOf(Response::class);
         expect($result->denied())->toBeTrue();
         expect($result->status())->toBe(404);
+    });
+
+    it('blocks a pending-deletion brand from updating an invite with 423', function () {
+        $this->brand->status = 'pending_deletion';
+        $invite = (new BrandAffiliateInvite)->forceFill([
+            'brand_professional_id' => 'brand-actor',
+            'claimed_professional_id' => 'affiliate-actor',
+        ]);
+        $result = $this->policy->update($this->brand, $invite);
+        expect($result->status())->toBe(423);
     });
 });

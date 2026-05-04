@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\BrandPartnerLinkEvent;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Auth\Access\Response;
@@ -43,6 +44,20 @@ class BrandPartnerLinkPolicy extends BasePolicy
         }
 
         return $this->denyAsNotFound();
+    }
+
+    /**
+     * Only the brand owner can create a partner link.
+     */
+    public function create(Professional $actor, BrandPartnerLink $skeleton): bool|Response
+    {
+        if ($denied = $this->denyIfPendingDeletion($actor)) {
+            return $denied;
+        }
+
+        $brandId = (string) ($skeleton->brand_professional_id ?? '');
+
+        return $brandId !== '' && (string) $actor->id === $brandId;
     }
 
     /**
