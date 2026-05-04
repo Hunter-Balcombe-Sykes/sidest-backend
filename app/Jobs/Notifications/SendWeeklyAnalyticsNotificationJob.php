@@ -41,9 +41,9 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
                 $metricsByPro = DB::table('analytics.professional_metrics_daily')
                     ->whereIn('affiliate_professional_id', $ids)
                     ->whereBetween('day', [$weekStart, $weekEnd])
-                    ->select('affiliate_professional_id',
-                        DB::raw('COALESCE(SUM(orders_count), 0) as orders'),
-                        DB::raw('COALESCE(SUM(commission_accrued_cents), 0) as commission_cents'))
+                    ->select('affiliate_professional_id')
+                    ->selectRaw('COALESCE(SUM(orders_count), ?) as orders', [0])
+                    ->selectRaw('COALESCE(SUM(commission_accrued_cents), ?) as commission_cents', [0])
                     ->groupBy('affiliate_professional_id')
                     ->get()
                     ->keyBy('affiliate_professional_id');
