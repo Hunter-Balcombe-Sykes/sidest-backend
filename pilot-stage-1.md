@@ -7,7 +7,7 @@ Source: `audit-ledger-2026-05-01.md`. Ordering inside each tier: **least urgent 
 ## Progress
 
 - P0 Blockers: 7 of 10 complete
-- P1 High: 30 of 51 complete
+- P1 High: 31 of 51 complete
 - P2 Medium: 41 of 46 complete
 - P3 Low: 9 of 30 complete
 
@@ -349,7 +349,7 @@ These are best in their own session because bundling would force unrelated archi
         abort(403, 'One or more items do not belong to your brand gallery.');
         ```
 
-- [ ] **#1-03** · P1 — VerifySupabaseJwt Auth-Server fallback skips claim validation
+- [x] **#1-03** · P1 — VerifySupabaseJwt Auth-Server fallback skips claim validation
     - **Where:** app/Http/Middleware/Auth/VerifySupabaseJwt.php (Auth-Server fallback path)
     - **Affects:** All authenticated requests during a JWKS outage.
     - **Effort:** S (~1–2h)
@@ -378,7 +378,7 @@ These are best in their own session because bundling would force unrelated archi
         // proceeds to professional lookup with arbitrary string
         ```
 
-- [ ] **#6-04** · P1 — Duplicate clicks not deduplicated — accidental double-clicks count as 2
+- [x] **#6-04** · P1 — Duplicate clicks not deduplicated — accidental double-clicks count as 2
     - **Where:** app/Http/Controllers/Api/PublicSite/AnalyticsController.php:139-159
     - **Affects:** All click analytics, top-links/top-sections, conversion rates.
     - **Effort:** M (~2–4h)
