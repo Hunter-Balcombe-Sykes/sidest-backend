@@ -48,6 +48,13 @@ class VerifySupabaseJwt
                 'ip' => $request->ip(),
             ]);
 
+            // Fail-closed mode: refuse to fall back to Auth-Server during JWKS outage.
+            // Set SUPABASE_JWKS_FAIL_CLOSED=true in production if you prefer hard failures
+            // over the reduced-security fallback path.
+            if (config('supabase.jwks_fail_closed', false)) {
+                return response()->json(['message' => 'Service unavailable'], 503);
+            }
+
             // 2) Fallback for legacy/shared-secret setups:
             // Supabase recommends verifying by calling Auth server /user. :contentReference[oaicite:2]{index=2}
             try {
@@ -163,6 +170,14 @@ class VerifySupabaseJwt
             throw new \RuntimeException('Missing SUPABASE_URL or SUPABASE_ANON_KEY');
         }
 
+        // Validate iss/aud from the token payload before calling Auth-Server.
+        // Auth-Server verifies the signature, but doesn't protect against cross-project
+        // tokens (a valid token from another Supabase project would pass otherwise).
+        $claims = $this->extractJwtPayloadClaims($jwt);
+        if (! $this->claimsMatchConfig($claims)) {
+            return null;
+        }
+
         $res = Http::timeout(5)
             ->withHeaders([
                 'apikey' => $anonKey,
@@ -175,8 +190,30 @@ class VerifySupabaseJwt
         }
 
         $user = $res->json();
+        $uid = $user['id'] ?? null;
 
-        return $user['id'] ?? null; // Supabase user id
+        // Reject if Supabase returns a non-UUID — guards against misconfig or unexpected response shapes.
+        if (! $uid || ! $this->isValidUuid($uid)) {
+            return null;
+        }
+
+        return $uid;
+    }
+
+    /** Decode JWT payload without signature verification — used only to read claims in the fallback path. */
+    private function extractJwtPayloadClaims(string $jwt): array
+    {
+        $parts = explode('.', $jwt);
+        if (count($parts) !== 3) {
+            return [];
+        }
+
+        return json_decode($this->b64urlDecode($parts[1]), true) ?: [];
+    }
+
+    private function isValidUuid(string $value): bool
+    {
+        return (bool) preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $value);
     }
 
     private function claimsMatchConfig(array $claims): bool

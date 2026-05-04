@@ -13,6 +13,10 @@ return [
     'jwks_url' => env('SUPABASE_JWKS_URL'),             // full URL
     'jwks_cache_seconds' => (int) env('SUPABASE_JWKS_CACHE_SECONDS', 300),
 
+    // When true, a JWKS outage returns 503 instead of falling back to Auth-Server.
+    // Recommended for production once JWKS is stable.
+    'jwks_fail_closed' => (bool) env('SUPABASE_JWKS_FAIL_CLOSED', false),
+
     // Service role key for server-side admin operations (user creation, etc.)
     'service_role_key' => env('SUPABASE_SERVICE_ROLE_KEY'),
 ];
