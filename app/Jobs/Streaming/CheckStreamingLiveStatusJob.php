@@ -26,7 +26,8 @@ class CheckStreamingLiveStatusJob implements ShouldQueue
         try {
             $kickRateLimited = Redis::exists('streaming:kick:rate_limited');
         } catch (\Throwable $e) {
-            Log::critical('streaming.redis_unavailable', ['message' => $e->getMessage()]);
+            Log::error('streaming.redis_unavailable', ['message' => $e->getMessage()]);
+            report($e);
 
             return;
         }
