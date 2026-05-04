@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional;
 
+use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
@@ -69,7 +70,7 @@ class ProfessionalController extends ApiController
                 $brandPartnerId = $siteSettings['brand_partner']['professional_id'] ?? null;
                 if ($brandPartnerId) {
                     $brandProfile = BrandProfile::where('professional_id', $brandPartnerId)->first();
-                    $primaryBrandStatus = $brandProfile?->brand_status ?? 'building';
+                    $primaryBrandStatus = $brandProfile?->brand_status ?? BrandStatus::Onboarding->value;
                     $primaryBrandName = \App\Models\Core\Professional\Professional::find($brandPartnerId)?->display_name ?? null;
                 }
             }

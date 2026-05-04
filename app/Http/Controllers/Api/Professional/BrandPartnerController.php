@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional;
 
+use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
@@ -52,8 +53,8 @@ class BrandPartnerController extends ApiController
 
         $brandProfile = $brand->brandProfile;
 
-        $brandStatus = $brandProfile?->brand_status ?? 'systems_down';
-        if ($brandStatus === 'systems_down') {
+        $brandStatus = $brandProfile?->brand_status ?? BrandStatus::SystemsDown->value;
+        if ($brandStatus === BrandStatus::SystemsDown->value) {
             return $this->error('This brand is temporarily unavailable due to a platform issue.', 403);
         }
 
@@ -81,7 +82,7 @@ class BrandPartnerController extends ApiController
         $page = Professional::query()
             ->where('professional_type', 'brand')
             ->where('status', 'active')
-            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public')->where('brand_status', 'live'))
+            ->whereHas('brandProfile', fn ($q) => $q->where('affiliate_visibility', 'public')->where('brand_status', BrandStatus::ReadyForAffiliates->value))
             ->with('site')
             ->orderByRaw('COALESCE(display_name, handle) asc')
             ->paginate($perPage)

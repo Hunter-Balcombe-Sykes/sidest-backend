@@ -33,6 +33,7 @@ class AffiliateProductResource extends JsonResource
             'commission_override' => $this->resource['commission_override'] ?? null,
             'affiliate_discount_pct' => $this->resource['affiliate_discount_pct'] ?? null,
             'in_favourites' => (bool) ($this->resource['in_favourites'] ?? false),
+            'custom_photos_enabled' => $this->resource['custom_photos_enabled'] ?? null,
         ];
     }
 }

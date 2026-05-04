@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional\ShopifyIntegration;
 
+use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
@@ -378,7 +379,7 @@ class ShopifyIntegrationController extends ApiController
         BrandStoreSettings::clearWizardProgress($targetBrandId);
         BrandProfile::where('professional_id', $targetBrandId)
             ->update([
-                'brand_status' => 'building',
+                'brand_status' => BrandStatus::Onboarding->value,
                 'setup_complete' => false,
             ]);
 

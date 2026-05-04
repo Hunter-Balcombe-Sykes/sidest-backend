@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Internal;
 
+use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
@@ -122,7 +123,7 @@ class EmbeddedSetupController extends ApiController
             'domain_txt_set' => (bool) ($storeSettings?->domain_txt_confirmed ?? false),
             'storefront_base_url' => $storefrontBaseUrl,
             'storefront_status' => $storefrontStatus,
-            'brand_status' => $brandProfile?->brand_status ?? 'building',
+            'brand_status' => $brandProfile?->brand_status ?? BrandStatus::Onboarding->value,
         ]);
     }
 

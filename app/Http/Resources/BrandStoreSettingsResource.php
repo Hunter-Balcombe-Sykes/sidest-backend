@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\BrandStatus;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,7 +25,7 @@ class BrandStoreSettingsResource extends JsonResource
             'hydrogen_install_confirmed' => (bool) ($this->resource['hydrogen_install_confirmed'] ?? false),
             'storefront_base_url' => $this->resource['storefront_base_url'] ?? null,
             'storefront_status' => $this->resource['storefront_status'] ?? 'unreachable',
-            'brand_status' => $this->resource['brand_status'] ?? 'building',
+            'brand_status' => $this->resource['brand_status'] ?? BrandStatus::Onboarding->value,
         ];
     }
 }

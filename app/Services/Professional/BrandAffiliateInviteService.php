@@ -2,6 +2,7 @@
 
 namespace App\Services\Professional;
 
+use App\Enums\BrandStatus;
 use App\Models\Core\Notifications\Notification;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandPartnerLink;
@@ -230,8 +231,8 @@ class BrandAffiliateInviteService
             }
 
             $brandProfile = $brandProfessional->brandProfile;
-            $brandStatus = $brandProfile?->brand_status ?? 'systems_down';
-            if ($brandStatus === 'systems_down') {
+            $brandStatus = $brandProfile?->brand_status ?? BrandStatus::SystemsDown->value;
+            if ($brandStatus === BrandStatus::SystemsDown->value) {
                 throw new RuntimeException('This brand is temporarily unavailable due to a platform issue.');
             }
 
@@ -276,8 +277,8 @@ class BrandAffiliateInviteService
             }
 
             $brandProfile = $invite->brandProfessional?->brandProfile;
-            $brandStatus = $brandProfile?->brand_status ?? 'systems_down';
-            if ($brandStatus === 'systems_down') {
+            $brandStatus = $brandProfile?->brand_status ?? BrandStatus::SystemsDown->value;
+            if ($brandStatus === BrandStatus::SystemsDown->value) {
                 throw new RuntimeException('This brand is temporarily unavailable due to a platform issue.');
             }
 
@@ -382,7 +383,7 @@ class BrandAffiliateInviteService
      */
     private function upsertInvite(Professional $brand, array $attributes): array
     {
-        $brandStatus = $brand->brandProfile?->brand_status ?? 'building';
+        $brandStatus = $brand->brandProfile?->brand_status ?? BrandStatus::Onboarding->value;
         if (! BrandStatusService::canSendInvites($brandStatus)) {
             throw new RuntimeException('Your brand must be fully set up before sending invites.');
         }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
+use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\BootstrapRequest;
 use App\Http\Resources\ProfessionalDashboardResource;
@@ -182,9 +183,9 @@ class BootstrapController extends ApiController
                         ->first();
 
                     if ($joinBrand) {
-                        $joinBrandStatus = $joinBrand->brandProfile?->brand_status ?? 'systems_down';
+                        $joinBrandStatus = $joinBrand->brandProfile?->brand_status ?? BrandStatus::SystemsDown->value;
 
-                        if ($joinBrandStatus !== 'systems_down') {
+                        if ($joinBrandStatus !== BrandStatus::SystemsDown->value) {
                             $affiliateId = (string) $professional->id;
                             $brandId = (string) $joinBrand->id;
 

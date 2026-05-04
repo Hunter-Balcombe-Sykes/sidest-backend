@@ -2,6 +2,7 @@
 
 namespace App\Observers\Core;
 
+use App\Enums\BrandStatus;
 use App\Jobs\Notifications\FanOutBrandStatusNotificationJob;
 use App\Models\Core\Professional\BrandProfile;
 use Illuminate\Support\Facades\Log;
@@ -30,7 +31,7 @@ class BrandProfileObserver
             //   building      → brand program was paused/reset
             //   systems_down  → platform-level outage
             // preview is an internal wizard state — affiliates don't need a notification.
-            if (! in_array($newStatus, ['live', 'building', 'systems_down'], true)) {
+            if (! in_array($newStatus, [BrandStatus::ReadyForAffiliates->value, BrandStatus::Onboarding->value, BrandStatus::SystemsDown->value], true)) {
                 return;
             }
 

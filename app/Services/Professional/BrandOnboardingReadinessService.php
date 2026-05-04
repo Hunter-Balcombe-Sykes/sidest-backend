@@ -2,6 +2,7 @@
 
 namespace App\Services\Professional;
 
+use App\Enums\BrandStatus;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -46,7 +47,7 @@ class BrandOnboardingReadinessService
         $newStatus = $statusService->sync($professional);
 
         return $newStatus ?? BrandProfile::where('professional_id', $professional->id)
-            ->value('brand_status') ?? 'building';
+            ->value('brand_status') ?? BrandStatus::Onboarding->value;
     }
 
     private function checkSiteImages(string $siteId): array

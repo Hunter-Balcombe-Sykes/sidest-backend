@@ -24,7 +24,7 @@ class StaffBrandProfileController extends ApiController
         }
 
         $data = $request->validate([
-            'brand_status' => ['sometimes', 'nullable', 'string', 'in:pending,active,suspended,rejected'],
+            'brand_status' => ['sometimes', 'nullable', 'string', 'in:onboarding,shopify_linked,shopify_configured,storefront_live,ready_for_affiliates,disconnected,systems_down'],
             'affiliate_visibility' => ['sometimes', 'nullable', 'string', 'in:public,invite_only'],
             'setup_complete' => ['sometimes', 'nullable', 'boolean'],
             'legal_business_name' => ['sometimes', 'nullable', 'string', 'max:255'],

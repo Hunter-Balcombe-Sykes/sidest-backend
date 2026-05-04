@@ -2,12 +2,14 @@
 
 namespace App\Services\Professional;
 
+use App\Enums\BrandStatus;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use App\Models\Retail\BrandStoreSettings;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -18,93 +20,176 @@ use Illuminate\Support\Facades\Log;
  * reachability, onboarding readiness) without duplicating any check logic.
  * Called from controllers after every mutation that could change status.
  *
- * States:
- *   building     — default, getting Shopify/Hydrogen configured
- *   preview      — wizard complete, storefront reachable, brand content not ready
- *   live         — fully ready, can send invites
- *   systems_down — manual override (preserved across evaluations)
+ * Stages 1-5 are progressive — brands step through in order:
+ *   1. onboarding           — fresh signup, no Shopify connection
+ *   2. shopify_linked       — OAuth complete, access_token present
+ *   3. shopify_configured   — Hydrogen/Oxygen/Domain configured
+ *   4. storefront_live      — storefront HTTP-reachable
+ *   5. ready_for_affiliates — full live gate (images + Shopify + Stripe)
+ *
+ * Out-of-band: disconnected (app uninstalled), systems_down (manual override).
+ * systems_down now auto-recovers when gates pass at storefront_live or above.
  */
 class BrandStatusService
 {
     /**
      * Determine the brand status for a professional without writing to DB.
-     * Returns one of: building, preview, live, systems_down.
      */
-    public function determine(Professional $professional): string
+    public function determine(Professional $professional): BrandStatus
     {
         $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
-        $currentStatus = $brandProfile?->brand_status ?? 'building';
+        $integrationCheck = $this->integrationState($professional->id);
 
-        // Manual override — never auto-transition out of systems_down
-        if ($currentStatus === 'systems_down') {
-            return 'systems_down';
+        // ── Disconnected: app uninstalled, token nulled, integration row kept ──
+        if ($integrationCheck['has_disconnected_at']) {
+            return BrandStatus::Disconnected;
         }
 
+        // Integration row exists but no access_token (embedded connect-code without OAuth yet,
+        // or app/uninstalled webhook which sets disconnected_at — caught above)
+        if ($integrationCheck['has_integration'] && ! $integrationCheck['has_token']) {
+            return BrandStatus::Disconnected;
+        }
+
+        // ── No integration at all → fresh signup ──
+        if (! $integrationCheck['has_integration']) {
+            return BrandStatus::Onboarding;
+        }
+
+        // ── Shopify linked at minimum (integration exists + access_token) ──
         $storeSettings = BrandStoreSettings::where('professional_id', $professional->id)->first();
         $site = Site::where('professional_id', $professional->id)->first();
         $subdomain = $site?->subdomain ?? '';
 
-        // Preview gate: all wizard steps must be complete + storefront reachable.
-        // A fully-connected Shopify integration satisfies the wizard gate even
-        // without Hydrogen/Oxygen — the brand can use affiliate marketing
-        // without deploying a storefront.
-        $wizardComplete = $this->isWizardComplete($storeSettings, $subdomain, $professional->id);
+        // Shopify-connected brands bypass Hydrogen/Oxygen wizard gate.
+        // They can use affiliate marketing without deploying a storefront.
+        $hasShopifyConnected = $this->hasShopifyConnected($professional->id);
+
+        // Wizard gate: all steps complete OR Shopify-connected bypass
+        $wizardComplete = $hasShopifyConnected || $this->isWizardComplete($storeSettings, $subdomain, $professional->id);
+
         if (! $wizardComplete) {
-            return 'building';
+            return BrandStatus::ShopifyLinked;
         }
 
-        // Live gate: onboarding readiness (images, Shopify, Stripe)
+        // ── Wizard complete. Check storefront reachability ──
+        $storefrontReachable = $hasShopifyConnected || $this->isStorefrontReachable($storeSettings, $subdomain);
+
+        if (! $storefrontReachable) {
+            return BrandStatus::ShopifyConfigured;
+        }
+
+        // ── Storefront reachable. Check affiliate readiness ──
         $onboardingReady = $this->isOnboardingReady($professional, $site);
-        if ($onboardingReady) {
-            return 'live';
+
+        if (! $onboardingReady) {
+            return BrandStatus::StorefrontLive;
         }
 
-        return 'preview';
+        return BrandStatus::ReadyForAffiliates;
     }
 
     /**
      * Evaluate and persist the current brand status.
      * Returns the new status if it changed, null if unchanged.
+     * systems_down auto-recovers when computed status reaches storefront_live or above.
      */
     public function sync(Professional $professional): ?string
     {
-        $newStatus = $this->determine($professional);
+        $computed = $this->determine($professional);
 
         $existing = BrandProfile::where('professional_id', $professional->id)
-            ->value('brand_status');
+            ->first();
 
-        if ($existing === $newStatus) {
+        $currentStatusValue = $existing?->brand_status ?? 'onboarding';
+
+        // Auto-recovery from systems_down: allow transition out when computed
+        // status is storefront_live or above (platform issue resolved).
+        if ($currentStatusValue === BrandStatus::SystemsDown->value) {
+            if ($computed->isAtLeast(BrandStatus::StorefrontLive)) {
+                // Allow recovery — fall through to normal logic
+            } else {
+                // Still not ready — keep systems_down
+                return null;
+            }
+        }
+
+        $newStatusValue = $computed->value;
+
+        if ($currentStatusValue === $newStatusValue) {
             return null;
         }
 
         BrandProfile::updateOrCreate(
             ['professional_id' => $professional->id],
-            ['brand_status' => $newStatus],
+            ['brand_status' => $newStatusValue],
         );
+
+        // Audit trail
+        DB::table('core.brand_status_history')->insert([
+            'professional_id' => $professional->id,
+            'from_status' => $currentStatusValue,
+            'to_status' => $newStatusValue,
+            'reason' => 'auto',
+            'created_at' => now(),
+        ]);
 
         Log::info('BrandStatus: status changed', [
             'professional_id' => $professional->id,
-            'from' => $existing ?? 'null',
-            'to' => $newStatus,
+            'from' => $currentStatusValue,
+            'to' => $newStatusValue,
+            'step' => $computed->stepNumber(),
         ]);
 
-        return $newStatus;
+        return $newStatusValue;
     }
 
     /**
-     * Only live brands can send new affiliate invites.
+     * Only ready_for_affiliates brands can send new affiliate invites.
      */
     public static function canSendInvites(string $status): bool
     {
-        return $status === 'live';
+        return $status === BrandStatus::ReadyForAffiliates->value;
     }
 
     /**
-     * Storefront rendering is allowed for preview and live brands.
+     * Storefront rendering is allowed for storefront_live and above.
      */
     public static function isStorefrontReady(string $status): bool
     {
-        return in_array($status, ['preview', 'live'], true);
+        return in_array($status, [
+            BrandStatus::StorefrontLive->value,
+            BrandStatus::ReadyForAffiliates->value,
+        ], true);
+    }
+
+    // ── Integration state (single query, avoids N+1) ───────────────────────
+
+    /**
+     * @return array{has_integration: bool, has_token: bool, has_disconnected_at: bool}
+     */
+    private function integrationState(string $professionalId): array
+    {
+        $integration = ProfessionalIntegration::query()
+            ->where('professional_id', $professionalId)
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->first();
+
+        if (! $integration) {
+            return [
+                'has_integration' => false,
+                'has_token' => false,
+                'has_disconnected_at' => false,
+            ];
+        }
+
+        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+
+        return [
+            'has_integration' => true,
+            'has_token' => ! empty($integration->access_token),
+            'has_disconnected_at' => ! empty($metadata['disconnected_at'] ?? null),
+        ];
     }
 
     // ── Private checks ──────────────────────────────────────────────────────
@@ -113,12 +198,11 @@ class BrandStatusService
      * All Shopify wizard steps complete AND storefront is reachable.
      *
      * A fully-connected Shopify integration (access_token + external_account_id)
-     * satisfies the wizard gate even without Hydrogen/Oxygen flags — the brand
-     * can use affiliate marketing without deploying a storefront.
+     * satisfies this gate even without Hydrogen/Oxygen flags — the brand can use
+     * affiliate marketing without deploying a storefront.
      */
     private function isWizardComplete(?BrandStoreSettings $settings, string $subdomain, string $professionalId): bool
     {
-        // Shopify-connected brands bypass the Hydrogen/Oxygen/storefront checks
         if ($this->hasShopifyConnected($professionalId)) {
             return true;
         }
@@ -144,8 +228,12 @@ class BrandStatusService
     /**
      * HTTP-check whether the brand's storefront is serving pages (2xx, no redirect).
      */
-    private function isStorefrontReachable(BrandStoreSettings $settings, string $subdomain): bool
+    private function isStorefrontReachable(?BrandStoreSettings $settings, string $subdomain): bool
     {
+        if (! $settings) {
+            return false;
+        }
+
         $url = $settings->storefrontBaseUrl($subdomain);
 
         try {
@@ -163,8 +251,6 @@ class BrandStatusService
 
     /**
      * Onboarding readiness: 5+ images, Shopify connected, Stripe connected.
-     * Mirrors the checks in BrandOnboardingReadinessService without duplicating
-     * its getChecklist() method (which also includes label/metadata for UI).
      */
     private function isOnboardingReady(Professional $professional, ?Site $site): bool
     {

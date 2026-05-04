@@ -14,6 +14,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
+use App\Services\Professional\BrandStatusService;
 use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
@@ -43,6 +44,9 @@ class BrandSignupService
             $integration->update(['storefront_token' => null]);
         }
 
+        // Clear disconnected markers — the brand is reconnecting.
+        unset($metadata['disconnected_at'], $metadata['disconnected_reason']);
+
         $integration->update([
             'access_token' => $accessToken,
             'provider_metadata' => array_merge($metadata, [
@@ -57,6 +61,11 @@ class BrandSignupService
         $professional = Professional::findOrFail($integration->professional_id);
         $site = Site::where('professional_id', $professional->id)->firstOrFail();
         $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
+
+        // Re-evaluate brand status after reinstall. If the brand was disconnected
+        // and Shopify-side resources survived, the status service will jump them
+        // to the appropriate stage instead of starting from onboarding.
+        app(BrandStatusService::class)->sync($professional);
 
         Log::info('Shopify brand reinstall', [
             'professional_id' => (string) $professional->id,

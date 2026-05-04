@@ -6,6 +6,7 @@ use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Support\Arr;
@@ -256,7 +257,7 @@ GRAPHQL;
     /**
      * Return the brand's catalog with the affiliate's selection state and metafield data merged in.
      *
-     * @return array{products: array, brand_professional_id: string, default_commission_rate: float}
+     * @return array{products: array, brand_professional_id: string, default_commission_rate: float, custom_photos_enabled: bool, product_image_ratio: string|null}
      */
     public function getCatalogWithSelections(Professional $affiliate): array
     {
@@ -278,6 +279,19 @@ GRAPHQL;
             ? (float) $storeSettings->default_commission_rate
             : (float) config('sidest.store.default_commission_rate', 15);
 
+        // Brand-level product image ratio from site settings design JSON
+        $site = Site::where('professional_id', $brandId)->first();
+        $siteSettings = is_array($site?->settings) ? $site->settings : [];
+        $design = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
+        $productImageRatio = $design['product_image_ratio'] ?? null;
+
+        // Global custom photos toggle — brand-level permission for this affiliate
+        $link = BrandPartnerLink::query()
+            ->where('affiliate_professional_id', $affiliate->id)
+            ->where('brand_professional_id', $brandId)
+            ->first();
+        $customPhotosEnabled = (bool) ($link?->custom_photos_enabled ?? false);
+
         $selections = AffiliateProductSelection::query()
             ->where('affiliate_professional_id', $affiliate->id)
             ->where('brand_professional_id', $brandId)
@@ -298,6 +312,7 @@ GRAPHQL;
             $meta = $metafieldMap[$gid] ?? [];
             $product['commission_override'] = $meta['commission_override'] ?? null;
             $product['affiliate_discount_pct'] = $meta['affiliate_discount_pct'] ?? null;
+            $product['custom_photos_enabled'] = $meta['custom_photos_enabled'];
 
             // Two-layer variant filter, in order:
             //   1. Brand-side: variants with sidest.enabled=false are hidden. Missing
@@ -353,6 +368,8 @@ GRAPHQL;
             'products' => $products,
             'brand_professional_id' => $brandId,
             'default_commission_rate' => $defaultCommissionRate,
+            'custom_photos_enabled' => $customPhotosEnabled,
+            'product_image_ratio' => $productImageRatio,
         ];
     }
 
@@ -535,6 +552,7 @@ GRAPHQL;
             $map[$gid] = [
                 'commission_override' => isset($metafields['commission_override']) ? (float) $metafields['commission_override'] : null,
                 'affiliate_discount_pct' => isset($metafields['affiliate_discount_pct']) ? (float) $metafields['affiliate_discount_pct'] : null,
+                'custom_photos_enabled' => $metafields['custom_photos_enabled'] ?? null,
             ];
         }
 

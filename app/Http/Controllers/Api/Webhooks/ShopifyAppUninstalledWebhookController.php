@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Webhooks;
 
+use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ValidatesShopifyWebhookHmac;
 use App\Models\Commerce\AffiliateProductSelection;
@@ -50,6 +51,22 @@ class ShopifyAppUninstalledWebhookController extends ApiController
         $metadata['webhook_registration_state'] = 'uninstalled';
         $metadata['webhooks_state'] = 'uninstalled';
 
+        // Preserve pre-uninstall state so the brand can resume where they left off
+        // on reinstall. Wizard flags in brand_store_settings are intentionally NOT
+        // cleared — the Shopify-side resources (collections, metafields) may still
+        // exist, and the BrandSignupService will re-evaluate them on reinstall.
+        $brandProfile = BrandProfile::where('professional_id', $integration->professional_id)->first();
+        $storeSettings = BrandStoreSettings::where('professional_id', $integration->professional_id)->first();
+
+        $metadata['uninstalled_from_status'] = $brandProfile?->brand_status ?? 'onboarding';
+        $metadata['uninstalled_wizard_state'] = [
+            'hydrogen_install_confirmed' => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
+            'oxygen_deployment_token_set' => ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token')),
+            'oxygen_storefront_id_present' => ! empty($storeSettings?->oxygen_storefront_id),
+            'domain_wizard_complete' => (bool) ($storeSettings?->domain_wizard_complete ?? false),
+            'domain_txt_confirmed' => (bool) ($storeSettings?->domain_txt_confirmed ?? false),
+        ];
+
         $integration->update([
             'access_token' => null,
             'refresh_token' => null,
@@ -73,11 +90,11 @@ class ShopifyAppUninstalledWebhookController extends ApiController
             ->where('brand_professional_id', $integration->professional_id)
             ->delete();
 
-        // Reset wizard progress and brand status so the setup flow starts fresh on reinstall.
-        BrandStoreSettings::clearWizardProgress((string) $integration->professional_id);
+        // Set brand to disconnected without clearing wizard progress — preserve wizard
+        // state so the brand doesn't have to re-enter profile/business details on reinstall.
         BrandProfile::where('professional_id', $integration->professional_id)
             ->update([
-                'brand_status' => 'building',
+                'brand_status' => BrandStatus::Disconnected->value,
                 'setup_complete' => false,
             ]);
 

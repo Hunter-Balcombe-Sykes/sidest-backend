@@ -48,6 +48,8 @@ class AffiliateProductController extends ApiController
             'products' => AffiliateProductResource::collection(collect($result['products'])),
             'brand_professional_id' => $result['brand_professional_id'],
             'default_commission_rate' => $result['default_commission_rate'] ?? 15,
+            'custom_photos_enabled' => $result['custom_photos_enabled'] ?? false,
+            'product_image_ratio' => $result['product_image_ratio'] ?? null,
         ]);
     }
 

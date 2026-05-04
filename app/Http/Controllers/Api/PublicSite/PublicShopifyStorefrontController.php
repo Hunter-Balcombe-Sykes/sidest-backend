@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
+use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
@@ -88,7 +89,7 @@ class PublicShopifyStorefrontController extends ApiController
             'shop_domain' => $shopDomain,
             'storefront_access_token' => $storefrontToken,
             'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'sidest-default-products'),
-            'brand_status' => $brandProfile?->brand_status ?? 'building',
+            'brand_status' => $brandProfile?->brand_status ?? BrandStatus::Onboarding->value,
             'business_website' => $brandProfile?->business_website,
         ]);
     }

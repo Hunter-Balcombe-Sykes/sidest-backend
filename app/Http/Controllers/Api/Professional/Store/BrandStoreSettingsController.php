@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional\Store;
 
+use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
@@ -70,7 +71,7 @@ class BrandStoreSettingsController extends ApiController
             'storefront_status' => $storeSettings
                 ? $this->checkStorefrontStatus($storeSettings, $site?->subdomain ?? '')
                 : 'unreachable',
-            'brand_status' => $brandProfile?->brand_status ?? 'building',
+            'brand_status' => $brandProfile?->brand_status ?? BrandStatus::Onboarding->value,
         ]));
     }
 

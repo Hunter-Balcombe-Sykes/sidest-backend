@@ -24,7 +24,7 @@ class FanOutBrandStatusNotificationJob implements ShouldQueue
 
     public function __construct(
         public readonly string $brandProfessionalId,
-        public readonly string $brandStatus, // 'live' | 'building' | 'systems_down'
+        public readonly string $brandStatus, // BrandStatus::ReadyForAffiliates->value | BrandStatus::Onboarding->value | BrandStatus::SystemsDown->value
     ) {
         $this->onQueue('notifications');
     }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\PublicSite;
 
+use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
@@ -27,8 +28,8 @@ class PublicOpenInviteController extends ApiController
             return $this->error('Brand not found.', 404);
         }
 
-        $brandStatus = $brand->brandProfile?->brand_status ?? 'systems_down';
-        if ($brandStatus === 'systems_down') {
+        $brandStatus = $brand->brandProfile?->brand_status ?? BrandStatus::SystemsDown->value;
+        if ($brandStatus === BrandStatus::SystemsDown->value) {
             return $this->error('Brand not found.', 404);
         }
 
