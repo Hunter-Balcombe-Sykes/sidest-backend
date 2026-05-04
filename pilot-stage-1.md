@@ -984,7 +984,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** When the transfer fails AND the auto-refund also fails, the brand is left charged with no operational surface to detect or remediate.
     - **Source:** v5 audit (discovery_lens: domain-subagent-3; in_scope_v4: yes).
 
-- [ ] **#V5-032** · P2 — REST Retry-After defaults to 1ms (not 1s) when header missing
+- [x] **#V5-032** · P2 — REST Retry-After defaults to 1ms (not 1s) when header missing
     - **Where:** app/Services/Shopify/Client/ShopifyAdminClient.php:128-129
     - **Effort:** S (~0.25h)
     - **What to do:**
@@ -1000,7 +1000,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Untrusted webhook payload constructs a GraphQL identifier without validation.
     - **Source:** v5 audit (discovery_lens: domain-subagent-4; in_scope_v4: yes).
 
-- [ ] **#V5-034** · P2 — SquareApiClient and FreshaApiClient don't honor 429 Retry-After
+- [x] **#V5-034** · P2 — SquareApiClient and FreshaApiClient don't honor 429 Retry-After
     - **Where:** app/Services/Square/SquareApiClient.php, app/Services/Fresha/FreshaApiClient.php
     - **Effort:** S (~1-2h)
     - **What to do:**
