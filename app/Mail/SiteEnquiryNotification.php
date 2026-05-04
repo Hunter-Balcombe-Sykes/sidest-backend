@@ -8,6 +8,7 @@ use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Str;
 
 // V2: Notifies the affiliate's configured inbox of a new enquiry submitted via the contact section block.
 class SiteEnquiryNotification extends Mailable
@@ -21,7 +22,7 @@ class SiteEnquiryNotification extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: "New enquiry from {$this->enquiry->name} — {$this->enquiry->subject}",
+            subject: Str::limit("New enquiry from {$this->enquiry->name} — {$this->enquiry->subject}", 77),
         );
     }
 
