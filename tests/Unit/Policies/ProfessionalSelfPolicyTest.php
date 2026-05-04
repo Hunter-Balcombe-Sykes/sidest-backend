@@ -2,6 +2,7 @@
 
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalConfirmationPreference;
+use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
 use App\Models\Core\Professional\WalletCurrencySwitchAudit;
 use App\Policies\ProfessionalSelfPolicy;
 
@@ -89,6 +90,48 @@ it('denies delete with 404 when the actor does not own the resource', function (
     $pref = (new ProfessionalConfirmationPreference)->forceFill(['professional_id' => 'pro-2']);
 
     $result = $this->policy->delete($actor, $pref);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
+});
+
+// --- audit-log immutability ---
+
+it('denies update on WalletCurrencySwitchAudit even for the owner (append-only)', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $audit = new WalletCurrencySwitchAudit(['professional_id' => 'pro-1']);
+
+    $result = $this->policy->update($actor, $audit);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
+});
+
+it('denies delete on WalletCurrencySwitchAudit even for the owner (append-only)', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $audit = new WalletCurrencySwitchAudit(['professional_id' => 'pro-1']);
+
+    $result = $this->policy->delete($actor, $audit);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
+});
+
+it('denies update on ProfessionalDeletionAuditEntry even for the owner (append-only)', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $audit = new ProfessionalDeletionAuditEntry(['professional_id' => 'pro-1']);
+
+    $result = $this->policy->update($actor, $audit);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
+});
+
+it('denies delete on ProfessionalDeletionAuditEntry even for the owner (append-only)', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $audit = new ProfessionalDeletionAuditEntry(['professional_id' => 'pro-1']);
+
+    $result = $this->policy->delete($actor, $audit);
 
     expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
     expect($result->status())->toBe(404);
