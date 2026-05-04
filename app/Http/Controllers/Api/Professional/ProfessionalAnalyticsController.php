@@ -70,6 +70,10 @@ class ProfessionalAnalyticsController extends ApiController
             return $this->error('Invalid date range: from must be before to. ', 422);
         }
 
+        if ($from->diffInDays($to) > 365) {
+            return $this->error('Date range cannot exceed 365 days.', 422);
+        }
+
         $site = $professional->site;
         if (! $site) {
             return $this->error('professional has no site.', 404);
@@ -484,6 +488,10 @@ class ProfessionalAnalyticsController extends ApiController
 
         if ($from->gt($to)) {
             return $this->error('Invalid date range: from must be before to.', 422);
+        }
+
+        if ($from->diffInDays($to) > 365) {
+            return $this->error('Date range cannot exceed 365 days.', 422);
         }
 
         $site = $professional->site;
