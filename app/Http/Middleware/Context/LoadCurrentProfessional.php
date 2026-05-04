@@ -6,6 +6,7 @@ use App\Services\Cache\ProfessionalCacheService;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
 // V2: Loads authenticated professional into request context via cache. Rejects suspended/missing accounts.
@@ -25,6 +26,13 @@ class LoadCurrentProfessional
             Log::debug('LoadCurrentProfessional missing uid');
 
             return response()->json(['message' => 'Missing uid'], 401);
+        }
+
+        // Supabase sub claim is always a UUID; any non-UUID string indicates a routing/middleware misconfiguration.
+        if (! Str::isUuid($uid)) {
+            Log::warning('LoadCurrentProfessional invalid uid format', ['uid' => $uid]);
+
+            return response()->json(['message' => 'Invalid uid'], 401);
         }
 
         Log::debug('LoadCurrentProfessional before cache getByAuthId', ['uid' => $uid]);
