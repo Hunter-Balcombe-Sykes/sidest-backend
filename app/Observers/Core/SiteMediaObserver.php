@@ -2,7 +2,6 @@
 
 namespace App\Observers\Core;
 
-use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
@@ -41,7 +40,7 @@ class SiteMediaObserver
         }
 
         try {
-            $site = Site::query()->find($media->site_id);
+            $site = $media->site;
             if (! $site || ! $site->professional_id) {
                 return;
             }
