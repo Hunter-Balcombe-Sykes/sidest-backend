@@ -7,8 +7,10 @@ use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Retail\BrandStoreSettings;
+use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -186,7 +188,11 @@ GRAPHQL;
      */
     public function fetchActiveCatalog(string $brandProfessionalId): array
     {
-        return $this->queryStorefrontCatalog($brandProfessionalId);
+        return Cache::remember(
+            CacheKeyGenerator::brandActiveCatalog($brandProfessionalId),
+            now()->addMinutes(5),
+            fn () => $this->queryStorefrontCatalog($brandProfessionalId),
+        );
     }
 
     /**

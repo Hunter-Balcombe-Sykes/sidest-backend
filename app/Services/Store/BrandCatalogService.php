@@ -376,7 +376,11 @@ GRAPHQL;
      */
     public function fetchBrandCatalog(Professional $brand): array
     {
-        return $this->queryAdminCatalog($brand);
+        return Cache::remember(
+            CacheKeyGenerator::brandAdminCatalog((string) $brand->id),
+            now()->addMinutes(5),
+            fn () => $this->queryAdminCatalog($brand),
+        );
     }
 
     /**
