@@ -564,7 +564,12 @@ GRAPHQL;
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
         $storefrontToken = trim((string) ($integration->storefront_token ?? ''));
-        $collectionHandle = Arr::get($metadata, 'active_collection_handle', 'sidest-active-products');
+        // Arr::get's third argument is only used when the key is missing — when the
+        // key exists with a null value (e.g. failed collection setup), it returns
+        // null. ?: coerces null/empty to the default so we never send handle: null
+        // to Shopify's String! GraphQL parameter, which would cause a validation
+        // error that breaks the loop before the all-products fallback engages.
+        $collectionHandle = Arr::get($metadata, 'active_collection_handle') ?: 'sidest-active-products';
         $apiVersion = config('services.shopify.api_version', '2025-01');
 
         if ($shopDomain === '' || $storefrontToken === '') {

@@ -73,10 +73,13 @@ class ShopifyAppUninstalledWebhookController extends ApiController
             ->where('brand_professional_id', $integration->professional_id)
             ->delete();
 
-        // Reset wizard progress so the setup flow starts fresh on reinstall.
+        // Reset wizard progress and brand status so the setup flow starts fresh on reinstall.
         BrandStoreSettings::clearWizardProgress((string) $integration->professional_id);
         BrandProfile::where('professional_id', $integration->professional_id)
-            ->update(['setup_complete' => false]);
+            ->update([
+                'brand_status' => 'building',
+                'setup_complete' => false,
+            ]);
 
         Log::info('Shopify app uninstalled — integration disconnected.', [
             'professional_id' => (string) $integration->professional_id,

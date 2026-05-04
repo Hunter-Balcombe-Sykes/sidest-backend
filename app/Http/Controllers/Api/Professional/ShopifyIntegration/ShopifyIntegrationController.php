@@ -373,10 +373,14 @@ class ShopifyIntegrationController extends ApiController
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->delete();
 
-        // Clear all wizard progress so the setup wizard starts fresh if the brand reconnects.
+        // Clear all wizard progress and reset brand status so the setup wizard
+        // starts fresh if the brand reconnects.
         BrandStoreSettings::clearWizardProgress($targetBrandId);
         BrandProfile::where('professional_id', $targetBrandId)
-            ->update(['setup_complete' => false]);
+            ->update([
+                'brand_status' => 'building',
+                'setup_complete' => false,
+            ]);
 
         Log::info('Shopify disconnected', [
             'actor_professional_id' => (string) $actorProfessional->id,
