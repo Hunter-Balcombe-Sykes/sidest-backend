@@ -50,6 +50,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Professional\BrandAffiliateInvite::class, \App\Policies\BrandPartnerLinkPolicy::class);
         Gate::policy(\App\Models\Core\Professional\Service::class, \App\Policies\ServicePolicy::class);
         Gate::policy(\App\Models\Core\Professional\ServiceCategory::class, \App\Policies\ServicePolicy::class);
+        Gate::policy(\App\Models\Retail\BrandStoreSettings::class, \App\Policies\BrandResourcePolicy::class);
 
         // Refuse to boot in production with throttling disabled — a misconfigured
         // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.
