@@ -134,12 +134,12 @@ class CommissionVoidService
         // batch-load their pending commission totals to avoid N+1 queries.
         $warningWindows = [
             'day20' => [
-                'range' => [now()->addDays(9)->startOfDay(), now()->addDays(11)->endOfDay()],
+                'range' => [now()->addDays(10)->startOfDay(), now()->addDays(10)->endOfDay()],
                 'title' => 'Connect Stripe — 10 days left',
                 'body' => 'Connect your Stripe account within 10 days or your %s in pending earnings will be forfeited.',
             ],
             'day28' => [
-                'range' => [now()->addDays(1)->startOfDay(), now()->addDays(3)->endOfDay()],
+                'range' => [now()->addDays(2)->startOfDay(), now()->addDays(2)->endOfDay()],
                 'title' => 'Connect Stripe — 2 days left',
                 'body' => '2 days left — connect Stripe now or your %s in pending earnings will be forfeited.',
             ],
