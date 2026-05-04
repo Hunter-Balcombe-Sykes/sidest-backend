@@ -183,11 +183,9 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
         try {
             $metafieldsToSet = [];
             $collectionGids = [];
-            // Publish through the app's own publication (created by CreateShopifySalesChannelJob)
-            // so collections are visible via the Storefront API. Fall back to the Online Store
-            // publication for legacy integrations that predate the app publication flow.
-            $publicationId = Arr::get($metadata, 'publication_id')
-                ?: $this->findOnlineStorePublicationId($shopDomain, $accessToken, $apiVersion);
+            // Find the app's publication (by name) or fall back to Online Store.
+            // Don't use the cached publication_id from metadata — it goes stale on reinstall.
+            $publicationId = $this->findPublicationId($shopDomain, $accessToken, $apiVersion);
 
             $shopGid = $this->getShopGid($shopDomain, $accessToken, $apiVersion);
             if ($shopGid === '') {
@@ -439,24 +437,40 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
     /**
      * Find the Online Store publication ID so collections can be published to it.
      */
-    private function findOnlineStorePublicationId(string $shopDomain, string $accessToken, string $apiVersion): ?string
+    /**
+     * Find the publication to publish collections to.
+     *
+     * Prefers the app's own publication (created by CreateShopifySalesChannelJob,
+     * named after the app — "Side St" or "sidest"). Falls back to "Online Store"
+     * for legacy integrations that predate the app publication flow.
+     */
+    private function findPublicationId(string $shopDomain, string $accessToken, string $apiVersion): ?string
     {
         $response = $this->graphql($shopDomain, $accessToken, $apiVersion, '
             query { publications(first: 20) { edges { node { id name } } } }
         ', []);
 
         $edges = $response->json('data.publications.edges', []);
+        $onlineStoreId = null;
 
         foreach ($edges as $edge) {
             $name = strtolower(trim((string) Arr::get($edge, 'node.name', '')));
+            $id = (string) Arr::get($edge, 'node.id', '');
+
+            if (str_contains($name, 'side st') || str_contains($name, 'sidest')) {
+                return $id;
+            }
             if ($name === 'online store') {
-                return (string) Arr::get($edge, 'node.id', '');
+                $onlineStoreId = $id;
             }
         }
 
-        // No "Online Store" found — don't fall back to an arbitrary channel (could be POS)
+        if ($onlineStoreId !== null) {
+            return $onlineStoreId;
+        }
+
         if (! empty($edges)) {
-            Log::warning('Online Store publication not found, skipping collection publishing', [
+            Log::warning('No suitable publication found for collection publishing', [
                 'integration_id' => $this->integrationId,
                 'available_publications' => collect($edges)->pluck('node.name')->toArray(),
             ]);
