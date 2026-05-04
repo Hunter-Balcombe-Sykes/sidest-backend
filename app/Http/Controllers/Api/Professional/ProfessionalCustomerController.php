@@ -81,6 +81,9 @@ class ProfessionalCustomerController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
+        $skeleton = new Customer(['professional_id' => $pro->id]);
+        $this->authorizeForUser($pro, 'create', $skeleton);
+
         $data = $request->validated();
         $data['source'] = $data['source'] ?? 'manual';
 

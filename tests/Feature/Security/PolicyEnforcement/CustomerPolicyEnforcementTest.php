@@ -108,3 +108,28 @@ it('blocks a pending-deletion owner from deleting a customer with 423', function
         expect($e->getMessage())->toBe('Account is pending deletion.');
     }
 });
+
+it('blocks a pending-deletion owner from creating a customer with 423', function () {
+    $owner = createTenant('pro-pending-store');
+    DB::connection('pgsql')->table('core.professionals')->where('id', $owner->id)->update([
+        'status' => 'pending_deletion',
+    ]);
+    $owner->refresh();
+
+    // Use a plain Request to bypass FormRequest validation — policy fires before any DB write.
+    $req = tenantRequestAs($owner, [
+        'full_name' => 'Test Customer',
+        'email' => 'test@example.com',
+        'source' => 'manual',
+    ], 'POST');
+
+    try {
+        app(ProfessionalCustomerController::class)->store(
+            \App\Http\Requests\Api\Professional\Customer\StoreCustomerRequest::createFrom($req)
+        );
+        expect(false)->toBeTrue('Expected AuthorizationException');
+    } catch (AuthorizationException $e) {
+        expect($e->status())->toBe(423);
+        expect($e->getMessage())->toBe('Account is pending deletion.');
+    }
+});
