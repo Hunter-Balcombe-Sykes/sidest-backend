@@ -21,6 +21,7 @@ use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -95,11 +96,23 @@ return Application::configure(basePath: dirname(__DIR__))
                 ], 404);
             }
 
-            // Not found (404)
+            // Route not found (404)
             elseif ($e instanceof NotFoundHttpException) {
                 $response = response()->json([
                     'message' => 'Endpoint not found',
                 ], 404);
+            }
+
+            // Policy denials via prepareException() — AuthorizationException(hasStatus=true)
+            // becomes HttpException(status). denyAsNotFound() → HttpException(404), distinct
+            // from NotFoundHttpException (route not found). denyWithStatus(423) → HttpException(423).
+            elseif ($e instanceof HttpException
+                && ! $e instanceof NotFoundHttpException
+                && ($e->getStatusCode() === 404 || $e->getStatusCode() === 423)
+            ) {
+                $response = $e->getStatusCode() === 404
+                    ? response()->json(['message' => 'Resource not found'], 404)
+                    : response()->json(['message' => $e->getMessage() ?: 'Account is pending deletion.'], 423);
             }
 
             // Forbidden (403)
@@ -122,7 +135,7 @@ return Application::configure(basePath: dirname(__DIR__))
             // Generic error handling
             else {
                 $statusCode = 500;
-                if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpException) {
+                if ($e instanceof HttpException) {
                     $statusCode = $e->getStatusCode();
                 }
 
