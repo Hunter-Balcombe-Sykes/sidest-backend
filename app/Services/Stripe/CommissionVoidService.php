@@ -4,6 +4,7 @@ namespace App\Services\Stripe;
 
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionLedgerEntry;
+use App\Models\Retail\CommissionPayout;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -100,6 +101,91 @@ class CommissionVoidService
         }
 
         return true;
+    }
+
+    /**
+     * Cancel commission payouts whose 60-day grace window has expired
+     * without the affiliate connecting Stripe Connect.
+     *
+     * Scans pending/pending_funds payouts past their void_at via the
+     * partial index commission_payouts_void_at_idx, then for each one
+     * checks the affiliate's Stripe status and cancels if not active.
+     * Linked ledger entries are marked voided in the same transaction so
+     * the affiliate's ledger UI shows a consistent "expired" state — leaving
+     * them linked to a cancelled payout would orphan them (never re-eligible
+     * because the payout creator filters whereNull('payout_id')).
+     *
+     * Called from VoidExpiredPayoutsJob (nightly cron).
+     *
+     * @return array{cancelled_count: int, cancelled_cents: int, voided_entries: int}
+     */
+    public function processExpiredPayouts(): array
+    {
+        $stats = ['cancelled_count' => 0, 'cancelled_cents' => 0, 'voided_entries' => 0];
+
+        CommissionPayout::query()
+            ->whereIn('status', ['pending', 'pending_funds'])
+            ->where('void_at', '<', now())
+            ->whereHas('affiliateProfessional', function ($q) {
+                $q->where('stripe_connect_status', '!=', 'active');
+            })
+            ->orderBy('void_at')
+            ->chunkById(200, function ($payouts) use (&$stats): void {
+                foreach ($payouts as $payout) {
+                    try {
+                        $this->cancelExpiredPayout($payout, $stats);
+                    } catch (\Throwable $e) {
+                        Log::error('Failed to cancel expired payout', [
+                            'payout_id' => $payout->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            });
+
+        return $stats;
+    }
+
+    /**
+     * Cancel a single expired payout and void its linked ledger entries.
+     * Optimistic lock guards against an in-flight ExecuteCommissionPayoutJob
+     * advancing the status to 'collecting' between the SELECT and UPDATE.
+     */
+    private function cancelExpiredPayout(CommissionPayout $payout, array &$stats): void
+    {
+        DB::transaction(function () use ($payout, &$stats): void {
+            $updated = CommissionPayout::query()
+                ->where('id', $payout->id)
+                ->whereIn('status', ['pending', 'pending_funds'])
+                ->update([
+                    'status' => 'cancelled',
+                    'failure_code' => 'grace_expired',
+                    'failure_reason' => 'Affiliate did not connect Stripe Connect within the grace period.',
+                    'updated_at' => now(),
+                ]);
+
+            if ($updated === 0) {
+                Log::info('Skipped cancelling expired payout — status changed concurrently', [
+                    'payout_id' => $payout->id,
+                ]);
+
+                return;
+            }
+
+            $voidedEntries = CommissionLedgerEntry::query()
+                ->where('payout_id', $payout->id)
+                ->whereIn('status', ['pending', 'approved'])
+                ->update([
+                    'status' => 'voided',
+                    'voided_at' => now(),
+                    'void_reason' => 'payout_grace_expired',
+                    'updated_at' => now(),
+                ]);
+
+            $stats['cancelled_count']++;
+            $stats['cancelled_cents'] += (int) $payout->gross_commission_cents;
+            $stats['voided_entries'] += (int) $voidedEntries;
+        });
     }
 
     /**

@@ -60,6 +60,16 @@ Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: process-commission-payouts');
     });
 
+// Closes #CR-003: enforces the 60-day payout grace window the UI promises.
+// Runs after the daily payout pass at 06:00 so any payouts that just
+// transitioned out of 'pending' aren't candidates here.
+Schedule::job(new \App\Jobs\Stripe\VoidExpiredPayoutsJob)
+    ->dailyAt('07:00')
+    ->withoutOverlapping(600)
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: void-expired-payouts');
+    });
+
 Schedule::command('sidest:analytics:compact-hourly')
     ->hourly()
     ->withoutOverlapping()

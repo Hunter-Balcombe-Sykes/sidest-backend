@@ -167,7 +167,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** A typo in a config lookup means the env var that's supposed to control the payout grace window has no effect. Always uses the hardcoded fallback.
     - **Source:** Commit-batch review item #2 (commit `85f2673`).
 
-- [ ] **#CR-003** · P0 — UI promises 60-day payout grace; no job actually voids expired payouts (still using legacy 30d ledger-entry path)
+- [x] **#CR-003** · P0 — UI promises 60-day payout grace; no job actually voids expired payouts (still using legacy 30d ledger-entry path)
     - **Where:** app/Jobs/Stripe/ (no `VoidExpiredPayoutsJob` exists); referenced by model docblock + commit message of `85f2673`; consumed for display only by `AffiliateCommerceAnalyticsController::overview` `grace_summary` block
     - **Affects:** Affiliate trust on payout grace banner. UI surface displays "60 days remaining"; real enforcement is the older `commission_void_window_days` (30d) path against `commission_ledger_entries`.
     - **Effort:** M (~3–4h)
