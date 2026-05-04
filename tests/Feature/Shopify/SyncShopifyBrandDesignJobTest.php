@@ -71,6 +71,7 @@ function seedBrandDesignJobFixtures(array $existingDesign = []): ProfessionalInt
         'provider' => 'shopify',
         'external_account_id' => 'bdjob.myshopify.com',
         'access_token' => 'shpat_test_token',
+        'storefront_token' => 'shpat_test_storefront_token',
         'provider_metadata' => ['shop_domain' => 'bdjob.myshopify.com'],
     ]);
     $integration->id = 'int-bdjob-1';
@@ -80,10 +81,10 @@ function seedBrandDesignJobFixtures(array $existingDesign = []): ProfessionalInt
 }
 
 // Single Http::fake() call covering every endpoint the job hits:
-//   1. graphql.json — three different query bodies (shop brand, themes,
-//      metafieldsSet) routed by inspecting the request body.
-//   2. assets.json (REST) — settings_data.json blob.
-//   3. cdn.shopify.com/* — logo bytes.
+//   1. Storefront API graphql.json — brand query (shop.brand only exists here).
+//   2. Admin API graphql.json — themes query + metafieldsSet mutation.
+//   3. Admin API assets.json (REST) — settings_data.json blob.
+//   4. cdn.shopify.com/* — logo bytes.
 function fakeBrandDesignJobShopify(?array $brandColors = null): void
 {
     $colors = $brandColors ?? [
@@ -92,7 +93,30 @@ function fakeBrandDesignJobShopify(?array $brandColors = null): void
     ];
 
     Http::fake([
-        'bdjob.myshopify.com/admin/api/*/graphql.json' => function ($request) use ($colors) {
+        // Storefront API — shop.brand lives here.
+        'bdjob.myshopify.com/api/*/graphql.json' => function ($request) use ($colors) {
+            $query = $request->data()['query'] ?? '';
+
+            if (str_contains($query, 'shop {')) {
+                return Http::response([
+                    'data' => [
+                        'shop' => [
+                            'id' => 'gid://shopify/Shop/777',
+                            'brand' => [
+                                'slogan' => 'Job test slogan',
+                                'logo' => ['image' => ['url' => 'https://cdn.shopify.com/s/files/full.png']],
+                                'squareLogo' => ['image' => ['url' => 'https://cdn.shopify.com/s/files/square.png']],
+                                'colors' => $colors,
+                            ],
+                        ],
+                    ],
+                ]);
+            }
+
+            return Http::response(['errors' => [['message' => 'unexpected query']]], 500);
+        },
+        // Admin API — themes query, metafieldsSet mutation.
+        'bdjob.myshopify.com/admin/api/*/graphql.json' => function ($request) {
             $query = $request->data()['query'] ?? '';
 
             if (str_contains($query, 'metafieldsSet')) {
@@ -101,22 +125,6 @@ function fakeBrandDesignJobShopify(?array $brandColors = null): void
                         'metafieldsSet' => [
                             'metafields' => [['id' => 'gid://shopify/Metafield/1', 'key' => 'brand_design']],
                             'userErrors' => [],
-                        ],
-                    ],
-                ]);
-            }
-            if (str_contains($query, 'shop {')) {
-                return Http::response([
-                    'data' => [
-                        'shop' => [
-                            'id' => 'gid://shopify/Shop/777',
-                            'myshopifyDomain' => 'bdjob.myshopify.com',
-                            'brand' => [
-                                'slogan' => 'Job test slogan',
-                                'logo' => ['image' => ['url' => 'https://cdn.shopify.com/s/files/full.png']],
-                                'squareLogo' => ['image' => ['url' => 'https://cdn.shopify.com/s/files/square.png']],
-                                'colors' => $colors,
-                            ],
                         ],
                     ],
                 ]);
@@ -221,16 +229,19 @@ it('is a no-op when the integration row does not exist', function () {
     expect(true)->toBeTrue();
 });
 
-it('rethrows when the importer fails so Laravel retries', function () {
+it('succeeds with empty brand data when both APIs are down', function () {
     $integration = seedBrandDesignJobFixtures();
 
-    // Fail every Shopify call. fetchBrand() throws on a non-ok response,
-    // import() bubbles it, the job's try/catch logs and rethrows — which is
-    // what triggers Laravel's retry/backoff machinery in production.
+    // Fail every Shopify call. Both the Storefront brand query and the Admin
+    // theme query return errors — the importer degrades gracefully and still
+    // writes design tokens with null brand values (leave-if-absent).
     Http::fake([
         'bdjob.myshopify.com/*' => Http::response(['errors' => [['message' => 'boom']]], 500),
     ]);
 
-    expect(fn () => SyncShopifyBrandDesignJob::dispatchSync($integration->id))
-        ->toThrow(\RuntimeException::class);
+    SyncShopifyBrandDesignJob::dispatchSync($integration->id);
+
+    // Job succeeds — no credentials were thrown away, no retry needed.
+    $integration->refresh();
+    expect($integration->provider_metadata['brand_design_state'])->toBe('synced');
 });

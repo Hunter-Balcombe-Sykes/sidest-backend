@@ -2,18 +2,19 @@
 
 namespace App\Services\Shopify;
 
-use App\Exceptions\Shopify\ShopifyGraphQLException;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // Imports the brand-design shape from Shopify for a single integration.
 //
 // Two sources are combined:
-//   1. Shop Brand API (GraphQL `shop.brand`) — colours, logos, slogan. These
-//      are merchant-set brand values (Settings → Brand in Shopify admin) and
-//      are theme-agnostic.
+//   1. Storefront API (GraphQL `shop.brand`) — colours, logos, slogan. The
+//      `brand` field only exists on the Storefront API Shop type, not the Admin
+//      API. Requires a storefront access token (provisioned by
+//      CreateStorefrontAccessTokenJob).
 //   2. Active theme's `config/settings_data.json` (Asset API) — radius,
 //      border thickness, and section spacing. These are pixel values that we
 //      bucket into our three design enums (square|rounded|pill, etc.) so every
@@ -82,11 +83,10 @@ class BrandDesignImporter
         ],
     ];
 
-    private const SHOP_BRAND_QUERY = <<<'GRAPHQL'
+    private const STOREFRONT_BRAND_QUERY = <<<'GRAPHQL'
     {
       shop {
         id
-        myshopifyDomain
         brand {
           slogan
           logo { image { url } }
@@ -139,7 +139,7 @@ class BrandDesignImporter
             throw new \RuntimeException('Invalid Shopify credentials on integration.');
         }
 
-        $brand = $this->fetchBrand($shopDomain, $accessToken, $apiVersion);
+        $brand = $this->fetchBrand($shopDomain, $apiVersion, $integration->storefront_token);
         $themeSettings = $this->fetchActiveThemeSettings($shopDomain, $accessToken, $apiVersion);
 
         $themeName = strtolower((string) ($themeSettings['_theme_name'] ?? ''));
@@ -173,28 +173,43 @@ class BrandDesignImporter
     /**
      * @return array{slogan: ?string, logo: array, squareLogo: array, colors: array, shop_gid: ?string}
      */
-    private function fetchBrand(string $shopDomain, string $accessToken, string $apiVersion): array
+    // The `brand` field on `Shop` exists only in the Storefront API, not the
+    // Admin API. If no storefront token has been provisioned yet (e.g. the
+    // CreateStorefrontAccessTokenJob hasn't run), we skip brand data and still
+    // import theme tokens.
+    private function fetchBrand(string $shopDomain, string $apiVersion, ?string $storefrontToken): array
     {
+        if ($storefrontToken === null || $storefrontToken === '') {
+            Log::info('Skipping brand query — no storefront token available yet.');
+
+            return $this->emptyBrand();
+        }
+
         try {
-            $response = $this->client->graphql(
-                $shopDomain,
-                $accessToken,
-                $apiVersion,
-                self::SHOP_BRAND_QUERY,
-            );
-        } catch (ShopifyGraphQLException $e) {
-            Log::warning('Brand query failed — brand data will be skipped (theme tokens still import).', [
+            $response = Http::withHeaders([
+                'X-Shopify-Storefront-Access-Token' => $storefrontToken,
+                'Content-Type' => 'application/json',
+                'Accept' => 'application/json',
+            ])->post("https://{$shopDomain}/api/{$apiVersion}/graphql.json", [
+                'query' => self::STOREFRONT_BRAND_QUERY,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Storefront brand query transport failed.', [
                 'shop_domain' => $shopDomain,
                 'error' => $e->getMessage(),
             ]);
 
-            return [
-                'slogan' => null,
-                'logo' => [],
-                'squareLogo' => [],
-                'colors' => [],
-                'shop_gid' => null,
-            ];
+            return $this->emptyBrand();
+        }
+
+        $errors = $response->json('errors', []);
+        if (! empty($errors)) {
+            Log::warning('Storefront brand query had errors.', [
+                'shop_domain' => $shopDomain,
+                'errors' => $errors,
+            ]);
+
+            return $this->emptyBrand();
         }
 
         return [
@@ -203,6 +218,17 @@ class BrandDesignImporter
             'squareLogo' => $response->json('data.shop.brand.squareLogo') ?? [],
             'colors' => $response->json('data.shop.brand.colors') ?? [],
             'shop_gid' => $response->json('data.shop.id'),
+        ];
+    }
+
+    private function emptyBrand(): array
+    {
+        return [
+            'slogan' => null,
+            'logo' => [],
+            'squareLogo' => [],
+            'colors' => [],
+            'shop_gid' => null,
         ];
     }
 
