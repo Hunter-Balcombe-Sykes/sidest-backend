@@ -95,6 +95,8 @@ Gate::policy(YourModel::class, YourPolicy::class);
 
 **CI enforces:** Direct `BrandAccessService` capability calls (`canManageShopify`, `canManageBrand`, `canReadBrandAnalytics`, `canReadBrandFinancialAnalytics`) and inline 403 aborts in controllers fail the build. When you add a new capability method to `BrandAccessService`, also add it to the `CAPABILITY_PATTERN` in `.github/workflows/ci.yml`.
 
+**Coverage is sweep-tested:** `tests/Feature/Security/PolicyCoverageTest.php` asserts every model under `app/Models/` either has a `Gate::policy()` registration in `AppServiceProvider::boot()` or appears in the `POLICY_EXEMPT` allowlist with a justification. Adding a new tenant-owned model? Register a policy or add an exempt entry — silent omissions fail CI.
+
 ## Development Commands
 
 ```bash

@@ -12,15 +12,17 @@
 
 ## Progress
 
-- P1 High: 0 of 2 complete
-- P2 Medium: 0 of 2 complete
-- P3 Low: 0 of 1 complete
+- P1 High: 2 of 2 complete
+- P2 Medium: 2 of 2 complete
+- P3 Low: 1 of 1 complete
+
+**Status:** All findings resolved 2026-05-05. Phase 5 closed: PolicyCoverageTest sweep enabled, CLAUDE.md updated, audit finding #1-01 marked done.
 
 ---
 
 ## P1 — Fix before pilot launch
 
-- [ ] **#AUTH-1** · P1 — `ProfessionalUploadController::upload` skips SitePolicy `create` — pending-deletion accounts can upload media
+- [x] **#AUTH-1** · P1 — `ProfessionalUploadController::upload` skips SitePolicy `create` — pending-deletion accounts can upload media
     - **Where:** app/Http/Controllers/Api/Professional/Uploads/ProfessionalUploadController.php:52-232 (`upload` method, no `authorizeForUser` call anywhere)
     - **Affects:** All media upload paths (gallery + content pools, image + video). Pending-deletion professionals retain write access to media even though `SitePolicy::create` was designed to gate exactly this.
     - **Effort:** S (~0.5–1h)
@@ -52,7 +54,7 @@
         }
         ```
 
-- [ ] **#AUTH-2** · P1 — Brand-design create/delete paths skip SitePolicy entirely
+- [x] **#AUTH-2** · P1 — Brand-design create/delete paths skip SitePolicy entirely
     - **Where:** app/Http/Controllers/Api/Professional/Uploads/ProfessionalUploadController.php:440-612 — `uploadBrandLogo`, `destroyBrandLogo`, `uploadBrandPlaceholderImage`, `destroyBrandPlaceholder`, plus the shared `storeBrandDesignImage` helper
     - **Affects:** Brand logos, brand placeholder images. Pending-deletion brand accounts retain write access to brand design assets.
     - **Effort:** M (~2–4h)
@@ -82,7 +84,7 @@
 
 ## P2 — Should fix
 
-- [ ] **#AUTH-3** · P2 — Brand-only routes use inline `professional_type` checks instead of the existing `brand.only` middleware
+- [x] **#AUTH-3** · P2 — Brand-only routes use inline `professional_type` checks instead of the existing `brand.only` middleware
     - **Where:** app/Http/Controllers/Api/Professional/Uploads/ProfessionalUploadController.php — six occurrences in `uploadBrandLogo` (446-448), `destroyBrandLogo` (467-469), `uploadBrandPlaceholderImage` (489-491), `listBrandPlaceholders` (515-517), `destroyBrandPlaceholder` (536-538), `reorderBrandPlaceholders` (558-560); routes at routes/api/professional.php:214-220
     - **Affects:** Brand-design route surface. The check works today, but the inline pattern violates the doctrine in `CLAUDE.md` and creates six places to keep in sync if the check evolves.
     - **Effort:** S (~1h)
@@ -107,7 +109,7 @@
         }
         ```
 
-- [ ] **#AUTH-4** · P2 — Reorder endpoints mutate `sort_order` without invoking SitePolicy `update`
+- [x] **#AUTH-4** · P2 — Reorder endpoints mutate `sort_order` without invoking SitePolicy `update`
     - **Where:** app/Http/Controllers/Api/Professional/Uploads/ProfessionalUploadController.php:304-385 (`reorder`); app/Http/Controllers/Api/Professional/ProfessionalSiteSelfManagement/ProfessionalGalleryController.php:73-112 (`reorder`)
     - **Affects:** Pending-deletion accounts can still reorder media. Lower blast radius than AUTH-1/AUTH-2 because reorder is reversible and doesn't create new state.
     - **Effort:** S (~0.5–1h)

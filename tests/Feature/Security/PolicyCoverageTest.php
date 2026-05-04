@@ -66,7 +66,7 @@ it('every tenant-owned model has a registered policy', function () {
     }
 
     expect($missing)->toBe([], "Models without a registered Policy:\n  - " . implode("\n  - ", $missing) . "\n\nEither register one in AppServiceProvider::boot() or add to POLICY_EXEMPT in this test with a justification.");
-})->todo('Enabled in Phase 5 of auth-policy-coverage plan once all policies are registered.');
+});
 
 it('every POLICY_EXEMPT entry resolves to a real model class', function () {
     foreach (POLICY_EXEMPT as $class) {
