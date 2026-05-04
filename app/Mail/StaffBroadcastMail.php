@@ -21,6 +21,9 @@ class StaffBroadcastMail extends Mailable
     {
         return $this
             ->subject($this->notification->title)
-            ->view('emails.staff_broadcast');
+            ->view('emails.staff_broadcast', [
+                'notification'   => $this->notification,
+                'unsubscribeUrl' => $this->unsubscribeUrl,
+            ]);
     }
 }
