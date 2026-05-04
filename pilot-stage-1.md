@@ -181,7 +181,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** The dashboard tells affiliates "your payout will be voided in 60 days if you don't connect Stripe." The system does nothing of the sort — the older 30-day rule on individual commission rows is what actually cancels the money. Either build the job, or change the dashboard to tell the truth.
     - **Source:** Commit-batch review item #3 (commit `85f2673`).
 
-- [ ] **#V5-001** · P0 — TrustProxies not configured → all rate limiting keys to Cloudflare edge IP
+- [x] **#V5-001** · P0 — TrustProxies not configured → all rate limiting keys to Cloudflare edge IP
     - **Where:** bootstrap/app.php (likely no trustProxies call)
     - **Affects:** Every rate-limited route (essentially the whole API).
     - **Effort:** S (~0.5-1h)
@@ -224,7 +224,7 @@ These are best in their own session because bundling would force unrelated archi
         ```
     - **Source:** v5 audit (discovery_lens: tobias-commit-review; in_scope_v4: yes).
 
-- [ ] **#V5-069** · P0 — EmbeddedSetupController has 6 success() calls that pass a string as int $status — TypeError at runtime
+- [x] **#V5-069** · P0 — EmbeddedSetupController has 6 success() calls that pass a string as int $status — TypeError at runtime
     - **Where:** app/Http/Controllers/Api/Internal/EmbeddedSetupController.php (lines 108, 139, 180, 211, 230, 298, all verified via origin)
     - **Affects:** Embedded Shopify app setup wizard; brand onboarding flow; Hydrogen confirm step.
     - **Effort:** S (~0.5h)
@@ -311,7 +311,7 @@ These are best in their own session because bundling would force unrelated archi
         Affected versions: >=2.3.0,<=2.8.1
         ```
 
-- [ ] **#9-015** · P1 — AffiliateProductSelection unique constraint stale — should include brand_id
+- [x] **#9-015** · P1 — AffiliateProductSelection unique constraint stale — should include brand_id
     - **Where:** supabase/migrations/20260403000000_v2_baseline.sql (original UNIQUE) and supabase/migrations/20260420000100_add_brand_professional_id_to_affiliate_product_selections.sql
     - **Affects:** Affiliate selection lifecycle when brand re-onboards or multi-brand support arrives.
     - **Effort:** S (~1–2h)
@@ -362,7 +362,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** When the main login check breaks, we fall back to asking Supabase directly. We trust whatever Supabase says without double-checking the token claims itself. Mostly fine, but worth tightening so a Supabase misconfig can't accidentally accept tokens from a different project.
     - **Evidence:** `verifyWithAuthServer()` returns only `$user['id']` without re-validating iss/aud/exp.
 
-- [ ] **#2-06** · P1 — LoadCurrentProfessional accepts any string in `supabase_uid` attribute without UUID validation
+- [x] **#2-06** · P1 — LoadCurrentProfessional accepts any string in `supabase_uid` attribute without UUID validation
     - **Where:** app/Http/Middleware/Context/LoadCurrentProfessional.php:23-28
     - **Affects:** All authenticated routes.
     - **Effort:** S (~0.5–1h)
@@ -389,7 +389,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** A user clicking a link twice in a fraction of a second registers as two clicks. Drop near-instant duplicates from the same visitor.
     - **Evidence:** `LinkClick::create` called unconditionally with values from the request — no existence check.
 
-- [ ] **#9-010** · P1 — FanOutBrandStatusNotificationJob has tries=1 and no idempotency — single transient failure drops some affiliates' notifications
+- [x] **#9-010** · P1 — FanOutBrandStatusNotificationJob has tries=1 and no idempotency — single transient failure drops some affiliates' notifications
     - **Where:** app/Jobs/Notifications/FanOutBrandStatusNotificationJob.php (~line 20)
     - **Affects:** Brand status change notifications across an affiliate cohort.
     - **Effort:** M (~2–3h)
