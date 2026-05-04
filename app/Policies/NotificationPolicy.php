@@ -35,6 +35,11 @@ class NotificationPolicy extends BasePolicy
 
     public function update(Professional $actor, Model $resource): bool|Response
     {
+        // Global notifications have no single owner — deny all mutations.
+        if ($resource instanceof Notification && $resource->professional_id === null) {
+            return $this->denyAsNotFound();
+        }
+
         if ($denied = $this->denyIfPendingDeletion($actor)) {
             return $denied;
         }

@@ -2,7 +2,9 @@
 
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
+use App\Models\Core\Notifications\NotificationEmailPolicy;
 use App\Models\Core\Notifications\NotificationEmailPreference;
+use App\Models\Core\Notifications\NotificationReceipt;
 use App\Models\Core\Professional\Professional;
 use App\Policies\NotificationPolicy;
 
@@ -160,4 +162,40 @@ it('denies delete with 423 when the actor is pending deletion', function () {
     expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
     expect($result->status())->toBe(423);
     expect($result->message())->toBe('Account is pending deletion.');
+});
+
+// ---------------------------------------------------------------------------
+// view — NotificationEmailPolicy (direct ownership, no broadcast concept)
+// ---------------------------------------------------------------------------
+
+it('allows view on NotificationEmailPolicy for the owner', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $pref = new NotificationEmailPolicy(['professional_id' => 'pro-1']);
+    expect($this->policy->view($actor, $pref))->toBeTrue();
+});
+
+it('denies view on NotificationEmailPolicy with 404 for non-owner', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $pref = new NotificationEmailPolicy(['professional_id' => 'pro-other']);
+    $result = $this->policy->view($actor, $pref);
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
+});
+
+// ---------------------------------------------------------------------------
+// view — NotificationReceipt (direct ownership)
+// ---------------------------------------------------------------------------
+
+it('allows view on NotificationReceipt for the owner', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $receipt = new NotificationReceipt(['professional_id' => 'pro-1']);
+    expect($this->policy->view($actor, $receipt))->toBeTrue();
+});
+
+it('denies view on NotificationReceipt with 404 for non-owner', function () {
+    $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active']);
+    $receipt = new NotificationReceipt(['professional_id' => 'pro-other']);
+    $result = $this->policy->view($actor, $receipt);
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
 });
