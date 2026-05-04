@@ -55,6 +55,12 @@ class ProfessionalUploadController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
+        // SitePolicy::create gates pending_deletion (423) before any media is created.
+        // currentSite() already enforces site→professional ownership, so the skeleton's
+        // site_id matches the loaded site relation — spoofing defense is a no-op here.
+        $skeleton = (new SiteMedia(['site_id' => $site->id]))->setRelation('site', $site);
+        $this->authorizeForUser($pro, 'create', $skeleton);
+
         $pool = $request->validated('pool');
         $isVideo = $request->hasFile('video');
         $file = $isVideo ? $request->file('video') : $request->file('image');
@@ -307,6 +313,10 @@ class ProfessionalUploadController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
+        // SitePolicy::update gates pending_deletion (423) before reordering existing media.
+        $skeleton = (new SiteMedia(['site_id' => $site->id]))->setRelation('site', $site);
+        $this->authorizeForUser($pro, 'update', $skeleton);
+
         $pool = $request->validated('pool');
         // null here = mixed-type reorder (unified grid). Don't default to
         // 'image' — that silently drops video ids and corrupts the order.
@@ -465,6 +475,12 @@ class ProfessionalUploadController extends ApiController
             return $this->error('Variant must be "full" or "square".', 422);
         }
 
+        // SitePolicy::delete gates pending_deletion (423). The brand-design service
+        // resolves the actual logo row from $site + $variant; ownership is enforced
+        // transitively via currentSite($pro).
+        $skeleton = (new SiteMedia(['site_id' => $site->id]))->setRelation('site', $site);
+        $this->authorizeForUser($pro, 'delete', $skeleton);
+
         $this->brandDesign->deleteLogo($site, $variant);
 
         return $this->success(['deleted' => true]);
@@ -517,6 +533,11 @@ class ProfessionalUploadController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
+        // SitePolicy::delete gates pending_deletion (423). The brand-design service
+        // verifies the placeholder belongs to $site, so transitive ownership holds.
+        $skeleton = (new SiteMedia(['site_id' => $site->id]))->setRelation('site', $site);
+        $this->authorizeForUser($pro, 'delete', $skeleton);
+
         $this->brandDesign->deletePlaceholder($site, $media);
         app(BrandStatusService::class)->sync($pro);
 
@@ -535,6 +556,10 @@ class ProfessionalUploadController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
+        // SitePolicy::update gates pending_deletion (423) before reordering placeholders.
+        $skeleton = (new SiteMedia(['site_id' => $site->id]))->setRelation('site', $site);
+        $this->authorizeForUser($pro, 'update', $skeleton);
+
         $orderedIds = $request->validated('ids') ?? [];
         $this->brandDesign->reorderPlaceholders($site, $orderedIds);
 
@@ -550,6 +575,13 @@ class ProfessionalUploadController extends ApiController
         // $label is one of: 'logo_full', 'logo_square', or 'placeholder'.
         // The brand-logo and brand-placeholder routes both funnel through here
         // so BrandDesignMediaService is the only writer.
+
+        // SitePolicy::create gates pending_deletion (423) before any brand-design
+        // media is created. Both upload entry points funnel through here, so one
+        // gate covers brand-logo and brand-placeholder uploads.
+        $skeleton = (new SiteMedia(['site_id' => $site->id]))->setRelation('site', $site);
+        $this->authorizeForUser($pro, 'create', $skeleton);
+
         try {
             $media = match ($label) {
                 'logo_full' => $this->brandDesign->upsertLogoFromUploadedFile($site, $pro->id, $file, 'full'),

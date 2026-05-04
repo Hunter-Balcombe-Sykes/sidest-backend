@@ -75,6 +75,10 @@ class ProfessionalGalleryController extends ApiController
         $pro = $this->currentProfessional(request());
         $site = $this->currentSite($pro);
 
+        // SitePolicy::update gates pending_deletion (423) before reordering gallery items.
+        $skeleton = (new SiteMedia(['site_id' => $site->id]))->setRelation('site', $site);
+        $this->authorizeForUser($pro, 'update', $skeleton);
+
         $ids = array_values(array_unique($request->validated()['ids'] ?? []));
 
         DB::transaction(function () use ($site, $ids) {
