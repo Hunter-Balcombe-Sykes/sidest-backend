@@ -65,7 +65,11 @@ class ProfessionalDocumentController extends ApiController
 
         $title = trim((string) $request->validated('title'));
         $caption = $this->normaliseOptionalString($request->validated('caption'));
-        $originalFilename = substr((string) $file->getClientOriginalName(), 0, 255);
+        // basename() removes path traversal components; control-char strip (incl. CRLF)
+        // prevents header injection if this value ever appears in Content-Disposition.
+        $rawFilename = basename((string) $file->getClientOriginalName());
+        $rawFilename = (string) preg_replace('/[\x00-\x1F\x7F]/', '', $rawFilename);
+        $originalFilename = substr($rawFilename, 0, 255);
 
         // Flat-replace: inside one transaction, soft-delete the existing row
         // (if any), create the new row, stream the file to R2, and set the path.

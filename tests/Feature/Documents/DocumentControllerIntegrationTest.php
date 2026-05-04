@@ -105,6 +105,25 @@ it('POST /api/documents creates a SiteMedia row and stores the file on R2', func
     Storage::disk('media')->assertExists($row->path);
 });
 
+it('POST /api/documents strips CRLF and path-traversal from original_filename', function () {
+    $pro = seedProfessional();
+    // Filename combines path traversal (../../etc/) and CRLF injection (\r\n) —
+    // both should be neutralised before storage.
+    $file = UploadedFile::fake()->create("../../etc/\r\npasswd.pdf", 50, 'application/pdf');
+    file_put_contents($file->getRealPath(), "%PDF-1.4\n%%EOF\n".str_repeat('x', 50 * 1024 - 12));
+
+    $response = app(ProfessionalDocumentController::class)
+        ->store(uploadRequestFor($pro, $file, 'Test'));
+
+    expect($response->status())->toBe(201);
+
+    $row = SiteMedia::query()->where('site_id', $pro->site->id)->first();
+    // basename() removes the path prefix; CRLF control chars are then stripped.
+    expect($row->original_filename)->toBe('passwd.pdf');
+    expect($row->original_filename)->not->toContain("\r");
+    expect($row->original_filename)->not->toContain("\n");
+});
+
 it('POST /api/documents flat-replaces: old row soft-deleted, old R2 bytes removed, new active', function () {
     $pro = seedProfessional();
 
