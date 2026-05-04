@@ -19,7 +19,7 @@ class ShopifyThemePublishedWebhookController extends ApiController
 
     public function __invoke(Request $request): JsonResponse
     {
-        $rawBody   = (string) $request->getContent();
+        $rawBody = (string) $request->getContent();
         $signature = (string) $request->header('X-Shopify-Hmac-SHA256', '');
         $webhookId = (string) $request->header('X-Shopify-Webhook-Id', '');
         $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop-Domain', '')));

@@ -7,7 +7,6 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
-use App\Services\Professional\BrandStatusService;
 
 // V2: Brand activation gate. Evaluates checklist (5+ images, Shopify connected, Stripe connected) and syncs brand_status accordingly.
 class BrandOnboardingReadinessService

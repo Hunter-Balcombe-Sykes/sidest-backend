@@ -449,6 +449,7 @@ class ProfessionalAnalyticsController extends ApiController
 
     /**
      * Shop analytics funnel for the authenticated professional (as affiliate).
+     *
      * @deprecated Data is now folded into summary() — kept temporarily for in-flight callers.
      */
     public function shopSummary(Request $request): JsonResponse
@@ -571,7 +572,7 @@ class ProfessionalAnalyticsController extends ApiController
                     ->where('entry_type', 'accrual')
                     ->whereNotNull('shopify_order_id')
                     ->whereBetween('occurred_at', [$from, $to])
-                    ->selectRaw("DATE(occurred_at) as bucket, COUNT(DISTINCT shopify_order_id) as orders, SUM(amount_cents) as commission_cents")
+                    ->selectRaw('DATE(occurred_at) as bucket, COUNT(DISTINCT shopify_order_id) as orders, SUM(amount_cents) as commission_cents')
                     ->groupByRaw('DATE(occurred_at)')
                     ->orderBy('bucket')
                     ->get();

@@ -65,7 +65,7 @@ class BrandPartnerSiteSettingsSync
 
                 $storefrontBaseUrl = $storeSettings
                     ? $storeSettings->storefrontBaseUrl($subdomain)
-                    : 'https://' . $subdomain . '.sidest.co';
+                    : 'https://'.$subdomain.'.sidest.co';
 
                 $brandPartner['subdomain'] = $subdomain;
                 $brandPartner['storefront_base_url'] = $storefrontBaseUrl;

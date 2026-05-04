@@ -102,7 +102,7 @@ class HydrogenAffiliateController extends ApiController
             // Shop has no content envelope (products come from Shopify), but
             // the block_id is needed so Hydrogen can fire click tracking when
             // the visitor opens the shop card.
-            'shop' => $this->sectionEnvelope($sections, 'shop', fn() => null),
+            'shop' => $this->sectionEnvelope($sections, 'shop', fn () => null),
         ])->header('Cache-Control', 'no-store');
     }
 

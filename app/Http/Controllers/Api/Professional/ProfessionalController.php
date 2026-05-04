@@ -7,9 +7,9 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Block;
-use App\Models\Core\Professional\BrandProfile;
 use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
@@ -115,7 +115,7 @@ class ProfessionalController extends ApiController
                 'settings' => $siteSettings,
                 'storefront_base_url' => $brandStoreSettings
                     ? $brandStoreSettings->storefrontBaseUrl($pro->site->subdomain)
-                    : 'https://' . $pro->site->subdomain . '.sidest.co',
+                    : 'https://'.$pro->site->subdomain.'.sidest.co',
             ] : null,
         ];
 

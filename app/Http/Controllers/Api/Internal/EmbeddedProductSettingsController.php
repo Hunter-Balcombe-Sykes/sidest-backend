@@ -24,16 +24,16 @@ class EmbeddedProductSettingsController extends ApiController
      * and global settings the extension needs on mount.
      *
      * @return JsonResponse {
-     *     active: bool,
-     *     commission_override: float|null,
-     *     affiliate_discount_pct: float|null,
-     *     custom_photos_enabled: bool|null,
-     *     default_commission_rate: float,
-     *     global_custom_photos_enabled: bool,
-     *     in_favourites_collection: bool,
-     *     in_default_collection: bool,
-     *     variants: Array<{ gid: string, title: string, enabled: bool }>,
-     * }
+     *                      active: bool,
+     *                      commission_override: float|null,
+     *                      affiliate_discount_pct: float|null,
+     *                      custom_photos_enabled: bool|null,
+     *                      default_commission_rate: float,
+     *                      global_custom_photos_enabled: bool,
+     *                      in_favourites_collection: bool,
+     *                      in_default_collection: bool,
+     *                      variants: Array<{ gid: string, title: string, enabled: bool }>,
+     *                      }
      */
     public function show(Request $request): JsonResponse
     {
@@ -374,6 +374,7 @@ GRAPHQL;
         // The value is an array of variant GIDs to disable; all others are enabled.
         if ($field === 'disabled_variant_gids') {
             $this->saveVariantEnabledStates($integration, $productGid, is_array($value) ? $value : []);
+
             return;
         }
 

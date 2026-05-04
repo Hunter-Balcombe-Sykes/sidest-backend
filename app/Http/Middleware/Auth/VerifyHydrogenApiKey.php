@@ -13,9 +13,16 @@ class VerifyHydrogenApiKey
     {
         $expected = (string) config('services.hydrogen.api_key');
 
-        // Skip validation in dev if no key is configured
         if ($expected === '') {
-            return $next($request);
+            // In local dev and CI, allow unauthenticated hydrogen requests so
+            // developers don't need to provision a shared secret on every machine.
+            // In production/staging, fail closed — a missing key means the env
+            // is misconfigured and hydrogen endpoints must not be reachable.
+            if (app()->isLocal() || app()->runningUnitTests()) {
+                return $next($request);
+            }
+
+            throw new \RuntimeException('HYDROGEN_API_KEY must be set in production.');
         }
 
         $provided = (string) $request->header('X-Hydrogen-Api-Key', '');

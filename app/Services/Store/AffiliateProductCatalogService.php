@@ -630,6 +630,7 @@ GRAPHQL;
                     // Retry this page with the all-products query — reset the
                     // cursor so we start from the beginning of all products.
                     $cursor = null;
+
                     continue;
                 }
 
@@ -683,7 +684,7 @@ GRAPHQL;
                     ];
                 }
 
-                $hasNextPage = Arr::get($data, $pageInfoPath . '.hasNextPage', false);
+                $hasNextPage = Arr::get($data, $pageInfoPath.'.hasNextPage', false);
             } catch (\Throwable $e) {
                 Log::error('Storefront API exception.', [
                     'brand_professional_id' => $brandProfessionalId,

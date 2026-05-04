@@ -17,7 +17,7 @@ class CloudflareDnsService
 
     public function __construct()
     {
-        $this->zoneId   = (string) config('services.cloudflare.zone_id', '');
+        $this->zoneId = (string) config('services.cloudflare.zone_id', '');
         $this->apiToken = (string) config('services.cloudflare.api_token', '');
     }
 
@@ -43,20 +43,20 @@ class CloudflareDnsService
 
         $response = Http::withToken($this->apiToken)
             ->post($this->zonesUrl('/dns_records'), [
-                'type'    => 'CNAME',
-                'name'    => $name,
+                'type' => 'CNAME',
+                'name' => $name,
                 'content' => $target,
                 'proxied' => $proxied,
                 // ttl: 1 means "automatic" when proxied is true.
-                'ttl'     => 1,
+                'ttl' => 1,
             ]);
 
         if (! $response->successful()) {
             Log::error('CloudflareDnsService: failed to create CNAME record.', [
-                'name'   => $name,
+                'name' => $name,
                 'target' => $target,
                 'status' => $response->status(),
-                'body'   => $response->body(),
+                'body' => $response->body(),
             ]);
 
             return null;
@@ -90,9 +90,9 @@ class CloudflareDnsService
 
                 if (! $response->successful()) {
                     Log::error('CloudflareDnsService: failed to update CNAME proxied state.', [
-                        'name'   => $name,
+                        'name' => $name,
                         'status' => $response->status(),
-                        'body'   => $response->body(),
+                        'body' => $response->body(),
                     ]);
 
                     return null;
@@ -109,9 +109,9 @@ class CloudflareDnsService
 
             if (! $response->successful()) {
                 Log::error('CloudflareDnsService: failed to update CNAME record.', [
-                    'name'   => $name,
+                    'name' => $name,
                     'status' => $response->status(),
-                    'body'   => $response->body(),
+                    'body' => $response->body(),
                 ]);
 
                 return null;
@@ -122,19 +122,19 @@ class CloudflareDnsService
 
         $response = Http::withToken($this->apiToken)
             ->post($this->zonesUrl('/dns_records'), [
-                'type'    => 'CNAME',
-                'name'    => $name,
+                'type' => 'CNAME',
+                'name' => $name,
                 'content' => $target,
                 'proxied' => $proxied,
-                'ttl'     => 1,
+                'ttl' => 1,
             ]);
 
         if (! $response->successful()) {
             Log::error('CloudflareDnsService: failed to create CNAME record.', [
-                'name'   => $name,
+                'name' => $name,
                 'target' => $target,
                 'status' => $response->status(),
-                'body'   => $response->body(),
+                'body' => $response->body(),
             ]);
 
             return null;
@@ -161,17 +161,17 @@ class CloudflareDnsService
 
         $response = Http::withToken($this->apiToken)
             ->post($this->zonesUrl('/dns_records'), [
-                'type'    => 'TXT',
-                'name'    => $name,
+                'type' => 'TXT',
+                'name' => $name,
                 'content' => $content,
-                'ttl'     => 1,
+                'ttl' => 1,
             ]);
 
         if (! $response->successful()) {
             Log::error('CloudflareDnsService: failed to create TXT record.', [
-                'name'   => $name,
+                'name' => $name,
                 'status' => $response->status(),
-                'body'   => $response->body(),
+                'body' => $response->body(),
             ]);
 
             return null;
@@ -205,9 +205,9 @@ class CloudflareDnsService
 
             if (! $response->successful()) {
                 Log::error('CloudflareDnsService: failed to update TXT record.', [
-                    'name'   => $name,
+                    'name' => $name,
                     'status' => $response->status(),
-                    'body'   => $response->body(),
+                    'body' => $response->body(),
                 ]);
 
                 return null;
@@ -218,17 +218,17 @@ class CloudflareDnsService
 
         $response = Http::withToken($this->apiToken)
             ->post($this->zonesUrl('/dns_records'), [
-                'type'    => 'TXT',
-                'name'    => $name,
+                'type' => 'TXT',
+                'name' => $name,
                 'content' => $content,
-                'ttl'     => 1,
+                'ttl' => 1,
             ]);
 
         if (! $response->successful()) {
             Log::error('CloudflareDnsService: failed to create TXT record.', [
-                'name'   => $name,
+                'name' => $name,
                 'status' => $response->status(),
-                'body'   => $response->body(),
+                'body' => $response->body(),
             ]);
 
             return null;
@@ -252,8 +252,8 @@ class CloudflareDnsService
         if (! $response->successful() && $response->status() !== 404) {
             Log::warning('CloudflareDnsService: failed to delete DNS record.', [
                 'record_id' => $recordId,
-                'status'    => $response->status(),
-                'body'      => $response->body(),
+                'status' => $response->status(),
+                'body' => $response->body(),
             ]);
         }
     }
@@ -276,8 +276,8 @@ class CloudflareDnsService
 
         if (! $response->successful()) {
             Log::warning('CloudflareDnsService: failed to query DNS records.', [
-                'type'   => $type,
-                'name'   => $name,
+                'type' => $type,
+                'name' => $name,
                 'status' => $response->status(),
             ]);
 
@@ -292,9 +292,9 @@ class CloudflareDnsService
         $record = $results[0];
 
         return [
-            'id'      => (string) ($record['id'] ?? ''),
-            'type'    => (string) ($record['type'] ?? ''),
-            'name'    => (string) ($record['name'] ?? ''),
+            'id' => (string) ($record['id'] ?? ''),
+            'type' => (string) ($record['type'] ?? ''),
+            'name' => (string) ($record['name'] ?? ''),
             'content' => (string) ($record['content'] ?? ''),
         ];
     }

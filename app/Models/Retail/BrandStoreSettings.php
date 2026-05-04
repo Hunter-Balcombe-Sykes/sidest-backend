@@ -60,10 +60,10 @@ class BrandStoreSettings extends BaseModel
         if ($this->domain_mode === 'custom'
             && $this->custom_domain
             && $this->custom_domain_tls_provisioned_at) {
-            return 'https://' . $this->custom_domain;
+            return 'https://'.$this->custom_domain;
         }
 
-        return 'https://' . $subdomain . '.sidest.co';
+        return 'https://'.$subdomain.'.sidest.co';
     }
 
     /**
@@ -91,14 +91,14 @@ class BrandStoreSettings extends BaseModel
     public static function clearWizardProgress(string $professionalId): void
     {
         static::where('professional_id', $professionalId)->update([
-            'hydrogen_install_confirmed'       => false,
-            'oxygen_deployment_token'          => null,
-            'oxygen_storefront_id'             => null,
-            'domain_wizard_complete'           => false,
-            'domain_txt_confirmed'             => false,
-            'domain_mode'                      => 'platform',
-            'custom_domain'                    => null,
-            'custom_domain_verified_at'        => null,
+            'hydrogen_install_confirmed' => false,
+            'oxygen_deployment_token' => null,
+            'oxygen_storefront_id' => null,
+            'domain_wizard_complete' => false,
+            'domain_txt_confirmed' => false,
+            'domain_mode' => 'platform',
+            'custom_domain' => null,
+            'custom_domain_verified_at' => null,
             'custom_domain_tls_provisioned_at' => null,
         ]);
     }
