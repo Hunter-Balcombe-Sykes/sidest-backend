@@ -9,7 +9,11 @@ use Illuminate\Http\JsonResponse;
 abstract class ApiController extends Controller
 {
     /**
-     * Return success response with data.
+     * Return a success JSON response.
+     *
+     * Signature: success($data, $status) — no message argument.
+     * Common footgun: success($data, 'message', 200) passes 'message' as $status
+     * and silently drops 200. Pass only data + integer status code.
      */
     protected function success($data = null, int $status = 200): JsonResponse
     {
