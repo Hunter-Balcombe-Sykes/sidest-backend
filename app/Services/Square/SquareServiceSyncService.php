@@ -284,6 +284,7 @@ class SquareServiceSyncService
 
                         foreach ($toDelete as $service) {
                             $service->is_active = false;
+                            $service->deleted_origin = 'square';
                             $service->save();
                             $service->delete();
                             $deletedCount++;
@@ -343,6 +344,12 @@ class SquareServiceSyncService
                             'square_sync_error' => null,
                         ]);
                     } else {
+                        // Don't resurrect a service the professional manually deleted.
+                        // Only restore if Side St itself (via Square sync) did the deletion.
+                        if ($service->trashed() && $service->deleted_origin !== 'square') {
+                            continue;
+                        }
+
                         $previousCategoryId = $service->category_id;
                         $wasTrashed = $service->trashed();
                         $service->fill([
@@ -389,6 +396,7 @@ class SquareServiceSyncService
 
                 foreach ($missing as $service) {
                     $service->is_active = false;
+                    $service->deleted_origin = 'square';
                     $service->save();
                     $service->delete();
                     $deletedCount++;

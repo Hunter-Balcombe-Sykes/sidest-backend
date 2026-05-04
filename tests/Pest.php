@@ -585,6 +585,58 @@ function setupBrandProfilesTable(): void
 }
 
 /**
+ * site.service_categories — minimal columns for Square sync tests.
+ */
+function setupServiceCategoriesTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS site.service_categories (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        title TEXT NULL,
+        sort_order INTEGER NULL,
+        deleted_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
+ * site.services — all columns nullable except PK. Includes deleted_origin for sync-origin tracking.
+ */
+function setupServicesTable(): void
+{
+    attachTestSchemas();
+    setupServiceCategoriesTable();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS site.services (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        category_id TEXT NULL,
+        title TEXT NULL,
+        description TEXT NULL,
+        price_cents INTEGER NULL,
+        currency_code TEXT NULL,
+        duration_minutes INTEGER NULL,
+        is_active INTEGER NULL,
+        sort_order INTEGER NULL,
+        square_catalog_object_id TEXT NULL,
+        square_variation_id TEXT NULL,
+        square_catalog_version INTEGER NULL,
+        square_last_synced_at TEXT NULL,
+        square_sync_error TEXT NULL,
+        fresha_service_id TEXT NULL,
+        fresha_variation_id TEXT NULL,
+        fresha_service_version INTEGER NULL,
+        fresha_last_synced_at TEXT NULL,
+        fresha_sync_error TEXT NULL,
+        deleted_origin TEXT NULL,
+        deleted_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
  * commerce.commission_ledger_entries — minimal columns for CommissionVoidService flush/void tests.
  */
 function setupCommissionLedgerEntriesTable(): void

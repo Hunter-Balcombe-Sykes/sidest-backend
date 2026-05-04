@@ -36,6 +36,9 @@ class Service extends BaseModel
         'square_last_synced_at',
         'square_sync_error',
 
+        // Deletion origin: 'square' = sync-deleted (restorable); null = manually deleted (never auto-restore)
+        'deleted_origin',
+
         // Fresha integration
         'fresha_service_id',
         'fresha_variation_id',
