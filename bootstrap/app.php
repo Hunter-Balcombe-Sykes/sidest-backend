@@ -65,6 +65,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'shopify.session' => VerifyShopifySessionToken::class,
             'feature' => FeatureGate::class,
             'brand-funding-gate' => BrandFundingGate::class,
+            'brand.only' => \App\Http\Middleware\EnsureBrandAccount::class,
+            'affiliate.only' => \App\Http\Middleware\EnsureAffiliateAccount::class,
         ]);
     })
 
