@@ -13,7 +13,7 @@ from audit_orchestrator.stream_parser import StreamEventTracker
 from audit_orchestrator.prompts import render_item_prompt, render_resume_prompt
 from audit_orchestrator.git_utils import (
     pre_push_check, push_to_remote, discard_working_changes, tick_checkbox_for_item,
-    squash_to_single_commit,
+    squash_to_single_commit, head_sha, dirty_tracked_files,
 )
 from audit_orchestrator.completion import (
     write_completion_record, write_blocked_record, CompletionContext,
@@ -70,6 +70,33 @@ class Runner:
         if item is None:
             return "skipped"
 
+        # Working-tree isolation guard (Fix E): refuse to spawn the agent if
+        # the tree has uncommitted modifications to non-ignored tracked files.
+        # Without this, the agent's commit silently absorbs leftover work from
+        # an earlier interrupted item — that's how a 105-file frankenstein
+        # commit got built across our overnight run. Ignored prefixes (e.g.
+        # the orchestrator's own source) are skipped so dev-in-progress edits
+        # don't block agent runs.
+        ignore = self.config.pre_push_ignore_prefixes
+        contamination = dirty_tracked_files(self.repo_root, ignore_prefixes=ignore)
+        if contamination:
+            sample = "\n".join(contamination[:5])
+            self._mark(
+                item_id, status="blocked",
+                blocked_reason=(
+                    "working tree has uncommitted modifications outside the ignore "
+                    "list — refusing to run to avoid contaminating the agent's "
+                    f"commit with unrelated changes. Sample:\n{sample}"
+                ),
+            )
+            return "blocked"
+
+        # Capture pre-spawn HEAD so we can hard-reset on push failure (Fix B).
+        # The agent will commit on top of this; if its push later fails, we
+        # roll back to here rather than leaving the orphan commit to be
+        # absorbed by the next item's squash.
+        pre_spawn_sha = head_sha(self.repo_root)
+
         item["status"] = "running"
         state.current_run = {"id": item_id, "started_at": now_iso(), "mode": mode.value}
         self.state_mgr.save(state)
@@ -91,7 +118,9 @@ class Runner:
             on_step_change=on_step_change, on_action=on_action,
             should_stop=should_stop,
         )
-        return self._handle_exit(item_id, tracker, question_file)
+        return self._handle_exit(
+            item_id, tracker, question_file, pre_spawn_sha=pre_spawn_sha,
+        )
 
     def resume(
         self, item_id: str, answer: str, *,
@@ -199,9 +228,13 @@ class Runner:
         tracker.exit_code = proc.returncode
         return tracker
 
-    def _handle_exit(self, item_id: str, tracker: StreamEventTracker, question_file: Path) -> str:
+    def _handle_exit(
+        self, item_id: str, tracker: StreamEventTracker, question_file: Path,
+        *, pre_spawn_sha: str | None = None,
+    ) -> str:
         state = self.state_mgr.load()
         item = state.items.get(item_id, {})
+        ignore = self.config.pre_push_ignore_prefixes
 
         # FIRST: detect interrupts (user pause OR claude usage-limit/error).
         # These are NOT failures — they should be re-runnable on next launch.
@@ -209,7 +242,7 @@ class Runner:
         was_terminated = getattr(tracker, "was_terminated", False)
         if was_terminated or tracker.is_usage_limit or tracker.is_error:
             try:
-                discard_working_changes(self.repo_root)
+                discard_working_changes(self.repo_root, ignore_prefixes=ignore)
             except Exception:
                 pass
             if was_terminated:
@@ -247,7 +280,7 @@ class Runner:
                 # discard_working_changes can throw if git is in a weird state;
                 # don't let it skip the _mark call below
                 try:
-                    discard_working_changes(self.repo_root)
+                    discard_working_changes(self.repo_root, ignore_prefixes=ignore)
                 except Exception:
                     pass
                 write_blocked_record(
@@ -275,7 +308,11 @@ class Runner:
             pass
 
         # Pre-push safety check
-        ppc = pre_push_check(self.repo_root, item_id=item_id, base_ref=f"origin/{self.config.push_target}")
+        ppc = pre_push_check(
+            self.repo_root, item_id=item_id,
+            base_ref=f"origin/{self.config.push_target}",
+            ignore_prefixes=ignore,
+        )
         if not ppc.ok:
             self._save_blocked_artifacts(item_id, reason=f"pre_push: {ppc.reason}")
             write_blocked_record(
@@ -289,10 +326,31 @@ class Runner:
         # Capture files-touched BEFORE pushing (so we can report what was in the commit)
         files_touched = self._files_in_commit(ppc.commit_sha)
 
-        # Push and mark done
+        # Push and mark done. push_to_remote now does fetch + rebase + push,
+        # so a non-fast-forward (origin moved on) is no longer fatal — it's
+        # transparently handled. A RuntimeError here means EITHER the rebase
+        # conflicted with remote work OR the push itself was rejected for
+        # some other reason (auth, hook, etc.). In both cases the agent's
+        # commit is still on local HEAD and would pollute the next item's
+        # squash if we left it there. Roll back to the pre-spawn anchor.
         try:
             push_to_remote(self.repo_root, branch=self.config.push_target)
         except RuntimeError as e:
+            if pre_spawn_sha:
+                try:
+                    # Hard-reset to before the agent ran. Any commit(s) the
+                    # agent made on top are discarded — that's the intended
+                    # outcome: better to lose this item's work and re-run it
+                    # cleanly than to leave an orphaned commit that gets
+                    # silently absorbed into a later item's squash with the
+                    # wrong attribution (the 5ba2c4b frankenstein pattern).
+                    subprocess.run(
+                        ["git", "reset", "--hard", pre_spawn_sha],
+                        cwd=self.repo_root, check=True, capture_output=True,
+                    )
+                except Exception:
+                    pass  # if reset fails, the next item's working-tree guard
+                          # will catch the contamination anyway
             self._mark(item_id, status="blocked", blocked_reason=f"push failed: {e}")
             return "blocked"
 

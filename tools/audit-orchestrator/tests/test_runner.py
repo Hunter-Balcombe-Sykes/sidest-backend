@@ -22,7 +22,9 @@ def _mock_claude_exits_clean(stream_lines: list[str], exit_code: int = 0):
 
 @pytest.fixture
 def runner_setup(tmp_path):
-    """Create a tmp .audit-work/ + state with one queued item."""
+    """Create a tmp .audit-work/ + state with one queued item.
+    Repo root is tmp_path (NOT a real git repo) — git_utils calls are mocked
+    in each test rather than running real git."""
     work = tmp_path / ".audit-work"
     work.mkdir()
     sm = StateManager(work / "state.json")
@@ -34,11 +36,23 @@ def runner_setup(tmp_path):
     return Runner(work_dir=work, repo_root=tmp_path, config=config), sm
 
 
+def _patch_git_clean():
+    """Stack of patches that make git calls inside run_one no-op so the
+    tests don't need a real git repo. Returns a list of context managers
+    to use with `with contextlib.ExitStack`."""
+    return [
+        patch("audit_orchestrator.runner.dirty_tracked_files", return_value=[]),
+        patch("audit_orchestrator.runner.head_sha", return_value="pre-spawn-sha"),
+    ]
+
+
 def test_runner_marks_done_on_clean_exit_with_passing_tests(runner_setup):
     runner, sm = runner_setup
     stream = [json.dumps({"type": "system", "subtype": "init", "session_id": "sid-1"})]
 
     with patch("subprocess.Popen", return_value=_mock_claude_exits_clean(stream)), \
+         patch("audit_orchestrator.runner.dirty_tracked_files", return_value=[]), \
+         patch("audit_orchestrator.runner.head_sha", return_value="pre-spawn-sha"), \
          patch("audit_orchestrator.runner.run_test_command", return_value=True), \
          patch("audit_orchestrator.runner.pre_push_check") as ppc, \
          patch("audit_orchestrator.runner.push_to_remote"), \
@@ -67,6 +81,8 @@ def test_runner_marks_blocked_on_test_failure(runner_setup, tmp_path):
     stream = [json.dumps({"type": "system", "subtype": "init", "session_id": "sid-1"})]
 
     with patch("subprocess.Popen", return_value=_mock_claude_exits_clean(stream)), \
+         patch("audit_orchestrator.runner.dirty_tracked_files", return_value=[]), \
+         patch("audit_orchestrator.runner.head_sha", return_value="pre-spawn-sha"), \
          patch("audit_orchestrator.runner.run_test_command", return_value=False), \
          patch("audit_orchestrator.runner.discard_working_changes"), \
          patch.object(Runner, "_save_blocked_artifacts"):
@@ -89,7 +105,9 @@ def test_runner_detects_question_file_and_sets_awaiting(runner_setup):
             json.dumps({"type": "system", "subtype": "init", "session_id": "sid-2"}),
         ])
 
-    with patch("subprocess.Popen", side_effect=popen_side_effect):
+    with patch("subprocess.Popen", side_effect=popen_side_effect), \
+         patch("audit_orchestrator.runner.dirty_tracked_files", return_value=[]), \
+         patch("audit_orchestrator.runner.head_sha", return_value="pre-spawn-sha"):
         outcome = runner.run_one("#T-001", mode=RunMode.OVERNIGHT)
 
     assert outcome == "awaiting_answer"
@@ -128,3 +146,71 @@ def test_runner_resume_uses_resume_flag(runner_setup):
 
     assert "--resume" in captured_cmd
     assert "sid-old" in captured_cmd
+
+
+def test_runner_refuses_to_spawn_when_working_tree_contaminated(runner_setup):
+    """Fix E: if non-ignored tracked files are dirty, refuse to run.
+    Without this, the agent's commit silently absorbs leftover work from
+    an earlier interrupted item — that was the 5ba2c4b frankenstein root
+    cause."""
+    runner, sm = runner_setup
+
+    # Simulate a contaminated working tree
+    contamination = [" M app/SomeFile.php", " M app/Other.php"]
+
+    with patch("audit_orchestrator.runner.dirty_tracked_files", return_value=contamination), \
+         patch("subprocess.Popen") as popen, \
+         patch("audit_orchestrator.runner.head_sha"):
+        outcome = runner.run_one("#T-001", mode=RunMode.OVERNIGHT)
+
+    assert outcome == "blocked"
+    state = sm.load()
+    item = state.items["#T-001"]
+    assert item["status"] == "blocked"
+    assert "working tree" in (item.get("blocked_reason") or "").lower()
+    assert "app/SomeFile.php" in (item.get("blocked_reason") or "")
+    # Crucially: agent was NEVER spawned
+    popen.assert_not_called()
+
+
+def test_runner_rolls_back_to_pre_spawn_sha_on_push_failure(runner_setup):
+    """Fix B: when push fails after the agent committed, hard-reset the
+    local branch to where it was before the agent ran — so the orphan
+    commit can't be absorbed by the next item's squash."""
+    runner, sm = runner_setup
+    stream = [json.dumps({"type": "system", "subtype": "init", "session_id": "sid-1"})]
+
+    captured_git = []
+
+    def fake_subprocess_run(cmd, **kwargs):
+        # Capture only git invocations from the rollback path
+        if isinstance(cmd, list) and cmd and cmd[0] == "git":
+            captured_git.append(cmd)
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = ""
+        result.stderr = ""
+        return result
+
+    with patch("subprocess.Popen", return_value=_mock_claude_exits_clean(stream)), \
+         patch("audit_orchestrator.runner.dirty_tracked_files", return_value=[]), \
+         patch("audit_orchestrator.runner.head_sha", return_value="anchor-sha"), \
+         patch("audit_orchestrator.runner.run_test_command", return_value=True), \
+         patch("audit_orchestrator.runner.pre_push_check") as ppc, \
+         patch("audit_orchestrator.runner.push_to_remote", side_effect=RuntimeError("non-fast-forward")), \
+         patch.object(Runner, "_files_in_commit", return_value=[]), \
+         patch("audit_orchestrator.runner.subprocess.run", side_effect=fake_subprocess_run):
+        ppc.return_value.ok = True
+        ppc.return_value.commit_sha = "agent-commit"
+
+        outcome = runner.run_one("#T-001", mode=RunMode.OVERNIGHT)
+
+    assert outcome == "blocked"
+    state = sm.load()
+    assert state.items["#T-001"]["status"] == "blocked"
+    assert "push failed" in (state.items["#T-001"].get("blocked_reason") or "")
+
+    # The rollback git command was issued with the pre-spawn anchor
+    reset_calls = [c for c in captured_git if c[:3] == ["git", "reset", "--hard"]]
+    assert len(reset_calls) == 1, f"expected one git reset --hard, got {reset_calls}"
+    assert reset_calls[0][3] == "anchor-sha"

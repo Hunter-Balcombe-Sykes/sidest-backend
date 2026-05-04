@@ -22,7 +22,47 @@ def _run(repo: Path, *args: str) -> str:
     return proc.stdout
 
 
-def pre_push_check(repo: Path, *, item_id: str, base_ref: str = "origin/development-v2") -> PrePushResult:
+def head_sha(repo: Path) -> str:
+    """Current HEAD commit sha. Used by the runner to capture a 'before-spawn'
+    anchor that lets us hard-reset on push failure (Fix B in the recovery
+    plan) without losing track of where the branch was."""
+    return _run(repo, "rev-parse", "HEAD").strip()
+
+
+def _path_from_porcelain_line(line: str) -> str:
+    """`git status --porcelain` formats each row as `XY <path>` (or with
+    a `->` for renames). Pull the path out for prefix matching."""
+    rest = line[3:] if len(line) > 3 else ""
+    if " -> " in rest:
+        rest = rest.split(" -> ", 1)[1]
+    return rest.strip()
+
+
+def _is_ignored(path: str, prefixes: list[str]) -> bool:
+    """True if path lives under any of the prefixes."""
+    return any(path.startswith(p) for p in (prefixes or []))
+
+
+def dirty_tracked_files(repo: Path, *, ignore_prefixes: list[str] | None = None) -> list[str]:
+    """List modified tracked files, with paths under `ignore_prefixes`
+    filtered out. Used by the runner's working-tree isolation guard so a
+    user editing the orchestrator's own source doesn't block agent runs."""
+    status = _run(repo, "status", "--porcelain")
+    out = []
+    for line in status.splitlines():
+        if not line or line.startswith("??") or line.startswith("!!"):
+            continue
+        path = _path_from_porcelain_line(line)
+        if not _is_ignored(path, ignore_prefixes or []):
+            out.append(line)
+    return out
+
+
+def pre_push_check(
+    repo: Path, *, item_id: str,
+    base_ref: str = "origin/development-v2",
+    ignore_prefixes: list[str] | None = None,
+) -> PrePushResult:
     """Verify it's safe to push: no uncommitted modifications to tracked files,
     exactly one commit ahead of base, commit message references the item id.
 
@@ -31,19 +71,17 @@ def pre_push_check(repo: Path, *, item_id: str, base_ref: str = "origin/developm
     legitimately appear as untracked during a run. We only reject when there
     are MODIFIED tracked files that should have been committed.
 
+    `ignore_prefixes` filters out paths the user might be editing live (e.g.
+    the orchestrator's own source under `tools/audit-orchestrator/`) so those
+    in-progress edits don't block agent pushes.
+
     Returns PrePushResult.ok=True on success, with .commit_sha set.
     """
-    status = _run(repo, "status", "--porcelain")
-    # Filter porcelain lines: only keep modifications to tracked files
-    # (status codes M, A, D, R, C, U). Untracked (??) and ignored (!!) are OK.
-    dirty_tracked = [
-        line for line in status.splitlines()
-        if line and not line.startswith("??") and not line.startswith("!!")
-    ]
-    if dirty_tracked:
+    dirty = dirty_tracked_files(repo, ignore_prefixes=ignore_prefixes)
+    if dirty:
         return PrePushResult(
             ok=False,
-            reason="uncommitted modifications to tracked files:\n" + "\n".join(dirty_tracked),
+            reason="uncommitted modifications to tracked files:\n" + "\n".join(dirty),
         )
 
     log = _run(repo, "log", "--oneline", f"{base_ref}..HEAD").strip()
@@ -118,14 +156,80 @@ def squash_to_single_commit(
 
 
 def push_to_remote(repo: Path, *, branch: str = "development-v2") -> None:
-    """Push the named branch to origin. Raises on failure."""
+    """Fetch + rebase the local branch onto origin, then push.
+
+    The rebase step is what prevents the cascading frankenstein-commit failure
+    mode: if origin moved on (because the user pushed manually, another
+    Claude session pushed, or CI made a commit), a bare `git push` would be
+    rejected non-fast-forward and the runner had no recovery path. With
+    rebase, the agent's local commit replays cleanly on top of the new
+    remote tip and pushes normally.
+
+    On rebase conflict — i.e. the agent's commit overlaps with new remote
+    work — abort cleanly to restore pre-rebase state and raise. Caller
+    (runner._handle_exit) treats this as a hard block and rolls back the
+    agent's commit so it doesn't pollute the next item's squash.
+    """
+    # Fetch first so origin/<branch> reflects current reality, not a stale
+    # local view from whenever it was last fetched.
+    _run(repo, "fetch", "origin", branch)
+
+    # Rebase onto fetched origin. If our local branch was already in sync,
+    # this is a no-op. If origin moved, we replay our commit on top.
+    rebase_proc = subprocess.run(
+        ["git", "rebase", f"origin/{branch}"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    if rebase_proc.returncode != 0:
+        # Conflict during replay. Abort to restore pre-rebase HEAD and
+        # surface the failure. The runner's caller will reset the local
+        # commit and mark the item blocked.
+        subprocess.run(
+            ["git", "rebase", "--abort"],
+            cwd=repo, capture_output=True, text=True,
+        )
+        stderr = (rebase_proc.stderr or "")[:300].strip()
+        raise RuntimeError(
+            f"rebase onto origin/{branch} failed (conflicts with remote): {stderr}"
+        )
+
+    # Now safe to push — local is fast-forward of origin.
     _run(repo, "push", "origin", branch)
 
 
-def discard_working_changes(repo: Path) -> None:
-    """Reset working tree to HEAD (used after a failing fix attempt)."""
-    _run(repo, "checkout", "--", ".")
-    _run(repo, "clean", "-fd")
+def discard_working_changes(
+    repo: Path, *, ignore_prefixes: list[str] | None = None,
+) -> None:
+    """Reset modified tracked files to HEAD, optionally skipping paths under
+    `ignore_prefixes`.
+
+    Without the filter, the old `git checkout -- .` reverted EVERY modified
+    tracked file — including a developer's in-progress edits to the
+    orchestrator's own source code. That was the root cause of the "your
+    changes keep disappearing" pattern: every test-failed item run wiped
+    pending edits as collateral damage.
+
+    With the filter, we list only the modified tracked files outside the
+    ignored prefixes and revert just those. Untracked files are no longer
+    auto-cleaned — `git clean -fd` was blowing away `.audit-work/`
+    artifacts (questions, completion records) that are legitimately
+    untracked during a run.
+    """
+    ignore_prefixes = ignore_prefixes or []
+    status = _run(repo, "status", "--porcelain")
+    to_revert: list[str] = []
+    for line in status.splitlines():
+        if not line or line.startswith("??") or line.startswith("!!"):
+            continue
+        path = _path_from_porcelain_line(line)
+        if not _is_ignored(path, ignore_prefixes):
+            to_revert.append(path)
+
+    if to_revert:
+        # Use checkout HEAD -- <files> rather than `git checkout -- <files>`
+        # so we explicitly target HEAD (defensive against detached-HEAD or
+        # mid-merge states).
+        _run(repo, "checkout", "HEAD", "--", *to_revert)
 
 
 def tick_checkbox_for_item(audit_file: Path, item_id: str) -> bool:

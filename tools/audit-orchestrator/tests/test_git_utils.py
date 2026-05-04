@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from audit_orchestrator.git_utils import (
     pre_push_check, PrePushResult, squash_to_single_commit,
+    head_sha, dirty_tracked_files, discard_working_changes, push_to_remote,
 )
 
 
@@ -177,3 +178,148 @@ def test_checkbox_tick_returns_false_for_missing_item(tmp_path):
     md = tmp_path / "audit.md"
     md.write_text("- [ ] **#A** · P0 — exists\n")
     assert tick_checkbox_for_item(md, "#NOPE") is False
+
+
+# --- Fix C: ignore-prefix filtering --------------------------------------
+
+def test_dirty_tracked_files_filters_ignored_prefix(repo: Path):
+    """Files under ignore_prefixes shouldn't show up as 'dirty'."""
+    (repo / "tools").mkdir()
+    (repo / "tools" / "orch.py").write_text("hello")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init orch")
+
+    # Modify both an ignored path and a non-ignored path
+    (repo / "tools" / "orch.py").write_text("hello modified")
+    (repo / "README.md").write_text("readme modified")
+
+    all_dirty = dirty_tracked_files(repo)
+    filtered = dirty_tracked_files(repo, ignore_prefixes=["tools/"])
+
+    assert any("tools/orch.py" in line for line in all_dirty)
+    assert any("README.md" in line for line in all_dirty)
+    assert any("README.md" in line for line in filtered)
+    assert not any("tools/orch.py" in line for line in filtered)
+
+
+def test_pre_push_check_passes_when_only_dirty_files_are_ignored(repo: Path):
+    """A commit landing while orchestrator-source edits are pending in
+    the working tree must still pass pre_push_check — that's the bug
+    that blocked #9-010 and B13 in the recovery scenario."""
+    (repo / "tools" / "audit-orchestrator").mkdir(parents=True)
+    (repo / "tools" / "audit-orchestrator" / "config.py").write_text("# orig")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "track orch")
+    _git(repo, "push", "-q", "origin", "development-v2")  # baseline so the fix below is "1 ahead"
+
+    # Make a real fix commit
+    (repo / "fix.txt").write_text("fixed")
+    _git(repo, "add", "fix.txt")
+    _git(repo, "commit", "-q", "-m", "fix: real work\n\nItem: B16")
+
+    # Simulate developer-in-progress edits to orchestrator source
+    (repo / "tools" / "audit-orchestrator" / "config.py").write_text("# edited")
+
+    # Without ignore: blocked
+    result_strict = pre_push_check(repo, item_id="B16", base_ref="origin/development-v2")
+    assert not result_strict.ok
+    assert "uncommitted modifications" in result_strict.reason
+
+    # With ignore: passes
+    result_filtered = pre_push_check(
+        repo, item_id="B16", base_ref="origin/development-v2",
+        ignore_prefixes=["tools/audit-orchestrator/"],
+    )
+    assert result_filtered.ok, result_filtered.reason
+
+
+def test_discard_working_changes_preserves_ignored_files(repo: Path):
+    """The previous `git checkout -- .` wiped EVERY modified tracked file,
+    including dev-in-progress edits to the orchestrator's own source.
+    Ignored prefixes must survive."""
+    (repo / "tools").mkdir()
+    (repo / "tools" / "orch.py").write_text("# original")
+    (repo / "app.php").write_text("<?php // original")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+
+    # Modify both
+    (repo / "tools" / "orch.py").write_text("# IN PROGRESS")
+    (repo / "app.php").write_text("<?php // agent edited")
+
+    discard_working_changes(repo, ignore_prefixes=["tools/"])
+
+    # Agent's edit reverted, dev-in-progress preserved
+    assert (repo / "app.php").read_text() == "<?php // original"
+    assert (repo / "tools" / "orch.py").read_text() == "# IN PROGRESS"
+
+
+# --- Fix A: push_to_remote rebases before pushing ------------------------
+
+def _make_remote_advance(repo: Path, tmp_path: Path, label: str, file_name: str, contents: str) -> None:
+    """Helper: simulate someone else pushing a commit to origin/development-v2
+    while our local repo is unaware. Used by the push_to_remote tests."""
+    remote_path = (repo.parent / "remote.git").resolve()
+    other = tmp_path / f"other-clone-{label}"
+    subprocess.run(["git", "clone", "-q", str(remote_path), str(other)],
+                   check=True, capture_output=True)
+    # Cloning a bare remote can leave us on a detached state or wrong branch
+    # depending on git defaults — explicitly checkout development-v2.
+    subprocess.run(["git", "checkout", "-q", "development-v2"],
+                   cwd=other, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "x@x"], cwd=other, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "X"], cwd=other, check=True, capture_output=True)
+    (other / file_name).write_text(contents)
+    subprocess.run(["git", "add", "."], cwd=other, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-q", "-m", f"manual: {label}"],
+                   cwd=other, check=True, capture_output=True)
+    subprocess.run(["git", "push", "-q", "origin", "development-v2"],
+                   cwd=other, check=True, capture_output=True)
+
+
+def test_push_to_remote_rebases_when_origin_moved(repo: Path, tmp_path: Path):
+    """When origin has new commits we don't have locally, push_to_remote
+    should fetch + rebase + push instead of failing non-fast-forward.
+    This is what would have prevented the 5ba2c4b cascade."""
+    _make_remote_advance(repo, tmp_path, "advance", "from-someone-else.txt", "manual fix")
+
+    # Now make a non-conflicting commit locally
+    (repo / "agent-fix.txt").write_text("agent did this")
+    _git(repo, "add", "agent-fix.txt")
+    _git(repo, "commit", "-q", "-m", "fix(agent): something\n\nItem: B16")
+
+    # push_to_remote should fetch + rebase onto origin's new tip + push
+    push_to_remote(repo, branch="development-v2")
+
+    # Both commits now on origin
+    log = _git(repo, "log", "--oneline", "origin/development-v2", "-5")
+    assert "manual: advance" in log
+    assert "fix(agent): something" in log
+
+
+def test_push_to_remote_aborts_rebase_on_conflict(repo: Path, tmp_path: Path):
+    """If our local commit conflicts with remote work, rebase should abort
+    cleanly and raise — leaving the working tree as it was before the push
+    attempt so the runner can roll back the agent's commit."""
+    _make_remote_advance(repo, tmp_path, "conflict", "shared.txt", "MANUAL VERSION")
+
+    # Local makes a conflicting edit on the same file
+    (repo / "shared.txt").write_text("AGENT VERSION")
+    _git(repo, "add", "shared.txt")
+    _git(repo, "commit", "-q", "-m", "agent edit shared\n\nItem: B16")
+
+    head_before = head_sha(repo)
+
+    # Should raise — rebase conflict
+    with pytest.raises(RuntimeError, match="rebase"):
+        push_to_remote(repo, branch="development-v2")
+
+    # And HEAD should be untouched (rebase --abort restored it)
+    assert head_sha(repo) == head_before
+
+
+def test_head_sha_returns_current_commit(repo: Path):
+    sha = head_sha(repo)
+    assert len(sha) == 40  # full sha
+    expected = _git(repo, "rev-parse", "HEAD")
+    assert sha == expected

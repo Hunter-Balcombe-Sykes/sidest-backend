@@ -43,6 +43,15 @@ class Config:
     ])
     notify_on_question: bool = True
     notifier_command: str = "terminal-notifier -title 'Audit' -message"
+    # Path prefixes the orchestrator must NEVER touch when:
+    #   - assessing whether the working tree is "dirty" for pre_push_check
+    #   - reverting working-tree changes via discard_working_changes
+    #   - guarding new runs against contaminated working trees
+    # Default protects the orchestrator's own source so developer-in-progress
+    # edits there don't get wiped by failed agent runs and don't block pushes.
+    pre_push_ignore_prefixes: list[str] = field(default_factory=lambda: [
+        "tools/audit-orchestrator/",
+    ])
     # Per-item model override map: {"#B5": "haiku", "#V5-068": "opus"}.
     # Falls back to claude_model when an id isn't listed.
     overrides: dict[str, str] = field(default_factory=dict)
