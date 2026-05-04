@@ -98,7 +98,8 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 continue;
             }
             $productId = (string) Arr::get($li, 'product_id', '');
-            if ($productId !== '') {
+            // Validate numeric-only before embedding in GID to prevent injection via tampered payload.
+            if ($productId !== '' && preg_match('/^\d+$/', $productId)) {
                 $productGids[] = "gid://shopify/Product/{$productId}";
             }
         }
