@@ -661,12 +661,14 @@ function setupCommissionLedgerEntriesTable(): void
 
 /**
  * commerce.commission_payouts — minimal columns for affiliate analytics payout/grace summary.
+ * Includes brand_professional_id so CommissionPolicy tests can assert brand-owner access.
  */
 function setupCommissionPayoutsTable(): void
 {
     attachTestSchemas();
     \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
         id TEXT PRIMARY KEY,
+        brand_professional_id TEXT NULL,
         affiliate_professional_id TEXT NULL,
         status TEXT NULL,
         net_payout_cents INTEGER NULL,
@@ -674,6 +676,24 @@ function setupCommissionPayoutsTable(): void
         processed_at TEXT NULL,
         void_at TEXT NULL,
         currency_code TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
+ * commerce.brand_commission_topups — minimal columns for brand wallet top-up tests.
+ * Only the brand side; no affiliate_professional_id on these records.
+ */
+function setupBrandCommissionTopupsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.brand_commission_topups (
+        id TEXT PRIMARY KEY,
+        brand_professional_id TEXT NULL,
+        amount_cents INTEGER NULL,
+        currency_code TEXT NULL,
+        notes TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
     )');

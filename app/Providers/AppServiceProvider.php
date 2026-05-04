@@ -42,6 +42,9 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Site\SiteSubdomainAlias::class, \App\Policies\SitePolicy::class);
         Gate::policy(\App\Models\Core\Site\Enquiry::class, \App\Policies\SitePolicy::class);
         Gate::policy(\App\Models\Analytics\LeadSubmission::class, \App\Policies\SitePolicy::class);
+        Gate::policy(\App\Models\Retail\CommissionPayout::class, \App\Policies\CommissionPolicy::class);
+        Gate::policy(\App\Models\Retail\CommissionLedgerEntry::class, \App\Policies\CommissionPolicy::class);
+        Gate::policy(\App\Models\Retail\BrandCommissionTopup::class, \App\Policies\CommissionPolicy::class);
 
         // Refuse to boot in production with throttling disabled — a misconfigured
         // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.
