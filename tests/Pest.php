@@ -865,6 +865,36 @@ function createServiceCategoryFor(Professional $pro, array $overrides = []): \Ap
 }
 
 /**
+ * Insert a link-type Block row for $pro and return the Eloquent model.
+ */
+function createLinkBlockFor(Professional $pro, array $overrides = []): \App\Models\Core\Site\Block
+{
+    setupBlocksTable();
+
+    $id = (string) \Illuminate\Support\Str::uuid();
+    $site = $pro->relationLoaded('site') ? $pro->site : $pro->load('site')->site;
+    $now = now()->toDateTimeString();
+
+    $row = array_merge([
+        'id' => $id,
+        'professional_id' => $pro->id,
+        'site_id' => $site->id,
+        'block_group' => 'links',
+        'block_type' => 'link',
+        'title' => 'Test Link',
+        'url' => 'https://example.com',
+        'sort_order' => 0,
+        'is_active' => 1,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ], $overrides);
+
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.blocks')->insert($row);
+
+    return \App\Models\Core\Site\Block::query()->findOrFail($id);
+}
+
+/**
  * notifications.notifications — minimal columns for notification policy enforcement tests.
  */
 function setupNotificationsTable(): void

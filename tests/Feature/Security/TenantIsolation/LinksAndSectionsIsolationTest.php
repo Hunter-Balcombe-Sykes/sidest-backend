@@ -4,9 +4,9 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Requests\Api\Professional\Site\IndexLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
 use App\Models\Core\Site\Block;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpKernel\Exception\HttpException;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();
@@ -80,17 +80,27 @@ it('link update refuses a block belonging to another professional site', functio
         'updated_at' => $now,
     ]);
 
-    // UpdateLinkBlockRequest validates url/title — abort_unless fires before validated() is reached.
+    // Ownership is now enforced via SitePolicy — authorizeForUser throws AuthorizationException.
+    // The policy check runs before validated(), so we must wire the route binding to get past
+    // prepareForValidation's UUID extraction (authorizeForUser fires after type check, before validated()).
     $plainReq = tenantRequestAs($b, ['title' => 'Pwned', 'url' => 'https://pwned.example'], 'PATCH');
-    $req = UpdateLinkBlockRequest::createFrom($plainReq);
-    $req->setContainer(app());
-    $req->attributes->set('professional', $b);
-
     $block = Block::query()->findOrFail($blockId);
 
-    // abort_unless($linkBlock->professional_id === $pro->id) fires before validation runs.
-    expect(fn () => app(ProfessionalLinkBlockController::class)->update($req, $block))
-        ->toThrow(HttpException::class);
+    $formReq = UpdateLinkBlockRequest::createFrom($plainReq);
+    $formReq->setRouteResolver(fn () => tap(new \Illuminate\Routing\Route('PATCH', '/', []), function ($route) use ($block) {
+        $route->bind(request());
+        $route->setParameter('linkBlock', $block);
+    }));
+    $formReq->setContainer(app());
+    $formReq->validateResolved();
 
+    try {
+        app(ProfessionalLinkBlockController::class)->update($formReq, $block);
+        expect(false)->toBeTrue('Expected AuthorizationException');
+    } catch (AuthorizationException $e) {
+        expect($e->status())->toBe(404);
+    }
+
+    // Confirm the block was not modified — the key isolation guarantee.
     expect(DB::table('site.blocks')->where('id', $blockId)->value('title'))->toBe('Secret A');
 });

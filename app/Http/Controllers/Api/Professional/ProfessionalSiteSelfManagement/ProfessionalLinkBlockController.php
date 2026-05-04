@@ -26,8 +26,8 @@ use InvalidArgumentException;
  *   - **Custom mode**: client sends `title` + `url` (legacy contract preserved).
  *     No platform binding, free-form icon_key.
  *
- * Authorization: every CRUD action checks `block->professional_id === current pro`.
- * This is the TOCTOU defense — must not be removed during refactors.
+ * Authorization: ownership on write actions is enforced via SitePolicy (authorizeForUser).
+ * A type constraint abort_unless guards that only link-type blocks reach the policy check.
  */
 class ProfessionalLinkBlockController extends ApiController
 {
@@ -106,16 +106,9 @@ class ProfessionalLinkBlockController extends ApiController
         $pro = $this->currentProfessional($request);
         $this->authorizeCustomLinks($pro);
 
-        // TOCTOU defense: never trust route model binding alone. Verify the
-        // block belongs to the current professional and is the right type.
-        // Removing this check would let any authenticated user PATCH any
-        // link block by guessing the UUID.
-        abort_unless(
-            $linkBlock->professional_id === $pro->id &&
-            $linkBlock->block_group === 'links' &&
-            $linkBlock->block_type === 'link',
-            404
-        );
+        // Type constraint: this endpoint only handles link-type blocks.
+        abort_unless($linkBlock->block_group === 'links' && $linkBlock->block_type === 'link', 404);
+        $this->authorizeForUser($pro, 'update', $linkBlock);
 
         $data = $request->validated();
         unset($data['id']);
@@ -240,12 +233,9 @@ class ProfessionalLinkBlockController extends ApiController
 
         $pro = $this->currentProfessional($request);
 
-        abort_unless(
-            $linkBlock->professional_id === $pro->id &&
-            $linkBlock->block_group === 'links' &&
-            $linkBlock->block_type === 'link',
-            404
-        );
+        // Type constraint: this endpoint only handles link-type blocks.
+        abort_unless($linkBlock->block_group === 'links' && $linkBlock->block_type === 'link', 404);
+        $this->authorizeForUser($pro, 'delete', $linkBlock);
 
         $linkBlock->delete();
 
