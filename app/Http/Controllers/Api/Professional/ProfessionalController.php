@@ -7,7 +7,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
-use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Http\Resources\ProfessionalDashboardResource;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Retail\BrandStoreSettings;
@@ -34,7 +34,7 @@ class ProfessionalController extends ApiController
         Log::info('/api/me start');
 
         $pro = $this->currentProfessional($request);
-        $squareIntegration = $pro->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+        $pro->load('squareIntegration');
         $brandStoreSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
         Log::info('/api/me after currentProfessional', ['pro_id' => $pro->id]);
 
@@ -76,38 +76,7 @@ class ProfessionalController extends ApiController
 
         // Use the already-loaded professional to build payload instead of querying again
         $payload = [
-            'professional' => [
-                'id' => $pro->id,
-                'auth_user_id' => $pro->auth_user_id,
-                'handle' => $pro->handle,
-                'handle_lc' => $pro->handle_lc,
-                'display_name' => $pro->display_name,
-                'first_name' => $pro->first_name,
-                'last_name' => $pro->last_name,
-                'phone' => $pro->phone,
-                'primary_email' => $pro->primary_email,
-                'bio' => $pro->bio,
-                'about' => (object) ($pro->about ?? []),
-                'country_code' => $pro->country_code,
-                'timezone' => $pro->timezone,
-                'professional_type' => $pro->professional_type,
-                'status' => $pro->status,
-                'onboarding_step' => $pro->onboarding_step,
-                'qr_slug' => $pro->qr_slug,
-                'public_contact_number' => $pro->public_contact_number,
-                'public_contact_email' => $pro->public_contact_email,
-                'location_street_address' => $pro->location_street_address,
-                'location_city' => $pro->location_city,
-                'location_state' => $pro->location_state,
-                'location_postcode' => $pro->location_postcode,
-                'location_country' => $pro->location_country,
-                'created_at' => optional($pro->created_at)->toIso8601String(),
-                'updated_at' => optional($pro->updated_at)->toIso8601String(),
-                'square_connected' => $squareIntegration
-                    && ! empty($squareIntegration->access_token)
-                    && ! empty($squareIntegration->external_account_id),
-                'square_merchant_id' => $squareIntegration?->external_account_id,
-            ],
+            'professional' => new ProfessionalDashboardResource($pro),
             'site' => $pro->site ? [
                 'id' => $pro->site->id,
                 'subdomain' => $pro->site->subdomain,
@@ -151,7 +120,7 @@ class ProfessionalController extends ApiController
         });
 
         return $this->success([
-            'professional' => new \App\Http\Resources\ProfessionalResource($professional->fresh()),
+            'professional' => new ProfessionalDashboardResource($professional->fresh()),
         ]);
     }
 

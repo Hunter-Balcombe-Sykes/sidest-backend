@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\BootstrapRequest;
+use App\Http\Resources\ProfessionalDashboardResource;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
 use App\Models\Core\Professional\BrandProfile;
@@ -245,7 +246,7 @@ class BootstrapController extends ApiController
                 }
 
                 return [
-                    'professional' => $professional->fresh(),
+                    'professional' => new ProfessionalDashboardResource($professional->fresh()),
                     'site' => $site->fresh(),
                     'shopify_integration_id' => $shopifyIntegrationId,
                 ];

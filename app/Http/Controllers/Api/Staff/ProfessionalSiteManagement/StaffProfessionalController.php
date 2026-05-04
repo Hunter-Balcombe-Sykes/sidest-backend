@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\HandlesSearchQueries;
 use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateProfessionalRequest;
+use App\Http\Resources\ProfessionalStaffResource;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
 use Exception;
@@ -109,31 +110,7 @@ class StaffProfessionalController extends ApiController
         $professional->load(['site.theme', 'services', 'blocks']);
 
         return $this->success([
-            'professional' => [
-                'id' => $professional->id,
-                'auth_user_id' => $professional->auth_user_id,
-                'handle' => $professional->handle,
-                'display_name' => $professional->display_name,
-                'bio' => $professional->bio,
-                'country_code' => $professional->country_code,
-                'timezone' => $professional->timezone,
-                'professional_type' => $professional->professional_type,
-                'status' => $professional->status,
-                'onboarding_step' => $professional->onboarding_step,
-                'primary_email' => $professional->primary_email,
-                'phone' => $professional->phone,
-                'public_contact_number' => $professional->public_contact_number,
-                'public_contact_email' => $professional->public_contact_email,
-                'location_street_address' => $professional->location_street_address,
-                'location_city' => $professional->location_city,
-                'location_state' => $professional->location_state,
-                'location_postcode' => $professional->location_postcode,
-                'location_country' => $professional->location_country,
-                'first_name' => $professional->first_name,
-                'last_name' => $professional->last_name,
-                'created_at' => optional($professional->created_at)->toISOString(),
-                'updated_at' => optional($professional->updated_at)->toISOString(),
-            ],
+            'professional' => new ProfessionalStaffResource($professional),
             'site' => $professional->site ? [
                 'id' => $professional->site->id,
                 'subdomain' => $professional->site->subdomain,
@@ -161,7 +138,7 @@ class StaffProfessionalController extends ApiController
         $professional->save();
 
         return $this->success([
-            'professional' => $professional->fresh(),
+            'professional' => new ProfessionalStaffResource($professional->fresh()),
         ]);
     }
 
@@ -182,7 +159,7 @@ class StaffProfessionalController extends ApiController
         });
 
         return $this->success([
-            'professional' => $professional->fresh(),
+            'professional' => new ProfessionalStaffResource($professional->fresh()),
         ]);
     }
 
@@ -227,7 +204,7 @@ class StaffProfessionalController extends ApiController
 
         return $this->success([
             'message' => 'Professional restored successfully',
-            'professional' => $professional->fresh(),
+            'professional' => new ProfessionalStaffResource($professional->fresh()),
         ]);
     }
 
