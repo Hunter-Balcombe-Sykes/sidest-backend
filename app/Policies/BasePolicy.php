@@ -24,4 +24,15 @@ abstract class BasePolicy
 
         return null;
     }
+
+    /**
+     * Deny with a 404 to avoid leaking resource existence to non-owners.
+     * Use in policy methods that gate route-bound resources — an actor reaching
+     * this point has already submitted a valid UUID, and we don't want to
+     * confirm or deny it exists if they don't have access.
+     */
+    protected function denyAsNotFound(): Response
+    {
+        return Response::denyAsNotFound('Not found.');
+    }
 }
