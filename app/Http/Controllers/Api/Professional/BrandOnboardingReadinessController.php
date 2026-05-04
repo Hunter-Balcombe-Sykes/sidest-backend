@@ -20,10 +20,6 @@ class BrandOnboardingReadinessController extends ApiController
     {
         $professional = $this->currentProfessional($request);
 
-        if (! $professional->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         return $this->success($this->readinessService->getChecklist($professional));
     }
 }

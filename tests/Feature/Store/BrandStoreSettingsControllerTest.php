@@ -22,30 +22,8 @@ function makeBrandSettingsRequest(string $method = 'GET', array $params = [], ?s
     return $request;
 }
 
-it('returns 403 when non-brand tries to view store settings', function () {
-    $service = app(BrandCatalogService::class);
-    $deployment = app(HydrogenDeploymentService::class);
-    $controller = new BrandStoreSettingsController($service, $deployment);
-
-    $response = $controller->show(makeBrandSettingsRequest('GET', [], 'influencer'));
-
-    expect($response->status())->toBe(403);
-    expect($response->getData(true)['message'])->toContain('brand accounts');
-});
-
-it('returns 403 when non-brand tries to update store settings', function () {
-    $service = app(BrandCatalogService::class);
-    $deployment = app(HydrogenDeploymentService::class);
-    $controller = new BrandStoreSettingsController($service, $deployment);
-
-    $request = makeBrandSettingsRequest('PATCH', ['default_commission_rate' => 20], 'influencer');
-    $formRequest = UpdateBrandStoreSettingsRequest::createFrom($request);
-    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
-
-    $response = $controller->update($formRequest);
-
-    expect($response->status())->toBe(403);
-});
+// Non-brand access is now rejected by the `brand.only` middleware (EnsureBrandAccount)
+// before the controller is reached — see tests/Unit/Middleware/EnsureBrandAccountTest.php.
 
 it('validates accent_color format in UpdateBrandStoreSettingsRequest', function () {
     $request = new UpdateBrandStoreSettingsRequest;

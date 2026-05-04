@@ -30,10 +30,6 @@ class BrandCatalogController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         try {
             $products = $this->catalogService->fetchBrandCatalog($pro);
         } catch (\RuntimeException $e) {
@@ -56,10 +52,6 @@ class BrandCatalogController extends ApiController
     public function all(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         try {
             $products = $this->catalogService->fetchAllProducts($pro);
@@ -93,10 +85,6 @@ class BrandCatalogController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         try {
             $resolved = $this->catalogService->resolveBrandIntegration($pro);
         } catch (\RuntimeException $e) {
@@ -124,10 +112,6 @@ class BrandCatalogController extends ApiController
     public function debug(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         // ?mode=all runs the exact ALL_PRODUCTS query /brand/catalog/all uses
         // so we can see whether that specific query is the one failing.
@@ -158,10 +142,6 @@ class BrandCatalogController extends ApiController
     public function updateMetafields(UpdateProductMetafieldsRequest $request, string $productGid): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         if (! $this->isValidProductGid($productGid)) {
             return $this->error('Invalid product GID format.', 422);
@@ -315,10 +295,6 @@ class BrandCatalogController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         if (! $this->isValidProductGid($productGid)) {
             return $this->error('Invalid product GID format.', 422);
         }
@@ -368,10 +344,6 @@ class BrandCatalogController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         if (! $this->isValidProductGid($productGid)) {
             return $this->error('Invalid product GID format.', 422);
         }
@@ -410,10 +382,6 @@ class BrandCatalogController extends ApiController
     public function updateDiscount(UpdateProductDiscountRequest $request, string $productGid): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         if (! $this->isValidProductGid($productGid)) {
             return $this->error('Invalid product GID format.', 422);

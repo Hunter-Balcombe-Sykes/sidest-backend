@@ -104,7 +104,7 @@ These are best in their own session because bundling would force unrelated archi
         }
         ```
 
-- [ ] **#1-01** · P0 — Only 2 of ~30 tenant-owned models have an authorization policy registered
+- [ ] **#1-01** · P0 — Only 2 of ~30 tenant-owned models have an authorization policy registered *(Phases 0–4 complete 2026-05-04 — 32 Gate::policy registrations, brand.only + affiliate.only middleware applied; Phase 5 CI tightening + coverage sweep remaining)*
     - **Where:** app/Policies/* (only BasePolicy.php and IntegrationPolicy.php exist); app/Providers/AppServiceProvider.php registers only 1 `Gate::policy`
     - **Affects:** Every authenticated CRUD endpoint touching a tenant-owned model — most of the Professional and Staff API surface.
     - **Effort:** XL (~16–32h)

@@ -20,10 +20,6 @@ class BrandSetupController extends ApiController
     {
         $professional = $this->currentProfessional($request);
 
-        if (! $professional->isBrand()) {
-            return $this->error('Only brand accounts have setup status.', 403);
-        }
-
         $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
 
         $fields = [
@@ -53,10 +49,6 @@ class BrandSetupController extends ApiController
     public function completeSetup(Request $request): JsonResponse
     {
         $professional = $this->currentProfessional($request);
-
-        if (! $professional->isBrand()) {
-            return $this->error('Only brand accounts can complete setup.', 403);
-        }
 
         $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
 

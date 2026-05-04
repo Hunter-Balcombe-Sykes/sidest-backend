@@ -211,13 +211,17 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
 
         // Image Upload (server-side processing → WebP variants via queue)
         Route::post('/uploads', [ProfessionalUploadController::class, 'upload']);
-        Route::post('/uploads/brand-logo', [ProfessionalUploadController::class, 'uploadBrandLogo']);
-        Route::delete('/uploads/brand-logo', [ProfessionalUploadController::class, 'destroyBrandLogo']);
-        Route::post('/uploads/brand-placeholder-image', [ProfessionalUploadController::class, 'uploadBrandPlaceholderImage']);
-        Route::get('/uploads/brand-placeholder-images', [ProfessionalUploadController::class, 'listBrandPlaceholders']);
-        Route::post('/uploads/brand-placeholder-images/reorder', [ProfessionalUploadController::class, 'reorderBrandPlaceholders']);
-        Route::delete('/uploads/brand-placeholder-images/{media}', [ProfessionalUploadController::class, 'destroyBrandPlaceholder'])
-            ->whereUuid('media');
+
+        // Brand-only upload endpoints
+        Route::middleware(['brand.only'])->group(function () {
+            Route::post('/uploads/brand-logo', [ProfessionalUploadController::class, 'uploadBrandLogo']);
+            Route::delete('/uploads/brand-logo', [ProfessionalUploadController::class, 'destroyBrandLogo']);
+            Route::post('/uploads/brand-placeholder-image', [ProfessionalUploadController::class, 'uploadBrandPlaceholderImage']);
+            Route::get('/uploads/brand-placeholder-images', [ProfessionalUploadController::class, 'listBrandPlaceholders']);
+            Route::post('/uploads/brand-placeholder-images/reorder', [ProfessionalUploadController::class, 'reorderBrandPlaceholders']);
+            Route::delete('/uploads/brand-placeholder-images/{media}', [ProfessionalUploadController::class, 'destroyBrandPlaceholder'])
+                ->whereUuid('media');
+        });
 
         // Image Management (pool-based: gallery / content)
         Route::get('/images', [ProfessionalUploadController::class, 'index']);
@@ -293,89 +297,92 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::get('/shopify/token', [ShopifyIntegrationController::class, 'token']);
         Route::post('/shopify/webhooks/register', [ShopifyIntegrationController::class, 'registerWebhooks']);
         Route::post('/shopify/setup/retry', [ShopifyIntegrationController::class, 'retrySetup']);
-        // Generates a one-time code for linking a Shopify store via the embedded app.
-        Route::post('/shopify/embedded-connection-code', [ShopifyEmbeddedConnectionController::class, 'generate'])
-            ->middleware('throttle:10,1');
+        // Brand-only routes — all endpoints below require a brand-type professional account
+        Route::middleware(['brand.only'])->group(function () {
+            // Generates a one-time code for linking a Shopify store via the embedded app.
+            Route::post('/shopify/embedded-connection-code', [ShopifyEmbeddedConnectionController::class, 'generate'])
+                ->middleware('throttle:10,1');
 
-        // Brand profile (business fields)
-        Route::get('/brand/profile', [BrandProfileController::class, 'show']);
-        Route::patch('/brand/profile', [BrandProfileController::class, 'update']);
+            // Brand profile (business fields)
+            Route::get('/brand/profile', [BrandProfileController::class, 'show']);
+            Route::patch('/brand/profile', [BrandProfileController::class, 'update']);
 
-        // Brand Gallery Fallback
-        Route::get('/brand/gallery', [BrandGalleryController::class, 'index']);
-        Route::post('/brand/gallery', [BrandGalleryController::class, 'upload'])
-            ->middleware('throttle:brand-catalog-writes');
-        Route::delete('/brand/gallery/{media}', [BrandGalleryController::class, 'destroy'])
-            ->whereUuid('media')
-            ->middleware('throttle:brand-catalog-writes');
-        Route::patch('/brand/gallery/reorder', [BrandGalleryController::class, 'reorder'])
-            ->middleware('throttle:brand-catalog-writes');
+            // Brand Gallery Fallback
+            Route::get('/brand/gallery', [BrandGalleryController::class, 'index']);
+            Route::post('/brand/gallery', [BrandGalleryController::class, 'upload'])
+                ->middleware('throttle:brand-catalog-writes');
+            Route::delete('/brand/gallery/{media}', [BrandGalleryController::class, 'destroy'])
+                ->whereUuid('media')
+                ->middleware('throttle:brand-catalog-writes');
+            Route::patch('/brand/gallery/reorder', [BrandGalleryController::class, 'reorder'])
+                ->middleware('throttle:brand-catalog-writes');
 
-        // Brand onboarding readiness
-        Route::get('/brand/onboarding-readiness', [BrandOnboardingReadinessController::class, 'show']);
+            // Brand onboarding readiness
+            Route::get('/brand/onboarding-readiness', [BrandOnboardingReadinessController::class, 'show']);
 
-        // Brand setup wizard
-        Route::get('/brand/setup/status', [BrandSetupController::class, 'setupStatus']);
-        Route::post('/brand/setup/complete', [BrandSetupController::class, 'completeSetup']);
+            // Brand setup wizard
+            Route::get('/brand/setup/status', [BrandSetupController::class, 'setupStatus']);
+            Route::post('/brand/setup/complete', [BrandSetupController::class, 'completeSetup']);
 
-        // Brand Catalog Management
-        Route::get('/brand/catalog', [BrandCatalogController::class, 'index']);
-        Route::get('/brand/catalog/all', [BrandCatalogController::class, 'all']);
-        // Temporary diagnostic probe — returns raw Shopify response for a
-        // minimal products query so we can see exactly what Shopify returns
-        // (shop info, products sample, cost, errors, granted scopes). Safe
-        // to leave in place; auth-gated, read-only, no mutations.
-        Route::get('/brand/catalog/debug', [BrandCatalogController::class, 'debug']);
-        // Re-dispatches the has_enabled_variants backfill — for brands whose
-        // first backfill pass hit an earlier bug and marked "complete" with
-        // zero writes. Throttled because it kicks off a catalog-wide Shopify
-        // read; no reason to let a client spam it.
-        Route::post('/brand/catalog/refresh-derived-flags', [BrandCatalogController::class, 'refreshDerivedFlags'])
-            ->middleware('throttle:6,1');
-        Route::patch('/brand/catalog/{productGid}/metafields', [BrandCatalogController::class, 'updateMetafields'])
-            ->middleware('throttle:brand-catalog-writes')
-            ->where('productGid', '.*');
-        Route::patch('/brand/catalog/{productGid}/active', [BrandCatalogController::class, 'toggleActive'])
-            ->middleware('throttle:brand-catalog-writes')
-            ->where('productGid', '.*');
-        Route::patch('/brand/catalog/{productGid}/commission', [BrandCatalogController::class, 'updateCommission'])
-            ->middleware('throttle:brand-catalog-writes')
-            ->where('productGid', '.*');
-        Route::patch('/brand/catalog/{productGid}/discount', [BrandCatalogController::class, 'updateDiscount'])
-            ->middleware('throttle:brand-catalog-writes')
-            ->where('productGid', '.*');
+            // Brand Catalog Management
+            Route::get('/brand/catalog', [BrandCatalogController::class, 'index']);
+            Route::get('/brand/catalog/all', [BrandCatalogController::class, 'all']);
+            // Temporary diagnostic probe — returns raw Shopify response for a
+            // minimal products query so we can see exactly what Shopify returns
+            // (shop info, products sample, cost, errors, granted scopes). Safe
+            // to leave in place; auth-gated, read-only, no mutations.
+            Route::get('/brand/catalog/debug', [BrandCatalogController::class, 'debug']);
+            // Re-dispatches the has_enabled_variants backfill — for brands whose
+            // first backfill pass hit an earlier bug and marked "complete" with
+            // zero writes. Throttled because it kicks off a catalog-wide Shopify
+            // read; no reason to let a client spam it.
+            Route::post('/brand/catalog/refresh-derived-flags', [BrandCatalogController::class, 'refreshDerivedFlags'])
+                ->middleware('throttle:6,1');
+            Route::patch('/brand/catalog/{productGid}/metafields', [BrandCatalogController::class, 'updateMetafields'])
+                ->middleware('throttle:brand-catalog-writes')
+                ->where('productGid', '.*');
+            Route::patch('/brand/catalog/{productGid}/active', [BrandCatalogController::class, 'toggleActive'])
+                ->middleware('throttle:brand-catalog-writes')
+                ->where('productGid', '.*');
+            Route::patch('/brand/catalog/{productGid}/commission', [BrandCatalogController::class, 'updateCommission'])
+                ->middleware('throttle:brand-catalog-writes')
+                ->where('productGid', '.*');
+            Route::patch('/brand/catalog/{productGid}/discount', [BrandCatalogController::class, 'updateDiscount'])
+                ->middleware('throttle:brand-catalog-writes')
+                ->where('productGid', '.*');
 
-        // Brand Store Settings
-        Route::get('/brand/store-settings', [BrandStoreSettingsController::class, 'show']);
-        Route::patch('/brand/store-settings', [BrandStoreSettingsController::class, 'update'])
-            ->middleware('throttle:brand-catalog-writes');
-        Route::post('/brand/store-settings/deploy', [BrandStoreSettingsController::class, 'deploy'])
-            ->middleware('throttle:brand-catalog-writes');
+            // Brand Store Settings
+            Route::get('/brand/store-settings', [BrandStoreSettingsController::class, 'show']);
+            Route::patch('/brand/store-settings', [BrandStoreSettingsController::class, 'update'])
+                ->middleware('throttle:brand-catalog-writes');
+            Route::post('/brand/store-settings/deploy', [BrandStoreSettingsController::class, 'deploy'])
+                ->middleware('throttle:brand-catalog-writes');
 
-        // Brand Design. The unified shape lives in site.settings.design and is
-        // edited via the standard /site update endpoint — this controller only
-        // exposes a read of the resolved shape and a manual Shopify re-sync.
-        Route::get('/brand/design', [BrandDesignController::class, 'show']);
-        Route::post('/brand/design/resync', [BrandDesignController::class, 'resync'])
-            ->middleware('throttle:brand-catalog-writes');
+            // Brand Design. The unified shape lives in site.settings.design and is
+            // edited via the standard /site update endpoint — this controller only
+            // exposes a read of the resolved shape and a manual Shopify re-sync.
+            Route::get('/brand/design', [BrandDesignController::class, 'show']);
+            Route::post('/brand/design/resync', [BrandDesignController::class, 'resync'])
+                ->middleware('throttle:brand-catalog-writes');
 
-        // Full Shopify data resync (profile + brand fields + logo + theme tokens). Per-integration
-        // rate limit is enforced inside the controller (1 per 60s) — that is the primary gate.
-        // The shared `brand-catalog-writes` throttle is reused as a secondary safety net; if its
-        // definition ever tightens for catalog endpoints this route will inherit the change, which
-        // is acceptable because the controller already caps resync traffic more aggressively.
-        Route::post('/store/shopify/resync', ShopifyResyncController::class)
-            ->middleware('throttle:brand-catalog-writes');
+            // Full Shopify data resync (profile + brand fields + logo + theme tokens). Per-integration
+            // rate limit is enforced inside the controller (1 per 60s) — that is the primary gate.
+            // The shared `brand-catalog-writes` throttle is reused as a secondary safety net; if its
+            // definition ever tightens for catalog endpoints this route will inherit the change, which
+            // is acceptable because the controller already caps resync traffic more aggressively.
+            Route::post('/store/shopify/resync', ShopifyResyncController::class)
+                ->middleware('throttle:brand-catalog-writes');
 
-        // Brand Collection Management
-        Route::get('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'index'])
-            ->where('collectionType', 'active|default|favourites');
-        Route::post('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'addProducts'])
-            ->middleware('throttle:brand-catalog-writes')
-            ->where('collectionType', 'active|default|favourites');
-        Route::delete('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'removeProducts'])
-            ->middleware('throttle:brand-catalog-writes')
-            ->where('collectionType', 'active|default|favourites');
+            // Brand Collection Management
+            Route::get('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'index'])
+                ->where('collectionType', 'active|default|favourites');
+            Route::post('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'addProducts'])
+                ->middleware('throttle:brand-catalog-writes')
+                ->where('collectionType', 'active|default|favourites');
+            Route::delete('/brand/collections/{collectionType}/products', [BrandCollectionController::class, 'removeProducts'])
+                ->middleware('throttle:brand-catalog-writes')
+                ->where('collectionType', 'active|default|favourites');
+        });
 
         // Stripe Connect & Payouts
         Route::get('/stripe/status', [StripeConnectController::class, 'status']);
@@ -393,38 +400,41 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/stripe/topups/confirm', [StripeConnectController::class, 'confirmTopUpCheckoutSession']);
         Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
 
-        // Affiliate Product Selections
-        Route::get('/affiliate/products', [AffiliateProductController::class, 'index']);
-        Route::get('/affiliate/selections/stale', [AffiliateProductController::class, 'stale']);
-        Route::post('/affiliate/selections', [AffiliateProductController::class, 'store'])
-            ->middleware('throttle:affiliate-writes');
-        Route::delete('/affiliate/selections/{gid}', [AffiliateProductController::class, 'destroy'])
-            ->middleware('throttle:affiliate-writes')
-            ->where('gid', '.*');
-        Route::patch('/affiliate/selections/reorder', [AffiliateProductController::class, 'reorder'])
-            ->middleware('throttle:affiliate-writes');
-        // Per-selection variant picker. Accepts variant_gids=[] or null to reset
-        // back to "show every brand-enabled variant"; accepts a populated array
-        // to narrow the storefront to exactly those variants.
-        Route::patch('/affiliate/selections/{productGid}/variants', [AffiliateProductController::class, 'updateVariants'])
-            ->middleware('throttle:affiliate-writes')
-            ->where('productGid', '.*');
-        Route::post('/affiliate/selections/reset-to-defaults', [AffiliateProductController::class, 'resetToDefaults'])
-            ->middleware('throttle:affiliate-writes');
+        // Affiliate Product Selections & Custom Photos — affiliate accounts only
+        Route::middleware(['affiliate.only'])->group(function () {
+            // Affiliate Product Selections
+            Route::get('/affiliate/products', [AffiliateProductController::class, 'index']);
+            Route::get('/affiliate/selections/stale', [AffiliateProductController::class, 'stale']);
+            Route::post('/affiliate/selections', [AffiliateProductController::class, 'store'])
+                ->middleware('throttle:affiliate-writes');
+            Route::delete('/affiliate/selections/{gid}', [AffiliateProductController::class, 'destroy'])
+                ->middleware('throttle:affiliate-writes')
+                ->where('gid', '.*');
+            Route::patch('/affiliate/selections/reorder', [AffiliateProductController::class, 'reorder'])
+                ->middleware('throttle:affiliate-writes');
+            // Per-selection variant picker. Accepts variant_gids=[] or null to reset
+            // back to "show every brand-enabled variant"; accepts a populated array
+            // to narrow the storefront to exactly those variants.
+            Route::patch('/affiliate/selections/{productGid}/variants', [AffiliateProductController::class, 'updateVariants'])
+                ->middleware('throttle:affiliate-writes')
+                ->where('productGid', '.*');
+            Route::post('/affiliate/selections/reset-to-defaults', [AffiliateProductController::class, 'resetToDefaults'])
+                ->middleware('throttle:affiliate-writes');
 
-        // Affiliate Custom Product Photos
-        Route::get('/affiliate/products/{gid}/photos', [AffiliateProductPhotoController::class, 'index'])
-            ->where('gid', '.*');
-        Route::post('/affiliate/products/{gid}/photos', [AffiliateProductPhotoController::class, 'upload'])
-            ->where('gid', '.*')
-            ->middleware('throttle:affiliate-writes');
-        Route::delete('/affiliate/products/{gid}/photos/{media}', [AffiliateProductPhotoController::class, 'destroy'])
-            ->where('gid', '.*')
-            ->whereUuid('media')
-            ->middleware('throttle:affiliate-writes');
-        Route::patch('/affiliate/products/{gid}/photos/reorder', [AffiliateProductPhotoController::class, 'reorder'])
-            ->where('gid', '.*')
-            ->middleware('throttle:affiliate-writes');
+            // Affiliate Custom Product Photos
+            Route::get('/affiliate/products/{gid}/photos', [AffiliateProductPhotoController::class, 'index'])
+                ->where('gid', '.*');
+            Route::post('/affiliate/products/{gid}/photos', [AffiliateProductPhotoController::class, 'upload'])
+                ->where('gid', '.*')
+                ->middleware('throttle:affiliate-writes');
+            Route::delete('/affiliate/products/{gid}/photos/{media}', [AffiliateProductPhotoController::class, 'destroy'])
+                ->where('gid', '.*')
+                ->whereUuid('media')
+                ->middleware('throttle:affiliate-writes');
+            Route::patch('/affiliate/products/{gid}/photos/reorder', [AffiliateProductPhotoController::class, 'reorder'])
+                ->where('gid', '.*')
+                ->middleware('throttle:affiliate-writes');
+        });
 
         // Fresha Integration — gated behind fresha_sync feature flag
         Route::middleware('feature:fresha_sync')->group(function () {

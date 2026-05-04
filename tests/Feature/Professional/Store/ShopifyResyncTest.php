@@ -410,12 +410,8 @@ it('rolls back multi-model writes when a post-API save fails', function () {
 
 // ---------- ShopifyResyncController HTTP-layer tests ----------
 
-it('rejects non-brand users with 403', function () {
-    $controller = app(ShopifyResyncController::class);
-    $response = $controller(makeResyncRequest('influencer'));
-
-    expect($response->status())->toBe(403);
-});
+// Non-brand access is now rejected by the `brand.only` middleware (EnsureBrandAccount)
+// before the controller is reached — see tests/Unit/Middleware/EnsureBrandAccountTest.php.
 
 it('returns 404 when the brand has no Shopify integration', function () {
     DB::connection('pgsql')->table('core.professionals')->insert([

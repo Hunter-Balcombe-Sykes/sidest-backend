@@ -41,10 +41,6 @@ class AffiliateProductPhotoController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product photos.', 403);
-        }
-
         if (! preg_match(self::GID_PATTERN, $gid)) {
             return $this->error('Invalid product ID.', 422);
         }
@@ -84,10 +80,6 @@ class AffiliateProductPhotoController extends ApiController
     public function upload(Request $request, string $gid): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot upload product photos.', 403);
-        }
 
         if (! preg_match(self::GID_PATTERN, $gid)) {
             return $this->error('Invalid product ID.', 422);
@@ -191,10 +183,6 @@ class AffiliateProductPhotoController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product photos.', 403);
-        }
-
         if (! preg_match(self::GID_PATTERN, $gid)) {
             return $this->error('Invalid product ID.', 422);
         }
@@ -234,10 +222,6 @@ class AffiliateProductPhotoController extends ApiController
     public function reorder(Request $request, string $gid): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product photos.', 403);
-        }
 
         if (! preg_match(self::GID_PATTERN, $gid)) {
             return $this->error('Invalid product ID.', 422);

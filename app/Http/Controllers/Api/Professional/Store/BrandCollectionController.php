@@ -34,10 +34,6 @@ class BrandCollectionController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         try {
             $collectionGid = $this->resolveCollectionGidFromType($pro, $collectionType);
 
@@ -69,10 +65,6 @@ class BrandCollectionController extends ApiController
     public function addProducts(ManageCollectionProductsRequest $request, string $collectionType): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         try {
             $collectionGid = $this->resolveCollectionGidFromType($pro, $collectionType);
@@ -108,10 +100,6 @@ class BrandCollectionController extends ApiController
     public function removeProducts(ManageCollectionProductsRequest $request, string $collectionType): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         try {
             $collectionGid = $this->resolveCollectionGidFromType($pro, $collectionType);

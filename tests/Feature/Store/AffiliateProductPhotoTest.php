@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureAffiliateAccount;
 use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
@@ -7,6 +8,8 @@ use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
 use App\Services\Store\BrandCatalogService;
 use App\Services\Store\CustomPhotoPermissionService;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -345,17 +348,16 @@ it('lists product photos for a selected product', function () {
     expect($data['limit'])->toBe(1);
 });
 
-it('returns 403 for brand accounts', function () {
-    [$brand, $affiliate] = setupBrandAndAffiliate();
-
-    $controller = app(\App\Http\Controllers\Api\Professional\Store\AffiliateProductPhotoController::class);
-
-    $request = \Illuminate\Http\Request::create('/api/affiliate/products/gid://shopify/Product/123/photos', 'GET');
+it('returns 403 for brand accounts via affiliate.only middleware', function () {
+    // The controller no longer contains inline isBrand() checks; the
+    // EnsureAffiliateAccount middleware is the authoritative gate.
+    $brand = new Professional(['professional_type' => 'brand']);
+    $request = Request::create('/api/affiliate/products/gid://shopify/Product/123/photos', 'GET');
     $request->attributes->set('professional', $brand);
 
-    $response = $controller->index($request, 'gid://shopify/Product/123');
+    $response = (new EnsureAffiliateAccount())->handle($request, fn ($req) => new Response('ok', 200));
 
-    expect($response->status())->toBe(403);
+    expect($response->getStatusCode())->toBe(403);
 });
 
 it('returns 422 for invalid GID format', function () {

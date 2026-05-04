@@ -61,56 +61,8 @@ function fakeBrandCatalog(): array
     ];
 }
 
-// --- Authorization ---
-
-it('returns 403 when non-brand tries to list catalog', function () {
-    $service = app(BrandCatalogService::class);
-    $controller = new BrandCatalogController($service);
-
-    $response = $controller->index(makeNonBrandCatalogRequest());
-
-    expect($response->status())->toBe(403);
-    expect($response->getData(true)['message'])->toContain('brand accounts');
-});
-
-it('returns 403 when non-brand tries to toggle active', function () {
-    $service = app(BrandCatalogService::class);
-    $controller = new BrandCatalogController($service);
-
-    $request = makeNonBrandCatalogRequest('PATCH', ['active' => true]);
-    $formRequest = ToggleProductActiveRequest::createFrom($request);
-    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
-
-    $response = $controller->toggleActive($formRequest, 'gid://shopify/Product/123');
-
-    expect($response->status())->toBe(403);
-});
-
-it('returns 403 when non-brand tries to update commission', function () {
-    $service = app(BrandCatalogService::class);
-    $controller = new BrandCatalogController($service);
-
-    $request = makeNonBrandCatalogRequest('PATCH', ['commission_override' => 25]);
-    $formRequest = UpdateProductCommissionRequest::createFrom($request);
-    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
-
-    $response = $controller->updateCommission($formRequest, 'gid://shopify/Product/123');
-
-    expect($response->status())->toBe(403);
-});
-
-it('returns 403 when non-brand tries to update discount', function () {
-    $service = app(BrandCatalogService::class);
-    $controller = new BrandCatalogController($service);
-
-    $request = makeNonBrandCatalogRequest('PATCH', ['affiliate_discount_pct' => 10]);
-    $formRequest = UpdateProductDiscountRequest::createFrom($request);
-    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
-
-    $response = $controller->updateDiscount($formRequest, 'gid://shopify/Product/123');
-
-    expect($response->status())->toBe(403);
-});
+// Non-brand access is now rejected by the `brand.only` middleware (EnsureBrandAccount)
+// before the controller is reached — see tests/Unit/Middleware/EnsureBrandAccountTest.php.
 
 // --- Catalog listing ---
 

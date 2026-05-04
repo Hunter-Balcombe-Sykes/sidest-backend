@@ -443,10 +443,6 @@ class ProfessionalUploadController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return $this->error('Brand logo uploads are only available for brand accounts.', 403);
-        }
-
         $variant = $request->validated('variant') ?? 'full';
         $label = $variant === 'square' ? 'logo_square' : 'logo_full';
 
@@ -463,10 +459,6 @@ class ProfessionalUploadController extends ApiController
         $pro = $this->currentProfessional($request);
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
-
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return $this->error('Brand logo management is only available for brand accounts.', 403);
-        }
 
         $variant = $request->query('variant');
         if (! in_array($variant, ['full', 'square'], true)) {
@@ -486,10 +478,6 @@ class ProfessionalUploadController extends ApiController
         $pro = $this->currentProfessional($request);
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
-
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return $this->error('Placeholder image uploads are only available for brand accounts.', 403);
-        }
 
         $response = $this->storeBrandDesignImage($pro, $site, $request->file('image'), 'placeholder');
 
@@ -512,10 +500,6 @@ class ProfessionalUploadController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return $this->error('Placeholder image listing is only available for brand accounts.', 403);
-        }
-
         $payload = $this->brandDesign->listDesignMedia($site->id);
 
         return $this->success(['placeholders' => $payload['placeholders']]);
@@ -532,10 +516,6 @@ class ProfessionalUploadController extends ApiController
         $pro = $this->currentProfessional($request);
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
-
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return $this->error('Placeholder management is only available for brand accounts.', 403);
-        }
 
         $this->brandDesign->deletePlaceholder($site, $media);
         app(BrandStatusService::class)->sync($pro);
@@ -554,10 +534,6 @@ class ProfessionalUploadController extends ApiController
         $pro = $this->currentProfessional($request);
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
-
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return $this->error('Placeholder management is only available for brand accounts.', 403);
-        }
 
         $orderedIds = $request->validated('ids') ?? [];
         $this->brandDesign->reorderPlaceholders($site, $orderedIds);

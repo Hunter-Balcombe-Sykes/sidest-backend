@@ -26,10 +26,6 @@ class ShopifyResyncController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         // Scope strictly by the authenticated professional — never accept an integration id
         // from the request body; that would let a brand touch another brand's integration.
         $integration = ProfessionalIntegration::query()

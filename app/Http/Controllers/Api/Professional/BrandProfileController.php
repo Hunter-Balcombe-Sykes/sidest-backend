@@ -20,10 +20,6 @@ class BrandProfileController extends ApiController
     {
         $professional = $this->currentProfessional($request);
 
-        if (! $professional->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         $profile = BrandProfile::where('professional_id', $professional->id)->first();
 
         return $this->success([
@@ -34,10 +30,6 @@ class BrandProfileController extends ApiController
     public function update(Request $request)
     {
         $professional = $this->currentProfessional($request);
-
-        if (! $professional->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         $validator = Validator::make($request->all(), [
             'abn' => ['sometimes', 'nullable', 'string', 'max:20'],

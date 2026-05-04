@@ -36,10 +36,6 @@ class AffiliateProductController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product selections.', 403);
-        }
-
         try {
             $result = $this->catalogService->getCatalogWithSelections($pro);
         } catch (\RuntimeException $e) {
@@ -64,10 +60,6 @@ class AffiliateProductController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product selections.', 403);
-        }
-
         try {
             $stale = $this->catalogService->getStaleSelections($pro);
         } catch (\RuntimeException $e) {
@@ -90,10 +82,6 @@ class AffiliateProductController extends ApiController
     public function store(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product selections.', 403);
-        }
 
         $validated = $request->validate([
             'shopify_product_gid' => ['required', 'string', 'max:100', 'regex:/^gid:\/\/shopify\/Product\/\d+$/'],
@@ -197,10 +185,6 @@ class AffiliateProductController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product selections.', 403);
-        }
-
         if (! preg_match('/^gid:\/\/shopify\/Product\/\d+$/', $productGid)) {
             return $this->error('Invalid product GID format.', 422);
         }
@@ -303,10 +287,6 @@ class AffiliateProductController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product selections.', 403);
-        }
-
         // Validate GID format
         if (! preg_match('/^gid:\/\/shopify\/Product\/\d+$/', $gid)) {
             return $this->error('Invalid product GID format.', 422);
@@ -353,10 +333,6 @@ class AffiliateProductController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product selections.', 403);
-        }
-
         $items = $request->validated()['items'];
         $gids = array_column($items, 'product_gid');
 
@@ -393,10 +369,6 @@ class AffiliateProductController extends ApiController
     public function resetToDefaults(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if ($pro->isBrand()) {
-            return $this->error('Brand accounts cannot manage product selections.', 403);
-        }
 
         $data = $request->validate([
             'brand_professional_id' => ['sometimes', 'uuid'],

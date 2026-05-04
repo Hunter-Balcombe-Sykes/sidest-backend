@@ -26,20 +26,8 @@ function makeBrandDesignRequest(string $method = 'GET', array $params = [], ?str
     return $request;
 }
 
-it('returns 403 when non-brand tries to view design', function () {
-    $controller = app(BrandDesignController::class);
-    $response = $controller->show(makeBrandDesignRequest('GET', [], 'influencer'));
-
-    expect($response->status())->toBe(403);
-    expect($response->getData(true)['message'])->toContain('brand accounts');
-});
-
-it('returns 403 when non-brand tries to resync design', function () {
-    $controller = app(BrandDesignController::class);
-    $response = $controller->resync(makeBrandDesignRequest('POST', [], 'influencer'));
-
-    expect($response->status())->toBe(403);
-});
+// Non-brand access is now rejected by the `brand.only` middleware (EnsureBrandAccount)
+// before the controller is reached — see tests/Unit/Middleware/EnsureBrandAccountTest.php.
 
 it('returns logo urls + placeholders from site_media on show', function () {
     setupProfessionalsTable();

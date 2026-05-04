@@ -35,10 +35,6 @@ class BrandStoreSettingsController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         $storeSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
 
         $pro->loadMissing('site');
@@ -81,10 +77,6 @@ class BrandStoreSettingsController extends ApiController
     public function update(UpdateBrandStoreSettingsRequest $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         $validated = $request->validated();
 
@@ -267,10 +259,6 @@ class BrandStoreSettingsController extends ApiController
     public function deploy(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         $storeSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
 

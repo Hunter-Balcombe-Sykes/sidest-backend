@@ -149,7 +149,7 @@ class EmbeddedProductSettingsController extends ApiController
             return $this->error($e->getMessage(), 422);
         }
 
-        return $this->success([], 'Saved.');
+        return $this->success(['message' => 'Saved.']);
     }
 
     // ── Private helpers ──────────────────────────────────────────────────

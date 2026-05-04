@@ -11,20 +11,17 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * V2: Authorization for records where the actor can only access their own data.
  *
- * Covers ProfessionalConfirmationPreference (read/write), WalletCurrencySwitchAudit
- * (read-only, append-only), and ProfessionalDeletionAuditEntry (read-only, append-only).
- * All three carry professional_id directly.
+ * Covers Professional (id-based), ProfessionalConfirmationPreference (professional_id),
+ * WalletCurrencySwitchAudit (read-only), and ProfessionalDeletionAuditEntry (read-only).
  *
  * Audit-log models (WalletCurrencySwitchAudit, ProfessionalDeletionAuditEntry) are
  * immutable — update/delete are blocked by the policy regardless of ownership.
- *
- * In Phase 4, Professional itself will be added here for account/profile endpoints.
  */
 class ProfessionalSelfPolicy extends BasePolicy
 {
     public function view(Professional $actor, Model $resource): bool|Response
     {
-        if ((string) $resource->professional_id !== (string) $actor->id) {
+        if ($this->resolveOwnerId($resource) !== (string) $actor->id) {
             return $this->denyAsNotFound();
         }
 
@@ -42,7 +39,7 @@ class ProfessionalSelfPolicy extends BasePolicy
             return $denied;
         }
 
-        if ((string) $resource->professional_id !== (string) $actor->id) {
+        if ($this->resolveOwnerId($resource) !== (string) $actor->id) {
             return $this->denyAsNotFound();
         }
 
@@ -52,5 +49,18 @@ class ProfessionalSelfPolicy extends BasePolicy
     public function delete(Professional $actor, Model $resource): bool|Response
     {
         return $this->update($actor, $resource);
+    }
+
+    /**
+     * Professional itself is the root record — ownership is $resource->id.
+     * All other covered models carry professional_id directly.
+     */
+    private function resolveOwnerId(Model $resource): string
+    {
+        if ($resource instanceof Professional) {
+            return (string) $resource->id;
+        }
+
+        return (string) ($resource->professional_id ?? '');
     }
 }

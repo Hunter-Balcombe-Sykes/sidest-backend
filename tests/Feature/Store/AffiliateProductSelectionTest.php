@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;
+use App\Http\Middleware\EnsureAffiliateAccount;
 use App\Http\Requests\Api\Professional\Store\ReorderSelectionsRequest;
 use App\Http\Requests\Api\Professional\Store\StoreSelectionRequest;
 use App\Http\Requests\Api\Professional\Store\UpdateSelectionVariantsRequest;
@@ -8,6 +9,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Store\AffiliateProductCatalogService;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Str;
 
 // --- Helpers ---
@@ -91,51 +93,20 @@ function makeServiceWithCatalog(array $catalog): AffiliateProductCatalogService
     return $service;
 }
 
-// --- Brand account rejection ---
+// --- Brand account rejection (enforced by EnsureAffiliateAccount middleware) ---
+// The controller no longer contains inline isBrand() checks; the middleware gate
+// is the authoritative guard and is tested here via the middleware directly.
 
-it('returns 403 when brand account tries to list products', function () {
-    $service = app(AffiliateProductCatalogService::class);
-    $controller = new AffiliateProductController($service);
+it('returns 403 when brand account hits the affiliate.only middleware', function () {
+    $pro = new Professional(['professional_type' => 'brand']);
+    $request = Request::create('/api/affiliate/products', 'GET');
+    $request->attributes->set('professional', $pro);
 
-    $response = $controller->index(makeBrandRequest());
+    $response = (new EnsureAffiliateAccount())->handle($request, fn ($req) => new Response('ok', 200));
 
-    expect($response->status())->toBe(403);
-    expect($response->getData(true)['message'])->toContain('Brand accounts');
-});
-
-it('returns 403 when brand account tries to create selection', function () {
-    $service = app(AffiliateProductCatalogService::class);
-    $controller = new AffiliateProductController($service);
-
-    $request = makeBrandRequest('POST', ['product_gid' => 'gid://shopify/Product/123', 'sort_order' => 0]);
-    $formRequest = StoreSelectionRequest::createFrom($request);
-    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
-
-    $response = $controller->store($formRequest);
-
-    expect($response->status())->toBe(403);
-});
-
-it('returns 403 when brand account tries to delete selection', function () {
-    $service = app(AffiliateProductCatalogService::class);
-    $controller = new AffiliateProductController($service);
-
-    $response = $controller->destroy(makeBrandRequest('DELETE'), 'gid://shopify/Product/123');
-
-    expect($response->status())->toBe(403);
-});
-
-it('returns 403 when brand account tries to reorder selections', function () {
-    $service = app(AffiliateProductCatalogService::class);
-    $controller = new AffiliateProductController($service);
-
-    $request = makeBrandRequest('PATCH', ['items' => [['product_gid' => 'gid://shopify/Product/123', 'sort_order' => 0]]]);
-    $formRequest = ReorderSelectionsRequest::createFrom($request);
-    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
-
-    $response = $controller->reorder($formRequest);
-
-    expect($response->status())->toBe(403);
+    expect($response->getStatusCode())->toBe(403);
+    expect(json_decode($response->getContent(), true))
+        ->toMatchArray(['error' => 'Brand accounts cannot use this endpoint.']);
 });
 
 // --- Catalog service error handling ---
@@ -283,19 +254,16 @@ it('validates shape in UpdateSelectionVariantsRequest', function () {
     expect($rules)->toHaveKey('variant_gids.*');
 });
 
-it('rejects 403 on updateVariants for brand accounts', function () {
-    $service = app(AffiliateProductCatalogService::class);
-    $controller = new AffiliateProductController($service);
+it('rejects brand accounts on updateVariants via affiliate.only middleware', function () {
+    // The controller no longer checks isBrand(); the middleware is the gate.
+    // We verify the middleware rejects brand accounts at the route layer.
+    $pro = new Professional(['professional_type' => 'brand']);
+    $request = Request::create('/api/affiliate/selections/gid://shopify/Product/123/variants', 'PATCH');
+    $request->attributes->set('professional', $pro);
 
-    $request = makeBrandRequest('PATCH', [
-        'variant_gids' => null,
-    ]);
-    $formRequest = UpdateSelectionVariantsRequest::createFrom($request);
-    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
+    $response = (new EnsureAffiliateAccount())->handle($request, fn ($req) => new Response('ok', 200));
 
-    $response = $controller->updateVariants($formRequest, 'gid://shopify/Product/123');
-
-    expect($response->status())->toBe(403);
+    expect($response->getStatusCode())->toBe(403);
 });
 
 it('rejects malformed product GID on updateVariants', function () {

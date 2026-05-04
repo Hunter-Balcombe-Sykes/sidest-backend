@@ -35,10 +35,6 @@ class BrandGalleryController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('Only brand accounts can manage gallery fallbacks.', 403);
-        }
-
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
@@ -62,10 +58,6 @@ class BrandGalleryController extends ApiController
     public function upload(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('Only brand accounts can upload gallery fallbacks.', 403);
-        }
 
         $request->validate([
             'image' => [
@@ -148,10 +140,6 @@ class BrandGalleryController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('Only brand accounts can manage gallery fallbacks.', 403);
-        }
-
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
 
@@ -177,10 +165,6 @@ class BrandGalleryController extends ApiController
     public function reorder(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('Only brand accounts can manage gallery fallbacks.', 403);
-        }
 
         $request->validate([
             'ids' => ['required', 'array', 'min:1'],

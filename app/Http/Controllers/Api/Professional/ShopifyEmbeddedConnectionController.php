@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-use App\Services\Store\BrandAccessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -17,10 +16,6 @@ class ShopifyEmbeddedConnectionController extends ApiController
 {
     use ResolveCurrentProfessional;
 
-    public function __construct(
-        private readonly BrandAccessService $brandAccess,
-    ) {}
-
     /**
      * Generate a one-time connection code for the Shopify embedded app.
      *
@@ -29,10 +24,6 @@ class ShopifyEmbeddedConnectionController extends ApiController
     public function generate(Request $request): JsonResponse
     {
         $professional = $this->currentProfessional($request);
-
-        if (! $this->brandAccess->isBrandProfessional($professional)) {
-            return $this->error('Only brand accounts can generate a Shopify connection code.', 403);
-        }
 
         // 32-char random code — guessing probability negligible within 30 min window.
         $code = Str::random(32);

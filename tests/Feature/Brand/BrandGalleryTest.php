@@ -281,17 +281,8 @@ it('returns brand gallery images ordered by sort_order', function () {
     expect($data['limit'])->toBe(5);
 });
 
-it('returns 403 for non-brand accounts on index', function () {
-    $affiliate = createNonBrand();
-
-    $mediaService = Mockery::mock(ImageVariantService::class);
-    $controller = new BrandGalleryController($mediaService);
-
-    $request = makeBrandGalleryRequest($affiliate);
-    $response = $controller->index($request);
-
-    expect($response->status())->toBe(403);
-});
+// Non-brand access is now rejected by the `brand.only` middleware (EnsureBrandAccount)
+// before the controller is reached — see tests/Unit/Middleware/EnsureBrandAccountTest.php.
 
 // --- Delete Tests ---
 

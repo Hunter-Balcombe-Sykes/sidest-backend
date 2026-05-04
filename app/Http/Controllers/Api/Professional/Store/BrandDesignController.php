@@ -61,10 +61,6 @@ class BrandDesignController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
-
         $site = Site::where('professional_id', $pro->id)->first();
         $settings = is_array($site?->settings) ? $site->settings : [];
         $design = is_array($settings['design'] ?? null) ? $settings['design'] : [];
@@ -119,10 +115,6 @@ class BrandDesignController extends ApiController
     public function resync(Request $request): JsonResponse
     {
         $pro = $this->currentProfessional($request);
-
-        if (! $pro->isBrand()) {
-            return $this->error('This endpoint is only available for brand accounts.', 403);
-        }
 
         $integration = $this->brandIntegration($pro->id);
 

@@ -22,41 +22,8 @@ function makeBrandCollectionRequest(string $method = 'GET', array $params = [], 
     return $request;
 }
 
-it('returns 403 when non-brand tries to list collection products', function () {
-    $service = app(BrandCatalogService::class);
-    $controller = new BrandCollectionController($service);
-
-    $response = $controller->index(makeBrandCollectionRequest('GET', [], 'influencer'), 'default');
-
-    expect($response->status())->toBe(403);
-    expect($response->getData(true)['message'])->toContain('brand accounts');
-});
-
-it('returns 403 when non-brand tries to add products to collection', function () {
-    $service = app(BrandCatalogService::class);
-    $controller = new BrandCollectionController($service);
-
-    $request = makeBrandCollectionRequest('POST', ['product_gids' => ['gid://shopify/Product/123']], 'influencer');
-    $formRequest = ManageCollectionProductsRequest::createFrom($request);
-    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
-
-    $response = $controller->addProducts($formRequest, 'default');
-
-    expect($response->status())->toBe(403);
-});
-
-it('returns 403 when non-brand tries to remove products from collection', function () {
-    $service = app(BrandCatalogService::class);
-    $controller = new BrandCollectionController($service);
-
-    $request = makeBrandCollectionRequest('DELETE', ['product_gids' => ['gid://shopify/Product/123']], 'influencer');
-    $formRequest = ManageCollectionProductsRequest::createFrom($request);
-    $formRequest->attributes->set('professional', $request->attributes->get('professional'));
-
-    $response = $controller->removeProducts($formRequest, 'default');
-
-    expect($response->status())->toBe(403);
-});
+// Non-brand access is now rejected by the `brand.only` middleware (EnsureBrandAccount)
+// before the controller is reached — see tests/Unit/Middleware/EnsureBrandAccountTest.php.
 
 it('lists collection products for brand', function () {
     $service = Mockery::mock(BrandCatalogService::class);

@@ -243,23 +243,8 @@ it('uploads a brand logo even when a content-pool image already occupies sort_or
     expect($rows->where('pool', SiteMedia::POOL_DESIGN))->toHaveCount(1);
 });
 
-it('rejects brand logo uploads from non-brand professionals', function () {
-    [$brand, $site] = createBrandWithSiteForDesignUpload('typecheck');
-
-    // Flip the type on the existing professional row.
-    DB::connection('pgsql')->table('core.professionals')
-        ->where('id', $brand->id)
-        ->update(['professional_type' => 'professional']);
-
-    $brand = Professional::query()->findOrFail($brand->id);
-    $brand->load('site');
-
-    $controller = makeMockedUploadController();
-    $response = $controller->uploadBrandLogo(makeBrandLogoRequest($brand));
-
-    expect($response->getStatusCode())->toBe(403);
-    expect(SiteMedia::query()->where('site_id', $site->id)->count())->toBe(0);
-});
+// Non-brand access is now rejected by the `brand.only` middleware (EnsureBrandAccount)
+// before the controller is reached — see tests/Unit/Middleware/EnsureBrandAccountTest.php.
 
 it('exposes the design pool constant', function () {
     expect(SiteMedia::POOL_DESIGN)->toBe('design');
