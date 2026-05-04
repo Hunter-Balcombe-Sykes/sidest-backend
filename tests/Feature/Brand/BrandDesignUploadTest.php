@@ -35,11 +35,21 @@ use Illuminate\Support\Str;
  */
 
 beforeEach(function () {
+    $sqlite = config('database.connections.sqlite');
+    config([
+        'database.default' => 'sqlite',
+        'database.connections.pgsql' => array_merge($sqlite, ['database' => ':memory:']),
+    ]);
+
+    DB::purge('pgsql');
+    DB::reconnect('pgsql');
+
     setupProfessionalsTable();
     setupSitesTable();
     setupMediaTables();
     setupBrandProfilesTable();
     setupBrandStoreSettingsTable();
+    setupProfessionalIntegrationsTable();
 
     Storage::fake('media');
     Bus::fake();
