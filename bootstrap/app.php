@@ -36,6 +36,11 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Console\Commands\CompactHourlyAnalytics::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
+        // Trust all proxy IPs — the app is exclusively behind Cloudflare, so every
+        // inbound connection is from a Cloudflare edge node. Without this, $request->ip()
+        // returns the Cloudflare edge IP and all rate-limit keys collapse to the same value.
+        $middleware->trustProxies(at: '*');
+
         $middleware->append(SecureHeaders::class);
 
         // Apply public-cache headers to every API route. The middleware itself
