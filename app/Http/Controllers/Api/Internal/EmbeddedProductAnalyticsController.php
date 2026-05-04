@@ -24,14 +24,14 @@ class EmbeddedProductAnalyticsController extends ApiController
 
     /**
      * @return JsonResponse {
-     *     product_id: string,
-     *     active: bool|null,
-     *     currency_code: string,
-     *     period_days: int,
-     *     totals: { units: int, revenue_cents: int, commission_cents: int, avg_commission_rate: float },
-     *     variants: Array<{ variant_id, variant_title, units, revenue_cents }>,
-     *     recent_sales: Array<{ affiliate_name, quantity, revenue_cents, commission_cents, occurred_at }>,
-     * }
+     *                      product_id: string,
+     *                      active: bool|null,
+     *                      currency_code: string,
+     *                      period_days: int,
+     *                      totals: { units: int, revenue_cents: int, commission_cents: int, avg_commission_rate: float },
+     *                      variants: Array<{ variant_id, variant_title, units, revenue_cents }>,
+     *                      recent_sales: Array<{ affiliate_name, quantity, revenue_cents, commission_cents, occurred_at }>,
+     *                      }
      */
     public function show(Request $request, string $shopifyProductId): JsonResponse
     {

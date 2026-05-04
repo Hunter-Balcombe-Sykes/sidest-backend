@@ -7,8 +7,10 @@ use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Retail\BrandStoreSettings;
+use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -186,7 +188,11 @@ GRAPHQL;
      */
     public function fetchActiveCatalog(string $brandProfessionalId): array
     {
-        return $this->queryStorefrontCatalog($brandProfessionalId);
+        return Cache::remember(
+            CacheKeyGenerator::brandActiveCatalog($brandProfessionalId),
+            now()->addMinutes(5),
+            fn () => $this->queryStorefrontCatalog($brandProfessionalId),
+        );
     }
 
     /**
@@ -630,6 +636,7 @@ GRAPHQL;
                     // Retry this page with the all-products query — reset the
                     // cursor so we start from the beginning of all products.
                     $cursor = null;
+
                     continue;
                 }
 
@@ -683,7 +690,7 @@ GRAPHQL;
                     ];
                 }
 
-                $hasNextPage = Arr::get($data, $pageInfoPath . '.hasNextPage', false);
+                $hasNextPage = Arr::get($data, $pageInfoPath.'.hasNextPage', false);
             } catch (\Throwable $e) {
                 Log::error('Storefront API exception.', [
                     'brand_professional_id' => $brandProfessionalId,

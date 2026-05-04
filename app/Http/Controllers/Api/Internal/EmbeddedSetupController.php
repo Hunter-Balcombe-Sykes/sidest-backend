@@ -89,21 +89,21 @@ class EmbeddedSetupController extends ApiController
         }
 
         return $this->success([
-            'name'                => (string) ($professional->display_name ?? ''),
-            'logo_url'            => '',
-            'contact_email'       => (string) ($professional->primary_email ?? ''),
-            'contact_number'      => (string) ($professional->phone ?? ''),
-            'business_address'    => '',
-            'website_url'         => (string) ($brandProfile?->business_website ?? ''),
+            'name' => (string) ($professional->display_name ?? ''),
+            'logo_url' => '',
+            'contact_email' => (string) ($professional->primary_email ?? ''),
+            'contact_number' => (string) ($professional->phone ?? ''),
+            'business_address' => '',
+            'website_url' => (string) ($brandProfile?->business_website ?? ''),
             'legal_business_name' => (string) ($brandProfile?->legal_business_name ?? ''),
-            'abn'                 => (string) ($brandProfile?->abn ?? ''),
-            'business_type'       => (string) ($brandProfile?->business_type ?? ''),
-            'industries'          => (array) ($brandProfile?->industries ?? []),
-            'brand_slug'          => (string) ($site?->subdomain ?? ''),
+            'abn' => (string) ($brandProfile?->abn ?? ''),
+            'business_type' => (string) ($brandProfile?->business_type ?? ''),
+            'industries' => (array) ($brandProfile?->industries ?? []),
+            'brand_slug' => (string) ($site?->subdomain ?? ''),
             // Derived: only true when all wizard fields are populated AND the
             // storefront is actually reachable. Guards against the wizard showing
             // "complete" when Hydrogen has no production deployment.
-            'setup_complete'      => (bool) ($brandProfile?->setup_complete ?? false)
+            'setup_complete' => (bool) ($brandProfile?->setup_complete ?? false)
                 && ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token'))
                 && ! empty($storeSettings?->oxygen_storefront_id)
                 && (bool) ($storeSettings?->hydrogen_install_confirmed ?? false)
@@ -111,18 +111,18 @@ class EmbeddedSetupController extends ApiController
                 && $storefrontStatus === 'live',
             // Storefront settings
             'default_commission_rate' => (string) ($storeSettings?->default_commission_rate ?? ''),
-            'theme_id'                => (int) ($storeSettings?->theme_id ?? 1),
-            'domain_mode'             => (string) ($storeSettings?->domain_mode ?? ''),
-            'custom_domain'           => (string) ($storeSettings?->custom_domain ?? ''),
+            'theme_id' => (int) ($storeSettings?->theme_id ?? 1),
+            'domain_mode' => (string) ($storeSettings?->domain_mode ?? ''),
+            'custom_domain' => (string) ($storeSettings?->custom_domain ?? ''),
             // Shopify wizard progress fields
-            'oxygen_token_set'        => ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token')),
-            'oxygen_storefront_id'    => (string) ($storeSettings?->oxygen_storefront_id ?? ''),
-            'hydrogen_confirmed'      => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
-            'domain_provisioned'      => (bool) ($storeSettings?->domain_wizard_complete ?? false),
-            'domain_txt_set'          => (bool) ($storeSettings?->domain_txt_confirmed ?? false),
-            'storefront_base_url'     => $storefrontBaseUrl,
-            'storefront_status'       => $storefrontStatus,
-            'brand_status'            => $brandProfile?->brand_status ?? 'building',
+            'oxygen_token_set' => ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token')),
+            'oxygen_storefront_id' => (string) ($storeSettings?->oxygen_storefront_id ?? ''),
+            'hydrogen_confirmed' => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
+            'domain_provisioned' => (bool) ($storeSettings?->domain_wizard_complete ?? false),
+            'domain_txt_set' => (bool) ($storeSettings?->domain_txt_confirmed ?? false),
+            'storefront_base_url' => $storefrontBaseUrl,
+            'storefront_status' => $storefrontStatus,
+            'brand_status' => $brandProfile?->brand_status ?? 'building',
         ]);
     }
 
@@ -132,10 +132,10 @@ class EmbeddedSetupController extends ApiController
     public function saveIdentity(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'name'             => ['sometimes', 'string', 'max:255'],
-            'contact_email'    => ['sometimes', 'email', 'max:255'],
-            'contact_number'   => ['sometimes', 'string', 'max:50'],
-            'website_url'      => ['sometimes', 'nullable', 'url', 'max:512'],
+            'name' => ['sometimes', 'string', 'max:255'],
+            'contact_email' => ['sometimes', 'email', 'max:255'],
+            'contact_number' => ['sometimes', 'string', 'max:50'],
+            'website_url' => ['sometimes', 'nullable', 'url', 'max:512'],
         ]);
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
@@ -175,10 +175,10 @@ class EmbeddedSetupController extends ApiController
     {
         $data = $request->validate([
             'legal_business_name' => ['required', 'string', 'max:255'],
-            'abn'                 => ['required', 'string', 'max:14'],
-            'business_type'       => ['required', 'string', 'max:100'],
-            'industries'          => ['required', 'array'],
-            'industries.*'        => ['string', 'max:100'],
+            'abn' => ['required', 'string', 'max:14'],
+            'business_type' => ['required', 'string', 'max:100'],
+            'industries' => ['required', 'array'],
+            'industries.*' => ['string', 'max:100'],
         ]);
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
@@ -188,9 +188,9 @@ class EmbeddedSetupController extends ApiController
             ['professional_id' => $professionalId],
             [
                 'legal_business_name' => $data['legal_business_name'],
-                'abn'                 => $data['abn'],
-                'business_type'       => $data['business_type'],
-                'industries'          => $data['industries'],
+                'abn' => $data['abn'],
+                'business_type' => $data['business_type'],
+                'industries' => $data['industries'],
             ],
         );
 
@@ -210,7 +210,7 @@ class EmbeddedSetupController extends ApiController
     public function updateSetting(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'key'   => ['required', 'string', 'in:default_commission_rate,theme_id,setup_complete'],
+            'key' => ['required', 'string', 'in:default_commission_rate,theme_id,setup_complete'],
             'value' => ['required', 'string'],
         ]);
 
@@ -219,9 +219,9 @@ class EmbeddedSetupController extends ApiController
 
         $payload = match ($data['key']) {
             'default_commission_rate' => ['default_commission_rate' => (float) $data['value']],
-            'theme_id'                => ['theme_id' => (int) $data['value']],
+            'theme_id' => ['theme_id' => (int) $data['value']],
             // setup_complete lives on BrandProfile, not BrandStoreSettings
-            'setup_complete'          => null,
+            'setup_complete' => null,
         };
 
         if ($data['key'] === 'setup_complete') {
@@ -251,7 +251,7 @@ class EmbeddedSetupController extends ApiController
     public function saveDeploymentToken(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'token'        => ['required', 'string', 'max:512'],
+            'token' => ['required', 'string', 'max:512'],
             'storefront_id' => ['sometimes', 'nullable', 'string', 'max:255'],
         ]);
 
@@ -311,8 +311,8 @@ class EmbeddedSetupController extends ApiController
      * Return summary analytics for the brand dashboard overview panel.
      *
      * @return JsonResponse { data: { affiliate_count, total_commission_cents, currency_code,
-     *                                commission_30d_cents, revenue_30d_cents,
-     *                                recent_sales: [{affiliate_name, commission, occurred_at}] } }
+     *                      commission_30d_cents, revenue_30d_cents,
+     *                      recent_sales: [{affiliate_name, commission, occurred_at}] } }
      */
     public function overview(Request $request): JsonResponse
     {
@@ -359,19 +359,19 @@ class EmbeddedSetupController extends ApiController
             ->map(fn ($entry) => [
                 'affiliate_name' => (string) ($entry->affiliateProfessional?->display_name ?? 'Unknown'),
                 // Format as decimal string (cents → dollars) with currency suffix.
-                'commission'     => number_format($entry->amount_cents / 100, 2).' '.($entry->currency_code ?? ''),
-                'occurred_at'    => $entry->occurred_at?->toIso8601String(),
+                'commission' => number_format($entry->amount_cents / 100, 2).' '.($entry->currency_code ?? ''),
+                'occurred_at' => $entry->occurred_at?->toIso8601String(),
             ])
             ->values()
             ->all();
 
         return $this->success([
-            'affiliate_count'        => $affiliateCount,
+            'affiliate_count' => $affiliateCount,
             'total_commission_cents' => $totalCommissionCents,
-            'currency_code'          => $currencyCode,
-            'commission_30d_cents'   => $commission30dCents,
-            'revenue_30d_cents'      => $revenue30dCents,
-            'recent_sales'           => $recentSales,
+            'currency_code' => $currencyCode,
+            'commission_30d_cents' => $commission30dCents,
+            'revenue_30d_cents' => $revenue30dCents,
+            'recent_sales' => $recentSales,
         ]);
     }
 
@@ -415,16 +415,16 @@ class EmbeddedSetupController extends ApiController
             $imageUrl = $featuredImage['url'] ?? (! empty($images) ? ($images[0]['url'] ?? null) : null);
 
             return [
-                'id'              => $p['gid'] ?? '',
-                'title'           => $p['title'] ?? '',
-                'image_url'       => $imageUrl,
-                'active'          => true,
+                'id' => $p['gid'] ?? '',
+                'title' => $p['title'] ?? '',
+                'image_url' => $imageUrl,
+                'active' => true,
                 'commission_rate' => $metafields['commission_override'] ?? null,
             ];
         }, $activeOnly));
 
         return $this->success([
-            'products'               => $products,
+            'products' => $products,
             'default_commission_rate' => $defaultRate,
         ]);
     }
@@ -550,7 +550,7 @@ class EmbeddedSetupController extends ApiController
             'oxygen_storefront_id' => ['required', 'string'],
             // Subdomain input is validated but we use the brand's canonical site subdomain — not
             // this input — for security. The field is accepted to match client expectations.
-            'subdomain'            => ['required', 'string', 'regex:/^[a-z0-9][a-z0-9-]{0,62}$/'],
+            'subdomain' => ['required', 'string', 'regex:/^[a-z0-9][a-z0-9-]{0,62}$/'],
         ]);
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
@@ -574,8 +574,8 @@ class EmbeddedSetupController extends ApiController
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],
             [
-                'oxygen_storefront_id'  => (string) $request->input('oxygen_storefront_id'),
-                'domain_mode'           => 'platform',
+                'oxygen_storefront_id' => (string) $request->input('oxygen_storefront_id'),
+                'domain_mode' => 'platform',
                 'domain_wizard_complete' => true,
             ],
         );
@@ -649,8 +649,8 @@ class EmbeddedSetupController extends ApiController
     {
         $data = $request->validate([
             'access_token' => ['required', 'string', 'max:512'],
-            'shop_id'      => ['sometimes', 'nullable', 'string', 'max:255'],
-            'scopes'       => ['sometimes', 'nullable', 'string', 'max:4096'],
+            'shop_id' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'scopes' => ['sometimes', 'nullable', 'string', 'max:4096'],
         ]);
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
@@ -675,12 +675,12 @@ class EmbeddedSetupController extends ApiController
         }
 
         $metadata = array_merge($existingMetadata, [
-            'shop_domain'                    => $shopDomain,
-            'shop_id'                        => $data['shop_id'] ?? Arr::get($existingMetadata, 'shop_id'),
-            'scopes'                         => $scopesArray ?: Arr::get($existingMetadata, 'scopes', []),
-            'connected_at'                   => now()->toIso8601String(),
-            'webhook_registration_state'     => 'queued',
-            'connected_via'                  => 'embedded_wizard',
+            'shop_domain' => $shopDomain,
+            'shop_id' => $data['shop_id'] ?? Arr::get($existingMetadata, 'shop_id'),
+            'scopes' => $scopesArray ?: Arr::get($existingMetadata, 'scopes', []),
+            'connected_at' => now()->toIso8601String(),
+            'webhook_registration_state' => 'queued',
+            'connected_via' => 'embedded_wizard',
         ]);
 
         // Dispatch jobs only on first provision OR when a previous provision appears
@@ -697,19 +697,19 @@ class EmbeddedSetupController extends ApiController
         $integration = ProfessionalIntegration::updateOrCreate(
             [
                 'professional_id' => $professionalId,
-                'provider'        => ProfessionalIntegration::PROVIDER_SHOPIFY,
+                'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
             ],
             [
-                'external_account_id'   => $shopDomain,
-                'access_token'          => $data['access_token'],
+                'external_account_id' => $shopDomain,
+                'access_token' => $data['access_token'],
                 'last_catalog_sync_error' => null,
-                'provider_metadata'     => $metadata,
+                'provider_metadata' => $metadata,
             ],
         );
 
         BrandProfile::firstOrCreate(
             ['professional_id' => $professionalId],
-            ['setup_complete'  => false],
+            ['setup_complete' => false],
         );
 
         // Dispatch setup jobs on initial provision or when the previous attempt
@@ -731,8 +731,8 @@ class EmbeddedSetupController extends ApiController
                 } catch (\Throwable $e) {
                     Log::warning('Failed to dispatch embedded integration setup job', [
                         'professional_id' => $professionalId,
-                        'job'             => class_basename($jobClass),
-                        'message'         => $e->getMessage(),
+                        'job' => class_basename($jobClass),
+                        'message' => $e->getMessage(),
                     ]);
                 }
             }

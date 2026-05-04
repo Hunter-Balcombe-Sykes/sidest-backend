@@ -29,7 +29,7 @@ beforeEach(function () {
 });
 
 it('storefront_token is stored as ciphertext, not plaintext', function () {
-    $plaintext = 'shpat_plaintext_storefront_secret_' . Str::random(16);
+    $plaintext = 'shpat_plaintext_storefront_secret_'.Str::random(16);
 
     $integration = ProfessionalIntegration::create([
         'professional_id' => (string) Str::uuid(),
@@ -48,7 +48,7 @@ it('storefront_token is stored as ciphertext, not plaintext', function () {
 });
 
 it('access_token is stored as ciphertext, not plaintext', function () {
-    $plaintext = 'shpat_access_token_' . Str::random(16);
+    $plaintext = 'shpat_access_token_'.Str::random(16);
 
     $integration = ProfessionalIntegration::create([
         'professional_id' => (string) Str::uuid(),
@@ -66,7 +66,7 @@ it('access_token is stored as ciphertext, not plaintext', function () {
 });
 
 it('refresh_token is stored as ciphertext, not plaintext', function () {
-    $plaintext = 'shprt_refresh_token_' . Str::random(16);
+    $plaintext = 'shprt_refresh_token_'.Str::random(16);
 
     $integration = ProfessionalIntegration::create([
         'professional_id' => (string) Str::uuid(),

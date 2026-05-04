@@ -44,8 +44,11 @@ class BrandStatusService
         $site = Site::where('professional_id', $professional->id)->first();
         $subdomain = $site?->subdomain ?? '';
 
-        // Preview gate: all wizard steps must be complete + storefront reachable
-        $wizardComplete = $this->isWizardComplete($storeSettings, $subdomain);
+        // Preview gate: all wizard steps must be complete + storefront reachable.
+        // A fully-connected Shopify integration satisfies the wizard gate even
+        // without Hydrogen/Oxygen — the brand can use affiliate marketing
+        // without deploying a storefront.
+        $wizardComplete = $this->isWizardComplete($storeSettings, $subdomain, $professional->id);
         if (! $wizardComplete) {
             return 'building';
         }
@@ -108,9 +111,18 @@ class BrandStatusService
 
     /**
      * All Shopify wizard steps complete AND storefront is reachable.
+     *
+     * A fully-connected Shopify integration (access_token + external_account_id)
+     * satisfies the wizard gate even without Hydrogen/Oxygen flags — the brand
+     * can use affiliate marketing without deploying a storefront.
      */
-    private function isWizardComplete(?BrandStoreSettings $settings, string $subdomain): bool
+    private function isWizardComplete(?BrandStoreSettings $settings, string $subdomain, string $professionalId): bool
     {
+        // Shopify-connected brands bypass the Hydrogen/Oxygen/storefront checks
+        if ($this->hasShopifyConnected($professionalId)) {
+            return true;
+        }
+
         if (! $settings) {
             return false;
         }

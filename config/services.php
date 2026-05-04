@@ -72,7 +72,7 @@ return [
     // Cloudflare DNS API — used to provision platform subdomains (brand.sidest.co)
     // for Hydrogen storefronts. Zone must correspond to the sidest.co domain.
     'cloudflare' => [
-        'zone_id'   => env('CLOUDFLARE_ZONE_ID'),
+        'zone_id' => env('CLOUDFLARE_ZONE_ID'),
         'api_token' => env('CLOUDFLARE_API_TOKEN'),
     ],
 

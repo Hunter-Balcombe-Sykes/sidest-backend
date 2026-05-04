@@ -1,14 +1,15 @@
 <?php
 
 use App\Http\Controllers\Api\HealthController;
+use App\Http\Controllers\Api\Internal\EmbeddedConnectController;
+use App\Http\Controllers\Api\Internal\EmbeddedOrderAnalyticsController;
+use App\Http\Controllers\Api\Internal\EmbeddedProductAnalyticsController;
+use App\Http\Controllers\Api\Internal\EmbeddedProductSettingsController;
+use App\Http\Controllers\Api\Internal\EmbeddedSetupController;
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateController;
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateProductsController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandConfigController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandDesignController;
-use App\Http\Controllers\Api\Internal\EmbeddedConnectController;
-use App\Http\Controllers\Api\Internal\EmbeddedOrderAnalyticsController;
-use App\Http\Controllers\Api\Internal\EmbeddedProductAnalyticsController;
-use App\Http\Controllers\Api\Internal\EmbeddedSetupController;
 use App\Http\Controllers\Api\Internal\HydrogenDeploymentController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\BootstrapController;

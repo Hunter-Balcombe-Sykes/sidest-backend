@@ -142,6 +142,22 @@ beforeEach(function () {
         updated_at TEXT NULL
     )');
 
+    $conn->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        provider TEXT NULL,
+        external_account_id TEXT NULL,
+        access_token TEXT NULL,
+        refresh_token TEXT NULL,
+        expires_at TEXT NULL,
+        catalog_latest_time TEXT NULL,
+        last_catalog_sync_at TEXT NULL,
+        last_catalog_sync_error TEXT NULL,
+        provider_metadata TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+
     Storage::fake('media');
 
     // Mock SiteCacheService to avoid querying tables not in test schema

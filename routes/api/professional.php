@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\AffiliateInviteController;
-use App\Http\Controllers\Api\Professional\ShopifyEmbeddedConnectionController;
 use App\Http\Controllers\Api\Professional\Analytics\AffiliateCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Analytics\BrandCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
@@ -34,6 +33,7 @@ use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\Profess
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSiteController;
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalThemeController;
+use App\Http\Controllers\Api\Professional\ShopifyEmbeddedConnectionController;
 use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationController;
 use App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController;
 use App\Http\Controllers\Api\Professional\Store\AffiliateProductController;

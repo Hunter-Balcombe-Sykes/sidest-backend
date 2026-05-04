@@ -7,7 +7,6 @@ use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
-use App\Services\Professional\BrandStatusService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;

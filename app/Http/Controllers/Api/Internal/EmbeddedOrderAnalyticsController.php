@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
-use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionLedgerEntry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,18 +18,18 @@ class EmbeddedOrderAnalyticsController extends ApiController
 {
     /**
      * @return JsonResponse {
-     *     order_id: string,
-     *     has_affiliate: bool,
-     *     affiliate: { id, display_name, slug } | null,
-     *     currency_code: string,
-     *     total_commission_cents: int,
-     *     total_revenue_cents: int,
-     *     status_summary: { pending: int, approved: int, paid: int, reversed: int },
-     *     line_items: Array<{
-     *         line_item_id, product_id, product_title, variant_title,
-     *         quantity, revenue_cents, commission_rate, commission_cents, status
-     *     }>,
-     * }
+     *                      order_id: string,
+     *                      has_affiliate: bool,
+     *                      affiliate: { id, display_name, slug } | null,
+     *                      currency_code: string,
+     *                      total_commission_cents: int,
+     *                      total_revenue_cents: int,
+     *                      status_summary: { pending: int, approved: int, paid: int, reversed: int },
+     *                      line_items: Array<{
+     *                      line_item_id, product_id, product_title, variant_title,
+     *                      quantity, revenue_cents, commission_rate, commission_cents, status
+     *                      }>,
+     *                      }
      */
     public function show(Request $request, string $shopifyOrderId): JsonResponse
     {
@@ -84,15 +83,15 @@ class EmbeddedOrderAnalyticsController extends ApiController
             }
 
             $lineItems[] = [
-                'line_item_id'    => (string) ($meta['line_item_id'] ?? ''),
-                'product_id'      => (string) ($meta['product_id'] ?? ''),
-                'product_title'   => (string) ($meta['product_title'] ?? ''),
-                'variant_title'   => (string) ($meta['variant_title'] ?? ''),
-                'quantity'        => (int) ($meta['quantity'] ?? 0),
-                'revenue_cents'   => $revenueCents,
+                'line_item_id' => (string) ($meta['line_item_id'] ?? ''),
+                'product_id' => (string) ($meta['product_id'] ?? ''),
+                'product_title' => (string) ($meta['product_title'] ?? ''),
+                'variant_title' => (string) ($meta['variant_title'] ?? ''),
+                'quantity' => (int) ($meta['quantity'] ?? 0),
+                'revenue_cents' => $revenueCents,
                 'commission_rate' => $rate,
-                'commission_cents'=> (int) $entry->amount_cents,
-                'status'          => $status,
+                'commission_cents' => (int) $entry->amount_cents,
+                'status' => $status,
             ];
         }
 

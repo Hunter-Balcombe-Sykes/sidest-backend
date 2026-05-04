@@ -199,6 +199,7 @@ class FreshaApiClient
                 $wait = max(1000, ((int) ($response->header('Retry-After') ?? 1)) * 1000);
                 usleep($wait * 1000);
                 $attempt++;
+
                 continue;
             }
 

@@ -67,7 +67,7 @@ class BrandStoreSettingsController extends ApiController
             'hydrogen_install_confirmed' => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
             'storefront_base_url' => $storeSettings
                 ? $storeSettings->storefrontBaseUrl($site?->subdomain ?? '')
-                : 'https://' . ($site?->subdomain ?? '') . '.sidest.co',
+                : 'https://'.($site?->subdomain ?? '').'.sidest.co',
             'storefront_status' => $storeSettings
                 ? $this->checkStorefrontStatus($storeSettings, $site?->subdomain ?? '')
                 : 'unreachable',
@@ -248,7 +248,7 @@ class BrandStoreSettingsController extends ApiController
             'oxygen_storefront_id' => $storeSettings?->oxygen_storefront_id,
             'storefront_base_url' => $storeSettings
                 ? $storeSettings->storefrontBaseUrl($site?->subdomain ?? '')
-                : 'https://' . ($site?->subdomain ?? '') . '.sidest.co',
+                : 'https://'.($site?->subdomain ?? '').'.sidest.co',
             'storefront_status' => $storeSettings
                 ? $this->checkStorefrontStatus($storeSettings, $site?->subdomain ?? '')
                 : 'unreachable',
