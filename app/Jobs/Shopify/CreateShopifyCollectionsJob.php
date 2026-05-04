@@ -183,8 +183,11 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
         try {
             $metafieldsToSet = [];
             $collectionGids = [];
-            // Publish to Online Store so collections are visible via Storefront API
-            $publicationId = $this->findOnlineStorePublicationId($shopDomain, $accessToken, $apiVersion);
+            // Publish through the app's own publication (created by CreateShopifySalesChannelJob)
+            // so collections are visible via the Storefront API. Fall back to the Online Store
+            // publication for legacy integrations that predate the app publication flow.
+            $publicationId = Arr::get($metadata, 'publication_id')
+                ?: $this->findOnlineStorePublicationId($shopDomain, $accessToken, $apiVersion);
 
             $shopGid = $this->getShopGid($shopDomain, $accessToken, $apiVersion);
             if ($shopGid === '') {
