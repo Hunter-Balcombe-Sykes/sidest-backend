@@ -5,20 +5,8 @@ use Illuminate\Support\Facades\DB;
 beforeEach(function () {
     tenantHelpersEnsureTables();
 
-    // Rule::exists('sites', 'id') in PageviewRequest uses an unqualified table name.
-    // In production, search_path resolves 'sites' → 'site.sites'. In SQLite tests,
-    // the ATTACH creates 'site' as a separate database, so we create a plain 'sites'
-    // shadow table in the main DB that the validation rule can find.
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS sites (
-        id TEXT PRIMARY KEY,
-        professional_id TEXT NULL,
-        subdomain TEXT NULL,
-        is_published INTEGER NULL,
-        settings TEXT NULL,
-        deleted_at TEXT NULL,
-        created_at TEXT NULL,
-        updated_at TEXT NULL
-    )');
+    // PageviewRequest uses Rule::exists('pgsql.site.sites', 'id') which resolves to
+    // the real site.sites table via the pgsql connection. No shadow table needed.
 
     // analytics.site_visits — needed so the pageview controller can save the record.
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.site_visits (
@@ -52,17 +40,6 @@ it('refuses to record a pageview when body site_id does not match the X-Site-Sub
     $victim = createBrandTenant('victim');
     $attacker = createBrandTenant('attacker');
 
-    // Mirror victim's site into the unqualified 'sites' shadow table so that
-    // Rule::exists('sites', 'id') passes and execution reaches resolveSiteFromData().
-    DB::connection('pgsql')->table('sites')->insertOrIgnore([
-        'id' => $victim->site->id,
-        'professional_id' => $victim->id,
-        'subdomain' => 'victim',
-        'is_published' => 1,
-        'created_at' => now()->toDateTimeString(),
-        'updated_at' => now()->toDateTimeString(),
-    ]);
-
     // Attack: correct attacker subdomain in header, victim's site_id in body.
     // prepareForValidation() merges subdomain='attacker'. The cross-check must
     // detect the mismatch and reject the request.
@@ -78,16 +55,6 @@ it('refuses to record a pageview when body site_id does not match the X-Site-Sub
 
 it('records a pageview when site_id matches the X-Site-Subdomain header', function () {
     $tenant = createBrandTenant('legit');
-
-    // Mirror into the unqualified 'sites' shadow table for validation.
-    DB::connection('pgsql')->table('sites')->insertOrIgnore([
-        'id' => $tenant->site->id,
-        'professional_id' => $tenant->id,
-        'subdomain' => 'legit',
-        'is_published' => 1,
-        'created_at' => now()->toDateTimeString(),
-        'updated_at' => now()->toDateTimeString(),
-    ]);
 
     $response = $this->withHeaders(['X-Site-Subdomain' => 'legit'])
         ->postJson('/api/public/analytics/pageviews', [

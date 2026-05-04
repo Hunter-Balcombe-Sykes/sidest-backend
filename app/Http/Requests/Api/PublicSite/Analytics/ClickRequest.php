@@ -19,8 +19,8 @@ class ClickRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'block_id' => ['required', 'uuid', Rule::exists('blocks', 'id')],
-            'site_id' => ['required_without:subdomain', 'uuid', Rule::exists('sites', 'id')],
+            'block_id' => ['required', 'uuid', Rule::exists('pgsql.site.blocks', 'id')],
+            'site_id' => ['required_without:subdomain', 'uuid', Rule::exists('pgsql.site.sites', 'id')],
             'subdomain' => ['required_without:site_id', 'string', 'max:63'],
             'session_id' => ['nullable', 'uuid'],
             'visitor_id' => ['nullable', 'uuid'],
