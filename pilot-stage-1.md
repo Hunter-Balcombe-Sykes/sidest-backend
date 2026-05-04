@@ -533,7 +533,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** Same bug, two methods. `store()` was fixed; `restore()` wasn't. Restoring a soft-deleted service can crash for the same reason creating one used to.
     - **Source:** Commit-batch review item #5 (commit `af715f7` was incomplete).
 
-- [ ] **#CR-005** · P1 — ServiceObserver outer Throwable catch swallows pipeline-level failures (re-introduces the silent-swallow pattern AUDIT_REPORT.md flagged)
+- [x] **#CR-005** · P1 — ServiceObserver outer Throwable catch swallows pipeline-level failures (re-introduces the silent-swallow pattern AUDIT_REPORT.md flagged)
     - **Where:** app/Observers/Core/ServiceObserver.php:68-90
     - **Affects:** Cache invalidation, section visibility recompute, Square sync, Fresha sync — all silently aborted if `bust()` throws.
     - **Effort:** S (~1h)
@@ -545,7 +545,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** A single failure inside the cache-busting step quietly aborts everything else that was supposed to happen on a service save. The fix that was supposed to make this safer accidentally made it less observable.
     - **Source:** Commit-batch review item #6 (commit `1de24dc`). Companion to AUDIT_REPORT.md lines 174 and 287.
 
-- [ ] **#CR-006** · P1 — Square + Fresha catalog syncs use dispatchSync — block HTTP response on every service save
+- [x] **#CR-006** · P1 — Square + Fresha catalog syncs use dispatchSync — block HTTP response on every service save
     - **Where:** app/Observers/Core/ServiceObserver.php:121-143
     - **Affects:** Service-edit UX — every save blocks for 2 third-party API round-trips. Combined with #CR-005's outer catch, timeouts are absorbed as warnings rather than retried.
     - **Effort:** S (~1–2h)
