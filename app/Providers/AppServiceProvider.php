@@ -36,6 +36,12 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::policy(ProfessionalIntegration::class, IntegrationPolicy::class);
         Gate::policy(\App\Models\Core\Professional\Customer::class, \App\Policies\CustomerPolicy::class);
+        Gate::policy(\App\Models\Core\Site\Site::class, \App\Policies\SitePolicy::class);
+        Gate::policy(\App\Models\Core\Site\Block::class, \App\Policies\SitePolicy::class);
+        Gate::policy(\App\Models\Core\Site\SiteMedia::class, \App\Policies\SitePolicy::class);
+        Gate::policy(\App\Models\Core\Site\SiteSubdomainAlias::class, \App\Policies\SitePolicy::class);
+        Gate::policy(\App\Models\Core\Site\Enquiry::class, \App\Policies\SitePolicy::class);
+        Gate::policy(\App\Models\Analytics\LeadSubmission::class, \App\Policies\SitePolicy::class);
 
         // Refuse to boot in production with throttling disabled — a misconfigured
         // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.

@@ -121,7 +121,8 @@ class ProfessionalGalleryController extends ApiController
     {
         $pro = $this->currentProfessional($request);
         $site = $this->currentSite($pro);
-        abort_unless($image->site_id === $site->id, 404);
+        $image->setRelation('site', $site); // avoid N+1 and lazy-loading violation
+        $this->authorizeForUser($pro, 'update', $image);
 
         $data = $request->validated();
         $update = [];
@@ -177,7 +178,8 @@ class ProfessionalGalleryController extends ApiController
     {
         $pro = $this->currentProfessional($request);
         $site = $this->currentSite($pro);
-        abort_unless($image->site_id === $site->id, 404);
+        $image->setRelation('site', $site); // avoid N+1 and lazy-loading violation
+        $this->authorizeForUser($pro, 'delete', $image);
 
         $this->mediaService->deleteVariants($image->id, $image->path);
         $image->delete();

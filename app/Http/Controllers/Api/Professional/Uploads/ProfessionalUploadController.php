@@ -397,8 +397,8 @@ class ProfessionalUploadController extends ApiController
         $pro = $this->currentProfessional($request);
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
-
-        abort_unless($image->site_id === $site->id, 404);
+        $image->setRelation('site', $site); // avoid N+1 and lazy-loading violation
+        $this->authorizeForUser($pro, 'delete', $image);
 
         if ($image->media_type === SiteMedia::MEDIA_TYPE_VIDEO) {
             // Dispatch async cleanup – video has many HLS segment files.

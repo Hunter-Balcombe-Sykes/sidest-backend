@@ -3,14 +3,15 @@
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
 use App\Http\Requests\Api\Professional\ImageGallery\UpdateGalleryImageRequest;
 use App\Models\Core\Site\SiteMedia;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpKernel\Exception\HttpException;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();
     setupMediaTables();
+    setupSubdomainAliasesTable();
 });
 
 it('gallery destroy refuses an image belonging to another professionals site', function () {
@@ -34,10 +35,10 @@ it('gallery destroy refuses an image belonging to another professionals site', f
     $image = SiteMedia::query()->findOrFail($imageId);
     $req = tenantRequestAs($b, [], 'DELETE');
 
-    // abort_unless($image->site_id === $site->id, 404) rejects before any
-    // media service / cache invalidation runs — no mocks required.
+    // Policy denies with AuthorizationException (404) before any media service
+    // or cache invalidation runs — no mocks required.
     expect(fn () => app(ProfessionalGalleryController::class)->destroy($req, $image))
-        ->toThrow(HttpException::class);
+        ->toThrow(AuthorizationException::class);
 
     // Row must still exist (not soft-deleted).
     $row = DB::table('site.site_media')->where('id', $imageId)->first();
@@ -76,8 +77,9 @@ it('gallery update refuses an image belonging to another professionals site', fu
     $req->validateResolved();
     $req->attributes->set('professional', $b);
 
+    // Policy denies with AuthorizationException (404) before any write occurs.
     expect(fn () => app(ProfessionalGalleryController::class)->update($req, $image))
-        ->toThrow(HttpException::class);
+        ->toThrow(AuthorizationException::class);
 
     // Alt text / caption must be unchanged.
     $row = DB::table('site.site_media')->where('id', $imageId)->first();

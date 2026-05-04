@@ -746,3 +746,18 @@ function createCustomerFor(Professional $pro, array $overrides = []): \App\Model
 
     return \App\Models\Core\Professional\Customer::query()->findOrFail($id);
 }
+
+/**
+ * site.site_subdomain_aliases — minimal columns for cache-invalidation paths
+ * that iterate over historical aliases for a site.
+ */
+function setupSubdomainAliasesTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS site.site_subdomain_aliases (
+        id TEXT PRIMARY KEY,
+        site_id TEXT NULL,
+        subdomain TEXT NULL,
+        created_at TEXT NULL
+    )');
+}
