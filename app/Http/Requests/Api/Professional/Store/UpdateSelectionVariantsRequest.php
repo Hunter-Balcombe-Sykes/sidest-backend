@@ -18,7 +18,6 @@ class UpdateSelectionVariantsRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'brand_professional_id' => ['required', 'uuid'],
             'variant_gids' => ['sometimes', 'nullable', 'array'],
             'variant_gids.*' => ['string', 'regex:/^gid:\/\/shopify\/ProductVariant\/\d+$/'],
         ];

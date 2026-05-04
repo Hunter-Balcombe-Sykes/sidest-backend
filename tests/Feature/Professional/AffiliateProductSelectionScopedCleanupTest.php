@@ -7,18 +7,33 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-it('rejects store when affiliate is not linked to the specified brand', function () {
-    $affiliate = (new Professional)->forceFill(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $unlinkedBrandId = (string) Str::uuid();
+beforeEach(function () {
+    DB::purge('pgsql');
 
-    // Mock the linkage check to return false
-    $linkQuery = Mockery::mock();
-    $linkQuery->shouldReceive('where')->andReturnSelf();
-    $linkQuery->shouldReceive('exists')->andReturn(false);
-    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($linkQuery);
+    $conn = DB::connection('pgsql');
+    foreach (['brand'] as $schema) {
+        try {
+            $conn->statement("ATTACH DATABASE ':memory:' AS {$schema}");
+        } catch (\Throwable) {
+        }
+    }
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_partner_links (
+        id TEXT PRIMARY KEY, affiliate_professional_id TEXT,
+        brand_professional_id TEXT, slot INTEGER DEFAULT 0,
+        created_at TEXT, updated_at TEXT
+    )');
+});
+
+it('rejects store when affiliate is not linked to any brand', function () {
+    // brand_partner_links table is empty — no link for this affiliate
+    $affiliate = (new Professional)->forceFill([
+        'id' => (string) Str::uuid(),
+        'professional_type' => 'professional',
+        'status' => 'active',
+    ]);
 
     $request = Request::create('/', 'POST', [
-        'brand_professional_id' => $unlinkedBrandId,
         'shopify_product_gid' => 'gid://shopify/Product/123',
         'sort_order' => 0,
     ]);
@@ -29,4 +44,5 @@ it('rejects store when affiliate is not linked to the specified brand', function
     $response = $controller->store($request);
 
     expect($response->status())->toBe(422);
+    expect(json_decode($response->getContent(), true)['message'])->toContain('not linked');
 });
