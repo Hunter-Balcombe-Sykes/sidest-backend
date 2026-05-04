@@ -741,7 +741,13 @@ return [
     |----------------------------------------------------------------------
     | gallery = showcase images (portfolio, work samples)
     | content = broad-use images (icon, headshot, banner, etc. – frontend assigns purpose)
+    |
+    | upload_pools = pools accepted by the generic professional upload endpoint
+    |   (UploadImageRequest / ReorderPoolImagesRequest). Other pools have
+    |   dedicated controllers with their own authorization logic.
     */
+    'upload_pools' => ['gallery', 'content'],
+
     'image_pools' => [
         // Affiliate sitepage gallery + content panels both expose 6 slots
         // in the dashboard — keep the env override available, default to 6.
