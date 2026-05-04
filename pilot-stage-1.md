@@ -156,7 +156,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** A check that's supposed to stop affiliates adding more than 7 platform links never runs. They can add as many as they want.
     - **Source:** Commit-batch review item #1 (commit `162cb4a`).
 
-- [ ] **#CR-002** · P0 — Wrong config key in CommissionPayoutService — env var has zero effect on grace window
+- [x] **#CR-002** · P0 — Wrong config key in CommissionPayoutService — env var has zero effect on grace window
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:207
     - **Affects:** Per-payout grace timer (`void_at = now() + grace_period_days`); ops ability to tune the policy via `SIDEST_STORE_GRACE_PERIOD_DAYS` env var.
     - **Effort:** S (~0.25h)
