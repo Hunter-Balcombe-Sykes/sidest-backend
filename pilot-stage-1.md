@@ -405,7 +405,7 @@ These are best in their own session because bundling would force unrelated archi
         // foreach over affiliates, no rollback, no retry.
         ```
 
-- [ ] **#9-013** · P1 — AffiliateProductSelection.brand_professional_id is NOT NULL in DB but unguarded at app level
+- [x] **#9-013** · P1 — AffiliateProductSelection.brand_professional_id is NOT NULL in DB but unguarded at app level *(resolved 2026-05-04 — brand_professional_id derived server-side from BrandPartnerLink; AffiliateProductPolicy wired; brand_professional_id removed from UpdateSelectionVariantsRequest)*
     - **Where:** app/Models/Commerce/AffiliateProductSelection.php; supabase/migrations/20260420000100_add_brand_professional_id_to_affiliate_product_selections.sql
     - **Affects:** Affiliate product selection create/update endpoints.
     - **Effort:** S (~1h)
