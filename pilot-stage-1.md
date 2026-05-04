@@ -1281,7 +1281,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.5h)
     - **What to do:** Pass `$unsubscribeUrl` when rendering the view.
 
-- [ ] **#10-10** · P3 — `sidest:prune-notifications` onFailure log message is generic
+- [x] **#10-10** · P3 — `sidest:prune-notifications` onFailure log message is generic
     - **Where:** routes/console.php (sidest:prune-notifications onFailure)
     - **Effort:** S (~0.5h)
     - **What to do:** Include exception class and message in the log.
@@ -1301,17 +1301,17 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.25h)
     - **What to do:** `composer update phpunit/phpunit`.
 
-- [ ] **#9-017** · P3 — CheckStreamingLiveStatusJob silently returns when Redis unavailable
+- [x] **#9-017** · P3 — CheckStreamingLiveStatusJob silently returns when Redis unavailable
     - **Where:** app/Jobs/Streaming/CheckStreamingLiveStatusJob.php:26-32
     - **Effort:** S (~0.5h)
     - **What to do:** Promote log to error; emit Nightwatch event so an outage isn't invisible.
 
-- [ ] **#9-016** · P3 — N+1 in SiteMediaObserver / SiteObserver — `Site::find($media->site_id)` per event
+- [x] **#9-016** · P3 — N+1 in SiteMediaObserver / SiteObserver — `Site::find($media->site_id)` per event
     - **Where:** app/Observers/Core/SiteMediaObserver.php; app/Observers/Core/SiteObserver.php
     - **Effort:** S (~1h)
     - **What to do:** Use `site_id` directly or eager-load.
 
-- [ ] **#9-006** · P3 — `SendWeeklyAnalyticsNotificationJob` DB::raw aggregates use hardcoded literals
+- [x] **#9-006** · P3 — `SendWeeklyAnalyticsNotificationJob` DB::raw aggregates use hardcoded literals
     - **Where:** app/Jobs/Notifications/SendWeeklyAnalyticsNotificationJob.php
     - **Effort:** S (~1h)
     - **What to do:** Optional — switch to selectRaw() with bindings for clarity. Currently safe but noisy.
