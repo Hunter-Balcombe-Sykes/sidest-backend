@@ -200,3 +200,37 @@ it('blocks a pending-deletion owner from updating a service category with 423', 
         expect($e->getMessage())->toBe('Account is pending deletion.');
     }
 });
+
+// --- Fresha integration: service ownership via ServicePolicy ---
+
+it('blocks a non-owner from pushing another tenants service to Fresha with 404', function () {
+    $owner = createTenant('svc-fresha-push-owner');
+    $intruder = createTenant('svc-fresha-push-intruder');
+    $service = createServiceFor($owner);
+    $req = tenantRequestAs($intruder, [], 'POST');
+
+    try {
+        app(\App\Http\Controllers\Api\Professional\FreshaIntegration\FreshaIntegrationController::class)
+            ->pushServiceNow($req, $service, \Mockery::mock(\App\Services\Fresha\FreshaServiceSyncService::class));
+        expect(false)->toBeTrue('Expected AuthorizationException');
+    } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+        expect($e->status())->toBe(404);
+    }
+});
+
+// --- Square integration: service ownership via ServicePolicy ---
+
+it('blocks a non-owner from pushing another tenants service to Square with 404', function () {
+    $owner = createTenant('svc-square-push-owner');
+    $intruder = createTenant('svc-square-push-intruder');
+    $service = createServiceFor($owner);
+    $req = tenantRequestAs($intruder, [], 'POST');
+
+    try {
+        app(\App\Http\Controllers\Api\Professional\SquareIntegration\SquareIntegrationController::class)
+            ->pushServiceNow($req, $service, \Mockery::mock(\App\Services\Square\SquareServiceSyncService::class));
+        expect(false)->toBeTrue('Expected AuthorizationException');
+    } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+        expect($e->status())->toBe(404);
+    }
+});

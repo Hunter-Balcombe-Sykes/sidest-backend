@@ -257,7 +257,7 @@ class FreshaIntegrationController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($service->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'view', $service);
 
         if ($error = $this->ensureFreshaConnected($request)) {
             return $error;
