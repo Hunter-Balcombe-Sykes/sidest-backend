@@ -76,66 +76,84 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
 
+            $response = null;
+
             // Validation errors (422)
             if ($e instanceof ValidationException) {
-                return response()->json([
+                $response = response()->json([
                     'message' => 'Validation failed',
                     'errors' => $e->errors(),
                 ], 422);
             }
 
             // Model not found (404)
-            if ($e instanceof ModelNotFoundException) {
-                return response()->json([
+            elseif ($e instanceof ModelNotFoundException) {
+                $response = response()->json([
                     'message' => 'Resource not found',
                 ], 404);
             }
 
             // Not found (404)
-            if ($e instanceof NotFoundHttpException) {
-                return response()->json([
+            elseif ($e instanceof NotFoundHttpException) {
+                $response = response()->json([
                     'message' => 'Endpoint not found',
                 ], 404);
             }
 
             // Forbidden (403)
-            if ($e instanceof AccessDeniedHttpException) {
+            elseif ($e instanceof AccessDeniedHttpException) {
                 \Illuminate\Support\Facades\Log::warning('Access denied', [
                     'path' => $request->path(),
                     'message' => $e->getMessage(),
                 ]);
 
-                return response()->json([
+                $response = response()->json([
                     'message' => $e->getMessage() ?: 'Access denied',
                 ], 403);
             }
 
             // Preserve explicit response exceptions (e.g. throttle 429)
-            if ($e instanceof HttpResponseException) {
-                return $e->getResponse();
+            elseif ($e instanceof HttpResponseException) {
+                $response = $e->getResponse();
             }
 
             // Generic error handling
-            $statusCode = 500;
-            if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpException) {
-                $statusCode = $e->getStatusCode();
+            else {
+                $statusCode = 500;
+                if ($e instanceof \Symfony\Component\HttpKernel\Exception\HttpException) {
+                    $statusCode = $e->getStatusCode();
+                }
+
+                // Log full exception for debugging even in production
+                if ($statusCode >= 500) {
+                    \Illuminate\Support\Facades\Log::error('API Error', [
+                        'exception' => $e,
+                        'status' => $statusCode,
+                    ]);
+                }
+
+                // Don't expose internal errors in production
+                $message = config('app.debug')
+                    ? $e->getMessage()
+                    : 'An error occurred';
+
+                $response = response()->json([
+                    'message' => $message,
+                ], $statusCode);
             }
 
-            // Log full exception for debugging even in production
-            if ($statusCode >= 500) {
-                \Illuminate\Support\Facades\Log::error('API Error', [
-                    'exception' => $e,
-                    'status' => $statusCode,
-                ]);
+            // Ensure CORS headers are present on all API error responses.
+            // HandleCors middleware adds these during normal flow, but when
+            // an exception propagates past it the rendered response skips
+            // the CORS header injection. Laravel Cloud's proxy also strips
+            // CORS headers on some error responses. This guard ensures the
+            // browser can always read the error body.
+            if ($response !== null
+                && ! $response->headers->has('Access-Control-Allow-Origin')
+            ) {
+                $response->headers->set('Access-Control-Allow-Origin', '*');
             }
 
-            // Don't expose internal errors in production
-            $message = config('app.debug')
-                ? $e->getMessage()
-                : 'An error occurred';
-
-            return response()->json([
-                'message' => $message,
-            ], $statusCode);
+            return $response;
         });
     })->create();
