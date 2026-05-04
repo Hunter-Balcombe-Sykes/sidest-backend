@@ -49,8 +49,11 @@ Schedule::command('sidest:purge-soft-deletes')
 
 Schedule::command('sidest:prune-notifications', ['--days' => 30])
     ->dailyAt('03:25')
-    ->onFailure(function (): void {
-        \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-notifications');
+    ->onFailure(function (?\Throwable $e = null): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-notifications', [
+            'exception' => $e ? get_class($e) : null,
+            'message' => $e?->getMessage(),
+        ]);
     });
 
 Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob)
