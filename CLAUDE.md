@@ -123,13 +123,36 @@ Comment enough that a reader (Tobias, frontend Claude, future-you) can understan
 
 When in doubt, ask: "if I deleted this comment, would a new dev have to read 3 other files to understand?" If yes, keep it.
 
-## Audit Findings
+## Audits
 
-When generating audit / review markdown (e.g., `pilot-stage-*.md`, `audit-*.md`, post-`/ultrareview` outputs), follow the format in [`docs/audit-conventions.md`](docs/audit-conventions.md).
+### Generating new audits — use the pipeline, not a manual session
 
-The format is load-bearing: the audit orchestrator tool (`audit` CLI) parses these files to feed unattended fix sessions. Required: top-level `- [ ]` checkbox + `**#ID**` + tier marker + Effort tag + Where/Affects/What to do fields. Bundles go under `## Suggested Bundled Sessions`. Items that should not run unattended go under `### Standalone — do NOT bundle`.
+When asked to audit code (any phrasing: "let's audit X", "audit these controllers", "audit this", "review for issues", "find bugs in X"), use the dual-worker pipeline at `scripts/audit/audit.sh`:
 
-Companion files (`*-executive-summary.md`, `audit-ledger-*.md`, `*-legal-coding.md`) are not parsed — only files with the item-list structure are.
+```bash
+scripts/audit/audit.sh \
+  --lens "<5-15 word audit theme>" \
+  --scope <path> \
+  [--scope <path>...]
+```
+
+This runs DeepSeek V4 Pro for the first-pass scan, then `claude -p --model sonnet` for adjudication, and emits `audit-YYYY-MM-DD-<lens-slug>.md` in the canonical format. Validated 2026-05-04: ~$0.06–0.25 per audit, ~5–7 minutes wall time, ship-quality output.
+
+- DeepSeek key lives in `scripts/audit/.env` (gitignored). Override by exporting `DEEPSEEK_API_KEY`.
+- Claude uses the local `claude` CLI's existing OAuth login. No `ANTHROPIC_API_KEY` required.
+
+**Don't manually generate audit findings in a session unless explicitly told to.** The pipeline is faster, cheaper, and produces consistent format for downstream tooling. Use the standalone scripts (`audit-scan.sh`, `audit-adjudicate.sh`) when you want to inspect drafts before adjudicating, or re-adjudicate without re-scanning.
+
+### Audit format (canonical)
+
+The structure is load-bearing: the audit orchestrator (`audit` CLI) parses these files to feed unattended fix sessions. The canonical reference is **`pilot-stage-1.md`** — no separate conventions doc exists. Required structure per finding:
+
+- Top-level `- [ ]` checkbox + `**#ID**` + tier marker (P0/P1/P2/P3) + Effort tag (S/M/L/XL)
+- `Where:` / `Affects:` / `What to do:` (bullets) / `Technical:` / `Plain English:` / `Evidence:` (verbatim code)
+- Bundles go under `## Suggested Bundled Sessions`
+- Items that should not run unattended go under `### Standalone — do NOT bundle`
+
+Companion files (`*-executive-summary.md`, `audit-ledger-*.md`, `*-legal-coding.md`) are not parsed by the orchestrator — only files with the item-list structure are.
 
 ## Workflow
 

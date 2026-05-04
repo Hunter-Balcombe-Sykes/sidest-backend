@@ -23,6 +23,9 @@ class BrandStoreSettingsController extends ApiController
     use ResolveCurrentProfessional;
     use ResolveCurrentSite;
 
+    // V2: BrandResourcePolicy is registered for BrandStoreSettings — use authorizeForUser() if any
+    // new action resolves a BrandStoreSettings by ID rather than by scoped query.
+
     public function __construct(
         private readonly BrandCatalogService $catalogService,
         private readonly HydrogenDeploymentService $deployment,
