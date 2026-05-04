@@ -810,6 +810,61 @@ function setupBrandAffiliateInvitesTable(): void
 }
 
 /**
+ * Insert a Service row for $pro and return the Eloquent model.
+ *
+ * @param  array<string, mixed>  $overrides
+ */
+function createServiceFor(Professional $pro, array $overrides = []): \App\Models\Core\Professional\Service
+{
+    setupServicesTable();
+
+    $id = (string) \Illuminate\Support\Str::uuid();
+    $now = now()->toDateTimeString();
+
+    $row = array_merge([
+        'id' => $id,
+        'professional_id' => $pro->id,
+        'title' => 'Test Service',
+        'price_cents' => 5000,
+        'currency_code' => 'AUD',
+        'is_active' => 1,
+        'sort_order' => 0,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ], $overrides);
+
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.services')->insert($row);
+
+    return \App\Models\Core\Professional\Service::withTrashed()->findOrFail($id);
+}
+
+/**
+ * Insert a ServiceCategory row for $pro and return the Eloquent model.
+ *
+ * @param  array<string, mixed>  $overrides
+ */
+function createServiceCategoryFor(Professional $pro, array $overrides = []): \App\Models\Core\Professional\ServiceCategory
+{
+    setupServiceCategoriesTable();
+
+    $id = (string) \Illuminate\Support\Str::uuid();
+    $now = now()->toDateTimeString();
+
+    $row = array_merge([
+        'id' => $id,
+        'professional_id' => $pro->id,
+        'title' => 'Test Category',
+        'sort_order' => 0,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ], $overrides);
+
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.service_categories')->insert($row);
+
+    return \App\Models\Core\Professional\ServiceCategory::withoutGlobalScopes()->findOrFail($id);
+}
+
+/**
  * site.site_subdomain_aliases — minimal columns for cache-invalidation paths
  * that iterate over historical aliases for a site.
  */

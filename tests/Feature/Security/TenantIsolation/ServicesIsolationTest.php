@@ -2,9 +2,9 @@
 
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController;
 use App\Models\Core\Professional\Service;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpKernel\Exception\HttpException;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();
@@ -43,9 +43,9 @@ it('service destroy refuses a service belonging to another professional', functi
     $req = tenantRequestAs($b, [], 'DELETE');
     $service = Service::query()->findOrFail($serviceId);
 
-    // ProfessionalServiceController::destroy() calls abort_unless($service->professional_id === $pro->id, 404)
+    // Policy denies access with AuthorizationException (404 status via denyAsNotFound).
     expect(fn () => app(ProfessionalServiceController::class)->destroy($req, $service))
-        ->toThrow(HttpException::class);
+        ->toThrow(AuthorizationException::class);
 
     // Service must still exist.
     expect(DB::table('site.services')->where('id', $serviceId)->exists())->toBeTrue();

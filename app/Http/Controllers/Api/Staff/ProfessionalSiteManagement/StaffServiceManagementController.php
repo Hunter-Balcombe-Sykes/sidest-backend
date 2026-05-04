@@ -121,7 +121,7 @@ class StaffServiceManagementController extends ApiController
 
     public function show(Request $request, Professional $professional, Service $service): JsonResponse
     {
-        abort_unless($service->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'view', $service);
 
         $includeArchived = $request->boolean('include_archived');
         if (! $includeArchived && $service->trashed()) {
@@ -133,7 +133,7 @@ class StaffServiceManagementController extends ApiController
 
     public function update(StaffUpdateServiceRequest $request, Professional $professional, Service $service): JsonResponse
     {
-        abort_unless($service->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'update', $service);
         if ($service->trashed()) {
             abort(404);
         }
@@ -162,7 +162,7 @@ class StaffServiceManagementController extends ApiController
 
     public function destroy(Professional $professional, Service $service): JsonResponse
     {
-        abort_unless($service->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'delete', $service);
         if ($service->trashed()) {
             abort(404);
         }
@@ -296,7 +296,7 @@ class StaffServiceManagementController extends ApiController
 
     public function forceDestroy(Professional $professional, Service $service): JsonResponse
     {
-        abort_unless($service->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'delete', $service);
 
         $service->forceDelete();
 
@@ -305,7 +305,7 @@ class StaffServiceManagementController extends ApiController
 
     public function restore(Professional $professional, Service $service): JsonResponse
     {
-        abort_unless($service->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'update', $service);
 
         if ($service->trashed()) {
             $service->restore();

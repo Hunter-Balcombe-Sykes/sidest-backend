@@ -2,9 +2,9 @@
 
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceCategoryController;
 use App\Models\Core\Professional\ServiceCategory;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpKernel\Exception\HttpException;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();
@@ -37,7 +37,7 @@ it('service category show refuses a category belonging to another professional',
     $req = tenantRequestAs($b);
 
     expect(fn () => app(ProfessionalServiceCategoryController::class)->show($req, $category))
-        ->toThrow(HttpException::class);
+        ->toThrow(AuthorizationException::class);
 });
 
 it('service category destroy refuses a category belonging to another professional', function () {
@@ -57,7 +57,7 @@ it('service category destroy refuses a category belonging to another professiona
     $req = tenantRequestAs($b, [], 'DELETE');
 
     expect(fn () => app(ProfessionalServiceCategoryController::class)->destroy($req, $category))
-        ->toThrow(HttpException::class);
+        ->toThrow(AuthorizationException::class);
 
     // Category must still exist, and still belong to A.
     $row = DB::table('site.service_categories')->where('id', $categoryId)->first();

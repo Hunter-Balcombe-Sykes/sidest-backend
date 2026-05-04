@@ -70,7 +70,7 @@ class StaffServiceCategoryManagementController extends ApiController
 
     public function show(Request $request, Professional $professional, ServiceCategory $category): JsonResponse
     {
-        abort_unless($category->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'view', $category);
 
         $includeArchived = $request->boolean('include_archived');
         if (! $includeArchived && $category->trashed()) {
@@ -82,7 +82,7 @@ class StaffServiceCategoryManagementController extends ApiController
 
     public function update(StaffUpdateServiceCategoryRequest $request, Professional $professional, ServiceCategory $category): JsonResponse
     {
-        abort_unless($category->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'update', $category);
         if ($category->trashed()) {
             abort(404);
         }
@@ -95,7 +95,7 @@ class StaffServiceCategoryManagementController extends ApiController
 
     public function destroy(Professional $professional, ServiceCategory $category): JsonResponse
     {
-        abort_unless($category->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'delete', $category);
         if ($category->trashed()) {
             abort(404);
         }
@@ -175,7 +175,7 @@ class StaffServiceCategoryManagementController extends ApiController
 
     public function forceDestroy(Professional $professional, ServiceCategory $category): JsonResponse
     {
-        abort_unless($category->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'delete', $category);
 
         // Optional: also uncategorise services on hard delete (FK ON DELETE SET NULL handles it if in DB)
         $category->forceDelete();
@@ -185,7 +185,7 @@ class StaffServiceCategoryManagementController extends ApiController
 
     public function restore(Professional $professional, ServiceCategory $category): JsonResponse
     {
-        abort_unless($category->professional_id === $professional->id, 404);
+        $this->authorizeForUser($professional, 'update', $category);
 
         if ($category->trashed()) {
             $category->restore();

@@ -171,7 +171,7 @@ class ProfessionalServiceController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($service->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'view', $service);
 
         return $this->success(['service' => $service]);
     }
@@ -180,7 +180,7 @@ class ProfessionalServiceController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($service->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'update', $service);
 
         $data = $request->validated();
 
@@ -198,7 +198,7 @@ class ProfessionalServiceController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($service->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'delete', $service);
 
         $service->delete();
 
@@ -335,7 +335,7 @@ class ProfessionalServiceController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($service->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'update', $service);
 
         if (! $service->trashed()) {
             return $this->success(['restored' => true, 'service' => $service->fresh()]);

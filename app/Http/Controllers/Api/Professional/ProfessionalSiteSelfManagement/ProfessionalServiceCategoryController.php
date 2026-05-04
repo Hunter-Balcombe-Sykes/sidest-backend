@@ -77,7 +77,7 @@ class ProfessionalServiceCategoryController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($category->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'view', $category);
 
         // Optional include_archived behavior
         $includeArchived = $request->boolean('include_archived');
@@ -92,7 +92,7 @@ class ProfessionalServiceCategoryController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($category->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'update', $category);
         if ($category->trashed()) {
             abort(404);
         }
@@ -107,7 +107,7 @@ class ProfessionalServiceCategoryController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($category->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'delete', $category);
         if ($category->trashed()) {
             abort(404);
         }
@@ -190,7 +190,7 @@ class ProfessionalServiceCategoryController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        abort_unless($category->professional_id === $pro->id, 404);
+        $this->authorizeForUser($pro, 'update', $category);
 
         if (! $category->trashed()) {
             return $this->success(['restored' => true, 'category' => $category->fresh()]);
