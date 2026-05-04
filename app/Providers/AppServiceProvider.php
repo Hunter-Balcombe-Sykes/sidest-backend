@@ -60,6 +60,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Notifications\NotificationEmailPolicy::class, \App\Policies\NotificationPolicy::class);
         Gate::policy(\App\Models\Core\Notifications\NotificationReceipt::class, \App\Policies\NotificationPolicy::class);
         Gate::policy(\App\Models\Core\Notifications\EmailSubscription::class, \App\Policies\NotificationPolicy::class);
+        Gate::policy(\App\Models\Core\Gdpr\GdprRequest::class, \App\Policies\GdprPolicy::class);
+        Gate::policy(\App\Models\Core\Gdpr\DataExportAudit::class, \App\Policies\GdprPolicy::class);
 
         // Refuse to boot in production with throttling disabled — a misconfigured
         // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.
