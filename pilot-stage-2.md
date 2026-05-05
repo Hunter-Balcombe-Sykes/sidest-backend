@@ -37,7 +37,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
         // No failed() method declared.
         ```
 
-- [ ] **#9-007** · P1 — Critical money-path jobs lack explicit Nightwatch instrumentation
+- [x] **#9-007** · P1 — Critical money-path jobs lack explicit Nightwatch instrumentation
     - **Where:** app/Jobs/Stripe/ProcessCommissionPayoutsJob.php; app/Jobs/Stripe/ExecuteCommissionPayoutJob.php
     - **Affects:** Payout reliability monitoring at multi-brand scale.
     - **Effort:** S (~1–2h)
