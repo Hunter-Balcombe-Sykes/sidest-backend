@@ -211,7 +211,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Audit + decide which pools should be public. Files are keyed by `images/{proId}/{mediaId}/...` — proId is publicly known, mediaId is a UUID.
     - **Plain English:** All uploaded media lives in a public bucket. Mostly intentional (logos, gallery), but gallery photos might warrant a signed URL.
 
-- [ ] **#9-008** · P2 — BrandAffiliateInviteObserver fetches names per event — N+1 on bulk invite
+- [x] **#9-008** · P2 — BrandAffiliateInviteObserver fetches names per event — N+1 on bulk invite
     - **Where:** app/Observers/Core/BrandAffiliateInviteObserver.php:89-111
     - **Affects:** Bulk-invite latency and DB load when a brand uploads a CSV at Stage 2.
     - **Effort:** S (~1–2h)
