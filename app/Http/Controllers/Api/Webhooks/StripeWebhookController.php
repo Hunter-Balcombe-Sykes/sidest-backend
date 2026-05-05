@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Controller;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
+use App\Models\Billing\WebhookEvent;
 use App\Models\Core\Professional\Professional;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Professional\SiteProvisioningService;
@@ -52,19 +53,19 @@ class StripeWebhookController extends Controller
             return response()->json(['error' => 'Invalid payload structure'], 400);
         }
 
-        // Idempotency: atomic insert-or-skip using DB unique constraint on stripe_event_id.
-        // This prevents race conditions where two concurrent requests pass an exists() check.
-        $alreadyProcessed = ! DB::table('billing.webhook_events')->insertOrIgnore([
-            'id' => Str::uuid()->toString(),
-            'stripe_event_id' => $event->id,
-            'event_type' => $event->type,
-            'payload' => json_encode(json_decode($payload, true)),
-            'processed_at' => now(),
-        ]);
+        // Idempotency: firstOrCreate on the UNIQUE stripe_event_id. wasRecentlyCreated
+        // distinguishes "won the race / first delivery" from "duplicate — skip".
+        $webhookEvent = WebhookEvent::firstOrCreate(
+            ['stripe_event_id' => $event->id],
+            ['event_type' => $event->type, 'processed_at' => now()]
+        );
 
-        if ($alreadyProcessed) {
+        if (! $webhookEvent->wasRecentlyCreated) {
             return response()->json(['received' => true]);
         }
+
+        // Payload is HMAC-verified; set via forceFill (not mass-assignment) to preserve $fillable restriction.
+        $webhookEvent->forceFill(['payload' => json_decode($payload, true)])->save();
 
         match ($event->type) {
             'customer.subscription.created' => $this->handleSubscriptionCreated($event->data->object, $event),

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
+use App\Models\Billing\WebhookEvent;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionVoidService;
@@ -11,7 +12,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\Webhook;
 
@@ -63,23 +63,23 @@ class StripeConnectWebhookController extends Controller
             return response()->json(['error' => 'Invalid payload structure'], 400);
         }
 
-        // Idempotency: atomic insert-or-skip on the UNIQUE stripe_event_id.
+        // Idempotency: firstOrCreate on the UNIQUE stripe_event_id. wasRecentlyCreated
+        // distinguishes "won the race / first delivery" from "duplicate — skip".
         // Stripe event IDs are globally unique across platform + Connect events,
         // so billing.webhook_events covers both this controller and StripeWebhookController.
-        // The insert is committed before the match() dispatch: if a handler throws a 500,
-        // Stripe's retry will see the existing row and be short-circuited here rather than
-        // re-triggering the crashing handler. Investigate via Nightwatch if that occurs.
-        $alreadyProcessed = ! DB::table('billing.webhook_events')->insertOrIgnore([
-            'id' => Str::uuid()->toString(),
-            'stripe_event_id' => $event->id,
-            'event_type' => $event->type,
-            'payload' => json_encode(json_decode($payload, true)),
-            'processed_at' => now(),
-        ]);
+        // The row is committed before the match() dispatch: if a handler throws a 500,
+        // Stripe's retry will find the existing row here and skip re-triggering the crash.
+        $webhookEvent = WebhookEvent::firstOrCreate(
+            ['stripe_event_id' => $event->id],
+            ['event_type' => $event->type, 'processed_at' => now()]
+        );
 
-        if ($alreadyProcessed) {
+        if (! $webhookEvent->wasRecentlyCreated) {
             return response()->json(['received' => true]);
         }
+
+        // Payload is HMAC-verified; set via forceFill (not mass-assignment) to preserve $fillable restriction.
+        $webhookEvent->forceFill(['payload' => json_decode($payload, true)])->save();
 
         return $this->handleParsedEvent($event);
     }
