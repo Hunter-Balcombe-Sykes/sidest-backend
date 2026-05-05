@@ -438,7 +438,6 @@ class BrandDesignMediaService
             'image/png' => 'png',
             'image/jpeg', 'image/jpg' => 'jpg',
             'image/webp' => 'webp',
-            'image/svg+xml' => 'svg',
             'image/gif' => 'gif',
             default => 'png',
         };
