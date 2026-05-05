@@ -580,7 +580,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** The dashboard expects two new fields after this deploy. For five minutes after deploy, it can be served the old shape from cache that doesn't have them, and crash. Bumping the cache version forces a fresh build.
     - **Source:** Commit-batch review item #11 (commit `a0e12a9`).
 
-- [ ] **#CR-009** · P1 — At-risk amount selected by exact-timestamp equality; ties produce non-deterministic financial figure
+- [x] **#CR-009** · P1 — At-risk amount selected by exact-timestamp equality; ties produce non-deterministic financial figure
     - **Where:** app/Http/Controllers/Api/Professional/Analytics/AffiliateCommerceAnalyticsController.php:260-277 (buildGraceSummary)
     - **Affects:** Affiliate-facing "earliest at-risk amount" in the grace banner — financial figure they may act on (rushing to connect Stripe).
     - **Effort:** S (~1h)
