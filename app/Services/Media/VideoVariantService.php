@@ -39,6 +39,13 @@ use Symfony\Component\Process\Process;
 // V2: Transcodes videos to MP4 + HLS via FFmpeg. Feature-flagged (SIDEST_VIDEO_UPLOADS_ENABLED). Uses dedicated redis_video connection.
 class VideoVariantService
 {
+    /** Codecs we will transcode. hevc = H.265 (ffprobe reports 'hevc', not 'h265'). */
+    private const ALLOWED_CODECS = ['h264', 'hevc', 'vp9'];
+
+    /** 4K ceiling: long edge ≤ 3840px, short edge ≤ 2160px. */
+    private const MAX_RESOLUTION_LONG = 3840;
+    private const MAX_RESOLUTION_SHORT = 2160;
+
     /* ------------------------------------------------------------------ */
     /*  Public API */
     /* ------------------------------------------------------------------ */
@@ -52,19 +59,21 @@ class VideoVariantService
     public function probe(string $localPath): array
     {
         $ffprobe = $this->ffprobeBinary();
-        $cmd = sprintf(
-            '%s -v quiet -print_format json -show_format -show_streams %s 2>&1',
-            escapeshellcmd($ffprobe),
-            escapeshellarg($localPath),
-        );
 
-        $output = $this->runCommand($cmd, $exitCode);
+        $process = new Process([
+            $ffprobe, '-v', 'quiet', '-print_format', 'json',
+            '-show_format', '-show_streams', $localPath,
+        ]);
+        $process->setTimeout(30);
+        $process->run();
 
-        if ($exitCode !== 0) {
-            throw new \RuntimeException("ffprobe failed (exit {$exitCode}): {$output}");
+        if (! $process->isSuccessful()) {
+            $exitCode = $process->getExitCode();
+            $err = $process->getErrorOutput() ?: $process->getOutput();
+            throw new \RuntimeException("ffprobe failed (exit {$exitCode}): {$err}");
         }
 
-        $data = json_decode($output, true);
+        $data = json_decode($process->getOutput(), true);
         if (! is_array($data)) {
             throw new \RuntimeException('ffprobe returned non-JSON output.');
         }
@@ -87,16 +96,33 @@ class VideoVariantService
     {
         $probe = $this->probe($localPath);
 
-        $hasVideoStream = false;
+        $videoStream = null;
         foreach ($probe['streams'] ?? [] as $stream) {
             if (($stream['codec_type'] ?? '') === 'video') {
-                $hasVideoStream = true;
+                $videoStream = $stream;
                 break;
             }
         }
 
-        if (! $hasVideoStream) {
+        if ($videoStream === null) {
             throw new \RuntimeException('File does not contain a recognisable video stream.');
+        }
+
+        $codec = strtolower((string) ($videoStream['codec_name'] ?? ''));
+        if (! in_array($codec, self::ALLOWED_CODECS, true)) {
+            throw new \RuntimeException(
+                "Unsupported video codec '{$codec}'. Allowed: ".implode(', ', self::ALLOWED_CODECS).'.'
+            );
+        }
+
+        $width = (int) ($videoStream['width'] ?? 0);
+        $height = (int) ($videoStream['height'] ?? 0);
+        $longEdge = max($width, $height);
+        $shortEdge = min($width, $height);
+        if ($longEdge > self::MAX_RESOLUTION_LONG || $shortEdge > self::MAX_RESOLUTION_SHORT) {
+            throw new \RuntimeException(
+                "Video resolution {$width}×{$height} exceeds the maximum allowed (3840×2160 / 4K)."
+            );
         }
 
         $durationMs = $this->extractDurationMs($probe);
@@ -127,16 +153,12 @@ class VideoVariantService
             'base_path' => $basePath,
         ]);
 
-        // --- 1. Probe metadata ---
-        $probe = $this->probe($localOriginalPath);
+        // --- 1. Probe metadata + validate codec, resolution, and duration ---
+        $probe = $this->probeAndValidate($localOriginalPath);
         $durationMs = $this->extractDurationMs($probe);
-        $maxDur = (int) config('sidest.video_max_duration_seconds', 300);
 
-        if ($durationMs > $maxDur * 1000) {
-            throw new \RuntimeException(
-                "Video duration ({$durationMs}ms) exceeds maximum ({$maxDur}s)."
-            );
-        }
+        // Timeout budget: 2× video duration + 60s, floored at 120s for very short clips.
+        $encodingTimeout = max(120, (int) round($durationMs / 1000) * 2 + 60);
 
         $variantDefs = (array) config('sidest.video_variants', []);
         $tmpDirs = [];
@@ -146,7 +168,7 @@ class VideoVariantService
             $mp4Paths = [];
             foreach ($variantDefs as $variantKey => $def) {
                 $tmpMp4 = $this->makeTmpFile("sidest_mp4_{$variantKey}_", '.mp4');
-                $this->encodeMp4($localOriginalPath, $tmpMp4, $def);
+                $this->encodeMp4($localOriginalPath, $tmpMp4, $def, $encodingTimeout);
                 $mp4Paths[$variantKey] = $tmpMp4;
             }
 
@@ -158,7 +180,7 @@ class VideoVariantService
                     throw new \RuntimeException("Failed to create HLS temp dir: {$tmpHlsDir}");
                 }
                 $tmpDirs[] = $tmpHlsDir;
-                $this->packageHls($mp4, $tmpHlsDir.'/playlist.m3u8');
+                $this->packageHls($mp4, $tmpHlsDir.'/playlist.m3u8', $encodingTimeout);
                 $hlsDirs[$variantKey] = $tmpHlsDir;
             }
 
@@ -167,7 +189,7 @@ class VideoVariantService
 
             // --- 6. Extract poster ---
             $tmpPoster = $this->makeTmpFile('sidest_poster_', '.jpg');
-            $this->extractPoster($localOriginalPath, $tmpPoster);
+            $this->extractPoster($localOriginalPath, $tmpPoster, $encodingTimeout);
 
             // --- 7. Upload all artifacts ---
             $disk = $this->disk();
@@ -347,7 +369,7 @@ class VideoVariantService
     /*  Private helpers */
     /* ------------------------------------------------------------------ */
 
-    private function encodeMp4(string $input, string $output, array $def): void
+    private function encodeMp4(string $input, string $output, array $def, int $timeout): void
     {
         $ffmpeg = $this->ffmpegBinary();
         $resolution = (string) ($def['resolution'] ?? '1280x720');
@@ -359,71 +381,58 @@ class VideoVariantService
         // The scale filter uses -2 to keep dimensions divisible by 2 (required by libx264).
         $scaleFilter = "scale='if(gt(iw,{$width}),{$width},-2)':'if(gt(ih,{$height}),{$height},-2)'";
 
-        $cmd = sprintf(
-            '%s -y -i %s -vf %s -c:v libx264 -b:v %dk -maxrate %dk -bufsize %dk '
-            .'-profile:v main -level 4.0 -movflags +faststart '
-            .'-c:a aac -b:a %dk -ar 44100 %s 2>&1',
-            escapeshellcmd($ffmpeg),
-            escapeshellarg($input),
-            escapeshellarg($scaleFilter),
-            $videoBitrate,
-            (int) ($videoBitrate * 1.5),
-            (int) ($videoBitrate * 2),
-            $audioBitrate,
-            escapeshellarg($output),
-        );
+        $cmd = [
+            $ffmpeg, '-y', '-i', $input,
+            '-vf', $scaleFilter,
+            '-c:v', 'libx264',
+            '-b:v', "{$videoBitrate}k",
+            '-maxrate', ((int) ($videoBitrate * 1.5)).'k',
+            '-bufsize', ((int) ($videoBitrate * 2)).'k',
+            '-profile:v', 'main', '-level', '4.0',
+            '-movflags', '+faststart',
+            '-c:a', 'aac', '-b:a', "{$audioBitrate}k", '-ar', '44100',
+            $output,
+        ];
 
-        $output_str = $this->runCommand($cmd, $exitCode);
+        $output_str = $this->runCommand($cmd, $exitCode, $timeout);
 
         if ($exitCode !== 0) {
             throw new \RuntimeException("ffmpeg MP4 encoding failed (exit {$exitCode}): {$output_str}");
         }
     }
 
-    private function packageHls(string $mp4Input, string $playlistOutput): void
+    private function packageHls(string $mp4Input, string $playlistOutput, int $timeout): void
     {
         $ffmpeg = $this->ffmpegBinary();
         $outputDir = dirname($playlistOutput);
         $segmentPattern = $outputDir.'/seg_%03d.ts';
 
-        $cmd = sprintf(
-            '%s -y -i %s -c copy -f hls -hls_time 6 -hls_playlist_type vod '
-            .'-hls_segment_filename %s %s 2>&1',
-            escapeshellcmd($ffmpeg),
-            escapeshellarg($mp4Input),
-            escapeshellarg($segmentPattern),
-            escapeshellarg($playlistOutput),
-        );
+        $cmd = [
+            $ffmpeg, '-y', '-i', $mp4Input,
+            '-c', 'copy', '-f', 'hls',
+            '-hls_time', '6', '-hls_playlist_type', 'vod',
+            '-hls_segment_filename', $segmentPattern,
+            $playlistOutput,
+        ];
 
-        $output = $this->runCommand($cmd, $exitCode);
+        $output = $this->runCommand($cmd, $exitCode, $timeout);
 
         if ($exitCode !== 0) {
             throw new \RuntimeException("ffmpeg HLS packaging failed (exit {$exitCode}): {$output}");
         }
     }
 
-    private function extractPoster(string $input, string $output): void
+    private function extractPoster(string $input, string $output, int $timeout): void
     {
         $ffmpeg = $this->ffmpegBinary();
 
-        $cmd = sprintf(
-            '%s -y -i %s -ss 00:00:01 -frames:v 1 -q:v 3 %s 2>&1',
-            escapeshellcmd($ffmpeg),
-            escapeshellarg($input),
-            escapeshellarg($output),
-        );
-
-        $outputStr = $this->runCommand($cmd, $exitCode);
+        $cmd = [$ffmpeg, '-y', '-i', $input, '-ss', '00:00:01', '-frames:v', '1', '-q:v', '3', $output];
+        $outputStr = $this->runCommand($cmd, $exitCode, $timeout);
 
         if ($exitCode !== 0 || ! file_exists($output)) {
             // Non-fatal: try frame at 0s as fallback
-            $cmd2 = sprintf(
-                '%s -y -i %s -frames:v 1 -q:v 3 %s 2>&1',
-                escapeshellcmd($ffmpeg),
-                escapeshellarg($input),
-                escapeshellarg($output),
-            );
-            $this->runCommand($cmd2, $exitCode2);
+            $cmd2 = [$ffmpeg, '-y', '-i', $input, '-frames:v', '1', '-q:v', '3', $output];
+            $this->runCommand($cmd2, $exitCode2, $timeout);
 
             if ($exitCode2 !== 0 || ! file_exists($output)) {
                 Log::warning('VideoVariantService: could not extract poster frame.', [
@@ -499,23 +508,21 @@ class VideoVariantService
     }
 
     /**
-     * Run a pre-escaped shell command via Symfony Process and return its output.
+     * Run an FFmpeg/FFprobe command via Symfony Process and return combined stdout+stderr.
      * $exitCode is set by reference.
      *
-     * All arguments in $cmd must be escaped by the caller via
-     * escapeshellcmd()/escapeshellarg() before this method is called.
-     * No timeout is applied — video encoding can be arbitrarily long.
+     * Uses array-form Process — each element is passed as a literal argument,
+     * bypassing the shell entirely and eliminating injection via argument composition.
      */
-    private function runCommand(string $cmd, ?int &$exitCode = null): string
+    private function runCommand(array $cmd, ?int &$exitCode = null, int $timeout = 30): string
     {
-        $process = Process::fromShellCommandline($cmd);
-        $process->setTimeout(null);
+        $process = new Process($cmd);
+        $process->setTimeout($timeout);
         $process->run();
 
         $exitCode = $process->getExitCode() ?? 0;
 
-        // Callers append 2>&1, so all output (including stderr) is in stdout
-        return $process->getOutput();
+        return $process->getOutput() . $process->getErrorOutput();
     }
 
     private function removeDir(string $dir): void
