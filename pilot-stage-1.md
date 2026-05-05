@@ -918,7 +918,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** State machine for the install pipeline. 5 install jobs dispatched in parallel; partial failures log a warning but don't mark setup incomplete.
     - **Plain English:** If one of the post-install setup steps fails, the brand is left half-configured with no way to fix it short of reinstalling.
 
-- [ ] **#3-02** · P2 — past_due Stripe status keeps full entitlements indefinitely
+- [x] **#3-02** · P2 — past_due Stripe status keeps full entitlements indefinitely
     - **Where:** app/Models/Billing/Subscription.php (GRACE_STATUSES) + app/Services/Billing/Entitlements.php
     - **Affects:** Brand billing/entitlement enforcement.
     - **Effort:** M (~4h)
