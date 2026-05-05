@@ -145,7 +145,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
         ]);
         ```
 
-- [ ] **#3-05** · P2 — Wallet debit and PaymentIntent create are not in a single transaction
+- [x] **#3-05** · P2 — Wallet debit and PaymentIntent create are not in a single transaction
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:314-398
     - **Affects:** Wallet integrity for all brands; risk multiplies with payout volume at Stage 2.
     - **Effort:** M (~3h)
