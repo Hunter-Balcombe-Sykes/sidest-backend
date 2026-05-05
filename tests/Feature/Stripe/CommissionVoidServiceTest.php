@@ -28,6 +28,23 @@ beforeEach(function () {
         }
     }
 
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
+        id TEXT PRIMARY KEY,
+        brand_professional_id TEXT,
+        affiliate_professional_id TEXT,
+        status TEXT NOT NULL DEFAULT \'pending\',
+        gross_commission_cents INTEGER NOT NULL DEFAULT 0,
+        platform_fee_cents INTEGER NOT NULL DEFAULT 0,
+        net_payout_cents INTEGER NOT NULL DEFAULT 0,
+        currency_code TEXT NOT NULL DEFAULT \'AUD\',
+        failure_reason TEXT,
+        failure_code TEXT,
+        ledger_entry_count INTEGER NOT NULL DEFAULT 0,
+        void_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )');
+
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
         id TEXT PRIMARY KEY,
         shopify_order_id TEXT,
@@ -314,4 +331,92 @@ it('uses UTC for flush cutoff so an app-timezone offset does not exclude commiss
 
     expect($count)->toBe(1);
     expect(CommissionLedgerEntry::find('c1')->status)->toBe('approved');
+});
+
+// ============================================================
+// #VEP-2 — Per-payout expiry warnings aligned with void_at
+// ============================================================
+
+function seedVoidPayout(string $id, string $affiliateId, string $brandId, string $voidAt, string $status = 'pending', int $netPayoutCents = 9700): void
+{
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('commerce.commission_payouts')->insert([
+        'id' => $id,
+        'brand_professional_id' => $brandId,
+        'affiliate_professional_id' => $affiliateId,
+        'status' => $status,
+        'gross_commission_cents' => 10000,
+        'platform_fee_cents' => 300,
+        'net_payout_cents' => $netPayoutCents,
+        'currency_code' => 'AUD',
+        'ledger_entry_count' => 1,
+        'void_at' => $voidAt,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+}
+
+it('sends a 10-day warning for a payout expiring in 10 days', function () {
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldReceive('publish')
+        ->once()
+        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) =>
+            $professionalId === 'aff-1' &&
+            str_contains($dedupeKey, 'payout') &&
+            $category === 'commissions'
+        );
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'not_connected');
+    seedVoidPayout('p1', 'aff-1', 'brand-1', voidAt: now()->addDays(10)->midDay()->toDateTimeString());
+
+    $stats = $service->sendGracePeriodWarnings();
+
+    expect($stats['warnings_sent'])->toBe(1);
+});
+
+it('sends a 2-day warning for a payout expiring in 2 days', function () {
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldReceive('publish')
+        ->once()
+        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) =>
+            $professionalId === 'aff-1' &&
+            str_contains($dedupeKey, 'payout') &&
+            $category === 'commissions'
+        );
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'not_connected');
+    seedVoidPayout('p1', 'aff-1', 'brand-1', voidAt: now()->addDays(2)->midDay()->toDateTimeString());
+
+    $stats = $service->sendGracePeriodWarnings();
+
+    expect($stats['warnings_sent'])->toBe(1);
+});
+
+it('does not send a payout expiry warning outside the 10-day and 2-day windows', function () {
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    // No affiliates in signup warning windows, no ledger entries — only payout with wrong timing
+    $publisher->shouldNotReceive('publish');
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'not_connected');
+    seedVoidPayout('p1', 'aff-1', 'brand-1', voidAt: now()->addDays(15)->toDateTimeString());
+
+    $service->sendGracePeriodWarnings();
+});
+
+it('does not send a payout expiry warning when the affiliate has active Stripe', function () {
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldNotReceive('publish');
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'active');
+    seedVoidPayout('p1', 'aff-1', 'brand-1', voidAt: now()->addDays(10)->midDay()->toDateTimeString());
+
+    $service->sendGracePeriodWarnings();
 });

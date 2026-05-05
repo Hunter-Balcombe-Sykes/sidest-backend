@@ -129,6 +129,7 @@ class CommissionVoidService
             ->whereHas('affiliateProfessional', function ($q) {
                 $q->where('stripe_connect_status', '!=', 'active');
             })
+            ->with('brandProfessional:id,display_name')
             ->orderBy('void_at')
             ->chunkById(200, function ($payouts) use (&$stats): void {
                 foreach ($payouts as $payout) {
@@ -153,7 +154,9 @@ class CommissionVoidService
      */
     private function cancelExpiredPayout(CommissionPayout $payout, array &$stats): void
     {
-        DB::transaction(function () use ($payout, &$stats): void {
+        $cancelled = false;
+
+        DB::transaction(function () use ($payout, &$stats, &$cancelled): void {
             $updated = CommissionPayout::query()
                 ->where('id', $payout->id)
                 ->whereIn('status', ['pending', 'pending_funds'])
@@ -185,7 +188,25 @@ class CommissionVoidService
             $stats['cancelled_count']++;
             $stats['cancelled_cents'] += (int) $payout->gross_commission_cents;
             $stats['voided_entries'] += (int) $voidedEntries;
+            $cancelled = true;
         });
+
+        if ($cancelled) {
+            $this->publisher->publish(
+                professionalId: $payout->affiliate_professional_id,
+                frontendType: 'Warning',
+                category: 'commissions',
+                title: 'Commission payout expired',
+                body: sprintf(
+                    'Your %s payout from %s has been cancelled because Stripe Connect was not activated within the grace period.',
+                    $this->formatMoney($payout->net_payout_cents, $payout->currency_code),
+                    $payout->brandProfessional?->display_name ?? 'a brand',
+                ),
+                dedupeKey: "payout_voided.{$payout->id}",
+                ctaUrl: '/account/settings?section=stripe',
+                retentionConfigKey: 'commission',
+            );
+        }
     }
 
     /**
@@ -205,6 +226,7 @@ class CommissionVoidService
 
         $stats['warnings_sent'] += $this->sendSignupWarnings();
         $stats['warnings_sent'] += $this->sendPerCommissionWarnings();
+        $stats['warnings_sent'] += $this->sendPerPayoutWarnings();
 
         return $stats;
     }
@@ -319,6 +341,55 @@ class CommissionVoidService
                     $sent++;
                 }
             });
+
+        return $sent;
+    }
+
+    /**
+     * Per-payout warning: 10 and 2 days before each payout's void_at deadline.
+     * Mirrors sendSignupWarnings but is keyed off payout.void_at — the actual
+     * deadline enforced by processExpiredPayouts — so warnings align with enforcement.
+     */
+    private function sendPerPayoutWarnings(): int
+    {
+        $sent = 0;
+
+        $warningWindows = [
+            'day10' => [
+                'range' => [now()->addDays(10)->startOfDay(), now()->addDays(10)->endOfDay()],
+                'title' => 'Connect Stripe — 10 days left',
+                'body' => 'Connect Stripe within 10 days or your %s payout will be cancelled.',
+            ],
+            'day2' => [
+                'range' => [now()->addDays(2)->startOfDay(), now()->addDays(2)->endOfDay()],
+                'title' => 'Connect Stripe — 2 days left',
+                'body' => '2 days left — connect Stripe now or your %s payout will be cancelled.',
+            ],
+        ];
+
+        foreach ($warningWindows as $key => $window) {
+            CommissionPayout::query()
+                ->whereIn('status', ['pending', 'pending_funds'])
+                ->whereBetween('void_at', $window['range'])
+                ->whereHas('affiliateProfessional', function ($q) {
+                    $q->where('stripe_connect_status', '!=', 'active');
+                })
+                ->chunkById(200, function ($payouts) use (&$sent, $key, $window): void {
+                    foreach ($payouts as $payout) {
+                        $this->publisher->publish(
+                            professionalId: $payout->affiliate_professional_id,
+                            frontendType: 'Warning',
+                            category: 'commissions',
+                            title: $window['title'],
+                            body: sprintf($window['body'], $this->formatMoney($payout->net_payout_cents, $payout->currency_code)),
+                            dedupeKey: "stripe_warning.payout.{$key}.{$payout->id}",
+                            ctaUrl: '/account/settings?section=stripe',
+                            retentionConfigKey: 'commission',
+                        );
+                        $sent++;
+                    }
+                });
+        }
 
         return $sent;
     }

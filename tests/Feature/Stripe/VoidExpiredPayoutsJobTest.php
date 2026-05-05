@@ -241,3 +241,43 @@ it('leaves completed payouts alone even if void_at is in the past', function () 
     expect(CommissionPayout::find('p1')->status)->toBe('completed');
     expect(CommissionLedgerEntry::find('l1')->status)->toBe('paid');
 });
+
+// ============================================================
+// #VEP-2 — Affiliate notification on payout void
+// ============================================================
+
+it('publishes a voided notification to the affiliate when their payout expires', function () {
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString());
+    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved');
+
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldReceive('publish')
+        ->once()
+        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) =>
+            $professionalId === 'aff-1' &&
+            $dedupeKey === 'payout_voided.p1' &&
+            $category === 'commissions'
+        );
+
+    $service = new CommissionVoidService($publisher);
+    expiredPayout_makeJob()->handle($service);
+});
+
+it('publishes notification only once when the same expired payout is processed on two consecutive runs', function () {
+    // First run cancels the payout. Second run finds no pending/pending_funds payouts
+    // past void_at, so nothing is selected and publisher is never called again.
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString());
+    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved');
+
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldReceive('publish')->once();
+
+    $service = new CommissionVoidService($publisher);
+    $job = expiredPayout_makeJob();
+    $job->handle($service);
+    $job->handle($service);
+});
