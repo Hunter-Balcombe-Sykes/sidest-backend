@@ -799,7 +799,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Default 1 attempt → single transient failure drops broadcast silently.
     - **Source:** v5 audit (discovery_lens: domain-subagent-9; in_scope_v4: yes).
 
-- [ ] **#V5-023** · P1 — WebhookEvent payload mass-assignable, no schema validation
+- [x] **#V5-023** · P1 — WebhookEvent payload mass-assignable, no schema validation
     - **Where:** app/Models/Billing/WebhookEvent.php:16
     - **Affects:** All webhook event persistence (Stripe, Stripe Connect).
     - **Effort:** M (~2h)
