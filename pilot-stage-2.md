@@ -259,7 +259,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Effort:** S (~1h)
     - **What to do:** Use a real placeholder JPEG or fail the upload outright.
 
-- [ ] **#7-09** · P3 — VideoVariantService uses `Process::fromShellCommandline` (currently safe, server-config inputs only)
+- [x] **#7-09** · P3 — VideoVariantService uses `Process::fromShellCommandline` (currently safe, server-config inputs only)
     - **Where:** app/Services/Media/VideoVariantService.php
     - **Effort:** S (~2h)
     - **What to do:** Refactor to array form `new Process([...])`. Pairs with the #7-04 hardening.
