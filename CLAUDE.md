@@ -97,6 +97,8 @@ Gate::policy(YourModel::class, YourPolicy::class);
 
 **Coverage is sweep-tested:** `tests/Feature/Security/PolicyCoverageTest.php` asserts every model under `app/Models/` either has a `Gate::policy()` registration in `AppServiceProvider::boot()` or appears in the `POLICY_EXEMPT` allowlist with a justification. Adding a new tenant-owned model? Register a policy or add an exempt entry — silent omissions fail CI.
 
+**403 vs 404 standard:** Use 404 (not 403) when a resource doesn't exist or doesn't belong to the authenticated user. Use 403 only for role/type restrictions ("brand-only", "staff-only") and policy gate failures. On public (unauthenticated) endpoints, always use 404 for missing/inaccessible resources — returning 403 reveals the resource exists and enables enumeration.
+
 ## Development Commands
 
 ```bash

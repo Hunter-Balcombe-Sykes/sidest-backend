@@ -44,9 +44,9 @@ class AnalyticsController extends ApiController
             return $this->error('Site not found', $statusCode);
         }
 
-        // Check if site is published
+        // 404 not 403: public endpoint — returning 403 would reveal the site exists but is unpublished
         if (! $site->is_published) {
-            return $this->error('Site not published', 403);
+            return $this->error('Site not found', 404);
         }
 
         // Create pageview record
@@ -98,9 +98,9 @@ class AnalyticsController extends ApiController
             return $this->error('Site not found', $statusCode);
         }
 
-        // Check if site is published
+        // 404 not 403: public endpoint — returning 403 would reveal the site exists but is unpublished
         if (! $site->is_published) {
-            return $this->error('Site not published', 403);
+            return $this->error('Site not found', 404);
         }
 
         // Verify block exists and belongs to this site
@@ -133,9 +133,9 @@ class AnalyticsController extends ApiController
             return $this->error('Block is not trackable for analytics', 422);
         }
 
-        // Check if block is active
+        // 404 not 403: state check on a public endpoint — 403 reveals the block exists but is disabled
         if (! $block->is_active) {
-            return $this->error('Block is not active', 403);
+            return $this->error('Block not found', 404);
         }
 
         $click = LinkClick::runForBlockForeignKey(
@@ -212,8 +212,9 @@ class AnalyticsController extends ApiController
             return $this->error('Site not found', $statusCode);
         }
 
+        // 404 not 403: public endpoint — returning 403 would reveal the site exists but is unpublished
         if (! $site->is_published) {
-            return $this->error('Site not published', 403);
+            return $this->error('Site not found', 404);
         }
 
         $event = new CartEvent([
