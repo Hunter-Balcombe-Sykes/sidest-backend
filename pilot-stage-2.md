@@ -129,7 +129,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Combined with the #2-01 fix in Stage 1, this gives the audit trail to detect impersonation attempts.
     - **Plain English:** When the system serves brand design assets to an affiliate, no record exists of who asked for what. Add logging so misuse can be detected. **See also #2-01 in Stage 1.**
 
-- [ ] **#3-01** · P2 — Stripe API error messages logged with full string (potential PII)
+- [x] **#3-01** · P2 — Stripe API error messages logged with full string (potential PII)
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:489-494 (and similar)
     - **Affects:** Payout error logs across all brands.
     - **Effort:** S (~1h)
