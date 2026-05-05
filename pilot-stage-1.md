@@ -1396,7 +1396,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.5h)
     - **What to do:** Document the immutability assumption (auth_user_id never changes) inline.
 
-- [ ] **#1-07** · P3 — `EnsureSidestStaff` fail-closed but creation flow not asserted by test
+- [x] **#1-07** · P3 — `EnsureSidestStaff` fail-closed but creation flow not asserted by test
     - **Where:** app/Http/Middleware/Auth/EnsureSidestStaff.php
     - **Effort:** S (~1h)
     - **What to do:** Add a Pest test that confirms staff creation requires both Supabase + SidestStaff atomically.
