@@ -276,6 +276,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
                     ->where('affiliate_professional_id', $professionalId)
                     ->where('void_at', '=', $atRisk->earliest_at)
                     ->whereIn('status', ['pending', 'pending_funds'])
+                    ->orderBy('net_payout_cents', 'desc') // deterministic tie-break when batch creates share a void_at timestamp
                     ->select('net_payout_cents')
                     ->first();
                 $earliestPayoutCents = (int) ($earliest->net_payout_cents ?? 0);
