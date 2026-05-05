@@ -16,9 +16,9 @@ class InviteExpirySweepJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 1;
+    public int $tries = 3;
 
-    public int $timeout = 120;
+    public int $timeout = 300;
 
     public function __construct()
     {
@@ -29,48 +29,49 @@ class InviteExpirySweepJob implements ShouldQueue
     {
         $now = now();
 
-        $expired = DB::table('brand.brand_affiliate_invites')
+        DB::table('brand.brand_affiliate_invites')
             ->where('status', 'pending')
             ->where('expires_at', '<', $now)
-            ->get(['id', 'brand_professional_id', 'email', 'first_name']);
+            ->select(['id', 'brand_professional_id', 'email', 'first_name'])
+            ->chunkById(500, function ($chunk) use ($publisher, $now) {
+                foreach ($chunk as $invite) {
+                    try {
+                        DB::table('brand.brand_affiliate_invites')
+                            ->where('id', $invite->id)
+                            ->where('status', 'pending') // guard against concurrent updates
+                            ->update(['status' => 'expired', 'updated_at' => $now]);
 
-        foreach ($expired as $invite) {
-            try {
-                DB::table('brand.brand_affiliate_invites')
-                    ->where('id', $invite->id)
-                    ->where('status', 'pending') // guard against concurrent updates
-                    ->update(['status' => 'expired', 'updated_at' => $now]);
+                        $brandId = trim((string) ($invite->brand_professional_id ?? ''));
+                        if ($brandId === '') {
+                            continue;
+                        }
 
-                $brandId = trim((string) ($invite->brand_professional_id ?? ''));
-                if ($brandId === '') {
-                    continue;
+                        $label = trim((string) ($invite->first_name ?? ''));
+                        if ($label === '') {
+                            $label = trim((string) ($invite->email ?? ''));
+                        }
+                        if ($label === '') {
+                            $label = 'An invitee';
+                        }
+
+                        $publisher->publish(
+                            professionalId: $brandId,
+                            frontendType: 'Warning',
+                            category: 'invites',
+                            title: 'Invite expired',
+                            body: "Your invite to {$label} has expired.",
+                            dedupeKey: "invite.expired.{$invite->id}",
+                            ctaUrl: '/account/affiliates',
+                            retentionConfigKey: 'invite',
+                        );
+                    } catch (\Throwable $e) {
+                        Log::warning('InviteExpirySweepJob failed for invite', [
+                            'invite_id' => $invite->id,
+                            'message' => $e->getMessage(),
+                        ]);
+                    }
                 }
-
-                $label = trim((string) ($invite->first_name ?? ''));
-                if ($label === '') {
-                    $label = trim((string) ($invite->email ?? ''));
-                }
-                if ($label === '') {
-                    $label = 'An invitee';
-                }
-
-                $publisher->publish(
-                    professionalId: $brandId,
-                    frontendType: 'Warning',
-                    category: 'invites',
-                    title: 'Invite expired',
-                    body: "Your invite to {$label} has expired.",
-                    dedupeKey: "invite.expired.{$invite->id}",
-                    ctaUrl: '/account/affiliates',
-                    retentionConfigKey: 'invite',
-                );
-            } catch (\Throwable $e) {
-                Log::warning('InviteExpirySweepJob failed for invite', [
-                    'invite_id' => $invite->id,
-                    'message' => $e->getMessage(),
-                ]);
-            }
-        }
+            });
     }
 
     public function failed(\Throwable $e): void
