@@ -125,7 +125,7 @@ class CommissionPayoutService
                         'brand_id' => $group->brand_professional_id,
                         'affiliate_id' => $group->affiliate_professional_id,
                         'currency' => $group->currency_code,
-                        'error' => $e->getMessage(),
+                        'error' => $e instanceof ApiErrorException ? ($e->getStripeCode() ?? 'stripe_error') : get_class($e),
                     ]);
                 }
             }
@@ -394,7 +394,7 @@ class CommissionPayoutService
                 if ($walletDebitCents > 0) {
                     $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
                 }
-                $this->markPendingFunding($payout, 'charge_failed', $e->getMessage());
+                $this->markPendingFunding($payout, 'charge_failed', $e->getStripeCode() ?? 'stripe_error');
 
                 return null;
             }
@@ -492,13 +492,13 @@ class CommissionPayoutService
                     Log::error('Auto-refund after transfer failure failed — manual action required', [
                         'payout_id' => $payout->id,
                         'payment_intent_id' => $payout->stripe_payment_intent_id,
-                        'transfer_error' => $e->getMessage(),
-                        'refund_error' => $refundEx->getMessage(),
+                        'transfer_error' => $e->getStripeCode() ?? 'stripe_error',
+                        'refund_error' => $refundEx instanceof ApiErrorException ? ($refundEx->getStripeCode() ?? 'stripe_error') : get_class($refundEx),
                     ]);
                 }
             }
 
-            $this->failPayout($payout, $failureCode, $e->getMessage());
+            $this->failPayout($payout, $failureCode, $e->getStripeCode() ?? 'stripe_error');
 
             return false;
         }
