@@ -43,7 +43,12 @@ class VoidExpiredPayoutsJob implements ShouldQueue
     {
         $stats = $voidService->processExpiredPayouts();
 
+        // Always emit a heartbeat — silence here would mask a stuck scheduler.
+        // Promote to notice when real cancellations land so they stand out
+        // from routine zero-action passes (matches markPendingFunding's pattern).
         if ($stats['cancelled_count'] > 0 || $stats['voided_entries'] > 0) {
+            Log::notice('Expired payout void processing complete', $stats);
+        } else {
             Log::info('Expired payout void processing complete', $stats);
         }
     }
