@@ -7,6 +7,7 @@ use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
@@ -209,8 +210,16 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                     if ($affiliate) {
                         $row->setRelation('affiliateProfessional', $affiliate);
                     }
-                    $row->save();
-                    $reversalsCreated++;
+                    try {
+                        $row->save();
+                        $reversalsCreated++;
+                    } catch (QueryException $e) {
+                        // Race condition: two concurrent jobs both passed the pre-check.
+                        // The unique constraint on idempotency_key is the durable dedup guarantee.
+                        if ($e->getCode() !== '23505') {
+                            throw $e;
+                        }
+                    }
                 }
             });
         }
