@@ -1401,7 +1401,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~1h)
     - **What to do:** Add a Pest test that confirms staff creation requires both Supabase + SidestStaff atomically.
 
-- [ ] **#1-06** · P3 — `BrandAccessService::isBrandProfessional()` is a type-check living next to capability methods
+- [x] **#1-06** · P3 — `BrandAccessService::isBrandProfessional()` is a type-check living next to capability methods
     - **Where:** app/Http/Controllers/Api/Professional/ShopifyIntegration/ShopifyIntegrationController.php:64
     - **Effort:** S (~0.5h)
     - **What to do:** Rename or move the method onto the Professional model itself.
