@@ -254,7 +254,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Effort:** L (~8h)
     - **What to do:** Move to per-brand API keys + IP allowlist. (Stage 2 makes the multi-brand exposure concrete.)
 
-- [ ] **#7-10** · P3 — VideoVariantService.extractPoster writes a 0/1-byte placeholder file on poster-extract failure
+- [x] **#7-10** · P3 — VideoVariantService.extractPoster writes a 0/1-byte placeholder file on poster-extract failure
     - **Where:** app/Services/Media/VideoVariantService.php (extractPoster)
     - **Effort:** S (~1h)
     - **What to do:** Use a real placeholder JPEG or fail the upload outright.
