@@ -1346,7 +1346,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.25h)
     - **What to do:** Remove the SVG mapping — no upload validator accepts SVG.
 
-- [ ] **#6-02** · P3 — `public_contact_email` / `public_contact_number` echoed unconditionally in PublicSitePayload view
+- [x] **#6-02** · P3 — `public_contact_email` / `public_contact_number` echoed unconditionally in PublicSitePayload view
     - **Where:** supabase/migrations/20260403000000_v2_baseline.sql (PublicSitePayload view)
     - **Effort:** S (~1h)
     - **What to do:** Document or add validation; consider gating behind a "share publicly" flag.
