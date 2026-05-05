@@ -1406,7 +1406,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.5h)
     - **What to do:** Rename or move the method onto the Professional model itself.
 
-- [ ] **#PR-007** · P3 — Shopify webhook `fallback_secret` has no rotation deadline
+- [x] **#PR-007** · P3 — Shopify webhook `fallback_secret` has no rotation deadline
     - **Where:** app/Http/Controllers/Concerns/ValidatesShopifyWebhookHmac.php
     - **Effort:** S (~0.5h)
     - **What to do:** Document the rotation cadence inline or add an expiry.
