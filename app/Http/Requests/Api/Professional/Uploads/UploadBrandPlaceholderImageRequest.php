@@ -3,10 +3,14 @@
 namespace App\Http\Requests\Api\Professional\Uploads;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Http\Requests\Concerns\SniffsFileMimeType;
+use Illuminate\Contracts\Validation\Validator;
 
 // V2: Validates brand placeholder image upload — JPEG, PNG, or WebP image file up to 5 MB.
 class UploadBrandPlaceholderImageRequest extends BaseFormRequest
 {
+    use SniffsFileMimeType;
+
     public function rules(): array
     {
         return [
@@ -17,6 +21,15 @@ class UploadBrandPlaceholderImageRequest extends BaseFormRequest
                 'max:5120',
             ],
         ];
+    }
+
+    protected function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $v) {
+            if ($this->hasFile('image')) {
+                $this->assertImageMimeBytes($this->file('image'), $v, 'image');
+            }
+        });
     }
 
     public function messages(): array

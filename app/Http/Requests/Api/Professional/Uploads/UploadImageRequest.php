@@ -3,12 +3,15 @@
 namespace App\Http\Requests\Api\Professional\Uploads;
 
 use App\Http\Requests\BaseFormRequest;
+use App\Http\Requests\Concerns\SniffsFileMimeType;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Validation\Rule;
 
 // V2: Validates image or video upload to a pool — enforces one-of constraint, file type/size limits, and video feature flag check.
 class UploadImageRequest extends BaseFormRequest
 {
+    use SniffsFileMimeType;
+
     public function rules(): array
     {
         $imageMaxKb = (int) config('sidest.image_max_upload_size', 10240);
@@ -62,6 +65,10 @@ class UploadImageRequest extends BaseFormRequest
 
             if ($hasVideo && ! config('sidest.video_uploads_enabled', false)) {
                 $v->errors()->add('video', 'Video uploads are not currently enabled.');
+            }
+
+            if ($hasImage) {
+                $this->assertImageMimeBytes($this->file('image'), $v, 'image');
             }
         });
     }
