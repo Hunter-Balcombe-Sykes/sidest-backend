@@ -192,7 +192,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Replace cache-window idempotency with a durable table. Multi-brand traffic and Shopify outage windows make 24h cache-only dedup unsafe.
     - **Plain English:** The "we already processed this refund" check expires after a day. If Shopify resends the same refund a day later, we'd process it twice.
 
-- [ ] **#5-02** · P2 — Square/Fresha disconnect doesn't revoke tokens at provider
+- [x] **#5-02** · P2 — Square/Fresha disconnect doesn't revoke tokens at provider
     - **Where:** app/Http/Controllers/Api/Professional/SquareIntegration/SquareIntegrationController.php:185-187 (and Fresha equivalent)
     - **Affects:** OAuth hygiene across all brands disconnecting integrations.
     - **Effort:** S (~2–3h)
