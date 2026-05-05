@@ -231,7 +231,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Standard chunked iteration.
     - **Plain English:** A daily cleanup job loads everything into memory at once. If the queue has thousands of expired invites, it'll crash.
 
-- [ ] **#9-014** · P2 — Horizon analytics worker memory limit may be tight for aggregations
+- [x] **#9-014** · P2 — Horizon analytics worker memory limit may be tight for aggregations
     - **Where:** config/horizon.php:105-117 (supervisor-analytics, memory: 256)
     - **Affects:** Daily analytics rebuilds at multi-brand row counts.
     - **Effort:** S (~1h)
