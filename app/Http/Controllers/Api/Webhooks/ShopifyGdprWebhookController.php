@@ -49,7 +49,28 @@ class ShopifyGdprWebhookController extends ApiController
             return $this->error('invalid signature', 401);
         }
 
-        $payload = json_decode($rawBody, true) ?: [];
+        // Validate BEFORE computing hash — if a malformed payload gets cached as
+        // RECEIVED, every Shopify retry is silently deduplicated and the compliance
+        // action (deletion/export) never runs. Rejecting with 422 tells Shopify to
+        // keep retrying so a clean delivery can succeed.
+        $payload = json_decode($rawBody, true);
+        if (! is_array($payload)) {
+            Log::warning("Shopify GDPR webhook ({$topic}): malformed JSON body", [
+                'shop_domain' => $shopDomain,
+            ]);
+
+            return $this->error('malformed payload', 422);
+        }
+
+        if (! $this->hasRequiredFields($topic, $payload)) {
+            Log::warning("Shopify GDPR webhook ({$topic}): payload missing required fields", [
+                'shop_domain' => $shopDomain,
+                'fields_present' => array_keys($payload),
+            ]);
+
+            return $this->error('malformed payload', 422);
+        }
+
         $hash = hash('sha256', $rawBody);
 
         // firstOrCreate on payload_hash gives us Shopify-retry idempotency:
@@ -86,5 +107,16 @@ class ShopifyGdprWebhookController extends ApiController
         }
 
         return $this->success(['received' => true], 202);
+    }
+
+    private function hasRequiredFields(string $topic, array $payload): bool
+    {
+        if ($topic === GdprRequest::TOPIC_SHOP_REDACT) {
+            // shop_domain from the header is sufficient; shop_id is optional
+            return true;
+        }
+
+        // Both customer topics require email so the job can locate the customer
+        return ! empty($payload['customer']['email'] ?? null);
     }
 }

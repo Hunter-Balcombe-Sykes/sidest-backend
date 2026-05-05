@@ -137,6 +137,59 @@ it('persists payload_hash as sha256 of the raw body', function () {
     expect($row->payload_hash)->toBe(hash('sha256', $body));
 });
 
+it('returns 422 and stores nothing when the body is not valid JSON', function () {
+    $rawBody = '!!!not-valid-json!!!';
+    $response = $this->call(
+        'POST',
+        '/api/webhooks/shopify/gdpr/shop-redact',
+        [], [], [],
+        [
+            'HTTP_X-Shopify-Hmac-SHA256' => signShopifyBody($rawBody, 'test_shared_secret'),
+            'HTTP_X-Shopify-Shop-Domain' => 'test-brand.myshopify.com',
+            'CONTENT_TYPE' => 'application/json',
+        ],
+        $rawBody,
+    );
+
+    $response->assertStatus(422);
+    expect(GdprRequest::count())->toBe(0);
+    Bus::assertNotDispatched(RedactShopJob::class);
+});
+
+it('returns 422 and stores nothing when customers/redact payload is missing customer.email', function () {
+    $payload = ['shop_domain' => 'test-brand.myshopify.com', 'customer' => ['id' => 42]];
+    $body = json_encode($payload);
+
+    $this->postJson(
+        '/api/webhooks/shopify/gdpr/customers-redact',
+        $payload,
+        [
+            'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test_shared_secret'),
+            'X-Shopify-Shop-Domain' => 'test-brand.myshopify.com',
+        ]
+    )->assertStatus(422);
+
+    expect(GdprRequest::count())->toBe(0);
+    Bus::assertNotDispatched(RedactCustomerJob::class);
+});
+
+it('returns 422 and stores nothing when customers/data_request payload is missing customer.email', function () {
+    $payload = ['shop_domain' => 'test-brand.myshopify.com'];
+    $body = json_encode($payload);
+
+    $this->postJson(
+        '/api/webhooks/shopify/gdpr/customers-data-request',
+        $payload,
+        [
+            'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test_shared_secret'),
+            'X-Shopify-Shop-Domain' => 'test-brand.myshopify.com',
+        ]
+    )->assertStatus(422);
+
+    expect(GdprRequest::count())->toBe(0);
+    Bus::assertNotDispatched(ExportCustomerDataJob::class);
+});
+
 it('accepts the request even when shop_domain is unknown (deferred to the job)', function () {
     $payload = ['shop_domain' => 'ghost.myshopify.com'];
     $body = json_encode($payload);
