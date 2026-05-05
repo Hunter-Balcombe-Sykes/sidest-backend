@@ -4,6 +4,7 @@ use App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob;
 use App\Jobs\Stripe\ExecuteCommissionPayoutJob;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
+use App\Services\Notifications\NotificationPublisher;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -208,6 +209,72 @@ it('marks brand_payment_method_missing when brand has no card on file', function
     $fresh = $payout->fresh();
     expect($fresh->status)->toBe('pending_funds');
     expect($fresh->failure_code)->toBe('brand_payment_method_missing');
+});
+
+it('marks wallet_currency_mismatch and notifies brand when wallet currency differs from payout currency', function () {
+    // Brand has EUR wallet balance but payout is in AUD — must not charge card.
+    payoutSvc_seedBrand('brand-1', [
+        'stripe_manual_balance_cents' => 15000,
+        'stripe_manual_balance_currency' => 'EUR',
+    ]);
+    payoutSvc_seedAffiliate('aff-1');
+    $payout = payoutSvc_seedPayout('p1', ['currency_code' => 'AUD', 'gross_commission_cents' => 10000]);
+
+    $piMock = Mockery::mock();
+    $piMock->shouldNotReceive('create');
+
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldReceive('publish')
+        ->once()
+        ->with(
+            'brand-1',                         // professionalId
+            'Warning',                         // frontendType
+            'commissions',                     // category
+            Mockery::any(),                    // title
+            Mockery::any(),                    // body
+            'wallet_currency_mismatch.p1',     // dedupeKey
+            Mockery::any(),                    // ctaUrl
+        );
+
+    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock]), $publisher);
+    $result = $service->processPayoutBatch($payout);
+
+    expect($result)->toBeNull();
+    $fresh = $payout->fresh();
+    expect($fresh->status)->toBe('pending_funds');
+    expect($fresh->failure_code)->toBe('wallet_currency_mismatch');
+    // Wallet must remain untouched — no debit occurred.
+    $brandRow = DB::connection('pgsql')->table('core.professionals')->where('id', 'brand-1')->first();
+    expect($brandRow->stripe_manual_balance_cents)->toBe(15000);
+});
+
+it('does NOT flag currency mismatch when wallet balance is zero regardless of currency', function () {
+    // Zero balance with wrong currency code should proceed to card charge, not halt.
+    payoutSvc_seedBrand('brand-1', [
+        'stripe_manual_balance_cents' => 0,
+        'stripe_manual_balance_currency' => 'EUR',
+    ]);
+    payoutSvc_seedAffiliate('aff-1');
+    $payout = payoutSvc_seedPayout('p1', ['currency_code' => 'AUD', 'gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
+
+    $piMock = Mockery::mock();
+    $piMock->shouldReceive('create')->once()->andReturn((object) [
+        'id' => 'pi_test',
+        'status' => 'succeeded',
+        'latest_charge' => 'ch_test',
+    ]);
+
+    $transferMock = Mockery::mock();
+    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test']);
+
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldNotReceive('publish');
+
+    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]), $publisher);
+    $result = $service->processPayoutBatch($payout);
+
+    expect($result)->toBeTrue();
+    expect($payout->fresh()->status)->toBe('completed');
 });
 
 // ============================================================

@@ -8,6 +8,7 @@ use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
+use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiConnectionException;
@@ -20,6 +21,8 @@ class CommissionPayoutService
 {
     private StripeClient $stripe;
 
+    private NotificationPublisher $publisher;
+
     private float $platformFeePercent;
 
     private int $systemHoldDays;
@@ -28,9 +31,10 @@ class CommissionPayoutService
 
     private int $gracePeriodDays;
 
-    public function __construct(?StripeClient $stripe = null)
+    public function __construct(?StripeClient $stripe = null, ?NotificationPublisher $publisher = null)
     {
         $this->stripe = $stripe ?? new StripeClient(config('services.stripe.secret_key'));
+        $this->publisher = $publisher ?? app(NotificationPublisher::class);
         $this->platformFeePercent = config('sidest.store.platform_fee_percent', 3);
         $this->systemHoldDays = max(0, (int) config('sidest.store.payout_hold_days', 7));
         $this->minHoldDays = (int) config('sidest.store.min_payout_hold_days', 7);
@@ -321,8 +325,16 @@ class CommissionPayoutService
             // READ COMMITTED (PG default) — the payout status update and wallet debit
             // are atomic here; lockForUpdate() inside debitBrandManualBalancePartial
             // guards against concurrent debits on the wallet row itself.
-            DB::transaction(function () use ($payout, $brand, $amountToCollect, $currencyUpper, &$walletDebitCents, &$chargeAmountCents): void {
-                $walletDebitCents = $this->debitBrandManualBalancePartial($brand->id, $amountToCollect, $currencyUpper);
+            $hasCurrencyMismatch = false;
+            DB::transaction(function () use ($payout, $brand, $amountToCollect, $currencyUpper, &$walletDebitCents, &$chargeAmountCents, &$hasCurrencyMismatch): void {
+                $walletDebitCents = $this->debitBrandManualBalancePartial($brand->id, $amountToCollect, $currencyUpper, $hasCurrencyMismatch);
+
+                // Wallet has balance but in the wrong currency — abort without charging card.
+                // markPendingFunding and notification happen outside the transaction below.
+                if ($hasCurrencyMismatch) {
+                    return;
+                }
+
                 $chargeAmountCents = $amountToCollect - $walletDebitCents;
 
                 $fundingSource = 'card';
@@ -341,6 +353,31 @@ class CommissionPayoutService
                     'failure_reason' => null,
                 ])->save();
             });
+
+            if ($hasCurrencyMismatch) {
+                $walletCurrency = strtoupper((string) ($brand->stripe_manual_balance_currency ?? 'unknown'));
+                $this->markPendingFunding(
+                    $payout,
+                    'wallet_currency_mismatch',
+                    "Wallet balance is in {$walletCurrency} but payout requires {$currencyUpper}. Please contact support to resolve.",
+                );
+
+                $this->publisher->publish(
+                    professionalId: $payout->brand_professional_id,
+                    frontendType: 'Warning',
+                    category: 'commissions',
+                    title: 'Commission payout on hold',
+                    body: sprintf(
+                        'A commission payout of %s could not be processed because your wallet balance is in %s. Please contact support to resolve the currency mismatch.',
+                        $this->formatMoney($payout->gross_commission_cents, $payout->currency_code),
+                        $walletCurrency,
+                    ),
+                    dedupeKey: "wallet_currency_mismatch.{$payout->id}",
+                    ctaUrl: '/account/settings?section=wallet',
+                );
+
+                return null;
+            }
         }
 
         // Step 2: Charge brand's card for the shortfall (if any)
@@ -526,8 +563,12 @@ class CommissionPayoutService
     /**
      * Debit the brand's wallet balance, up to the requested amount (partial OK).
      * Returns the actual amount debited (0 if no balance available).
+     *
+     * Sets $hasCurrencyMismatch=true when the wallet has a positive balance but in a
+     * different currency than $currencyCode — caller must treat this as a hard stop,
+     * not a zero-balance case, to avoid silently charging the full amount to the card.
      */
-    private function debitBrandManualBalancePartial(string $brandId, int $requestedCents, string $currencyCode): int
+    private function debitBrandManualBalancePartial(string $brandId, int $requestedCents, string $currencyCode, bool &$hasCurrencyMismatch = false): int
     {
         if ($requestedCents <= 0) {
             return 0;
@@ -535,7 +576,7 @@ class CommissionPayoutService
 
         // READ COMMITTED (PG default) — lockForUpdate() on the professional row
         // serialises concurrent debits; no higher isolation level is required.
-        return DB::transaction(function () use ($brandId, $requestedCents, $currencyCode) {
+        return DB::transaction(function () use ($brandId, $requestedCents, $currencyCode, &$hasCurrencyMismatch) {
             $brand = Professional::query()
                 ->whereKey($brandId)
                 ->lockForUpdate()
@@ -548,7 +589,17 @@ class CommissionPayoutService
             $balance = max(0, (int) ($brand->stripe_manual_balance_cents ?? 0));
             $walletCurrency = strtoupper((string) ($brand->stripe_manual_balance_currency ?: $currencyCode));
 
-            if ($walletCurrency !== strtoupper($currencyCode) || $balance <= 0) {
+            if ($walletCurrency !== strtoupper($currencyCode)) {
+                // Only flag as a mismatch when there's actual balance in the wrong currency.
+                // An empty wallet with any currency is just "no funds" — not a mismatch.
+                if ($balance > 0) {
+                    $hasCurrencyMismatch = true;
+                }
+
+                return 0;
+            }
+
+            if ($balance <= 0) {
                 return 0;
             }
 
@@ -672,6 +723,19 @@ class CommissionPayoutService
         ])->save();
 
         return $this->processPayoutBatch($payout) === true;
+    }
+
+    private function formatMoney(int $cents, string $currencyCode): string
+    {
+        $prefix = match (strtoupper($currencyCode)) {
+            'USD' => '$',
+            'GBP' => '£',
+            'EUR' => '€',
+            'AUD' => 'A$',
+            default => strtoupper($currencyCode).' ',
+        };
+
+        return $prefix.number_format($cents / 100, 2, '.', ',');
     }
 
     /**
