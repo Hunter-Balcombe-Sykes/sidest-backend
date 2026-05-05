@@ -139,7 +139,6 @@ class CommissionVoidService
             ->where('void_at', '<', now())
             ->whereIn('affiliate_professional_id', $inactiveAffiliateIds)
             ->with('brandProfessional:id,display_name')
-            ->orderBy('void_at')
             ->chunkById(200, function ($payouts) use (&$stats): void {
                 foreach ($payouts as $payout) {
                     try {
@@ -147,7 +146,7 @@ class CommissionVoidService
                     } catch (\Throwable $e) {
                         Log::error('Failed to cancel expired payout', [
                             'payout_id' => $payout->id,
-                            'error' => $e->getMessage(),
+                            'exception' => $e,
                         ]);
                     }
                 }
@@ -171,7 +170,7 @@ class CommissionVoidService
                 ->whereIn('status', ['pending', 'pending_funds'])
                 ->update([
                     'status' => 'cancelled',
-                    'failure_code' => 'grace_expired',
+                    'failure_code' => 'grace_period_expired',
                     'failure_reason' => 'Affiliate did not connect Stripe Connect within the grace period.',
                     'updated_at' => now(),
                 ]);

@@ -181,7 +181,7 @@ it('voids expired payouts when affiliate has not connected Stripe', function () 
 
     $payout = CommissionPayout::find('p1');
     expect($payout->status)->toBe('cancelled');
-    expect($payout->failure_code)->toBe('grace_expired');
+    expect($payout->failure_code)->toBe('grace_period_expired');
 
     expect(CommissionLedgerEntry::find('l1')->status)->toBe('voided');
     expect(CommissionLedgerEntry::find('l1')->void_reason)->toBe('payout_grace_expired');
@@ -263,6 +263,79 @@ it('publishes a voided notification to the affiliate when their payout expires',
 
     $service = new CommissionVoidService($publisher);
     expiredPayout_makeJob()->handle($service);
+});
+
+// ============================================================
+// #VEP-6 — Optimistic-lock race coverage
+// ============================================================
+
+it('does not cancel payout or void ledger entries when status changed concurrently', function () {
+    // Simulate: another process (ExecuteCommissionPayoutJob) advanced the payout to
+    // 'collecting' between the chunk SELECT and the optimistic-lock UPDATE inside
+    // cancelExpiredPayout(). The whereIn('status', ['pending', 'pending_funds']) guard
+    // must fire 0 rows updated — leaving payout and ledger untouched.
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString(), status: 'pending');
+    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved');
+
+    // Race: advance status before the cron processes it
+    DB::connection('pgsql')
+        ->table('commerce.commission_payouts')
+        ->where('id', 'p1')
+        ->update(['status' => 'collecting']);
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+
+    expect(CommissionPayout::find('p1')->status)->toBe('collecting');
+    expect(CommissionLedgerEntry::find('l1')->status)->toBe('approved');
+});
+
+// ============================================================
+// #VEP-7 — Multi-payout / chunk-boundary coverage
+// ============================================================
+
+it('processes all expired payouts across two chunks', function () {
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+
+    // Seed 201 expired payouts — one more than the chunkById(200) boundary —
+    // so the loop must complete at least two chunk passes.
+    $past = now()->subDay()->toDateTimeString();
+    $now = now()->toDateTimeString();
+    $rows = [];
+    for ($i = 1; $i <= 201; $i++) {
+        $rows[] = [
+            'id' => "chunk-p{$i}",
+            'brand_professional_id' => 'brand-1',
+            'affiliate_professional_id' => 'aff-1',
+            'status' => 'pending',
+            'gross_commission_cents' => 1000,
+            'platform_fee_cents' => 30,
+            'net_payout_cents' => 970,
+            'currency_code' => 'AUD',
+            'ledger_entry_count' => 0,
+            'eligible_after' => $now,
+            'wallet_debit_cents' => 0,
+            'charge_cents' => 0,
+            'retry_count' => 0,
+            'needs_manual_refund' => 0,
+            'void_at' => $past,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+    }
+    DB::connection('pgsql')->table('commerce.commission_payouts')->insert($rows);
+
+    $stats = expiredPayout_makeService()->processExpiredPayouts();
+
+    expect($stats['cancelled_count'])->toBe(201);
+
+    $remaining = DB::connection('pgsql')
+        ->table('commerce.commission_payouts')
+        ->where('status', 'pending')
+        ->count();
+    expect($remaining)->toBe(0);
 });
 
 it('publishes notification only once when the same expired payout is processed on two consecutive runs', function () {
