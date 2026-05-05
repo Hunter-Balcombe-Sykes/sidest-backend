@@ -557,7 +557,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** Editing a service makes the user wait for two external services to respond before the page comes back. Push those calls to the background queue.
     - **Source:** Commit-batch review item #7 (commit `1de24dc`). Related to AUDIT_REPORT.md line 174.
 
-- [ ] **#CR-007** · P1 — BrandFundingGate checks on-file column nullability, not Stripe live state — detached card still passes the gate
+- [x] **#CR-007** · P1 — BrandFundingGate checks on-file column nullability, not Stripe live state — detached card still passes the gate
     - **Where:** app/Http/Middleware/BrandFundingGate.php:47
     - **Affects:** Brand invite write endpoints. A brand who detached their card via Stripe dashboard still passes the gate until a sync job clears the column locally.
     - **Effort:** M (~2–4h)
