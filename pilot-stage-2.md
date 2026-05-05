@@ -77,7 +77,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
         'image' => ['sometimes', 'nullable', 'file', 'image', 'mimes:jpeg,png,webp', "max:{$imageMaxKb}"],
         ```
 
-- [ ] **#6-03** · P1 — Click-recording endpoint has no bot/fraud detection beyond IP throttle
+- [x] **#6-03** · P1 — Click-recording endpoint has no bot/fraud detection beyond IP throttle
     - **Where:** app/Http/Controllers/Api/PublicSite/AnalyticsController.php:84-179
     - **Affects:** All analytics dashboards (LinkClick aggregation), top_links/top_sections, click-rate calculations across competing brands.
     - **Effort:** M (~4–8h)
