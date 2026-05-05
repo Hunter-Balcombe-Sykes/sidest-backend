@@ -264,7 +264,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Effort:** S (~2h)
     - **What to do:** Refactor to array form `new Process([...])`. Pairs with the #7-04 hardening.
 
-- [ ] **#3-04** · P3 — No JSON-schema validation of webhook payload before storage
+- [x] **#3-04** · P3 — No JSON-schema validation of webhook payload before storage
     - **Where:** StripeWebhookController + StripeConnectWebhookController payload storage
     - **Effort:** S (~2h)
     - **What to do:** Optional schema check (e.g., Opis JSON Schema) before persisting payload row.
