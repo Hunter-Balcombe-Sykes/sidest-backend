@@ -3,7 +3,6 @@
 uses(Tests\TestCase::class)->in(__FILE__);
 
 use App\Services\Professional\DataExportZipWriter;
-use ZipArchive;
 
 afterEach(function () {
     // Clean up any test temp files

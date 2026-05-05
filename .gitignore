@@ -37,3 +37,8 @@ Thumbs.db
 .audit-work/.run.lock
 # .audit-work/config.yml is intentionally NOT ignored (committed)
 # .audit-work/completed/ is intentionally NOT ignored (durable audit trail)
+
+# AI tooling config — not deployable
+.junie/
+.mcp.json
+boost.json
