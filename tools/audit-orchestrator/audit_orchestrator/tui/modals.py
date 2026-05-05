@@ -344,7 +344,17 @@ class QueueBrowser(ModalScreen[None]):
         for r in parse_results:
             src_short = _short_source(r.source_filename)
             item_by_id = {i.id: i for i in r.items}
-            done_map = {i.id: i.status == ItemStatus.DONE for i in r.items}
+            # Merge markdown checkbox AND state.json status — either source
+            # being "done" is enough. Without the merge, items that the runner
+            # completed (state.json=done) but whose checkbox wasn't ticked yet
+            # appeared as actionable in the browser but were refused on toggle.
+            done_map = {
+                i.id: (
+                    i.status == ItemStatus.DONE
+                    or state.items.get(i.id, {}).get("status") == "done"
+                )
+                for i in r.items
+            }
 
             for bundle in r.bundles:
                 members = [item_by_id[m] for m in bundle.members if m in item_by_id]

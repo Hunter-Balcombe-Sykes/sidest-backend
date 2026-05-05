@@ -102,12 +102,18 @@ class AuditApp(App):
                 detail.update(f"No audit files found · queue: {len(state.queue)}")
             else:
                 lines = []
+                fully_done_count = 0
                 for p in sources:
                     r = parse_audit_file(p)
                     done = sum(1 for i in r.items if i.status == ItemStatus.DONE)
-                    total = len(r.items) or 1
-                    pct = int(100 * done / total)
+                    total = len(r.items)
+                    if total > 0 and done == total:
+                        fully_done_count += 1
+                        continue
+                    pct = int(100 * done / (total or 1))
                     lines.append(f"{_short_source(r.source_filename):>5}: {done:>3}/{total:<3} ({pct}%)")
+                if fully_done_count:
+                    lines.append(f"  ✅ {fully_done_count} file(s) complete")
                 lines.append(f"queue: {len(state.queue)}")
                 detail.update("\n".join(lines))
         except Exception as e:
