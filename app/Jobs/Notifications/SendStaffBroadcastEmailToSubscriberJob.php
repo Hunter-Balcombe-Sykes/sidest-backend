@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 // V2: Sends individual staff broadcast email, respecting unsubscribe preferences and subscriber status.
@@ -46,5 +47,17 @@ class SendStaffBroadcastEmailToSubscriberJob implements ShouldQueue
         Mail::to($sub->email)->send(
             new StaffBroadcastMail($notification, $unsubscribeUrl)
         );
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        // Forward to Nightwatch so the failure is observable by notification_id.
+        report($e);
+
+        Log::error('Staff broadcast email permanently failed', [
+            'notification_id' => $this->notificationId,
+            'subscription_id' => $this->subscriptionId,
+            'message' => $e->getMessage(),
+        ]);
     }
 }
