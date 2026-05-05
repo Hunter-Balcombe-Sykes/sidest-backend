@@ -678,7 +678,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** PaymentIntent and Transfer idempotency keys both include `_r{retry_count}`. After async-success-then-disconnect, the next retry uses a fresh key and creates a SECOND transfer to the same affiliate.
     - **Source:** v5 audit (discovery_lens: domain-subagent-3; in_scope_v4: yes).
 
-- [ ] **#V5-008** · P1 — Wallet currency mismatch silently fails — brand charged full amount on card
+- [x] **#V5-008** · P1 — Wallet currency mismatch silently fails — brand charged full amount on card
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:316, 508-530
     - **Affects:** Brand wallet integrity — silent overcharge on currency mismatch.
     - **Effort:** M (~2-3h)
