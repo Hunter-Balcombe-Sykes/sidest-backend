@@ -1120,7 +1120,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Cross-references #CR-001/#CR-011 — even the write-time check is broken; pre-existing data may already be over the cap.
     - **Source:** v5 audit (discovery_lens: domain-subagent-8; in_scope_v4: no).
 
-- [ ] **#V5-051** · P2 — CommissionLedgerEntry FK CASCADE vs payout SET NULL — asymmetric audit retention
+- [x] **#V5-051** · P2 — CommissionLedgerEntry FK CASCADE vs payout SET NULL — asymmetric audit retention
     - **Where:** supabase/migrations/20260403000000_v2_baseline.sql vs 20260419000002_nullable_commission_fks.sql
     - **Effort:** M (~2h)
     - **What to do:**
