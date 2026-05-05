@@ -154,6 +154,8 @@ class CommissionPayoutService
         string $currency,
         \DateTimeInterface $cutoff,
     ): ?CommissionPayout {
+        // READ COMMITTED (PG default) — lockForUpdate() on both reads is sufficient
+        // to prevent a concurrent batch from claiming the same ledger entries.
         return DB::transaction(function () use ($brandId, $affiliateId, $currency, $cutoff) {
             $entries = CommissionLedgerEntry::query()
                 ->whereNull('payout_id')
@@ -313,6 +315,9 @@ class CommissionPayoutService
             $walletDebitCents = (int) ($payout->wallet_debit_cents ?? 0);
             $chargeAmountCents = (int) ($payout->charge_cents ?? $amountToCollect);
         } else {
+            // READ COMMITTED (PG default) — the payout status update and wallet debit
+            // are atomic here; lockForUpdate() inside debitBrandManualBalancePartial
+            // guards against concurrent debits on the wallet row itself.
             DB::transaction(function () use ($payout, $brand, $amountToCollect, $currencyUpper, &$walletDebitCents, &$chargeAmountCents): void {
                 $walletDebitCents = $this->debitBrandManualBalancePartial($brand->id, $amountToCollect, $currencyUpper);
                 $chargeAmountCents = $amountToCollect - $walletDebitCents;
@@ -514,6 +519,8 @@ class CommissionPayoutService
             return 0;
         }
 
+        // READ COMMITTED (PG default) — lockForUpdate() on the professional row
+        // serialises concurrent debits; no higher isolation level is required.
         return DB::transaction(function () use ($brandId, $requestedCents, $currencyCode) {
             $brand = Professional::query()
                 ->whereKey($brandId)
@@ -545,6 +552,7 @@ class CommissionPayoutService
             return;
         }
 
+        // READ COMMITTED (PG default) — lockForUpdate() serialises concurrent credits.
         DB::transaction(function () use ($brandId, $amountCents, $currencyCode) {
             $brand = Professional::query()
                 ->whereKey($brandId)
