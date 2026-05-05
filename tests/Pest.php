@@ -964,6 +964,25 @@ function createDocumentFor(Professional $pro, array $overrides = []): \App\Model
 }
 
 /**
+ * core.sidest_staff — internal staff accounts, linked to Supabase auth users.
+ */
+function setupSidestStaffTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.sidest_staff (
+        id TEXT PRIMARY KEY,
+        auth_user_id TEXT NULL,
+        role TEXT NULL,
+        primary_email TEXT NULL,
+        name TEXT NULL,
+        phone TEXT NULL,
+        deleted_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
  * analytics.link_clicks — minimal columns for click dedup and analytics tests.
  */
 function setupLinkClicksTable(): void

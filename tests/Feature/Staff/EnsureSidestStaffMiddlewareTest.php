@@ -74,3 +74,45 @@ it('accepts multiple allowed roles (any match passes)', function () {
 
     expect($response->getStatusCode())->toBe(200);
 });
+
+// The next two tests exercise the DB lookup path (no pre-set sidest_staff attribute).
+// They verify the middleware is fail-closed: a valid Supabase UID alone is not enough —
+// a matching SidestStaff DB record must also exist.
+
+it('returns 403 when supabase uid has no matching SidestStaff record in DB', function () {
+    setupSidestStaffTable();
+
+    $middleware = new EnsureSidestStaff;
+    $request = Request::create('/', 'GET');
+    $request->attributes->set('supabase_uid', 'uid-with-no-staff-record');
+
+    $response = $middleware->handle($request, fn () => response()->json(['ok' => true]));
+
+    expect($response->getStatusCode())->toBe(403);
+    $data = json_decode($response->getContent(), true);
+    expect($data['message'])->toBe('Staff access required');
+});
+
+it('passes through when supabase uid maps to a SidestStaff record in DB', function () {
+    setupSidestStaffTable();
+
+    $uid = 'uid-with-staff-record';
+    $now = now()->toDateTimeString();
+
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('core.sidest_staff')->insert([
+        'id' => (string) \Illuminate\Support\Str::uuid(),
+        'auth_user_id' => $uid,
+        'role' => SidestStaff::ROLE_SUPPORT,
+        'primary_email' => 'staff@example.test',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $middleware = new EnsureSidestStaff;
+    $request = Request::create('/', 'GET');
+    $request->attributes->set('supabase_uid', $uid);
+
+    $response = $middleware->handle($request, fn () => response()->json(['ok' => true]));
+
+    expect($response->getStatusCode())->toBe(200);
+});
