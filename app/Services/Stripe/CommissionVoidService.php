@@ -123,12 +123,21 @@ class CommissionVoidService
     {
         $stats = ['cancelled_count' => 0, 'cancelled_cents' => 0, 'voided_entries' => 0];
 
+        // Pre-fetch inactive affiliate IDs so the main query uses set membership
+        // (hash join) instead of a correlated per-row EXISTS probe against professionals.
+        $inactiveAffiliateIds = Professional::query()
+            ->where('stripe_connect_status', '!=', 'active')
+            ->pluck('id')
+            ->all();
+
+        if ($inactiveAffiliateIds === []) {
+            return $stats;
+        }
+
         CommissionPayout::query()
             ->whereIn('status', ['pending', 'pending_funds'])
             ->where('void_at', '<', now())
-            ->whereHas('affiliateProfessional', function ($q) {
-                $q->where('stripe_connect_status', '!=', 'active');
-            })
+            ->whereIn('affiliate_professional_id', $inactiveAffiliateIds)
             ->with('brandProfessional:id,display_name')
             ->orderBy('void_at')
             ->chunkById(200, function ($payouts) use (&$stats): void {
@@ -367,13 +376,22 @@ class CommissionVoidService
             ],
         ];
 
+        // Pre-fetch once for both warning windows (day 10 and day 2) to avoid
+        // a correlated subquery on each chunk pass.
+        $inactiveAffiliateIds = Professional::query()
+            ->where('stripe_connect_status', '!=', 'active')
+            ->pluck('id')
+            ->all();
+
+        if ($inactiveAffiliateIds === []) {
+            return $sent;
+        }
+
         foreach ($warningWindows as $key => $window) {
             CommissionPayout::query()
                 ->whereIn('status', ['pending', 'pending_funds'])
                 ->whereBetween('void_at', $window['range'])
-                ->whereHas('affiliateProfessional', function ($q) {
-                    $q->where('stripe_connect_status', '!=', 'active');
-                })
+                ->whereIn('affiliate_professional_id', $inactiveAffiliateIds)
                 ->chunkById(200, function ($payouts) use (&$sent, $key, $window): void {
                     foreach ($payouts as $payout) {
                         $this->publisher->publish(
