@@ -19,6 +19,13 @@ trait NormalizesShopDomain
         $value = preg_replace('/:\d+$/', '', $value) ?? $value;
         $value = trim($value, " \t\n\r\0\x0B./");
 
+        // Trimming '.' and '/' could silently reshape a malformed input into something
+        // that bypasses callers that only check for empty string. Enforce the Shopify
+        // domain contract here so every caller is protected regardless of validation order.
+        if (! preg_match('/^[a-zA-Z0-9\-]+\.myshopify\.com$/', $value)) {
+            return '';
+        }
+
         return $value;
     }
 }
