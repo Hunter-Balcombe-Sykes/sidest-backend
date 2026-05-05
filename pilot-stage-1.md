@@ -475,7 +475,7 @@ These are best in their own session because bundling would force unrelated archi
         $brandSite = Site::query()->where('professional_id', $brandId)->first();
         ```
 
-- [ ] **#5-01** · P1 — Square/Fresha token refresh has a race window — concurrent refreshes clobber each other
+- [x] **#5-01** · P1 — Square/Fresha token refresh has a race window — concurrent refreshes clobber each other
     - **Where:** app/Services/Square/SquareTokenService.php (refreshAccessToken); app/Services/Fresha/FreshaTokenService.php (refreshAccessToken)
     - **Affects:** All Square and Fresha sync jobs near token expiry.
     - **Effort:** M (~3–4h)
