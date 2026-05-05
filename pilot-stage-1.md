@@ -1326,7 +1326,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~1–2h)
     - **What to do:** Switch to `$guarded = ['*']` for defense in depth. **Verified no exploitable callsite** (server-side computed values only) — DOWNGRADED from P0 in audit. Pure hardening.
 
-- [ ] **#8-08** · P3 — Inconsistent 403 vs 404 for "not yours" responses
+- [x] **#8-08** · P3 — Inconsistent 403 vs 404 for "not yours" responses
     - **Where:** various controllers
     - **Effort:** S (~2h)
     - **What to do:** Document the standard (e.g., always 404 to avoid resource enumeration), audit and align.
