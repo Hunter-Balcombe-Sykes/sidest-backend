@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
+use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Support\Facades\DB;
@@ -72,8 +73,8 @@ it('stripe payouts list never returns another professionals payouts', function (
 
     $this->mock(StripeConnectService::class, fn ($mock) => $mock);
 
-    $req = tenantRequestAs($b);
-    $req->query->set('role', 'affiliate');
+    $req = PayoutsRequest::create('/api/stripe/payouts', 'GET', ['role' => 'affiliate']);
+    $req->attributes->set('professional', $b);
 
     $response = app(StripeConnectController::class)->payouts($req);
     $payload = $response->getData(true);

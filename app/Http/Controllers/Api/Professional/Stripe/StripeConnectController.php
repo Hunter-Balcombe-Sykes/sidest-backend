@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Professional\Stripe;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
@@ -318,10 +319,10 @@ class StripeConnectController extends Controller
      *      surface area to validate.
      * Option (a) is probably the right first move; (b) can grow from it.
      */
-    public function payouts(Request $request): JsonResponse
+    public function payouts(PayoutsRequest $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
-        $role = $request->query('role', 'affiliate'); // 'brand' or 'affiliate'
+        $role = $request->input('role');
 
         $query = CommissionPayout::query()
             ->with(['brandProfessional:id,display_name,handle', 'affiliateProfessional:id,display_name,handle']);

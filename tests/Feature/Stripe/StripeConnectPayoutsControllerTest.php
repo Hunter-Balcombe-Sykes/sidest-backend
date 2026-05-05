@@ -1,10 +1,10 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
+use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
 use App\Models\Core\Professional\Professional;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 // Happy-path coverage for StripeConnectController::payouts() — the
@@ -83,9 +83,10 @@ function makePayoutsController(CommissionPayoutService $payoutService): StripeCo
     return new StripeConnectController($connectStub, $payoutService);
 }
 
-function makePayoutsRequest(Professional $pro, array $query = []): Request
+function makePayoutsRequest(Professional $pro, array $query = []): PayoutsRequest
 {
-    $request = Request::create('/api/stripe/payouts', 'GET', $query);
+    $query = array_merge(['role' => 'affiliate'], $query);
+    $request = PayoutsRequest::create('/api/stripe/payouts', 'GET', $query);
     $request->attributes->set('professional', $pro);
 
     return $request;
