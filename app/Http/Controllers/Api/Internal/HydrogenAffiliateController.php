@@ -101,7 +101,8 @@ class HydrogenAffiliateController extends ApiController
             'booking' => $booking,
             // Shop has no content envelope (products come from Shopify), but
             // the block_id is needed so Hydrogen can fire click tracking when
-            // the visitor opens the shop card.
+            // the visitor opens the shop card. block_id is absent (not null)
+            // when the block hasn't been created — Hydrogen guards on presence.
             'shop' => $this->sectionEnvelope($sections, 'shop', fn () => null),
         ])->header('Cache-Control', 'no-store');
     }
@@ -167,18 +168,27 @@ class HydrogenAffiliateController extends ApiController
 
     /**
      * @param  \Illuminate\Support\Collection<string, Block>  $sections
-     * @return array{state: string, data: mixed}
+     * @return array{state: string, block_id?: string, data: mixed}
      */
     private function sectionEnvelope($sections, string $blockType, callable $buildData): array
     {
         $section = $sections->get($blockType);
         $isLive = $section !== null && (bool) $section->is_active;
 
-        return [
+        $envelope = [
             'state' => $isLive ? 'live' : 'draft',
-            'block_id' => $section?->id,
             'data' => $isLive ? $buildData($section) : null,
         ];
+
+        // Omit block_id when the section row doesn't exist yet. Callers that
+        // fire analytics events (e.g. shop click-tracking) can guard on key
+        // presence rather than `block_id !== null`, which Hydrogen's pipeline
+        // silently drops.
+        if ($section !== null) {
+            $envelope['block_id'] = (string) $section->id;
+        }
+
+        return $envelope;
     }
 
     // ── Gallery ──────────────────────────────────────────────────────────────
