@@ -173,7 +173,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Drift between local and Stripe state on payment failure.
     - **Plain English:** When a brand upgrades plans and the upgrade payment fails, we still grant the higher-tier features locally.
 
-- [ ] **#4-05** · P2 — shop/update webhook overwrites brand-customized fields
+- [x] **#4-05** · P2 — shop/update webhook overwrites brand-customized fields
     - **Where:** app/Jobs/Shopify/ProcessShopifyShopUpdateJob.php (calls ShopProfileAutoFillService)
     - **Affects:** Brand profile data integrity for any brand that customizes locally.
     - **Effort:** M (~4h)
