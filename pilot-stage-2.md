@@ -269,7 +269,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Effort:** S (~2h)
     - **What to do:** Optional schema check (e.g., Opis JSON Schema) before persisting payload row.
 
-- [ ] **#2-07** · P3 — Cache keys don't include site_id (one-site-per-pro assumption)
+- [x] **#2-07** · P3 — Cache keys don't include site_id (one-site-per-pro assumption)
     - **Where:** app/Services/Cache/CacheKeyGenerator.php
     - **Effort:** S (~1h)
     - **What to do:** Document the assumption inline; or namespace cache keys by site if multi-site support arrives.
