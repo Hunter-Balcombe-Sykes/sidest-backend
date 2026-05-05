@@ -163,7 +163,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Exponential backoff specifically for 429s. Job-level backoff array exists, but `RateLimitException` re-thrown immediately on each attempt with no spacing — at 5× brands this could exacerbate Stripe degradation.
     - **Plain English:** When Stripe says "slow down," we keep hammering. Wait between retries.
 
-- [ ] **#3-08** · P2 — Plan upgrade local state may diverge from Stripe past_due
+- [x] **#3-08** · P2 — Plan upgrade local state may diverge from Stripe past_due
     - **Where:** app/Services/Stripe/StripeBillingService.php:106-126; app/Actions/Subscription/ChangeProfessionalPlanAction.php
     - **Affects:** Brand entitlement correctness on plan upgrades.
     - **Effort:** M (~3h)
