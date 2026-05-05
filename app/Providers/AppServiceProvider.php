@@ -140,6 +140,18 @@ class AppServiceProvider extends ServiceProvider
                 ->by($request->ip());
         });
 
+        // Per-link click cap — secondary defense against sustained single-link spam
+        RateLimiter::for('analytics-click', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            $blockId = $request->input('block_id', 'unknown');
+
+            return Limit::perMinute(5)
+                ->by($request->ip().':click:'.$blockId);
+        });
+
         // Customer lead submissions (form submissions)
         RateLimiter::for('leads', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {

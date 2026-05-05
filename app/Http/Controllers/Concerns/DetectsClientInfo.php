@@ -31,6 +31,45 @@ trait DetectsClientInfo
     }
 
     /**
+     * Returns true if the User-Agent string matches a known bot, headless browser, or scripting tool.
+     * Empty/null UAs are treated as bots — no legitimate browser omits the header.
+     */
+    protected function isBotUserAgent(?string $ua): bool
+    {
+        if (! $ua || trim($ua) === '') {
+            return true;
+        }
+
+        $u = strtolower($ua);
+
+        $signals = [
+            // Generic bot signals
+            'bot', 'spider', 'crawler',
+            // SEO / index crawlers
+            'ahrefsbot', 'semrushbot', 'mj12bot', 'dotbot', 'rogerbot',
+            // Social media crawlers
+            'facebookexternalhit', 'twitterbot', 'linkedinbot', 'pinterestbot',
+            // Search engines (explicit in case generic 'bot' substring misses)
+            'yandexbot', 'baiduspider', 'slurp',
+            // Scripting / CLI tools
+            'python-requests', 'python-urllib',
+            'curl/', 'wget/',
+            'libwww-perl',
+            // Headless browsers and test automation
+            'headlesschrome', 'phantomjs', 'puppeteer',
+            'playwright', 'selenium',
+        ];
+
+        foreach ($signals as $signal) {
+            if (str_contains($u, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Detect devices type from user agent.
      */
     protected function detectDeviceType(?string $ua): ?string

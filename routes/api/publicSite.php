@@ -42,7 +42,7 @@ Route::group([
 
     // Click Analytics
     Route::post('/analytics/clicks', [AnalyticsController::class, 'click'])
-        ->middleware('throttle:analytics');
+        ->middleware(['throttle:analytics', 'throttle:analytics-click']);
 
     // Customer Leads
     Route::post('/customers', [PublicCustomerLeadController::class, 'store'])

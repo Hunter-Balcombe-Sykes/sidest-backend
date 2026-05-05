@@ -103,6 +103,11 @@ class AnalyticsController extends ApiController
             return $this->error('Site not found', 404);
         }
 
+        // Discard bot traffic silently — fake 200 avoids fingerprinting the filter
+        if ($this->isBotUserAgent($request->userAgent())) {
+            return $this->success(['message' => 'Click recorded'], 200);
+        }
+
         // Verify block exists and belongs to this site
         $block = Block::where('id', $data['block_id'])
             ->where('site_id', $site->id)
@@ -138,8 +143,12 @@ class AnalyticsController extends ApiController
             return $this->error('Block not found', 404);
         }
 
+        // Sanitize referrer: discard values that are not valid URLs (e.g., injected strings)
+        $rawReferrer = $data['referrer'] ?? $request->headers->get('referer');
+        $referrer = ($rawReferrer !== null && filter_var($rawReferrer, FILTER_VALIDATE_URL)) ? $rawReferrer : null;
+
         $click = LinkClick::runForBlockForeignKey(
-            function (string $blockColumn) use ($request, $data, $site, $block) {
+            function (string $blockColumn) use ($request, $data, $site, $block, $referrer) {
                 // Dedup: return existing click if same visitor/session hit this block within 3 seconds.
                 $hasIdentifier = ! empty($data['visitor_id']) || ! empty($data['session_id']);
                 if ($hasIdentifier) {
@@ -166,7 +175,7 @@ class AnalyticsController extends ApiController
                     'visitor_id' => $data['visitor_id'] ?? null,
                     'ip_hash' => $this->hashIp($request->ip()),
                     'user_agent' => $request->userAgent(),
-                    'referrer' => $data['referrer'] ?? $request->headers->get('referer'),
+                    'referrer' => $referrer,
                     'utm_source' => $data['utm_source'] ?? null,
                     'utm_medium' => $data['utm_medium'] ?? null,
                     'utm_campaign' => $data['utm_campaign'] ?? null,
