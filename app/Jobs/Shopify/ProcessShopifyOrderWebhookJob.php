@@ -16,7 +16,6 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 // V2: Processes a Shopify orders/paid webhook — identifies affiliate, calculates commission, creates ledger entries, and captures the customer as an affiliate contact.
@@ -238,9 +237,9 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             ];
         }
 
-        // Phase 2: pre-filter existing idempotency keys (one query), then bulk-insert in one transaction.
-        // Pre-filtering avoids a 23505 unique violation inside the transaction — PostgreSQL aborts the
-        // entire transaction on constraint violations, so we can't catch-and-continue inside DB::transaction().
+        // Phase 2: pre-filter existing idempotency keys (one query), then insert survivors row-by-row.
+        // Pre-filtering handles the common case (clean re-delivery). A per-row UniqueConstraintViolationException
+        // catch covers the concurrent-race window between the pre-filter query and each insert.
         $entriesCreated = 0;
         if (! empty($candidates)) {
             $candidateKeys = array_column($candidates, 'idempotency_key');
@@ -251,8 +250,8 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
 
             $newEntries = array_filter($candidates, fn ($c) => ! isset($existingKeys[$c['idempotency_key']]));
 
-            DB::transaction(function () use ($newEntries, $affiliate, &$entriesCreated): void {
-                foreach ($newEntries as $entry) {
+            foreach ($newEntries as $entry) {
+                try {
                     // Preload the relation before save so the observer's notifyBrandSale()
                     // can access affiliateProfessional->display_name without a lazy query.
                     // The pre-set survives the observer's afterCommit dispatch — Laravel
@@ -261,8 +260,13 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                     $row->setRelation('affiliateProfessional', $affiliate);
                     $row->save();
                     $entriesCreated++;
+                } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+                    // A concurrent worker inserted this idempotency key in the window
+                    // between the pre-filter query and this insert — already recorded,
+                    // safe to skip. PostgreSQL aborts the whole transaction on 23505, so
+                    // we must catch per-row (no outer transaction) rather than in bulk.
                 }
-            });
+            }
         }
 
         // Capture the buyer as an affiliate contact (Beta 3 — Contacts — Automatic Customer Capture).

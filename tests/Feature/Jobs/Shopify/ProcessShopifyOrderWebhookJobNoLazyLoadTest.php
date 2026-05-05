@@ -152,3 +152,46 @@ it('creates multiple ledger entries without triggering a lazy-load violation on 
     // confirms the affiliate relation was preloaded before observer execution.
     expect(true)->toBeTrue();
 });
+
+it('is idempotent — re-delivering the same webhook does not duplicate ledger entries', function () {
+    [$brandId] = seedForNoLazyLoadTest();
+
+    $catalogMock = Mockery::mock(BrandCatalogService::class);
+    // Called once per job run; two runs = two calls.
+    $catalogMock->shouldReceive('fetchCommissionOverridesForProducts')
+        ->twice()
+        ->andReturn([]);
+    app()->instance(BrandCatalogService::class, $catalogMock);
+
+    $payload = [
+        'id' => 'order_idempotency_test',
+        'currency' => 'AUD',
+        'created_at' => now()->toIso8601String(),
+        'note_attributes' => [['name' => 'affiliate', 'value' => 'sarah']],
+        'line_items' => [
+            [
+                'id' => 'line_1', 'product_id' => '201',
+                'price' => '50.00', 'quantity' => 1, 'total_discount' => '0',
+                'properties' => [],
+            ],
+            [
+                'id' => 'line_2', 'product_id' => '202',
+                'price' => '30.00', 'quantity' => 2, 'total_discount' => '0',
+                'properties' => [],
+            ],
+        ],
+    ];
+
+    $contactMock = Mockery::mock(ContactCaptureService::class)->shouldIgnoreMissing();
+    $catalogService = app(BrandCatalogService::class);
+
+    // First delivery — both entries created.
+    (new ProcessShopifyOrderWebhookJob($brandId, $payload))->handle($contactMock, $catalogService);
+    expect(CommissionLedgerEntry::query()->count())->toBe(2);
+
+    // Second delivery (duplicate webhook) — pre-filter catches both keys; no
+    // new inserts attempted. If the per-row try-catch safety net were the only
+    // guard, it would catch the 23505 here instead. Either way: no exception thrown.
+    (new ProcessShopifyOrderWebhookJob($brandId, $payload))->handle($contactMock, $catalogService);
+    expect(CommissionLedgerEntry::query()->count())->toBe(2);
+});
