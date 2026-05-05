@@ -14,6 +14,7 @@ use App\Models\Core\Site\Enquiry;
 use App\Services\Public\PublicSiteResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 
 // V2: Handles public contact form submissions. Saves enquiry, upserts submitter as Customer lead, dispatches notification email.
 class PublicEnquiryController extends ApiController
@@ -105,10 +106,16 @@ class PublicEnquiryController extends ApiController
         // 7) Log unified lead analytics.
         $this->logLead($request, $subdomain, $site->id, (string) $site->professional_id, 'created', $startedMs);
 
-        // 8) Dispatch notification email (only if settings.notification_email is present).
+        // 8) Dispatch notification email (only if settings.notification_email is present and per-brand hourly limit not reached).
         $notificationEmail = data_get($block->settings, 'notification_email');
         if (is_string($notificationEmail) && trim($notificationEmail) !== '') {
-            SendEnquiryNotificationJob::dispatch((string) $enquiry->id, trim($notificationEmail));
+            $notifyKey = 'enquiry_notify:' . $site->professional_id;
+            $notifyLimit = config('sidest.throttle.enquiry_notification_per_hour', 10);
+
+            if (! RateLimiter::tooManyAttempts($notifyKey, $notifyLimit)) {
+                RateLimiter::hit($notifyKey, 3600);
+                SendEnquiryNotificationJob::dispatch((string) $enquiry->id, trim($notificationEmail));
+            }
         }
 
         return $this->success(['ok' => true]);

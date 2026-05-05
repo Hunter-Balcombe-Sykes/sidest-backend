@@ -257,3 +257,19 @@ it('logs outcome=created on success', function () {
     $lead = DB::connection('pgsql')->table('analytics.lead_submissions')->first();
     expect($lead?->outcome)->toBe('created');
 });
+
+it('stops dispatching notification job once per-brand hourly limit is exceeded but still returns 200', function () {
+    seedPublishedContactSite();
+    config(['sidest.throttle.enquiry_notification_per_hour' => 2]);
+    Bus::fake();
+
+    // Three submissions from different submitters; limit is 2.
+    foreach (['a@example.com', 'b@example.com', 'c@example.com'] as $email) {
+        $this->postJson('/api/public/enquiry', validEnquiryPayload(['email' => $email]), [
+            'X-Site-Subdomain' => 'testpro',
+        ])->assertOk();
+    }
+
+    Bus::assertDispatchedTimes(SendEnquiryNotificationJob::class, 2);
+    expect(DB::connection('pgsql')->table('site.enquiries')->count())->toBe(3);
+});

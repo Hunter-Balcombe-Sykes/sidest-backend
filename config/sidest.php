@@ -731,6 +731,8 @@ return [
 
     'throttle' => [
         'enabled' => (bool) env('SIDEST_THROTTLE_ENABLED', true),
+        // Max notification emails sent per brand inbox per hour regardless of how many enquiries arrive.
+        'enquiry_notification_per_hour' => (int) env('SIDEST_ENQUIRY_NOTIFY_PER_HOUR', 10),
     ],
 
     'media_disk' => env('SIDEST_MEDIA_DISK', 'media'),
