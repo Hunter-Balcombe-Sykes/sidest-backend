@@ -10,6 +10,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Services\Fresha\FreshaApiException;
 use App\Services\Fresha\FreshaServiceSyncService;
+use App\Services\Fresha\FreshaTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -18,6 +19,8 @@ use Illuminate\Support\Facades\Log;
 class FreshaIntegrationController extends ApiController
 {
     use ResolveCurrentProfessional;
+
+    public function __construct(private FreshaTokenService $freshaTokenService) {}
 
     private function currentFreshaIntegration(Request $request): ?ProfessionalIntegration
     {
@@ -177,12 +180,26 @@ class FreshaIntegrationController extends ApiController
 
     /**
      * POST /api/fresha/disconnect
-     * Clears the stored Fresha tokens for this professional.
+     * Revokes the Fresha OAuth token at the provider, then clears the local record.
      */
     public function disconnect(Request $request)
     {
         $pro = $this->currentProfessional($request);
         $this->authorizeForUser($pro, 'manage', $this->freshaSkeletonFor($pro));
+
+        $integration = $pro->integrationForProvider(ProfessionalIntegration::PROVIDER_FRESHA);
+
+        if ($integration) {
+            try {
+                $this->freshaTokenService->revokeToken($integration);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to revoke Fresha token at provider', [
+                    'professional_id' => $pro->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         $pro->integrations()
             ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA)
             ->delete();

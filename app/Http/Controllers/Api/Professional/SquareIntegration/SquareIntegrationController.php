@@ -10,6 +10,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Services\Square\SquareApiException;
 use App\Services\Square\SquareServiceSyncService;
+use App\Services\Square\SquareTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -18,6 +19,8 @@ use Illuminate\Support\Facades\Log;
 class SquareIntegrationController extends ApiController
 {
     use ResolveCurrentProfessional;
+
+    public function __construct(private SquareTokenService $squareTokenService) {}
 
     private function currentSquareIntegration(Request $request): ?ProfessionalIntegration
     {
@@ -176,12 +179,26 @@ class SquareIntegrationController extends ApiController
 
     /**
      * POST /api/square/disconnect
-     * Clears the stored Square tokens for this professional.
+     * Revokes the Square OAuth token at the provider, then clears the local record.
      */
     public function disconnect(Request $request)
     {
         $pro = $this->currentProfessional($request);
         $this->authorizeForUser($pro, 'manage', $this->squareSkeletonFor($pro));
+
+        $integration = $pro->integrationForProvider(ProfessionalIntegration::PROVIDER_SQUARE);
+
+        if ($integration) {
+            try {
+                $this->squareTokenService->revokeToken($integration);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to revoke Square token at provider', [
+                    'professional_id' => $pro->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         $pro->integrations()
             ->where('provider', ProfessionalIntegration::PROVIDER_SQUARE)
             ->delete();

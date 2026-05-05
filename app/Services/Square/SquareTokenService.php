@@ -83,6 +83,30 @@ class SquareTokenService
         return $accessToken;
     }
 
+    /**
+     * Revoke the access token at Square. Callers catch and log — deletion must not be blocked.
+     * Square revoke requires "Authorization: Client {secret}" rather than a bearer token.
+     */
+    public function revokeToken(ProfessionalIntegration $integration): void
+    {
+        $clientId = trim((string) config('services.square.application_id', ''));
+        $clientSecret = trim((string) config('services.square.client_secret', ''));
+        $accessToken = trim((string) ($integration->access_token ?? ''));
+
+        if ($clientId === '' || $clientSecret === '' || $accessToken === '') {
+            return;
+        }
+
+        Http::acceptJson()
+            ->asJson()
+            ->timeout(10)
+            ->withHeaders(['Authorization' => 'Client '.$clientSecret])
+            ->post($this->baseUrl().'/oauth2/revoke', [
+                'client_id' => $clientId,
+                'access_token' => $accessToken,
+            ]);
+    }
+
     private function baseUrl(): string
     {
         $environment = strtolower((string) config('services.square.environment', 'production'));

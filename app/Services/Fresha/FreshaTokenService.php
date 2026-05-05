@@ -84,6 +84,30 @@ class FreshaTokenService
         return $accessToken;
     }
 
+    /**
+     * Attempt to revoke the access token at Fresha. Callers catch and log — deletion must not be blocked.
+     * NOTE: Fresha revoke endpoint is inferred from OAuth2 conventions (RFC 7009); verify against Partner API docs.
+     */
+    public function revokeToken(ProfessionalIntegration $integration): void
+    {
+        $clientId = trim((string) config('services.fresha.client_id', ''));
+        $clientSecret = trim((string) config('services.fresha.client_secret', ''));
+        $accessToken = trim((string) ($integration->access_token ?? ''));
+
+        if ($clientId === '' || $clientSecret === '' || $accessToken === '') {
+            return;
+        }
+
+        Http::acceptJson()
+            ->asJson()
+            ->timeout(10)
+            ->post($this->baseUrl().'/oauth2/revoke', [
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret,
+                'token' => $accessToken,
+            ]);
+    }
+
     private function baseUrl(): string
     {
         $environment = strtolower((string) config('services.fresha.environment', 'production'));
