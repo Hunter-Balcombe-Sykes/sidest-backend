@@ -7,6 +7,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 // Public-safe shape for Professional — only fields appropriate for unauthenticated visitors.
 // Excludes: auth_user_id, primary_email, phone, street address, internal status/onboarding fields.
+// public_contact_* are opt-in: a professional sets them to share a contact detail publicly;
+// NULL means not sharing. They are distinct from primary_email / phone, which are never exposed.
 class ProfessionalPublicResource extends JsonResource
 {
     public function toArray(Request $request): array

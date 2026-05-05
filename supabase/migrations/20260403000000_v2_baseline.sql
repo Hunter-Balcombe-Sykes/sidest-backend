@@ -1607,6 +1607,9 @@ SELECT
       'bio', p.bio,
       'country_code', p.country_code,
       'timezone', p.timezone,
+      -- Opt-in fields: NULL = not sharing publicly; setting a value is the professional's
+      -- explicit choice to display that contact detail on their public site.
+      -- primary_email / phone are intentionally excluded from this view.
       'public_contact_number', p.public_contact_number,
       'public_contact_email', p.public_contact_email
     ),
