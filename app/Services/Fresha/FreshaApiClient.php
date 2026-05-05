@@ -7,7 +7,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
-// V2: Fresha Partner API client for services, bookings, and availability. Automatic token refresh on 401.
+// V2: Fresha Partner API client for service sync only. Automatic token refresh on 401.
 class FreshaApiClient
 {
     public function __construct(
@@ -135,43 +135,6 @@ class FreshaApiClient
     public function getBusiness(Professional $professional): array
     {
         return $this->request($professional, 'GET', '/v1/businesses/'.$this->businessId($professional));
-    }
-
-    /**
-     * Search availability for a service on a given date.
-     *
-     * NOTE: Update endpoint and request body based on actual Fresha API docs.
-     */
-    public function searchAvailability(Professional $professional, array $body): array
-    {
-        return $this->request($professional, 'POST', '/v1/businesses/'.$this->businessId($professional).'/availability/search', [], $body);
-    }
-
-    /**
-     * Create a booking in Fresha.
-     *
-     * NOTE: Update endpoint and request body based on actual Fresha API docs.
-     * Fresha does NOT support direct payment processing — only the booking is created.
-     */
-    public function createBooking(Professional $professional, array $body): array
-    {
-        return $this->request($professional, 'POST', '/v1/businesses/'.$this->businessId($professional).'/bookings', [], $body);
-    }
-
-    /**
-     * Cancel a booking in Fresha.
-     */
-    public function cancelBooking(Professional $professional, string $bookingId): array
-    {
-        return $this->request($professional, 'POST', '/v1/businesses/'.$this->businessId($professional).'/bookings/'.$bookingId.'/cancel');
-    }
-
-    /**
-     * Create or find a customer in Fresha.
-     */
-    public function createCustomer(Professional $professional, array $customerData): array
-    {
-        return $this->request($professional, 'POST', '/v1/businesses/'.$this->businessId($professional).'/customers', [], $customerData);
     }
 
     /**
