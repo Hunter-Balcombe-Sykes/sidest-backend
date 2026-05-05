@@ -1381,7 +1381,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~1h)
     - **What to do:** Add a test that confirms tokens are encrypted at rest.
 
-- [ ] **#4-03** · P3 — `normalizeShopDomain` trim chars include `./` — could mask invalid domains
+- [x] **#4-03** · P3 — `normalizeShopDomain` trim chars include `./` — could mask invalid domains
     - **Where:** app/Http/Controllers/Api/Shopify/ShopifyAppOAuthController.php (normalizeShopDomain)
     - **Effort:** S (~0.5h)
     - **What to do:** Add an explicit `*.myshopify.com` regex check after normalization.
