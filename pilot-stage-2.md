@@ -154,7 +154,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Ledger-style debit-then-confirm pattern.
     - **Plain English:** A rare crash at exactly the wrong moment could leave a brand's wallet debited without a payment going through.
 
-- [ ] **#3-06** · P2 — Stripe rate-limit errors retry without explicit backoff
+- [x] **#3-06** · P2 — Stripe rate-limit errors retry without explicit backoff
     - **Where:** app/Jobs/Stripe/ProcessCommissionPayoutsJob.php
     - **Affects:** Stripe API health under multi-brand payout load.
     - **Effort:** S (~2h)
