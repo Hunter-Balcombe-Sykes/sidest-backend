@@ -19,7 +19,6 @@ use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
 use App\Services\Shopify\ShopifyTeardownService;
 use App\Services\Shopify\ShopProfileAutoFillService;
-use App\Services\Store\BrandAccessService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
@@ -36,7 +35,6 @@ class ShopifyIntegrationController extends ApiController
     use NormalizesShopDomain, ResolveCurrentProfessional;
 
     public function __construct(
-        private readonly BrandAccessService $brandAccess,
         private readonly ShopifyTeardownService $teardownService,
     ) {}
 
@@ -63,7 +61,7 @@ class ShopifyIntegrationController extends ApiController
         $requestedBrandProfessionalId = trim((string) $requestedBrandProfessionalId);
 
         if ($requestedBrandProfessionalId === '') {
-            if ($this->brandAccess->isBrandProfessional($professional)) {
+            if ($professional->isBrand()) {
                 $requestedBrandProfessionalId = (string) $professional->id;
             } elseif ($requireForNonBrand) {
                 return ['', $this->error('brand_professional_id is required for this account type.', 422)];

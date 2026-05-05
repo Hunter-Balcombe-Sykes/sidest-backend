@@ -103,11 +103,6 @@ class BrandAccessService
         return in_array($capability, $access[$brandProfessionalId]['capabilities'], true);
     }
 
-    public function isBrandProfessional(Professional $professional): bool
-    {
-        return strtolower(trim((string) ($professional->professional_type ?? ''))) === 'brand';
-    }
-
     /**
      * @return array<string, array{roles: array<int, string>, capabilities: array<int, string>}>
      */
@@ -120,7 +115,7 @@ class BrandAccessService
 
         $rolesByBrand = [];
 
-        if ($this->isBrandProfessional($professional)) {
+        if ($professional->isBrand()) {
             $this->grantRole($rolesByBrand, (string) $professional->id, self::ROLE_OWNER);
         }
 

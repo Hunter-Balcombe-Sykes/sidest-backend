@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
  * Covers BrandStoreSettings (professional_id), BrandProfile (professional_id),
  * and BrandTeamMembership (brand_professional_id).
  *
- * Brand-account eligibility (isBrandProfessional) is enforced by the brand.only
+ * Brand-account eligibility (isBrand) is enforced by the brand.only
  * route middleware — this policy only handles resource ownership.
  */
 class BrandResourcePolicy extends BasePolicy
