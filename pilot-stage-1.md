@@ -1366,7 +1366,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~1h)
     - **What to do:** Add explicit retry configuration to each.
 
-- [ ] **#5-04** · P3 — No `(professional_id, fresha_variation_id)` unique constraint on Fresha service mapping
+- [x] **#5-04** · P3 — No `(professional_id, fresha_variation_id)` unique constraint on Fresha service mapping
     - **Where:** app/Services/Fresha/FreshaServiceSyncService.php:108-142
     - **Effort:** S (~1h)
     - **What to do:** Add a Supabase migration for the unique constraint.
