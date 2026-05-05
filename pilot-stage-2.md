@@ -23,7 +23,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
 
 ## P1 — Fix before Stage 2 launch
 
-- [ ] **#9-011** · P1 — Staff broadcast email job has no `failed()` handler — permanent failures are silent
+- [x] **#9-011** · P1 — Staff broadcast email job has no `failed()` handler — permanent failures are silent
     - **Where:** app/Jobs/Notifications/SendStaffBroadcastEmailToSubscriberJob.php
     - **Affects:** Staff broadcast email reliability across the now-larger affiliate cohort.
     - **Effort:** S (~1h)
