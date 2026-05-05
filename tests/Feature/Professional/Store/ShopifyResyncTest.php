@@ -302,6 +302,65 @@ it('normalizes currency and country_code to uppercase', function () {
     expect($integration->provider_metadata['shop_currency'])->toBe('AUD');
 });
 
+// ---------- shopify_sync_locked_fields tests ----------
+
+it('preserves a locked field when brand has opted out of Shopify overwrite for it', function () {
+    [$brand, , $integration] = createResyncBrand(
+        ['display_name' => 'My Custom Name'],
+        [],
+        ['shopify_sync_locked_fields' => ['display_name']],
+    );
+
+    $service = app(ShopProfileAutoFillService::class);
+    $result = $service->resyncFromShopData($integration, resyncFakeShopPayload());
+
+    expect($result['preserved'])->toContain('display_name');
+    expect($result['updated'])->not->toContain('display_name');
+
+    $brand->refresh();
+    expect($brand->display_name)->toBe('My Custom Name');
+});
+
+it('syncs non-locked fields while preserving locked ones', function () {
+    [$brand, , $integration] = createResyncBrand(
+        ['display_name' => 'My Custom Name'],
+        [],
+        ['shopify_sync_locked_fields' => ['display_name']],
+    );
+
+    $service = app(ShopProfileAutoFillService::class);
+    $result = $service->resyncFromShopData($integration, resyncFakeShopPayload());
+
+    expect($result['preserved'])->toContain('display_name');
+    expect($result['updated'])->toContain('phone', 'location_city');
+
+    $brand->refresh();
+    expect($brand->display_name)->toBe('My Custom Name');
+    expect($brand->phone)->toBe('+61400000000');
+    expect($brand->location_city)->toBe('Sydney');
+});
+
+it('preserves multiple locked fields across professional and brand_profile targets', function () {
+    [$brand, $brandProfile, $integration] = createResyncBrand(
+        ['display_name' => 'My Custom Name', 'phone' => '+61422222222'],
+        ['business_website' => 'my-custom-site.com'],
+        ['shopify_sync_locked_fields' => ['display_name', 'phone', 'business_website']],
+    );
+
+    $service = app(ShopProfileAutoFillService::class);
+    $result = $service->resyncFromShopData($integration, resyncFakeShopPayload());
+
+    expect($result['preserved'])->toContain('display_name', 'phone', 'business_website');
+    expect($result['updated'])->not->toContain('display_name', 'phone', 'business_website');
+
+    $brand->refresh();
+    expect($brand->display_name)->toBe('My Custom Name');
+    expect($brand->phone)->toBe('+61422222222');
+
+    $brandProfile->refresh();
+    expect($brandProfile->business_website)->toBe('my-custom-site.com');
+});
+
 // ---------- ShopifyDataResyncService integration tests ----------
 
 it('dispatches the unified brand-design job and records last_resynced_at', function () {

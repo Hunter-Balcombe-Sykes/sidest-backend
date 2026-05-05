@@ -2,7 +2,6 @@
 
 namespace App\Jobs\Shopify;
 
-use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
@@ -15,8 +14,9 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
-// Processes shop/update webhooks — re-syncs brand profile fields and triggers
-// a throttled brand-design refresh (logos, colours, enums, slogan).
+// Processes shop/update webhooks — re-syncs brand profile fields (honouring any
+// shopify_sync_locked_fields the brand has set) and triggers a throttled brand-design
+// refresh (logos, colours, enums, slogan).
 class ProcessShopifyShopUpdateJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -46,29 +46,32 @@ class ProcessShopifyShopUpdateJob implements ShouldQueue
             return;
         }
 
-        $brandProfile = BrandProfile::where('professional_id', $this->professionalId)->first();
         $integration = ProfessionalIntegration::query()
             ->where('professional_id', $this->professionalId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->first();
 
-        // Re-sync profile fields from the shop/update payload (which is the shop object)
-        app(ShopProfileAutoFillService::class)->fillFromShopData(
-            $professional,
-            $site,
-            $brandProfile,
-            $this->payload,
+        if (! $integration) {
+            Log::warning('Shopify shop/update: no integration record found.', [
+                'professional_id' => $this->professionalId,
+            ]);
+
+            return;
+        }
+
+        // Re-sync profile fields, honouring shopify_sync_locked_fields for brands
+        // that have customized specific fields locally.
+        app(ShopProfileAutoFillService::class)->resyncFromShopData(
             $integration,
+            $this->payload,
         );
 
         // Re-sync the full brand-design shape (logos, colours, enums, slogan).
         // Throttled to once per hour per integration so a chatty shop/update
         // webhook stream can't pummel Shopify with brand-design fetches.
-        if ($integration) {
-            $cacheKey = "shopify:brand_design_sync:{$integration->id}";
-            if (Cache::add($cacheKey, true, now()->addHour())) {
-                SyncShopifyBrandDesignJob::dispatch((string) $integration->id);
-            }
+        $cacheKey = "shopify:brand_design_sync:{$integration->id}";
+        if (Cache::add($cacheKey, true, now()->addHour())) {
+            SyncShopifyBrandDesignJob::dispatch((string) $integration->id);
         }
 
         Log::info('Shopify shop/update processed.', [

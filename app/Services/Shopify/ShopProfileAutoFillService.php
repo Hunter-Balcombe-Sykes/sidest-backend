@@ -68,10 +68,12 @@ class ShopProfileAutoFillService
 
     /**
      * Resync Shopify-sourced fields. For each field in FIELD_MAP:
+     *   - If the field is in shopify_sync_locked_fields → preserve local (brand opted out).
      *   - If Shopify returns a non-empty value → overwrite local.
      *   - If Shopify returns empty/missing → preserve local.
      *
-     * No comparison against prior state; no "manual edit" detection.
+     * Brands can protect specific fields from Shopify overwrites by listing their
+     * column names in provider_metadata.shopify_sync_locked_fields. Default: [] (all sync).
      *
      * @return array{updated: string[], preserved: string[]}
      */
@@ -79,6 +81,8 @@ class ShopProfileAutoFillService
     {
         $professional = Professional::findOrFail($integration->professional_id);
         $brandProfile = BrandProfile::where('professional_id', $integration->professional_id)->first();
+
+        $lockedFields = $this->getLockedFields($integration);
 
         $updated = [];
         $preserved = [];
@@ -91,6 +95,12 @@ class ShopProfileAutoFillService
         $metadataMerge = [];
 
         foreach (self::FIELD_MAP as $field) {
+            if (in_array($field['column'], $lockedFields, true)) {
+                $preserved[] = $field['column'];
+
+                continue;
+            }
+
             $freshValue = $this->freshValueForField($field, $shopData);
 
             if ($freshValue === '') {
@@ -215,6 +225,21 @@ class ShopProfileAutoFillService
         }
 
         $metadataMerge[$field['column']] = $freshValue;
+    }
+
+    /**
+     * Fields listed in provider_metadata.shopify_sync_locked_fields are skipped during
+     * resync — the brand has opted to manage them locally rather than let Shopify overwrite.
+     * Returns an empty array by default (all fields sync).
+     *
+     * @return string[]
+     */
+    private function getLockedFields(ProfessionalIntegration $integration): array
+    {
+        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+        $locked = $metadata['shopify_sync_locked_fields'] ?? [];
+
+        return is_array($locked) ? $locked : [];
     }
 
     private function str(array $data, string $key): string
