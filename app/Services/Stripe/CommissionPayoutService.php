@@ -539,7 +539,7 @@ class CommissionPayoutService
         });
     }
 
-    private function creditBrandManualBalance(string $brandId, int $amountCents, string $currencyCode): void
+    public function creditBrandManualBalance(string $brandId, int $amountCents, string $currencyCode): void
     {
         if ($amountCents <= 0) {
             return;
