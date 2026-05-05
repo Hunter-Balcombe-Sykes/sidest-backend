@@ -36,6 +36,7 @@ beforeEach(function () {
         external_account_id TEXT,
         access_token TEXT,
         refresh_token TEXT,
+        storefront_token TEXT,
         expires_at TEXT,
         catalog_latest_time TEXT,
         last_catalog_sync_at TEXT,

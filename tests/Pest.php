@@ -491,6 +491,7 @@ function setupProfessionalIntegrationsTable(): void
         shopify_shop_domain TEXT NULL,
         access_token TEXT NULL,
         refresh_token TEXT NULL,
+        storefront_token TEXT NULL,
         provider_metadata TEXT NULL,
         status TEXT NULL,
         expires_at TEXT NULL,

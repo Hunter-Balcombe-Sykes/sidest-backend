@@ -4,6 +4,7 @@
 
 use App\Jobs\Streaming\CheckStreamingLiveStatusJob;
 use App\Services\Streaming\LiveStatusPoller;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use Tests\TestCase;
@@ -36,13 +37,19 @@ it('logs critical and aborts when Redis is unavailable', function () {
         ->once()
         ->andThrow(new \RedisException('Connection refused'));
 
-    Log::shouldReceive('critical')->once()->with('streaming.redis_unavailable', Mockery::any());
+    // The job calls report($e) after the explicit log; intercept it so the
+    // exception handler doesn't double-fire Log::error.
+    Exceptions::fake();
+
+    Log::shouldReceive('error')->once()->with('streaming.redis_unavailable', Mockery::any());
 
     $poller = Mockery::mock(LiveStatusPoller::class);
     $poller->shouldNotReceive('poll');
 
     $job = new CheckStreamingLiveStatusJob;
     $job->handle($poller);
+
+    Exceptions::assertReported(\RedisException::class);
 });
 
 it('catches poller exceptions and logs per-platform error without crashing the job', function () {

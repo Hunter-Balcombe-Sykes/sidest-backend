@@ -33,6 +33,7 @@ beforeEach(function () {
         external_account_id TEXT,
         access_token TEXT,
         refresh_token TEXT,
+        storefront_token TEXT,
         expires_at TEXT,
         catalog_latest_time TEXT,
         last_catalog_sync_at TEXT,
@@ -51,6 +52,7 @@ function makeBrandDesignImporterIntegration(string $shopDomain = 'importer.mysho
         'provider' => 'shopify',
         'external_account_id' => $shopDomain,
         'access_token' => 'shpat_test_token',
+        'storefront_token' => 'shpat_test_storefront_token',
         'provider_metadata' => ['shop_domain' => $shopDomain],
     ]);
     $integration->id = 'int-importer-'.substr(md5($shopDomain), 0, 8);
@@ -103,16 +105,17 @@ function brandDesignFakeAssetResponse(array $currentSettings): array
     ];
 }
 
-// Standard 3-endpoint fake: brand graphql, themes graphql (same URL, routed by
-// query body), asset REST. Caller picks theme name + the settings keys present.
+// Standard 3-endpoint fake. Brand query goes to the Storefront API
+// (/api/*/graphql.json — no /admin); themes query goes to the Admin API
+// (/admin/api/*/graphql.json). Asset REST is Admin API.
 function fakeBrandDesignImporterShopify(string $themeName, array $currentSettings): void
 {
     Http::fake([
+        // Storefront API — shop.brand only exists here.
+        'importer.myshopify.com/api/*/graphql.json' => Http::response(brandDesignFakeShopBrandResponse()),
+        // Admin API — themes lookup + (other admin GraphQL).
         'importer.myshopify.com/admin/api/*/graphql.json' => function ($request) use ($themeName) {
             $query = $request->data()['query'] ?? '';
-            if (str_contains($query, 'shop {')) {
-                return Http::response(brandDesignFakeShopBrandResponse());
-            }
             if (str_contains($query, 'themes(')) {
                 return Http::response(brandDesignFakeThemesResponse($themeName));
             }
@@ -227,14 +230,8 @@ it('returns null enums (without throwing) when the asset endpoint fails', functi
     $integration = makeBrandDesignImporterIntegration();
 
     Http::fake([
-        'importer.myshopify.com/admin/api/*/graphql.json' => function ($request) {
-            $query = $request->data()['query'] ?? '';
-            if (str_contains($query, 'shop {')) {
-                return Http::response(brandDesignFakeShopBrandResponse());
-            }
-
-            return Http::response(brandDesignFakeThemesResponse('Dawn'));
-        },
+        'importer.myshopify.com/api/*/graphql.json' => Http::response(brandDesignFakeShopBrandResponse()),
+        'importer.myshopify.com/admin/api/*/graphql.json' => Http::response(brandDesignFakeThemesResponse('Dawn')),
         'importer.myshopify.com/admin/api/*/themes/*/assets.json*' => Http::response(null, 404),
     ]);
 
@@ -253,30 +250,24 @@ it('infers theme_mode dark when the primary background is a dark hue', function 
     $integration = makeBrandDesignImporterIntegration();
 
     Http::fake([
-        'importer.myshopify.com/admin/api/*/graphql.json' => function ($request) {
-            $query = $request->data()['query'] ?? '';
-            if (str_contains($query, 'shop {')) {
-                return Http::response([
-                    'data' => [
-                        'shop' => [
-                            'id' => 'gid://shopify/Shop/12345',
-                            'myshopifyDomain' => 'importer.myshopify.com',
-                            'brand' => [
-                                'slogan' => null,
-                                'logo' => ['image' => ['url' => null]],
-                                'squareLogo' => ['image' => ['url' => null]],
-                                'colors' => [
-                                    'primary' => [['background' => '#0a0a0a', 'foreground' => '#ffffff']],
-                                    'secondary' => [['background' => '#ff0066', 'foreground' => '#ffffff']],
-                                ],
-                            ],
+        'importer.myshopify.com/api/*/graphql.json' => Http::response([
+            'data' => [
+                'shop' => [
+                    'id' => 'gid://shopify/Shop/12345',
+                    'myshopifyDomain' => 'importer.myshopify.com',
+                    'brand' => [
+                        'slogan' => null,
+                        'logo' => ['image' => ['url' => null]],
+                        'squareLogo' => ['image' => ['url' => null]],
+                        'colors' => [
+                            'primary' => [['background' => '#0a0a0a', 'foreground' => '#ffffff']],
+                            'secondary' => [['background' => '#ff0066', 'foreground' => '#ffffff']],
                         ],
                     ],
-                ]);
-            }
-
-            return Http::response(brandDesignFakeThemesResponse('Dawn'));
-        },
+                ],
+            ],
+        ]),
+        'importer.myshopify.com/admin/api/*/graphql.json' => Http::response(brandDesignFakeThemesResponse('Dawn')),
         'importer.myshopify.com/admin/api/*/themes/*/assets.json*' => Http::response(
             brandDesignFakeAssetResponse([])
         ),
@@ -293,14 +284,8 @@ it('resolves a settings_data.json preset when current is a string', function () 
     // settings_data.json `current` is sometimes a preset name string instead
     // of an object — the importer must look the name up under `presets`.
     Http::fake([
-        'importer.myshopify.com/admin/api/*/graphql.json' => function ($request) {
-            $query = $request->data()['query'] ?? '';
-            if (str_contains($query, 'shop {')) {
-                return Http::response(brandDesignFakeShopBrandResponse());
-            }
-
-            return Http::response(brandDesignFakeThemesResponse('Dawn'));
-        },
+        'importer.myshopify.com/api/*/graphql.json' => Http::response(brandDesignFakeShopBrandResponse()),
+        'importer.myshopify.com/admin/api/*/graphql.json' => Http::response(brandDesignFakeThemesResponse('Dawn')),
         'importer.myshopify.com/admin/api/*/themes/*/assets.json*' => Http::response([
             'asset' => [
                 'key' => 'config/settings_data.json',

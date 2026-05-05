@@ -36,7 +36,7 @@ it('updates allowed brand profile fields', function () {
 
     $controller = new StaffBrandProfileController;
     $request = Request::create('/', 'PATCH', [
-        'brand_status' => 'active',
+        'brand_status' => 'storefront_live',
         'affiliate_visibility' => 'public',
         'setup_complete' => true,
         'legal_business_name' => 'Cuts & Co Pty Ltd',
