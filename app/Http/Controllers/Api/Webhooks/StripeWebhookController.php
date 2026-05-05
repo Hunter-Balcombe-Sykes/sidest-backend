@@ -72,6 +72,7 @@ class StripeWebhookController extends Controller
             'customer.subscription.deleted' => $this->handleSubscriptionDeleted($event->data->object, $event),
             'invoice.paid' => $this->handleInvoicePaid($event->data->object, $event),
             'invoice.payment_failed' => $this->handleInvoicePaymentFailed($event->data->object, $event),
+            'payment_method.detached' => $this->handlePaymentMethodDetached($event->data->object),
             default => Log::debug('Unhandled Stripe billing event', ['type' => $event->type]),
         };
 
@@ -286,6 +287,34 @@ class StripeWebhookController extends Controller
         Log::warning('Stripe invoice payment failed', [
             'subscription_id' => $localSub->id,
             'professional_id' => $localSub->professional_id,
+        ]);
+    }
+
+    private function handlePaymentMethodDetached(object $paymentMethod): void
+    {
+        $pmId = (string) ($paymentMethod->id ?? '');
+
+        if (! $pmId) {
+            Log::warning('Stripe payment_method.detached: missing payment method id in event');
+
+            return;
+        }
+
+        // Find the brand who had this PM on file and clear it so the funding
+        // gate rejects further invite attempts until they add a new card.
+        $brand = Professional::where('stripe_payment_method_id', $pmId)->first();
+
+        if (! $brand) {
+            Log::debug('Stripe payment_method.detached: no brand found for pm', ['pm_id' => $pmId]);
+
+            return;
+        }
+
+        $brand->update(['stripe_payment_method_id' => null]);
+
+        Log::info('Stripe payment_method.detached: cleared stripe_payment_method_id on brand', [
+            'brand_id' => $brand->id,
+            'pm_id' => $pmId,
         ]);
     }
 

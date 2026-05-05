@@ -6,6 +6,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Services\Stripe\StripeConnectService;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 // V2: Funding gate for brand-side affiliate-invite write endpoints. The
 // brand can't push their first invite into the wild without a card on
@@ -13,6 +14,13 @@ use Illuminate\Http\Request;
 // the brand's funding obligation. Without this gate, the platform absorbs
 // the float for any brand who lapses on Stripe before the first payout
 // settles.
+//
+// NOTE: This is an "on-file" check — it verifies our DB columns are
+// non-null, not a live Stripe authorise. To keep this accurate, the
+// payment_method.detached Stripe webhook nullifies stripe_payment_method_id
+// proactively when a brand removes their card at Stripe. There is a small
+// window between detachment and webhook delivery; acceptable given low
+// invite frequency and Stripe's sub-second webhook delivery in practice.
 //
 // Returns 402 Payment Required with a structured payload so the
 // dashboard can surface the funding-gate dialog without parsing prose.
@@ -42,6 +50,11 @@ class BrandFundingGate
         if ($this->connectService->brandHasPaymentMethod($professional)) {
             return $next($request);
         }
+
+        Log::warning('BrandFundingGate: denied — no payment method on file', [
+            'brand_id' => $professional->id,
+            'reason' => 'no_payment_method',
+        ]);
 
         // 402 Payment Required is the correct semantic. The payload's
         // `code` field is what the dashboard reads to render the
