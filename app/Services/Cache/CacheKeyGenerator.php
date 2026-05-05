@@ -133,6 +133,13 @@ class CacheKeyGenerator
         return "analytics:commerce:affiliate:{$professionalId}:{$from}:{$to}";
     }
 
+    // Payout + grace state are current-state snapshots, not window-dependent.
+    // Cached per-professional so switching date ranges reuses the same entry.
+    public static function affiliatePayoutState(string $professionalId): string
+    {
+        return "analytics:commerce:affiliate:{$professionalId}:payout-state";
+    }
+
     // @multi-site: needs site_id — commerce traffic is tied to a site storefront
     public static function brandCommerceAnalytics(string $professionalId, string $from, string $to): string
     {

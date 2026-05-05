@@ -33,24 +33,30 @@ class AffiliateCommerceAnalyticsController extends ApiController
         $professionalId = (string) $professional->id;
 
         $filters = $this->resolveFilters($request);
-        $cacheKey = CacheKeyGenerator::affiliateCommerceAnalytics($professionalId, $filters['from'], $filters['to']);
+        $windowKey = CacheKeyGenerator::affiliateCommerceAnalytics($professionalId, $filters['from'], $filters['to']);
+        $payoutStateKey = CacheKeyGenerator::affiliatePayoutState($professionalId);
 
-        return $this->success($this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $filters): array {
+        // Timeseries + brands depend on the selected date window.
+        $windowed = $this->cacheLock->rememberLocked($windowKey, now()->addMinutes(5), function () use ($professionalId, $filters): array {
             $base = $filters['use_hourly']
                 ? $this->buildHourlyResponse($professionalId, $filters)
                 : $this->buildDailyResponse($professionalId, $filters);
 
-            // Layer per-brand breakdown, payout summary, and grace summary
-            // on top of the orders/commission timeseries. The brand
-            // breakdown respects the filter window; payout + grace
-            // summaries describe the affiliate's *current* state regardless
-            // of which window they're looking at.
             return array_merge($base, [
                 'brands' => $this->buildBrandBreakdown($professionalId, $filters, $base['totals']['currency_code']),
+            ]);
+        });
+
+        // Payout + grace state describe the affiliate's current position and
+        // are cached per-professional so switching date windows reuses one entry.
+        $payoutState = $this->cacheLock->rememberLocked($payoutStateKey, now()->addMinutes(5), function () use ($professionalId): array {
+            return [
                 'payout_summary' => $this->buildPayoutSummary($professionalId),
                 'grace_summary' => $this->buildGraceSummary($professionalId),
-            ]);
-        }));
+            ];
+        });
+
+        return $this->success(array_merge($windowed, $payoutState));
     }
 
     private function buildDailyResponse(string $professionalId, array $filters): array
