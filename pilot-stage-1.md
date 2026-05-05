@@ -614,7 +614,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** The cap query has a subtle SQL syntax issue that means even if #CR-001 fixes the auth bug, the query might still return no matching rows and the cap still wouldn't fire. Companion fix.
     - **Source:** Commit-batch review item #27 (commit `162cb4a`).
 
-- [ ] **#V5-002** · P1 — GDPR webhook deduplication on malformed payload causes permanent stuck state
+- [x] **#V5-002** · P1 — GDPR webhook deduplication on malformed payload causes permanent stuck state
     - **Where:** app/Http/Controllers/Api/Webhooks/ShopifyGdprWebhookController.php:52-68
     - **Affects:** Shopify GDPR webhook compliance — customer data deletion / data-request flow.
     - **Effort:** M (~1.5-2h)
