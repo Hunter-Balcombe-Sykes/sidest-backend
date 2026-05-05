@@ -1331,7 +1331,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~2h)
     - **What to do:** Document the standard (e.g., always 404 to avoid resource enumeration), audit and align.
 
-- [ ] **#8-06** · P3 — `cors.allowed_headers: ['*']` safe only because `supports_credentials: false`
+- [x] **#8-06** · P3 — `cors.allowed_headers: ['*']` safe only because `supports_credentials: false`
     - **Where:** config/cors.php:42
     - **Effort:** S (~0.25h)
     - **What to do:** Add a comment guard explaining the dependency.
