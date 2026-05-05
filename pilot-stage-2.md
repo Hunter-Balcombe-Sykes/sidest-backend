@@ -89,7 +89,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** A defense-in-depth stack: signal (UA), origin (referrer), pacing (per-link rate), behavioral dedup (session). Each layer is small. Keeping it simple beats integrating a third-party WAF for pilot.
     - **Plain English:** Right now anyone can hit the click-tracking URL as fast as IP throttling allows and it counts as real clicks. We should at least filter obvious bots and check that the click looks like it came from a real visit.
 
-- [ ] **#3-03** · P1 — Stripe webhook event idempotency uses `insertOrIgnore` without distinguishing race-loss from duplicate
+- [x] **#3-03** · P1 — Stripe webhook event idempotency uses `insertOrIgnore` without distinguishing race-loss from duplicate
     - **Where:** app/Http/Controllers/Api/Webhooks/StripeWebhookController.php:52-62; same pattern in StripeConnectWebhookController
     - **Affects:** All Stripe and Stripe Connect webhook handlers — risk grows linearly with subscription count.
     - **Effort:** M (~2–4h)
