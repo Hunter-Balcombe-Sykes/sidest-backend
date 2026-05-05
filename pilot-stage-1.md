@@ -949,7 +949,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** The "your next payout" and "you're at risk" boxes don't depend on which date filter the user picked — they're always "now." But we cache them as if they did, so the same data lives under multiple keys with different freshness.
     - **Source:** Commit-batch review item #19 (commit `85f2673`).
 
-- [ ] **#CR-014** · P2 — Shop block_id can be null with state:'live'; Hydrogen tracking pipeline silently drops null block_ids
+- [x] **#CR-014** · P2 — Shop block_id can be null with state:'live'; Hydrogen tracking pipeline silently drops null block_ids
     - **Where:** app/Http/Controllers/Api/Public/HydrogenAffiliateController.php:177
     - **Affects:** Click-tracking on the shop section when the block hasn't been published yet. Clicks lost without surface error.
     - **Effort:** S (~1h)
