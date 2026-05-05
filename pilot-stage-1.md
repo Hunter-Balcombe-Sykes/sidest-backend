@@ -1416,7 +1416,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** M (~3h)
     - **What to do:** Tie API key to a `brand_id`, not a global key. (Related to #PR-006 deferred to Stage 2.)
 
-- [ ] **#CR-015** · P3 — `role` query param trusted without validation in StripeConnectController::payouts
+- [x] **#CR-015** · P3 — `role` query param trusted without validation in StripeConnectController::payouts
     - **Where:** app/Http/Controllers/Api/Professional/Stripe/StripeConnectController.php:330-332
     - **Effort:** S (~0.5h)
     - **What to do:** Add a Form Request with `'role' => ['required', Rule::in(['brand', 'affiliate'])]`. Not cross-tenant — rows still scoped to authenticated `pro->id` — but the param is currently unsanitized. Endpoint now exposes `void_at` per row (introduced by `85f2673`), worth tightening since the response surface grew.
