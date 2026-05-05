@@ -77,7 +77,27 @@ class Subscription extends BaseModel
 
     public function isInGracePeriod(): bool
     {
-        return in_array($this->status, self::GRACE_STATUSES, true) && $this->ended_at === null;
+        if ($this->ended_at !== null) {
+            return false;
+        }
+
+        if ($this->status === self::STATUS_ACTIVE) {
+            return true;
+        }
+
+        if ($this->status === self::STATUS_PAST_DUE) {
+            // Time-box grace: revoke entitlements after N days of failed payment.
+            // current_period_end is when the billing period ended (= when payment first failed).
+            // Guard for unit-test contexts where the config repository isn't bootstrapped.
+            $graceDays = app()->bound('config')
+                ? (int) config('sidest.billing.past_due_grace_days', 7)
+                : 7;
+
+            return $this->current_period_end !== null
+                && $this->current_period_end->greaterThan(now()->subDays($graceDays));
+        }
+
+        return false;
     }
 
     public function isStripeManaged(): bool

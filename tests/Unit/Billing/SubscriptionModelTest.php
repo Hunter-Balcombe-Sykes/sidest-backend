@@ -30,11 +30,26 @@ it('reports not active for non-active status', function () {
     expect($sub->isActive())->toBeFalse();
 });
 
-it('reports grace period for past_due', function () {
+it('reports grace period for past_due within grace window', function () {
+    $sub = new Subscription;
+    // setRawAttributes bypasses the datetime cast setter, which would require a DB connection.
+    $sub->setRawAttributes(['status' => Subscription::STATUS_PAST_DUE, 'current_period_end' => now()->subDays(3)]);
+
+    expect($sub->isInGracePeriod())->toBeTrue();
+});
+
+it('revokes grace period for past_due beyond grace window', function () {
+    $sub = new Subscription;
+    $sub->setRawAttributes(['status' => Subscription::STATUS_PAST_DUE, 'current_period_end' => now()->subDays(8)]);
+
+    expect($sub->isInGracePeriod())->toBeFalse();
+});
+
+it('revokes grace period for past_due with no period end', function () {
     $sub = new Subscription;
     $sub->status = Subscription::STATUS_PAST_DUE;
 
-    expect($sub->isInGracePeriod())->toBeTrue();
+    expect($sub->isInGracePeriod())->toBeFalse();
 });
 
 it('reports no grace period for unpaid', function () {

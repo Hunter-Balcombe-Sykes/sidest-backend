@@ -729,6 +729,12 @@ return [
 
     'analytics_raw_event_retention_days' => (int) env('ANALYTICS_RAW_EVENT_RETENTION_DAYS', 90),
 
+    // How many days after the billing period ends a past_due subscription retains plan entitlements.
+    // After this window, access is revoked until Stripe collects payment or cancels.
+    'billing' => [
+        'past_due_grace_days' => (int) env('SIDEST_PAST_DUE_GRACE_DAYS', 7),
+    ],
+
     'throttle' => [
         'enabled' => (bool) env('SIDEST_THROTTLE_ENABLED', true),
         // Max notification emails sent per brand inbox per hour regardless of how many enquiries arrive.
