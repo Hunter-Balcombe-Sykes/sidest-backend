@@ -343,15 +343,20 @@ class ProfessionalServiceController extends ApiController
         }
 
         DB::transaction(function () use ($pro, $service) {
-            $service->restore();
-
+            // Compute the next sort_order BEFORE restoring. The partial unique
+            // index (professional_id, sort_order) WHERE deleted_at IS NULL is
+            // global per professional — category_id is not part of it. Another
+            // service may have claimed this slot while this one was soft-deleted,
+            // so restore() would violate the constraint if called first.
             $max = Service::query()
                 ->where('professional_id', $pro->id)
-                ->where('category_id', $service->category_id)
+                ->whereNull('deleted_at')
                 ->max('sort_order');
 
             $service->sort_order = is_null($max) ? 0 : ((int) $max + 1);
-            $service->save();
+            $service->saveQuietly(); // update sort_order while still soft-deleted
+
+            $service->restore();
         });
 
         return $this->success(['restored' => true, 'service' => $service->fresh()]);
