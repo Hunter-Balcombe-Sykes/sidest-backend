@@ -695,6 +695,15 @@ class EmbeddedSetupController extends ApiController
             || $existingWebhookState === 'queued'
             || $collectionsIncomplete;
 
+        // Detect a pure token-refresh no-op: integration already exists with the same
+        // access token and setup is complete. The embedded app calls this on every
+        // admin page load, so the no-op path must skip status sync + cache busting —
+        // those are cross-region DB queries and Redis writes that nothing depends on
+        // when the brand's underlying state is unchanged.
+        $isNoOpRefresh = ! $needsJobDispatch
+            && $existing !== null
+            && $existing->access_token === $data['access_token'];
+
         $integration = ProfessionalIntegration::updateOrCreate(
             [
                 'professional_id' => $professionalId,
@@ -739,8 +748,13 @@ class EmbeddedSetupController extends ApiController
             }
         }
 
-        $this->cache->invalidateProfessional($professional);
-        app(BrandStatusService::class)->sync($professional);
+        // Skip cache invalidation + status sync on no-op token refreshes. Brand
+        // status can't have changed when nothing about the integration changed,
+        // and avoiding sync() saves ~8–12 cross-region DB queries per page load.
+        if (! $isNoOpRefresh) {
+            $this->cache->invalidateProfessional($professional);
+            app(BrandStatusService::class)->sync($professional);
+        }
 
         return $this->success(['provisioned' => true]);
     }

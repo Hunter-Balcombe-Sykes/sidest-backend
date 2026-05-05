@@ -9,6 +9,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use App\Models\Retail\BrandStoreSettings;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -32,6 +33,13 @@ use Illuminate\Support\Facades\Log;
  */
 class BrandStatusService
 {
+    // Per-instance memoization. determine() / sync() call hasShopifyConnected()
+    // up to 3× per evaluation (lines 66, 206 via isWizardComplete, 258 via
+    // isOnboardingReady) — cache it so we hit the DB once per professional
+    // per service-instance lifetime (instance is request-scoped via app()).
+    /** @var array<string, bool> */
+    private array $shopifyConnectedCache = [];
+
     /**
      * Determine the brand status for a professional without writing to DB.
      */
@@ -227,6 +235,11 @@ class BrandStatusService
 
     /**
      * HTTP-check whether the brand's storefront is serving pages (2xx, no redirect).
+     *
+     * Cached per URL: reachable=true for 60s (steady state), reachable=false for
+     * 15s (so a freshly-deployed storefront flips status quickly). Without the
+     * cache this single call dominates p95 on hot endpoints like
+     * /internal/embedded/provision-integration that fire on every admin page load.
      */
     private function isStorefrontReachable(?BrandStoreSettings $settings, string $subdomain): bool
     {
@@ -235,6 +248,12 @@ class BrandStatusService
         }
 
         $url = $settings->storefrontBaseUrl($subdomain);
+        $cacheKey = 'brand_status:storefront_reachable:'.sha1($url);
+
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return (bool) $cached;
+        }
 
         try {
             $response = Http::withOptions([
@@ -243,10 +262,14 @@ class BrandStatusService
                 'connect_timeout' => 3,
             ])->get($url);
 
-            return $response->successful();
+            $reachable = $response->successful();
         } catch (\Throwable) {
-            return false;
+            $reachable = false;
         }
+
+        Cache::put($cacheKey, $reachable, $reachable ? 60 : 15);
+
+        return $reachable;
     }
 
     /**
@@ -278,7 +301,11 @@ class BrandStatusService
 
     private function hasShopifyConnected(string $professionalId): bool
     {
-        return ProfessionalIntegration::query()
+        if (array_key_exists($professionalId, $this->shopifyConnectedCache)) {
+            return $this->shopifyConnectedCache[$professionalId];
+        }
+
+        return $this->shopifyConnectedCache[$professionalId] = ProfessionalIntegration::query()
             ->where('professional_id', $professionalId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->whereNotNull('access_token')
