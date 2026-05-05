@@ -60,6 +60,7 @@ class VideoVariantService
     {
         $ffprobe = $this->ffprobeBinary();
 
+        // Array-form Process: each element is a literal argument; no shell interpolation.
         $process = new Process([
             $ffprobe, '-v', 'quiet', '-print_format', 'json',
             '-show_format', '-show_streams', $localPath,
