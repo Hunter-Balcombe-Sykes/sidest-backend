@@ -47,7 +47,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Auto-instrumentation gives you "jobs ran"; explicit events give you "this specific operation took N ms / succeeded / failed because X". Critical at Stage 2 because payout volume grows 5×.
     - **Plain English:** When a payout job fails, the alert should make it obvious *that's the one that matters*, not lost in a stream of generic "queue job failed" notifications.
 
-- [ ] **#7-04** · P1 — Video processing has no codec allowlist, no resolution cap, no FFmpeg timeout
+- [x] **#7-04** · P1 — Video processing has no codec allowlist, no resolution cap, no FFmpeg timeout
     - **Where:** app/Services/Media/VideoVariantService.php (probe / encodeMp4 / extractPoster paths; `setTimeout(null)`)
     - **Affects:** Video upload pipeline (currently feature-flagged off but the code is the same that runs when the flag flips).
     - **Effort:** M (~4–6h)
