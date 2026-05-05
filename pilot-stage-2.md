@@ -221,7 +221,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Standard N+1 fix.
     - **Plain English:** When a brand uploads 100 invites at once, we hit the database 100 times to get the brand's name.
 
-- [ ] **#9-009** · P2 — InviteExpirySweepJob loads all expired invites into memory
+- [x] **#9-009** · P2 — InviteExpirySweepJob loads all expired invites into memory
     - **Where:** app/Jobs/Notifications/InviteExpirySweepJob.php:19-42
     - **Affects:** Daily expiry sweep job — risk grows with invite volume across 5 brands.
     - **Effort:** S (~1h)
