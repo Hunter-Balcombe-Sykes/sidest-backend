@@ -56,7 +56,7 @@ class CommissionPayoutService
         // Re-dispatch any in-flight batches. ExecuteCommissionPayoutJob's idempotent
         // resume logic handles collecting/transferring states safely.
         $existingPending = CommissionPayout::query()
-            ->whereIn('status', ['pending', 'collecting', 'transferring'])
+            ->whereIn('status', ['pending', 'pending_funds', 'collecting', 'transferring'])
             ->whereNull('processed_at')
             ->where('eligible_after', '<=', now())
             ->orderBy('eligible_after')
@@ -586,7 +586,7 @@ class CommissionPayoutService
     private function markPendingFunding(CommissionPayout $payout, string $code, string $reason): void
     {
         $payout->forceFill([
-            'status' => 'pending',
+            'status' => 'pending_funds',
             'failure_code' => $code,
             'failure_reason' => $reason,
             'processed_at' => null,
@@ -627,7 +627,7 @@ class CommissionPayoutService
      */
     public function retryPayout(CommissionPayout $payout): bool
     {
-        if (! in_array($payout->status, ['failed', 'pending'], true)) {
+        if (! in_array($payout->status, ['failed', 'pending', 'pending_funds'], true)) {
             return false;
         }
 

@@ -179,7 +179,7 @@ it('marks affiliate_not_connected when affiliate has no active Stripe account', 
 
     expect($result)->toBeNull();
     $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('pending');
+    expect($fresh->status)->toBe('pending_funds');
     expect($fresh->failure_code)->toBe('affiliate_not_connected');
 });
 
@@ -206,7 +206,7 @@ it('marks brand_payment_method_missing when brand has no card on file', function
 
     expect($result)->toBeNull();
     $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('pending');
+    expect($fresh->status)->toBe('pending_funds');
     expect($fresh->failure_code)->toBe('brand_payment_method_missing');
 });
 
