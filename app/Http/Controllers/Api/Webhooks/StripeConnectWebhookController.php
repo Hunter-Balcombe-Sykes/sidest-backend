@@ -18,6 +18,7 @@ use Stripe\Webhook;
 // V2: Core. Processes Stripe Connect events: account updates, checkout completions, transfer status, payment intents. Drives the commission payout lifecycle.
 class StripeConnectWebhookController extends Controller
 {
+    use ValidatesStripeWebhookPayload;
     public function __invoke(Request $request): JsonResponse
     {
         $payload = $request->getContent();
@@ -56,6 +57,10 @@ class StripeConnectWebhookController extends Controller
             Log::warning('Stripe webhook signature verification failed for all configured secrets');
 
             return response()->json(['error' => 'Invalid signature'], 400);
+        }
+
+        if (! $this->validateEventStructure($event)) {
+            return response()->json(['error' => 'Invalid payload structure'], 400);
         }
 
         // Idempotency: atomic insert-or-skip on the UNIQUE stripe_event_id.

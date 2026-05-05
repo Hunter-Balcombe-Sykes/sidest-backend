@@ -74,6 +74,22 @@ it('stripe connect — rejects 400 when neither connect nor billing secret match
         ->assertJson(['error' => 'Invalid signature']);
 });
 
+it('stripe connect — rejects 400 when event payload is structurally incomplete (missing data)', function () {
+    // Valid HMAC, valid JSON, but missing 'data' — our structural check should reject before storage.
+    $body = json_encode([
+        'id' => 'evt_'.Str::random(20),
+        'type' => 'account.updated',
+    ]);
+    $sig = signStripeBody($body, 'whsec_connect_test');
+
+    $this->call('POST', '/api/webhooks/stripe-connect', [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        'HTTP_STRIPE_SIGNATURE' => $sig,
+    ], $body)
+        ->assertStatus(400)
+        ->assertJson(['error' => 'Invalid payload structure']);
+});
+
 it('stripe connect — account_mismatch returns 400 (HMAC-signed account != data.object.id)', function () {
     // event['account'] = 'acct_real' (HMAC-signed top-level) but
     // event['data']['object']['id'] = 'acct_attacker' — mismatch triggers rejection

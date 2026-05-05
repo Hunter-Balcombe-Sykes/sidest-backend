@@ -128,6 +128,23 @@ it('stripe billing — accepts a real-shape customer.subscription.updated and pe
     expect($updated->status)->toBe('active');
 });
 
+it('stripe billing — rejects 400 when event payload is structurally incomplete (missing data)', function () {
+    // Valid HMAC, valid JSON, but missing 'data' — constructEvent() succeeds but our structural
+    // check should reject it before storage.
+    $body = json_encode([
+        'id' => 'evt_'.Str::random(20),
+        'type' => 'customer.subscription.updated',
+    ]);
+    $sig = signStripeBody($body, 'whsec_test_billing_secret');
+
+    $this->call('POST', '/api/webhooks/stripe', [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        'HTTP_STRIPE_SIGNATURE' => $sig,
+    ], $body)
+        ->assertStatus(400)
+        ->assertJson(['error' => 'Invalid payload structure']);
+});
+
 it('stripe billing — same event_id arriving twice processes only once', function () {
     $event = realStripeSubscriptionUpdatedEvent('sub_unknown', 'cus_unknown', 'price_unknown');
     $body = json_encode($event);

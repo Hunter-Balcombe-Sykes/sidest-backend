@@ -20,6 +20,7 @@ use Stripe\Webhook;
 // V2: Core. Processes Stripe Billing subscription lifecycle webhooks. Source of truth for subscription state.
 class StripeWebhookController extends Controller
 {
+    use ValidatesStripeWebhookPayload;
     public function __invoke(Request $request): JsonResponse
     {
         $payload = $request->getContent();
@@ -45,6 +46,10 @@ class StripeWebhookController extends Controller
             Log::warning('Stripe billing webhook parse error', ['error' => $e->getMessage()]);
 
             return response()->json(['error' => 'Invalid payload'], 400);
+        }
+
+        if (! $this->validateEventStructure($event)) {
+            return response()->json(['error' => 'Invalid payload structure'], 400);
         }
 
         // Idempotency: atomic insert-or-skip using DB unique constraint on stripe_event_id.
