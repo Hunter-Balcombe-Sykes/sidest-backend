@@ -1391,7 +1391,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.5h)
     - **What to do:** Add an explicit case for `paused`.
 
-- [ ] **#2-04** · P3 — Theoretical race in ProfessionalCacheService on `auth_user_id` change mid-request
+- [x] **#2-04** · P3 — Theoretical race in ProfessionalCacheService on `auth_user_id` change mid-request
     - **Where:** app/Services/Cache/ProfessionalCacheService.php:129-160
     - **Effort:** S (~0.5h)
     - **What to do:** Document the immutability assumption (auth_user_id never changes) inline.
