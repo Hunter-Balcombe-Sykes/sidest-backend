@@ -522,7 +522,7 @@ These are best in their own session because bundling would force unrelated archi
         'oxygen_deployment_token' => $row->oxygen_deployment_token,
         ```
 
-- [ ] **#CR-004** · P1 — ProfessionalServiceController::restore() repeats the sort_order bug `store()` was fixed for
+- [x] **#CR-004** · P1 — ProfessionalServiceController::restore() repeats the sort_order bug `store()` was fixed for
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalSiteSelfManagement/ProfessionalServiceController.php:347-350
     - **Affects:** Soft-deleted services restoration. Will 500 on duplicate-key whenever another service has claimed the next sort_order across categories.
     - **Effort:** S (~0.5h)
