@@ -386,6 +386,32 @@ it('skips wallet debit and card charge when resuming from transferring status', 
     expect($payout->fresh()->stripe_transfer_id)->toBe('tr_test');
 });
 
+it('skips transfer creation and completes when stripe_transfer_id was already recorded', function () {
+    // Simulates a crash between saving stripe_transfer_id and saving status=completed.
+    // On resume the service must not create a second transfer.
+    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
+    payoutSvc_seedAffiliate('aff-1');
+    $payout = payoutSvc_seedPayout('p1', [
+        'status' => 'transferring',
+        'stripe_transfer_id' => 'tr_already',
+        'wallet_debit_cents' => 0,
+        'charge_cents' => 10000,
+        'gross_commission_cents' => 10000,
+        'net_payout_cents' => 9700,
+    ]);
+
+    $transferMock = Mockery::mock();
+    $transferMock->shouldNotReceive('create');
+
+    $service = new CommissionPayoutService(payoutSvc_makeStripe(['transfer' => $transferMock]));
+    $result = $service->processPayoutBatch($payout);
+
+    $fresh = $payout->fresh();
+    expect($result)->toBeTrue();
+    expect($fresh->status)->toBe('completed');
+    expect($fresh->stripe_transfer_id)->toBe('tr_already');
+});
+
 // ============================================================
 // Gap 2 — Auto-refund on transfer failure
 // ============================================================
@@ -531,7 +557,7 @@ it('blocks retryPayout when payout status is neither failed nor pending', functi
     expect($payout->fresh()->status)->toBe('completed');
 });
 
-it('increments retry_count so fresh Stripe idempotency keys are used on each admin retry', function () {
+it('increments retry_count on admin retry so a fresh PaymentIntent idempotency key is used', function () {
     payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
     payoutSvc_seedAffiliate('aff-1');
     $payout = payoutSvc_seedPayout('p1', [

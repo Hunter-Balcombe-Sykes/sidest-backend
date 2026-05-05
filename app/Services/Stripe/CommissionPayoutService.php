@@ -297,9 +297,12 @@ class CommissionPayoutService
         $currencyLower = strtolower($currencyUpper);
         $amountToCollect = $payout->gross_commission_cents;
 
-        // Idempotency key suffix — retry_count is incremented on each admin manual retry
-        // so fresh Stripe objects are created rather than returning a refunded/failed one
-        // from within the 24-hour idempotency TTL window.
+        // Idempotency key suffix used only for PaymentIntents — retry_count is incremented
+        // on each admin manual retry so a fresh PI is created rather than returning a
+        // refunded/failed one from within the 24-hour idempotency TTL window.
+        // Transfers intentionally use a stable key (no suffix) so Stripe returns the same
+        // transfer on any retry, preventing a duplicate payout if the transfer succeeded
+        // but the HTTP response was lost before the ID could be recorded.
         $retryKey = '_r'.$payout->retry_count;
 
         // Step 1: Wallet debit — or resume from recorded state
@@ -416,29 +419,40 @@ class CommissionPayoutService
                 $payout->forceFill(['status' => 'transferring'])->save();
             }
 
-            $transferPayload = [
-                'amount' => $payout->net_payout_cents,
-                'currency' => $currencyLower,
-                'destination' => $affiliate->stripe_connect_account_id,
-                'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
-                'metadata' => [
-                    'sidest_payout_id' => $payout->id,
-                    'brand_id' => $brand->id,
-                    'affiliate_id' => $affiliate->id,
-                ],
-            ];
+            // Guard: skip transfer creation if a prior run already recorded the ID
+            // (e.g. the transfer was saved but the server crashed before marking complete).
+            if (! $payout->stripe_transfer_id) {
+                $transferPayload = [
+                    'amount' => $payout->net_payout_cents,
+                    'currency' => $currencyLower,
+                    'destination' => $affiliate->stripe_connect_account_id,
+                    'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
+                    'metadata' => [
+                        'sidest_payout_id' => $payout->id,
+                        'brand_id' => $brand->id,
+                        'affiliate_id' => $affiliate->id,
+                    ],
+                ];
 
-            if ($latestChargeId) {
-                $transferPayload['source_transaction'] = $latestChargeId;
+                if ($latestChargeId) {
+                    $transferPayload['source_transaction'] = $latestChargeId;
+                }
+
+                $transfer = $this->stripe->transfers->create(
+                    $transferPayload,
+                    // Stable key — no retry_count suffix. Stripe returns the same transfer
+                    // on any retry (including admin retries that increment retry_count),
+                    // preventing a duplicate payout when the transfer succeeded but the
+                    // response was lost before stripe_transfer_id could be recorded.
+                    ['idempotency_key' => 'tr_'.$payout->id]
+                );
+
+                // Persist stripe_transfer_id before the completion record. If the process
+                // crashes between these two saves, the guard above prevents re-creation.
+                $payout->forceFill(['stripe_transfer_id' => $transfer->id])->save();
             }
 
-            $transfer = $this->stripe->transfers->create(
-                $transferPayload,
-                ['idempotency_key' => 'tr_'.$payout->id.$retryKey]
-            );
-
             $payout->forceFill([
-                'stripe_transfer_id' => $transfer->id,
                 'status' => 'completed',
                 'processed_at' => now(),
                 'failure_code' => null,
@@ -469,9 +483,9 @@ class CommissionPayoutService
             return true;
         } catch (ApiConnectionException|RateLimitException $e) {
             // Transient error — re-throw so Horizon retries from 'transferring' status.
-            // Wallet and charge are NOT reversed: if the transfer succeeded on Stripe's side
-            // but the response was lost in transit, the idempotency key returns the same
-            // transfer on retry rather than creating a duplicate.
+            // Wallet and charge are NOT reversed. The stable transfer idempotency key
+            // and the stripe_transfer_id guard above together ensure no duplicate transfer
+            // is created if the original request succeeded but the response was lost.
             throw $e;
         } catch (ApiErrorException $e) {
             // Terminal transfer failure — credit wallet back, then attempt to auto-refund.
