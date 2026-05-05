@@ -10,6 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Stripe\Exception\RateLimitException;
 
 // V2: Core. Batch-processes all eligible commission payouts via CommissionPayoutService. Runs on daily cron.
 class ProcessCommissionPayoutsJob implements ShouldQueue
@@ -51,7 +52,22 @@ class ProcessCommissionPayoutsJob implements ShouldQueue
             'attempt' => $this->attempts(),
         ]);
 
-        $payoutStats = $payoutService->processEligiblePayouts();
+        try {
+            $payoutStats = $payoutService->processEligiblePayouts();
+        } catch (RateLimitException $e) {
+            // Stripe 429: back off exponentially before requeueing so we don't
+            // amplify API pressure across concurrent brand payouts.
+            // release() avoids burning a retry attempt against a transient throttle.
+            $delay = min(120 * (2 ** ($this->attempts() - 1)), 600);
+            Log::warning('Stripe rate limit hit in payout orchestration, requeueing with backoff', [
+                'delay_seconds' => $delay,
+                'attempt' => $this->attempts(),
+            ]);
+            $this->release($delay);
+
+            return;
+        }
+
         Log::info('Commission payout processing complete', $payoutStats);
 
         // Void commissions past their window for unconnected affiliates
