@@ -126,6 +126,14 @@ class ProfessionalCacheService
      |  Keep model-returning helpers (no model caching)
      * --------------------------*/
 
+    /**
+     * Resolve a Professional by their Supabase auth UUID.
+     *
+     * auth_user_id is immutable — set at account creation, never updated — so there is
+     * no real mid-request race between the cached ID lookup and the model fetch.
+     * The mismatch guard below is a belt-and-suspenders defence against stale/corrupt
+     * cache entries only, not a concurrency fix.
+     */
     public function getByAuthId(string $authUserId): ?Professional
     {
         $id = $this->getIdByAuthId($authUserId);
