@@ -13,6 +13,8 @@ trait ValidatesShopifyWebhookHmac
 
         $secrets = array_filter([
             (string) config('services.shopify.webhook_secret'),
+            // Fallback secret supports zero-downtime rotation: set it to the old webhook_secret
+            // when rotating, then CLEAR it within 30 days once all in-flight webhooks have drained.
             (string) config('services.shopify.fallback_secret'),
         ], static fn (string $s): bool => $s !== '');
 
