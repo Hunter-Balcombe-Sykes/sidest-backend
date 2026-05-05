@@ -294,6 +294,7 @@ class StripeWebhookController extends Controller
             'incomplete' => Subscription::STATUS_INCOMPLETE,
             'incomplete_expired' => Subscription::STATUS_INCOMPLETE_EXPIRED,
             'trialing' => Subscription::STATUS_ACTIVE, // we don't use trials — map to active
+            'paused' => Subscription::STATUS_PAUSED,
             default => $stripeStatus,
         };
     }

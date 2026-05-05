@@ -27,6 +27,8 @@ class Subscription extends BaseModel
 
     public const STATUS_INCOMPLETE_EXPIRED = 'incomplete_expired';
 
+    public const STATUS_PAUSED = 'paused';
+
     public const GRACE_STATUSES = [self::STATUS_ACTIVE, self::STATUS_PAST_DUE];
 
     protected $fillable = [
