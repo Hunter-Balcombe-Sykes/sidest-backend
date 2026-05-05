@@ -295,7 +295,11 @@ class ProfessionalAnalyticsController extends ApiController
                         // dashboard can label rows by platform name (instagram,
                         // fresha, etc.) rather than raw title/URL.
                         return DB::table('analytics.link_clicks as lc')
-                            ->join('site.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
+                            ->when(
+                                $clickBlockColumn === 'block_id',
+                                fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.block_id'),
+                                fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id'),
+                            )
                             ->where('lc.professional_id', $professional->id)
                             ->whereBetween('lc.occurred_at', [$from, $to])
                             ->whereNull('b.deleted_at')
@@ -318,7 +322,11 @@ class ProfessionalAnalyticsController extends ApiController
                     function (string $clickBlockColumn) use ($professional, $from, $to) {
                         // Top sections (total opens)
                         return DB::table('analytics.link_clicks as lc')
-                            ->join('site.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
+                            ->when(
+                                $clickBlockColumn === 'block_id',
+                                fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.block_id'),
+                                fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id'),
+                            )
                             ->where('lc.professional_id', $professional->id)
                             ->whereBetween('lc.occurred_at', [$from, $to])
                             ->whereNull('b.deleted_at')
@@ -528,7 +536,11 @@ class ProfessionalAnalyticsController extends ApiController
             $shopOpens = (int) LinkClick::runForBlockForeignKey(
                 function (string $clickBlockColumn) use ($professional, $from, $to) {
                     return DB::table('analytics.link_clicks as lc')
-                        ->join('site.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
+                        ->when(
+                            $clickBlockColumn === 'block_id',
+                            fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.block_id'),
+                            fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id'),
+                        )
                         ->where('lc.professional_id', $professional->id)
                         ->whereBetween('lc.occurred_at', [$from, $to])
                         ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'shop'")
