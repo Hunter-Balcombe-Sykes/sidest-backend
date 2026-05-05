@@ -1351,7 +1351,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~1h)
     - **What to do:** Document or add validation; consider gating behind a "share publicly" flag.
 
-- [ ] **#6-01** · P3 — `$clickBlockColumn` interpolated into JOIN clause in ProfessionalAnalyticsController
+- [x] **#6-01** · P3 — `$clickBlockColumn` interpolated into JOIN clause in ProfessionalAnalyticsController
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalAnalyticsController.php:283-343
     - **Effort:** S (~1h)
     - **What to do:** Refactor to a conditional join for clarity. Whitelist is tight, no real injection risk.
