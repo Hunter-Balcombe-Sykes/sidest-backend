@@ -435,13 +435,36 @@ class VideoVariantService
             $this->runCommand($cmd2, $exitCode2, $timeout);
 
             if ($exitCode2 !== 0 || ! file_exists($output)) {
-                Log::warning('VideoVariantService: could not extract poster frame.', [
+                Log::warning('VideoVariantService: could not extract poster frame; writing placeholder JPEG.', [
                     'error' => $outputStr,
                 ]);
-                // Create a 1-byte placeholder so downstream code doesn't fail
-                file_put_contents($output, '');
+
+                if (! $this->writePlaceholderJpeg($output)) {
+                    throw new \RuntimeException('Could not extract poster frame and GD is unavailable to generate a placeholder.');
+                }
             }
         }
+    }
+
+    /**
+     * Write a minimal 1×1 black JPEG to $path as a last-resort poster placeholder.
+     * Returns false if the GD extension is not loaded.
+     */
+    private function writePlaceholderJpeg(string $path): bool
+    {
+        if (! function_exists('imagecreatetruecolor')) {
+            return false;
+        }
+
+        $img = imagecreatetruecolor(1, 1);
+        if ($img === false) {
+            return false;
+        }
+
+        $written = imagejpeg($img, $path, 85);
+        imagedestroy($img);
+
+        return $written;
     }
 
     /**
