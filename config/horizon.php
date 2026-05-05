@@ -102,6 +102,8 @@ return [
         ],
         // Capped to prevent analytics/image backlogs from starving critical queues.
         // nice=10 also deprioritises these at the OS scheduler level.
+        // memory=512: raised from 256 — images queue can spike PHP heap during
+        // transformation and rebuild aggregates scan large date windows at Stage 2.
         'supervisor-analytics' => [
             'connection' => 'redis',
             'queue' => ['analytics', 'images'],
@@ -110,7 +112,7 @@ return [
             'maxProcesses' => 2,
             'maxTime' => 0,
             'maxJobs' => 0,
-            'memory' => 256,
+            'memory' => 512,
             'tries' => 1,
             'timeout' => 300,
             'nice' => 10,
