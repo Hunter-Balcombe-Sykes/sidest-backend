@@ -3,6 +3,12 @@
 namespace App\Services\Cache;
 
 // V2: Central cache key naming convention. All cache keys across the application flow through this class.
+//
+// ONE-SITE-PER-PROFESSIONAL ASSUMPTION: Many keys below are namespaced by professionalId rather than siteId.
+// This is intentional and correct for the current data model (each professional has exactly one site).
+// If multi-site support is introduced, any key that caches site-scoped data under professionalId will need
+// a siteId segment added — otherwise two sites owned by the same professional would share a cache entry.
+// Methods carrying this assumption are annotated with "@multi-site: needs site_id".
 class CacheKeyGenerator
 {
     public static function publicSite(string $subdomain): string
@@ -50,11 +56,13 @@ class CacheKeyGenerator
         return "site:{$siteId}:images:active";
     }
 
+    // @multi-site: needs site_id — visits belong to a site, not just a professional
     public static function analyticsVisits(string $professionalId, string $startDate, string $endDate): string
     {
         return "analytics:visits:{$professionalId}:{$startDate}:{$endDate}";
     }
 
+    // @multi-site: needs site_id — clicks belong to a site, not just a professional
     public static function analyticsClicks(string $professionalId, string $startDate, string $endDate): string
     {
         return "analytics:clicks:{$professionalId}:{$startDate}:{$endDate}";
@@ -90,6 +98,7 @@ class CacheKeyGenerator
         return "pro:map:auth:{$authUserId}";
     }
 
+    // @multi-site: needs site_id — summary aggregates site traffic, scoped to one site under current model
     public static function analyticsSummary(string $professionalId, string $startDate, string $endDate): string
     {
         // q2: top_links/top_sections query shape changed (commits 672aa80, c144ccc)
@@ -100,6 +109,7 @@ class CacheKeyGenerator
      * Version token used to bust all analytics summary keys for a professional at once.
      * Incrementing this key makes every date-range summary key for the professional stale
      * without requiring a full key-space scan.
+     * @multi-site: needs site_id — if multi-site, version tokens must be per-site
      */
     public static function analyticsSummaryVersion(string $professionalId): string
     {
@@ -111,16 +121,19 @@ class CacheKeyGenerator
         return "brand:{$brandProfessionalId}:font:active";
     }
 
+    // @multi-site: needs site_id if booking widgets are ever per-site
     public static function bookingAnalytics(string $professionalId, string $from, string $to, string $groupBy): string
     {
         return "analytics:booking:{$professionalId}:{$from}:{$to}:{$groupBy}";
     }
 
+    // @multi-site: needs site_id — commerce traffic is tied to a site storefront
     public static function affiliateCommerceAnalytics(string $professionalId, string $from, string $to): string
     {
         return "analytics:commerce:affiliate:{$professionalId}:{$from}:{$to}";
     }
 
+    // @multi-site: needs site_id — commerce traffic is tied to a site storefront
     public static function brandCommerceAnalytics(string $professionalId, string $from, string $to): string
     {
         // v2: totals block now includes page_views + unique_visitors (commit a0e12a9)
