@@ -938,7 +938,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** The grace clock is set from PHP's idea of "now" instead of the database's. They're usually milliseconds apart. Switch to the DB clock for consistency.
     - **Source:** Commit-batch review item #17 (commit `85f2673`).
 
-- [ ] **#CR-013** · P2 — Window-keyed caching of window-independent payout/grace state — same data duplicated across every viewed window
+- [x] **#CR-013** · P2 — Window-keyed caching of window-independent payout/grace state — same data duplicated across every viewed window
     - **Where:** app/Http/Controllers/Api/Professional/Analytics/AffiliateCommerceAnalyticsController.php (overview cache key)
     - **Affects:** `payout_summary` and `grace_summary` blocks are current-state, not window-dependent — but cached under `from:to`. After a payout voids, previously-viewed windows still display old urgency banners up to 5min each.
     - **Effort:** M (~2h)
