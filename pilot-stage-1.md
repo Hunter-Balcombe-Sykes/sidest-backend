@@ -835,7 +835,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Void window query uses created_at (insertion); business intent is "X days from sale" (occurred_at).
     - **Source:** v5 audit (discovery_lens: lens-L-time-money-tz-currency; in_scope_v4: no).
 
-- [ ] **#V5-027** · P1 — Enquiry notification email lacks per-brand throttle — spammable inbox
+- [x] **#V5-027** · P1 — Enquiry notification email lacks per-brand throttle — spammable inbox
     - **Where:** app/Http/Controllers/Api/PublicSite/PublicEnquiryController.php:108-111, app/Jobs/Notifications/SendEnquiryNotificationJob.php
     - **Affects:** Brand inbox; bot abuse rotating IPs around the existing per-IP/subdomain throttle.
     - **Effort:** M (~2-3h)
