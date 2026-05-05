@@ -169,9 +169,12 @@ class StripeWebhookController extends Controller
             'provider_payload' => json_decode(json_encode($event), true),
         ];
 
-        // Check if price changed (plan upgrade/downgrade)
+        // Only sync plan_id when Stripe confirms the subscription is payment-healthy.
+        // If the upgrade payment failed (past_due, incomplete, etc.) keep the old plan
+        // so entitlements are not granted prematurely. A later subscription.updated
+        // with status=active (successful retry) will promote the plan at that point.
         $priceId = $subscription->items->data[0]->price->id ?? null;
-        if ($priceId) {
+        if ($priceId && in_array($subscription->status, ['active', 'trialing'], true)) {
             $plan = Plan::where('stripe_price_id', $priceId)->where('is_active', true)->first();
             if ($plan && $plan->id !== $localSub->plan_id) {
                 $updates['plan_id'] = $plan->id;

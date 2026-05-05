@@ -148,6 +148,71 @@ it('subscription.updated webhook updates plan_id when price changes', function (
     expect($subscription->fresh()->plan_id)->toBe($newPlan->id);
 });
 
+it('subscription.updated webhook does not promote plan_id when status is past_due', function () {
+    $professional = whTestProfessional();
+    $oldPlan = whTestPlan('starter', 'price_old_pd');
+    $newPlan = whTestPlan('growth', 'price_new_pd');
+    $subscription = whTestSubscription($professional, $oldPlan, 'sub_pastdue');
+
+    // Stripe fires subscription.updated with the new price but payment failed → past_due
+    $stripeSubscription = (object) [
+        'id' => 'sub_pastdue',
+        'status' => 'past_due',
+        'current_period_start' => now()->timestamp,
+        'current_period_end' => now()->addMonth()->timestamp,
+        'cancel_at_period_end' => false,
+        'items' => (object) [
+            'data' => [
+                (object) [
+                    'price' => (object) ['id' => 'price_new_pd'],
+                ],
+            ],
+        ],
+    ];
+    $event = (object) ['type' => 'customer.subscription.updated'];
+
+    $controller = new StripeWebhookController;
+    $method = new ReflectionMethod($controller, 'handleSubscriptionUpdated');
+    $method->setAccessible(true);
+    $method->invoke($controller, $stripeSubscription, $event);
+
+    $fresh = $subscription->fresh();
+    // Status must reflect Stripe reality, but plan must not be promoted
+    expect($fresh->status)->toBe('past_due')
+        ->and($fresh->plan_id)->toBe($oldPlan->id);
+});
+
+it('subscription.updated webhook promotes plan_id when retry succeeds and status becomes active', function () {
+    $professional = whTestProfessional();
+    $oldPlan = whTestPlan('starter', 'price_old_retry');
+    $newPlan = whTestPlan('growth', 'price_new_retry');
+    $subscription = whTestSubscription($professional, $oldPlan, 'sub_retry');
+
+    // Simulate the successful-retry event: status is now active with the new price
+    $stripeSubscription = (object) [
+        'id' => 'sub_retry',
+        'status' => 'active',
+        'current_period_start' => now()->timestamp,
+        'current_period_end' => now()->addMonth()->timestamp,
+        'cancel_at_period_end' => false,
+        'items' => (object) [
+            'data' => [
+                (object) [
+                    'price' => (object) ['id' => 'price_new_retry'],
+                ],
+            ],
+        ],
+    ];
+    $event = (object) ['type' => 'customer.subscription.updated'];
+
+    $controller = new StripeWebhookController;
+    $method = new ReflectionMethod($controller, 'handleSubscriptionUpdated');
+    $method->setAccessible(true);
+    $method->invoke($controller, $stripeSubscription, $event);
+
+    expect($subscription->fresh()->plan_id)->toBe($newPlan->id);
+});
+
 it('subscription.updated webhook leaves plan_id unchanged when price is same', function () {
     $professional = whTestProfessional();
     $plan = whTestPlan('starter', 'price_same');
