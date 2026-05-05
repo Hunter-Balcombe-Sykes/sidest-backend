@@ -659,7 +659,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Single `config('services.shopify.webhook_secret')`. Shopify partner apps expose per-shop secrets; using one platform secret means a single leak compromises every brand's webhook channel.
     - **Source:** v5 audit (discovery_lens: domain-subagent-4-pass2; in_scope_v4: no).
 
-- [ ] **#V5-006** · P1 — ProcessShopifyOrderWebhookJob filter races vs unique constraint, dropping commissions
+- [x] **#V5-006** · P1 — ProcessShopifyOrderWebhookJob filter races vs unique constraint, dropping commissions
     - **Where:** app/Jobs/Shopify/ProcessShopifyOrderWebhookJob.php:220-226
     - **Affects:** Commission ledger integrity under concurrent webhook processing.
     - **Effort:** M (~1-2h)
