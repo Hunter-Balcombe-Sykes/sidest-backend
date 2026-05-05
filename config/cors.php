@@ -10,7 +10,10 @@ return [
     // to call the API without CORS preflight rejections.
     'allowed_origins' => ['*'],
     'allowed_origins_patterns' => [],
-    // Wildcard headers equally safe for the same reason.
+    // Wildcard headers are safe for the same reason as allowed_origins above:
+    // supports_credentials => false means the browser's wildcard+credentials
+    // restriction does not apply. If supports_credentials is ever set to true,
+    // both allowed_origins and allowed_headers MUST be locked to explicit values.
     'allowed_headers' => ['*'],
     'exposed_headers' => [],
     'max_age' => 0,
