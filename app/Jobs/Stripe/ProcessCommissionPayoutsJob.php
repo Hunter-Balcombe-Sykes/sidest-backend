@@ -70,6 +70,12 @@ class ProcessCommissionPayoutsJob implements ShouldQueue
 
     public function failed(\Throwable $e): void
     {
+        // Forward to Nightwatch so the daily payout orchestration failure
+        // is observable as a named exception, not a generic queue event.
+        // Log::error gives a structured breadcrumb in cloud logs even if
+        // Nightwatch is offline.
+        report($e);
+
         Log::error('Commission payout job failed after all retries', [
             'message' => $e->getMessage(),
         ]);

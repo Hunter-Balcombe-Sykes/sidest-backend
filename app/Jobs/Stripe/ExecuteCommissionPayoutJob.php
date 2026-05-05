@@ -55,11 +55,35 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
+        $start = microtime(true);
         $payoutService->processPayoutBatch($payout);
+        $durationMs = (int) round((microtime(true) - $start) * 1000);
+
+        // Alert threshold: 30s = 25% of job timeout. Nightwatch captures warning+
+        // level logs — configure an alert on this message to catch batches trending
+        // toward the 120s timeout before they start failing.
+        if ($durationMs > 30_000) {
+            Log::warning('ExecuteCommissionPayoutJob slow payout batch', [
+                'payout_id' => $this->payoutId,
+                'duration_ms' => $durationMs,
+                'attempt' => $this->attempts(),
+            ]);
+        } else {
+            Log::info('ExecuteCommissionPayoutJob completed', [
+                'payout_id' => $this->payoutId,
+                'duration_ms' => $durationMs,
+            ]);
+        }
     }
 
     public function failed(\Throwable $e): void
     {
+        // Forward to Nightwatch so this payout failure is observable by payout_id
+        // as a named exception, not a generic "queue job failed" event.
+        // Log::error gives a structured breadcrumb in cloud logs even if Nightwatch
+        // is offline.
+        report($e);
+
         Log::error('ExecuteCommissionPayoutJob exhausted all retries', [
             'payout_id' => $this->payoutId,
             'error' => $e->getMessage(),
