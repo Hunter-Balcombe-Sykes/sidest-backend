@@ -1386,7 +1386,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.5h)
     - **What to do:** Add an explicit `*.myshopify.com` regex check after normalization.
 
-- [ ] **#3-07** · P3 — Stripe `paused` status falls through default → string literal in webhook controller
+- [x] **#3-07** · P3 — Stripe `paused` status falls through default → string literal in webhook controller
     - **Where:** app/Http/Controllers/Api/Webhooks/StripeWebhookController.php:286-298
     - **Effort:** S (~0.5h)
     - **What to do:** Add an explicit case for `paused`.
