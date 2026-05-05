@@ -668,7 +668,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Pre-filter existing idempotency keys outside transaction; concurrent insert races; bulk insert aborts the transaction; job logs success but no entries are created.
     - **Source:** v5 audit (discovery_lens: domain-subagent-4; in_scope_v4: yes).
 
-- [ ] **#V5-007** · P1 — Transfer idempotency key changes on retry — duplicate transfer risk
+- [x] **#V5-007** · P1 — Transfer idempotency key changes on retry — duplicate transfer risk
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:299, 361, 430
     - **Affects:** Stripe payout transfers — duplicate payment risk on retry after async-success-then-disconnect.
     - **Effort:** M (~2-3h)
