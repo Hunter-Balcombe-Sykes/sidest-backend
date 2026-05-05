@@ -59,7 +59,9 @@ def _collect_recommended(config, count: int) -> list[str]:
     The runner processes a queued bundle as one Claude session that fixes all
     members together. Expanding here would lose that bundle abstraction.
     Standalone items (not in any bundle) are appended after bundles.
+    Items/bundles already marked done in the markdown ([x]) are excluded.
     """
+    from audit_orchestrator.models import ItemStatus
     sources = _gather_sources(config)
     parse_results = [parse_audit_file(p) for p in sources]
     ctx = _build_classifier_context(config, parse_results)
@@ -69,11 +71,16 @@ def _collect_recommended(config, count: int) -> list[str]:
         item_by_id = {i.id: i for i in r.items}
         for bundle in r.bundles:
             members = [item_by_id[m] for m in bundle.members if m in item_by_id]
+            all_done = bool(members) and all(m.status == ItemStatus.DONE for m in members)
+            if all_done:
+                continue
             if classify_bundle(bundle, members, ctx) == Classification.RECOMMENDED:
                 if bundle.id not in out:
                     out.append(bundle.id)
         for item in r.items:
             if item.bundle is not None:
+                continue
+            if item.status == ItemStatus.DONE:
                 continue
             if classify_item(item, ctx) == Classification.RECOMMENDED:
                 if item.id not in out:
@@ -116,15 +123,21 @@ def add(ids: tuple[str, ...], count: int) -> None:
 
     parse_results = parse_all(config, Path.cwd())
     not_found: list[str] = []
+    already_done: list[str] = []
     for item_id in to_add:
         if not populate_item_metadata(state, item_id, parse_results):
             not_found.append(item_id)
+            continue
+        if state.items.get(item_id, {}).get("status") == "done":
+            already_done.append(item_id)
             continue
         if item_id not in state.queue:
             state.queue.append(item_id)
 
     sm.save(state)
     click.echo(f"Queue: {', '.join(state.queue) if state.queue else '(empty)'}")
+    if already_done:
+        click.echo(f"Already done (skipped): {', '.join(already_done)}")
     if not_found:
         click.echo(f"Not found in audit sources: {', '.join(not_found)}", err=True)
 

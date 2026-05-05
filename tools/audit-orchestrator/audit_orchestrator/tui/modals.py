@@ -442,7 +442,10 @@ class QueueBrowser(ModalScreen[None]):
             # Populate metadata so the runner has something to send to Claude
             parse_results = parse_all(config, self.repo_root)
             if populate_item_metadata(state, item_id, parse_results):
-                state.queue.append(item_id)
+                if state.items.get(item_id, {}).get("status") == "done":
+                    self.notify(f"{item_id} is already done — not queued")
+                else:
+                    state.queue.append(item_id)
         self.state_mgr.save(state)
         # _populate handles cursor + scroll preservation now; an extra
         # move_cursor here would re-scroll the cursor into view and undo
