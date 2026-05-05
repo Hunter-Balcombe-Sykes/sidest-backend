@@ -63,7 +63,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
         $process->setTimeout(null); // unbounded
         ```
 
-- [ ] **#7-01** · P1 — Image MIME validation accepts client-declared Content-Type without magic-byte sniffing
+- [x] **#7-01** · P1 — Image MIME validation accepts client-declared Content-Type without magic-byte sniffing
     - **Where:** app/Http/Requests/Api/Professional/Uploads/UploadImageRequest.php (and brand logo / placeholder request classes)
     - **Affects:** All image upload endpoints across all brands.
     - **Effort:** S (~2h)
