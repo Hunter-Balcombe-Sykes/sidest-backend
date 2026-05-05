@@ -11,6 +11,9 @@ class BrandAffiliateInviteObserver
 {
     public bool $afterCommit = true;
 
+    // Memoize brand names within the request to avoid N+1 on bulk CSV imports.
+    private static array $brandNameCache = [];
+
     public function __construct(private readonly NotificationPublisher $publisher) {}
 
     public function created(BrandAffiliateInvite $invite): void
@@ -88,10 +91,14 @@ class BrandAffiliateInviteObserver
 
     private function brandName(string $brandProfessionalId): string
     {
-        return (string) (\Illuminate\Support\Facades\DB::table('core.professionals')
-            ->where('id', $brandProfessionalId)
-            ->whereNull('deleted_at')
-            ->value(\Illuminate\Support\Facades\DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), 'Brand')")));
+        if (! isset(self::$brandNameCache[$brandProfessionalId])) {
+            self::$brandNameCache[$brandProfessionalId] = (string) (\Illuminate\Support\Facades\DB::table('core.professionals')
+                ->where('id', $brandProfessionalId)
+                ->whereNull('deleted_at')
+                ->value(\Illuminate\Support\Facades\DB::raw("COALESCE(NULLIF(display_name, ''), NULLIF(handle, ''), 'Brand')")));
+        }
+
+        return self::$brandNameCache[$brandProfessionalId];
     }
 
     private function claimedName(BrandAffiliateInvite $invite): string
