@@ -790,7 +790,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Each webhook controller calls HMAC validation as first action. No middleware enforcement → #4-01 was exactly this class of bug.
     - **Source:** v5 audit (discovery_lens: lens-H-rate-limit-posture; in_scope_v4: yes).
 
-- [ ] **#V5-022** · P1 — SendStaffBroadcastEmailsJob has no $tries or $backoff
+- [x] **#V5-022** · P1 — SendStaffBroadcastEmailsJob has no $tries or $backoff
     - **Where:** app/Jobs/Notifications/SendStaffBroadcastEmailsJob.php:14
     - **Affects:** Staff broadcast reliability (different file from #9-011 in stage-2; this is the parent job, that is the per-subscriber).
     - **Effort:** S (~0.25h)
