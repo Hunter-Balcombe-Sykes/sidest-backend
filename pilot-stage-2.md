@@ -183,7 +183,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Single-source-of-truth question — make the choice explicit and document it.
     - **Plain English:** When a brand changes their store name in Shopify, our copy gets overwritten — even if the brand had customized it locally.
 
-- [ ] **#4-09** · P2 — orders/updated refund reversal idempotency window is only the 24h cache
+- [x] **#4-09** · P2 — orders/updated refund reversal idempotency window is only the 24h cache
     - **Where:** app/Jobs/Shopify/ProcessShopifyOrderUpdatedWebhookJob.php (handlePartialRefund ~95-227)
     - **Affects:** Commission ledger correctness on long-delayed Shopify replays.
     - **Effort:** M (~3h)
