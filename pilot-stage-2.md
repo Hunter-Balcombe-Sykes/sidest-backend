@@ -244,7 +244,7 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
 
 ## P3 — Nice to have
 
-- [ ] **#PR-008** · P3 — Stripe transaction blocks don't set isolation level explicitly
+- [x] **#PR-008** · P3 — Stripe transaction blocks don't set isolation level explicitly
     - **Where:** app/Services/Stripe/CommissionPayoutService.php (transaction blocks)
     - **Effort:** S (~1h)
     - **What to do:** Document expected isolation level for these blocks; or set explicitly with `DB::transaction(..., isolationLevel: ...)`.
