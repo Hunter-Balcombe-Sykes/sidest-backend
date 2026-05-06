@@ -7,7 +7,10 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-// V2: Core. Records commission per order line from Shopify orders/paid webhook. Tracks entry_type, status (pending/approved/reversed), and rate_source.
+// DEPRECATED: order-lifecycle accrual/reversal rows move to App\Models\Commerce\Order
+// in the Phase 3 webhook rewrite. Money-movement rows (payouts/clawbacks/adjustments)
+// move to App\Models\Retail\CommissionMovement when the table is renamed in Phase 4.
+// Until then this class continues to serve all current webhook job callers unchanged.
 class CommissionLedgerEntry extends BaseModel
 {
     use HasUuids;

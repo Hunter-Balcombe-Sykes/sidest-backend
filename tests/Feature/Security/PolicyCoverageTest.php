@@ -36,6 +36,10 @@ const POLICY_EXEMPT = [
 
     // Nested under CommissionPayout — gated transitively by CommissionPolicy.
     \App\Models\Retail\CommissionPayoutItem::class,
+
+    // Nested under Commerce\Order — append-only audit log; access flows through
+    // the parent Order's CommissionPolicy. Mirrors the CommissionPayoutItem pattern.
+    \App\Models\Commerce\OrderEvent::class,
 ];
 
 it('every tenant-owned model has a registered policy', function () {

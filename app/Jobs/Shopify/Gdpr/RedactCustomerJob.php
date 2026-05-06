@@ -129,9 +129,42 @@ class RedactCustomerJob implements ShouldQueue
                     'updated_at' => now(),
                 ]);
 
+            // Scrub PII on commerce.orders. Customer-linked Shopify order rows hold the
+            // raw Shopify payload (billing/shipping address, customer name/email/phone) on
+            // shopify_data, plus customer-authored fields under line_items[*].properties.
+            // Full-nuke shopify_data to '{}' (matches the booking_events.raw_payload pattern
+            // — works on Postgres and SQLite). Cents columns are kept for analytics.
+            $scrubbedOrders = 0;
+            if ($customer) {
+                $orderIds = DB::connection('pgsql')
+                    ->table('commerce.orders')
+                    ->where('customer_id', $customer->id)
+                    ->pluck('id')
+                    ->all();
+
+                if (! empty($orderIds)) {
+                    $scrubbedOrders = DB::connection('pgsql')
+                        ->table('commerce.orders')
+                        ->whereIn('id', $orderIds)
+                        ->update([
+                            'shopify_data' => '{}',
+                            'customer_id' => null,
+                            'updated_at' => now(),
+                        ]);
+
+                    // Order events (audit log) can hold customer-named refund notes,
+                    // adjustment reasons, denormalised customer fields. Full-nuke metadata.
+                    DB::connection('pgsql')
+                        ->table('commerce.order_events')
+                        ->whereIn('order_id', $orderIds)
+                        ->update(['metadata' => '{}']);
+                }
+            }
+
             // Nothing found for this email — legitimate skip (email address may
             // never have interacted with this shop via Side St).
-            if (! $customer && $deletedSubs === 0 && $deletedEnquiries === 0 && $scrubbedBookings === 0) {
+            if (! $customer && $deletedSubs === 0 && $deletedEnquiries === 0
+                && $scrubbedBookings === 0 && $scrubbedOrders === 0) {
                 $gdpr->markSkipped('no data found for email in this shop');
 
                 return;
@@ -146,6 +179,7 @@ class RedactCustomerJob implements ShouldQueue
                 'deleted_subscriptions' => $deletedSubs,
                 'deleted_enquiries' => $deletedEnquiries,
                 'scrubbed_bookings' => $scrubbedBookings,
+                'scrubbed_orders' => $scrubbedOrders,
             ]);
         } catch (\Throwable $e) {
             $gdpr->markFailed($e->getMessage());

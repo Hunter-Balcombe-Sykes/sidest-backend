@@ -60,6 +60,21 @@ beforeEach(function () {
         updated_at TEXT
     )');
 
+    // Phase 1 schema — RedactShopJob scrubs PII on these.
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.orders (
+        id TEXT PRIMARY KEY,
+        brand_professional_id TEXT,
+        affiliate_professional_id TEXT,
+        customer_id TEXT,
+        shopify_data TEXT,
+        updated_at TEXT
+    )');
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.order_events (
+        id TEXT PRIMARY KEY,
+        order_id TEXT,
+        metadata TEXT
+    )');
+
     $conn->statement('CREATE TABLE IF NOT EXISTS core.gdpr_requests (
         id TEXT PRIMARY KEY,
         topic TEXT NOT NULL,

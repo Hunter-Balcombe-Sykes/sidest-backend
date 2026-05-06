@@ -14,8 +14,24 @@ beforeEach(function () {
         $conn->statement('ATTACH DATABASE \':memory:\' AS notifications');
         $conn->statement('ATTACH DATABASE \':memory:\' AS site');
         $conn->statement('ATTACH DATABASE \':memory:\' AS analytics');
+        $conn->statement('ATTACH DATABASE \':memory:\' AS commerce');
     } catch (\Throwable) {
     }
+
+    // Phase 1 schema — RedactCustomerJob scrubs PII on these.
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.orders (
+        id TEXT PRIMARY KEY,
+        brand_professional_id TEXT,
+        affiliate_professional_id TEXT,
+        customer_id TEXT,
+        shopify_data TEXT,
+        updated_at TEXT
+    )');
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.order_events (
+        id TEXT PRIMARY KEY,
+        order_id TEXT,
+        metadata TEXT
+    )');
 
     $conn->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
         id TEXT PRIMARY KEY,

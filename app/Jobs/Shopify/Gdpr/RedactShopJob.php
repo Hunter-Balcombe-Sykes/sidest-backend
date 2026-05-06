@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -89,7 +90,34 @@ class RedactShopJob implements ShouldQueue
             //    using those integrations.
             $anonymisedCount = $this->anonymiseShopifyCustomers($professionalId);
 
-            // 4. Delete the integration row LAST. This removes the
+            // 4. Scrub PII on commerce.orders for this brand. shopify_data holds the
+            //    raw Shopify payload (customer object + addresses); order_events.metadata
+            //    holds refund/adjustment notes. Full-nuke both JSONB columns and null
+            //    customer_id. Cents/status columns are kept for analytics.
+            $orderIds = DB::connection('pgsql')
+                ->table('commerce.orders')
+                ->where('brand_professional_id', $professionalId)
+                ->pluck('id')
+                ->all();
+
+            $scrubbedOrders = 0;
+            if (! empty($orderIds)) {
+                $scrubbedOrders = DB::connection('pgsql')
+                    ->table('commerce.orders')
+                    ->whereIn('id', $orderIds)
+                    ->update([
+                        'shopify_data' => '{}',
+                        'customer_id' => null,
+                        'updated_at' => now(),
+                    ]);
+
+                DB::connection('pgsql')
+                    ->table('commerce.order_events')
+                    ->whereIn('order_id', $orderIds)
+                    ->update(['metadata' => '{}']);
+            }
+
+            // 5. Delete the integration row LAST. This removes the
             //    shopify_shop_domain key, so subsequent retries fall into the
             //    "no integration" skip branch above.
             $integration->delete();
@@ -102,6 +130,7 @@ class RedactShopJob implements ShouldQueue
                 'shop_domain' => $gdpr->shop_domain,
                 'deleted_selections' => $deletedSelections,
                 'anonymised_customers' => $anonymisedCount,
+                'scrubbed_orders' => $scrubbedOrders,
             ]);
         } catch (\Throwable $e) {
             $gdpr->markFailed($e->getMessage());

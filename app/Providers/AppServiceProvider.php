@@ -44,6 +44,10 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Analytics\LeadSubmission::class, \App\Policies\SitePolicy::class);
         Gate::policy(\App\Models\Retail\CommissionPayout::class, \App\Policies\CommissionPolicy::class);
         Gate::policy(\App\Models\Retail\CommissionLedgerEntry::class, \App\Policies\CommissionPolicy::class);
+        Gate::policy(\App\Models\Retail\CommissionMovement::class, \App\Policies\CommissionPolicy::class);
+        Gate::policy(\App\Models\Commerce\Order::class, \App\Policies\CommissionPolicy::class);
+        Gate::policy(\App\Models\Commerce\OrderItem::class, \App\Policies\CommissionPolicy::class);
+        Gate::policy(\App\Models\Commerce\BrandAffiliateRollup::class, \App\Policies\CommissionPolicy::class);
         Gate::policy(\App\Models\Retail\BrandCommissionTopup::class, \App\Policies\CommissionPolicy::class);
         Gate::policy(\App\Models\Core\Professional\BrandPartnerLink::class, \App\Policies\BrandPartnerLinkPolicy::class);
         Gate::policy(\App\Models\Core\Professional\BrandPartnerLinkEvent::class, \App\Policies\BrandPartnerLinkPolicy::class);
