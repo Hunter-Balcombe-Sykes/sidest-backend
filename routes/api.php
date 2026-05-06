@@ -202,10 +202,16 @@ Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('inter
     Route::get('/deployment-targets', [HydrogenDeploymentController::class, 'targets']);
     Route::get('/brand-design/{slug}', [HydrogenBrandDesignController::class, 'show'])
         ->where('slug', '[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}');
-    Route::get('/affiliate', [HydrogenAffiliateController::class, 'show']);
     Route::get('/affiliate-services', [HydrogenAffiliateController::class, 'services']);
     Route::get('/affiliate-products', [HydrogenAffiliateProductsController::class, 'show']);
 });
+
+// Public affiliate endpoint — no API key needed. The affiliate is only returned
+// when a verified brand-affiliate link exists, so there's no enumeration risk.
+// Accessory endpoints (services, products) remain behind the hydrogen.key
+// middleware since they add load with no client-side initiator.
+Route::get('/internal/hydrogen/affiliate', [HydrogenAffiliateController::class, 'show'])
+    ->middleware('throttle:hydrogen-internal');
 
 Route::get('/ready', [HealthController::class, 'check'])->middleware('throttle:health-check');
 Route::get('/health/scheduler', [HealthController::class, 'scheduler'])->middleware('throttle:health-check');
