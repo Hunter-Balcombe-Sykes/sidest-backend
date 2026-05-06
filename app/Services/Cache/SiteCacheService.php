@@ -18,10 +18,28 @@ class SiteCacheService
 {
     private const MISS_SENTINEL = '__MISS__';
 
+    // Public site payload TTL (15 min). Stored as int so we can jitter ±20% on
+    // each write — without it, a deploy fills 1,500 sites' caches in one window
+    // and they all expire in the same instant 15 min later (thundering-herd on
+    // expiry). Jitter spreads the expiry burst across a ~6-minute window.
+    private const PAYLOAD_TTL_SECONDS = 900;
+
     /** @var array<string, array<string, string|null>|null> */
     private array $brandPartnerEnrichmentCache = [];
 
-    public function __construct() {}
+    public function __construct(private readonly CacheLockService $cacheLock) {}
+
+    /**
+     * Returns PAYLOAD_TTL_SECONDS with ±20% jitter applied.
+     *
+     * Mirrors CacheLockService::writeWithJitter's distribution so payload-cache
+     * writes (which use raw Cache::put inside our manual single-flight) get the
+     * same expiry-spreading behaviour as rememberLocked-managed entries.
+     */
+    private function jitteredPayloadTtl(): int
+    {
+        return (int) round(self::PAYLOAD_TTL_SECONDS * (0.8 + mt_rand(0, 4000) / 10000.0));
+    }
 
     /**
      * Get public site payload (MOST CRITICAL - 95% of traffic)
@@ -69,7 +87,7 @@ class SiteCacheService
                     );
                 }
 
-                Cache::put($key, $cached, now()->addMinutes(15));
+                Cache::put($key, $cached, $this->jitteredPayloadTtl());
 
                 return $cached;
             }
@@ -159,7 +177,7 @@ class SiteCacheService
             $data = $this->safeWithStorePayload($data, (string) ($row->professional_id ?? ''), $subdomain);
             $data = $this->safeApplyBrandImageFallbacks($data, $subdomain);
 
-            Cache::put($key, $data, now()->addMinutes(15));
+            Cache::put($key, $data, $this->jitteredPayloadTtl());
 
             return $data;
         } finally {
@@ -812,9 +830,13 @@ class SiteCacheService
 
     public function getSiteLinkBlocks(string $siteId): array
     {
-        return Cache::remember(
+        // Single-flight + ±20% jitter + SWR via CacheLockService. Without the
+        // lock, a cold cache after a flush lets every concurrent visitor on a
+        // popular site rebuild this list in parallel; with int TTL the helper
+        // also spreads expiry across the fleet.
+        return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::siteBlocks($siteId, 'links'),
-            now()->addMinutes(15),
+            self::PAYLOAD_TTL_SECONDS,
             fn () => Block::query()
                 ->where('site_id', $siteId)
                 ->where('block_group', 'links')

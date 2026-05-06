@@ -101,7 +101,10 @@ class ProfessionalAnalyticsController extends ApiController
         ).':'.($useHourlyBuckets ? 'hour' : 'day').":v{$summaryVersion}";
 
         // Cache for 5 minutes (or longer for historical data)
-        $cacheTTL = $to->isToday() ? now()->addMinutes(5) : now()->addHours(24);
+        // Int seconds (not Carbon) so CacheLockService applies ±20% jitter on
+        // write — without it, every dashboard cache fills at the same moment
+        // and expires at the same instant, hammering the DB on each rollover.
+        $cacheTTL = $to->isToday() ? 300 : 86400;
 
         $data = $this->cacheLock->rememberLocked($cacheKey, $cacheTTL, function () use ($professional, $from, $to, $site, $professionalTimezone, $useHourlyBuckets) {
             // All your existing query logic here
@@ -527,7 +530,10 @@ class ProfessionalAnalyticsController extends ApiController
         $cacheKey = 'analytics:shop:'.$professional->id.':'.$from->format('YmdH').':'.$to->format('YmdH').':'
             .($useHourlyBuckets ? 'hour' : 'day').":v{$summaryVersion}";
 
-        $cacheTTL = $to->isToday() ? now()->addMinutes(5) : now()->addHours(24);
+        // Int seconds (not Carbon) so CacheLockService applies ±20% jitter on
+        // write — without it, every dashboard cache fills at the same moment
+        // and expires at the same instant, hammering the DB on each rollover.
+        $cacheTTL = $to->isToday() ? 300 : 86400;
 
         $data = $this->cacheLock->rememberLocked($cacheKey, $cacheTTL, function () use ($professional, $from, $to, $useHourlyBuckets) {
             // ── Funnel totals ────────────────────────────────────────────────

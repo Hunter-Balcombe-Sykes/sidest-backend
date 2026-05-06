@@ -1,8 +1,16 @@
 <?php
 
 use App\Http\Controllers\Api\Staff\StaffSite\StaffStatsController;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+
+beforeEach(function () {
+    // Stats are cached for 60s under a shared key — flush so each test exercises
+    // the underlying DB queries instead of a value left over from a sibling test.
+    Cache::flush();
+});
 
 it('returns correct shape with zero data', function () {
     $profQuery = Mockery::mock();
@@ -23,7 +31,7 @@ it('returns correct shape with zero data', function () {
     DB::shouldReceive('table')->with('billing.subscriptions')->andReturn($subQuery);
     DB::shouldReceive('table')->with('commerce.commission_movements')->andReturn($commQuery);
 
-    $controller = new StaffStatsController;
+    $controller = new StaffStatsController(new CacheLockService);
     $response = $controller->show(Request::create('/', 'GET'));
     $data = json_decode($response->getContent(), true);
 
@@ -57,7 +65,7 @@ it('sums professional type counts correctly', function () {
     DB::shouldReceive('table')->with('billing.subscriptions')->andReturn($subQuery);
     DB::shouldReceive('table')->with('commerce.commission_movements')->andReturn($commQuery);
 
-    $controller = new StaffStatsController;
+    $controller = new StaffStatsController(new CacheLockService);
     $response = $controller->show(Request::create('/', 'GET'));
     $data = json_decode($response->getContent(), true);
 
@@ -67,4 +75,29 @@ it('sums professional type counts correctly', function () {
         ->and($data['professionals']['total'])->toBe(20)
         ->and($data['subscriptions']['active_count'])->toBe(8)
         ->and($data['commissions']['pending_cents'])->toBe(150000);
+});
+
+it('caches the stats payload across calls', function () {
+    $profQuery = Mockery::mock();
+    $profQuery->shouldReceive('whereNull')->andReturnSelf();
+    $profQuery->shouldReceive('selectRaw')->andReturnSelf();
+    $profQuery->shouldReceive('groupBy')->andReturnSelf();
+    // pluck must run exactly once: second invocation should be served from cache.
+    $profQuery->shouldReceive('pluck')->once()->andReturn(collect(['brand' => '1']));
+
+    $subQuery = Mockery::mock();
+    $subQuery->shouldReceive('whereNull')->andReturnSelf();
+    $subQuery->shouldReceive('count')->once()->andReturn(0);
+
+    $commQuery = Mockery::mock();
+    $commQuery->shouldReceive('where')->andReturnSelf();
+    $commQuery->shouldReceive('sum')->once()->andReturn(0);
+
+    DB::shouldReceive('table')->with('core.professionals')->andReturn($profQuery);
+    DB::shouldReceive('table')->with('billing.subscriptions')->andReturn($subQuery);
+    DB::shouldReceive('table')->with('commerce.commission_movements')->andReturn($commQuery);
+
+    $controller = new StaffStatsController(new CacheLockService);
+    $controller->show(Request::create('/', 'GET'));
+    $controller->show(Request::create('/', 'GET'));
 });
