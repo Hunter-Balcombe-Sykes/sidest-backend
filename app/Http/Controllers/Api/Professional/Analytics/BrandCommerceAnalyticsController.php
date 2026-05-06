@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Professional\Analytics;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Models\Commerce\Order;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;
@@ -17,17 +18,12 @@ class BrandCommerceAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
 
-    // Status values excluded from all live-query commerce aggregations.
-    // 'approved' is the canonical "paid" status — do NOT exclude it.
-    private const EXCLUDED_STATUSES = ['stub', 'cancelled', 'voided', 'refunded'];
-
     public function __construct(private CacheLockService $cacheLock) {}
 
     /**
      * Brand's commerce performance overview.
-     * Live queries against commerce.orders + commerce.brand_affiliate_rollup.
-     * Replaces reads of analytics.brand_metrics_daily/hourly, brand_affiliate_daily,
-     * brand_commission_daily, and site_metrics_daily.
+     * Live queries against commerce.orders + commerce.brand_affiliate_rollup
+     * + analytics.site_visits.
      *
      * @return JsonResponse{ data: { range, granularity, totals, timeseries, affiliates, commission_summary } }
      */
@@ -92,7 +88,7 @@ class BrandCommerceAnalyticsController extends ApiController
 
         $row = DB::table('commerce.orders')
             ->where($column, $professionalId)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
             ->selectRaw('
@@ -106,7 +102,7 @@ class BrandCommerceAnalyticsController extends ApiController
         // Determine the dominant currency from the period's orders (most orders wins).
         $currencyRow = DB::table('commerce.orders')
             ->where($column, $professionalId)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
             ->selectRaw('currency_code, COUNT(*) as cnt')
@@ -148,7 +144,7 @@ class BrandCommerceAnalyticsController extends ApiController
 
         $rows = DB::table('commerce.orders')
             ->where($column, $professionalId)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
             ->selectRaw("
@@ -243,7 +239,7 @@ class BrandCommerceAnalyticsController extends ApiController
         $customerCounts = DB::table('commerce.orders')
             ->where('brand_professional_id', $professionalId)
             ->whereIn('affiliate_professional_id', $affiliateIds)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
             ->selectRaw('affiliate_professional_id, COUNT(DISTINCT customer_id) AS customers_count')
@@ -308,7 +304,7 @@ class BrandCommerceAnalyticsController extends ApiController
         // approved = all non-excluded commissions in window
         $approvedRow = DB::table('commerce.orders')
             ->where('brand_professional_id', $professionalId)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', $endOfDay)
             ->selectRaw('COALESCE(SUM(commission_cents), 0) AS approved_cents')
@@ -317,7 +313,7 @@ class BrandCommerceAnalyticsController extends ApiController
         // paid = subset with a payout assigned
         $paidRow = DB::table('commerce.orders')
             ->where('brand_professional_id', $professionalId)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->whereNotNull('payout_id')
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', $endOfDay)

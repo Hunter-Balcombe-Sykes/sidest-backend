@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\BrandAffiliateController;
 use App\Http\Controllers\Api\Professional\BrandPartnerController;
 use App\Models\Core\Professional\Professional;
 use App\Services\Professional\BrandPartnerLinkLifecycleService;
@@ -18,12 +17,9 @@ function brandGuardRequest(string $professionalType): Request
     return $request;
 }
 
-it('blocks non-brand users from brand affiliate listing endpoint', function () {
-    $controller = new BrandAffiliateController;
-    $request = brandGuardRequest('barber');
-
-    expect($controller->index($request)->status())->toBe(403);
-});
+// Brand-affiliate role check moved to `brand.only` middleware (audit fix #PH4-3);
+// EnsureBrandAccountTest covers the gating. The brand-side controller no longer
+// has an inline guard, so a unit test that bypasses middleware is meaningless.
 
 it('blocks brand users from managing their own partner list endpoints', function () {
     $controller = new BrandPartnerController;

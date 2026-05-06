@@ -9,20 +9,23 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 // Forward-looking model for the post-rename world. Currently points at the unrenamed
-// commerce.commission_ledger_entries — Phase 4 cleanup renames the table to
-// commerce.commission_movements and updates this $table value in the same PR.
+// commerce.commission_ledger_entries. The rename to commerce.commission_movements was
+// planned for Phase 1 but deferred — Phase 4 cleanup chose to stay with the current
+// name to keep the destructive migration focused. The rename is now a separate future PR
+// (one DDL plus a sweep over CommissionLedgerEntry callers).
 //
-// Use this class for NEW code (Phase 3 webhook rewrites) that writes only money-movement
-// rows. Legacy callers continue using App\Models\Retail\CommissionLedgerEntry until
-// Phase 4. Both models read/write the same table.
+// Use this class for NEW code that writes only money-movement rows. Legacy callers
+// continue using App\Models\Retail\CommissionLedgerEntry. Both models read/write the
+// same table.
 //
-// Scope (post-rename) is MONEY MOVEMENTS ONLY:
+// Scope is MONEY MOVEMENTS ONLY (enforced at DB level post-Phase-4 — accrual/reversal
+// rows are deleted by 20260506500000_drop_legacy_aggregates.sql):
 //   - entry_type='payout'     — payout settled
 //   - entry_type='clawback'   — post-payout reversal
 //   - entry_type='adjustment' — manual support correction
 //
 // Order-lifecycle state (accruals, reversals from refunds) lives on commerce.orders +
-// commerce.order_events. Pre-cutover accrual/reversal rows are dropped in Phase 4 cleanup.
+// commerce.order_events. brand_affiliate_rollup carries the per-day signed deltas.
 class CommissionMovement extends BaseModel
 {
     use HasUuids;

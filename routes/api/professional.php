@@ -79,17 +79,24 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/me/data-export', [ProfessionalDataExportController::class, 'store'])
             ->withoutMiddleware([EnforcePendingDeletionReadOnly::class])
             ->middleware('throttle:1,1440');
-        Route::get('/brand-affiliates', [BrandAffiliateController::class, 'index']);
-        Route::middleware('throttle:30,1')->group(function (): void {
-            Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect'])
+        // Brand-affiliate management is brand-only; gating moved to middleware
+        // so the role check is centralized (audit fix #PH4-3). BrandPartnerController
+        // stays outside this group — it's the affiliate-side mirror endpoint.
+        Route::middleware(['brand.only'])->group(function (): void {
+            Route::get('/brand-affiliates', [BrandAffiliateController::class, 'index']);
+            Route::middleware('throttle:30,1')->group(function (): void {
+                Route::delete('/brand-affiliates/{affiliate}', [BrandAffiliateController::class, 'disconnect'])
+                    ->whereUuid('affiliate');
+            });
+            Route::patch('/brand-affiliates/{affiliate}/custom-photos', [BrandAffiliateController::class, 'updateCustomPhotos'])
                 ->whereUuid('affiliate');
+            Route::get('/brand-affiliates/{affiliate}/snapshot', [BrandAffiliateController::class, 'snapshot'])
+                ->whereUuid('affiliate');
+        });
+        Route::middleware('throttle:30,1')->group(function (): void {
             Route::delete('/brand-partners/{brandProfessionalId}', [BrandPartnerController::class, 'disconnect'])
                 ->whereUuid('brandProfessionalId');
         });
-        Route::patch('/brand-affiliates/{affiliate}/custom-photos', [BrandAffiliateController::class, 'updateCustomPhotos'])
-            ->whereUuid('affiliate');
-        Route::get('/brand-affiliates/{affiliate}/snapshot', [BrandAffiliateController::class, 'snapshot'])
-            ->whereUuid('affiliate');
         Route::get('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'index']);
         Route::post('/brand-affiliate-invites/availability', [BrandAffiliateInviteController::class, 'availability']);
         // Write endpoints are gated by BrandFundingGate — a brand can't

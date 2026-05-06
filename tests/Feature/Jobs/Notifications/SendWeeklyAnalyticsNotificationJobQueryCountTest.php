@@ -8,28 +8,19 @@ use Illuminate\Support\Str;
 beforeEach(function () {
     attachTestSchemas();
     setupProfessionalsTable();
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.professional_metrics_daily (
-        id TEXT PRIMARY KEY,
-        affiliate_professional_id TEXT,
-        day TEXT,
-        orders_count INTEGER,
-        gross_cents INTEGER,
-        refunded_cents INTEGER,
-        net_cents INTEGER,
-        commission_accrued_cents INTEGER,
-        commission_reversed_cents INTEGER,
-        commission_paid_cents INTEGER,
-        currency_code TEXT
-    )');
+    setupCommerceOrdersTables();
 });
 
 it('issues at most one metrics query per chunk regardless of professional count', function () {
-    $weekStart = now()->subDays(7)->toDateString();
-    $weekEnd = now()->subDay()->toDateString();
-    $now = now()->toDateTimeString();
+    // Pin "now" so window math (subDays(7)->startOfDay() etc.) is deterministic
+    // — yesterday must fall inside the window the job builds.
+    $pinned = \Carbon\Carbon::parse('2026-05-06 12:00:00');
+    \Illuminate\Support\Carbon::setTestNow($pinned);
+    $occurredAt = $pinned->copy()->subDays(2)->toDateTimeString();
+    $now = $pinned->toDateTimeString();
+    $brandId = (string) Str::uuid();
 
-    // Seed 5 active professionals, each with one metrics row in the test window.
+    // Seed 5 active affiliate professionals, each with one in-window order.
     $ids = [];
     foreach (range(1, 5) as $i) {
         $id = (string) Str::uuid();
@@ -46,16 +37,23 @@ it('issues at most one metrics query per chunk regardless of professional count'
             'updated_at' => $now,
         ]);
 
-        DB::connection('pgsql')->table('analytics.professional_metrics_daily')->insert([
-            'id' => (string) Str::uuid(),
+        DB::connection('pgsql')->table('commerce.orders')->insert([
+            'shopify_order_id' => "order-{$i}",
+            'shopify_shop_domain' => 'shop.example.test',
+            'brand_professional_id' => $brandId,
             'affiliate_professional_id' => $id,
-            'day' => $weekStart,
-            'orders_count' => $i,
-            'commission_accrued_cents' => $i * 1000,
+            'status' => 'approved',
+            'gross_cents' => $i * 1000,
+            'net_cents' => $i * 1000,
+            'commission_cents' => $i * 1000,
+            'currency_code' => 'AUD',
+            'shopify_updated_at' => $occurredAt,
+            'occurred_at' => $occurredAt,
+            'created_at' => $now,
+            'updated_at' => $now,
         ]);
     }
 
-    // Mock publisher so notifyProfessional() doesn't need notifications.notifications table.
     $publisher = Mockery::mock(NotificationPublisher::class);
     $publisher->shouldReceive('publish')->times(5);
 
@@ -63,10 +61,16 @@ it('issues at most one metrics query per chunk regardless of professional count'
 
     (new SendWeeklyAnalyticsNotificationJob)->handle($publisher);
 
+    // After Phase 4 the job reads from commerce.orders directly. The <=1
+    // query/chunk contract is what we care about — preserves the original
+    // performance guarantee even though the table changed.
     $metricsQueries = array_filter(
         DB::getQueryLog(),
-        fn ($q) => str_contains($q['query'], 'professional_metrics_daily')
+        fn ($q) => str_contains($q['query'], 'commerce.orders')
+            && str_contains($q['query'], 'group by')
     );
 
     expect(count($metricsQueries))->toBeLessThanOrEqual(1);
+
+    \Illuminate\Support\Carbon::setTestNow();
 });

@@ -167,13 +167,17 @@ Stuck failed batches → POST /staff/commission-payouts/{payout}/retry (staff ad
 | `BrandPartnerLink` | `core.brand_partner_links` | Brand-affiliate connection (V2: single-brand model) |
 | `BrandAffiliateInvite` | `core.brand_affiliate_invites` | Token-based invite for affiliate onboarding |
 | `ProfessionalIntegration` | `core.professional_integrations` | OAuth connections (Square, Fresha, Shopify) |
-| `CommissionLedgerEntry` | `retail.commission_ledger_entries` | Commission per order line from Shopify webhook |
-| `CommissionPayout` | `retail.commission_payouts` | Payout lifecycle (pending → completed/failed) |
-| `CommissionPayoutItem` | `retail.commission_payout_items` | Links payouts to ledger entries |
-| `BrandStoreSettings` | `retail.brand_store_settings` | V2: only `default_commission_rate` + `payout_hold_days` |
-| `BrandCommissionTopup` | `retail.brand_commission_topups` | Manual wallet top-ups via Stripe Checkout |
-| `BrandTeamMembership` | `retail.brand_team_memberships` | Brand team roles for RBAC |
-| `AffiliateProductSelection` | `retail.affiliate_product_selections` | V2 new — uses `shopify_product_gid` (not local UUID) |
+| `Order` | `commerce.orders` | V3 (Phase 3) — order-lifecycle source of truth, one row per Shopify order |
+| `OrderEvent` | `commerce.order_events` | Append-only audit log; `shopify_event_id` unique = webhook idempotency |
+| `OrderItem` | `commerce.order_items` | Trigger-mirrored normalization of `orders.line_items` JSONB |
+| `BrandAffiliateRollup` | `commerce.brand_affiliate_rollup` | Trigger-maintained per-day rollup keyed by (brand, affiliate, day, currency) |
+| `CommissionLedgerEntry` / `CommissionMovement` | `commerce.commission_ledger_entries` | Money-movement rows only (post-Phase-4): `payout`, `clawback`, `adjustment`. Both classes point at the same table; rename to `commission_movements` is deferred |
+| `CommissionPayout` | `commerce.commission_payouts` | Payout lifecycle (pending → completed/failed); reads `commerce.orders.payout_id` linkage |
+| `CommissionPayoutItem` | `commerce.commission_payout_items` | Links payouts to orders via `order_id` (NOT NULL post-Phase-4) |
+| `BrandStoreSettings` | `brand.brand_store_settings` | V2: only `default_commission_rate` + `payout_hold_days` |
+| `BrandCommissionTopup` | `commerce.brand_commission_topups` | Manual wallet top-ups via Stripe Checkout |
+| `BrandTeamMembership` | `brand.brand_team_memberships` | Brand team roles for RBAC |
+| `AffiliateProductSelection` | `commerce.affiliate_product_selections` | V2 new — uses `shopify_product_gid` (not local UUID) |
 | `SidestStaff` | `core.sidest_staff` | Staff/admin accounts for internal dashboard |
 | `Notification` | `core.notifications` | In-app notification records |
 | `NotificationReceipt` | `core.notification_receipts` | Notification delivery tracking |
@@ -211,8 +215,7 @@ Stuck failed batches → POST /staff/commission-payouts/{payout}/retry (staff ad
 | `SiteCacheService` | Public site payload caching with single-flight locking |
 | `ProfessionalCacheService` | Multi-lookup professional caching |
 | `AnalyticsCacheService` | Analytics-specific caching layer |
-| `SiteAnalyticsAggregateService` | Site analytics aggregation (hourly/daily) |
-| `BookingAnalyticsAggregateService` | Booking analytics aggregation (hourly/daily) |
+| `BookingAnalyticsAggregateService` | Booking analytics aggregation (hourly/daily) — booking is the only domain still on the rebuild-aggregates pattern; commerce/site analytics use live queries |
 | `Entitlements` | Plan entitlement / tier checking |
 | `SupabaseAdminService` | Admin Supabase auth operations |
 | `ImageVariantService` | WebP variant generation |
@@ -256,19 +259,28 @@ BrandAffiliateInviteController@store (brand sends invite)
   → AccountTypeDefaultsService (applies affiliate site defaults)
 ```
 
-#### 3. Commission Flow
+#### 3. Commission Flow (Phase 3+ commerce model)
 ```
 Shopify orders/paid webhook → ShopifyOrderWebhookController
   → ProcessShopifyOrderWebhookJob
-  → CommissionLedgerEntry created (status: approved, rate from metafields)
-  → CommissionLedgerEntryObserver → notification to affiliate
+  → INSERT commerce.orders + commerce.order_events (idempotent on
+    shopify_event_id) → trigger writes commerce.order_items + bumps
+    brand_affiliate_rollup. No accrual ledger row is written.
+  → Notification dispatched off the new-order event.
   → ProcessCommissionPayoutsJob (daily cron, tries=3, 60s/180s backoff)
     → CommissionPayoutService
         → Phase 1: retry any 'pending' batches from prior runs
         → Phase 2: create new batches per brand with brand-selected hold
           window (7/14/28 days, stored on brand_store_settings.payout_hold_days)
+        → Source rows: commerce.orders eligible by hold-window cutoff,
+          status NOT IN ('stub','cancelled','voided','refunded'),
+          payout_id IS NULL.
         → processPayoutBatch: hybrid funding (wallet first, card for shortfall)
         → Stripe Connect transfer (80/20 split: 20% platform fee, 80% to affiliate)
+        → On settle: write commerce.commission_ledger_entries row with
+          entry_type='payout' AND set commerce.orders.payout_id on every
+          included order (Phase 3.1 writer). The ledger holds money
+          movements only; accrual state is derived from orders.
   → CommissionPayoutObserver → context-aware notifications:
         - completed: affiliate "Payout sent"
         - failed (affiliate_not_connected): affiliate "Stripe Connect setup required"
@@ -279,8 +291,14 @@ Shopify orders/paid webhook → ShopifyOrderWebhookController
 
 Shopify orders/updated webhook → ShopifyOrdersUpdatedWebhookController
   → ProcessShopifyOrderUpdatedWebhookJob
-  → Handles refunds and cancellations
-  → Updates or reverses CommissionLedgerEntry accordingly
+  → orders/edited: snapshot fields update, commission_cents stays FROZEN at
+    the original-paid value (ADR 0001 Decision #3). No reversal row written.
+  → orders/cancelled: status → 'cancelled' (excluded from rollup/totals).
+  → refunds/create: status → 'partially_refunded'/'refunded',
+    refund_cents/reversed_commission_cents updated; rollup trigger applies
+    the signed delta. No ledger reversal row.
+  → Out-of-order events handled via shopify_updated_at LWW guard +
+    `status='stub'` rows for events arriving before the parent orders/paid.
 ```
 
 #### 4. Storefront Data
@@ -299,13 +317,14 @@ Hydrogen internal API (server-to-server, token-authenticated):
 #### 4a. Shopify Webhook Lifecycle
 ```
 Registered webhooks (via RegisterShopifyWebhooksJob):
-  orders/paid    → ShopifyOrderWebhookController → commission ledger entry
-  orders/updated → ShopifyOrdersUpdatedWebhookController → refund/cancellation handling
+  orders/paid    → ShopifyOrderWebhookController → commerce.orders + order_events insert; rollup trigger handles aggregates
+  orders/updated → ShopifyOrdersUpdatedWebhookController → orders/edited (snapshot, commission frozen), orders/cancelled, refunds/create
   app/uninstalled → ShopifyAppUninstalledWebhookController → cleanup brand integration
   shop/update    → ShopifyShopUpdateWebhookController → ProcessShopifyShopUpdateJob → sync shop data
   GDPR (customers/redact, customers/data_request, shop/redact) → ShopifyGdprWebhookController
 
 All Shopify webhooks validated via HMAC signature (ValidatesShopifyWebhookHmac concern).
+Idempotency: every event row's `shopify_event_id` (from the `X-Shopify-Event-Id` header) has a unique constraint on `commerce.order_events.shopify_event_id` — duplicate deliveries are rejected at the DB layer.
 ```
 
 #### 5. Public Site Visit
@@ -344,12 +363,25 @@ Request → VerifySupabaseJwt (validate JWT via JWKS, extract supabase_uid)
 | Schema | Contents |
 |--------|----------|
 | `public` | Laravel infrastructure (cache, jobs, failed_jobs) |
-| `core` | Professionals, sites, services, customers, blocks, media, integrations, brand links, invites, notifications |
-| `analytics` | Site visits, link clicks, lead submissions, hourly/daily metrics |
+| `core` | Professionals, sites, services, customers, blocks, media, integrations, themes, staff |
+| `site` | Site-level tables that are siblings of core but isolated (`sites`, `site_media`, `media_variants`, `blocks`, `service_categories`, `services`, `subdomain_aliases`, `public_site_payload` view) |
+| `brand` | Brand-team domain: `brand_partner_links`, `brand_partner_link_events`, `brand_affiliate_invites`, `brand_profiles`, `brand_status_history`, `brand_store_settings`, `brand_team_memberships` |
+| `commerce` | Order-lifecycle source of truth (Phase 3+): `orders`, `order_events`, `order_items`, `brand_affiliate_rollup`, `commission_ledger_entries` (money movements only post-Phase-4), `commission_payouts`, `commission_payout_items`, `brand_commission_topups`, `affiliate_product_selections` |
+| `notifications` | `notifications`, `notification_receipts`, `notification_preferences`, etc. |
+| `analytics` | Raw event tables: `site_visits`, `link_clicks`, `cart_events`, `lead_submissions`, `booking_events`. Booking aggregates: `booking_metrics_daily`, `booking_metrics_hourly`, `professional_customer_daily` (still rebuild-aggregate pattern via `BookingAnalyticsAggregateService`). The eight commerce/site aggregate tables — `brand_metrics_daily`, `brand_metrics_hourly`, `brand_affiliate_daily`, `brand_commission_daily`, `professional_metrics_daily`, `professional_metrics_hourly`, `site_metrics_daily`, `site_metrics_hourly` — were dropped in Phase 4 (`20260506500000_drop_legacy_aggregates.sql`); commerce/site analytics now use live queries on `commerce.orders` + `commerce.brand_affiliate_rollup` + raw event tables. |
 | `billing` | Plans, subscriptions |
-| `retail` | Commission ledger, payouts, brand store settings, team memberships, affiliate product selections |
 
-`DB_SEARCH_PATH=public,core,analytics,billing,retail`
+`DB_SEARCH_PATH=public,core,site,brand,commerce,notifications,analytics,billing`
+
+### Commerce read pattern (Phase 3+)
+
+Live queries against `commerce.orders` + `commerce.brand_affiliate_rollup` + raw event tables, fronted by `CacheLockService::rememberLocked`:
+- 60s TTL with ±20% jitter
+- Single-flight Redis lock (never file driver — see `CacheLockService` warning)
+- Stale-while-revalidate: returns last-good on stale, refreshes in background
+- Push-invalidation on every commerce write and on `analytics:summary:ver:{professional_id}` bumps
+
+`commerce.orders.payout_id` (Phase 3.1) carries the link from order → settled payout. The analytics `paid_cents` column reads from this, not from `commission_ledger_entries`. Backfill SQL: `supabase/migrations/20260506400000_backfill_orders_payout_id.sql`.
 
 ### Queue Architecture
 
@@ -441,7 +473,7 @@ The following V1 code has been deleted. Do NOT recreate these:
 ### Critical Constraints
 - **Never use Laravel migrations.** All schema changes use `supabase/migrations/` (plain SQL). There is a composer guard enforcing this.
 - **Supabase JWT only for auth.** Never add password-based auth or Laravel Sanctum. Tokens come from Supabase.
-- **Multi-schema PostgreSQL.** Always respect schema namespaces (`core.`, `retail.`, `analytics.`, `billing.`). The search path handles bare table names in queries, but migrations must be fully qualified.
+- **Multi-schema PostgreSQL.** Always respect schema namespaces (`core.`, `site.`, `brand.`, `commerce.`, `analytics.`, `notifications.`, `billing.`). The search path handles bare table names in queries, but migrations must be fully qualified.
 - **R2 for all media.** Never store media in local filesystem or Supabase Storage.
 - **Products live in Shopify.** Do not create local product tables. Use Storefront API and metafields.
 - **Single-brand affiliates.** Each affiliate belongs to one brand only.

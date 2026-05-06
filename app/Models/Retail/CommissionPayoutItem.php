@@ -7,8 +7,9 @@ use App\Models\Commerce\Order;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-// V2: Line item linking a payout batch to either a (legacy) ledger entry or a (Phase 3.5+)
-// commerce.orders row. Exactly one of commission_ledger_entry_id / order_id must be set.
+// Line item linking a payout batch to a commerce.orders row via order_id.
+// `order_id` is NOT NULL post-Phase-4 (migration 20260506500000); the legacy
+// `commission_ledger_entry_id` link target was dropped in the same migration.
 class CommissionPayoutItem extends BaseModel
 {
     use HasUuids;
@@ -23,7 +24,6 @@ class CommissionPayoutItem extends BaseModel
 
     protected $fillable = [
         'payout_id',
-        'commission_ledger_entry_id',
         'order_id',
         'amount_cents',
     ];
@@ -36,11 +36,6 @@ class CommissionPayoutItem extends BaseModel
     public function payout(): BelongsTo
     {
         return $this->belongsTo(CommissionPayout::class, 'payout_id');
-    }
-
-    public function ledgerEntry(): BelongsTo
-    {
-        return $this->belongsTo(CommissionLedgerEntry::class, 'commission_ledger_entry_id');
     }
 
     public function order(): BelongsTo

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Professional\Analytics;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Models\Commerce\Order;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use Illuminate\Database\QueryException;
@@ -18,17 +19,12 @@ class AffiliateCommerceAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
 
-    // Status values excluded from all live-query commerce aggregations.
-    // 'approved' is the canonical "paid" status — do NOT exclude it.
-    private const EXCLUDED_STATUSES = ['stub', 'cancelled', 'voided', 'refunded'];
-
     public function __construct(private CacheLockService $cacheLock) {}
 
     /**
      * Affiliate's own commerce performance summary.
      * Live queries against commerce.orders + commerce.brand_affiliate_rollup.
-     * Replaces reads of analytics.professional_metrics_daily/hourly and brand_affiliate_daily.
-     * payout_summary and grace_summary remain: they read commerce.commission_payouts, unchanged.
+     * payout_summary and grace_summary read commerce.commission_payouts directly.
      *
      * @return JsonResponse{ data: { range, granularity, totals, timeseries, brands, payout_summary, grace_summary } }
      */
@@ -60,7 +56,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
             // commission_paid_cents: orders with an assigned payout in window
             $paidRow = DB::table('commerce.orders')
                 ->where('affiliate_professional_id', $professionalId)
-                ->whereNotIn('status', self::EXCLUDED_STATUSES)
+                ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
                 ->whereNotNull('payout_id')
                 ->where('occurred_at', '>=', $filters['from'])
                 ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
@@ -115,7 +111,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
 
         $row = DB::table('commerce.orders')
             ->where('affiliate_professional_id', $professionalId)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', $endOfDay)
             ->selectRaw('
@@ -130,7 +126,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
         // Dominant currency by order count
         $currencyRow = DB::table('commerce.orders')
             ->where('affiliate_professional_id', $professionalId)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', $endOfDay)
             ->selectRaw('currency_code, COUNT(*) as cnt')
@@ -169,7 +165,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
 
         $rows = DB::table('commerce.orders')
             ->where('affiliate_professional_id', $professionalId)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
             ->selectRaw("
@@ -237,7 +233,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
         $customerCounts = DB::table('commerce.orders')
             ->where('affiliate_professional_id', $professionalId)
             ->whereIn('brand_professional_id', $brandIds)
-            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
             ->selectRaw('brand_professional_id, COUNT(DISTINCT customer_id) AS customers_count')

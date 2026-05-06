@@ -83,7 +83,6 @@ beforeEach(function () {
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
         id TEXT PRIMARY KEY,
         payout_id TEXT,
-        commission_ledger_entry_id TEXT,
         order_id TEXT,
         amount_cents INTEGER,
         created_at TEXT

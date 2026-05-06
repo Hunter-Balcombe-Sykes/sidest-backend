@@ -220,7 +220,6 @@ class CommissionPayoutService
             foreach ($orders as $order) {
                 CommissionPayoutItem::create([
                     'payout_id' => $payout->id,
-                    'commission_ledger_entry_id' => null,
                     'order_id' => $order->id,
                     'amount_cents' => $order->commission_cents,
                 ]);

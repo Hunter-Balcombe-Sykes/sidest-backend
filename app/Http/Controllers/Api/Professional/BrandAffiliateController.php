@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api\Professional;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Models\Commerce\Order;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use App\Models\Retail\CommissionPayout;
+use App\Services\Cache\CacheLockService;
 use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Professional\DTO\DisconnectRequest;
@@ -20,14 +22,12 @@ class BrandAffiliateController extends ApiController
 {
     use ResolveCurrentProfessional;
 
+    public function __construct(private CacheLockService $cacheLock) {}
+
     public function index(Request $request): JsonResponse
     {
+        // Role gating handled by `brand.only` middleware (EnsureBrandAccount).
         $professional = $this->currentProfessional($request);
-
-        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
-            return $this->error('Only brand accounts can view affiliates.', 403);
-        }
-
         $brandId = $professional->id;
 
         $links = BrandPartnerLink::query()
@@ -93,11 +93,8 @@ class BrandAffiliateController extends ApiController
         string $affiliateId,
         BrandPartnerLinkLifecycleService $lifecycle,
     ): JsonResponse {
+        // Role gating handled by `brand.only` middleware (EnsureBrandAccount).
         $professional = $this->currentProfessional($request);
-
-        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
-            return $this->error('Only brand accounts can disconnect affiliates.', 403);
-        }
 
         $data = $request->validate([
             'reason' => ['nullable', 'string', 'max:500'],
@@ -136,12 +133,8 @@ class BrandAffiliateController extends ApiController
      */
     public function snapshot(Request $request, string $affiliateId): JsonResponse
     {
+        // Role gating handled by `brand.only` middleware (EnsureBrandAccount).
         $professional = $this->currentProfessional($request);
-
-        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
-            return $this->error('Only brand accounts can view affiliate snapshots.', 403);
-        }
-
         $brandId = (string) $professional->id;
 
         // Auth check — only return data for affiliates linked to this brand.
@@ -159,35 +152,77 @@ class BrandAffiliateController extends ApiController
             return $this->error('Affiliate not found.', 404);
         }
 
-        // Lifetime commerce aggregates from analytics.brand_affiliate_daily.
-        // Pick the dominant currency by row count so multi-currency
-        // affiliates resolve to their primary corridor for KPI display.
-        $rows = DB::table('analytics.brand_affiliate_daily')
-            ->where('brand_professional_id', $brandId)
-            ->where('affiliate_professional_id', $affiliateId)
-            ->get();
+        // Lifetime commerce + page-view aggregates. Cached at 60s with
+        // single-flight lock + jitter (matches the Phase 3 analytics
+        // controller pattern) — the modal's snapshot is the same shape no
+        // matter who hits it, and lifetime sums change at most once per
+        // webhook ingest, so a short TTL is safe and protects against
+        // dashboard re-open thrash.
+        $cacheKey = "analytics:commerce:brand_affiliate_snapshot:v1:{$brandId}:{$affiliateId}";
+        $aggregates = $this->cacheLock->rememberLocked($cacheKey, 60, function () use ($brandId, $affiliateId): array {
+            // Pick the dominant currency from the per-day rollup so multi-currency
+            // affiliates resolve to their primary corridor for KPI display.
+            $currencyRow = DB::table('commerce.brand_affiliate_rollup')
+                ->where('brand_professional_id', $brandId)
+                ->where('affiliate_professional_id', $affiliateId)
+                ->selectRaw('currency_code, SUM(orders_count) AS cnt')
+                ->groupBy('currency_code')
+                ->orderByDesc('cnt')
+                ->first();
 
-        $currencyCode = $rows->countBy('currency_code')->sortDesc()->keys()->first() ?? 'AUD';
-        $primary = $rows->filter(fn ($r) => $r->currency_code === $currencyCode);
+            $currencyCode = $currencyRow->currency_code ?? 'AUD';
 
-        $totals = [
-            'orders_count' => (int) $primary->sum('orders_count'),
-            'gross_cents' => (int) $primary->sum('gross_cents'),
-            'net_cents' => (int) $primary->sum('net_cents'),
-            'commission_net_cents' => (int) $primary->sum('commission_net_cents'),
-            'customers_count' => (int) $primary->sum('customers_count'),
-        ];
+            // Lifetime totals from the trigger-maintained rollup. net_cents is
+            // already gross-minus-refund per row; commission_net is
+            // commission_cents - reversed_commission_cents — the affiliate's
+            // earnings net of clawbacks/refund-driven reversals.
+            $rollupRow = DB::table('commerce.brand_affiliate_rollup')
+                ->where('brand_professional_id', $brandId)
+                ->where('affiliate_professional_id', $affiliateId)
+                ->where('currency_code', $currencyCode)
+                ->selectRaw('
+                    COALESCE(SUM(orders_count), 0) AS orders_count,
+                    COALESCE(SUM(gross_cents), 0) AS gross_cents,
+                    COALESCE(SUM(net_cents), 0) AS net_cents,
+                    COALESCE(SUM(commission_cents - reversed_commission_cents), 0) AS commission_net_cents
+                ')
+                ->first();
 
-        // Page views — joined from site_metrics_daily so the modal can show
-        // visits + unique visitors + a derived conversion rate. Lifetime so
-        // the figure stays comparable to the totals block.
-        $views = DB::table('analytics.site_metrics_daily')
-            ->where('professional_id', $affiliateId)
-            ->selectRaw('SUM(visits_count)::int as visits_count, SUM(unique_visitors)::int as unique_visitors')
-            ->first();
+            // customers_count isn't in the rollup; count distinct customer_id
+            // from non-excluded orders. Lifetime, same currency filter.
+            $customersRow = DB::table('commerce.orders')
+                ->where('brand_professional_id', $brandId)
+                ->where('affiliate_professional_id', $affiliateId)
+                ->where('currency_code', $currencyCode)
+                ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
+                ->selectRaw('COUNT(DISTINCT customer_id) AS customers_count')
+                ->first();
 
-        $visits = (int) ($views->visits_count ?? 0);
-        $uniqueVisitors = (int) ($views->unique_visitors ?? 0);
+            // Lifetime page views from raw site_visits — analytics.site_visits
+            // is the source of truth post-Phase-3.
+            $viewsRow = DB::table('analytics.site_visits')
+                ->where('professional_id', $affiliateId)
+                ->selectRaw('COUNT(*) AS visits_count, COUNT(DISTINCT visitor_id) AS unique_visitors')
+                ->first();
+
+            return [
+                'currency_code' => $currencyCode,
+                'totals' => [
+                    'orders_count' => (int) ($rollupRow->orders_count ?? 0),
+                    'gross_cents' => (int) ($rollupRow->gross_cents ?? 0),
+                    'net_cents' => (int) ($rollupRow->net_cents ?? 0),
+                    'commission_net_cents' => (int) ($rollupRow->commission_net_cents ?? 0),
+                    'customers_count' => (int) ($customersRow->customers_count ?? 0),
+                ],
+                'visits_count' => (int) ($viewsRow->visits_count ?? 0),
+                'unique_visitors' => (int) ($viewsRow->unique_visitors ?? 0),
+            ];
+        });
+
+        $currencyCode = $aggregates['currency_code'];
+        $totals = $aggregates['totals'];
+        $visits = $aggregates['visits_count'];
+        $uniqueVisitors = $aggregates['unique_visitors'];
         $conversionRate = $uniqueVisitors > 0
             ? round(($totals['orders_count'] / $uniqueVisitors) * 100, 2)
             : 0.0;
@@ -252,11 +287,8 @@ class BrandAffiliateController extends ApiController
 
     public function updateCustomPhotos(Request $request, string $affiliateId): JsonResponse
     {
+        // Role gating handled by `brand.only` middleware (EnsureBrandAccount).
         $professional = $this->currentProfessional($request);
-
-        if (mb_strtolower(trim((string) $professional->professional_type)) !== 'brand') {
-            return $this->error('Only brand accounts can manage affiliate photo permissions.', 403);
-        }
 
         $request->validate([
             'enabled' => ['present', 'nullable', 'boolean'],

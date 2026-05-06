@@ -27,6 +27,17 @@ class Order extends BaseModel
 
     protected $keyType = 'string';
 
+    /**
+     * Status values excluded from every commerce aggregation in the system —
+     * payout eligibility, brand/affiliate analytics dashboards, the brand
+     * affiliate snapshot modal, and the weekly notification job. ALL FOUR
+     * call sites must reference this constant; adding a status here cuts it
+     * from every report at once and keeps reported totals consistent.
+     *
+     * `'approved'` is the canonical "paid" status — do NOT add it here.
+     */
+    public const EXCLUDED_FROM_AGGREGATES = ['stub', 'cancelled', 'voided', 'refunded'];
+
     // All writes are server-side. Use forceFill() at callsites.
     protected $guarded = ['*'];
 

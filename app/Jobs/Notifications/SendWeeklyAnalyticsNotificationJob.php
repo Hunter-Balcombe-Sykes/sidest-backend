@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Notifications;
 
+use App\Models\Commerce\Order;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -28,22 +29,31 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
     public function handle(NotificationPublisher $publisher): void
     {
         $yearWeek = now()->format('o-W'); // ISO year + week number
-        $weekStart = now()->subDays(7)->toDateString();
-        $weekEnd = now()->subDay()->toDateString();
+        // Window is [now-7d 00:00, now 00:00) so "last 7 days" never includes today.
+        $windowStart = now()->subDays(7)->startOfDay();
+        $windowEnd = now()->startOfDay();
 
         DB::table('core.professionals')
             ->where('status', 'active')
             ->whereNull('deleted_at')
             ->orderBy('id')
-            ->chunkById(200, function ($professionals) use ($publisher, $yearWeek, $weekStart, $weekEnd): void {
+            ->chunkById(200, function ($professionals) use ($publisher, $yearWeek, $windowStart, $windowEnd): void {
                 $ids = $professionals->pluck('id')->all();
 
-                $metricsByPro = DB::table('analytics.professional_metrics_daily')
+                // Per-affiliate weekly orders + commission_cents from
+                // commerce.orders. Excludes stub/cancelled/voided/refunded so
+                // we never tell affiliates about a sale that won't pay out.
+                // One batched query per chunk preserves the prior <=1
+                // query/chunk contract enforced by
+                // SendWeeklyAnalyticsNotificationJobQueryCountTest.
+                $metricsByPro = DB::table('commerce.orders')
                     ->whereIn('affiliate_professional_id', $ids)
-                    ->whereBetween('day', [$weekStart, $weekEnd])
+                    ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
+                    ->where('occurred_at', '>=', $windowStart)
+                    ->where('occurred_at', '<', $windowEnd)
                     ->select('affiliate_professional_id')
-                    ->selectRaw('COALESCE(SUM(orders_count), ?) as orders', [0])
-                    ->selectRaw('COALESCE(SUM(commission_accrued_cents), ?) as commission_cents', [0])
+                    ->selectRaw('COUNT(*) as orders')
+                    ->selectRaw('COALESCE(SUM(commission_cents), 0) as commission_cents')
                     ->groupBy('affiliate_professional_id')
                     ->get()
                     ->keyBy('affiliate_professional_id');

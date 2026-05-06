@@ -77,7 +77,7 @@ OUT_FLAG=()
     --drafts "$DRAFTS" \
     "${LENS_ARG[@]}" \
     "${SCOPE_ARGS[@]}" \
-    "${OUT_FLAG[@]}"
+    ${OUT_FLAG[@]+"${OUT_FLAG[@]}"}
 
 if $KEEP_DRAFTS; then
     echo "" >&2

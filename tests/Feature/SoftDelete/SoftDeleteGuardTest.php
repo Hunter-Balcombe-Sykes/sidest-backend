@@ -63,31 +63,6 @@ beforeEach(function () {
         occurred_at TEXT NULL
     )');
 
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.site_metrics_hourly (
-        id TEXT PRIMARY KEY,
-        hour_start TEXT NULL,
-        professional_id TEXT NULL,
-        site_id TEXT NULL,
-        timezone TEXT NULL,
-        visits_count INTEGER NULL,
-        unique_visitors INTEGER NULL,
-        clicks_count INTEGER NULL,
-        unique_clickers INTEGER NULL,
-        updated_at TEXT NULL
-    )');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.site_metrics_daily (
-        id TEXT PRIMARY KEY,
-        day TEXT NULL,
-        professional_id TEXT NULL,
-        site_id TEXT NULL,
-        timezone TEXT NULL,
-        visits_count INTEGER NULL,
-        unique_visitors INTEGER NULL,
-        clicks_count INTEGER NULL,
-        unique_clickers INTEGER NULL,
-        updated_at TEXT NULL
-    )');
 });
 
 // ── #V5-012: transactional email job ─────────────────────────────────────────

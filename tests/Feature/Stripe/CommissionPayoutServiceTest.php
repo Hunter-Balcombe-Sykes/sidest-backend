@@ -70,13 +70,12 @@ beforeEach(function () {
         updated_at TEXT
     )');
 
-    // commission_payout_items supports both legacy ledger-entry items and new order-based items.
-    // commission_ledger_entry_id and order_id are both nullable — SQLite does not enforce the
-    // CHECK constraint (at least one must be set) from the PG migration, which is acceptable for tests.
+    // commission_payout_items links payouts to commerce.orders rows post-Phase-4.
+    // order_id is NOT NULL in production; left nullable here because SQLite test
+    // setup doesn't enforce the constraint and several tests insert minimal rows.
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
         id TEXT PRIMARY KEY,
         payout_id TEXT,
-        commission_ledger_entry_id TEXT,
         order_id TEXT,
         amount_cents INTEGER,
         created_at TEXT,
@@ -843,12 +842,11 @@ it('creates a payout batch from eligible commerce.orders and stamps payout_id on
     $order = Order::find($orderId);
     expect($order->payout_id)->not->toBeNull();
 
-    // Payout item should link to the order, not a ledger entry.
+    // Payout item should link to the order via order_id (the only link target post-Phase-4).
     $item = DB::connection('pgsql')->table('commerce.commission_payout_items')
         ->where('order_id', $orderId)
         ->first();
     expect($item)->not->toBeNull();
-    expect($item->commission_ledger_entry_id)->toBeNull();
     expect($item->amount_cents)->toBe(5000);
 });
 
@@ -944,7 +942,6 @@ it('voiding an expired payout clears payout_id on its order-based items so order
         'id' => (string) Str::uuid(),
         'payout_id' => $payoutId,
         'order_id' => $orderId,
-        'commission_ledger_entry_id' => null,
         'amount_cents' => 5000,
         'created_at' => now()->toDateTimeString(),
     ]);
@@ -1002,7 +999,6 @@ it('after a voided payout, processEligiblePayouts picks up the re-entered orders
         'id' => (string) Str::uuid(),
         'payout_id' => $payoutId,
         'order_id' => $orderId,
-        'commission_ledger_entry_id' => null,
         'amount_cents' => 3000,
         'created_at' => now()->toDateTimeString(),
     ]);
