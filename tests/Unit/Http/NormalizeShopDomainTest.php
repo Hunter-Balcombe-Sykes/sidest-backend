@@ -6,7 +6,8 @@ uses(TestCase::class)->in(__FILE__);
 
 function makeNormalizer(): object
 {
-    return new class {
+    return new class
+    {
         use \App\Http\Controllers\Concerns\NormalizesShopDomain;
 
         public function normalize(string $value): string

@@ -38,12 +38,13 @@ enum BrandStatus: string
         if ($thisIndex === false || $otherIndex === false) {
             return false;
         }
+
         return $thisIndex >= $otherIndex;
     }
 
     public function label(): string
     {
-        return match($this) {
+        return match ($this) {
             self::Onboarding => 'Onboarding',
             self::ShopifyLinked => 'Shopify Linked',
             self::ShopifyConfigured => 'Shopify Configured',
@@ -59,6 +60,7 @@ enum BrandStatus: string
     {
         $progression = self::progression();
         $index = array_search($this, $progression, true);
+
         return $index !== false ? $index + 1 : 0;
     }
 

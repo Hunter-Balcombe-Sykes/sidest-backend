@@ -1,9 +1,9 @@
 <?php
 
+use App\Models\Analytics\LinkClick;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
-use App\Models\Analytics\LinkClick;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();

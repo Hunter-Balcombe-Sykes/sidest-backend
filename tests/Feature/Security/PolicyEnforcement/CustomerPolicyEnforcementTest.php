@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
-use App\Models\Core\Professional\Customer;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 

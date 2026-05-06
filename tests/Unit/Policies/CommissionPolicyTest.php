@@ -2,7 +2,6 @@
 
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\BrandCommissionTopup;
-use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\CommissionPayout;
 use App\Policies\CommissionPolicy;
 use App\Services\Store\BrandAccessService;

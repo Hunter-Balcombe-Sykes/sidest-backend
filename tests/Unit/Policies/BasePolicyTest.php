@@ -40,7 +40,8 @@ it('returns null when the professional has any other status', function () {
 });
 
 it('returns a 404 deny response from denyAsNotFound', function () {
-    $policy = new class extends \App\Policies\BasePolicy {
+    $policy = new class extends \App\Policies\BasePolicy
+    {
         public function callDenyAsNotFound(): \Illuminate\Auth\Access\Response
         {
             return $this->denyAsNotFound();

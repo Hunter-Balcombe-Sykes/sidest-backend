@@ -1,10 +1,7 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\Store\BrandStoreSettingsController;
 use App\Http\Requests\Api\Professional\Store\UpdateBrandStoreSettingsRequest;
 use App\Models\Core\Professional\Professional;
-use App\Services\Hydrogen\HydrogenDeploymentService;
-use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 

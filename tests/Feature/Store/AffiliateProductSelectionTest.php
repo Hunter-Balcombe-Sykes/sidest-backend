@@ -102,7 +102,7 @@ it('returns 403 when brand account hits the affiliate.only middleware', function
     $request = Request::create('/api/affiliate/products', 'GET');
     $request->attributes->set('professional', $pro);
 
-    $response = (new EnsureAffiliateAccount())->handle($request, fn ($req) => new Response('ok', 200));
+    $response = (new EnsureAffiliateAccount)->handle($request, fn ($req) => new Response('ok', 200));
 
     expect($response->getStatusCode())->toBe(403);
     expect(json_decode($response->getContent(), true))
@@ -261,7 +261,7 @@ it('rejects brand accounts on updateVariants via affiliate.only middleware', fun
     $request = Request::create('/api/affiliate/selections/gid://shopify/Product/123/variants', 'PATCH');
     $request->attributes->set('professional', $pro);
 
-    $response = (new EnsureAffiliateAccount())->handle($request, fn ($req) => new Response('ok', 200));
+    $response = (new EnsureAffiliateAccount)->handle($request, fn ($req) => new Response('ok', 200));
 
     expect($response->getStatusCode())->toBe(403);
 });

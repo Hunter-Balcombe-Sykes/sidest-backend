@@ -109,7 +109,7 @@ class PublicEnquiryController extends ApiController
         // 8) Dispatch notification email (only if settings.notification_email is present and per-brand hourly limit not reached).
         $notificationEmail = data_get($block->settings, 'notification_email');
         if (is_string($notificationEmail) && trim($notificationEmail) !== '') {
-            $notifyKey = 'enquiry_notify:' . $site->professional_id;
+            $notifyKey = 'enquiry_notify:'.$site->professional_id;
             $notifyLimit = config('sidest.throttle.enquiry_notification_per_hour', 10);
 
             if (! RateLimiter::tooManyAttempts($notifyKey, $notifyLimit)) {

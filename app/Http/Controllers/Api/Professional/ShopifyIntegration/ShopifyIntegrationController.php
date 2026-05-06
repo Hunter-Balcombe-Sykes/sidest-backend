@@ -509,11 +509,11 @@ class ShopifyIntegrationController extends ApiController
 
         // Map step name → job class and metadata state key
         $stepMap = [
-            'webhooks'         => ['job' => RegisterShopifyWebhooksJob::class,     'state_key' => 'webhooks_state'],
-            'metafields'       => ['job' => CreateShopifyMetafieldsJob::class,     'state_key' => 'metafield_definitions_state'],
-            'sales_channel'    => ['job' => CreateShopifySalesChannelJob::class,   'state_key' => 'sales_channel_state'],
+            'webhooks' => ['job' => RegisterShopifyWebhooksJob::class,     'state_key' => 'webhooks_state'],
+            'metafields' => ['job' => CreateShopifyMetafieldsJob::class,     'state_key' => 'metafield_definitions_state'],
+            'sales_channel' => ['job' => CreateShopifySalesChannelJob::class,   'state_key' => 'sales_channel_state'],
             'storefront_token' => ['job' => CreateStorefrontAccessTokenJob::class, 'state_key' => 'storefront_token_state'],
-            'brand_design'     => ['job' => SyncShopifyBrandDesignJob::class,      'state_key' => 'brand_design_state'],
+            'brand_design' => ['job' => SyncShopifyBrandDesignJob::class,      'state_key' => 'brand_design_state'],
         ];
 
         $successValues = ['registered', 'synced'];

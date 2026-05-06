@@ -4,7 +4,6 @@ use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationC
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\ShopifyTeardownService;
 use App\Services\Store\BrandAccessService;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 
@@ -55,11 +54,11 @@ it('returns pending when no step states are set', function () {
 it('returns complete when all five steps succeed', function () {
     $brand = createBrandTenant('setup-state-brand-2');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state'             => 'registered',
+        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'registered',
-        'sales_channel_state'        => 'registered',
-        'storefront_token_state'     => 'registered',
-        'brand_design_state'         => 'synced',
+        'sales_channel_state' => 'registered',
+        'storefront_token_state' => 'registered',
+        'brand_design_state' => 'synced',
     ]);
 
     $status = $integration->shopifyInstallStatus();
@@ -70,11 +69,11 @@ it('returns complete when all five steps succeed', function () {
 it('returns incomplete when any step is failed', function () {
     $brand = createBrandTenant('setup-state-brand-3');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state'             => 'registered',
+        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'failed',
-        'sales_channel_state'        => 'registered',
-        'storefront_token_state'     => 'registered',
-        'brand_design_state'         => 'synced',
+        'sales_channel_state' => 'registered',
+        'storefront_token_state' => 'registered',
+        'brand_design_state' => 'synced',
     ]);
 
     $status = $integration->shopifyInstallStatus();
@@ -85,11 +84,11 @@ it('returns incomplete when any step is failed', function () {
 it('returns incomplete when webhooks_state is partial', function () {
     $brand = createBrandTenant('setup-state-brand-4');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state'             => 'partial',
+        'webhooks_state' => 'partial',
         'metafield_definitions_state' => 'registered',
-        'sales_channel_state'        => 'registered',
-        'storefront_token_state'     => 'registered',
-        'brand_design_state'         => 'synced',
+        'sales_channel_state' => 'registered',
+        'storefront_token_state' => 'registered',
+        'brand_design_state' => 'synced',
     ]);
 
     expect($integration->shopifyInstallStatus()['state'])->toBe('incomplete');
@@ -98,7 +97,7 @@ it('returns incomplete when webhooks_state is partial', function () {
 it('returns pending when some steps are done but others missing', function () {
     $brand = createBrandTenant('setup-state-brand-5');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state'             => 'registered',
+        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'registered',
         // sales_channel, storefront_token, brand_design still pending
     ]);
@@ -111,11 +110,11 @@ it('returns pending when some steps are done but others missing', function () {
 it('retrySetup returns queued=false when setup is already complete', function () {
     $brand = createBrandTenant('setup-state-brand-6');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state'             => 'registered',
+        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'registered',
-        'sales_channel_state'        => 'registered',
-        'storefront_token_state'     => 'registered',
-        'brand_design_state'         => 'synced',
+        'sales_channel_state' => 'registered',
+        'storefront_token_state' => 'registered',
+        'brand_design_state' => 'synced',
     ]);
 
     Queue::fake();
@@ -132,11 +131,11 @@ it('retrySetup returns queued=false when setup is already complete', function ()
 it('retrySetup re-dispatches failed steps and resets their state to queued', function () {
     $brand = createBrandTenant('setup-state-brand-7');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state'             => 'registered',
+        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'failed',
-        'sales_channel_state'        => 'registered',
-        'storefront_token_state'     => 'registered',
-        'brand_design_state'         => 'failed',
+        'sales_channel_state' => 'registered',
+        'storefront_token_state' => 'registered',
+        'brand_design_state' => 'failed',
     ]);
 
     Queue::fake();
@@ -162,11 +161,11 @@ it('retrySetup re-dispatches failed steps and resets their state to queued', fun
 it('status endpoint includes setup_state and setup_steps when token is provisioned', function () {
     $brand = createBrandTenant('setup-state-brand-8');
     seedInstallIntegration($brand->id, [
-        'webhooks_state'             => 'registered',
+        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'registered',
-        'sales_channel_state'        => 'failed',
-        'storefront_token_state'     => 'registered',
-        'brand_design_state'         => 'synced',
+        'sales_channel_state' => 'failed',
+        'storefront_token_state' => 'registered',
+        'brand_design_state' => 'synced',
     ]);
 
     $req = tenantRequestAs($brand, [], 'GET');

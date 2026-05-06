@@ -19,6 +19,7 @@ use Stripe\Webhook;
 class StripeConnectWebhookController extends Controller
 {
     use ValidatesStripeWebhookPayload;
+
     public function __invoke(Request $request): JsonResponse
     {
         $payload = $request->getContent();

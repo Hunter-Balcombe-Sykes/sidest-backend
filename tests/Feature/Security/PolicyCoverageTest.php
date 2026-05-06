@@ -43,7 +43,7 @@ const POLICY_EXEMPT = [
 ];
 
 it('every tenant-owned model has a registered policy', function () {
-    $modelFiles = (new Finder())
+    $modelFiles = (new Finder)
         ->files()
         ->in(app_path('Models'))
         ->name('*.php')
@@ -69,7 +69,7 @@ it('every tenant-owned model has a registered policy', function () {
         }
     }
 
-    expect($missing)->toBe([], "Models without a registered Policy:\n  - " . implode("\n  - ", $missing) . "\n\nEither register one in AppServiceProvider::boot() or add to POLICY_EXEMPT in this test with a justification.");
+    expect($missing)->toBe([], "Models without a registered Policy:\n  - ".implode("\n  - ", $missing)."\n\nEither register one in AppServiceProvider::boot() or add to POLICY_EXEMPT in this test with a justification.");
 });
 
 it('every POLICY_EXEMPT entry resolves to a real model class', function () {

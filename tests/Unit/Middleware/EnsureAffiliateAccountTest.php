@@ -10,7 +10,7 @@ it('passes through when the professional is an affiliate (non-brand)', function 
     $request = Request::create('/test', 'GET');
     $request->attributes->set('professional', $pro);
 
-    $response = (new EnsureAffiliateAccount())->handle($request, fn ($req) => new Response('ok', 200));
+    $response = (new EnsureAffiliateAccount)->handle($request, fn ($req) => new Response('ok', 200));
 
     expect($response->getStatusCode())->toBe(200);
 });
@@ -20,7 +20,7 @@ it('returns 403 when the professional is a brand', function () {
     $request = Request::create('/test', 'GET');
     $request->attributes->set('professional', $pro);
 
-    $response = (new EnsureAffiliateAccount())->handle($request, fn ($req) => new Response('ok'));
+    $response = (new EnsureAffiliateAccount)->handle($request, fn ($req) => new Response('ok'));
 
     expect($response->getStatusCode())->toBe(403);
     expect(json_decode($response->getContent(), true))
@@ -29,6 +29,6 @@ it('returns 403 when the professional is a brand', function () {
 
 it('returns 401 when no professional is bound', function () {
     $request = Request::create('/test', 'GET');
-    $response = (new EnsureAffiliateAccount())->handle($request, fn ($req) => new Response('ok'));
+    $response = (new EnsureAffiliateAccount)->handle($request, fn ($req) => new Response('ok'));
     expect($response->getStatusCode())->toBe(401);
 });

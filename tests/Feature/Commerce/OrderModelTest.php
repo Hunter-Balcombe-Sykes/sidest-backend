@@ -82,7 +82,7 @@ it('BrandAffiliateRollup is a composite-key model without timestamps', function 
     $casts = $rollup->getCasts();
     expect($casts['day'] ?? null)->toBe('date');
     foreach (['orders_count', 'gross_cents', 'refund_cents', 'net_cents',
-              'commission_cents', 'reversed_commission_cents'] as $col) {
+        'commission_cents', 'reversed_commission_cents'] as $col) {
         expect($casts[$col] ?? null)->toBe('integer', "Expected {$col} cast to integer");
     }
 });

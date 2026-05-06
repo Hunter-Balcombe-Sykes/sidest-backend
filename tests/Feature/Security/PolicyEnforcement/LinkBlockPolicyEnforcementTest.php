@@ -1,9 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;
-use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\DestroyLinkBlockRequest;
-use App\Services\Site\SocialLinkNormalizer;
+use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 

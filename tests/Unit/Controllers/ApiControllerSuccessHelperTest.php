@@ -10,7 +10,8 @@ use App\Http\Controllers\Api\ApiController;
  */
 function makeController(): object
 {
-    return new class extends ApiController {
+    return new class extends ApiController
+    {
         public function callSuccess($data = null, int $status = 200)
         {
             return $this->success($data, $status);

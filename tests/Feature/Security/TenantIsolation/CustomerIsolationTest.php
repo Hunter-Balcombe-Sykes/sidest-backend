@@ -3,9 +3,9 @@
 use App\Http\Controllers\Api\Professional\ProfessionalCustomerController;
 use App\Http\Controllers\Api\Professional\ProfessionalEnquiryController;
 use App\Models\Core\Professional\Customer;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Illuminate\Auth\Access\AuthorizationException;
 
 beforeEach(function () {
     tenantHelpersEnsureTables();

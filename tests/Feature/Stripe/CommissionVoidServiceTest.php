@@ -360,8 +360,7 @@ it('sends a 10-day warning for a payout expiring in 10 days', function () {
     $publisher = Mockery::mock(NotificationPublisher::class);
     $publisher->shouldReceive('publish')
         ->once()
-        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) =>
-            $professionalId === 'aff-1' &&
+        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) => $professionalId === 'aff-1' &&
             str_contains($dedupeKey, 'payout') &&
             $category === 'commissions'
         );
@@ -380,8 +379,7 @@ it('sends a 2-day warning for a payout expiring in 2 days', function () {
     $publisher = Mockery::mock(NotificationPublisher::class);
     $publisher->shouldReceive('publish')
         ->once()
-        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) =>
-            $professionalId === 'aff-1' &&
+        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) => $professionalId === 'aff-1' &&
             str_contains($dedupeKey, 'payout') &&
             $category === 'commissions'
         );

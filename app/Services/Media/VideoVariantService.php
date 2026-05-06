@@ -44,6 +44,7 @@ class VideoVariantService
 
     /** 4K ceiling: long edge ≤ 3840px, short edge ≤ 2160px. */
     private const MAX_RESOLUTION_LONG = 3840;
+
     private const MAX_RESOLUTION_SHORT = 2160;
 
     /* ------------------------------------------------------------------ */
@@ -91,6 +92,7 @@ class VideoVariantService
      * not on the worker.
      *
      * @return array<string, mixed> Raw ffprobe data (reuse to avoid a second probe).
+     *
      * @throws \RuntimeException if the container is unreadable, has no video stream, or exceeds max duration.
      */
     public function probeAndValidate(string $localPath): array
@@ -546,7 +548,7 @@ class VideoVariantService
 
         $exitCode = $process->getExitCode() ?? 0;
 
-        return $process->getOutput() . $process->getErrorOutput();
+        return $process->getOutput().$process->getErrorOutput();
     }
 
     private function removeDir(string $dir): void

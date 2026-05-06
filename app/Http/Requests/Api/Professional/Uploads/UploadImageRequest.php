@@ -86,7 +86,7 @@ class UploadImageRequest extends BaseFormRequest
         $videoMaxMb = round(((int) config('sidest.video_max_upload_size', 512000)) / 1024, 0);
 
         return [
-            'pool.in' => 'Pool must be one of: ' . implode(', ', config('sidest.upload_pools')) . '.',
+            'pool.in' => 'Pool must be one of: '.implode(', ', config('sidest.upload_pools')).'.',
             'image.max' => "Image must be smaller than {$imageMaxMb} MB.",
             'image.mimes' => 'Image must be JPEG, PNG, or WebP.',
             'image.image' => 'The file must be a valid image.',

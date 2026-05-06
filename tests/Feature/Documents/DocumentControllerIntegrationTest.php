@@ -6,12 +6,12 @@ use App\Http\Requests\Api\Professional\Documents\UploadDocumentRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\Auth\Access\AuthorizationException;
 use Tests\Feature\Documents\DocumentTestCase;
 
 /**

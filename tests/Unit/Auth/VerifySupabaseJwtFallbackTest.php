@@ -21,10 +21,10 @@ function makeTestJwt(array $claims = []): string
 
 beforeEach(function () {
     config([
-        'supabase.url'          => 'https://proj.supabase.co',
-        'supabase.anon_key'     => 'anon-key',
-        'supabase.jwks_url'     => 'https://proj.supabase.co/.well-known/jwks.json',
-        'supabase.jwt_issuer'   => 'https://proj.supabase.co/auth/v1',
+        'supabase.url' => 'https://proj.supabase.co',
+        'supabase.anon_key' => 'anon-key',
+        'supabase.jwks_url' => 'https://proj.supabase.co/.well-known/jwks.json',
+        'supabase.jwt_issuer' => 'https://proj.supabase.co/auth/v1',
         'supabase.jwt_audience' => 'authenticated',
         'supabase.jwks_fail_closed' => false,
     ]);

@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Support\Facades\DB;

@@ -3,7 +3,6 @@
 use App\Http\Controllers\Api\Professional\Store\BrandCatalogController;
 use App\Http\Requests\Api\Professional\Store\ToggleProductActiveRequest;
 use App\Http\Requests\Api\Professional\Store\UpdateProductCommissionRequest;
-use App\Http\Requests\Api\Professional\Store\UpdateProductDiscountRequest;
 use App\Http\Requests\Api\Professional\Store\UpdateProductMetafieldsRequest;
 use App\Models\Core\Professional\Professional;
 use App\Services\Store\BrandCatalogService;

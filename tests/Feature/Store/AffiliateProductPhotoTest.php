@@ -355,7 +355,7 @@ it('returns 403 for brand accounts via affiliate.only middleware', function () {
     $request = Request::create('/api/affiliate/products/gid://shopify/Product/123/photos', 'GET');
     $request->attributes->set('professional', $brand);
 
-    $response = (new EnsureAffiliateAccount())->handle($request, fn ($req) => new Response('ok', 200));
+    $response = (new EnsureAffiliateAccount)->handle($request, fn ($req) => new Response('ok', 200));
 
     expect($response->getStatusCode())->toBe(403);
 });
