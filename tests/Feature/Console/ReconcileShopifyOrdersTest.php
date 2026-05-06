@@ -34,10 +34,6 @@ function insertReconcileIntegration(
     ?string $reconciledThrough = null,
 ): string {
     $id = (string) Str::uuid();
-    $metadata = ['shop_domain' => $shopDomain];
-    if ($reconciledThrough !== null) {
-        $metadata['reconciler_through'] = $reconciledThrough;
-    }
 
     DB::connection('pgsql')->table('core.professional_integrations')->insert([
         'id' => $id,
@@ -47,7 +43,8 @@ function insertReconcileIntegration(
         // access_token is cast as 'encrypted' on the model — store pre-encrypted value
         // so $integration->access_token decrypts to a non-empty string.
         'access_token' => encrypt('shpat_test'),
-        'provider_metadata' => json_encode($metadata),
+        'provider_metadata' => json_encode(['shop_domain' => $shopDomain]),
+        'reconciled_through' => $reconciledThrough,
         'created_at' => now()->toDateTimeString(),
         'updated_at' => now()->toDateTimeString(),
     ]);

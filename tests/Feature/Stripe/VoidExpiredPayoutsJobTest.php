@@ -77,6 +77,42 @@ beforeEach(function () {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )');
+
+    // clearOrderStampsForVoidedPayout queries this table; must exist even when no order-based
+    // items are seeded (the method no-ops when the pluck returns empty).
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
+        id TEXT PRIMARY KEY,
+        payout_id TEXT,
+        commission_ledger_entry_id TEXT,
+        order_id TEXT,
+        amount_cents INTEGER,
+        created_at TEXT
+    )');
+
+    // commerce.orders — needed so clearOrderStampsForVoidedPayout can clear payout_id.
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.orders (
+        id TEXT PRIMARY KEY,
+        shopify_order_id TEXT,
+        shopify_shop_domain TEXT,
+        brand_professional_id TEXT,
+        affiliate_professional_id TEXT,
+        status TEXT,
+        payout_id TEXT,
+        gross_cents INTEGER DEFAULT 0,
+        discount_cents INTEGER DEFAULT 0,
+        refund_cents INTEGER DEFAULT 0,
+        net_cents INTEGER DEFAULT 0,
+        commission_cents INTEGER DEFAULT 0,
+        commission_rate REAL DEFAULT 0,
+        rate_source TEXT,
+        currency_code TEXT,
+        line_items TEXT DEFAULT \'[]\',
+        shopify_data TEXT DEFAULT \'{}\',
+        shopify_updated_at TEXT,
+        occurred_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )');
 });
 
 function expiredPayout_seedAffiliate(string $id, string $stripeStatus = 'not_connected'): void
@@ -255,8 +291,7 @@ it('publishes a voided notification to the affiliate when their payout expires',
     $publisher = Mockery::mock(NotificationPublisher::class);
     $publisher->shouldReceive('publish')
         ->once()
-        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) =>
-            $professionalId === 'aff-1' &&
+        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) => $professionalId === 'aff-1' &&
             $dedupeKey === 'payout_voided.p1' &&
             $category === 'commissions'
         );

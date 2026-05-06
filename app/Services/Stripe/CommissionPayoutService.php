@@ -3,9 +3,9 @@
 namespace App\Services\Stripe;
 
 use App\Jobs\Stripe\ExecuteCommissionPayoutJob;
+use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\BrandStoreSettings;
-use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Notifications\NotificationPublisher;
@@ -73,12 +73,13 @@ class CommissionPayoutService
             $stats['batches_requeued']++;
         }
 
-        // Find all brands that have unpaid approved accruals, then apply
-        // per-brand hold days to determine which entries are eligible.
-        $brandIds = CommissionLedgerEntry::query()
-            ->whereNull('payout_id')
-            ->where('entry_type', 'accrual')
+        // Find all brands with unpaid approved orders, then apply per-brand hold days
+        // to determine which orders have cleared their hold window.
+        // Phase 3.5: source of truth moves from commission_ledger_entries to commerce.orders.
+        $brandIds = Order::query()
             ->where('status', 'approved')
+            ->whereNull('payout_id')
+            ->where('refund_cents', 0)
             ->distinct()
             ->pluck('brand_professional_id');
 
@@ -91,21 +92,21 @@ class CommissionPayoutService
             $holdDays = $this->resolveHoldDays($brandSettings[$brandId] ?? null);
             $cutoff = now()->utc()->subDays($holdDays);
 
-            $groups = CommissionLedgerEntry::query()
-                ->whereNull('payout_id')
-                ->where('entry_type', 'accrual')
+            $groups = Order::query()
                 ->where('status', 'approved')
+                ->whereNull('payout_id')
+                ->where('refund_cents', 0)
                 ->where('brand_professional_id', $brandId)
                 ->where('occurred_at', '<=', $cutoff)
                 ->select([
                     'brand_professional_id',
                     'affiliate_professional_id',
                     'currency_code',
-                    DB::raw('SUM(amount_cents) as total_cents'),
+                    DB::raw('SUM(commission_cents) as total_cents'),
                     DB::raw('COUNT(*) as entry_count'),
                 ])
                 ->groupBy('brand_professional_id', 'affiliate_professional_id', 'currency_code')
-                ->having(DB::raw('SUM(amount_cents)'), '>', 0)
+                ->having(DB::raw('SUM(commission_cents)'), '>', 0)
                 ->get();
 
             foreach ($groups as $group) {
@@ -150,7 +151,13 @@ class CommissionPayoutService
     }
 
     /**
-     * Create a payout batch record and link all eligible ledger entries.
+     * Create a payout batch record and link all eligible orders.
+     *
+     * Phase 3.5+: reads from commerce.orders directly (not commission_ledger_entries).
+     * Orders that are refunded after status='approved' have their status flipped to
+     * 'partially_refunded'/'refunded', which the WHERE clause already excludes. Refunds
+     * that arrive AFTER a payout is created are not reconciled in v1 — acceptable pre-beta;
+     * tracked for Phase 4.
      */
     private function createPayoutBatch(
         string $brandId,
@@ -158,13 +165,13 @@ class CommissionPayoutService
         string $currency,
         \DateTimeInterface $cutoff,
     ): ?CommissionPayout {
-        // READ COMMITTED (PG default) — lockForUpdate() on both reads is sufficient
-        // to prevent a concurrent batch from claiming the same ledger entries.
+        // READ COMMITTED (PG default) — lockForUpdate() prevents a concurrent batch
+        // from claiming the same orders between the SELECT and the payout_id stamp.
         return DB::transaction(function () use ($brandId, $affiliateId, $currency, $cutoff) {
-            $entries = CommissionLedgerEntry::query()
-                ->whereNull('payout_id')
-                ->where('entry_type', 'accrual')
+            $orders = Order::query()
                 ->where('status', 'approved')
+                ->whereNull('payout_id')
+                ->where('refund_cents', 0)
                 ->where('brand_professional_id', $brandId)
                 ->where('affiliate_professional_id', $affiliateId)
                 ->where('currency_code', $currency)
@@ -172,38 +179,17 @@ class CommissionPayoutService
                 ->lockForUpdate()
                 ->get();
 
-            if ($entries->isEmpty()) {
+            if ($orders->isEmpty()) {
                 return null;
             }
 
-            $grossCents = $entries->sum('amount_cents');
+            $grossCents = (int) $orders->sum('commission_cents');
             if ($grossCents <= 0) {
                 return null;
             }
 
-            // Single locked fetch — reused for both the net-commission sum
-            // below and the foreach that links these entries to the payout.
-            // lockForUpdate matches the accrual fetch above and closes the
-            // race where a reversal could land between SUM and GET.
-            $reversals = CommissionLedgerEntry::query()
-                ->whereNull('payout_id')
-                ->where('entry_type', 'reversal')
-                ->where('status', 'approved')
-                ->where('brand_professional_id', $brandId)
-                ->where('affiliate_professional_id', $affiliateId)
-                ->where('currency_code', $currency)
-                ->where('occurred_at', '<=', $cutoff)
-                ->lockForUpdate()
-                ->get();
-
-            $reversalCents = (int) $reversals->sum('amount_cents');
-            $netCommission = $grossCents + $reversalCents;
-            if ($netCommission <= 0) {
-                return null;
-            }
-
-            $platformFeeCents = (int) round($netCommission * $this->platformFeePercent / 100);
-            $netPayoutCents = $netCommission - $platformFeeCents;
+            $platformFeeCents = (int) round($grossCents * $this->platformFeePercent / 100);
+            $netPayoutCents = $grossCents - $platformFeeCents;
 
             if ($netPayoutCents <= 0) {
                 return null;
@@ -211,40 +197,37 @@ class CommissionPayoutService
 
             // Per-payout grace window — 60d from creation. If the affiliate
             // hasn't activated Stripe Connect by then, VoidExpiredPayoutsJob
-            // cancels this payout and voids its ledger entries.
+            // cancels this payout and clears the orders' payout_id stamps.
             // grace_period_days lives in config/sidest.php so ops can tune
             // the policy without a code release.
+            // ledger_entry_count now counts orders included; column rename deferred to Phase 4.
             $payout = CommissionPayout::forceCreate([
                 'brand_professional_id' => $brandId,
                 'affiliate_professional_id' => $affiliateId,
                 'status' => 'pending',
-                'gross_commission_cents' => $netCommission,
+                'gross_commission_cents' => $grossCents,
                 'platform_fee_cents' => $platformFeeCents,
                 'net_payout_cents' => $netPayoutCents,
                 'currency_code' => strtoupper($currency),
-                'ledger_entry_count' => $entries->count(),
+                'ledger_entry_count' => $orders->count(),
                 'eligible_after' => $cutoff,
-                'void_at' => DB::raw("NOW() + INTERVAL '{$this->gracePeriodDays} days'"),
+                'void_at' => now()->addDays($this->gracePeriodDays),
                 'funding_source' => null,
             ]);
 
-            foreach ($entries as $entry) {
+            // Create one payout item per order; stamp orders.payout_id atomically
+            // so the next sweep cannot double-claim these orders.
+            foreach ($orders as $order) {
                 CommissionPayoutItem::create([
                     'payout_id' => $payout->id,
-                    'commission_ledger_entry_id' => $entry->id,
-                    'amount_cents' => $entry->amount_cents,
+                    'commission_ledger_entry_id' => null,
+                    'order_id' => $order->id,
+                    'amount_cents' => $order->commission_cents,
                 ]);
-                $entry->forceFill(['payout_id' => $payout->id])->save();
             }
 
-            foreach ($reversals as $reversal) {
-                CommissionPayoutItem::create([
-                    'payout_id' => $payout->id,
-                    'commission_ledger_entry_id' => $reversal->id,
-                    'amount_cents' => $reversal->amount_cents,
-                ]);
-                $reversal->forceFill(['payout_id' => $payout->id])->save();
-            }
+            Order::whereIn('id', $orders->pluck('id')->all())
+                ->update(['payout_id' => $payout->id]);
 
             return $payout;
         });

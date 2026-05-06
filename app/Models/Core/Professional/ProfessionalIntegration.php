@@ -43,6 +43,7 @@ class ProfessionalIntegration extends BaseModel
         'last_catalog_sync_at',
         'last_catalog_sync_error',
         'provider_metadata',
+        'reconciled_through',
     ];
 
     protected $casts = [
@@ -53,6 +54,7 @@ class ProfessionalIntegration extends BaseModel
         'catalog_latest_time' => 'datetime',
         'last_catalog_sync_at' => 'datetime',
         'provider_metadata' => 'array',
+        'reconciled_through' => 'datetime',
     ];
 
     public function professional(): BelongsTo

@@ -1,12 +1,14 @@
 <?php
 
 use App\Jobs\Stripe\ExecuteCommissionPayoutJob;
+use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Stripe\Exception\ApiConnectionException;
 use Stripe\Exception\InvalidRequestException;
 use Stripe\StripeClient;
@@ -25,6 +27,7 @@ afterEach(function () {
 beforeEach(function () {
     Bus::fake();
     setupProfessionalsTable();
+    setupCommerceOrdersTables();
 
     $conn = DB::connection('pgsql');
     foreach ([
@@ -66,9 +69,78 @@ beforeEach(function () {
         created_at TEXT,
         updated_at TEXT
     )');
+
+    // commission_payout_items supports both legacy ledger-entry items and new order-based items.
+    // commission_ledger_entry_id and order_id are both nullable — SQLite does not enforce the
+    // CHECK constraint (at least one must be set) from the PG migration, which is acceptable for tests.
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
+        id TEXT PRIMARY KEY,
+        payout_id TEXT,
+        commission_ledger_entry_id TEXT,
+        order_id TEXT,
+        amount_cents INTEGER,
+        created_at TEXT,
+        updated_at TEXT
+    )');
+
+    // brand_store_settings is used by processEligiblePayouts for per-brand hold-day lookups.
+    $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_store_settings (
+        id TEXT PRIMARY KEY, professional_id TEXT, payout_hold_days INTEGER,
+        default_commission_rate REAL, created_at TEXT, updated_at TEXT
+    )');
+
+    // commission_ledger_entries — cancelExpiredPayout voids any legacy ledger-entry items
+    // on a cancelled payout. Table must exist even when no entries are seeded.
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
+        id TEXT PRIMARY KEY, payout_id TEXT, brand_professional_id TEXT,
+        affiliate_professional_id TEXT, entry_type TEXT, status TEXT,
+        amount_cents INTEGER, currency_code TEXT, occurred_at TEXT,
+        voided_at TEXT, void_reason TEXT, created_at TEXT, updated_at TEXT
+    )');
 });
 
 // --- seed helpers (prefixed with "payoutSvc_" to avoid global name collisions) ---
+
+/**
+ * Inserts a commerce.orders row and returns its UUID.
+ * Phase 3.5+: processEligiblePayouts reads from commerce.orders, not commission_ledger_entries.
+ */
+function payoutSvc_seedOrder(
+    string $brandId,
+    string $affiliateId,
+    int $commissionCents = 1000,
+    string $currency = 'AUD',
+    ?\Illuminate\Support\Carbon $occurredAt = null,
+    string $status = 'approved',
+    int $refundCents = 0,
+): string {
+    $orderId = (string) Str::uuid();
+    $ts = ($occurredAt ?? now())->toDateTimeString();
+    DB::connection('pgsql')->table('commerce.orders')->insert([
+        'id' => $orderId,
+        'shopify_order_id' => 'shop_order_'.substr($orderId, 0, 8),
+        'shopify_shop_domain' => 'test.myshopify.com',
+        'shopify_updated_at' => $ts,
+        'brand_professional_id' => $brandId,
+        'affiliate_professional_id' => $affiliateId,
+        'status' => $status,
+        'gross_cents' => $commissionCents * 10,
+        'discount_cents' => 0,
+        'refund_cents' => $refundCents,
+        'net_cents' => $commissionCents * 10 - $refundCents,
+        'commission_cents' => $commissionCents,
+        'commission_rate' => 10.0,
+        'rate_source' => 'brand_default',
+        'currency_code' => $currency,
+        'line_items' => '[]',
+        'shopify_data' => '{}',
+        'occurred_at' => $ts,
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
+
+    return $orderId;
+}
 
 function payoutSvc_seedBrand(string $id, array $overrides = []): void
 {
@@ -697,22 +769,10 @@ it('does not overwrite already-failed status in the failed hook', function () {
 it('uses UTC for payout cutoff so an app-timezone offset does not shorten the hold window', function () {
     $conn = DB::connection('pgsql');
 
-    $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_store_settings (
-        id TEXT PRIMARY KEY, professional_id TEXT, payout_hold_days INTEGER,
-        default_commission_rate REAL, created_at TEXT, updated_at TEXT
-    )');
-    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
-        id TEXT PRIMARY KEY,
-        brand_professional_id TEXT, affiliate_professional_id TEXT,
-        entry_type TEXT, status TEXT, amount_cents INTEGER, currency_code TEXT,
-        commission_rate REAL, rate_source TEXT,
-        idempotency_key TEXT UNIQUE, calculation_metadata TEXT, payout_id TEXT,
-        occurred_at TEXT NOT NULL, created_at TEXT, updated_at TEXT
-    )');
-    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
-        id TEXT PRIMARY KEY, payout_id TEXT, commission_ledger_entry_id TEXT,
-        amount_cents INTEGER, created_at TEXT, updated_at TEXT
-    )');
+    $conn->table('brand.brand_store_settings')->insert([
+        'id' => 'bss-tz', 'professional_id' => 'brand-tz', 'payout_hold_days' => 7,
+        'created_at' => now()->toDateTimeString(), 'updated_at' => now()->toDateTimeString(),
+    ]);
 
     // Carbon::now() converts testNow to date_default_timezone_get(), so we must set
     // the PHP default TZ BEFORE setting the mock. With Auckland (UTC+12) as the default,
@@ -725,26 +785,27 @@ it('uses UTC for payout cutoff so an app-timezone offset does not shorten the ho
     payoutSvc_seedBrand('brand-tz');
     payoutSvc_seedAffiliate('aff-tz');
 
-    $conn->table('brand.brand_store_settings')->insert([
-        'id' => 'bss-tz', 'professional_id' => 'brand-tz', 'payout_hold_days' => 7,
-        'created_at' => now()->toDateTimeString(), 'updated_at' => now()->toDateTimeString(),
-    ]);
-
-    // Entry from 6 days + 18 hours ago (UTC). Still within the 7-day hold window.
+    // Order occurred 6 days + 18 hours ago (UTC) — still within the 7-day hold window.
     // App-TZ cutoff '2026-04-25 12:00:00' incorrectly includes it (06:00 ≤ 12:00).
     // UTC cutoff    '2026-04-25 00:00:00' correctly excludes it  (06:00 > 00:00).
-    $conn->table('commerce.commission_ledger_entries')->insert([
-        'id' => 'entry-tz',
+    $conn->table('commerce.orders')->insert([
+        'id' => (string) Str::uuid(),
+        'shopify_order_id' => 'shop_tz_1',
+        'shopify_shop_domain' => 'test.myshopify.com',
         'brand_professional_id' => 'brand-tz',
         'affiliate_professional_id' => 'aff-tz',
-        'entry_type' => 'accrual',
         'status' => 'approved',
-        'amount_cents' => 10000,
-        'currency_code' => 'AUD',
+        'gross_cents' => 100000,
+        'discount_cents' => 0,
+        'refund_cents' => 0,
+        'net_cents' => 100000,
+        'commission_cents' => 10000,
         'commission_rate' => 10.0,
         'rate_source' => 'brand_default',
-        'idempotency_key' => 'entry-tz-key',
-        'calculation_metadata' => '{}',
+        'currency_code' => 'AUD',
+        'line_items' => '[]',
+        'shopify_data' => '{}',
+        'shopify_updated_at' => '2026-04-25 06:00:00',
         'occurred_at' => '2026-04-25 06:00:00',
         'created_at' => '2026-04-25 06:00:00',
         'updated_at' => '2026-04-25 06:00:00',
@@ -754,4 +815,220 @@ it('uses UTC for payout cutoff so an app-timezone offset does not shorten the ho
     $stats = $service->processEligiblePayouts();
 
     expect($stats['batches_created'])->toBe(0);
+});
+
+// ============================================================
+// Phase 3.5 — processEligiblePayouts reads from commerce.orders
+// ============================================================
+
+it('creates a payout batch from eligible commerce.orders and stamps payout_id on those orders', function () {
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1');
+
+    $orderId = payoutSvc_seedOrder(
+        brandId: 'brand-1',
+        affiliateId: 'aff-1',
+        commissionCents: 5000,
+        currency: 'AUD',
+        occurredAt: now()->subDays(10),
+    );
+
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(1);
+    expect($stats['batches_dispatched'])->toBeGreaterThanOrEqual(1);
+
+    // Order should be stamped with the new payout_id.
+    $order = Order::find($orderId);
+    expect($order->payout_id)->not->toBeNull();
+
+    // Payout item should link to the order, not a ledger entry.
+    $item = DB::connection('pgsql')->table('commerce.commission_payout_items')
+        ->where('order_id', $orderId)
+        ->first();
+    expect($item)->not->toBeNull();
+    expect($item->commission_ledger_entry_id)->toBeNull();
+    expect($item->amount_cents)->toBe(5000);
+});
+
+it('does not create a payout batch for orders still within the hold window', function () {
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1');
+
+    // Order occurred 3 days ago — within the 7-day default hold window.
+    payoutSvc_seedOrder(
+        brandId: 'brand-1',
+        affiliateId: 'aff-1',
+        commissionCents: 5000,
+        occurredAt: now()->subDays(3),
+    );
+
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(0);
+});
+
+it('does not include orders with non-approved status in payout sweep', function () {
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1');
+
+    payoutSvc_seedOrder(
+        brandId: 'brand-1',
+        affiliateId: 'aff-1',
+        commissionCents: 5000,
+        occurredAt: now()->subDays(10),
+        status: 'pending', // not yet approved
+    );
+
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(0);
+});
+
+it('does not include orders with non-zero refund_cents in payout sweep', function () {
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1');
+
+    payoutSvc_seedOrder(
+        brandId: 'brand-1',
+        affiliateId: 'aff-1',
+        commissionCents: 5000,
+        occurredAt: now()->subDays(10),
+        refundCents: 1000, // partially refunded
+    );
+
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(0);
+});
+
+// ============================================================
+// Phase 3.5 — void clears commerce.orders.payout_id
+// ============================================================
+
+it('voiding an expired payout clears payout_id on its order-based items so orders re-enter the sweep', function () {
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1', ['stripe_connect_status' => 'not_connected', 'stripe_connect_account_id' => null]);
+
+    // Seed an order, manually stamp a payout on it (simulates a prior createPayoutBatch).
+    $orderId = payoutSvc_seedOrder(
+        brandId: 'brand-1',
+        affiliateId: 'aff-1',
+        commissionCents: 5000,
+        occurredAt: now()->subDays(10),
+    );
+
+    // Create an expired payout referencing that order.
+    $payoutId = (string) Str::uuid();
+    DB::connection('pgsql')->table('commerce.commission_payouts')->insert([
+        'id' => $payoutId,
+        'brand_professional_id' => 'brand-1',
+        'affiliate_professional_id' => 'aff-1',
+        'status' => 'pending',
+        'gross_commission_cents' => 5000,
+        'platform_fee_cents' => 150,
+        'net_payout_cents' => 4850,
+        'currency_code' => 'AUD',
+        'ledger_entry_count' => 1,
+        'void_at' => now()->subDay()->toDateTimeString(),
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
+
+    // Link the order to the payout via a payout item.
+    DB::connection('pgsql')->table('commerce.commission_payout_items')->insert([
+        'id' => (string) Str::uuid(),
+        'payout_id' => $payoutId,
+        'order_id' => $orderId,
+        'commission_ledger_entry_id' => null,
+        'amount_cents' => 5000,
+        'created_at' => now()->toDateTimeString(),
+    ]);
+
+    // Stamp the order's payout_id.
+    DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->update(['payout_id' => $payoutId]);
+
+    // Confirm stamp before void.
+    $before = DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
+    expect($before->payout_id)->toBe($payoutId);
+
+    // Run the expired-payout void sweep.
+    $publisher = Mockery::mock(\App\Services\Notifications\NotificationPublisher::class);
+    $publisher->shouldReceive('publish')->andReturnNull();
+    $voidService = new \App\Services\Stripe\CommissionVoidService($publisher);
+    $voidService->processExpiredPayouts();
+
+    // Payout should be cancelled.
+    $payout = CommissionPayout::find($payoutId);
+    expect($payout->status)->toBe('cancelled');
+
+    // Order payout_id must be cleared so the next sweep can re-batch it.
+    $after = DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
+    expect($after->payout_id)->toBeNull();
+});
+
+it('after a voided payout, processEligiblePayouts picks up the re-entered orders in the next sweep', function () {
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1', ['stripe_connect_status' => 'not_connected', 'stripe_connect_account_id' => null]);
+
+    $orderId = payoutSvc_seedOrder(
+        brandId: 'brand-1',
+        affiliateId: 'aff-1',
+        commissionCents: 3000,
+        occurredAt: now()->subDays(10),
+    );
+
+    // Simulate the payout + stamp state.
+    $payoutId = (string) Str::uuid();
+    DB::connection('pgsql')->table('commerce.commission_payouts')->insert([
+        'id' => $payoutId,
+        'brand_professional_id' => 'brand-1',
+        'affiliate_professional_id' => 'aff-1',
+        'status' => 'pending',
+        'gross_commission_cents' => 3000,
+        'platform_fee_cents' => 90,
+        'net_payout_cents' => 2910,
+        'currency_code' => 'AUD',
+        'ledger_entry_count' => 1,
+        'void_at' => now()->subDay()->toDateTimeString(),
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
+    DB::connection('pgsql')->table('commerce.commission_payout_items')->insert([
+        'id' => (string) Str::uuid(),
+        'payout_id' => $payoutId,
+        'order_id' => $orderId,
+        'commission_ledger_entry_id' => null,
+        'amount_cents' => 3000,
+        'created_at' => now()->toDateTimeString(),
+    ]);
+    DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->update([
+        'payout_id' => $payoutId,
+    ]);
+
+    // Void the expired payout while the affiliate is still not_connected — that's what
+    // processExpiredPayouts looks for. The order stamp must be cleared atomically.
+    $publisher = Mockery::mock(\App\Services\Notifications\NotificationPublisher::class);
+    $publisher->shouldReceive('publish')->andReturnNull();
+    $voidService = new \App\Services\Stripe\CommissionVoidService($publisher);
+    $voidService->processExpiredPayouts();
+
+    // Order payout_id is now null — re-eligible.
+    expect(DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first()->payout_id)->toBeNull();
+
+    // Upgrade affiliate to active AFTER the void so the next payout sweep can succeed.
+    DB::connection('pgsql')->table('core.professionals')->where('id', 'aff-1')->update([
+        'stripe_connect_status' => 'active',
+        'stripe_connect_account_id' => 'acct_retest',
+    ]);
+
+    // Next sweep should create a new payout batch for the re-entered order.
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(1);
 });

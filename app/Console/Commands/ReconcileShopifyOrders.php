@@ -15,9 +15,6 @@ use Illuminate\Support\Facades\Log;
 // reconciled_through timestamp and dispatches ProcessShopifyOrderWebhookJob for
 // any rows that are missing or stale in commerce.orders. The LWW guard in the
 // upsert provides idempotency; no unique event-id constraint is needed here.
-//
-// reconciled_through is stored in provider_metadata JSON (option ii) — no schema
-// change required. Key: 'reconciler_through'.
 class ReconcileShopifyOrders extends Command
 {
     protected $signature = 'sidest:reconcile-shopify-orders
@@ -89,9 +86,9 @@ class ReconcileShopifyOrders extends Command
             return;
         }
 
-        // Determine the since timestamp. Precedence: --since flag > stored reconciler_through > 7 days ago.
+        // Determine the since timestamp. Precedence: --since flag > stored reconciled_through > 7 days ago.
         $since = $sinceOverride
-            ?? ($this->parseSinceFromMetadata($metadata))
+            ?? $integration->reconciled_through
             ?? now()->subDays(7);
 
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
@@ -202,25 +199,7 @@ class ReconcileShopifyOrders extends Command
         // Advance reconciled_through to now so the next run only fetches newly-updated orders.
         // Skipped when --dry-run so successive dry runs produce the same output.
         if (! $isDryRun) {
-            $integration->mergeProviderMetadata(['reconciler_through' => now()->toIso8601String()]);
-        }
-    }
-
-    /**
-     * Extract the `since` Carbon from provider_metadata.reconciler_through.
-     * Returns null if the key is absent or unparseable (first run).
-     */
-    private function parseSinceFromMetadata(array $metadata): ?Carbon
-    {
-        $raw = Arr::get($metadata, 'reconciler_through');
-        if (! is_string($raw) || $raw === '') {
-            return null;
-        }
-
-        try {
-            return Carbon::parse($raw);
-        } catch (\Throwable) {
-            return null;
+            $integration->forceFill(['reconciled_through' => now()])->save();
         }
     }
 

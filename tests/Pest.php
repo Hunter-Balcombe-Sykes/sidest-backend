@@ -495,6 +495,7 @@ function setupProfessionalIntegrationsTable(): void
         provider_metadata TEXT NULL,
         status TEXT NULL,
         expires_at TEXT NULL,
+        reconciled_through TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
     )');

@@ -2,9 +2,11 @@
 
 namespace App\Services\Stripe;
 
+use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\CommissionPayout;
+use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -192,6 +194,10 @@ class CommissionVoidService
                     'void_reason' => 'payout_grace_expired',
                     'updated_at' => now(),
                 ]);
+
+            // Re-enter any order-based items into the payout pool so the next
+            // processEligiblePayouts sweep can batch them into a fresh payout.
+            $this->clearOrderStampsForVoidedPayout($payout->id);
 
             $stats['cancelled_count']++;
             $stats['cancelled_cents'] += (int) $payout->gross_commission_cents;
@@ -546,6 +552,26 @@ class CommissionVoidService
             ->pluck(\Illuminate\Support\Facades\DB::raw('SUM(amount_cents)'), 'affiliate_professional_id')
             ->map(fn ($v) => (int) $v)
             ->all();
+    }
+
+    /**
+     * Clear payout_id on any commerce.orders rows linked to this payout via payout items.
+     * Called inside the cancelExpiredPayout transaction so order-based items re-enter the
+     * payout pool on the next processEligiblePayouts sweep. Legacy ledger-entry items are
+     * unaffected — their payout_id column lives on commission_ledger_entries, not orders.
+     */
+    private function clearOrderStampsForVoidedPayout(string $payoutId): void
+    {
+        $orderIds = CommissionPayoutItem::query()
+            ->where('payout_id', $payoutId)
+            ->whereNotNull('order_id')
+            ->pluck('order_id')
+            ->all();
+
+        if (! empty($orderIds)) {
+            Order::whereIn('id', $orderIds)
+                ->update(['payout_id' => null]);
+        }
     }
 
     private function formatMoney(int $cents, string $currencyCode): string
