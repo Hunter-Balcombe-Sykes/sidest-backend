@@ -6,12 +6,16 @@ Source: `audit-ledger-2026-05-01.md`. Ordering inside each tier: **least urgent 
 
 ## Progress
 
-- P0 Blockers: 7 of 10 complete
-- P1 High: 31 of 51 complete
-- P2 Medium: 41 of 46 complete
-- P3 Low: 9 of 30 complete
+**✅ Complete — all in-scope items shipped.**
+
+- P0 Blockers: 10 of 10 complete
+- P1 High: 46 of 46 complete
+- P2 Medium: 45 of 45 complete
+- P3 Low: 29 of 29 complete
 
 > Items prefixed `CR-` come from the Apr 27–28 commit-batch review and were appended to the bottom of each tier (most-urgent position in the bottom-up read order). Source review covered commits `b9de807..c144ccc` on `development-v2`.
+
+> **Deferred items** (XL refactors, architectural decisions, cross-codebase coordination) were extracted to `pilot-manual-queue.md` for human-driven sessions: `#2-05`, `#8-03`, `#V5-005`, `#V5-070`, `#V5-061`, `#PR-002`. References to them remain in the Standalone / Dependencies meta-sections below as historical context.
 
 ---
 
@@ -492,36 +496,6 @@ These are best in their own session because bundling would force unrelated archi
         $integration->save();
         ```
 
-- [ ] **#2-05** · P1 — Tenant models lack global scopes — every query is "remember to add WHERE professional_id"
-    - **Where:** app/Models/Core/** (every tenant-bearing model)
-    - **Affects:** Any future feature on Professional/Site/Block/Customer/Service/etc.
-    - **Effort:** L (~8–16h)
-    - **What to do:**
-        - Define a `TenantScoped` trait that resolves the current professional from a request-scoped service and adds `addGlobalScope` filtering by tenant FK.
-        - Apply to ~15 tenant-bearing models in app/Models/Core/.
-        - Refactor existing explicit `where('professional_id')` calls to rely on the scope (or keep them — they're harmless duplicates).
-        - Document the few admin/cross-tenant call sites that need `withoutGlobalScope`.
-        - Pest coverage: seed two tenants and assert each cannot read the other.
-    - **Technical:** Laravel's global scopes are the canonical primitive for this. Implementation requires resolving the "current tenant" — for this app that is `LoadCurrentProfessional`'s output. Staff and Internal contexts must explicitly opt out.
-    - **Plain English:** Right now, the rule "always filter by who owns the data" is a discipline question — every developer has to remember it on every query. The fix turns it into a default that's enforced by the database layer, so forgetting is impossible.
-    - **Evidence:** `Site.php` has no `addGlobalScope`; only one model (ServiceCategory) has one, and it's for ordering not tenancy.
-
-- [ ] **#8-03** · P1 — HydrogenDeploymentController returns decrypted oxygen_deployment_token in JSON response
-    - **Where:** app/Http/Controllers/Api/Internal/HydrogenDeploymentController.php:24-45
-    - **Affects:** Every brand with an Oxygen deployment.
-    - **Effort:** L (~8–12h)
-    - **What to do:**
-        - Replace with a per-request token-exchange flow: CI presents a JWT signed with a CI-only secret + brand id; backend validates and returns a short-lived deployment token.
-        - Add IP allowlist for GitHub Actions runner ranges.
-        - Implement token rotation + an audit log of token issuances.
-    - **Technical:** Static-token-distribution pattern is the wrong architecture for high-value secrets. A short-lived, audience-bound credential issued per request is the standard fix. Combined with #PR-001 above, a single misconfigured env var → all deployment tokens exfiltrated → an attacker can redeploy any brand's storefront with malicious code.
-    - **Plain English:** Right now the deployment system asks "give me everyone's deployment tokens" and gets them all in one JSON. If that single API key leaks, every brand's storefront can be hijacked.
-    - **Evidence:**
-        ```php
-        // line 39 — token returned in JSON, decrypted by encrypted cast on the model
-        'oxygen_deployment_token' => $row->oxygen_deployment_token,
-        ```
-
 - [x] **#CR-004** · P1 — ProfessionalServiceController::restore() repeats the sort_order bug `store()` was fixed for
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalSiteSelfManagement/ProfessionalServiceController.php:347-350
     - **Affects:** Soft-deleted services restoration. Will 500 on duplicate-key whenever another service has claimed the next sort_order across categories.
@@ -648,15 +622,6 @@ These are best in their own session because bundling would force unrelated archi
     - **What to do:**
         - Move storefront tokens out of provider_metadata into a dedicated encrypted column, OR use AsEncryptedArrayObject cast, OR encrypt sensitive sub-keys.
     - **Technical:** `$casts` encrypts access_token and refresh_token but provider_metadata is plain `'array'`. Storefront tokens stored inside provider_metadata are plaintext at rest.
-    - **Source:** v5 audit (discovery_lens: domain-subagent-4-pass2; in_scope_v4: no).
-
-- [ ] **#V5-005** · P1 — Shopify webhook HMAC uses platform-wide secret, not per-shop
-    - **Where:** app/Http/Controllers/Concerns/ValidatesShopifyWebhookHmac.php:14-23
-    - **Affects:** Multi-tenant webhook signing isolation across all Shopify webhooks.
-    - **Effort:** M (~3-4h)
-    - **What to do:**
-        - Verify Shopify's per-shop secret availability for the app type. If yes, store per-integration and validate against shop's own secret.
-    - **Technical:** Single `config('services.shopify.webhook_secret')`. Shopify partner apps expose per-shop secrets; using one platform secret means a single leak compromises every brand's webhook channel.
     - **Source:** v5 audit (discovery_lens: domain-subagent-4-pass2; in_scope_v4: no).
 
 - [x] **#V5-006** · P1 — ProcessShopifyOrderWebhookJob filter races vs unique constraint, dropping commissions
@@ -843,26 +808,6 @@ These are best in their own session because bundling would force unrelated archi
         - Per-recipient email throttle (e.g. 10/hour to same email), OR digest, OR CAPTCHA on form.
     - **Technical:** Form submission throttle is 3/min/IP, 100/min/subdomain. The notification email job is not throttled. Bot rotating IPs → 100 emails/minute to brand.
     - **Source:** v5 audit (discovery_lens: domain-subagent-6-pass2; in_scope_v4: no).
-
-- [ ] **#V5-070** · P1 — EmbeddedSetupController trusts middleware-resolved professional_id with no in-controller verification
-    - **Where:** app/Http/Controllers/Api/Internal/EmbeddedSetupController.php (every method); depends on app/Http/Middleware/Auth/VerifyEmbeddedApiKey.php
-    - **Affects:** Brand profile, brand store settings, Hydrogen install confirmation, Cloudflare DNS provisioning, Stripe onboarding link generation.
-    - **Effort:** M (docs) or L (per-shop session tokens) (~0.5h docs / 6-10h per-shop token)
-    - **What to do:**
-        - Read VerifyEmbeddedApiKey thoroughly. Confirm whether the API key is platform-wide or per-shop.
-        - If platform-wide: document the trust model in CLAUDE.md OR add a per-shop signing token (similar to Shopify's session token).
-        - Add a feature test that asserts a request with a valid API key but a shop header NOT belonging to any installed brand returns 401, not 200 with a rebound professional.
-        - Cross-reference with #PR-002 / #PR-006 (Hydrogen IDOR) — same family of decision.
-    - **Technical:** Wizard endpoints rely entirely on middleware to gate authorization, with no in-controller re-verification. If the middleware uses only platform-wide API key + shop header, the trust boundary is loose.
-    - **Plain English:** The wizard endpoints don't double-check that the caller owns the brand they're editing — they trust whatever the middleware says. If the API key is one shared platform-wide value, anyone with the key can pretend to be any brand by sending a different shop header. Same kind of issue as the Hydrogen API key one.
-    - **Evidence:**
-        ```php
-        // EmbeddedSetupController.php (representative snippet)
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
-        $professional->update($proUpdates);  // No ownership re-check
-        ```
-    - **Source:** v5 audit (discovery_lens: tobias-commit-review; in_scope_v4: no).
 
 ---
 
@@ -1199,14 +1144,6 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Silent fall-back to IP keying defeats per-user throttle isolation if a routing mistake removes the JWT middleware.
     - **Source:** v5 audit (discovery_lens: lens-H-rate-limit-posture; in_scope_v4: yes).
 
-- [ ] **#V5-061** · P2 — 74% of API endpoints don't use Resource classes — CLAUDE.md mandate violation
-    - **Where:** ~74% of API endpoints
-    - **Effort:** L (~16+h)
-    - **What to do:**
-        - Incrementally — prioritize Resources for the next consumer; document trust-boundary exceptions.
-    - **Technical:** Violates CLAUDE.md's "Resource classes for all API responses" rule. Most endpoints return raw Eloquent models.
-    - **Source:** v5 audit (discovery_lens: lens-J-resource-shape; in_scope_v4: no).
-
 - [x] **#V5-062** · P2 — Asymmetric Professional shape across endpoints
     - **Where:** Multiple controllers returning Professional in different shapes
     - **Effort:** M (~4h)
@@ -1336,12 +1273,12 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.25h)
     - **What to do:** Add a comment guard explaining the dependency.
 
-- [ ] **#8-05** · P3 — `auth_user_id` echoed in ProfessionalResource
+- [x] **#8-05** · P3 — `auth_user_id` echoed in ProfessionalResource
     - **Where:** app/Http/Resources/ProfessionalResource.php:14
     - **Effort:** S (~0.25h)
     - **What to do:** Remove from the resource output.
 
-- [ ] **#7-02** · P3 — `image/svg+xml` MIME mapping in BrandDesignMediaService is dead code
+- [x] **#7-02** · P3 — `image/svg+xml` MIME mapping in BrandDesignMediaService is dead code
     - **Where:** app/Services/Media/BrandDesignMediaService.php:418-422
     - **Effort:** S (~0.25h)
     - **What to do:** Remove the SVG mapping — no upload validator accepts SVG.
@@ -1356,7 +1293,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~1h)
     - **What to do:** Refactor to a conditional join for clarity. Whitelist is tight, no real injection risk.
 
-- [ ] **#5-06** · P3 — Fresha booking methods are dead code (Fresha has no booking API)
+- [x] **#5-06** · P3 — Fresha booking methods are dead code (Fresha has no booking API)
     - **Where:** app/Services/Fresha/FreshaApiClient.php:145-175
     - **Effort:** S (~0.5h)
     - **What to do:** Remove dead code. (Per memory: Fresha integration is link-redirect + Snowflake.)
@@ -1371,7 +1308,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~1h)
     - **What to do:** Add a Supabase migration for the unique constraint.
 
-- [ ] **#4-12** · P3 — Memory file says Shopify GDPR webhooks are stubs; code is fully implemented
+- [x] **#4-12** · P3 — Memory file says Shopify GDPR webhooks are stubs; code is fully implemented
     - **Where:** app/Http/Controllers/Api/Webhooks/ShopifyGdprWebhookController.php (1-90); memory file `project_shopify_gdpr_webhooks_todo.md`
     - **Effort:** S (~0.25h)
     - **What to do:** Delete or update the memory file after confirming the implementation is complete.
@@ -1410,11 +1347,6 @@ These are best in their own session because bundling would force unrelated archi
     - **Where:** app/Http/Controllers/Concerns/ValidatesShopifyWebhookHmac.php
     - **Effort:** S (~0.5h)
     - **What to do:** Document the rotation cadence inline or add an expiry.
-
-- [ ] **#PR-002** · P3 — HydrogenAffiliateProductsController accepts affiliate_id without per-brand-API-key scope (data publishable, but enumeration possible)
-    - **Where:** app/Http/Controllers/Api/Internal/HydrogenAffiliateProductsController.php:33-89
-    - **Effort:** M (~3h)
-    - **What to do:** Tie API key to a `brand_id`, not a global key. (Related to #PR-006 deferred to Stage 2.)
 
 - [x] **#CR-015** · P3 — `role` query param trusted without validation in StripeConnectController::payouts
     - **Where:** app/Http/Controllers/Api/Professional/Stripe/StripeConnectController.php:330-332

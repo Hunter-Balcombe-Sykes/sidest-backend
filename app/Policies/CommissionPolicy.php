@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * V2: Authorization for commission financial records.
  *
- * Covers: CommissionPayout, CommissionLedgerEntry, BrandCommissionTopup.
+ * Covers: CommissionPayout, CommissionMovement, BrandCommissionTopup.
  *
  * Read access:
  *   - The affiliate (CommissionPayout/LedgerEntry where affiliate_professional_id matches)

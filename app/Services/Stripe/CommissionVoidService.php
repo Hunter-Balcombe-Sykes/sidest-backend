@@ -3,8 +3,8 @@
 namespace App\Services\Stripe;
 
 use App\Models\Commerce\Order;
+use App\Models\Commerce\OrderEvent;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionLedgerEntry;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Notifications\NotificationPublisher;
@@ -14,9 +14,14 @@ use Illuminate\Support\Facades\Log;
 /**
  * Handles voiding commissions for affiliates who haven't connected Stripe.
  *
+ * Phase 4+ model: a "pending commission" is a commerce.orders row with
+ * status='approved' AND payout_id IS NULL. Voiding it sets status='voided';
+ * the rollup_apply_delta trigger automatically reverses the rollup deltas.
+ * The audit trail goes into commerce.order_events with event_type='voided'.
+ *
  * Two phases run on the daily cron:
- * 1. processVoidableCommissions() — void entries past their 30-day window
- * 2. sendGracePeriodWarnings() — nudge affiliates to connect Stripe
+ *   1. processVoidableCommissions() — void orders past their 30-day window
+ *   2. sendGracePeriodWarnings()    — nudge affiliates to connect Stripe
  *
  * Called from ProcessCommissionPayoutsJob after normal payout processing.
  */
@@ -33,8 +38,8 @@ class CommissionVoidService
     }
 
     /**
-     * Find and void all pending commissions past their void window
-     * for affiliates without active Stripe accounts.
+     * Find and void all approved orders past their void window
+     * for affiliates without active Stripe Connect accounts.
      *
      * @return array{voided_count: int, voided_cents: int}
      */
@@ -43,26 +48,34 @@ class CommissionVoidService
         $cutoff = now()->utc()->subDays($this->voidWindowDays);
         $stats = ['voided_count' => 0, 'voided_cents' => 0];
 
-        // Chunk to avoid OOM on large result sets. Each entry is voided with
-        // an optimistic lock so a concurrent flush won't be overwritten.
-        CommissionLedgerEntry::query()
+        // Pre-fetch inactive affiliate IDs so the orders query uses set membership
+        // (hash join) instead of a correlated EXISTS probe per row.
+        $inactiveAffiliateIds = Professional::query()
+            ->where('stripe_connect_status', '!=', 'active')
+            ->pluck('id')
+            ->all();
+
+        if ($inactiveAffiliateIds === []) {
+            return $stats;
+        }
+
+        // Chunk to avoid OOM. Each order is voided with an optimistic update so a
+        // concurrent payout-stamp won't get overwritten.
+        Order::query()
+            ->where('status', 'approved')
             ->whereNull('payout_id')
-            ->where('entry_type', 'accrual')
-            ->where('status', 'pending')
             ->where('occurred_at', '<=', $cutoff)
-            ->whereHas('affiliateProfessional', function ($q) {
-                $q->where('stripe_connect_status', '!=', 'active');
-            })
-            ->chunkById(500, function ($entries) use (&$stats) {
-                foreach ($entries as $entry) {
+            ->whereIn('affiliate_professional_id', $inactiveAffiliateIds)
+            ->chunkById(500, function ($orders) use (&$stats) {
+                foreach ($orders as $order) {
                     try {
-                        if ($this->voidEntry($entry, 'no_stripe_connected')) {
+                        if ($this->voidOrder($order, 'no_stripe_connected')) {
                             $stats['voided_count']++;
-                            $stats['voided_cents'] += $entry->amount_cents;
+                            $stats['voided_cents'] += (int) $order->commission_cents;
                         }
                     } catch (\Throwable $e) {
-                        Log::error('Failed to void commission entry', [
-                            'entry_id' => $entry->id,
+                        Log::error('Failed to void commission order', [
+                            'order_id' => (string) $order->id,
                             'error' => $e->getMessage(),
                         ]);
                     }
@@ -77,32 +90,65 @@ class CommissionVoidService
     }
 
     /**
-     * Void a single commission entry. Uses an optimistic lock (WHERE status = pending)
-     * so a concurrent flush-to-approved from a Stripe webhook can't be overwritten.
+     * Void a single approved order. Uses an optimistic lock guarded by
+     * status='approved' so a concurrent terminal-state transition (refund/cancel)
+     * can't be overwritten.
      *
-     * @return bool True if the entry was voided, false if it was already claimed.
+     * Two payout-id contexts:
+     *   - $expectedPayoutId === null (default): the order must be unclaimed
+     *     (payout_id IS NULL). Used by the 30-day-window void and by
+     *     staff/disconnect manual voids — voiding can't proceed once a
+     *     payout batch has stamped the row.
+     *   - $expectedPayoutId set: the order must be linked to that exact
+     *     (just-cancelled) payout. Used by cancelExpiredPayout when the
+     *     affiliate didn't activate Stripe Connect within the grace window.
+     *
+     * Setting status='voided' fires the rollup_apply_delta trigger which subtracts
+     * the order's contribution from brand_affiliate_rollup and adds the full
+     * commission_cents to reversed_commission_cents.
+     *
+     * @return bool True if the order was voided, false if it was already claimed.
      */
-    public function voidEntry(CommissionLedgerEntry $entry, string $reason): bool
+    public function voidOrder(Order $order, string $reason, ?string $expectedPayoutId = null): bool
     {
-        $updated = CommissionLedgerEntry::query()
-            ->where('id', $entry->id)
-            ->where('status', 'pending')
-            ->whereNull('payout_id')
-            ->update([
-                'status' => 'voided',
-                'voided_at' => now(),
-                'void_reason' => $reason,
-            ]);
+        return DB::transaction(function () use ($order, $reason, $expectedPayoutId): bool {
+            $query = Order::query()
+                ->where('id', $order->id)
+                ->where('status', 'approved');
 
-        if ($updated === 0) {
-            Log::info('Skipped voiding commission — status changed concurrently', [
-                'entry_id' => $entry->id,
-            ]);
+            if ($expectedPayoutId === null) {
+                $query->whereNull('payout_id');
+            } else {
+                $query->where('payout_id', $expectedPayoutId);
+            }
 
-            return false;
-        }
+            $updated = $query->update(['status' => 'voided']);
 
-        return true;
+            if ($updated === 0) {
+                Log::info('Skipped voiding order — status or payout_id changed concurrently', [
+                    'order_id' => (string) $order->id,
+                    'expected_payout_id' => $expectedPayoutId,
+                ]);
+
+                return false;
+            }
+
+            // OrderEvent::$guarded = ['*'] — go through forceFill to insert.
+            (new OrderEvent)->forceFill([
+                'order_id' => $order->id,
+                'event_type' => 'voided',
+                'source' => str_starts_with($reason, 'staff_manual') ? 'manual' : 'system',
+                'shopify_event_id' => null,
+                'shopify_triggered_at' => now(),
+                'amount_delta_cents' => -1 * (int) $order->commission_cents,
+                'metadata' => [
+                    'reason' => $reason,
+                    'voided_at' => now()->toIso8601String(),
+                ],
+            ])->save();
+
+            return true;
+        });
     }
 
     /**
@@ -112,10 +158,8 @@ class CommissionVoidService
      * Scans pending/pending_funds payouts past their void_at via the
      * partial index commission_payouts_void_at_idx, then for each one
      * checks the affiliate's Stripe status and cancels if not active.
-     * Linked ledger entries are marked voided in the same transaction so
-     * the affiliate's ledger UI shows a consistent "expired" state — leaving
-     * them linked to a cancelled payout would orphan them (never re-eligible
-     * because the payout creator filters whereNull('payout_id')).
+     * Linked orders are voided in the same transaction so the affiliate's
+     * dashboard shows a consistent "expired" state.
      *
      * Called from VoidExpiredPayoutsJob (nightly cron).
      *
@@ -158,7 +202,7 @@ class CommissionVoidService
     }
 
     /**
-     * Cancel a single expired payout and void its linked ledger entries.
+     * Cancel a single expired payout and void its linked orders.
      * Optimistic lock guards against an in-flight ExecuteCommissionPayoutJob
      * advancing the status to 'collecting' between the SELECT and UPDATE.
      */
@@ -185,23 +229,19 @@ class CommissionVoidService
                 return;
             }
 
-            $voidedEntries = CommissionLedgerEntry::query()
-                ->where('payout_id', $payout->id)
-                ->whereIn('status', ['pending', 'approved'])
-                ->update([
-                    'status' => 'voided',
-                    'voided_at' => now(),
-                    'void_reason' => 'payout_grace_expired',
-                    'updated_at' => now(),
-                ]);
+            // Phase 4+: void the linked orders directly. The rollup trigger handles
+            // the per-day delta reversal automatically. We do this BEFORE clearing
+            // payout_id so the optimistic guard (status='approved' AND payout_id=?)
+            // catches concurrent payout-stamp races.
+            $voidedOrders = $this->voidOrdersLinkedToPayout($payout->id, 'payout_grace_expired');
 
-            // Re-enter any order-based items into the payout pool so the next
-            // processEligiblePayouts sweep can batch them into a fresh payout.
+            // Now clear the payout_id stamp on those (now voided) orders so the
+            // legacy join-based reports don't surface them as still linked.
             $this->clearOrderStampsForVoidedPayout($payout->id);
 
             $stats['cancelled_count']++;
             $stats['cancelled_cents'] += (int) $payout->gross_commission_cents;
-            $stats['voided_entries'] += (int) $voidedEntries;
+            $stats['voided_entries'] += $voidedOrders;
             $cancelled = true;
         });
 
@@ -311,26 +351,33 @@ class CommissionVoidService
     private function sendPerCommissionWarnings(): int
     {
         $sent = 0;
-        $warningCutoff = now()->addDays(5);
         $voidWindowDays = $this->voidWindowDays;
+        // Orders that will void in 0..5 days = orders whose occurred_at falls
+        // in the window [now - voidWindowDays, now - voidWindowDays + 5 days].
+        $windowStart = now()->subDays($voidWindowDays);
+        $windowEnd = now()->subDays($voidWindowDays - 5);
 
-        // Chunk to avoid OOM on large result sets.
-        CommissionLedgerEntry::query()
-            ->whereNull('payout_id')
-            ->where('entry_type', 'accrual')
-            ->where('status', 'pending')
-            ->where('occurred_at', '<=', $warningCutoff->copy()->subDays($voidWindowDays))
-            ->whereHas('affiliateProfessional', function ($q) {
-                $q->where('stripe_connect_status', '!=', 'active')
-                    ->where(function ($q2) {
-                        $q2->whereNull('stripe_grace_period_ends_at')
-                            ->orWhere('stripe_grace_period_ends_at', '<=', now());
-                    });
+        $inactiveAffiliateIds = Professional::query()
+            ->where('stripe_connect_status', '!=', 'active')
+            ->where(function ($q) {
+                $q->whereNull('stripe_grace_period_ends_at')
+                    ->orWhere('stripe_grace_period_ends_at', '<=', now());
             })
-            ->with('affiliateProfessional:id,display_name')
-            ->chunkById(500, function ($entries) use (&$sent, $voidWindowDays) {
-                foreach ($entries as $entry) {
-                    $voidDate = $entry->occurred_at->addDays($voidWindowDays);
+            ->pluck('id')
+            ->all();
+
+        if ($inactiveAffiliateIds === []) {
+            return 0;
+        }
+
+        Order::query()
+            ->where('status', 'approved')
+            ->whereNull('payout_id')
+            ->whereBetween('occurred_at', [$windowStart, $windowEnd])
+            ->whereIn('affiliate_professional_id', $inactiveAffiliateIds)
+            ->chunkById(500, function ($orders) use (&$sent, $voidWindowDays) {
+                foreach ($orders as $order) {
+                    $voidDate = $order->occurred_at->copy()->addDays($voidWindowDays);
                     $daysLeft = (int) now()->diffInDays($voidDate, false);
 
                     if ($daysLeft < 0 || $daysLeft > 5) {
@@ -338,17 +385,17 @@ class CommissionVoidService
                     }
 
                     $this->publisher->publish(
-                        professionalId: $entry->affiliate_professional_id,
+                        professionalId: $order->affiliate_professional_id,
                         frontendType: 'Warning',
                         category: 'commissions',
                         title: 'Commission expiring soon',
                         body: sprintf(
                             'Connect Stripe within %d days or your %s commission from %s will be forfeited.',
                             $daysLeft,
-                            $this->formatMoney($entry->amount_cents, $entry->currency_code),
-                            $entry->occurred_at->format('M j'),
+                            $this->formatMoney((int) $order->commission_cents, $order->currency_code),
+                            $order->occurred_at->format('M j'),
                         ),
-                        dedupeKey: "stripe_warning.commission.{$entry->id}",
+                        dedupeKey: "stripe_warning.commission.{$order->id}",
                         ctaUrl: '/account/settings?section=stripe',
                         retentionConfigKey: 'commission',
                     );
@@ -418,33 +465,24 @@ class CommissionVoidService
     }
 
     /**
-     * Flush eligible held commissions when an affiliate connects Stripe.
-     * Called from the webhook handler when status transitions to 'active'.
+     * Phase 4+: no-op. In the legacy ledger model, accruals were 'pending' until
+     * the affiliate connected Stripe, then promoted to 'approved'. The rebuilt
+     * commerce.orders model creates orders as 'approved' immediately (Phase 3.5+);
+     * there is no held state to flush. The next payout cron picks them up
+     * automatically once the affiliate's stripe_connect_status flips to 'active'.
      *
-     * Finds all pending commissions for this affiliate where the void window
-     * hasn't expired, then marks them approved so the normal payout cron
-     * picks them up.
+     * Kept on the public surface so the StripeConnectWebhookController and tests
+     * can still call it without conditional plumbing.
      *
-     * @return int Number of commissions flushed to approved
+     * @return int Always 0.
      */
     public function flushHeldCommissions(Professional $affiliate): int
     {
-        $count = CommissionLedgerEntry::query()
-            ->whereNull('payout_id')
-            ->where('entry_type', 'accrual')
-            ->where('status', 'pending')
-            ->where('affiliate_professional_id', $affiliate->id)
-            ->where('occurred_at', '>', now()->utc()->subDays($this->voidWindowDays))
-            ->update(['status' => 'approved']);
+        Log::info('flushHeldCommissions is a no-op in Phase 4+ — orders are approved on creation', [
+            'affiliate_id' => (string) $affiliate->id,
+        ]);
 
-        if ($count > 0) {
-            Log::info('Flushed held commissions on Stripe connect', [
-                'affiliate_id' => $affiliate->id,
-                'count' => $count,
-            ]);
-        }
-
-        return $count;
+        return 0;
     }
 
     /**
@@ -457,13 +495,7 @@ class CommissionVoidService
     }
 
     /**
-     * Batch-load pending commission totals for multiple affiliates in one query.
-     *
-     * @param  string[]  $affiliateIds
-     * @return array<string, int> affiliate_id => total_pending_cents
-     */
-    /**
-     * Voids up to $cap pending commission entries for a specific affiliate-brand pair.
+     * Voids up to $cap pending orders for a specific affiliate-brand pair.
      * Returns overflow: true (without voiding) when count exceeds cap — caller should
      * dispatch VoidPendingCommissionsForLinkJob instead.
      *
@@ -475,10 +507,10 @@ class CommissionVoidService
         string $reason,
         int $cap = 200,
     ): array {
-        $pendingCount = DB::table('commerce.commission_ledger_entries')
+        $pendingCount = Order::query()
             ->where('affiliate_professional_id', $affiliateProfessionalId)
             ->where('brand_professional_id', $brandProfessionalId)
-            ->where('status', 'pending')
+            ->where('status', 'approved')
             ->whereNull('payout_id')
             ->count();
 
@@ -489,7 +521,11 @@ class CommissionVoidService
         return $this->runVoidLoop($affiliateProfessionalId, $brandProfessionalId, $reason);
     }
 
-    /** Loops voidEntry() over every pending entry for the pair. */
+    /**
+     * Loops voidOrder() over every approved+unstamped order for the pair.
+     *
+     * @return array{count: int, total_cents: int, overflow: bool}
+     */
     public function runVoidLoop(
         string $affiliateProfessionalId,
         string $brandProfessionalId,
@@ -498,17 +534,17 @@ class CommissionVoidService
         $voidedCount = 0;
         $voidedCents = 0;
 
-        CommissionLedgerEntry::query()
+        Order::query()
             ->where('affiliate_professional_id', $affiliateProfessionalId)
             ->where('brand_professional_id', $brandProfessionalId)
-            ->where('status', 'pending')
+            ->where('status', 'approved')
             ->whereNull('payout_id')
             ->orderBy('occurred_at')
-            ->chunkById(50, function ($entries) use (&$voidedCount, &$voidedCents, $reason): void {
-                foreach ($entries as $entry) {
-                    if ($this->voidEntry($entry, $reason)) {
+            ->chunkById(50, function ($orders) use (&$voidedCount, &$voidedCents, $reason): void {
+                foreach ($orders as $order) {
+                    if ($this->voidOrder($order, $reason)) {
                         $voidedCount++;
-                        $voidedCents += (int) $entry->amount_cents;
+                        $voidedCents += (int) $order->commission_cents;
                     }
                 }
             });
@@ -523,12 +559,12 @@ class CommissionVoidService
         string $affiliateProfessionalId,
         string $brandProfessionalId,
     ): array {
-        $row = DB::table('commerce.commission_ledger_entries')
+        $row = DB::table('commerce.orders')
             ->where('affiliate_professional_id', $affiliateProfessionalId)
             ->where('brand_professional_id', $brandProfessionalId)
-            ->where('status', 'pending')
+            ->where('status', 'approved')
             ->whereNull('payout_id')
-            ->selectRaw('COUNT(*) AS c, COALESCE(SUM(amount_cents), 0) AS t')
+            ->selectRaw('COUNT(*) AS c, COALESCE(SUM(commission_cents), 0) AS t')
             ->first();
 
         return [
@@ -537,28 +573,62 @@ class CommissionVoidService
         ];
     }
 
+    /**
+     * Batch-load pending commission totals for multiple affiliates in one query.
+     *
+     * @param  string[]  $affiliateIds
+     * @return array<string, int> affiliate_id => total_pending_cents
+     */
     private function getPendingCommissionCentsBatch(array $affiliateIds): array
     {
         if ($affiliateIds === []) {
             return [];
         }
 
-        return CommissionLedgerEntry::query()
+        return Order::query()
+            ->where('status', 'approved')
             ->whereNull('payout_id')
-            ->where('entry_type', 'accrual')
-            ->where('status', 'pending')
             ->whereIn('affiliate_professional_id', $affiliateIds)
             ->groupBy('affiliate_professional_id')
-            ->pluck(\Illuminate\Support\Facades\DB::raw('SUM(amount_cents)'), 'affiliate_professional_id')
+            ->pluck(DB::raw('SUM(commission_cents)'), 'affiliate_professional_id')
             ->map(fn ($v) => (int) $v)
             ->all();
     }
 
     /**
+     * Void all approved orders linked to a payout via payout_items. Used when a
+     * payout is being cancelled because the affiliate didn't activate Stripe Connect.
+     * Returns the number of orders successfully voided. The optimistic guard
+     * (`payout_id = $payoutId`) means orders already in a terminal state, or whose
+     * payout_id changed concurrently, are silently skipped.
+     */
+    private function voidOrdersLinkedToPayout(string $payoutId, string $reason): int
+    {
+        $orderIds = CommissionPayoutItem::query()
+            ->where('payout_id', $payoutId)
+            ->whereNotNull('order_id')
+            ->pluck('order_id')
+            ->all();
+
+        if (empty($orderIds)) {
+            return 0;
+        }
+
+        $voided = 0;
+        foreach (Order::whereIn('id', $orderIds)->where('status', 'approved')->get() as $order) {
+            if ($this->voidOrder($order, $reason, $payoutId)) {
+                $voided++;
+            }
+        }
+
+        return $voided;
+    }
+
+    /**
      * Clear payout_id on any commerce.orders rows linked to this payout via payout items.
-     * Called inside the cancelExpiredPayout transaction so order-based items re-enter the
-     * payout pool on the next processEligiblePayouts sweep. Legacy ledger-entry items are
-     * unaffected — their payout_id column lives on commission_ledger_entries, not orders.
+     * Called inside the cancelExpiredPayout transaction — any orders that were not voided
+     * (e.g., already refunded/cancelled) get their stamp cleared so reports don't surface
+     * them as still linked to a cancelled payout.
      */
     private function clearOrderStampsForVoidedPayout(string $payoutId): void
     {

@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 // Source of truth for Shopify order state. One row per (shop_domain, shopify_order_id).
-// Replaces commission_ledger_entries as the order-lifecycle record. Money movements
+// Replaces commission_movements as the order-lifecycle record. Money movements
 // (payouts, clawbacks) still live on commerce.commission_movements via FK.
 //
 // Writes happen exclusively via webhook jobs (ProcessShopifyOrderWebhookJob et al.) which

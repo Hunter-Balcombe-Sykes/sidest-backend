@@ -21,7 +21,7 @@ it('returns correct shape with zero data', function () {
 
     DB::shouldReceive('table')->with('core.professionals')->andReturn($profQuery);
     DB::shouldReceive('table')->with('billing.subscriptions')->andReturn($subQuery);
-    DB::shouldReceive('table')->with('commerce.commission_ledger_entries')->andReturn($commQuery);
+    DB::shouldReceive('table')->with('commerce.commission_movements')->andReturn($commQuery);
 
     $controller = new StaffStatsController;
     $response = $controller->show(Request::create('/', 'GET'));
@@ -55,7 +55,7 @@ it('sums professional type counts correctly', function () {
 
     DB::shouldReceive('table')->with('core.professionals')->andReturn($profQuery);
     DB::shouldReceive('table')->with('billing.subscriptions')->andReturn($subQuery);
-    DB::shouldReceive('table')->with('commerce.commission_ledger_entries')->andReturn($commQuery);
+    DB::shouldReceive('table')->with('commerce.commission_movements')->andReturn($commQuery);
 
     $controller = new StaffStatsController;
     $response = $controller->show(Request::create('/', 'GET'));

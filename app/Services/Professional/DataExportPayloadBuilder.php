@@ -217,7 +217,7 @@ class DataExportPayloadBuilder
             ->first();
 
         $ledger = DB::connection('pgsql')
-            ->table('commerce.commission_ledger_entries')
+            ->table('commerce.commission_movements')
             ->where('affiliate_professional_id', $professionalId)
             ->orWhere('brand_professional_id', $professionalId)
             ->get()
@@ -234,7 +234,7 @@ class DataExportPayloadBuilder
 
         return [
             'subscription' => $subscription ? (array) $subscription : null,
-            'commission_ledger_entries' => $ledger,
+            'commission_movements' => $ledger,
             'commission_payouts' => $payouts,
         ];
     }

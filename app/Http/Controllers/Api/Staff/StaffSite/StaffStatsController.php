@@ -22,7 +22,7 @@ class StaffStatsController extends ApiController
             ->whereNull('ended_at')
             ->count();
 
-        $pendingCommissionCents = DB::table('commerce.commission_ledger_entries')
+        $pendingCommissionCents = DB::table('commerce.commission_movements')
             ->where('status', 'pending')
             ->sum('amount_cents');
 

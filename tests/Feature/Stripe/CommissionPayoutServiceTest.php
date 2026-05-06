@@ -88,21 +88,13 @@ beforeEach(function () {
         default_commission_rate REAL, created_at TEXT, updated_at TEXT
     )');
 
-    // commission_ledger_entries — cancelExpiredPayout voids any legacy ledger-entry items
-    // on a cancelled payout. Table must exist even when no entries are seeded.
-    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
-        id TEXT PRIMARY KEY, payout_id TEXT, brand_professional_id TEXT,
-        affiliate_professional_id TEXT, entry_type TEXT, status TEXT,
-        amount_cents INTEGER, currency_code TEXT, occurred_at TEXT,
-        voided_at TEXT, void_reason TEXT, created_at TEXT, updated_at TEXT
-    )');
 });
 
 // --- seed helpers (prefixed with "payoutSvc_" to avoid global name collisions) ---
 
 /**
  * Inserts a commerce.orders row and returns its UUID.
- * Phase 3.5+: processEligiblePayouts reads from commerce.orders, not commission_ledger_entries.
+ * Phase 3.5+: processEligiblePayouts reads from commerce.orders (not the legacy ledger).
  */
 function payoutSvc_seedOrder(
     string $brandId,
@@ -905,10 +897,11 @@ it('does not include orders with non-zero refund_cents in payout sweep', functio
 });
 
 // ============================================================
-// Phase 3.5 — void clears commerce.orders.payout_id
+// Phase 4 — voiding an expired payout VOIDS its linked orders
+// (commission forfeit; the orders cannot re-enter the payout pool)
 // ============================================================
 
-it('voiding an expired payout clears payout_id on its order-based items so orders re-enter the sweep', function () {
+it('voiding an expired payout voids the linked orders and clears their payout_id stamp', function () {
     payoutSvc_seedBrand('brand-1');
     payoutSvc_seedAffiliate('aff-1', ['stripe_connect_status' => 'not_connected', 'stripe_connect_account_id' => null]);
 
@@ -963,12 +956,13 @@ it('voiding an expired payout clears payout_id on its order-based items so order
     $payout = CommissionPayout::find($payoutId);
     expect($payout->status)->toBe('cancelled');
 
-    // Order payout_id must be cleared so the next sweep can re-batch it.
+    // Order is voided (commission forfeit) AND payout_id is cleared.
     $after = DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
     expect($after->payout_id)->toBeNull();
+    expect($after->status)->toBe('voided');
 });
 
-it('after a voided payout, processEligiblePayouts picks up the re-entered orders in the next sweep', function () {
+it('after a voided payout, the linked orders are NOT picked up again — commission is forfeit', function () {
     payoutSvc_seedBrand('brand-1');
     payoutSvc_seedAffiliate('aff-1', ['stripe_connect_status' => 'not_connected', 'stripe_connect_account_id' => null]);
 
@@ -1007,24 +1001,25 @@ it('after a voided payout, processEligiblePayouts picks up the re-entered orders
     ]);
 
     // Void the expired payout while the affiliate is still not_connected — that's what
-    // processExpiredPayouts looks for. The order stamp must be cleared atomically.
+    // processExpiredPayouts looks for. Phase 4+: orders are voided AND payout_id cleared.
     $publisher = Mockery::mock(\App\Services\Notifications\NotificationPublisher::class);
     $publisher->shouldReceive('publish')->andReturnNull();
     $voidService = new \App\Services\Stripe\CommissionVoidService($publisher);
     $voidService->processExpiredPayouts();
 
-    // Order payout_id is now null — re-eligible.
-    expect(DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first()->payout_id)->toBeNull();
+    $afterVoid = DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
+    expect($afterVoid->payout_id)->toBeNull();
+    expect($afterVoid->status)->toBe('voided');
 
-    // Upgrade affiliate to active AFTER the void so the next payout sweep can succeed.
+    // Even if the affiliate connects Stripe AFTER the void, the order does not
+    // re-enter the pool — commission is forfeit (intentional in the new model).
     DB::connection('pgsql')->table('core.professionals')->where('id', 'aff-1')->update([
         'stripe_connect_status' => 'active',
         'stripe_connect_account_id' => 'acct_retest',
     ]);
 
-    // Next sweep should create a new payout batch for the re-entered order.
     $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
     $stats = $service->processEligiblePayouts();
 
-    expect($stats['batches_created'])->toBe(1);
+    expect($stats['batches_created'])->toBe(0);
 });

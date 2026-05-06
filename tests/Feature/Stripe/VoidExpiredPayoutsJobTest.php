@@ -1,7 +1,8 @@
 <?php
 
 use App\Jobs\Stripe\VoidExpiredPayoutsJob;
-use App\Models\Retail\CommissionLedgerEntry;
+use App\Models\Commerce\Order;
+use App\Models\Commerce\OrderEvent;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Stripe\CommissionVoidService;
@@ -10,6 +11,11 @@ use Illuminate\Support\Facades\DB;
 // Tests for the nightly cron that voids commission payouts whose 60-day grace
 // window has expired without the affiliate connecting Stripe Connect.
 // Closes #CR-003 — UI promised 60-day grace but no enforcement existed.
+//
+// Phase 4+: linked commerce.orders rows are voided (status='voided') instead of
+// legacy commission_movements. The voidOrder() optimistic guard uses the
+// payout_id stamp to scope the update to exactly the orders attached to the
+// just-cancelled payout.
 
 afterEach(function () {
     \Illuminate\Support\Carbon::setTestNow(null);
@@ -17,6 +23,7 @@ afterEach(function () {
 
 beforeEach(function () {
     setupProfessionalsTable();
+    setupCommerceOrdersTables();
 
     $conn = DB::connection('pgsql');
 
@@ -57,60 +64,12 @@ beforeEach(function () {
         updated_at TEXT
     )');
 
-    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
-        id TEXT PRIMARY KEY,
-        shopify_order_id TEXT,
-        brand_professional_id TEXT NOT NULL,
-        affiliate_professional_id TEXT NOT NULL,
-        entry_type TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT \'pending\',
-        amount_cents INTEGER NOT NULL,
-        currency_code TEXT NOT NULL DEFAULT \'AUD\',
-        commission_rate REAL NOT NULL,
-        rate_source TEXT NOT NULL,
-        idempotency_key TEXT NOT NULL,
-        calculation_metadata TEXT NOT NULL DEFAULT \'{}\',
-        payout_id TEXT,
-        voided_at TEXT,
-        void_reason TEXT,
-        occurred_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )');
-
-    // clearOrderStampsForVoidedPayout queries this table; must exist even when no order-based
-    // items are seeded (the method no-ops when the pluck returns empty).
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
         id TEXT PRIMARY KEY,
         payout_id TEXT,
         order_id TEXT,
         amount_cents INTEGER,
         created_at TEXT
-    )');
-
-    // commerce.orders — needed so clearOrderStampsForVoidedPayout can clear payout_id.
-    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.orders (
-        id TEXT PRIMARY KEY,
-        shopify_order_id TEXT,
-        shopify_shop_domain TEXT,
-        brand_professional_id TEXT,
-        affiliate_professional_id TEXT,
-        status TEXT,
-        payout_id TEXT,
-        gross_cents INTEGER DEFAULT 0,
-        discount_cents INTEGER DEFAULT 0,
-        refund_cents INTEGER DEFAULT 0,
-        net_cents INTEGER DEFAULT 0,
-        commission_cents INTEGER DEFAULT 0,
-        commission_rate REAL DEFAULT 0,
-        rate_source TEXT,
-        currency_code TEXT,
-        line_items TEXT DEFAULT \'[]\',
-        shopify_data TEXT DEFAULT \'{}\',
-        shopify_updated_at TEXT,
-        occurred_at TEXT,
-        created_at TEXT,
-        updated_at TEXT
     )');
 });
 
@@ -170,25 +129,42 @@ function expiredPayout_seedPayout(string $id, string $voidAt, string $status = '
     ], $overrides));
 }
 
-function expiredPayout_seedLedgerEntry(string $id, string $payoutId, string $status = 'approved', int $amountCents = 10000): void
+/**
+ * Phase 4+: payouts link to commerce.orders via commission_payout_items.
+ * Seeds an approved order stamped with the payout_id and a payout_item row that
+ * links the two — mirroring the production write path in CommissionPayoutService.
+ */
+function expiredPayout_seedLinkedOrder(string $orderId, string $payoutId, string $status = 'approved', int $amountCents = 10000): void
 {
     $now = now()->toDateTimeString();
-    DB::connection('pgsql')->table('commerce.commission_ledger_entries')->insert([
-        'id' => $id,
+    DB::connection('pgsql')->table('commerce.orders')->insert([
+        'id' => $orderId,
+        'shopify_order_id' => 'shop_'.$orderId,
+        'shopify_shop_domain' => 'test.myshopify.com',
         'brand_professional_id' => 'brand-1',
         'affiliate_professional_id' => 'aff-1',
-        'entry_type' => 'accrual',
         'status' => $status,
-        'amount_cents' => $amountCents,
-        'currency_code' => 'AUD',
-        'commission_rate' => 15.0,
+        'gross_cents' => $amountCents * 7,
+        'discount_cents' => 0,
+        'refund_cents' => 0,
+        'net_cents' => $amountCents * 7,
+        'commission_cents' => $amountCents,
+        'commission_rate' => 15,
         'rate_source' => 'brand_default',
-        'idempotency_key' => "test-{$id}",
-        'calculation_metadata' => '{}',
+        'currency_code' => 'AUD',
         'payout_id' => $payoutId,
+        'shopify_updated_at' => $now,
         'occurred_at' => $now,
         'created_at' => $now,
         'updated_at' => $now,
+    ]);
+
+    DB::connection('pgsql')->table('commerce.commission_payout_items')->insert([
+        'id' => 'pi_'.$orderId,
+        'payout_id' => $payoutId,
+        'order_id' => $orderId,
+        'amount_cents' => $amountCents,
+        'created_at' => $now,
     ]);
 }
 
@@ -209,8 +185,8 @@ it('voids expired payouts when affiliate has not connected Stripe', function () 
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString());
-    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved', 6000);
-    expiredPayout_seedLedgerEntry('l2', 'p1', 'approved', 4000);
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved', 6000);
+    expiredPayout_seedLinkedOrder('o2', 'p1', 'approved', 4000);
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
 
@@ -218,34 +194,41 @@ it('voids expired payouts when affiliate has not connected Stripe', function () 
     expect($payout->status)->toBe('cancelled');
     expect($payout->failure_code)->toBe('grace_period_expired');
 
-    expect(CommissionLedgerEntry::find('l1')->status)->toBe('voided');
-    expect(CommissionLedgerEntry::find('l1')->void_reason)->toBe('payout_grace_expired');
-    expect(CommissionLedgerEntry::find('l1')->voided_at)->not->toBeNull();
-    expect(CommissionLedgerEntry::find('l2')->status)->toBe('voided');
+    expect(Order::find('o1')->status)->toBe('voided');
+    expect(Order::find('o2')->status)->toBe('voided');
+
+    // Linked orders' payout_id is cleared after voiding so reports don't
+    // surface them as still attached to a cancelled payout.
+    expect(Order::find('o1')->payout_id)->toBeNull();
+    expect(Order::find('o2')->payout_id)->toBeNull();
+
+    // Audit-log rows recorded for both voids.
+    expect(OrderEvent::where('order_id', 'o1')->where('event_type', 'voided')->count())->toBe(1);
+    expect(OrderEvent::where('order_id', 'o2')->where('event_type', 'voided')->count())->toBe(1);
 });
 
 it('does not void expired payouts when affiliate has active Stripe', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'active');
     expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString());
-    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved');
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
 
     expect(CommissionPayout::find('p1')->status)->toBe('pending');
-    expect(CommissionLedgerEntry::find('l1')->status)->toBe('approved');
+    expect(Order::find('o1')->status)->toBe('approved');
 });
 
 it('does not void payouts still within their grace period', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString());
-    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved');
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
 
     expect(CommissionPayout::find('p1')->status)->toBe('pending');
-    expect(CommissionLedgerEntry::find('l1')->status)->toBe('approved');
+    expect(Order::find('o1')->status)->toBe('approved');
 });
 
 it('voids expired payouts in pending_funds status too', function () {
@@ -254,12 +237,12 @@ it('voids expired payouts in pending_funds status too', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString(), status: 'pending_funds');
-    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved');
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
 
     expect(CommissionPayout::find('p1')->status)->toBe('cancelled');
-    expect(CommissionLedgerEntry::find('l1')->status)->toBe('voided');
+    expect(Order::find('o1')->status)->toBe('voided');
 });
 
 it('leaves completed payouts alone even if void_at is in the past', function () {
@@ -269,12 +252,12 @@ it('leaves completed payouts alone even if void_at is in the past', function () 
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->subDays(60)->toDateTimeString(), status: 'completed');
-    expiredPayout_seedLedgerEntry('l1', 'p1', 'paid');
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
 
     expect(CommissionPayout::find('p1')->status)->toBe('completed');
-    expect(CommissionLedgerEntry::find('l1')->status)->toBe('paid');
+    expect(Order::find('o1')->status)->toBe('approved');
 });
 
 // ============================================================
@@ -285,7 +268,7 @@ it('publishes a voided notification to the affiliate when their payout expires',
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString());
-    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved');
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     $publisher = Mockery::mock(NotificationPublisher::class);
     $publisher->shouldReceive('publish')
@@ -303,17 +286,16 @@ it('publishes a voided notification to the affiliate when their payout expires',
 // #VEP-6 — Optimistic-lock race coverage
 // ============================================================
 
-it('does not cancel payout or void ledger entries when status changed concurrently', function () {
+it('does not cancel payout or void linked orders when status changed concurrently', function () {
     // Simulate: another process (ExecuteCommissionPayoutJob) advanced the payout to
     // 'collecting' between the chunk SELECT and the optimistic-lock UPDATE inside
     // cancelExpiredPayout(). The whereIn('status', ['pending', 'pending_funds']) guard
-    // must fire 0 rows updated — leaving payout and ledger untouched.
+    // must fire 0 rows updated — leaving payout and orders untouched.
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString(), status: 'pending');
-    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved');
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    // Race: advance status before the cron processes it
     DB::connection('pgsql')
         ->table('commerce.commission_payouts')
         ->where('id', 'p1')
@@ -322,7 +304,7 @@ it('does not cancel payout or void ledger entries when status changed concurrent
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
 
     expect(CommissionPayout::find('p1')->status)->toBe('collecting');
-    expect(CommissionLedgerEntry::find('l1')->status)->toBe('approved');
+    expect(Order::find('o1')->status)->toBe('approved');
 });
 
 // ============================================================
@@ -378,7 +360,7 @@ it('publishes notification only once when the same expired payout is processed o
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString());
-    expiredPayout_seedLedgerEntry('l1', 'p1', 'approved');
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     $publisher = Mockery::mock(NotificationPublisher::class);
     $publisher->shouldReceive('publish')->once();

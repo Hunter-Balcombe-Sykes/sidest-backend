@@ -75,7 +75,7 @@ class CommissionPayoutService
 
         // Find all brands with unpaid approved orders, then apply per-brand hold days
         // to determine which orders have cleared their hold window.
-        // Phase 3.5: source of truth moves from commission_ledger_entries to commerce.orders.
+        // Phase 3.5: source of truth moves from commission_movements to commerce.orders.
         $brandIds = Order::query()
             ->where('status', 'approved')
             ->whereNull('payout_id')
@@ -153,7 +153,7 @@ class CommissionPayoutService
     /**
      * Create a payout batch record and link all eligible orders.
      *
-     * Phase 3.5+: reads from commerce.orders directly (not commission_ledger_entries).
+     * Phase 3.5+: reads from commerce.orders directly (not commission_movements).
      * Orders that are refunded after status='approved' have their status flipped to
      * 'partially_refunded'/'refunded', which the WHERE clause already excludes. Refunds
      * that arrive AFTER a payout is created are not reconciled in v1 — acceptable pre-beta;

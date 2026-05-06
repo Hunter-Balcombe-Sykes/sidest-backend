@@ -93,7 +93,7 @@ class ProfessionalAnalyticsController extends ApiController
             0
         );
 
-        // q3 shape: commerce data now from commerce.orders (not commission_ledger_entries)
+        // q3 shape: commerce data now from commerce.orders (not commission_movements)
         $cacheKey = CacheKeyGenerator::analyticsSummary(
             $professional->id,
             $from->format('YmdH'),
@@ -624,7 +624,7 @@ class ProfessionalAnalyticsController extends ApiController
      * Aggregate commerce KPIs for a window — used for both the current
      * period and the equal-length prior period (vs-prior change badges).
      *
-     * Reads commerce.orders (not commission_ledger_entries). revenue_cents = gross_cents
+     * Reads commerce.orders (not commission_movements). revenue_cents = gross_cents
      * (pre-discount, post-refund is net_cents — we use gross for "revenue" KPI to match
      * the existing semantics). avg_order_qty aggregated from commerce.order_items.
      *
@@ -688,7 +688,7 @@ class ProfessionalAnalyticsController extends ApiController
 
     /**
      * Commerce timeseries for the area chart — orders / commission / revenue
-     * grouped by hour or day. Reads commerce.orders (not commission_ledger_entries).
+     * grouped by hour or day. Reads commerce.orders (not commission_movements).
      *
      * @return array{orders_by_day:\Illuminate\Support\Collection, commission_by_day:\Illuminate\Support\Collection, revenue_by_day:\Illuminate\Support\Collection}
      */

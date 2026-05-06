@@ -8,10 +8,14 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
 
 ## Progress
 
-- P0 Blockers: 0 of 0 complete
-- P1 High: 0 of 6 complete
-- P2 Medium: 0 of 13 complete
-- P3 Low: 0 of 6 complete
+**✅ Complete — all in-scope items shipped.**
+
+- P0 Blockers: 0 of 0 (no Stage 2-specific P0s; Stage 1 P0s remain prerequisites)
+- P1 High: 6 of 6 complete
+- P2 Medium: 10 of 10 complete
+- P3 Low: 5 of 5 complete
+
+> **Deferred items** (architectural decisions, cross-codebase coordination) were extracted to `pilot-manual-queue.md` for human-driven sessions: `#1-04 / #1-05`, `#2-02 / #2-03`, `#7-06`, `#PR-006`.
 
 ---
 
@@ -108,27 +112,6 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
 
 ## P2 — Fix during Stage 2 if seen
 
-- [ ] **#1-04 / #1-05** · P2 — JWKS cache failure observability + missing kid claim observability
-    - **Where:** app/Http/Middleware/Auth/VerifySupabaseJwt.php (JWKS rememberLocked, kid extraction)
-    - **Affects:** Auth observability for all tenants during a Supabase outage.
-    - **Effort:** S (~1h)
-    - **What to do:**
-        - Bump log level to error on JWKS fetch failures.
-        - Add a metric / Nightwatch event "supabase.jwks.fetch_failed".
-        - Add a `code` field to 401 responses (`'JWKS_UNAVAILABLE'`, `'TOKEN_INVALID'`, etc.).
-    - **Technical:** Observability hardening on the auth fallback path.
-    - **Plain English:** When the auth server is having trouble, our logs say "warning" instead of "error" and don't include enough detail. Promote the level and add specifics.
-
-- [ ] **#2-02 / #2-03** · P2 — SiteCache fill lock + brand-partner enrichment cache lack tenant-aware audit
-    - **Where:** app/Services/Cache/SiteCacheService.php:81 (fill lock); 369-410 (enrichment in-memory cache)
-    - **Affects:** Cross-tenant cache observability — needed for #2-01 follow-through.
-    - **Effort:** M (~3h)
-    - **What to do:**
-        - Add per-affiliate / per-brand log lines on enrichment cache misses.
-        - Monitor P99 fill-lock contention as sites grow.
-    - **Technical:** Combined with the #2-01 fix in Stage 1, this gives the audit trail to detect impersonation attempts.
-    - **Plain English:** When the system serves brand design assets to an affiliate, no record exists of who asked for what. Add logging so misuse can be detected. **See also #2-01 in Stage 1.**
-
 - [x] **#3-01** · P2 — Stripe API error messages logged with full string (potential PII)
     - **Where:** app/Services/Stripe/CommissionPayoutService.php:489-494 (and similar)
     - **Affects:** Payout error logs across all brands.
@@ -201,16 +184,6 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Technical:** Add a revoke step in the disconnect handler.
     - **Plain English:** When users disconnect, the OAuth token is still valid at Square / Fresha until it naturally expires. We should ask the provider to invalidate it.
 
-- [ ] **#7-06** · P2 — R2 visibility=public on the media disk; per-tenant URL is unsigned
-    - **Where:** config/filesystems.php:85
-    - **Affects:** All uploaded media — gallery photos may warrant signed URLs.
-    - **Effort:** L (~6–8h)
-    - **What to do:**
-        - Verify R2 bucket policy: world-read GETs OK, no LIST access.
-        - For sensitive pools (gallery, content_videos) consider signed URLs.
-    - **Technical:** Audit + decide which pools should be public. Files are keyed by `images/{proId}/{mediaId}/...` — proId is publicly known, mediaId is a UUID.
-    - **Plain English:** All uploaded media lives in a public bucket. Mostly intentional (logos, gallery), but gallery photos might warrant a signed URL.
-
 - [x] **#9-008** · P2 — BrandAffiliateInviteObserver fetches names per event — N+1 on bulk invite
     - **Where:** app/Observers/Core/BrandAffiliateInviteObserver.php:89-111
     - **Affects:** Bulk-invite latency and DB load when a brand uploads a CSV at Stage 2.
@@ -248,11 +221,6 @@ Stage 2 stress-tests what Stage 1 left implicit: multi-tenant isolation under cr
     - **Where:** app/Services/Stripe/CommissionPayoutService.php (transaction blocks)
     - **Effort:** S (~1h)
     - **What to do:** Document expected isolation level for these blocks; or set explicitly with `DB::transaction(..., isolationLevel: ...)`.
-
-- [ ] **#PR-006** · P3 — Single global API key for all brands across Hydrogen internal controllers — no per-brand scope
-    - **Where:** All Hydrogen internal controllers
-    - **Effort:** L (~8h)
-    - **What to do:** Move to per-brand API keys + IP allowlist. (Stage 2 makes the multi-brand exposure concrete.)
 
 - [x] **#7-10** · P3 — VideoVariantService.extractPoster writes a 0/1-byte placeholder file on poster-extract failure
     - **Where:** app/Services/Media/VideoVariantService.php (extractPoster)

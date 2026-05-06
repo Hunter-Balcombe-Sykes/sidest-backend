@@ -1,7 +1,8 @@
 <?php
 
+use App\Models\Commerce\Order;
+use App\Models\Commerce\OrderEvent;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Support\Facades\DB;
@@ -13,8 +14,9 @@ afterEach(function () {
 
 beforeEach(function () {
     setupProfessionalsTable();
+    setupCommerceOrdersTables();
 
-    // Add Stripe columns missing from the shared helper
+    // Stripe Connect columns missing from the shared professionals helper
     $conn = DB::connection('pgsql');
     foreach ([
         'stripe_connect_account_id TEXT',
@@ -24,10 +26,11 @@ beforeEach(function () {
         try {
             $conn->statement("ALTER TABLE core.professionals ADD COLUMN {$col}");
         } catch (\Throwable) {
-            // column already exists
+            // already exists
         }
     }
 
+    // commission_payouts — payout-warning tests still seed real rows here.
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
@@ -43,27 +46,6 @@ beforeEach(function () {
         void_at TEXT,
         created_at TEXT,
         updated_at TEXT
-    )');
-
-    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
-        id TEXT PRIMARY KEY,
-        shopify_order_id TEXT,
-        brand_professional_id TEXT NOT NULL,
-        affiliate_professional_id TEXT NOT NULL,
-        entry_type TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT \'pending\',
-        amount_cents INTEGER NOT NULL,
-        currency_code TEXT NOT NULL DEFAULT \'AUD\',
-        commission_rate REAL NOT NULL,
-        rate_source TEXT NOT NULL,
-        idempotency_key TEXT NOT NULL,
-        calculation_metadata TEXT NOT NULL DEFAULT \'{}\',
-        payout_id TEXT,
-        voided_at TEXT,
-        void_reason TEXT,
-        occurred_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
     )');
 });
 
@@ -100,22 +82,30 @@ function seedVoidBrand(string $id): void
     ]);
 }
 
+/**
+ * Phase 4+: a "voidable commission" is an approved commerce.orders row.
+ * The service voids it by flipping status='voided' (and writing an order_events row).
+ */
 function seedVoidCommission(string $id, string $brandId, string $affiliateId, int $amountCents = 1000, ?string $createdAt = null, ?string $occurredAt = null): void
 {
     $createdAt = $createdAt ?? now()->toDateTimeString();
     $occurredAt = $occurredAt ?? $createdAt;
-    DB::connection('pgsql')->table('commerce.commission_ledger_entries')->insert([
+    DB::connection('pgsql')->table('commerce.orders')->insert([
         'id' => $id,
+        'shopify_order_id' => 'shop_'.$id,
+        'shopify_shop_domain' => 'test.myshopify.com',
         'brand_professional_id' => $brandId,
         'affiliate_professional_id' => $affiliateId,
-        'entry_type' => 'accrual',
-        'status' => 'pending',
-        'amount_cents' => $amountCents,
-        'currency_code' => 'AUD',
+        'status' => 'approved',
+        'gross_cents' => $amountCents * 7,           // 1/7 commission rate ≈ 15%
+        'discount_cents' => 0,
+        'refund_cents' => 0,
+        'net_cents' => $amountCents * 7,
+        'commission_cents' => $amountCents,
         'commission_rate' => 15.0,
         'rate_source' => 'brand_default',
-        'idempotency_key' => "test-{$id}",
-        'calculation_metadata' => '{}',
+        'currency_code' => 'AUD',
+        'shopify_updated_at' => $occurredAt,
         'occurred_at' => $occurredAt,
         'created_at' => $createdAt,
         'updated_at' => $createdAt,
@@ -130,18 +120,20 @@ it('voids commissions past the void window for unconnected affiliates', function
     seedVoidBrand('brand-1');
     seedVoidAffiliate('aff-1', 'not_connected');
 
-    // Commission created 31 days ago — past the 30-day void window
+    // Sale was 31 days ago — past the 30-day void window.
     seedVoidCommission('c1', 'brand-1', 'aff-1', 1000, now()->subDays(31)->toDateTimeString());
 
     $stats = $service->processVoidableCommissions();
 
-    expect($stats['voided_count'])->toBe(1);
-    expect($stats['voided_cents'])->toBe(1000);
+    expect($stats['voided_count'])->toBe(1)
+        ->and($stats['voided_cents'])->toBe(1000);
 
-    $entry = CommissionLedgerEntry::find('c1');
-    expect($entry->status)->toBe('voided');
-    expect($entry->void_reason)->toBe('no_stripe_connected');
-    expect($entry->voided_at)->not->toBeNull();
+    expect(Order::find('c1')->status)->toBe('voided');
+
+    // An audit-log row is written for every void.
+    $event = OrderEvent::where('order_id', 'c1')->where('event_type', 'voided')->first();
+    expect($event)->not->toBeNull();
+    expect($event->source)->toBe('system');
 });
 
 it('does not void commissions within the void window', function () {
@@ -151,13 +143,12 @@ it('does not void commissions within the void window', function () {
     seedVoidBrand('brand-1');
     seedVoidAffiliate('aff-1', 'not_connected');
 
-    // Commission created 20 days ago — still within the 30-day window
     seedVoidCommission('c1', 'brand-1', 'aff-1', 1000, now()->subDays(20)->toDateTimeString());
 
     $stats = $service->processVoidableCommissions();
 
     expect($stats['voided_count'])->toBe(0);
-    expect(CommissionLedgerEntry::find('c1')->status)->toBe('pending');
+    expect(Order::find('c1')->status)->toBe('approved');
 });
 
 it('does not void commissions for affiliates with active Stripe', function () {
@@ -172,27 +163,28 @@ it('does not void commissions for affiliates with active Stripe', function () {
     $stats = $service->processVoidableCommissions();
 
     expect($stats['voided_count'])->toBe(0);
-    expect(CommissionLedgerEntry::find('c1')->status)->toBe('pending');
+    expect(Order::find('c1')->status)->toBe('approved');
 });
 
-it('flushes held commissions to approved on Stripe connect', function () {
+it('flushHeldCommissions is a no-op in Phase 4+', function () {
+    // Orders are 'approved' from creation; there is no held state to flush.
+    // This contract is documented on the method — the test guards against accidental regression.
     $publisher = Mockery::mock(NotificationPublisher::class);
     $service = new CommissionVoidService($publisher);
 
     seedVoidBrand('brand-1');
     seedVoidAffiliate('aff-1', 'active');
 
-    // Commission created 10 days ago — within void window, should flush
     seedVoidCommission('c1', 'brand-1', 'aff-1', 1000, now()->subDays(10)->toDateTimeString());
-    // Commission created 35 days ago — past void window, should NOT flush
     seedVoidCommission('c2', 'brand-1', 'aff-1', 2000, now()->subDays(35)->toDateTimeString());
 
     $affiliate = Professional::find('aff-1');
     $count = $service->flushHeldCommissions($affiliate);
 
-    expect($count)->toBe(1);
-    expect(CommissionLedgerEntry::find('c1')->status)->toBe('approved');
-    expect(CommissionLedgerEntry::find('c2')->status)->toBe('pending');
+    expect($count)->toBe(0);
+    // Orders are unchanged — flush does not mutate them.
+    expect(Order::find('c1')->status)->toBe('approved');
+    expect(Order::find('c2')->status)->toBe('approved');
 });
 
 it('identifies affiliates within grace period', function () {
@@ -209,7 +201,7 @@ it('identifies affiliates within grace period', function () {
     expect($service->isInGracePeriod($outGrace))->toBeFalse();
 });
 
-it('does not void commissions that already have a payout_id', function () {
+it('does not void orders that already have a payout_id', function () {
     $publisher = Mockery::mock(NotificationPublisher::class);
     $service = new CommissionVoidService($publisher);
 
@@ -217,8 +209,7 @@ it('does not void commissions that already have a payout_id', function () {
     seedVoidAffiliate('aff-1', 'not_connected');
 
     seedVoidCommission('c1', 'brand-1', 'aff-1', 1000, now()->subDays(31)->toDateTimeString());
-    // Simulate already linked to a payout
-    DB::connection('pgsql')->table('commerce.commission_ledger_entries')
+    DB::connection('pgsql')->table('commerce.orders')
         ->where('id', 'c1')
         ->update(['payout_id' => 'some-payout-id']);
 
@@ -232,10 +223,10 @@ it('does not void commissions that already have a payout_id', function () {
 // ============================================================
 
 it('voids a commission based on occurred_at when the webhook arrived late after the void window', function () {
-    // Scenario: sale happened 31 days ago (occurred_at) but the Shopify webhook
-    // was delayed — the DB row was only inserted today (created_at = now).
-    // The void window (30 days) should be measured from the sale date, not the insertion date.
+    // Sale happened 31 days ago (occurred_at) but the Shopify webhook was delayed —
+    // the row was inserted today. The void window must measure from sale date, not insertion.
     $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldReceive('publish')->andReturnNull();
     $service = new CommissionVoidService($publisher);
 
     seedVoidBrand('brand-1');
@@ -243,38 +234,14 @@ it('voids a commission based on occurred_at when the webhook arrived late after 
 
     seedVoidCommission(
         'c1', 'brand-1', 'aff-1', 1000,
-        createdAt: now()->toDateTimeString(),            // webhook processed today
-        occurredAt: now()->subDays(31)->toDateTimeString(), // sale was 31 days ago
+        createdAt: now()->toDateTimeString(),
+        occurredAt: now()->subDays(31)->toDateTimeString(),
     );
 
     $stats = $service->processVoidableCommissions();
 
-    // Should be voided: occurred_at is past the 30-day window
     expect($stats['voided_count'])->toBe(1);
-    expect(CommissionLedgerEntry::find('c1')->status)->toBe('voided');
-});
-
-it('does not flush a held commission when occurred_at is past the void window even if created_at is recent', function () {
-    // Scenario: sale happened 31 days ago (past the 30-day void window) but the webhook
-    // arrived 2 days late — created_at is 29 days ago (within window).
-    // flushHeldCommissions should NOT flush this: the void window based on the sale date has expired.
-    $publisher = Mockery::mock(NotificationPublisher::class);
-    $service = new CommissionVoidService($publisher);
-
-    seedVoidBrand('brand-1');
-    seedVoidAffiliate('aff-1', 'active');
-
-    seedVoidCommission(
-        'c1', 'brand-1', 'aff-1', 1000,
-        createdAt: now()->subDays(29)->toDateTimeString(),  // late webhook insertion
-        occurredAt: now()->subDays(31)->toDateTimeString(), // sale expired the void window
-    );
-
-    $affiliate = Professional::find('aff-1');
-    $count = $service->flushHeldCommissions($affiliate);
-
-    expect($count)->toBe(0);
-    expect(CommissionLedgerEntry::find('c1')->status)->toBe('pending');
+    expect(Order::find('c1')->status)->toBe('voided');
 });
 
 // ============================================================
@@ -294,43 +261,14 @@ it('uses UTC for void cutoff so an app-timezone offset does not void commissions
     seedVoidBrand('brand-1');
     seedVoidAffiliate('aff-1', 'not_connected');
 
-    // Sale was 29 days and 18 hours ago (UTC). Still inside the 30-day void window.
-    // UTC cutoff    '2026-04-02 00:00:00' → entry at 06:00 > 00:00 → NOT voided ✓
-    // App-TZ cutoff '2026-04-02 12:00:00' → entry at 06:00 ≤ 12:00 → voided EARLY ✗
-    seedVoidCommission('c1', 'brand-1', 'aff-1', 1000,
-        occurredAt: '2026-04-02 06:00:00',
-    );
+    // 29d18h ago (UTC). Inside the 30-day window.
+    // UTC cutoff '2026-04-02 00:00:00' → 06:00 > 00:00 → NOT voided ✓
+    seedVoidCommission('c1', 'brand-1', 'aff-1', 1000, occurredAt: '2026-04-02 06:00:00');
 
     $stats = $service->processVoidableCommissions();
 
     expect($stats['voided_count'])->toBe(0);
-    expect(CommissionLedgerEntry::find('c1')->status)->toBe('pending');
-});
-
-it('uses UTC for flush cutoff so an app-timezone offset does not exclude commissions still inside the void window', function () {
-    // Same Auckland scenario: now()->subDays(30) without UTC serializes 12h later,
-    // so flushHeldCommissions() would miss entries still within the window.
-    date_default_timezone_set('Pacific/Auckland');
-    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-05-02 00:00:00', 'UTC'));
-
-    $publisher = Mockery::mock(NotificationPublisher::class);
-    $service = new CommissionVoidService($publisher);
-
-    seedVoidBrand('brand-1');
-    seedVoidAffiliate('aff-1', 'active');
-
-    // Same entry: 29d18h old (UTC). Inside the 30-day void window.
-    // UTC cutoff: occurred_at > '2026-04-02 00:00:00' → 06:00 > 00:00 → flushed ✓
-    // App-TZ:     occurred_at > '2026-04-02 12:00:00' → 06:00 NOT > 12:00 → not flushed ✗
-    seedVoidCommission('c1', 'brand-1', 'aff-1', 1000,
-        occurredAt: '2026-04-02 06:00:00',
-    );
-
-    $affiliate = Professional::find('aff-1');
-    $count = $service->flushHeldCommissions($affiliate);
-
-    expect($count)->toBe(1);
-    expect(CommissionLedgerEntry::find('c1')->status)->toBe('approved');
+    expect(Order::find('c1')->status)->toBe('approved');
 });
 
 // ============================================================
@@ -396,7 +334,6 @@ it('sends a 2-day warning for a payout expiring in 2 days', function () {
 
 it('does not send a payout expiry warning outside the 10-day and 2-day windows', function () {
     $publisher = Mockery::mock(NotificationPublisher::class);
-    // No affiliates in signup warning windows, no ledger entries — only payout with wrong timing
     $publisher->shouldNotReceive('publish');
     $service = new CommissionVoidService($publisher);
 

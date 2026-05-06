@@ -101,7 +101,7 @@ class CacheKeyGenerator
     // @multi-site: needs site_id — summary aggregates site traffic, scoped to one site under current model
     public static function analyticsSummary(string $professionalId, string $startDate, string $endDate): string
     {
-        // q3: commerce fields now read from commerce.orders instead of commission_ledger_entries (Phase 3)
+        // q3: commerce fields now read from commerce.orders instead of commission_movements (Phase 3)
         return "analytics:summary:q3:{$professionalId}:{$startDate}:{$endDate}";
     }
 

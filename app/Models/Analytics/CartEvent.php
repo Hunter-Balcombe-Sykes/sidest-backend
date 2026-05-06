@@ -8,7 +8,7 @@ use App\Models\Core\Site\Site;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-// V2: Tracks cart add and checkout start events from Hydrogen storefronts. Feeds the shop analytics funnel alongside site_visits and commission_ledger_entries.
+// V2: Tracks cart add and checkout start events from Hydrogen storefronts. Feeds the shop analytics funnel alongside site_visits and commission_movements.
 class CartEvent extends BaseModel
 {
     use HasUuids;

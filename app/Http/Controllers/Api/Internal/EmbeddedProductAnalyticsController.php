@@ -3,12 +3,13 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionLedgerEntry;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 // Backs the affiliate-product-block Shopify admin UI extension.
 // Returns 30-day affiliate sales for a single product: totals, variant rollup,
@@ -52,16 +53,30 @@ class EmbeddedProductAnalyticsController extends ApiController
     {
         $thirtyDaysAgo = now()->subDays(30);
 
-        // Pull the matching ledger rows once and roll everything up in PHP —
-        // the JSON path filters need to run anyway, and at most a brand has a
-        // few thousand commission entries per product per month.
-        $entries = CommissionLedgerEntry::with('affiliateProfessional:id,display_name')
-            ->where('brand_professional_id', $professionalId)
-            ->whereIn('status', ['pending', 'approved', 'paid'])
-            ->where('occurred_at', '>=', $thirtyDaysAgo)
-            ->whereRaw("calculation_metadata->>'product_id' = ?", [$productId])
-            ->orderByDesc('occurred_at')
-            ->get();
+        // Phase 4+: read from commerce.order_items (denormalized per-line) joined to commerce.orders
+        // for status filtering. Excludes stub/cancelled/voided/refunded so they don't pollute totals.
+        // The webhook job pre-computes per-line commission_cents/commission_rate into the line_items
+        // JSONB; the order_items_diff trigger mirrors them into this table.
+        $rows = DB::table('commerce.order_items as oi')
+            ->join('commerce.orders as o', 'o.id', '=', 'oi.order_id')
+            ->leftJoin('core.professionals as p', 'p.id', '=', 'oi.affiliate_professional_id')
+            ->where('oi.brand_professional_id', $professionalId)
+            ->where('oi.shopify_product_id', $productId)
+            ->where('oi.occurred_at', '>=', $thirtyDaysAgo)
+            ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES)
+            ->orderByDesc('oi.occurred_at')
+            ->get([
+                'oi.shopify_variant_id',
+                'oi.title',
+                'oi.quantity',
+                'oi.line_total_cents',
+                'oi.commission_cents',
+                'oi.commission_rate',
+                'oi.currency_code',
+                'oi.occurred_at',
+                'oi.affiliate_professional_id',
+                'p.display_name as affiliate_name',
+            ]);
 
         $totalUnits = 0;
         $totalRevenueCents = 0;
@@ -73,26 +88,29 @@ class EmbeddedProductAnalyticsController extends ApiController
         // variant_id => { variant_id, variant_title, units, revenue_cents }
         $variants = [];
 
-        foreach ($entries as $entry) {
-            $meta = is_array($entry->calculation_metadata) ? $entry->calculation_metadata : [];
-            $qty = (int) ($meta['quantity'] ?? 0);
-            $linePost = (float) ($meta['line_price_post_discount'] ?? 0);
-            $revenueCents = (int) round($linePost * 100);
+        foreach ($rows as $row) {
+            $qty = (int) $row->quantity;
+            $revenueCents = (int) $row->line_total_cents;
+            $commissionCents = (int) $row->commission_cents;
 
             $totalUnits += $qty;
             $totalRevenueCents += $revenueCents;
-            $totalCommissionCents += (int) $entry->amount_cents;
-            $weightedRateSum += ((float) $entry->commission_rate) * (int) $entry->amount_cents;
-            $rateWeight += (int) $entry->amount_cents;
-            $currency = (string) ($entry->currency_code ?? $currency);
+            $totalCommissionCents += $commissionCents;
+            $weightedRateSum += ((float) $row->commission_rate) * $commissionCents;
+            $rateWeight += $commissionCents;
+            $currency = (string) ($row->currency_code ?? $currency);
 
-            $variantId = (string) ($meta['variant_id'] ?? '');
+            $variantId = (string) ($row->shopify_variant_id ?? '');
             $variantKey = $variantId !== '' ? $variantId : '__no_variant__';
 
             if (! isset($variants[$variantKey])) {
+                // Shopify line_item.variant_title is not captured into order_items
+                // (only line_item.title is mirrored). For variant-aware display the
+                // line title is the closest stable proxy; pure-product orders show
+                // the product title, variant orders show whatever Shopify formatted.
                 $variants[$variantKey] = [
                     'variant_id' => $variantId,
-                    'variant_title' => (string) ($meta['variant_title'] ?? ''),
+                    'variant_title' => (string) ($row->title ?? ''),
                     'units' => 0,
                     'revenue_cents' => 0,
                 ];
@@ -105,16 +123,15 @@ class EmbeddedProductAnalyticsController extends ApiController
         $variantsList = array_values($variants);
         usort($variantsList, fn ($a, $b) => $b['revenue_cents'] <=> $a['revenue_cents']);
 
-        $recentSales = $entries->take(5)->map(function (CommissionLedgerEntry $entry) {
-            $meta = is_array($entry->calculation_metadata) ? $entry->calculation_metadata : [];
-            $linePost = (float) ($meta['line_price_post_discount'] ?? 0);
+        $recentSales = $rows->take(5)->map(function ($row) {
+            $occurredAt = $row->occurred_at !== null ? \Illuminate\Support\Carbon::parse($row->occurred_at) : null;
 
             return [
-                'affiliate_name' => (string) ($entry->affiliateProfessional?->display_name ?? 'Unknown'),
-                'quantity' => (int) ($meta['quantity'] ?? 0),
-                'revenue_cents' => (int) round($linePost * 100),
-                'commission_cents' => (int) $entry->amount_cents,
-                'occurred_at' => $entry->occurred_at?->toIso8601String(),
+                'affiliate_name' => (string) ($row->affiliate_name ?? 'Unknown'),
+                'quantity' => (int) $row->quantity,
+                'revenue_cents' => (int) $row->line_total_cents,
+                'commission_cents' => (int) $row->commission_cents,
+                'occurred_at' => $occurredAt?->toIso8601String(),
             ];
         })->values()->all();
 

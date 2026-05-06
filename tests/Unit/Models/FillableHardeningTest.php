@@ -6,7 +6,7 @@ use App\Models\Core\Gdpr\DataExportAudit;
 use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\BrandTeamMembership;
-use App\Models\Retail\CommissionLedgerEntry;
+use App\Models\Retail\CommissionMovement;
 use App\Models\Retail\CommissionPayout;
 
 // Subscription — Stripe provider IDs must not be mass-assignable
@@ -49,9 +49,9 @@ it('guards all fields on CommissionPayout', function () {
     expect($model->getFillable())->toBe([]);
 });
 
-// CommissionLedgerEntry — fully guarded; no mass assignment
-it('guards all fields on CommissionLedgerEntry', function () {
-    $model = new CommissionLedgerEntry;
+// CommissionMovement — fully guarded; no mass assignment
+it('guards all fields on CommissionMovement', function () {
+    $model = new CommissionMovement;
     expect($model->getGuarded())->toBe(['*']);
     expect($model->getFillable())->toBe([]);
 });

@@ -215,7 +215,7 @@ class DataExportTestCase
             created_at TEXT
         )');
 
-        $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
+        $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_movements (
             id TEXT PRIMARY KEY,
             affiliate_professional_id TEXT,
             brand_professional_id TEXT,

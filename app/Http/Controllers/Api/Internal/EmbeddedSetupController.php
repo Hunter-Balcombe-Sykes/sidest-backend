@@ -16,7 +16,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
-use App\Models\Retail\CommissionLedgerEntry;
+use App\Models\Retail\CommissionMovement;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cloudflare\CloudflareDnsService;
 use App\Services\Hydrogen\HydrogenDeploymentService;
@@ -322,7 +322,7 @@ class EmbeddedSetupController extends ApiController
         $affiliateCount = BrandPartnerLink::where('brand_professional_id', $professionalId)->count();
 
         // Sum pending + approved commissions (not yet reversed).
-        $commissionQuery = CommissionLedgerEntry::where('brand_professional_id', $professionalId)
+        $commissionQuery = CommissionMovement::where('brand_professional_id', $professionalId)
             ->whereIn('status', ['pending', 'approved']);
 
         $totalCommissionCents = (int) $commissionQuery->sum('amount_cents');
@@ -332,7 +332,7 @@ class EmbeddedSetupController extends ApiController
         $thirtyDaysAgo = now()->subDays(30);
 
         // Commissions earned in the last 30 days (pending + approved).
-        $commission30dCents = (int) CommissionLedgerEntry::where('brand_professional_id', $professionalId)
+        $commission30dCents = (int) CommissionMovement::where('brand_professional_id', $professionalId)
             ->whereIn('status', ['pending', 'approved'])
             ->where('occurred_at', '>=', $thirtyDaysAgo)
             ->sum('amount_cents');
@@ -343,7 +343,7 @@ class EmbeddedSetupController extends ApiController
         // commission_rate is stored as a percentage (e.g. 10 for 10%), and
         // amount_cents = lineTotal_dollars * commission_rate, so
         // revenue_cents = amount_cents * 100 / commission_rate.
-        $revenue30dCents = (int) round((float) CommissionLedgerEntry::where('brand_professional_id', $professionalId)
+        $revenue30dCents = (int) round((float) CommissionMovement::where('brand_professional_id', $professionalId)
             ->whereIn('status', ['pending', 'approved'])
             ->where('occurred_at', '>=', $thirtyDaysAgo)
             ->where('commission_rate', '>', 0)
@@ -351,7 +351,7 @@ class EmbeddedSetupController extends ApiController
             ->value('revenue_cents'));
 
         // Last 5 sales with affiliate display name from related Professional record.
-        $recentSales = CommissionLedgerEntry::with('affiliateProfessional:id,display_name')
+        $recentSales = CommissionMovement::with('affiliateProfessional:id,display_name')
             ->where('brand_professional_id', $professionalId)
             ->whereIn('status', ['pending', 'approved'])
             ->orderByDesc('occurred_at')

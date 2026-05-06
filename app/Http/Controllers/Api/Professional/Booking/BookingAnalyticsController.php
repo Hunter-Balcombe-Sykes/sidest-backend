@@ -54,89 +54,43 @@ class BookingAnalyticsController extends ApiController
 
         return $this->success($this->cacheLock->rememberLocked($cacheKey, $ttl, function () use ($professionalId, $timezone, $metricsContext): array {
             if ($metricsContext['use_hourly']) {
-                $aggregateBase = DB::table('analytics.booking_metrics_hourly as h')
-                    ->where('h.professional_id', $professionalId)
-                    ->whereBetween('h.hour_start', [$metricsContext['from'], $metricsContext['to']]);
-
-                $totals = (clone $aggregateBase)
-                    ->selectRaw('COALESCE(SUM(h.bookings_count), 0) as bookings_count')
-                    ->selectRaw('COALESCE(SUM(h.total_spent_cents), 0) as total_spent_cents')
-                    ->selectRaw('COALESCE(SUM(h.paid_bookings_count), 0) as paid_bookings_count')
-                    ->selectRaw('COALESCE(SUM(h.customers_count), 0) as customers_count')
-                    ->first();
-
-                $timeseries = (clone $aggregateBase)
-                    ->selectRaw("DATE_TRUNC('hour', h.hour_start) as bucket")
-                    ->selectRaw('COALESCE(SUM(h.bookings_count), 0) as bookings_count')
-                    ->selectRaw('COALESCE(SUM(h.total_spent_cents), 0) as total_spent_cents')
-                    ->groupByRaw("DATE_TRUNC('hour', h.hour_start)")
-                    ->orderBy('bucket')
-                    ->get();
-
                 $eventsBase = DB::table('analytics.booking_events as e')
                     ->where('e.professional_id', $professionalId)
                     ->whereBetween('e.occurred_at', [$metricsContext['from'], $metricsContext['to']]);
 
-                if ($timeseries->isEmpty()) {
-                    $rawBase = clone $eventsBase;
-
-                    $totals = (clone $rawBase)
-                        ->selectRaw('COUNT(*) as bookings_count')
-                        ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
-                        ->selectRaw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count')
-                        ->selectRaw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count")
-                        ->first();
-
-                    $timeseries = (clone $rawBase)
-                        ->selectRaw("DATE_TRUNC('hour', e.occurred_at) as bucket")
-                        ->selectRaw('COUNT(*) as bookings_count')
-                        ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
-                        ->groupByRaw("DATE_TRUNC('hour', e.occurred_at)")
-                        ->orderBy('bucket')
-                        ->get();
-                }
-            } else {
-                $aggregateBase = DB::table('analytics.booking_metrics_daily as d')
-                    ->where('d.professional_id', $professionalId)
-                    ->whereBetween('d.day', [$metricsContext['from'], $metricsContext['to']]);
-
-                $totals = (clone $aggregateBase)
-                    ->selectRaw('COALESCE(SUM(d.bookings_count), 0) as bookings_count')
-                    ->selectRaw('COALESCE(SUM(d.total_spent_cents), 0) as total_spent_cents')
-                    ->selectRaw('COALESCE(SUM(d.paid_bookings_count), 0) as paid_bookings_count')
-                    ->selectRaw('COALESCE(SUM(d.customers_count), 0) as customers_count')
+                $totals = (clone $eventsBase)
+                    ->selectRaw('COUNT(*) as bookings_count')
+                    ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
+                    ->selectRaw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count')
+                    ->selectRaw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count")
                     ->first();
 
-                $timeseries = (clone $aggregateBase)
-                    ->selectRaw('d.day::text as bucket')
-                    ->selectRaw('COALESCE(SUM(d.bookings_count), 0) as bookings_count')
-                    ->selectRaw('COALESCE(SUM(d.total_spent_cents), 0) as total_spent_cents')
-                    ->groupBy('d.day')
-                    ->orderBy('d.day')
+                $timeseries = (clone $eventsBase)
+                    ->selectRaw("DATE_TRUNC('hour', e.occurred_at) as bucket")
+                    ->selectRaw('COUNT(*) as bookings_count')
+                    ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
+                    ->groupByRaw("DATE_TRUNC('hour', e.occurred_at)")
+                    ->orderBy('bucket')
                     ->get();
-
+            } else {
                 $eventsBase = DB::table('analytics.booking_events as e')
                     ->where('e.professional_id', $professionalId)
                     ->whereRaw('(e.occurred_at AT TIME ZONE ?)::date between ? and ?', [$timezone, $metricsContext['from'], $metricsContext['to']]);
 
-                if ($timeseries->isEmpty()) {
-                    $rawBase = clone $eventsBase;
+                $totals = (clone $eventsBase)
+                    ->selectRaw('COUNT(*) as bookings_count')
+                    ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
+                    ->selectRaw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count')
+                    ->selectRaw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count")
+                    ->first();
 
-                    $totals = (clone $rawBase)
-                        ->selectRaw('COUNT(*) as bookings_count')
-                        ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
-                        ->selectRaw('COALESCE(SUM(CASE WHEN e.amount_paid_cents > 0 THEN 1 ELSE 0 END), 0) as paid_bookings_count')
-                        ->selectRaw("COUNT(DISTINCT NULLIF(lower(trim(e.customer_email)), '')) as customers_count")
-                        ->first();
-
-                    $timeseries = (clone $rawBase)
-                        ->selectRaw("DATE_TRUNC('day', e.occurred_at AT TIME ZONE ?)::date as bucket", [$timezone])
-                        ->selectRaw('COUNT(*) as bookings_count')
-                        ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
-                        ->groupBy('bucket')
-                        ->orderBy('bucket')
-                        ->get();
-                }
+                $timeseries = (clone $eventsBase)
+                    ->selectRaw("DATE_TRUNC('day', e.occurred_at AT TIME ZONE ?)::date as bucket", [$timezone])
+                    ->selectRaw('COUNT(*) as bookings_count')
+                    ->selectRaw('COALESCE(SUM(e.amount_paid_cents), 0) as total_spent_cents')
+                    ->groupBy('bucket')
+                    ->orderBy('bucket')
+                    ->get();
             }
 
             $events = (clone $eventsBase)

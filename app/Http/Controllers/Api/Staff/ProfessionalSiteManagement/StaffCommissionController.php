@@ -24,7 +24,7 @@ class StaffCommissionController extends ApiController
         $perPage = $this->normalizePerPage($request, 25, 100);
         $status = $request->query('status');
 
-        $query = DB::table('commerce.commission_ledger_entries')
+        $query = DB::table('commerce.commission_movements')
             ->where(function ($q) use ($professional): void {
                 $q->where('brand_professional_id', $professional->id)
                     ->orWhere('affiliate_professional_id', $professional->id);

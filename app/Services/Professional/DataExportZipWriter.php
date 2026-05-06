@@ -101,7 +101,7 @@ class DataExportZipWriter
             'lead_submissions' => count($payload['bookings']['lead_submissions'] ?? []),
             'site_media' => count($payload['media']['site_media'] ?? []),
             'integrations' => count($payload['integrations'] ?? []),
-            'commission_ledger_entries' => count($payload['billing']['commission_ledger_entries'] ?? []),
+            'commission_movements' => count($payload['billing']['commission_movements'] ?? []),
             'commission_payouts' => count($payload['billing']['commission_payouts'] ?? []),
         ];
     }

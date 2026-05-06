@@ -55,7 +55,7 @@ class CommissionPayout extends BaseModel
 
     public function ledgerEntries(): HasMany
     {
-        return $this->hasMany(CommissionLedgerEntry::class, 'payout_id');
+        return $this->hasMany(CommissionMovement::class, 'payout_id');
     }
 
     public function isPending(): bool

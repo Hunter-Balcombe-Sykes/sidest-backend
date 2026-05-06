@@ -308,7 +308,7 @@ class StripeConnectController extends Controller
      *
      * TODO: expose commission ledger entries as a sibling endpoint so brands
      * can reconcile "why is this payout $X?" against individual commission
-     * rows. The CommissionLedgerEntry model, commerce.commission_ledger_entries
+     * rows. The CommissionMovement model, commerce.commission_movements
      * table, and CommissionPayoutService already exist — the only thing
      * missing is the HTTP layer (controller method + route + resource + test).
      * Deferred until a real brand asks; when promoting, decide between:

@@ -22,7 +22,7 @@ it('returns paginated commissions for a professional', function () {
     $mockQuery->shouldReceive('orderByDesc')->andReturnSelf();
     $mockQuery->shouldReceive('paginate')->andReturn(makeCommissionPaginator());
 
-    DB::shouldReceive('table')->with('commerce.commission_ledger_entries')->andReturn($mockQuery);
+    DB::shouldReceive('table')->with('commerce.commission_movements')->andReturn($mockQuery);
 
     $controller = new StaffCommissionController;
     $response = $controller->index(Request::create('/', 'GET'), $professional);
@@ -43,7 +43,7 @@ it('filters commissions by status when provided', function () {
     $mockQuery->shouldReceive('orderByDesc')->andReturnSelf();
     $mockQuery->shouldReceive('paginate')->andReturn(makeCommissionPaginator());
 
-    DB::shouldReceive('table')->with('commerce.commission_ledger_entries')->andReturn($mockQuery);
+    DB::shouldReceive('table')->with('commerce.commission_movements')->andReturn($mockQuery);
 
     $controller = new StaffCommissionController;
     $response = $controller->index(Request::create('/', 'GET', ['status' => 'pending']), $professional);

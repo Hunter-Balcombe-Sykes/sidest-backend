@@ -639,12 +639,12 @@ function setupServicesTable(): void
 }
 
 /**
- * commerce.commission_ledger_entries — minimal columns for CommissionVoidService flush/void tests.
+ * commerce.commission_movements — minimal columns for CommissionVoidService flush/void tests.
  */
 function setupCommissionLedgerEntriesTable(): void
 {
     attachTestSchemas();
-    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_ledger_entries (
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_movements (
         id TEXT PRIMARY KEY,
         payout_id TEXT NULL,
         brand_professional_id TEXT NULL,

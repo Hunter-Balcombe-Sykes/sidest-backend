@@ -2,18 +2,18 @@
 
 namespace App\Observers\Core;
 
-use App\Models\Retail\CommissionLedgerEntry;
+use App\Models\Retail\CommissionMovement;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;
 
 // V2: Core. Publishes commission earned/reversed notifications to affiliates when ledger entries are created or status changes.
-class CommissionLedgerEntryObserver
+class CommissionMovementObserver
 {
     public bool $afterCommit = true;
 
     public function __construct(private readonly NotificationPublisher $publisher) {}
 
-    public function created(CommissionLedgerEntry $entry): void
+    public function created(CommissionMovement $entry): void
     {
         try {
             if ($entry->status !== 'approved') {
@@ -23,14 +23,14 @@ class CommissionLedgerEntryObserver
             $this->notifyEarned($entry);
             $this->notifyBrandSale($entry);
         } catch (\Throwable $e) {
-            Log::warning('CommissionLedgerEntry created notification failed', [
+            Log::warning('CommissionMovement created notification failed', [
                 'entry_id' => $entry->id,
                 'message' => $e->getMessage(),
             ]);
         }
     }
 
-    public function updated(CommissionLedgerEntry $entry): void
+    public function updated(CommissionMovement $entry): void
     {
         try {
             if (! $entry->isDirty('status')) {
@@ -53,14 +53,14 @@ class CommissionLedgerEntryObserver
                 $this->notifyVoided($entry);
             }
         } catch (\Throwable $e) {
-            Log::warning('CommissionLedgerEntry updated notification failed', [
+            Log::warning('CommissionMovement updated notification failed', [
                 'entry_id' => $entry->id,
                 'message' => $e->getMessage(),
             ]);
         }
     }
 
-    private function notifyEarned(CommissionLedgerEntry $entry): void
+    private function notifyEarned(CommissionMovement $entry): void
     {
         $affiliateId = trim((string) ($entry->affiliate_professional_id ?? ''));
         if ($affiliateId === '') {
@@ -81,7 +81,7 @@ class CommissionLedgerEntryObserver
         );
     }
 
-    private function notifyReversed(CommissionLedgerEntry $entry): void
+    private function notifyReversed(CommissionMovement $entry): void
     {
         $affiliateId = trim((string) ($entry->affiliate_professional_id ?? ''));
         if ($affiliateId === '') {
@@ -102,7 +102,7 @@ class CommissionLedgerEntryObserver
         );
     }
 
-    private function notifyVoided(CommissionLedgerEntry $entry): void
+    private function notifyVoided(CommissionMovement $entry): void
     {
         $affiliateId = trim((string) ($entry->affiliate_professional_id ?? ''));
         if ($affiliateId === '') {
@@ -124,7 +124,7 @@ class CommissionLedgerEntryObserver
     }
 
     // V2: Notifies the brand when an affiliate sale generates commission.
-    private function notifyBrandSale(CommissionLedgerEntry $entry): void
+    private function notifyBrandSale(CommissionMovement $entry): void
     {
         $brandId = trim((string) ($entry->brand_professional_id ?? ''));
         if ($brandId === '') {

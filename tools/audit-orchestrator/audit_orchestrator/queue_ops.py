@@ -24,6 +24,10 @@ _COMPANION_PATTERNS = (
     "*-summary.md",
     "*-legal-coding.md",
     "*-legal-*.md",
+    # Manual queues hold items that are intentionally NOT enqueueable —
+    # XL refactors, architectural decisions, cross-codebase coordination.
+    # Matching files (e.g. pilot-manual-queue.md) are skipped at scan time.
+    "*-manual-queue.md",
 )
 
 

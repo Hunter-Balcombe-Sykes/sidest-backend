@@ -87,17 +87,17 @@ it('BrandAffiliateRollup is a composite-key model without timestamps', function 
     }
 });
 
-it('CommissionMovement points at commerce.commission_ledger_entries (rename deferred to Phase 4)', function () {
+it('CommissionMovement points at commerce.commission_movements (rename deferred to Phase 4)', function () {
     $movement = new CommissionMovement;
 
     // Phase 4 cleanup renames the table to commerce.commission_movements and updates this expectation.
-    expect($movement->getTable())->toBe('commerce.commission_ledger_entries')
+    expect($movement->getTable())->toBe('commerce.commission_movements')
         ->and($movement->order()->getRelated())->toBeInstanceOf(Order::class)
         ->and($movement->order()->getForeignKeyName())->toBe('order_id');
 });
 
-it('the legacy CommissionLedgerEntry continues pointing at commerce.commission_ledger_entries', function () {
-    $legacy = new \App\Models\Retail\CommissionLedgerEntry;
+it('the legacy CommissionMovement continues pointing at commerce.commission_movements', function () {
+    $legacy = new \App\Models\Retail\CommissionMovement;
 
-    expect($legacy->getTable())->toBe('commerce.commission_ledger_entries');
+    expect($legacy->getTable())->toBe('commerce.commission_movements');
 });

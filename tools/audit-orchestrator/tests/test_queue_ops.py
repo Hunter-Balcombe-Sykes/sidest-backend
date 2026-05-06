@@ -1,7 +1,12 @@
 """Tests for queue_ops.populate_item_metadata."""
 from pathlib import Path
 
-from audit_orchestrator.queue_ops import populate_item_metadata, parse_all
+from audit_orchestrator.queue_ops import (
+    populate_item_metadata,
+    parse_all,
+    gather_sources,
+    _is_companion_file,
+)
 from audit_orchestrator.config import Config
 from audit_orchestrator.parser import parse_audit_file
 from audit_orchestrator.state import State
@@ -94,3 +99,26 @@ def test_populate_bundle_pending_if_any_member_not_ticked(fixtures_dir):
     results = [parse_audit_file(fixtures_dir / "tiny-audit.md")]
     populate_item_metadata(state, "B-T1", results)
     assert state.items["B-T1"]["status"] == "pending"
+
+
+def test_companion_pattern_excludes_manual_queue_files():
+    """Files like pilot-manual-queue.md hold items that are intentionally
+    not enqueueable. They must be skipped at scan time so re-runs don't
+    re-discover and try to enqueue them."""
+    assert _is_companion_file("pilot-manual-queue.md") is True
+    assert _is_companion_file("audit-2026-05-05-manual-queue.md") is True
+    # Sanity: real audit files still pass through.
+    assert _is_companion_file("pilot-stage-1.md") is False
+    assert _is_companion_file("audit-2026-05-04-foo.md") is False
+
+
+def test_gather_sources_skips_manual_queue(tmp_path):
+    """End-to-end: gather_sources should not return a manual-queue file
+    even though it matches the pilot-*.md include glob."""
+    (tmp_path / "pilot-stage-1.md").write_text("# stage 1\n")
+    (tmp_path / "pilot-manual-queue.md").write_text("# manual\n")
+    config = Config(sources=[], auto_discover=True)
+    sources = gather_sources(config, tmp_path)
+    names = {p.name for p in sources}
+    assert "pilot-stage-1.md" in names
+    assert "pilot-manual-queue.md" not in names

@@ -8,18 +8,9 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-// Forward-looking model for the post-rename world. Currently points at the unrenamed
-// commerce.commission_ledger_entries. The rename to commerce.commission_movements was
-// planned for Phase 1 but deferred — Phase 4 cleanup chose to stay with the current
-// name to keep the destructive migration focused. The rename is now a separate future PR
-// (one DDL plus a sweep over CommissionLedgerEntry callers).
-//
-// Use this class for NEW code that writes only money-movement rows. Legacy callers
-// continue using App\Models\Retail\CommissionLedgerEntry. Both models read/write the
-// same table.
-//
-// Scope is MONEY MOVEMENTS ONLY (enforced at DB level post-Phase-4 — accrual/reversal
-// rows are deleted by 20260506500000_drop_legacy_aggregates.sql):
+// Money-movement ledger. Scope is enforced at the DB level post-Phase-4 (accrual and
+// reversal rows were deleted by 20260506500000_drop_legacy_aggregates.sql; the table
+// itself was renamed by 20260506600000_rename_ledger_to_movements.sql):
 //   - entry_type='payout'     — payout settled
 //   - entry_type='clawback'   — post-payout reversal
 //   - entry_type='adjustment' — manual support correction
@@ -30,7 +21,7 @@ class CommissionMovement extends BaseModel
 {
     use HasUuids;
 
-    protected $table = 'commerce.commission_ledger_entries';  // → commission_movements in Phase 4
+    protected $table = 'commerce.commission_movements';
 
     public $incrementing = false;
 

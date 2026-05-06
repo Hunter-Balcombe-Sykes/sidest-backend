@@ -136,7 +136,7 @@ jq -n \
             {role: "user",   content: $usr}
         ],
         temperature: 0.2,
-        max_tokens: 8000
+        max_tokens: 64000
     }' > "$PAYLOAD"
 
 PAYLOAD_BYTES=$(wc -c < "$PAYLOAD")

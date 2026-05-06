@@ -43,7 +43,7 @@ function samplePayload(): array
         ],
         'billing' => [
             'subscription' => null,
-            'commission_ledger_entries' => [],
+            'commission_movements' => [],
             'commission_payouts' => [],
         ],
         'audit' => ['data_export_audit' => []],

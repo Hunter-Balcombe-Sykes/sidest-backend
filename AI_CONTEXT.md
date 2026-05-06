@@ -171,7 +171,7 @@ Stuck failed batches → POST /staff/commission-payouts/{payout}/retry (staff ad
 | `OrderEvent` | `commerce.order_events` | Append-only audit log; `shopify_event_id` unique = webhook idempotency |
 | `OrderItem` | `commerce.order_items` | Trigger-mirrored normalization of `orders.line_items` JSONB |
 | `BrandAffiliateRollup` | `commerce.brand_affiliate_rollup` | Trigger-maintained per-day rollup keyed by (brand, affiliate, day, currency) |
-| `CommissionLedgerEntry` / `CommissionMovement` | `commerce.commission_ledger_entries` | Money-movement rows only (post-Phase-4): `payout`, `clawback`, `adjustment`. Both classes point at the same table; rename to `commission_movements` is deferred |
+| `CommissionMovement` | `commerce.commission_movements` | Money-movement rows only (post-Phase-4): `payout`, `clawback`, `adjustment`. Renamed from `commission_ledger_entries` in `20260506600000_rename_ledger_to_movements.sql` |
 | `CommissionPayout` | `commerce.commission_payouts` | Payout lifecycle (pending → completed/failed); reads `commerce.orders.payout_id` linkage |
 | `CommissionPayoutItem` | `commerce.commission_payout_items` | Links payouts to orders via `order_id` (NOT NULL post-Phase-4) |
 | `BrandStoreSettings` | `brand.brand_store_settings` | V2: only `default_commission_rate` + `payout_hold_days` |
@@ -277,7 +277,7 @@ Shopify orders/paid webhook → ShopifyOrderWebhookController
           payout_id IS NULL.
         → processPayoutBatch: hybrid funding (wallet first, card for shortfall)
         → Stripe Connect transfer (80/20 split: 20% platform fee, 80% to affiliate)
-        → On settle: write commerce.commission_ledger_entries row with
+        → On settle: write commerce.commission_movements row with
           entry_type='payout' AND set commerce.orders.payout_id on every
           included order (Phase 3.1 writer). The ledger holds money
           movements only; accrual state is derived from orders.
@@ -366,7 +366,7 @@ Request → VerifySupabaseJwt (validate JWT via JWKS, extract supabase_uid)
 | `core` | Professionals, sites, services, customers, blocks, media, integrations, themes, staff |
 | `site` | Site-level tables that are siblings of core but isolated (`sites`, `site_media`, `media_variants`, `blocks`, `service_categories`, `services`, `subdomain_aliases`, `public_site_payload` view) |
 | `brand` | Brand-team domain: `brand_partner_links`, `brand_partner_link_events`, `brand_affiliate_invites`, `brand_profiles`, `brand_status_history`, `brand_store_settings`, `brand_team_memberships` |
-| `commerce` | Order-lifecycle source of truth (Phase 3+): `orders`, `order_events`, `order_items`, `brand_affiliate_rollup`, `commission_ledger_entries` (money movements only post-Phase-4), `commission_payouts`, `commission_payout_items`, `brand_commission_topups`, `affiliate_product_selections` |
+| `commerce` | Order-lifecycle source of truth (Phase 3+): `orders`, `order_events`, `order_items`, `brand_affiliate_rollup`, `commission_movements` (money movements only post-Phase-4; renamed from `commission_ledger_entries`), `commission_payouts`, `commission_payout_items`, `brand_commission_topups`, `affiliate_product_selections` |
 | `notifications` | `notifications`, `notification_receipts`, `notification_preferences`, etc. |
 | `analytics` | Raw event tables: `site_visits`, `link_clicks`, `cart_events`, `lead_submissions`, `booking_events`. Booking aggregates: `booking_metrics_daily`, `booking_metrics_hourly`, `professional_customer_daily` (still rebuild-aggregate pattern via `BookingAnalyticsAggregateService`). The eight commerce/site aggregate tables — `brand_metrics_daily`, `brand_metrics_hourly`, `brand_affiliate_daily`, `brand_commission_daily`, `professional_metrics_daily`, `professional_metrics_hourly`, `site_metrics_daily`, `site_metrics_hourly` — were dropped in Phase 4 (`20260506500000_drop_legacy_aggregates.sql`); commerce/site analytics now use live queries on `commerce.orders` + `commerce.brand_affiliate_rollup` + raw event tables. |
 | `billing` | Plans, subscriptions |
@@ -381,7 +381,7 @@ Live queries against `commerce.orders` + `commerce.brand_affiliate_rollup` + raw
 - Stale-while-revalidate: returns last-good on stale, refreshes in background
 - Push-invalidation on every commerce write and on `analytics:summary:ver:{professional_id}` bumps
 
-`commerce.orders.payout_id` (Phase 3.1) carries the link from order → settled payout. The analytics `paid_cents` column reads from this, not from `commission_ledger_entries`. Backfill SQL: `supabase/migrations/20260506400000_backfill_orders_payout_id.sql`.
+`commerce.orders.payout_id` (Phase 3.1) carries the link from order → settled payout. The analytics `paid_cents` column reads from this, not from `commission_movements`. Backfill SQL: `supabase/migrations/20260506400000_backfill_orders_payout_id.sql`.
 
 ### Queue Architecture
 

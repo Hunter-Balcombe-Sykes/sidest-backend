@@ -123,8 +123,8 @@ it('stripe connect — valid account.updated transitions stripe_connect_status',
     $body = json_encode($event);
     $sig = signStripeBody($body, 'whsec_connect_test');
 
-    // flushHeldCommissions runs inside a DB::transaction; with an empty
-    // commerce.commission_ledger_entries table it updates 0 rows (no-op).
+    // Phase 4+: flushHeldCommissions is a no-op (orders are 'approved' on creation;
+    // no held state to flush). The transaction rollback contract is still tested below.
     $this->call('POST', '/api/webhooks/stripe-connect', [], [], [], [
         'CONTENT_TYPE' => 'application/json',
         'HTTP_STRIPE_SIGNATURE' => $sig,

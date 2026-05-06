@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
-use App\Models\Retail\CommissionLedgerEntry;
+use App\Models\Retail\CommissionMovement;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -38,7 +38,7 @@ class EmbeddedOrderAnalyticsController extends ApiController
         // Strip the GID prefix if Shopify hands us one — ledger stores numeric IDs.
         $orderId = (string) preg_replace('#^gid://shopify/Order/#', '', $shopifyOrderId);
 
-        $entries = CommissionLedgerEntry::with('affiliateProfessional:id,display_name')
+        $entries = CommissionMovement::with('affiliateProfessional:id,display_name')
             ->where('brand_professional_id', $professionalId)
             ->where('shopify_order_id', $orderId)
             ->orderBy('id')
