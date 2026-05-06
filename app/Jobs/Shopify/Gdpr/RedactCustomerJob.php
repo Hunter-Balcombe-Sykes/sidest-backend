@@ -131,33 +131,91 @@ class RedactCustomerJob implements ShouldQueue
 
             // Scrub PII on commerce.orders. Customer-linked Shopify order rows hold the
             // raw Shopify payload (billing/shipping address, customer name/email/phone) on
-            // shopify_data, plus customer-authored fields under line_items[*].properties.
-            // Full-nuke shopify_data to '{}' (matches the booking_events.raw_payload pattern
-            // — works on Postgres and SQLite). Cents columns are kept for analytics.
+            // shopify_data, plus customer-authored fields (note, note_attributes, line item
+            // properties). Use jsonb_strip_pii on Postgres to surgically redact only the
+            // listed paths; fall back to full-nuke '{}' on SQLite (test environments).
+            // Cents columns and non-PII structure are kept for analytics integrity.
             $scrubbedOrders = 0;
             if ($customer) {
-                $orderIds = DB::connection('pgsql')
-                    ->table('commerce.orders')
-                    ->where('customer_id', $customer->id)
-                    ->pluck('id')
-                    ->all();
+                $conn = DB::connection('pgsql');
 
-                if (! empty($orderIds)) {
-                    $scrubbedOrders = DB::connection('pgsql')
-                        ->table('commerce.orders')
-                        ->whereIn('id', $orderIds)
-                        ->update([
-                            'shopify_data' => '{}',
-                            'customer_id' => null,
-                            'updated_at' => now(),
-                        ]);
+                if ($conn->getDriverName() === 'pgsql') {
+                    // Collect order IDs before the UPDATE so we can target order_events
+                    // afterward (customer_id is NULLed and cannot be used as a join key post-update).
+                    $orderIds = $conn->table('commerce.orders')
+                        ->where('customer_id', $customer->id)
+                        ->pluck('id')
+                        ->all();
 
-                    // Order events (audit log) can hold customer-named refund notes,
-                    // adjustment reasons, denormalised customer fields. Full-nuke metadata.
-                    DB::connection('pgsql')
-                        ->table('commerce.order_events')
-                        ->whereIn('order_id', $orderIds)
-                        ->update(['metadata' => '{}']);
+                    if (! empty($orderIds)) {
+                        // Postgres: surgical per-path redaction + NULL customer_id in one UPDATE.
+                        // billing_address / shipping_address replace the entire address object
+                        // with "REDACTED" — jsonb_strip_pii's plain-path branch sets the top-level
+                        // key. The plan specifies billing_address.* / shipping_address.* but the
+                        // function's wildcard support only handles [*] (array iteration), not .*
+                        // (object key enumeration). Replacing the whole object is the safer GDPR outcome.
+                        $scrubbedOrders = $conn->update(
+                            <<<'SQL'
+                            UPDATE commerce.orders
+                               SET customer_id  = NULL,
+                                   shopify_data = public.jsonb_strip_pii(shopify_data, ARRAY[
+                                       'customer.email',
+                                       'customer.first_name',
+                                       'customer.last_name',
+                                       'customer.phone',
+                                       'billing_address',
+                                       'shipping_address',
+                                       'note',
+                                       'note_attributes[*].value',
+                                       'line_items[*].properties[*].value'
+                                   ]::text[]),
+                                   updated_at   = NOW()
+                             WHERE customer_id = ?
+                            SQL,
+                            [$customer->id]
+                        );
+
+                        // Order events: redact customer-authored free text and denormalized
+                        // customer fields (refund notes, adjustment reasons, customer object).
+                        $conn->update(
+                            sprintf(
+                                <<<'SQL'
+                                UPDATE commerce.order_events
+                                   SET metadata = public.jsonb_strip_pii(metadata, ARRAY[
+                                       'refund.note',
+                                       'adjustment.note',
+                                       'customer.email',
+                                       'customer.name',
+                                       'customer.phone'
+                                   ]::text[])
+                                 WHERE order_id IN (%s)
+                                SQL,
+                                implode(',', array_fill(0, count($orderIds), '?'))
+                            ),
+                            $orderIds
+                        );
+                    }
+                } else {
+                    // SQLite (test environment): fall back to the pre-Phase-3 full-nuke
+                    // behaviour. Stronger than path-based but correct for CI purposes.
+                    $orderIds = $conn->table('commerce.orders')
+                        ->where('customer_id', $customer->id)
+                        ->pluck('id')
+                        ->all();
+
+                    if (! empty($orderIds)) {
+                        $scrubbedOrders = $conn->table('commerce.orders')
+                            ->whereIn('id', $orderIds)
+                            ->update([
+                                'shopify_data' => '{}',
+                                'customer_id' => null,
+                                'updated_at' => now(),
+                            ]);
+
+                        $conn->table('commerce.order_events')
+                            ->whereIn('order_id', $orderIds)
+                            ->update(['metadata' => '{}']);
+                    }
                 }
             }
 

@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 /**
- * Single-flight cache regeneration helper.
+ * Single-flight cache regeneration helper with jitter and stale-while-revalidate.
  *
  * Wraps Laravel's Cache::remember with a Cache::lock so that under concurrent
  * load only one request rebuilds an expired value while others wait and read
@@ -26,6 +26,15 @@ use Throwable;
  *                                may not find a row); uses a sentinel so cached
  *                                nulls survive across requests instead of triggering
  *                                a fresh DB hit each time.
+ *
+ * Cache hardening features (rememberLocked only):
+ *   - TTL jitter ±20% on every int TTL write, preventing thundering-herd expiry.
+ *   - Stale-while-revalidate (SWR): stores a long-lived stale copy alongside the
+ *     primary key. On stale (primary expired, stale present), returns last-good
+ *     immediately without blocking. The next caller that acquires the lock will
+ *     recompute and fill the primary key for all subsequent readers.
+ *   - Lock keys live on the 'cache_locks' Redis DB (via lock_connection in
+ *     config/cache.php) so Cache::flush() on the data DB never releases held locks.
  */
 class CacheLockService
 {
@@ -38,10 +47,23 @@ class CacheLockService
     private const NULL_SENTINEL = '__cache_lock_null_sentinel__';
 
     /**
+     * Multiplier applied to int TTLs to derive the stale-extension TTL.
+     * A primary TTL of 60s → stale TTL of 600s (10 min last-good window).
+     */
+    private const STALE_TTL_MULTIPLIER = 10;
+
+    /**
      * Get the value at $key, or compute it via $callback under a single-flight lock.
      *
+     * TTL jitter (±20%) is applied to every int $ttl write to spread expiry across
+     * the fleet. A stale-extension copy at "$key:stale" is written at 10× the base
+     * TTL; when the primary expires but the stale copy is still live, the last-good
+     * value is returned immediately and the lock-acquiring caller recomputes silently
+     * on the next miss (stale-while-revalidate without a background job).
+     *
      * @param  string  $key  Cache key (the lock key is auto-derived as 'lock:'.$key)
-     * @param  DateTimeInterface|int  $ttl  Same TTL semantics as Cache::remember (DateTime or seconds)
+     * @param  DateTimeInterface|int  $ttl  Same TTL semantics as Cache::remember (DateTime or seconds).
+     *                                      Defaults to 60s; callers passing explicit TTL still win.
      * @param  Closure(): mixed  $callback  Closure that produces the value on miss; must not return null
      * @param  int  $lockSeconds  How long the lock is held before auto-expiring (must exceed worst-case closure runtime)
      * @param  int  $blockSeconds  How long a waiting request blocks for the lock before falling through
@@ -53,13 +75,48 @@ class CacheLockService
         int $lockSeconds = 10,
         int $blockSeconds = 5,
     ): mixed {
-        // Fast path: value already cached, no lock needed.
+        // Fast path: primary key still warm.
         $cached = Cache::get($key);
         if ($cached !== null) {
             return $cached;
         }
 
-        // Cache miss — acquire a per-key fill lock so only one process rebuilds.
+        // SWR fast path: primary expired but stale copy is still live — return
+        // last-good immediately. The lock below will let one worker recompute.
+        $staleKey = $key.':stale';
+        $stale = Cache::get($staleKey);
+        if ($stale !== null) {
+            // Try a non-blocking lock attempt so a single worker recomputes in
+            // this same request. If the lock is already held (another worker is
+            // recomputing), skip and return the stale value without waiting.
+            $lock = Cache::lock('lock:'.$key, $lockSeconds);
+            if ($lock->get()) {
+                try {
+                    // Re-check primary after acquiring — another process may have
+                    // just filled it while we were racing for the lock.
+                    $fresh = Cache::get($key);
+                    if ($fresh !== null) {
+                        return $fresh;
+                    }
+
+                    $value = $callback();
+                    $this->writeWithJitter($key, $staleKey, $value, $ttl);
+
+                    return $value;
+                } finally {
+                    try {
+                        $lock->release();
+                    } catch (Throwable) {
+                        // ignore — lock may have auto-expired
+                    }
+                }
+            }
+
+            // Another worker is refreshing — return last-good without blocking.
+            return $stale;
+        }
+
+        // Cold miss — acquire blocking lock so only one worker runs the callback.
         $lock = Cache::lock('lock:'.$key, $lockSeconds);
 
         try {
@@ -85,7 +142,7 @@ class CacheLockService
             }
 
             $value = $callback();
-            Cache::put($key, $value, $ttl);
+            $this->writeWithJitter($key, $staleKey, $value, $ttl);
 
             return $value;
         } finally {
@@ -100,8 +157,39 @@ class CacheLockService
     }
 
     /**
+     * Write $value to $key with jitter and to $staleKey with the stale extension TTL.
+     *
+     * Jitter is applied only to int TTLs (±20% uniform distribution). DateTimeInterface
+     * TTLs represent a caller-specified deadline and must not be modified.
+     */
+    private function writeWithJitter(string $key, string $staleKey, mixed $value, DateTimeInterface|int $ttl): void
+    {
+        if ($ttl instanceof DateTimeInterface) {
+            // Caller wants a specific expiry deadline — honour it exactly.
+            Cache::put($key, $value, $ttl);
+            // Stale extension: seconds from now to deadline, then ×10. Ensures
+            // the stale copy outlives the primary by a meaningful window.
+            $secondsUntilDeadline = max(1, $ttl->getTimestamp() - now()->timestamp);
+            Cache::put($staleKey, $value, $secondsUntilDeadline * self::STALE_TTL_MULTIPLIER);
+
+            return;
+        }
+
+        // Apply ±20% jitter: mt_rand(0, 4000) / 10000.0 gives [0.0, 0.4],
+        // adding 0.8 shifts the range to [0.8, 1.2].
+        $jitteredTtl = (int) round($ttl * (0.8 + mt_rand(0, 4000) / 10000.0));
+        $staleTtl = $ttl * self::STALE_TTL_MULTIPLIER;
+
+        Cache::put($key, $value, $jitteredTtl);
+        Cache::put($staleKey, $value, $staleTtl);
+    }
+
+    /**
      * Like rememberLocked, but the callback may return null. Null results are cached
      * as a sentinel so subsequent reads return null without re-running the callback.
+     *
+     * Note: no jitter or SWR here — this method is used for negative-cache lookups
+     * (profile misses, etc.) where stale last-good semantics don't apply.
      *
      * @param  string  $key  Cache key
      * @param  DateTimeInterface|int  $ttl  TTL for non-null values

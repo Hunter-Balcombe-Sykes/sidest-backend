@@ -18,14 +18,19 @@ class AffiliateCommerceAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
 
+    // Status values excluded from all live-query commerce aggregations.
+    // 'approved' is the canonical "paid" status — do NOT exclude it.
+    private const EXCLUDED_STATUSES = ['stub', 'cancelled', 'voided', 'refunded'];
+
     public function __construct(private CacheLockService $cacheLock) {}
 
     /**
      * Affiliate's own commerce performance summary.
-     * Uses professional_metrics_hourly for the last 24h, professional_metrics_daily for older ranges.
-     * When multiple currencies exist, the one with the most orders is used for totals.
+     * Live queries against commerce.orders + commerce.brand_affiliate_rollup.
+     * Replaces reads of analytics.professional_metrics_daily/hourly and brand_affiliate_daily.
+     * payout_summary and grace_summary remain: they read commerce.commission_payouts, unchanged.
      *
-     * @return JsonResponse{ data: { range: {from: string, to: string}, granularity: string, totals: array, timeseries: array } }
+     * @return JsonResponse{ data: { range, granularity, totals, timeseries, brands, payout_summary, grace_summary } }
      */
     public function overview(Request $request): JsonResponse
     {
@@ -37,19 +42,60 @@ class AffiliateCommerceAnalyticsController extends ApiController
         $payoutStateKey = CacheKeyGenerator::affiliatePayoutState($professionalId);
 
         // Timeseries + brands depend on the selected date window.
-        $windowed = $this->cacheLock->rememberLocked($windowKey, now()->addMinutes(5), function () use ($professionalId, $filters): array {
-            $base = $filters['use_hourly']
-                ? $this->buildHourlyResponse($professionalId, $filters)
-                : $this->buildDailyResponse($professionalId, $filters);
+        $windowed = $this->cacheLock->rememberLocked($windowKey, 60, function () use ($professionalId, $filters): array {
+            $granularity = $filters['use_hourly'] ? 'hour' : 'day';
 
-            return array_merge($base, [
-                'brands' => $this->buildBrandBreakdown($professionalId, $filters, $base['totals']['currency_code']),
-            ]);
+            // ── Totals from commerce.orders ──────────────────────────────────
+            $totalsRow = $this->queryOrderTotals($professionalId, $filters);
+            $currencyCode = $totalsRow->currency_code ?? 'AUD';
+
+            // commission_reversed_cents comes from the rollup (trigger-maintained)
+            $reversedRow = DB::table('commerce.brand_affiliate_rollup')
+                ->where('affiliate_professional_id', $professionalId)
+                ->where('day', '>=', $filters['from'])
+                ->where('day', '<=', $filters['to'])
+                ->selectRaw('COALESCE(SUM(reversed_commission_cents), 0) AS reversed_cents')
+                ->first();
+
+            // commission_paid_cents: orders with an assigned payout in window
+            $paidRow = DB::table('commerce.orders')
+                ->where('affiliate_professional_id', $professionalId)
+                ->whereNotIn('status', self::EXCLUDED_STATUSES)
+                ->whereNotNull('payout_id')
+                ->where('occurred_at', '>=', $filters['from'])
+                ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+                ->selectRaw('COALESCE(SUM(commission_cents), 0) AS paid_cents')
+                ->first();
+
+            $totals = [
+                'orders_count' => (int) ($totalsRow->orders_count ?? 0),
+                'gross_cents' => (int) ($totalsRow->gross_cents ?? 0),
+                'refunded_cents' => (int) ($totalsRow->refunded_cents ?? 0),
+                'net_cents' => (int) ($totalsRow->net_cents ?? 0),
+                'commission_accrued_cents' => (int) ($totalsRow->commission_cents ?? 0),
+                'commission_reversed_cents' => (int) ($reversedRow->reversed_cents ?? 0),
+                'commission_paid_cents' => (int) ($paidRow->paid_cents ?? 0),
+                'currency_code' => strtoupper($currencyCode),
+            ];
+
+            // ── Timeseries from commerce.orders ──────────────────────────────
+            $timeseries = $this->queryOrderTimeseries($professionalId, $filters, $granularity);
+
+            // ── Per-brand breakdown from rollup ───────────────────────────────
+            $brands = $this->buildBrandBreakdown($professionalId, $filters, $currencyCode);
+
+            return [
+                'range' => ['from' => $filters['from'], 'to' => $filters['to']],
+                'granularity' => $granularity,
+                'totals' => $totals,
+                'timeseries' => $timeseries,
+                'brands' => $brands,
+            ];
         });
 
         // Payout + grace state describe the affiliate's current position and
         // are cached per-professional so switching date windows reuses one entry.
-        $payoutState = $this->cacheLock->rememberLocked($payoutStateKey, now()->addMinutes(5), function () use ($professionalId): array {
+        $payoutState = $this->cacheLock->rememberLocked($payoutStateKey, 60, function () use ($professionalId): array {
             return [
                 'payout_summary' => $this->buildPayoutSummary($professionalId),
                 'grace_summary' => $this->buildGraceSummary($professionalId),
@@ -59,106 +105,166 @@ class AffiliateCommerceAnalyticsController extends ApiController
         return $this->success(array_merge($windowed, $payoutState));
     }
 
-    private function buildDailyResponse(string $professionalId, array $filters): array
+    /**
+     * Aggregate order totals for the affiliate in the requested window.
+     * Returns a stdClass with orders_count, gross_cents, refunded_cents, net_cents, commission_cents, currency_code.
+     */
+    private function queryOrderTotals(string $professionalId, array $filters): object
     {
-        $rows = DB::table('analytics.professional_metrics_daily')
+        $endOfDay = Carbon::parse($filters['to'])->endOfDay();
+
+        $row = DB::table('commerce.orders')
             ->where('affiliate_professional_id', $professionalId)
-            ->whereBetween('day', [$filters['from'], $filters['to']])
-            ->get();
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', $endOfDay)
+            ->selectRaw('
+                COUNT(*) AS orders_count,
+                COALESCE(SUM(gross_cents), 0) AS gross_cents,
+                COALESCE(SUM(refund_cents), 0) AS refunded_cents,
+                COALESCE(SUM(net_cents), 0) AS net_cents,
+                COALESCE(SUM(commission_cents), 0) AS commission_cents
+            ')
+            ->first();
 
-        $currencyCode = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
-        $primary = $rows->filter(fn ($r) => $r->currency_code === $currencyCode);
-
-        return [
-            'range' => ['from' => $filters['from'], 'to' => $filters['to']],
-            'granularity' => 'day',
-            'totals' => $this->sumTotals($primary, $currencyCode),
-            'timeseries' => $primary->sortBy('day')->map(fn ($row) => [
-                'bucket' => (string) $row->day,
-                'orders_count' => (int) $row->orders_count,
-                'gross_cents' => (int) $row->gross_cents,
-                'net_cents' => (int) $row->net_cents,
-                'commission_accrued_cents' => (int) $row->commission_accrued_cents,
-            ])->values()->all(),
-        ];
-    }
-
-    private function buildHourlyResponse(string $professionalId, array $filters): array
-    {
-        $rows = DB::table('analytics.professional_metrics_hourly')
+        // Dominant currency by order count
+        $currencyRow = DB::table('commerce.orders')
             ->where('affiliate_professional_id', $professionalId)
-            ->where('hour_start', '>=', $filters['hourly_from'])
-            ->where('hour_start', '<', $filters['hourly_to'])
-            ->get();
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', $endOfDay)
+            ->selectRaw('currency_code, COUNT(*) as cnt')
+            ->groupBy('currency_code')
+            ->orderByDesc('cnt')
+            ->first();
 
-        $currencyCode = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
-        $primary = $rows->filter(fn ($r) => $r->currency_code === $currencyCode);
+        if ($row) {
+            $row->currency_code = $currencyRow->currency_code ?? 'AUD';
+        } else {
+            $row = (object) [
+                'orders_count' => 0, 'gross_cents' => 0, 'refunded_cents' => 0,
+                'net_cents' => 0, 'commission_cents' => 0, 'currency_code' => 'AUD',
+            ];
+        }
 
-        return [
-            'range' => ['from' => $filters['from'], 'to' => $filters['to']],
-            'granularity' => 'hour',
-            'totals' => $this->sumTotals($primary, $currencyCode),
-            'timeseries' => $primary->sortBy('hour_start')->map(fn ($row) => [
-                'bucket' => Carbon::parse($row->hour_start)->toIso8601String(),
-                'orders_count' => (int) $row->orders_count,
-                'gross_cents' => (int) $row->gross_cents,
-                'net_cents' => (int) $row->net_cents,
-                'commission_accrued_cents' => (int) $row->commission_accrued_cents,
-            ])->values()->all(),
-        ];
+        return $row;
     }
 
     /**
-     * Per-brand breakdown — each row of brand_affiliate_daily filtered to
-     * THIS affiliate, summed across the requested window, joined to the
-     * brand's identity (display_name, handle) for UI labelling.
+     * Order timeseries bucketed by hour or day, including commission_accrued_cents.
+     * Returns array of ['bucket', 'orders_count', 'gross_cents', 'net_cents', 'commission_accrued_cents']
+     */
+    private function queryOrderTimeseries(string $professionalId, array $filters, string $granularity): array
+    {
+        $conn = DB::connection('pgsql');
+        $driver = $conn->getDriverName();
+
+        if ($driver === 'sqlite') {
+            $fmtMap = ['hour' => '%Y-%m-%d %H:00:00', 'day' => '%Y-%m-%d'];
+            $fmt = $fmtMap[$granularity] ?? '%Y-%m-%d';
+            $bucketExpr = "strftime('{$fmt}', occurred_at)";
+        } else {
+            $bucketExpr = "DATE_TRUNC('{$granularity}', occurred_at)";
+        }
+
+        $rows = DB::table('commerce.orders')
+            ->where('affiliate_professional_id', $professionalId)
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+            ->selectRaw("
+                {$bucketExpr} AS bucket,
+                COUNT(*) AS orders_count,
+                COALESCE(SUM(gross_cents), 0) AS gross_cents,
+                COALESCE(SUM(net_cents), 0) AS net_cents,
+                COALESCE(SUM(commission_cents), 0) AS commission_accrued_cents
+            ")
+            ->groupByRaw($bucketExpr)
+            ->orderByRaw($bucketExpr)
+            ->get();
+
+        return $rows->map(function ($row) use ($granularity) {
+            $bucket = $granularity === 'hour'
+                ? Carbon::parse($row->bucket)->toIso8601String()
+                : (string) $row->bucket;
+
+            return [
+                'bucket' => $bucket,
+                'orders_count' => (int) $row->orders_count,
+                'gross_cents' => (int) $row->gross_cents,
+                'net_cents' => (int) $row->net_cents,
+                'commission_accrued_cents' => (int) $row->commission_accrued_cents,
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * Per-brand breakdown for this affiliate using the rollup table.
+     * Joins core.professionals for brand display labels.
+     * customers_count aggregated from orders (not in rollup).
      *
-     * Returns rows for every brand the affiliate had activity with in the
-     * window, sorted by gross revenue desc so the highest-performing
-     * brand reads first. Currency is filtered to the primary currency
-     * for the affiliate so multi-currency rows don't double-count.
+     * @return array<int, array>
      */
     private function buildBrandBreakdown(string $professionalId, array $filters, string $currencyCode): array
     {
-        $rows = DB::table('analytics.brand_affiliate_daily as bad')
-            ->leftJoin('core.professionals as brand', 'brand.id', '=', 'bad.brand_professional_id')
-            ->where('bad.affiliate_professional_id', $professionalId)
-            ->where('bad.currency_code', $currencyCode)
-            ->whereBetween('bad.day', [$filters['from'], $filters['to']])
-            ->select(
-                'bad.brand_professional_id',
-                'brand.display_name as brand_display_name',
-                'brand.handle as brand_handle',
-                DB::raw('CAST(SUM(bad.orders_count) AS INTEGER) as orders_count'),
-                DB::raw('CAST(SUM(bad.gross_cents) AS INTEGER) as gross_cents'),
-                DB::raw('CAST(SUM(bad.net_cents) AS INTEGER) as net_cents'),
-                DB::raw('CAST(SUM(bad.commission_accrued_cents) AS INTEGER) as commission_accrued_cents'),
-                DB::raw('CAST(SUM(bad.commission_net_cents) AS INTEGER) as commission_net_cents'),
-                DB::raw('CAST(SUM(bad.customers_count) AS INTEGER) as customers_count'),
-            )
-            ->groupBy('bad.brand_professional_id', 'brand.display_name', 'brand.handle')
-            ->orderByDesc(DB::raw('SUM(bad.gross_cents)'))
+        $rollupRows = DB::table('commerce.brand_affiliate_rollup as r')
+            ->leftJoin('core.professionals as brand', 'brand.id', '=', 'r.brand_professional_id')
+            ->where('r.affiliate_professional_id', $professionalId)
+            ->where('r.currency_code', $currencyCode)
+            ->where('r.day', '>=', $filters['from'])
+            ->where('r.day', '<=', $filters['to'])
+            ->selectRaw('
+                r.brand_professional_id,
+                brand.display_name AS brand_display_name,
+                brand.handle AS brand_handle,
+                SUM(r.orders_count) AS orders_count,
+                SUM(r.gross_cents) AS gross_cents,
+                SUM(r.gross_cents - r.refund_cents) AS net_cents,
+                SUM(r.commission_cents) AS commission_accrued_cents,
+                SUM(r.commission_cents - r.reversed_commission_cents) AS commission_net_cents
+            ')
+            ->groupBy('r.brand_professional_id', 'brand.display_name', 'brand.handle')
+            ->orderByRaw('SUM(r.gross_cents) DESC')
             ->get();
 
-        return $rows->map(fn ($row) => [
-            'brand_professional_id' => (string) $row->brand_professional_id,
-            'brand_display_name' => (string) ($row->brand_display_name ?? ''),
-            'brand_handle' => $row->brand_handle ? (string) $row->brand_handle : null,
-            'orders_count' => (int) $row->orders_count,
-            'gross_cents' => (int) $row->gross_cents,
-            'net_cents' => (int) $row->net_cents,
-            'commission_accrued_cents' => (int) $row->commission_accrued_cents,
-            'commission_net_cents' => (int) $row->commission_net_cents,
-            'customers_count' => (int) $row->customers_count,
-            'currency_code' => strtoupper($currencyCode),
-        ])->values()->all();
+        if ($rollupRows->isEmpty()) {
+            return [];
+        }
+
+        $brandIds = $rollupRows->pluck('brand_professional_id')->all();
+
+        // customers_count per brand — not stored in rollup
+        $customerCounts = DB::table('commerce.orders')
+            ->where('affiliate_professional_id', $professionalId)
+            ->whereIn('brand_professional_id', $brandIds)
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+            ->selectRaw('brand_professional_id, COUNT(DISTINCT customer_id) AS customers_count')
+            ->groupBy('brand_professional_id')
+            ->get()
+            ->keyBy('brand_professional_id');
+
+        return $rollupRows->map(function ($row) use ($customerCounts, $currencyCode) {
+            return [
+                'brand_professional_id' => (string) $row->brand_professional_id,
+                'brand_display_name' => (string) ($row->brand_display_name ?? ''),
+                'brand_handle' => $row->brand_handle ? (string) $row->brand_handle : null,
+                'orders_count' => (int) $row->orders_count,
+                'gross_cents' => (int) $row->gross_cents,
+                'net_cents' => (int) $row->net_cents,
+                'commission_accrued_cents' => (int) $row->commission_accrued_cents,
+                'commission_net_cents' => (int) $row->commission_net_cents,
+                'customers_count' => (int) ($customerCounts->get($row->brand_professional_id)?->customers_count ?? 0),
+                'currency_code' => strtoupper($currencyCode),
+            ];
+        })->values()->all();
     }
 
     /**
      * Snapshot of the affiliate's payout state — independent of the
      * filter window. Surfaces:
-     *   - estimated next payout (sum of approved-not-yet-paid commissions
-     *     past their hold-days threshold)
+     *   - estimated next payout (sum of approved-not-yet-paid commissions)
      *   - the earliest eligible_after timestamp across pending payouts
      *   - last completed payout (for "last paid" KPI on the dashboard)
      */
@@ -173,12 +279,6 @@ class AffiliateCommerceAnalyticsController extends ApiController
         ];
 
         try {
-            // Pending / eligible amounts — payouts that exist but haven't
-            // completed yet. Includes 'pending', 'pending_funds',
-            // 'collecting', 'transferring' (anything mid-flight). The
-            // pending_funds status was added with the grace migration —
-            // safe to include even when the enum doesn't carry it because
-            // SQL just treats unknown values as no-match.
             $pendingAgg = DB::table('commerce.commission_payouts')
                 ->where('affiliate_professional_id', $professionalId)
                 ->whereIn('status', ['pending', 'pending_funds', 'collecting', 'transferring'])
@@ -189,7 +289,6 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 ')
                 ->first();
 
-            // Last completed payout — for the "last paid X.XX on date" line.
             $lastCompleted = DB::table('commerce.commission_payouts')
                 ->where('affiliate_professional_id', $professionalId)
                 ->where('status', 'completed')
@@ -209,10 +308,8 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 'currency_code' => strtoupper($lastCompleted->currency_code ?? $pendingAgg->currency_code ?? 'AUD'),
             ];
         } catch (QueryException $e) {
-            // Guard: SQLSTATE 42703 (undefined column) from schema drift — the
-            // grace migration has shipped, but this catch remains as a safety
-            // net for that specific case. Re-throw everything else so real bugs
-            // (connection failures, cast errors) surface in Nightwatch.
+            // Guard: SQLSTATE 42703 (undefined column) from schema drift.
+            // Re-throw everything else so real bugs surface in Nightwatch.
             if (($e->errorInfo[0] ?? null) !== '42703') {
                 throw $e;
             }
@@ -227,16 +324,10 @@ class AffiliateCommerceAnalyticsController extends ApiController
 
     /**
      * Per-payout grace state — surfaces the most urgent void deadline so
-     * the dashboard can show "X days left or you lose $Y" with the
-     * earliest expiring payout's numbers, not an average. Empty when
-     * the affiliate has Stripe connected and active (no payouts at risk).
+     * the dashboard can show "X days left or you lose $Y". Empty when Stripe is connected.
      */
     private function buildGraceSummary(string $professionalId): array
     {
-        // Defensive empty shape — used when Stripe is connected, when the
-        // affiliate has nothing at risk, or when the void_at migration
-        // hasn't shipped yet (the column-missing exception below falls
-        // through to this exact shape so the dashboard still renders).
         $emptyShape = [
             'status' => 'none',
             'earliest_expiring_payout_at' => null,
@@ -255,15 +346,10 @@ class AffiliateCommerceAnalyticsController extends ApiController
 
             $isActive = $professional && $professional->stripe_connect_status === 'active';
 
-            // When Stripe is active, no payouts can void for grace reasons —
-            // return a clean shape so the UI can short-circuit.
             if ($isActive) {
                 return [...$emptyShape, 'status' => 'connected'];
             }
 
-            // Aggregate unvoided pending payouts that haven't been paid out.
-            // void_at is per-payout (created_at + 60d) so the earliest deadline
-            // dictates the most urgent banner.
             $atRisk = DB::table('commerce.commission_payouts')
                 ->where('affiliate_professional_id', $professionalId)
                 ->whereIn('status', ['pending', 'pending_funds'])
@@ -282,14 +368,12 @@ class AffiliateCommerceAnalyticsController extends ApiController
                     ->where('affiliate_professional_id', $professionalId)
                     ->where('void_at', '=', $atRisk->earliest_at)
                     ->whereIn('status', ['pending', 'pending_funds'])
-                    ->orderBy('net_payout_cents', 'desc') // deterministic tie-break when batch creates share a void_at timestamp
+                    ->orderBy('net_payout_cents', 'desc')
                     ->select('net_payout_cents')
                     ->first();
                 $earliestPayoutCents = (int) ($earliest->net_payout_cents ?? 0);
             }
 
-            // Status tone driven by days remaining. Mirrors the banner logic:
-            //   critical = ≤3d  warning = ≤14d  active = >14d  none = no payouts at risk
             $earliestAt = $atRisk && $atRisk->earliest_at ? Carbon::parse($atRisk->earliest_at) : null;
             $daysRemaining = $earliestAt ? (int) max(0, now()->diffInDays($earliestAt, false)) : null;
 
@@ -309,10 +393,6 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 'currency_code' => strtoupper($atRisk->currency_code ?? 'AUD'),
             ];
         } catch (QueryException $e) {
-            // Guard: SQLSTATE 42703 (undefined column) — originally for void_at
-            // before the grace migration shipped. Re-throw everything else so
-            // real bugs surface in Nightwatch rather than silently returning
-            // an empty banner to the dashboard.
             if (($e->errorInfo[0] ?? null) !== '42703') {
                 throw $e;
             }
@@ -323,21 +403,6 @@ class AffiliateCommerceAnalyticsController extends ApiController
 
             return $emptyShape;
         }
-    }
-
-    /** @param \Illuminate\Support\Collection $rows */
-    private function sumTotals($rows, string $currencyCode): array
-    {
-        return [
-            'orders_count' => (int) $rows->sum('orders_count'),
-            'gross_cents' => (int) $rows->sum('gross_cents'),
-            'refunded_cents' => (int) $rows->sum('refunded_cents'),
-            'net_cents' => (int) $rows->sum('net_cents'),
-            'commission_accrued_cents' => (int) $rows->sum('commission_accrued_cents'),
-            'commission_reversed_cents' => (int) $rows->sum('commission_reversed_cents'),
-            'commission_paid_cents' => (int) $rows->sum('commission_paid_cents'),
-            'currency_code' => strtoupper($currencyCode),
-        ];
     }
 
     private function resolveFilters(Request $request): array
@@ -390,15 +455,13 @@ class AffiliateCommerceAnalyticsController extends ApiController
         $fromUtc = Carbon::parse($from)->utc()->startOfDay();
         $toUtc = Carbon::parse($to)->utc()->endOfDay();
 
-        // Use hourly table when the entire range falls within the last 24h.
+        // Use hourly granularity when the entire range falls within the last 24h.
         $useHourly = $fromUtc->gte($cutoff) && $toUtc->lte(now()->utc()->addMinute());
 
         return [
             'from' => $from,
             'to' => $to,
             'use_hourly' => $useHourly,
-            'hourly_from' => $cutoff,
-            'hourly_to' => now()->utc()->addMinute(),
         ];
     }
 }

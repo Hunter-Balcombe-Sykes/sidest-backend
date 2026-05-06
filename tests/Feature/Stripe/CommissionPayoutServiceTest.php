@@ -1,6 +1,5 @@
 <?php
 
-use App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob;
 use App\Jobs\Stripe\ExecuteCommissionPayoutJob;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
@@ -306,7 +305,6 @@ it('completes a card-only payout when brand wallet balance is zero', function ()
     expect($payout->wallet_debit_cents)->toBe(0);
     expect($payout->charge_cents)->toBe(10000);
     expect($payout->funding_source)->toBe('card');
-    Bus::assertDispatched(RebuildCommerceDailyAggregatesJob::class);
 });
 
 it('completes a wallet-only payout without creating a PaymentIntent', function () {

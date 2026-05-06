@@ -1,7 +1,6 @@
 <?php
 
 use App\Jobs\Notifications\SendTransactionalNotificationEmailJob;
-use App\Services\Analytics\SiteAnalyticsAggregateService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -153,51 +152,7 @@ it('email job does not block active professionals from receiving email', functio
     expect($email)->toBe('active@example.test');
 });
 
-// ── #V5-013: site analytics aggregate ────────────────────────────────────────
-
-it('analytics hourly rebuild skips soft-deleted professional', function () {
-    $proId = (string) Str::uuid();
-    $now = now()->toDateTimeString();
-
-    DB::connection('pgsql')->table('core.professionals')->insert([
-        'id' => $proId,
-        'status' => 'active',
-        'deleted_at' => $now,
-        'created_at' => $now,
-        'updated_at' => $now,
-    ]);
-
-    app(SiteAnalyticsAggregateService::class)->rebuildProfessionalHour($proId, now()->startOfHour());
-
-    $count = DB::connection('pgsql')
-        ->table('analytics.site_metrics_hourly')
-        ->where('professional_id', $proId)
-        ->count();
-
-    expect($count)->toBe(0);
-});
-
-it('analytics daily rebuild skips soft-deleted professional', function () {
-    $proId = (string) Str::uuid();
-    $now = now()->toDateTimeString();
-
-    DB::connection('pgsql')->table('core.professionals')->insert([
-        'id' => $proId,
-        'status' => 'active',
-        'deleted_at' => $now,
-        'created_at' => $now,
-        'updated_at' => $now,
-    ]);
-
-    app(SiteAnalyticsAggregateService::class)->rebuildProfessionalDay($proId, now()->toDateString());
-
-    $count = DB::connection('pgsql')
-        ->table('analytics.site_metrics_daily')
-        ->where('professional_id', $proId)
-        ->count();
-
-    expect($count)->toBe(0);
-});
+// ── #V5-013: soft-delete EXISTS predicate ────────────────────────────────────
 
 it('analytics soft-delete guard does not block non-deleted professional', function () {
     // Verify the EXISTS query itself returns true for an active professional.

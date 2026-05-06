@@ -30,8 +30,11 @@ use App\Http\Controllers\Api\Shopify\ShopifyAppOAuthController;
 use App\Http\Controllers\Api\Webhooks\FreshaCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyAppUninstalledWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyGdprWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyOrdersCancelledWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyOrdersEditedWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyOrdersUpdatedWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
+use App\Http\Controllers\Api\Webhooks\ShopifyRefundsCreateWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyShopUpdateWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyThemePublishedWebhookController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
@@ -65,6 +68,12 @@ Route::middleware('throttle:webhooks')->group(function () {
     Route::post('/webhooks/shopify/orders-paid', ShopifyOrderWebhookController::class)
         ->middleware('throttle:shopify-webhooks');
     Route::post('/webhooks/shopify/orders-updated', ShopifyOrdersUpdatedWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/orders-edited', ShopifyOrdersEditedWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/orders-cancelled', ShopifyOrdersCancelledWebhookController::class)
+        ->middleware('throttle:shopify-webhooks');
+    Route::post('/webhooks/shopify/refunds-create', ShopifyRefundsCreateWebhookController::class)
         ->middleware('throttle:shopify-webhooks');
     Route::post('/webhooks/shopify/app-uninstalled', ShopifyAppUninstalledWebhookController::class)
         ->middleware('throttle:shopify-webhooks');

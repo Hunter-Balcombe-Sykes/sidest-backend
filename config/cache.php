@@ -75,7 +75,9 @@ return [
         'redis' => [
             'driver' => 'redis',
             'connection' => env('REDIS_CACHE_CONNECTION', 'cache'),
-            'lock_connection' => env('REDIS_CACHE_LOCK_CONNECTION', 'default'),
+            // Isolated DB so Cache::flush() on the data connection never
+            // releases locks held by in-flight workers.
+            'lock_connection' => env('REDIS_CACHE_LOCK_CONNECTION', 'cache_locks'),
         ],
 
         'dynamodb' => [

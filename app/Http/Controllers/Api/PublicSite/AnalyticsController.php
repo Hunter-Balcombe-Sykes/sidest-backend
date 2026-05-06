@@ -9,7 +9,6 @@ use App\Http\Controllers\Concerns\ResolvesSiteFromRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\CartEventRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\ClickRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\PageviewRequest;
-use App\Jobs\Analytics\RebuildSiteHourlyAggregatesJob;
 use App\Models\Analytics\CartEvent;
 use App\Models\Analytics\LinkClick;
 use App\Models\Analytics\SiteVisit;
@@ -18,7 +17,9 @@ use App\Services\Cache\AnalyticsCacheService;
 use Illuminate\Http\JsonResponse;
 use Throwable;
 
-// V2: Records pageview and click analytics events from public mini-sites. Events feed into hourly/daily aggregate jobs.
+// Records pageview and click analytics events from public mini-sites.
+// Read path queries raw site_visits + link_clicks tables directly; cache invalidation
+// bumps a per-professional version token so dashboards see fresh totals on next read.
 class AnalyticsController extends ApiController
 {
     use DetectsClientInfo;
@@ -66,11 +67,6 @@ class AnalyticsController extends ApiController
         $visit->professional_id = $site->professional_id;
         $visit->site_id = $site->id;
         $visit->save();
-
-        RebuildSiteHourlyAggregatesJob::dispatch(
-            (string) $site->professional_id,
-            $visit->occurred_at?->copy()->utc()->startOfHour()->toIso8601String() ?? now()->utc()->startOfHour()->toIso8601String()
-        );
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);
@@ -192,11 +188,6 @@ class AnalyticsController extends ApiController
         if (! $click instanceof LinkClick) {
             return $this->error('Unable to record click due to schema mismatch', 500);
         }
-
-        RebuildSiteHourlyAggregatesJob::dispatch(
-            (string) $site->professional_id,
-            $click->occurred_at?->copy()->utc()->startOfHour()->toIso8601String() ?? now()->utc()->startOfHour()->toIso8601String()
-        );
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);

@@ -73,13 +73,6 @@ Schedule::job(new \App\Jobs\Stripe\VoidExpiredPayoutsJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: void-expired-payouts');
     });
 
-Schedule::command('sidest:analytics:compact-hourly')
-    ->hourly()
-    ->withoutOverlapping()
-    ->onFailure(function (): void {
-        \Illuminate\Support\Facades\Log::error('Scheduled task failed: compact-hourly');
-    });
-
 Schedule::command('sidest:analytics:purge-raw-events')
     ->dailyAt('03:00')
     ->withoutOverlapping()
@@ -116,4 +109,15 @@ Schedule::job(new \App\Jobs\Streaming\CheckStreamingLiveStatusJob)
     ->withoutOverlapping(2)
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: check-streaming-live-status');
+    });
+
+// Phase 3 backstop reconciler. Cron expression is env-overridable: set
+// SIDEST_RECONCILER_SCHEDULE='0 * * * *' for the first 60 days post-launch,
+// then revert to the default daily-at-3am value.
+Schedule::command('sidest:reconcile-shopify-orders')
+    ->cron(config('sidest.reconciler.schedule', '0 3 * * *'))
+    ->withoutOverlapping(60 * 60) // 1h overlap guard
+    ->description('Backstop reconcile of Shopify orders against commerce.orders (Phase 3)')
+    ->onFailure(function (): void {
+        \Log::error('sidest:reconcile-shopify-orders schedule failure');
     });

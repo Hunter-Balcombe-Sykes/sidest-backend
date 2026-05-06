@@ -101,14 +101,15 @@ class CacheKeyGenerator
     // @multi-site: needs site_id — summary aggregates site traffic, scoped to one site under current model
     public static function analyticsSummary(string $professionalId, string $startDate, string $endDate): string
     {
-        // q2: top_links/top_sections query shape changed (commits 672aa80, c144ccc)
-        return "analytics:summary:q2:{$professionalId}:{$startDate}:{$endDate}";
+        // q3: commerce fields now read from commerce.orders instead of commission_ledger_entries (Phase 3)
+        return "analytics:summary:q3:{$professionalId}:{$startDate}:{$endDate}";
     }
 
     /**
      * Version token used to bust all analytics summary keys for a professional at once.
      * Incrementing this key makes every date-range summary key for the professional stale
      * without requiring a full key-space scan.
+     *
      * @multi-site: needs site_id — if multi-site, version tokens must be per-site
      */
     public static function analyticsSummaryVersion(string $professionalId): string
@@ -130,7 +131,8 @@ class CacheKeyGenerator
     // @multi-site: needs site_id — commerce traffic is tied to a site storefront
     public static function affiliateCommerceAnalytics(string $professionalId, string $from, string $to): string
     {
-        return "analytics:commerce:affiliate:{$professionalId}:{$from}:{$to}";
+        // v2: read path switched to live commerce.orders + brand_affiliate_rollup queries (Phase 3)
+        return "analytics:commerce:affiliate:v2:{$professionalId}:{$from}:{$to}";
     }
 
     // Payout + grace state are current-state snapshots, not window-dependent.
@@ -143,8 +145,8 @@ class CacheKeyGenerator
     // @multi-site: needs site_id — commerce traffic is tied to a site storefront
     public static function brandCommerceAnalytics(string $professionalId, string $from, string $to): string
     {
-        // v2: totals block now includes page_views + unique_visitors (commit a0e12a9)
-        return "analytics:commerce:brand:v2:{$professionalId}:{$from}:{$to}";
+        // v3: read path switched to live commerce.orders + brand_affiliate_rollup queries (Phase 3)
+        return "analytics:commerce:brand:v3:{$professionalId}:{$from}:{$to}";
     }
 
     public static function brandActiveCatalog(string $brandProfessionalId): string

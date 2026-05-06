@@ -11,9 +11,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
-// Phase 3: Receives Shopify orders/updated webhooks. Validates HMAC, deduplicates on
-// X-Shopify-Webhook-Id, then passes topic + X-Shopify-Event-Id into the job.
-class ShopifyOrdersUpdatedWebhookController extends ApiController
+// Phase 3: Receives Shopify orders/edited webhooks. Commission is frozen at orders/paid time
+// (Decision #3) — this path only snapshots updated order data.
+class ShopifyOrdersEditedWebhookController extends ApiController
 {
     use ValidatesShopifyWebhookHmac;
 
@@ -25,13 +25,13 @@ class ShopifyOrdersUpdatedWebhookController extends ApiController
         $eventId = (string) $request->header('X-Shopify-Event-Id', '');
         $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop-Domain', '')));
 
-        $dedupeKey = $webhookId !== '' ? "shopify:webhook:order-updated:{$webhookId}" : null;
+        $dedupeKey = $webhookId !== '' ? "shopify:webhook:order-edited:{$webhookId}" : null;
         if ($dedupeKey && Cache::has($dedupeKey)) {
             return $this->success(['received' => true, 'duplicate' => true]);
         }
 
         if (! $this->isValidShopifyHmac($rawBody, $signature)) {
-            Log::warning('Shopify orders/updated webhook: invalid HMAC signature', [
+            Log::warning('Shopify orders/edited webhook: invalid HMAC signature', [
                 'shop_domain' => $shopDomain,
             ]);
 
@@ -48,7 +48,7 @@ class ShopifyOrdersUpdatedWebhookController extends ApiController
             ->first();
 
         if (! $integration) {
-            Log::warning('Shopify orders/updated webhook: unknown shop domain', [
+            Log::warning('Shopify orders/edited webhook: unknown shop domain', [
                 'shop_domain' => $shopDomain,
             ]);
 
@@ -63,7 +63,7 @@ class ShopifyOrdersUpdatedWebhookController extends ApiController
         ProcessShopifyOrderUpdatedWebhookJob::dispatch(
             (string) $integration->professional_id,
             $payload,
-            'orders/updated',
+            'orders/edited',
             $eventId,
         );
 

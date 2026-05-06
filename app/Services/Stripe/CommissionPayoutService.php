@@ -507,16 +507,6 @@ class CommissionPayoutService
                 'currency' => $payout->currency_code,
             ]);
 
-            // Rebuild commerce aggregates so commission_paid_cents is reflected.
-            // Guard against null FKs (SET NULL on professional hard-delete).
-            if ($payout->brand_professional_id && $payout->affiliate_professional_id) {
-                \App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob::dispatch(
-                    (string) $payout->brand_professional_id,
-                    (string) $payout->affiliate_professional_id,
-                    now()->toDateString()
-                );
-            }
-
             return true;
         } catch (ApiConnectionException|RateLimitException $e) {
             // Transient error — re-throw so Horizon retries from 'transferring' status.

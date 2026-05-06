@@ -194,5 +194,16 @@ return [
             'database' => env('REDIS_QUEUE_DB', '2'),
         ],
 
+        // Dedicated DB for atomic lock keys so Cache::flush() on the data
+        // connection never releases locks held by in-flight workers.
+        'cache_locks' => [
+            'url' => env('REDIS_URL'),
+            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'password' => env('REDIS_PASSWORD', null),
+            'username' => env('REDIS_USERNAME', null),
+            'port' => env('REDIS_PORT', 6379),
+            'database' => env('REDIS_CACHE_LOCKS_DB', 3),
+        ],
+
     ],
 ];

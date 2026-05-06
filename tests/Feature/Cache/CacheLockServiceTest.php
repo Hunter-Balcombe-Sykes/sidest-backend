@@ -33,9 +33,17 @@ it('runs closure and stores result on cache miss', function () {
     $lock->shouldReceive('block')->with(5)->once();
     $lock->shouldReceive('release')->once()->andReturn(true);
 
+    // Cold miss: primary null, stale null, double-check null.
     Cache::shouldReceive('get')->with('test:miss')->twice()->andReturn(null, null);
+    Cache::shouldReceive('get')->with('test:miss:stale')->once()->andReturn(null);
     Cache::shouldReceive('lock')->with('lock:test:miss', 10)->once()->andReturn($lock);
-    Cache::shouldReceive('put')->with('test:miss', ['fresh' => 'value'], 60)->once();
+    // Primary gets jittered TTL (±20% of 60 → [48, 72]); stale gets 60×10=600.
+    Cache::shouldReceive('put')
+        ->with('test:miss', ['fresh' => 'value'], M::type('int'))
+        ->once();
+    Cache::shouldReceive('put')
+        ->with('test:miss:stale', ['fresh' => 'value'], 600)
+        ->once();
 
     $result = $this->service->rememberLocked(
         'test:miss',
@@ -57,6 +65,7 @@ it('skips closure when cache fills during lock wait (double-check)', function ()
         ->with('test:double')
         ->twice()
         ->andReturn(null, ['filled' => 'by other']);
+    Cache::shouldReceive('get')->with('test:double:stale')->once()->andReturn(null);
     Cache::shouldReceive('lock')->with('lock:test:double', 10)->once()->andReturn($lock);
     Cache::shouldReceive('put')->never();
 
@@ -79,8 +88,9 @@ it('falls through to closure when lock acquisition times out and cache is still 
     $lock = M::mock(Lock::class);
     $lock->shouldReceive('block')->with(5)->once()->andThrow(new LockTimeoutException);
 
-    // Initial miss, then re-check after timeout still returns null.
+    // Initial miss, stale miss, then re-check after timeout still returns null.
     Cache::shouldReceive('get')->with('test:timeout')->twice()->andReturn(null, null);
+    Cache::shouldReceive('get')->with('test:timeout:stale')->once()->andReturn(null);
     Cache::shouldReceive('lock')->with('lock:test:timeout', 10)->once()->andReturn($lock);
     Cache::shouldReceive('put')->never();
 
@@ -101,6 +111,7 @@ it('returns cached value on lock timeout if cache filled in the meantime', funct
         ->with('test:timeout-filled')
         ->twice()
         ->andReturn(null, ['filled' => 'while waiting']);
+    Cache::shouldReceive('get')->with('test:timeout-filled:stale')->once()->andReturn(null);
     Cache::shouldReceive('lock')->with('lock:test:timeout-filled', 10)->once()->andReturn($lock);
 
     $closureRan = false;
@@ -124,6 +135,7 @@ it('releases lock when closure throws', function () {
     $lock->shouldReceive('release')->once()->andReturn(true);
 
     Cache::shouldReceive('get')->with('test:throw')->twice()->andReturn(null, null);
+    Cache::shouldReceive('get')->with('test:throw:stale')->once()->andReturn(null);
     Cache::shouldReceive('lock')->with('lock:test:throw', 10)->once()->andReturn($lock);
     Cache::shouldReceive('put')->never();
 
@@ -142,8 +154,14 @@ it('honours custom lockSeconds and blockSeconds', function () {
     $lock->shouldReceive('release')->once()->andReturn(true);
 
     Cache::shouldReceive('get')->with('test:custom')->twice()->andReturn(null, null);
+    Cache::shouldReceive('get')->with('test:custom:stale')->once()->andReturn(null);
     Cache::shouldReceive('lock')->with('lock:test:custom', 30)->once()->andReturn($lock);
-    Cache::shouldReceive('put')->with('test:custom', 'v', 60)->once();
+    Cache::shouldReceive('put')
+        ->with('test:custom', 'v', M::type('int'))
+        ->once();
+    Cache::shouldReceive('put')
+        ->with('test:custom:stale', 'v', 600)
+        ->once();
 
     $result = $this->service->rememberLocked(
         'test:custom',

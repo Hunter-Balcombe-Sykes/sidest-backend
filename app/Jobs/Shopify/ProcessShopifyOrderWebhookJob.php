@@ -2,23 +2,28 @@
 
 namespace App\Jobs\Shopify;
 
+use App\Models\Commerce\Order;
+use App\Models\Commerce\OrderEvent;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Retail\BrandStoreSettings;
-use App\Models\Retail\CommissionLedgerEntry;
+use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Customers\ContactCaptureService;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-// V2: Processes a Shopify orders/paid webhook — identifies affiliate, calculates commission, creates ledger entries, and captures the customer as an affiliate contact.
+// Phase 3: Processes orders/paid webhooks. Writes commerce.orders (LWW upsert) +
+// commerce.order_events (idempotent via shopify_event_id). Triggers maintain
+// order_items and brand_affiliate_rollup automatically.
 class ProcessShopifyOrderWebhookJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -30,23 +35,40 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
     public function __construct(
         public string $brandProfessionalId,
         public array $orderPayload,
+        public string $shopifyEventId = '',
+        // 'webhook' for live webhook deliveries; 'reconciler' for backstop-sourced events.
+        public string $source = 'webhook',
     ) {
         $this->onQueue('integrations');
     }
 
-    public function handle(ContactCaptureService $contactCapture, BrandCatalogService $catalogService): void
-    {
+    public function handle(
+        ContactCaptureService $contactCapture,
+        BrandCatalogService $catalogService,
+        AnalyticsCacheService $analyticsCache,
+    ): void {
         $orderId = (string) Arr::get($this->orderPayload, 'id', '');
+        $shopDomain = strtolower(trim((string) Arr::get($this->orderPayload, 'domain', '')));
         $noteAttributes = Arr::get($this->orderPayload, 'note_attributes', []);
         $lineItems = Arr::get($this->orderPayload, 'line_items', []);
         $currency = strtoupper(trim((string) Arr::get($this->orderPayload, 'currency', 'AUD')));
         $occurredAt = Arr::get($this->orderPayload, 'created_at', now()->toIso8601String());
+        $shopifyUpdatedAt = Arr::get($this->orderPayload, 'updated_at', $occurredAt);
 
-        // Extract affiliate slug from cart attributes
+        if ($orderId === '') {
+            Log::warning('ProcessShopifyOrderWebhookJob: missing order id, skipping', [
+                'brand_professional_id' => $this->brandProfessionalId,
+            ]);
+
+            return;
+        }
+
+        // Resolve affiliate from note_attributes. Preserves the same extraction
+        // logic as the previous job — the cart attribute key is 'affiliate'.
         $affiliateSlug = $this->extractCartAttribute($noteAttributes, 'affiliate');
 
         if ($affiliateSlug === '') {
-            Log::info('Shopify order webhook: no affiliate attribute, skipping', [
+            Log::info('ProcessShopifyOrderWebhookJob: no affiliate attribute, skipping', [
                 'order_id' => $orderId,
                 'brand_professional_id' => $this->brandProfessionalId,
             ]);
@@ -54,13 +76,12 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             return;
         }
 
-        // Look up affiliate
         $affiliate = Professional::query()
             ->where('handle_lc', strtolower($affiliateSlug))
             ->first();
 
         if (! $affiliate) {
-            Log::warning('Shopify order webhook: affiliate not found', [
+            Log::warning('ProcessShopifyOrderWebhookJob: affiliate not found', [
                 'order_id' => $orderId,
                 'affiliate_slug' => $affiliateSlug,
             ]);
@@ -68,14 +89,14 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             return;
         }
 
-        // Verify affiliate is connected to this brand
+        // Verify affiliate is connected to this brand before writing any commerce rows.
         $isConnected = BrandPartnerLink::query()
             ->where('affiliate_professional_id', $affiliate->id)
             ->where('brand_professional_id', $this->brandProfessionalId)
             ->exists();
 
         if (! $isConnected) {
-            Log::warning('Shopify order webhook: affiliate not connected to brand', [
+            Log::warning('ProcessShopifyOrderWebhookJob: affiliate not connected to brand', [
                 'order_id' => $orderId,
                 'affiliate_id' => (string) $affiliate->id,
                 'brand_professional_id' => $this->brandProfessionalId,
@@ -84,42 +105,16 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             return;
         }
 
-        // Get brand settings and platform fallback for server-side rate resolution.
-        $brandSettings = BrandStoreSettings::where('professional_id', $this->brandProfessionalId)->first();
-        $platformDefault = (float) config('sidest.store.default_commission_rate', 15);
-
-        // Collect distinct product GIDs from the order's line items. Shopify
-        // sends a numeric product_id on the REST webhook payload; convert to GID
-        // shape so we can query the Admin API (which only accepts GIDs via nodes()).
-        $productGids = [];
-        foreach ($lineItems as $li) {
-            if (! is_array($li)) {
-                continue;
-            }
-            $productId = (string) Arr::get($li, 'product_id', '');
-            // Validate numeric-only before embedding in GID to prevent injection via tampered payload.
-            if ($productId !== '' && preg_match('/^\d+$/', $productId)) {
-                $productGids[] = "gid://shopify/Product/{$productId}";
-            }
-        }
-        $productGids = array_values(array_unique($productGids));
-
-        // Fetch commission_override metafield for each product in ONE Admin API
-        // call. Buyer-set sidest_commission_rate line attributes are NOT used for
-        // calculation — they're writable by the buyer via the Storefront Cart API
-        // and therefore untrusted. We resolve the rate ourselves using the same
-        // precedence the Hydrogen storefront applies.
+        // Resolve integration for currency validation and metafield overrides.
         $integration = ProfessionalIntegration::query()
             ->where('professional_id', $this->brandProfessionalId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->first();
 
-        // Validate order currency against shop_currency stored in integration metadata.
-        // Mismatches (e.g. a multi-currency store misconfiguration) mean commission math
-        // would be in the wrong unit — skip and log rather than create wrong ledger entries.
+        // Currency mismatch guard: commission math would be wrong unit on multi-currency misconfiguration.
         $shopCurrency = strtoupper(trim((string) Arr::get($integration?->provider_metadata ?? [], 'shop_currency', '')));
         if ($shopCurrency !== '' && $shopCurrency !== $currency) {
-            Log::warning('Shopify order webhook: currency mismatch, skipping commission', [
+            Log::warning('ProcessShopifyOrderWebhookJob: currency mismatch, skipping', [
                 'order_id' => $orderId,
                 'brand_professional_id' => $this->brandProfessionalId,
                 'order_currency' => $currency,
@@ -129,12 +124,196 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             return;
         }
 
+        // Use shop_domain from the integration record (authoritative); fall back to payload.
+        $shopDomain = $integration?->shopify_shop_domain ?? $shopDomain;
+
+        $brandSettings = BrandStoreSettings::where('professional_id', $this->brandProfessionalId)->first();
+        $platformDefault = (float) config('sidest.store.default_commission_rate', 15);
+
+        // Collect GIDs for a single-call metafield override fetch.
+        $productGids = $this->extractProductGids($lineItems);
         $overrideMap = ($integration && ! empty($productGids))
             ? $catalogService->fetchCommissionOverridesForProducts($integration, $productGids)
             : [];
 
-        // Phase 1: build candidates without touching the DB
-        $candidates = [];
+        // Pre-compute per-line commission and serialize into line_items JSONB.
+        // Postgres triggers can't access PHP business logic (metafields, brand defaults),
+        // so commission is resolved here and stored in the JSONB for the trigger to read.
+        [$enrichedLineItems, $totalGrossCents, $totalDiscountCents, $totalCommissionCents, $commissionRate, $rateSource] =
+            $this->buildEnrichedLineItems($lineItems, $overrideMap, $brandSettings, $platformDefault, $currency, $orderId);
+
+        // Strip GDPR-tracked PII to a safe shopify_data snapshot before writing.
+        // Per ADR 0001, full redaction happens in RedactCustomerJob; here we store
+        // only the non-PII structural fields needed for reconciliation.
+        $shopifyData = $this->buildSafeShopifyData($this->orderPayload);
+
+        // LWW upsert: the WHERE guard is enforced in SQL, not PHP — out-of-order
+        // delivery with an older shopify_updated_at leaves the existing row untouched.
+        $this->upsertOrder(
+            orderId: $orderId,
+            shopDomain: $shopDomain,
+            brandProfessionalId: $this->brandProfessionalId,
+            affiliateProfessionalId: (string) $affiliate->id,
+            grossCents: $totalGrossCents,
+            discountCents: $totalDiscountCents,
+            commissionCents: $totalCommissionCents,
+            commissionRate: $commissionRate,
+            rateSource: $rateSource,
+            currency: $currency,
+            lineItems: $enrichedLineItems,
+            shopifyData: $shopifyData,
+            occurredAt: $occurredAt,
+            shopifyUpdatedAt: $shopifyUpdatedAt,
+        );
+
+        // Fetch the order id for the event FK after upsert.
+        $order = Order::query()
+            ->where('shopify_shop_domain', $shopDomain)
+            ->where('shopify_order_id', $orderId)
+            ->first();
+
+        if ($order) {
+            $this->insertOrderEvent(
+                orderId: (string) $order->id,
+                eventType: 'paid',
+                shopifyEventId: $this->shopifyEventId,
+                source: $this->source,
+                metadata: [
+                    'shopify_order_id' => $orderId,
+                    'financial_status' => Arr::get($this->orderPayload, 'financial_status', ''),
+                ],
+                shopifyTriggeredAt: $occurredAt,
+            );
+
+            // Invalidate caches for both brand and affiliate so dashboards reflect this order.
+            $analyticsCache->invalidateAnalytics($this->brandProfessionalId);
+            $analyticsCache->invalidateAnalytics((string) $affiliate->id);
+        }
+
+        // Capture the buyer as an affiliate contact — independent of commerce writes.
+        $this->captureAffiliateContact($contactCapture, (string) $affiliate->id, $noteAttributes, $orderId);
+
+        Log::info('ProcessShopifyOrderWebhookJob: processed', [
+            'order_id' => $orderId,
+            'brand_professional_id' => $this->brandProfessionalId,
+            'affiliate_id' => (string) $affiliate->id,
+            'commission_cents' => $totalCommissionCents,
+        ]);
+    }
+
+    /**
+     * INSERT ... ON CONFLICT DO UPDATE WHERE EXCLUDED.shopify_updated_at > orders.shopify_updated_at.
+     * The LWW guard is entirely in SQL — PHP never compares timestamps.
+     */
+    private function upsertOrder(
+        string $orderId,
+        string $shopDomain,
+        string $brandProfessionalId,
+        string $affiliateProfessionalId,
+        int $grossCents,
+        int $discountCents,
+        int $commissionCents,
+        float $commissionRate,
+        string $rateSource,
+        string $currency,
+        array $lineItems,
+        array $shopifyData,
+        string $occurredAt,
+        string $shopifyUpdatedAt,
+    ): void {
+        $now = now()->toIso8601String();
+        $netCents = max(0, $grossCents - $discountCents);
+
+        DB::connection('pgsql')->statement(<<<'SQL'
+            INSERT INTO commerce.orders (
+                shopify_order_id, shopify_shop_domain,
+                brand_professional_id, affiliate_professional_id,
+                status, gross_cents, discount_cents, refund_cents, net_cents,
+                commission_cents, commission_rate, rate_source, currency_code,
+                line_items, shopify_data,
+                shopify_updated_at, occurred_at, created_at, updated_at
+            ) VALUES (
+                ?, ?,
+                ?::uuid, ?::uuid,
+                'approved', ?, ?, 0, ?,
+                ?, ?, ?, ?,
+                ?::jsonb, ?::jsonb,
+                ?::timestamptz, ?::timestamptz, ?::timestamptz, ?::timestamptz
+            )
+            ON CONFLICT (shopify_shop_domain, shopify_order_id) DO UPDATE SET
+                status           = 'approved',
+                gross_cents      = EXCLUDED.gross_cents,
+                discount_cents   = EXCLUDED.discount_cents,
+                net_cents        = EXCLUDED.net_cents,
+                commission_cents = EXCLUDED.commission_cents,
+                commission_rate  = EXCLUDED.commission_rate,
+                rate_source      = EXCLUDED.rate_source,
+                currency_code    = EXCLUDED.currency_code,
+                line_items       = EXCLUDED.line_items,
+                shopify_data     = EXCLUDED.shopify_data,
+                shopify_updated_at = EXCLUDED.shopify_updated_at,
+                updated_at       = EXCLUDED.updated_at
+            WHERE EXCLUDED.shopify_updated_at > commerce.orders.shopify_updated_at
+        SQL, [
+            $orderId, $shopDomain,
+            $brandProfessionalId, $affiliateProfessionalId,
+            $grossCents, $discountCents, $netCents,
+            $commissionCents, $commissionRate, $rateSource, $currency,
+            json_encode($lineItems), json_encode($shopifyData),
+            $shopifyUpdatedAt, $occurredAt, $now, $now,
+        ]);
+    }
+
+    /**
+     * Insert one order_events row. The unique partial index on shopify_event_id
+     * provides durable idempotency — catch the violation and no-op.
+     */
+    private function insertOrderEvent(
+        string $orderId,
+        string $eventType,
+        string $shopifyEventId,
+        string $source,
+        array $metadata,
+        string $shopifyTriggeredAt,
+    ): void {
+        try {
+            (new OrderEvent)->forceFill([
+                'order_id' => $orderId,
+                'event_type' => $eventType,
+                'source' => $source,
+                'shopify_event_id' => $shopifyEventId !== '' ? $shopifyEventId : null,
+                'shopify_triggered_at' => $shopifyTriggeredAt,
+                'metadata' => $metadata,
+            ])->save();
+        } catch (UniqueConstraintViolationException) {
+            // Duplicate shopify_event_id — this webhook has already been processed.
+            // The orders table LWW upsert above is also idempotent, so this is safe to skip.
+        }
+    }
+
+    /**
+     * Build line_items JSONB with pre-computed commission per line.
+     * Returns [$enrichedItems, $totalGrossCents, $totalDiscountCents, $totalCommissionCents, $rate, $rateSource].
+     *
+     * @param  array<int, array<string, mixed>>  $lineItems
+     * @param  array<string, float|null>  $overrideMap
+     * @return array{0: list<array<string, mixed>>, 1: int, 2: int, 3: int, 4: float, 5: string}
+     */
+    private function buildEnrichedLineItems(
+        array $lineItems,
+        array $overrideMap,
+        ?BrandStoreSettings $brandSettings,
+        float $platformDefault,
+        string $currency,
+        string $orderId,
+    ): array {
+        $enriched = [];
+        $totalGrossCents = 0;
+        $totalDiscountCents = 0;
+        $totalCommissionCents = 0;
+        $resolvedRate = 0.0;
+        $resolvedRateSource = 'platform_default';
+
         foreach ($lineItems as $lineItem) {
             if (! is_array($lineItem)) {
                 continue;
@@ -148,164 +327,103 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 continue;
             }
 
-            // Commission base = what the customer actually paid for this line
-            // (post-discount). Shopify's orders/paid webhook line_items shape:
-            //   price             — pre-discount unit price
-            //   quantity          — units in the line
-            //   total_discount    — sum of every discount allocation applied to this line
-            //                       (Side St Price Function discount included)
-            //   discount_allocations[] — per-allocation breakdown (not needed here,
-            //       but worth knowing if we ever need to differentiate our function
-            //       from a manually-applied code on the same line).
-            //
-            // Using post-discount line total keeps commission aligned with the
-            // brand's actual revenue on the sale — a 20% Side St Price discount
-            // means the brand took home 20% less, and the affiliate's commission
-            // on that line is 20% smaller too at the same commission rate.
-            $lineTotalPreDiscount = $unitPrice * $quantity;
-            $totalDiscount = (float) Arr::get($lineItem, 'total_discount', 0);
-            $lineTotal = max(0.0, $lineTotalPreDiscount - $totalDiscount);
-
-            if ($lineTotal <= 0) {
-                // Line fully discounted (100% off, comp, etc.) — nothing to
-                // accrue. Skip rather than emit a zero-cent entry.
-                continue;
-            }
-
-            $productGid = ($productIdStr = (string) Arr::get($lineItem, 'product_id', '')) !== ''
+            $productIdStr = (string) Arr::get($lineItem, 'product_id', '');
+            $productGid = ($productIdStr !== '' && preg_match('/^\d+$/', $productIdStr))
                 ? "gid://shopify/Product/{$productIdStr}"
                 : '';
 
-            [$commissionRate, $rateSource] = $this->resolveCommissionRate(
+            [$rate, $rateSource] = $this->resolveCommissionRate(
                 $productGid,
                 $overrideMap,
                 $brandSettings,
                 $platformDefault,
             );
+            $resolvedRate = $rate;
+            $resolvedRateSource = $rateSource;
 
-            $commissionAmountCents = (int) round($lineTotal * ($commissionRate / 100) * 100);
+            $linePricePreDiscount = (int) round($unitPrice * $quantity * 100);
+            $totalDiscountRaw = (float) Arr::get($lineItem, 'total_discount', 0);
+            $lineDiscountCents = (int) round($totalDiscountRaw * 100);
+            $lineTotalCents = max(0, $linePricePreDiscount - $lineDiscountCents);
 
-            if ($commissionAmountCents <= 0) {
-                continue;
-            }
+            $lineCommissionCents = (int) round($lineTotalCents * ($rate / 100));
 
-            // Audit trail: the buyer-submitted rate (may be empty or inflated).
-            // Recorded verbatim so post-hoc investigations can detect tampering.
-            $submittedRate = $this->extractSubmittedRate($lineItem);
+            $totalGrossCents += $lineTotalCents;
+            $totalDiscountCents += $lineDiscountCents;
+            $totalCommissionCents += $lineCommissionCents;
 
-            $candidates[] = [
-                'idempotency_key' => "shopify_order_{$orderId}_line_{$lineItemId}",
-                'data' => [
-                    'shopify_order_id' => $orderId,
-                    'brand_professional_id' => $this->brandProfessionalId,
-                    'affiliate_professional_id' => (string) $affiliate->id,
-                    'entry_type' => 'accrual',
-                    'status' => 'approved',
-                    'amount_cents' => $commissionAmountCents,
-                    'currency_code' => $currency,
-                    'commission_rate' => $commissionRate,
-                    'rate_source' => $rateSource,
-                    'idempotency_key' => "shopify_order_{$orderId}_line_{$lineItemId}",
-                    'calculation_metadata' => [
-                        'order_id' => $orderId,
-                        'line_item_id' => $lineItemId,
-                        'product_id' => (string) Arr::get($lineItem, 'product_id', ''),
-                        // Variant powers the per-variant breakdown on the
-                        // Shopify-admin product analytics block. Stored as the
-                        // numeric Shopify ID; we promote to a GID at read time.
-                        'variant_id' => (string) Arr::get($lineItem, 'variant_id', ''),
-                        'variant_title' => (string) Arr::get($lineItem, 'variant_title', ''),
-                        // Captured here because Shopify only populates `title` on
-                        // the order/line payload — fetching it later would need an
-                        // Admin API roundtrip per row. Powers the "Top Products"
-                        // analytics widget.
-                        'product_title' => (string) Arr::get($lineItem, 'title', ''),
-                        // Keep both for audit: pre-discount line price (what the
-                        // Shopify sticker was) plus the discount applied by
-                        // any function/code, plus the post-discount figure we
-                        // computed commission off.
-                        'unit_price' => $unitPrice,
-                        'line_price_pre_discount' => $lineTotalPreDiscount,
-                        'total_discount' => $totalDiscount,
-                        'line_price_post_discount' => $lineTotal,
-                        'quantity' => $quantity,
-                        'affiliate_slug' => $affiliateSlug,
-                        'submitted_rate' => $submittedRate,
-                    ],
-                    'occurred_at' => $occurredAt,
-                ],
+            $enriched[] = [
+                'shopify_line_item_id' => $lineItemId,
+                'shopify_product_id' => $productIdStr,
+                'shopify_variant_id' => (string) Arr::get($lineItem, 'variant_id', ''),
+                'sku' => (string) Arr::get($lineItem, 'sku', ''),
+                'title' => (string) Arr::get($lineItem, 'title', ''),
+                'quantity' => $quantity,
+                'unit_price_cents' => (int) round($unitPrice * 100),
+                'discount_cents' => $lineDiscountCents,
+                'line_total_cents' => $lineTotalCents,
+                'commission_cents' => $lineCommissionCents,
+                'commission_rate' => $rate,
             ];
         }
 
-        // Phase 2: pre-filter existing idempotency keys (one query), then insert survivors row-by-row.
-        // Pre-filtering handles the common case (clean re-delivery). A per-row UniqueConstraintViolationException
-        // catch covers the concurrent-race window between the pre-filter query and each insert.
-        $entriesCreated = 0;
-        if (! empty($candidates)) {
-            $candidateKeys = array_column($candidates, 'idempotency_key');
-            $existingKeys = CommissionLedgerEntry::whereIn('idempotency_key', $candidateKeys)
-                ->pluck('idempotency_key')
-                ->flip()
-                ->all();
-
-            $newEntries = array_filter($candidates, fn ($c) => ! isset($existingKeys[$c['idempotency_key']]));
-
-            foreach ($newEntries as $entry) {
-                try {
-                    // Preload the relation before save so the observer's notifyBrandSale()
-                    // can access affiliateProfessional->display_name without a lazy query.
-                    // The pre-set survives the observer's afterCommit dispatch — Laravel
-                    // keeps object identity (no clone) for synchronous post-commit callbacks.
-                    $row = (new CommissionLedgerEntry)->forceFill($entry['data']);
-                    $row->setRelation('affiliateProfessional', $affiliate);
-                    $row->save();
-                    $entriesCreated++;
-                } catch (\Illuminate\Database\UniqueConstraintViolationException) {
-                    // A concurrent worker inserted this idempotency key in the window
-                    // between the pre-filter query and this insert — already recorded,
-                    // safe to skip. PostgreSQL aborts the whole transaction on 23505, so
-                    // we must catch per-row (no outer transaction) rather than in bulk.
-                }
-            }
-        }
-
-        // Capture the buyer as an affiliate contact (Beta 3 — Contacts — Automatic Customer Capture).
-        // Non-blocking: any failure inside the service is logged and swallowed so it can never
-        // fail commission processing above.
-        $this->captureAffiliateContact($contactCapture, (string) $affiliate->id, $noteAttributes, $orderId);
-
-        // Rebuild commerce daily aggregates so dashboards and weekly notifications
-        // reflect this order. Non-blocking — queued on the analytics worker.
-        if ($entriesCreated > 0) {
-            \App\Jobs\Analytics\RebuildCommerceDailyAggregatesJob::dispatch(
-                $this->brandProfessionalId,
-                (string) $affiliate->id,
-                Carbon::parse($occurredAt)->toDateString()
-            );
-            \App\Jobs\Analytics\RebuildCommerceHourlyAggregatesJob::dispatch(
-                $this->brandProfessionalId,
-                (string) $affiliate->id,
-                Carbon::parse($occurredAt)->utc()->startOfHour()->toIso8601String()
-            );
-        }
-
-        Log::info('Shopify order webhook processed', [
-            'order_id' => $orderId,
-            'brand_professional_id' => $this->brandProfessionalId,
-            'affiliate_id' => (string) $affiliate->id,
-            'entries_created' => $entriesCreated,
-        ]);
+        return [$enriched, $totalGrossCents, $totalDiscountCents, $totalCommissionCents, $resolvedRate, $resolvedRateSource];
     }
 
     /**
-     * Upsert the buyer into the affiliate's contacts list and, if the cart
-     * carried a truthy `sidest_marketing_opt_in` attribute, add them to the
-     * affiliate's marketing subscribers.
+     * Extract Shopify product GIDs from line_items for the metafield API call.
+     * Validates numeric-only IDs to prevent injection via tampered payloads.
      *
-     * Name resolution priority (matches the commit message): try
-     * billing_address.name first (Shopify populates this with the full name
-     * as entered at checkout), then fall back to customer.first_name +
-     * customer.last_name from the Shopify customer record.
+     * @param  array<int, mixed>  $lineItems
+     * @return list<string>
+     */
+    private function extractProductGids(array $lineItems): array
+    {
+        $gids = [];
+        foreach ($lineItems as $li) {
+            if (! is_array($li)) {
+                continue;
+            }
+            $productId = (string) Arr::get($li, 'product_id', '');
+            if ($productId !== '' && preg_match('/^\d+$/', $productId)) {
+                $gids[] = "gid://shopify/Product/{$productId}";
+            }
+        }
+
+        return array_values(array_unique($gids));
+    }
+
+    /**
+     * Build a PII-safe shopify_data snapshot for storage.
+     * Full PII paths are redacted by RedactCustomerJob; here we exclude the
+     * top-level customer object and billing/shipping addresses (contain name/email/phone).
+     * Non-PII structural fields (financial_status, name, currency, etc.) are preserved
+     * for reconciliation and display.
+     */
+    private function buildSafeShopifyData(array $payload): array
+    {
+        // Store non-PII fields for reconciliation. PII paths are enumerated in ADR 0001
+        // and stripped later by GDPR jobs; storing them here risks leakage before redaction.
+        $safe = [
+            'id' => Arr::get($payload, 'id'),
+            'name' => Arr::get($payload, 'name'),
+            'financial_status' => Arr::get($payload, 'financial_status'),
+            'fulfillment_status' => Arr::get($payload, 'fulfillment_status'),
+            'total_price' => Arr::get($payload, 'total_price'),
+            'subtotal_price' => Arr::get($payload, 'subtotal_price'),
+            'total_discounts' => Arr::get($payload, 'total_discounts'),
+            'total_tax' => Arr::get($payload, 'total_tax'),
+            'currency' => Arr::get($payload, 'currency'),
+            'created_at' => Arr::get($payload, 'created_at'),
+            'updated_at' => Arr::get($payload, 'updated_at'),
+        ];
+
+        return array_filter($safe, fn ($v) => $v !== null);
+    }
+
+    /**
+     * Upsert the buyer into the affiliate's contacts list and marketing subscribers.
+     * Non-blocking: failures are logged and swallowed so they never fail commission processing.
      *
      * @param  array<int, array<string, mixed>>|mixed  $noteAttributes
      */
@@ -320,11 +438,9 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
 
         $email = trim((string) Arr::get($customer, 'email', ''));
         if ($email === '') {
-            // Shopify guest checkouts or POS orders without a customer — nothing to capture.
             return;
         }
 
-        // Name: prefer billing_address.name, then fall back to customer first/last.
         $billingName = trim((string) Arr::get($billingAddress, 'name', ''));
         $firstName = trim((string) Arr::get($customer, 'first_name', ''));
         $lastName = trim((string) Arr::get($customer, 'last_name', ''));
@@ -333,22 +449,15 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
 
         $marketingConsent = $this->parseMarketingOptInAttribute($noteAttributes);
 
-        // ContactCaptureService normalizes phone/full_name null-or-empty — we
-        // can pass raw values through without pre-guarding.
         $contactCapture->captureContact($affiliateId, [
             'email' => $email,
             'full_name' => $fullName,
             'phone' => (string) Arr::get($billingAddress, 'phone', ''),
             'source' => 'shopify_order',
             'external_id' => $orderId !== '' ? $orderId : null,
-            // Only override the service default when the shopper EXPLICITLY opted out.
-            // Missing attribute -> null -> service default (true). Explicit "true" is
-            // also null here because captureMarketingSubscription() handles it below.
             'marketing_opt_in' => $marketingConsent === false ? false : null,
         ]);
 
-        // Truthy consent -> add them to the marketing list. Missing/falsy: the
-        // contact is still captured above, just not subscribed for email blasts.
         if ($marketingConsent === true) {
             $contactCapture->captureMarketingSubscription(
                 $affiliateId,
@@ -360,17 +469,8 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
     }
 
     /**
-     * Parse the `sidest_marketing_opt_in` cart attribute into an explicit
-     * tri-state: true (explicit opt-in), false (explicit opt-out), or null
-     * (attribute missing / unrecognized value — let the schema default apply).
-     *
-     * Hydrogen is the only documented producer of this attribute. Recognized
-     * values (case-insensitive):
-     *   truthy:  'true' | '1' | 'yes'
-     *   falsy:   'false' | '0' | 'no'
-     *
-     * Any other string is treated as "missing" so a typo doesn't silently
-     * flip consent to false.
+     * Parse the `sidest_marketing_opt_in` cart attribute into explicit tri-state.
+     * true=explicit opt-in, false=explicit opt-out, null=missing or unrecognized.
      *
      * @param  array<int, array<string, mixed>>|mixed  $noteAttributes
      */
@@ -409,7 +509,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
     }
 
     /**
-     * Resolve the commission rate for a line item, server-side. Precedence:
+     * Resolve commission rate for a line item. Precedence:
      *   1. product metafield `sidest.commission_override` (brand-set per-product)
      *   2. brand.brand_store_settings.default_commission_rate (brand default)
      *   3. config('sidest.store.default_commission_rate', 15) (platform fallback)
@@ -435,25 +535,5 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
         }
 
         return [$platformDefault, 'platform_default'];
-    }
-
-    /**
-     * Pull the buyer-submitted sidest_commission_rate for the audit trail.
-     * NOT used for calculation — returned verbatim so post-hoc analysis can
-     * spot cart tampering or Hydrogen/webhook drift.
-     */
-    private function extractSubmittedRate(array $lineItem): ?string
-    {
-        $properties = Arr::get($lineItem, 'properties', []);
-        if (! is_array($properties)) {
-            return null;
-        }
-        foreach ($properties as $prop) {
-            if (is_array($prop) && strtolower(trim((string) ($prop['name'] ?? ''))) === 'sidest_commission_rate') {
-                return (string) ($prop['value'] ?? '');
-            }
-        }
-
-        return null;
     }
 }

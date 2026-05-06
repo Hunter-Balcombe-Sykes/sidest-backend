@@ -1006,4 +1006,20 @@ return [
         // Prevents accidental double-clicks AND queue thrashing.
         'dedup_window_minutes' => (int) env('GDPR_EXPORT_DEDUP_WINDOW_MINUTES', 30),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reconciler
+    |--------------------------------------------------------------------------
+    |
+    | Shopify orders backstop — pulls orders updated since the last reconcile
+    | timestamp and dispatches ProcessShopifyOrderWebhookJob for missing/stale
+    | local rows. Cron expression is env-overridable so ops can switch to
+    | hourly ('0 * * * *') for the first 60 days post-launch without a deploy.
+    |
+    */
+
+    'reconciler' => [
+        'schedule' => env('SIDEST_RECONCILER_SCHEDULE', '0 3 * * *'),
+    ],
 ];

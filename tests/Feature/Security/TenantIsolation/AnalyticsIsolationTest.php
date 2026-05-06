@@ -9,100 +9,36 @@ use Illuminate\Support\Str;
 beforeEach(function () {
     tenantHelpersEnsureTables();
     setupCommissionPayoutsTable();
+    setupCommerceOrdersTables();  // also sets up brand_affiliate_rollup and order_items
+    setupSiteVisitsTable();       // brand controller queries site_visits for page_views
     Cache::flush();
-
-    // Column names must match what the controllers actually query (day, gross_cents, orders_count).
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.brand_metrics_daily (
-        id TEXT PRIMARY KEY,
-        brand_professional_id TEXT,
-        day TEXT,
-        orders_count INTEGER,
-        gross_cents INTEGER,
-        refunded_cents INTEGER,
-        net_cents INTEGER,
-        currency_code TEXT
-    )');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.brand_affiliate_daily (
-        id TEXT PRIMARY KEY,
-        brand_professional_id TEXT,
-        affiliate_professional_id TEXT,
-        day TEXT,
-        orders_count INTEGER,
-        gross_cents INTEGER,
-        net_cents INTEGER,
-        commission_accrued_cents INTEGER,
-        commission_net_cents INTEGER,
-        customers_count INTEGER,
-        currency_code TEXT
-    )');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.brand_commission_daily (
-        id TEXT PRIMARY KEY,
-        brand_professional_id TEXT,
-        day TEXT,
-        payout_status TEXT,
-        net_outstanding_cents INTEGER,
-        payout_cents INTEGER,
-        reversal_cents INTEGER,
-        currency_code TEXT
-    )');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.professional_metrics_daily (
-        id TEXT PRIMARY KEY,
-        affiliate_professional_id TEXT,
-        day TEXT,
-        orders_count INTEGER,
-        gross_cents INTEGER,
-        refunded_cents INTEGER,
-        net_cents INTEGER,
-        commission_accrued_cents INTEGER,
-        commission_reversed_cents INTEGER,
-        commission_paid_cents INTEGER,
-        currency_code TEXT
-    )');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.professional_metrics_hourly (
-        id TEXT PRIMARY KEY,
-        affiliate_professional_id TEXT,
-        hour_start TEXT,
-        orders_count INTEGER,
-        gross_cents INTEGER,
-        refunded_cents INTEGER,
-        net_cents INTEGER,
-        commission_accrued_cents INTEGER,
-        commission_reversed_cents INTEGER,
-        commission_paid_cents INTEGER,
-        currency_code TEXT
-    )');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.brand_metrics_hourly (
-        id TEXT PRIMARY KEY,
-        brand_professional_id TEXT,
-        hour_start TEXT,
-        orders_count INTEGER,
-        gross_cents INTEGER,
-        refunded_cents INTEGER,
-        net_cents INTEGER,
-        currency_code TEXT
-    )');
 });
 
 it('brand commerce analytics overview never exposes another brands revenue', function () {
     [$a, $b] = createTwoTenants('brand');
+    $affiliateId = (string) Str::uuid(); // synthetic affiliate (FKs not enforced on SQLite)
     $from = now()->subDays(7)->toDateString();
     $to = now()->toDateString();
 
-    // Only Brand A has revenue data.
-    DB::table('analytics.brand_metrics_daily')->insert([
+    // Only Brand A has order data
+    DB::connection('pgsql')->table('commerce.orders')->insert([
         'id' => (string) Str::uuid(),
+        'shopify_order_id' => 'test-order-001',
+        'shopify_shop_domain' => 'brand-a.myshopify.com',
         'brand_professional_id' => $a->id,
-        'day' => now()->subDay()->toDateString(),
-        'orders_count' => 5,
+        'affiliate_professional_id' => $affiliateId,
+        'status' => 'approved',
         'gross_cents' => 999_00,
-        'refunded_cents' => 0,
+        'refund_cents' => 0,
         'net_cents' => 900_00,
+        'commission_cents' => 100_00,
+        'commission_rate' => '0.1000',
+        'rate_source' => 'brand_default',
         'currency_code' => 'GBP',
+        'shopify_updated_at' => now()->toDateTimeString(),
+        'occurred_at' => now()->subDay()->toDateTimeString(),
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
     ]);
 
     $req = tenantRequestAs($b);
@@ -112,7 +48,6 @@ it('brand commerce analytics overview never exposes another brands revenue', fun
     $response = app(BrandCommerceAnalyticsController::class)->overview($req);
     $payload = $response->getData(true);
 
-    // success() wraps via response()->json($data) — totals is a top-level key, no 'data' envelope.
     $totals = $payload['totals'] ?? [];
     expect((int) ($totals['gross_cents'] ?? 0))->toBe(0);
     expect((int) ($totals['orders_count'] ?? 0))->toBe(0);
@@ -120,22 +55,29 @@ it('brand commerce analytics overview never exposes another brands revenue', fun
 
 it('affiliate commerce analytics overview never exposes another affiliates commissions', function () {
     [$a, $b] = createTwoTenants('affiliate');
+    $brandId = (string) Str::uuid(); // synthetic brand (FKs not enforced on SQLite)
     $from = now()->subDays(7)->toDateString();
     $to = now()->toDateString();
 
-    // Only Affiliate A has commission data.
-    DB::table('analytics.professional_metrics_daily')->insert([
+    // Only Affiliate A has order data
+    DB::connection('pgsql')->table('commerce.orders')->insert([
         'id' => (string) Str::uuid(),
+        'shopify_order_id' => 'test-order-002',
+        'shopify_shop_domain' => 'brand-x.myshopify.com',
+        'brand_professional_id' => $brandId,
         'affiliate_professional_id' => $a->id,
-        'day' => now()->subDay()->toDateString(),
-        'orders_count' => 3,
+        'status' => 'approved',
         'gross_cents' => 500_00,
-        'refunded_cents' => 0,
+        'refund_cents' => 0,
         'net_cents' => 450_00,
-        'commission_accrued_cents' => 500_00,
-        'commission_reversed_cents' => 0,
-        'commission_paid_cents' => 0,
+        'commission_cents' => 500_00,
+        'commission_rate' => '0.1000',
+        'rate_source' => 'brand_default',
         'currency_code' => 'GBP',
+        'shopify_updated_at' => now()->toDateTimeString(),
+        'occurred_at' => now()->subDay()->toDateTimeString(),
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
     ]);
 
     $req = tenantRequestAs($b);
@@ -145,7 +87,6 @@ it('affiliate commerce analytics overview never exposes another affiliates commi
     $response = app(AffiliateCommerceAnalyticsController::class)->overview($req);
     $payload = $response->getData(true);
 
-    // success() wraps via response()->json($data) — totals is a top-level key, no 'data' envelope.
     $totals = $payload['totals'] ?? [];
     expect((int) ($totals['commission_accrued_cents'] ?? 0))->toBe(0);
 });

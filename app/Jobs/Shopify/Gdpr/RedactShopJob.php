@@ -91,30 +91,76 @@ class RedactShopJob implements ShouldQueue
             $anonymisedCount = $this->anonymiseShopifyCustomers($professionalId);
 
             // 4. Scrub PII on commerce.orders for this brand. shopify_data holds the
-            //    raw Shopify payload (customer object + addresses); order_events.metadata
-            //    holds refund/adjustment notes. Full-nuke both JSONB columns and null
-            //    customer_id. Cents/status columns are kept for analytics.
-            $orderIds = DB::connection('pgsql')
-                ->table('commerce.orders')
+            //    raw Shopify payload (customer object + addresses + free-text fields);
+            //    order_events.metadata holds refund/adjustment notes.
+            //    Use jsonb_strip_pii on Postgres to surgically redact only the listed paths;
+            //    fall back to full-nuke '{}' on SQLite (test environments).
+            $conn = DB::connection('pgsql');
+
+            $orderIds = $conn->table('commerce.orders')
                 ->where('brand_professional_id', $professionalId)
                 ->pluck('id')
                 ->all();
 
             $scrubbedOrders = 0;
             if (! empty($orderIds)) {
-                $scrubbedOrders = DB::connection('pgsql')
-                    ->table('commerce.orders')
-                    ->whereIn('id', $orderIds)
-                    ->update([
-                        'shopify_data' => '{}',
-                        'customer_id' => null,
-                        'updated_at' => now(),
-                    ]);
+                if ($conn->getDriverName() === 'pgsql') {
+                    // Postgres: surgical per-path redaction. billing_address / shipping_address
+                    // replace the entire object (jsonb_strip_pii's plain-path branch). The plan
+                    // specifies billing_address.* but the function only handles [*] array wildcard;
+                    // replacing the whole object is the correct GDPR outcome.
+                    $scrubbedOrders = $conn->update(
+                        <<<'SQL'
+                        UPDATE commerce.orders
+                           SET customer_id  = NULL,
+                               shopify_data = public.jsonb_strip_pii(shopify_data, ARRAY[
+                                   'customer.email',
+                                   'customer.first_name',
+                                   'customer.last_name',
+                                   'customer.phone',
+                                   'billing_address',
+                                   'shipping_address',
+                                   'note',
+                                   'note_attributes[*].value',
+                                   'line_items[*].properties[*].value'
+                               ]::text[]),
+                           updated_at       = NOW()
+                         WHERE brand_professional_id = ?
+                        SQL,
+                        [$professionalId]
+                    );
 
-                DB::connection('pgsql')
-                    ->table('commerce.order_events')
-                    ->whereIn('order_id', $orderIds)
-                    ->update(['metadata' => '{}']);
+                    $conn->update(
+                        sprintf(
+                            <<<'SQL'
+                            UPDATE commerce.order_events
+                               SET metadata = public.jsonb_strip_pii(metadata, ARRAY[
+                                   'refund.note',
+                                   'adjustment.note',
+                                   'customer.email',
+                                   'customer.name',
+                                   'customer.phone'
+                               ]::text[])
+                             WHERE order_id IN (%s)
+                            SQL,
+                            implode(',', array_fill(0, count($orderIds), '?'))
+                        ),
+                        $orderIds
+                    );
+                } else {
+                    // SQLite (test environment): fall back to the pre-Phase-3 full-nuke behaviour.
+                    $scrubbedOrders = $conn->table('commerce.orders')
+                        ->whereIn('id', $orderIds)
+                        ->update([
+                            'shopify_data' => '{}',
+                            'customer_id' => null,
+                            'updated_at' => now(),
+                        ]);
+
+                    $conn->table('commerce.order_events')
+                        ->whereIn('order_id', $orderIds)
+                        ->update(['metadata' => '{}']);
+                }
             }
 
             // 5. Delete the integration row LAST. This removes the

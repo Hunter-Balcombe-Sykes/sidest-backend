@@ -12,17 +12,36 @@ beforeEach(function () {
     Cache::flush();
 });
 
-// Helper: returns a Mockery query builder that yields an empty collection.
-// Supports all chain methods used across brand analytics queries.
-function emptyQueryMock(): \Illuminate\Database\Query\Builder
+/**
+ * Returns a Mockery query builder stub that emits an empty collection/null
+ * for all query chain calls used by the brand analytics controller.
+ */
+function brandEmptyQueryMock(): \Illuminate\Database\Query\Builder
 {
     $mock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
-    $mock->shouldReceive('where')->andReturnSelf();
-    $mock->shouldReceive('whereBetween')->andReturnSelf();
+
+    foreach (['where', 'whereNotIn', 'whereIn', 'whereNull', 'whereNotNull', 'whereBetween', 'leftJoin', 'join',
+        'select', 'selectRaw', 'groupBy', 'groupByRaw', 'orderBy', 'orderByDesc', 'orderByRaw', 'limit'] as $m) {
+        $mock->shouldReceive($m)->andReturnSelf();
+    }
     $mock->shouldReceive('get')->andReturn(collect());
+    $mock->shouldReceive('first')->andReturn(null);
     $mock->shouldReceive('pluck')->andReturn(collect());
+    $mock->shouldReceive('count')->andReturn(0);
 
     return $mock;
+}
+
+/**
+ * Stub DB::connection() so driver-detection calls don't blow up when DB is mocked.
+ * The brand/affiliate controllers call DB::connection('pgsql')->getDriverName() for SQLite compat.
+ */
+function stubDbConnection(string $driver = 'pgsql'): void
+{
+    $connMock = Mockery::mock(\Illuminate\Database\Connection::class);
+    $connMock->shouldReceive('getDriverName')->andReturn($driver);
+
+    DB::shouldReceive('connection')->andReturn($connMock);
 }
 
 it('throws ValidationException when from is provided without to', function () {
@@ -42,10 +61,9 @@ it('throws ValidationException when from is after to', function () {
 });
 
 it('returns correct empty response shape when no data exists', function () {
-    DB::shouldReceive('table')->with('analytics.brand_metrics_daily')->andReturn(emptyQueryMock());
-    DB::shouldReceive('table')->with('analytics.brand_affiliate_daily')->andReturn(emptyQueryMock());
-    DB::shouldReceive('table')->with('analytics.brand_commission_daily')->andReturn(emptyQueryMock());
-    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn(emptyQueryMock());
+    stubDbConnection();
+    // Stub all DB::table calls the controller makes — all return empty results
+    DB::shouldReceive('table')->andReturn(brandEmptyQueryMock());
 
     $request = Request::create('/', 'GET', ['from' => '2026-04-01', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);
@@ -55,6 +73,7 @@ it('returns correct empty response shape when no data exists', function () {
 
     expect($data['range'])->toBe(['from' => '2026-04-01', 'to' => '2026-04-19'])
         ->and($data['totals']['orders_count'])->toBe(0)
+        ->and($data['totals']['gross_cents'])->toBe(0)
         ->and($data['affiliates'])->toBe([])
         ->and($data['timeseries'])->toBe([])
         ->and($data['commission_summary']['pending_cents'])->toBe(0)
@@ -63,41 +82,51 @@ it('returns correct empty response shape when no data exists', function () {
         ->and($data['commission_summary']['reversed_cents'])->toBe(0);
 });
 
-it('groups affiliate breakdown by affiliate_professional_id', function () {
+it('builds affiliate breakdown from brand_affiliate_rollup rows', function () {
+    stubDbConnection();
     $affiliateId = (string) Str::uuid();
 
-    $affiliateMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
-    $affiliateMock->shouldReceive('where')->andReturnSelf();
-    $affiliateMock->shouldReceive('whereBetween')->andReturnSelf();
-    $affiliateMock->shouldReceive('get')->andReturn(collect([
+    // brand_affiliate_rollup: first get() returns affiliates, subsequent get() returns empty (commission reversed),
+    // first() returns reversed_cents = 0
+    $rollupMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['where', 'whereNotIn', 'whereNull', 'whereBetween', 'selectRaw', 'groupBy',
+        'orderByRaw', 'limit'] as $m) {
+        $rollupMock->shouldReceive($m)->andReturnSelf();
+    }
+    $affiliateRows = collect([
         (object) [
-            'day' => '2026-04-18',
             'affiliate_professional_id' => $affiliateId,
-            'currency_code' => 'AUD',
-            'orders_count' => 5,
-            'gross_cents' => 25000,
-            'refunded_cents' => 0,
-            'net_cents' => 25000,
-            'commission_net_cents' => 2500,
-            'customers_count' => 3,
+            'orders_count' => 7,
+            'gross_cents' => 35000,
+            'net_cents' => 35000,
+            'commission_net_cents' => 3500,
         ],
-        (object) [
-            'day' => '2026-04-19',
-            'affiliate_professional_id' => $affiliateId,
-            'currency_code' => 'AUD',
-            'orders_count' => 2,
-            'gross_cents' => 10000,
-            'refunded_cents' => 0,
-            'net_cents' => 10000,
-            'commission_net_cents' => 1000,
-            'customers_count' => 1,
-        ],
-    ]));
+    ]);
+    $callCount = 0;
+    $rollupMock->shouldReceive('get')->andReturnUsing(function () use (&$callCount, $affiliateRows) {
+        $callCount++;
 
-    DB::shouldReceive('table')->with('analytics.brand_metrics_daily')->andReturn(emptyQueryMock());
-    DB::shouldReceive('table')->with('analytics.brand_affiliate_daily')->andReturn($affiliateMock);
-    DB::shouldReceive('table')->with('analytics.brand_commission_daily')->andReturn(emptyQueryMock());
-    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn(emptyQueryMock());
+        // First get() = affiliate breakdown; subsequent = empty (commission summary reversed)
+        return $callCount === 1 ? $affiliateRows : collect();
+    });
+    $rollupMock->shouldReceive('first')->andReturn((object) ['reversed_cents' => 0]);
+
+    // Identity lookup
+    $identityMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['whereIn', 'whereNull', 'select'] as $m) {
+        $identityMock->shouldReceive($m)->andReturnSelf();
+    }
+    $identityMock->shouldReceive('get')->andReturn(collect([
+        (object) ['id' => $affiliateId, 'display_name' => 'Alice', 'first_name' => 'Alice', 'last_name' => 'Smith', 'handle' => 'alice'],
+    ])->keyBy('id'));
+
+    // All commerce.orders calls return empty/zeros
+    $defaultMock = brandEmptyQueryMock();
+
+    DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($rollupMock);
+    DB::shouldReceive('table')->with('core.professionals')->andReturn($identityMock);
+    DB::shouldReceive('table')->with('commerce.orders')->andReturn($defaultMock);
+    DB::shouldReceive('table')->with('analytics.site_visits')->andReturn($defaultMock);
 
     $request = Request::create('/', 'GET', ['from' => '2026-04-18', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);
@@ -109,25 +138,54 @@ it('groups affiliate breakdown by affiliate_professional_id', function () {
         ->and($data['affiliates'][0]['affiliate_professional_id'])->toBe($affiliateId)
         ->and($data['affiliates'][0]['orders_count'])->toBe(7)
         ->and($data['affiliates'][0]['gross_cents'])->toBe(35000)
-        ->and($data['affiliates'][0]['commission_net_cents'])->toBe(3500)
-        ->and($data['affiliates'][0]['customers_count'])->toBe(4);
+        ->and($data['affiliates'][0]['commission_net_cents'])->toBe(3500);
 });
 
-it('summarises commission rows by payout_status', function () {
-    $commissionMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
-    $commissionMock->shouldReceive('where')->andReturnSelf();
-    $commissionMock->shouldReceive('whereBetween')->andReturnSelf();
-    $commissionMock->shouldReceive('get')->andReturn(collect([
-        (object) ['payout_status' => 'pending',  'currency_code' => 'AUD', 'net_outstanding_cents' => 3000, 'payout_cents' => 0, 'reversal_cents' => 0],
-        (object) ['payout_status' => 'pending',  'currency_code' => 'AUD', 'net_outstanding_cents' => 2000, 'payout_cents' => 0, 'reversal_cents' => 0],
-        (object) ['payout_status' => 'paid',     'currency_code' => 'AUD', 'net_outstanding_cents' => 0,    'payout_cents' => 8000, 'reversal_cents' => 0],
-        (object) ['payout_status' => 'reversed', 'currency_code' => 'AUD', 'net_outstanding_cents' => 0,    'payout_cents' => 0,    'reversal_cents' => 500],
-    ]));
+it('derives commission_summary pending_cents as approved minus paid minus reversed', function () {
+    stubDbConnection();
 
-    DB::shouldReceive('table')->with('analytics.brand_metrics_daily')->andReturn(emptyQueryMock());
-    DB::shouldReceive('table')->with('analytics.brand_affiliate_daily')->andReturn(emptyQueryMock());
-    DB::shouldReceive('table')->with('analytics.brand_commission_daily')->andReturn($commissionMock);
-    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn(emptyQueryMock());
+    // Comprehensive commerce.orders mock: handles totals, currency detection, timeseries,
+    // approved_cents, and paid_cents calls. Returns meaningful values only for
+    // commission-related first() calls; everything else returns safe zeros.
+    $ordersMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['where', 'whereNotIn', 'whereNull', 'whereNotNull', 'whereBetween',
+        'selectRaw', 'groupBy', 'groupByRaw', 'orderBy', 'orderByDesc', 'orderByRaw', 'limit'] as $m) {
+        $ordersMock->shouldReceive($m)->andReturnSelf();
+    }
+    // first() is called multiple times; use a counter-based approach via andReturnUsing
+    // to return different values per call type. We'll use a sequence:
+    //   1st: totals (orders_count etc.)     → zeros
+    //   2nd: currency detection              → AUD
+    //   3rd: approved_cents (commission summary) → 10000
+    //   4th: paid_cents (commission summary) → 3000
+    $callCount = 0;
+    $ordersMock->shouldReceive('first')->andReturnUsing(function () use (&$callCount) {
+        $callCount++;
+
+        return match ($callCount) {
+            1 => (object) ['orders_count' => 0, 'gross_cents' => 0, 'refunded_cents' => 0, 'net_cents' => 0],
+            2 => (object) ['currency_code' => 'AUD', 'cnt' => 0],
+            3 => (object) ['approved_cents' => 10000],
+            4 => (object) ['paid_cents' => 3000],
+            default => null,
+        };
+    });
+    $ordersMock->shouldReceive('get')->andReturn(collect()); // timeseries
+
+    // brand_affiliate_rollup: reversed_cents for commission summary AND rollup for affiliates
+    $rollupMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['where', 'whereBetween', 'selectRaw', 'groupBy', 'orderByRaw', 'limit'] as $m) {
+        $rollupMock->shouldReceive($m)->andReturnSelf();
+    }
+    $rollupMock->shouldReceive('first')->andReturn((object) ['reversed_cents' => 1000]);
+    $rollupMock->shouldReceive('get')->andReturn(collect()); // affiliate breakdown
+
+    // Everything else returns empty
+    $defaultMock = brandEmptyQueryMock();
+
+    DB::shouldReceive('table')->with('commerce.orders')->andReturn($ordersMock);
+    DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($rollupMock);
+    DB::shouldReceive('table')->with('analytics.site_visits')->andReturn($defaultMock);
 
     $request = Request::create('/', 'GET', ['from' => '2026-04-01', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);
@@ -135,8 +193,9 @@ it('summarises commission rows by payout_status', function () {
     $response = $this->controller->overview($request);
     $summary = json_decode($response->getContent(), true)['commission_summary'];
 
-    expect($summary['pending_cents'])->toBe(5000)
-        ->and($summary['paid_cents'])->toBe(8000)
-        ->and($summary['reversed_cents'])->toBe(500)
-        ->and($summary['approved_cents'])->toBe(0);
+    // pending = max(0, approved - paid - reversed) = max(0, 10000 - 3000 - 1000) = 6000
+    expect($summary['approved_cents'])->toBe(10000)
+        ->and($summary['paid_cents'])->toBe(3000)
+        ->and($summary['reversed_cents'])->toBe(1000)
+        ->and($summary['pending_cents'])->toBe(6000);
 });

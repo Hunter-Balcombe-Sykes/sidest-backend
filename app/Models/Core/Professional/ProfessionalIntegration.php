@@ -73,19 +73,19 @@ class ProfessionalIntegration extends BaseModel
      * still pending (queued or in-flight).
      *
      * @return array{state: string, steps: array<string, string|null>}
-     *   state  — 'complete' | 'incomplete' | 'pending'
-     *   steps  — per-job state values keyed by step name
+     *                                                                 state  — 'complete' | 'incomplete' | 'pending'
+     *                                                                 steps  — per-job state values keyed by step name
      */
     public function shopifyInstallStatus(): array
     {
         $metadata = is_array($this->provider_metadata) ? $this->provider_metadata : [];
 
         $steps = [
-            'webhooks'         => Arr::get($metadata, 'webhooks_state'),
-            'metafields'       => Arr::get($metadata, 'metafield_definitions_state'),
-            'sales_channel'    => Arr::get($metadata, 'sales_channel_state'),
+            'webhooks' => Arr::get($metadata, 'webhooks_state'),
+            'metafields' => Arr::get($metadata, 'metafield_definitions_state'),
+            'sales_channel' => Arr::get($metadata, 'sales_channel_state'),
             'storefront_token' => Arr::get($metadata, 'storefront_token_state'),
-            'brand_design'     => Arr::get($metadata, 'brand_design_state'),
+            'brand_design' => Arr::get($metadata, 'brand_design_state'),
         ];
 
         $allComplete = true;

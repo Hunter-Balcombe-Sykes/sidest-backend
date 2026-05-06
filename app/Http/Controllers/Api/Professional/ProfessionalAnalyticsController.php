@@ -19,7 +19,7 @@ use Throwable;
 // NOTE: keep shopSummary in sync with summary()'s date-range parsing logic —
 // both accept the same ?days / ?from / ?to / ?group_by query params.
 
-// V2: Site visit analytics (visits, clicks, devices, countries, traffic sources). Unrelated to commerce — site identity analytics only.
+// V3: Commerce KPIs now read from commerce.orders (Phase 3). Site visit analytics unchanged.
 class ProfessionalAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
@@ -93,6 +93,7 @@ class ProfessionalAnalyticsController extends ApiController
             0
         );
 
+        // q3 shape: commerce data now from commerce.orders (not commission_ledger_entries)
         $cacheKey = CacheKeyGenerator::analyticsSummary(
             $professional->id,
             $from->format('YmdH'),
@@ -143,28 +144,32 @@ class ProfessionalAnalyticsController extends ApiController
             $totalVisits = (int) ($visitsAgg->total_visits ?? 0);
             $totalClicks = (int) ($clicksAgg->total_clicks ?? 0);
 
-            // Daily charts (unique visitors/clickers)
+            // Daily charts (unique visitors/clickers) — raw events only, no aggregate tables
             if ($useHourlyBuckets) {
-                $fromUtc = $from->copy()->utc();
-                $toUtc = $to->copy()->utc();
+                $driver = DB::connection('pgsql')->getDriverName();
+                $truncExpr = $driver === 'sqlite'
+                    ? "strftime('%Y-%m-%d %H:00:00', occurred_at)"
+                    : "DATE_TRUNC('hour', occurred_at)";
 
-                $visitsByDay = DB::table('analytics.site_metrics_hourly as h')
-                    ->where('h.professional_id', $professional->id)
-                    ->whereBetween('h.hour_start', [$fromUtc, $toUtc])
-                    ->selectRaw("DATE_TRUNC('hour', h.hour_start) as day")
-                    ->selectRaw('COALESCE(SUM(h.unique_visitors), 0) as count')
-                    ->groupByRaw("DATE_TRUNC('hour', h.hour_start)")
+                $visitsByDay = DB::table('analytics.site_visits')
+                    ->where('professional_id', $professional->id)
+                    ->whereBetween('occurred_at', [$from, $to])
+                    ->selectRaw("{$truncExpr} as day, COUNT(DISTINCT COALESCE(visitor_id, ip_hash)) as count")
+                    ->groupByRaw($truncExpr)
                     ->orderBy('day')
                     ->get();
 
-                $clicksByDay = DB::table('analytics.site_metrics_hourly as h')
-                    ->where('h.professional_id', $professional->id)
-                    ->whereBetween('h.hour_start', [$fromUtc, $toUtc])
-                    ->selectRaw("DATE_TRUNC('hour', h.hour_start) as day")
-                    ->selectRaw('COALESCE(SUM(h.unique_clickers), 0) as count')
-                    ->groupByRaw("DATE_TRUNC('hour', h.hour_start)")
-                    ->orderBy('day')
-                    ->get();
+                try {
+                    $clicksByDay = DB::table('analytics.link_clicks')
+                        ->where('professional_id', $professional->id)
+                        ->whereBetween('occurred_at', [$from, $to])
+                        ->selectRaw("{$truncExpr} as day, COUNT(DISTINCT COALESCE(visitor_id, ip_hash)) as count")
+                        ->groupByRaw($truncExpr)
+                        ->orderBy('day')
+                        ->get();
+                } catch (QueryException) {
+                    $clicksByDay = collect();
+                }
             } else {
                 $visitsByDay = DB::table('analytics.site_visits')
                     ->where('professional_id', $professional->id)
@@ -561,42 +566,40 @@ class ProfessionalAnalyticsController extends ApiController
                 ->whereBetween('occurred_at', [$from, $to])
                 ->count();
 
-            // Orders = distinct Shopify orders attributed to this affiliate
-            $ordersResult = DB::table('commerce.commission_ledger_entries')
+            // Orders attributed to this affiliate from commerce.orders
+            $excluded = ['stub', 'cancelled', 'voided', 'refunded'];
+            $ordersResult = DB::table('commerce.orders')
                 ->where('affiliate_professional_id', $professional->id)
-                ->where('entry_type', 'accrual')
-                ->whereNotNull('shopify_order_id')
+                ->whereNotIn('status', $excluded)
                 ->whereBetween('occurred_at', [$from, $to])
-                ->selectRaw('COUNT(DISTINCT shopify_order_id) as orders, SUM(amount_cents) as commission_cents')
+                ->selectRaw('COUNT(*) as orders, COALESCE(SUM(commission_cents), 0) as commission_cents')
                 ->first();
 
             $orders = (int) ($ordersResult->orders ?? 0);
             $commissionCents = (int) ($ordersResult->commission_cents ?? 0);
 
             // ── Orders chart ────────────────────────────────────────────────
-            // Groups distinct orders by hour or day for a sparkline / area chart.
+            // Groups orders by hour or day for a sparkline / area chart.
 
+            $driver = DB::connection('pgsql')->getDriverName();
             if ($useHourlyBuckets) {
-                $ordersByBucket = DB::table('commerce.commission_ledger_entries')
-                    ->where('affiliate_professional_id', $professional->id)
-                    ->where('entry_type', 'accrual')
-                    ->whereNotNull('shopify_order_id')
-                    ->whereBetween('occurred_at', [$from, $to])
-                    ->selectRaw("DATE_TRUNC('hour', occurred_at) as bucket, COUNT(DISTINCT shopify_order_id) as orders, SUM(amount_cents) as commission_cents")
-                    ->groupByRaw("DATE_TRUNC('hour', occurred_at)")
-                    ->orderBy('bucket')
-                    ->get();
+                $bucket = $driver === 'sqlite'
+                    ? "strftime('%Y-%m-%d %H:00:00', occurred_at)"
+                    : "DATE_TRUNC('hour', occurred_at)";
             } else {
-                $ordersByBucket = DB::table('commerce.commission_ledger_entries')
-                    ->where('affiliate_professional_id', $professional->id)
-                    ->where('entry_type', 'accrual')
-                    ->whereNotNull('shopify_order_id')
-                    ->whereBetween('occurred_at', [$from, $to])
-                    ->selectRaw('DATE(occurred_at) as bucket, COUNT(DISTINCT shopify_order_id) as orders, SUM(amount_cents) as commission_cents')
-                    ->groupByRaw('DATE(occurred_at)')
-                    ->orderBy('bucket')
-                    ->get();
+                $bucket = $driver === 'sqlite'
+                    ? "strftime('%Y-%m-%d', occurred_at)"
+                    : 'DATE(occurred_at)';
             }
+
+            $ordersByBucket = DB::table('commerce.orders')
+                ->where('affiliate_professional_id', $professional->id)
+                ->whereNotIn('status', $excluded)
+                ->whereBetween('occurred_at', [$from, $to])
+                ->selectRaw("{$bucket} as bucket, COUNT(*) as orders, COALESCE(SUM(commission_cents), 0) as commission_cents")
+                ->groupByRaw($bucket)
+                ->orderBy('bucket')
+                ->get();
 
             return [
                 'granularity' => $useHourlyBuckets ? 'hour' : 'day',
@@ -621,18 +624,17 @@ class ProfessionalAnalyticsController extends ApiController
      * Aggregate commerce KPIs for a window — used for both the current
      * period and the equal-length prior period (vs-prior change badges).
      *
-     * Revenue is back-derived from the ledger: amount_cents (commission)
-     * divided by commission_rate (percent). NULLIF guards rate=0 rows that
-     * would otherwise divide by zero.
-     *
-     * Quantity is summed out of the calculation_metadata JSON bag captured
-     * by ProcessShopifyOrderWebhookJob — the only place line-item quantity
-     * lives, since the ledger itself is rolled up to one accrual per line.
+     * Reads commerce.orders (not commission_ledger_entries). revenue_cents = gross_cents
+     * (pre-discount, post-refund is net_cents — we use gross for "revenue" KPI to match
+     * the existing semantics). avg_order_qty aggregated from commerce.order_items.
      *
      * @return array{orders:int, cart_adds:int, checkouts:int, commission_cents:int, revenue_cents:int, avg_order_cents:int, avg_order_qty:float}
      */
     private function commerceAggregates(string $professionalId, Carbon $from, Carbon $to): array
     {
+        // Status exclusion: stub/cancelled/voided/refunded — 'approved' is included (it means paid)
+        $excluded = ['stub', 'cancelled', 'voided', 'refunded'];
+
         $cartAdds = (int) DB::table('analytics.cart_events')
             ->where('professional_id', $professionalId)
             ->where('event_type', 'cart_add')
@@ -645,23 +647,30 @@ class ProfessionalAnalyticsController extends ApiController
             ->whereBetween('occurred_at', [$from, $to])
             ->count();
 
-        $orderAgg = DB::table('commerce.commission_ledger_entries')
+        $orderAgg = DB::table('commerce.orders')
             ->where('affiliate_professional_id', $professionalId)
-            ->where('entry_type', 'accrual')
-            ->whereNotNull('shopify_order_id')
+            ->whereNotIn('status', $excluded)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw('
-                COUNT(DISTINCT shopify_order_id) as orders,
-                SUM(amount_cents) as commission_cents,
-                SUM(amount_cents * 100.0 / NULLIF(commission_rate, 0)) as revenue_cents,
-                SUM((calculation_metadata->>\'quantity\')::int) as total_qty
+                COUNT(*) as orders,
+                COALESCE(SUM(commission_cents), 0) as commission_cents,
+                COALESCE(SUM(gross_cents), 0) as revenue_cents
             ')
             ->first();
 
+        // Total quantity from order_items (normalized mirror of line_items JSONB)
+        $qtyAgg = DB::table('commerce.order_items as oi')
+            ->join('commerce.orders as o', 'o.id', '=', 'oi.order_id')
+            ->where('o.affiliate_professional_id', $professionalId)
+            ->whereNotIn('o.status', $excluded)
+            ->whereBetween('o.occurred_at', [$from, $to])
+            ->selectRaw('COALESCE(SUM(oi.quantity), 0) as total_qty')
+            ->first();
+
         $orders = (int) ($orderAgg->orders ?? 0);
-        $commissionCents = (int) round((float) ($orderAgg->commission_cents ?? 0));
-        $revenueCents = (int) round((float) ($orderAgg->revenue_cents ?? 0));
-        $totalQty = (int) ($orderAgg->total_qty ?? 0);
+        $commissionCents = (int) ($orderAgg->commission_cents ?? 0);
+        $revenueCents = (int) ($orderAgg->revenue_cents ?? 0);
+        $totalQty = (int) ($qtyAgg->total_qty ?? 0);
 
         $avgOrderCents = $orders > 0 ? (int) round($revenueCents / $orders) : 0;
         $avgOrderQty = $orders > 0 ? round($totalQty / $orders, 2) : 0.0;
@@ -679,24 +688,34 @@ class ProfessionalAnalyticsController extends ApiController
 
     /**
      * Commerce timeseries for the area chart — orders / commission / revenue
-     * grouped by hour or day depending on bucket choice.
+     * grouped by hour or day. Reads commerce.orders (not commission_ledger_entries).
      *
      * @return array{orders_by_day:\Illuminate\Support\Collection, commission_by_day:\Illuminate\Support\Collection, revenue_by_day:\Illuminate\Support\Collection}
      */
     private function commerceCharts(string $professionalId, Carbon $from, Carbon $to, bool $useHourlyBuckets): array
     {
-        $bucket = $useHourlyBuckets ? "DATE_TRUNC('hour', occurred_at)" : 'DATE(occurred_at)';
+        $excluded = ['stub', 'cancelled', 'voided', 'refunded'];
+        $driver = DB::connection('pgsql')->getDriverName();
 
-        $rows = DB::table('commerce.commission_ledger_entries')
+        if ($driver === 'sqlite') {
+            $bucket = $useHourlyBuckets
+                ? "strftime('%Y-%m-%d %H:00:00', occurred_at)"
+                : "strftime('%Y-%m-%d', occurred_at)";
+        } else {
+            $bucket = $useHourlyBuckets
+                ? "DATE_TRUNC('hour', occurred_at)"
+                : 'DATE(occurred_at)';
+        }
+
+        $rows = DB::table('commerce.orders')
             ->where('affiliate_professional_id', $professionalId)
-            ->where('entry_type', 'accrual')
-            ->whereNotNull('shopify_order_id')
+            ->whereNotIn('status', $excluded)
             ->whereBetween('occurred_at', [$from, $to])
             ->selectRaw("
                 {$bucket} as bucket,
-                COUNT(DISTINCT shopify_order_id) as orders,
-                SUM(amount_cents) as commission_cents,
-                SUM(amount_cents * 100.0 / NULLIF(commission_rate, 0)) as revenue_cents
+                COUNT(*) as orders,
+                COALESCE(SUM(commission_cents), 0) as commission_cents,
+                COALESCE(SUM(gross_cents), 0) as revenue_cents
             ")
             ->groupByRaw($bucket)
             ->orderBy('bucket')
@@ -709,48 +728,48 @@ class ProfessionalAnalyticsController extends ApiController
             ])->values(),
             'commission_by_day' => $rows->map(fn ($r) => [
                 'bucket' => $r->bucket,
-                'commission_cents' => (int) round((float) $r->commission_cents),
+                'commission_cents' => (int) $r->commission_cents,
             ])->values(),
             'revenue_by_day' => $rows->map(fn ($r) => [
                 'bucket' => $r->bucket,
-                'revenue_cents' => (int) round((float) $r->revenue_cents),
+                'revenue_cents' => (int) $r->revenue_cents,
             ])->values(),
         ];
     }
 
     /**
      * Top products by commission earned in the window.
-     *
-     * Reads product title from the calculation_metadata JSON bag (captured
-     * by ProcessShopifyOrderWebhookJob since the line-item title is the only
-     * source available without a Shopify Admin call). Older rows pre-dating
-     * the title capture render with a "Product #{id}" fallback.
+     * Reads from commerce.order_items (normalized trigger mirror of line_items JSONB).
+     * Joined to commerce.orders to apply affiliate + status filters.
+     * Product title comes from order_items.shopify_product_title (set by webhook handler).
      */
     private function topProducts(string $professionalId, Carbon $from, Carbon $to): \Illuminate\Support\Collection
     {
-        return DB::table('commerce.commission_ledger_entries')
-            ->where('affiliate_professional_id', $professionalId)
-            ->where('entry_type', 'accrual')
-            ->whereNotNull('shopify_order_id')
-            ->whereBetween('occurred_at', [$from, $to])
-            ->whereRaw("calculation_metadata->>'product_id' IS NOT NULL")
-            ->selectRaw("
-                calculation_metadata->>'product_id' as product_id,
-                MAX(calculation_metadata->>'product_title') as product_title,
-                COUNT(DISTINCT shopify_order_id) as orders,
-                SUM(amount_cents) as commission_cents,
-                SUM(amount_cents * 100.0 / NULLIF(commission_rate, 0)) as revenue_cents
-            ")
-            ->groupByRaw("calculation_metadata->>'product_id'")
-            ->orderByDesc('commission_cents')
+        $excluded = ['stub', 'cancelled', 'voided', 'refunded'];
+
+        return DB::table('commerce.order_items as oi')
+            ->join('commerce.orders as o', 'o.id', '=', 'oi.order_id')
+            ->where('o.affiliate_professional_id', $professionalId)
+            ->whereNotIn('o.status', $excluded)
+            ->whereBetween('o.occurred_at', [$from, $to])
+            ->whereNotNull('oi.shopify_product_id')
+            ->selectRaw('
+                oi.shopify_product_id as product_id,
+                MAX(oi.title) as product_title,
+                COUNT(DISTINCT o.id) as orders,
+                COALESCE(SUM(oi.commission_cents), 0) as commission_cents,
+                COALESCE(SUM(oi.line_total_cents), 0) as revenue_cents
+            ')
+            ->groupBy('oi.shopify_product_id')
+            ->orderByRaw('SUM(oi.commission_cents) DESC')
             ->limit(8)
             ->get()
             ->map(fn ($r) => [
                 'product_id' => (string) $r->product_id,
                 'title' => (string) ($r->product_title ?? 'Product #'.substr((string) $r->product_id, -6)),
                 'orders' => (int) $r->orders,
-                'commission_cents' => (int) round((float) $r->commission_cents),
-                'revenue_cents' => (int) round((float) $r->revenue_cents),
+                'commission_cents' => (int) $r->commission_cents,
+                'revenue_cents' => (int) $r->revenue_cents,
             ])
             ->values();
     }

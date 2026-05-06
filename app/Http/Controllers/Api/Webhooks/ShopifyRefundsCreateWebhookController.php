@@ -11,9 +11,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
-// Phase 3: Receives Shopify orders/updated webhooks. Validates HMAC, deduplicates on
-// X-Shopify-Webhook-Id, then passes topic + X-Shopify-Event-Id into the job.
-class ShopifyOrdersUpdatedWebhookController extends ApiController
+// Phase 3: Receives Shopify refunds/create webhooks. Updates refund_cents on the parent order;
+// the trg_rollup_clawback trigger handles the brand_affiliate_rollup delta automatically.
+class ShopifyRefundsCreateWebhookController extends ApiController
 {
     use ValidatesShopifyWebhookHmac;
 
@@ -25,13 +25,13 @@ class ShopifyOrdersUpdatedWebhookController extends ApiController
         $eventId = (string) $request->header('X-Shopify-Event-Id', '');
         $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop-Domain', '')));
 
-        $dedupeKey = $webhookId !== '' ? "shopify:webhook:order-updated:{$webhookId}" : null;
+        $dedupeKey = $webhookId !== '' ? "shopify:webhook:refund-create:{$webhookId}" : null;
         if ($dedupeKey && Cache::has($dedupeKey)) {
             return $this->success(['received' => true, 'duplicate' => true]);
         }
 
         if (! $this->isValidShopifyHmac($rawBody, $signature)) {
-            Log::warning('Shopify orders/updated webhook: invalid HMAC signature', [
+            Log::warning('Shopify refunds/create webhook: invalid HMAC signature', [
                 'shop_domain' => $shopDomain,
             ]);
 
@@ -48,7 +48,7 @@ class ShopifyOrdersUpdatedWebhookController extends ApiController
             ->first();
 
         if (! $integration) {
-            Log::warning('Shopify orders/updated webhook: unknown shop domain', [
+            Log::warning('Shopify refunds/create webhook: unknown shop domain', [
                 'shop_domain' => $shopDomain,
             ]);
 
@@ -63,7 +63,7 @@ class ShopifyOrdersUpdatedWebhookController extends ApiController
         ProcessShopifyOrderUpdatedWebhookJob::dispatch(
             (string) $integration->professional_id,
             $payload,
-            'orders/updated',
+            'refunds/create',
             $eventId,
         );
 

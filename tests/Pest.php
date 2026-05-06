@@ -964,6 +964,100 @@ function createDocumentFor(Professional $pro, array $overrides = []): \App\Model
 }
 
 /**
+ * commerce.orders + commerce.order_events + commerce.brand_affiliate_rollup + commerce.order_items
+ * — minimal columns for Phase 3 webhook write-path and analytics read-path tests.
+ * SQLite does not support INSERT ... ON CONFLICT WHERE (partial predicate), so tests that
+ * exercise the LWW guard directly must call markTestSkipped() on non-pgsql connections.
+ */
+function setupCommerceOrdersTables(): void
+{
+    attachTestSchemas();
+    $conn = \Illuminate\Support\Facades\DB::connection('pgsql');
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.orders (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        shopify_order_id TEXT NOT NULL,
+        shopify_shop_domain TEXT NOT NULL,
+        brand_professional_id TEXT NOT NULL,
+        affiliate_professional_id TEXT NOT NULL,
+        customer_id TEXT NULL,
+        status TEXT NOT NULL DEFAULT \'pending\',
+        gross_cents INTEGER NOT NULL DEFAULT 0,
+        discount_cents INTEGER NOT NULL DEFAULT 0,
+        refund_cents INTEGER NOT NULL DEFAULT 0,
+        net_cents INTEGER NOT NULL DEFAULT 0,
+        commission_cents INTEGER NOT NULL DEFAULT 0,
+        commission_rate REAL NOT NULL DEFAULT 0,
+        rate_source TEXT NOT NULL DEFAULT \'pending\',
+        currency_code TEXT NOT NULL DEFAULT \'AUD\',
+        line_items TEXT NOT NULL DEFAULT \'[]\',
+        shopify_data TEXT NOT NULL DEFAULT \'{}\',
+        stripe_payment_intent_id TEXT NULL,
+        stripe_transfer_id TEXT NULL,
+        payout_id TEXT NULL,
+        reconciled_at TEXT NULL,
+        shopify_updated_at TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL,
+        UNIQUE(shopify_shop_domain, shopify_order_id)
+    )');
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.order_events (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        order_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        amount_delta_cents INTEGER NULL,
+        metadata TEXT NOT NULL DEFAULT \'{}\',
+        source TEXT NOT NULL DEFAULT \'webhook\',
+        shopify_event_id TEXT NULL UNIQUE,
+        shopify_triggered_at TEXT NOT NULL,
+        occurred_at TEXT NULL
+    )');
+    // UNIQUE on shopify_event_id simulates the PG partial unique index.
+    // SQLite UNIQUE with NULLs: multiple NULLs are treated as distinct (NOT equal),
+    // so reconciler-sourced events (NULL event_id) can coexist — matches PG partial-index behavior.
+
+    // Trigger-maintained rollup — manually seeded in tests since SQLite won't fire PG triggers.
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.brand_affiliate_rollup (
+        brand_professional_id TEXT NOT NULL,
+        affiliate_professional_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        currency_code TEXT NOT NULL DEFAULT \'AUD\',
+        orders_count INTEGER NOT NULL DEFAULT 0,
+        gross_cents INTEGER NOT NULL DEFAULT 0,
+        refund_cents INTEGER NOT NULL DEFAULT 0,
+        net_cents INTEGER NOT NULL DEFAULT 0,
+        commission_cents INTEGER NOT NULL DEFAULT 0,
+        reversed_commission_cents INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NULL,
+        PRIMARY KEY (brand_professional_id, affiliate_professional_id, day, currency_code)
+    )');
+
+    // Normalized mirror of line_items JSONB — used by topProducts query.
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.order_items (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        order_id TEXT NOT NULL,
+        shopify_line_item_id TEXT NOT NULL,
+        shopify_product_id TEXT NULL,
+        shopify_variant_id TEXT NULL,
+        sku TEXT NULL,
+        title TEXT NOT NULL DEFAULT \'\',
+        quantity INTEGER NOT NULL DEFAULT 1,
+        unit_price_cents INTEGER NOT NULL DEFAULT 0,
+        discount_cents INTEGER NOT NULL DEFAULT 0,
+        line_total_cents INTEGER NOT NULL DEFAULT 0,
+        commission_cents INTEGER NOT NULL DEFAULT 0,
+        commission_rate REAL NOT NULL DEFAULT 0,
+        brand_professional_id TEXT NOT NULL,
+        affiliate_professional_id TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        currency_code TEXT NOT NULL DEFAULT \'AUD\',
+        UNIQUE (order_id, shopify_line_item_id)
+    )');
+}
+
+/**
  * core.sidest_staff — internal staff accounts, linked to Supabase auth users.
  */
 function setupSidestStaffTable(): void
@@ -979,6 +1073,30 @@ function setupSidestStaffTable(): void
         deleted_at TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
+    )');
+}
+
+/**
+ * analytics.site_visits — raw visit events used by live analytics read queries.
+ */
+function setupSiteVisitsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.site_visits (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        site_id TEXT NULL,
+        visitor_id TEXT NULL,
+        session_id TEXT NULL,
+        ip_hash TEXT NULL,
+        device_type TEXT NULL,
+        country_code TEXT NULL,
+        referrer TEXT NULL,
+        utm_source TEXT NULL,
+        utm_medium TEXT NULL,
+        utm_campaign TEXT NULL,
+        occurred_at TEXT NULL,
+        created_at TEXT NULL
     )');
 }
 

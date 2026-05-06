@@ -11,7 +11,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
-// V2: Receives Shopify orders/paid webhooks. Validates HMAC signature, deduplicates, dispatches processing job.
+// Phase 3: Receives Shopify orders/paid webhooks. Validates HMAC, deduplicates on
+// X-Shopify-Webhook-Id (cheap Redis upfront check), then passes X-Shopify-Event-Id
+// into the job for durable DB-level idempotency.
 class ShopifyOrderWebhookController extends ApiController
 {
     use ValidatesShopifyWebhookHmac;
@@ -21,9 +23,10 @@ class ShopifyOrderWebhookController extends ApiController
         $rawBody = (string) $request->getContent();
         $signature = (string) $request->header('X-Shopify-Hmac-SHA256', '');
         $webhookId = (string) $request->header('X-Shopify-Webhook-Id', '');
+        $eventId = (string) $request->header('X-Shopify-Event-Id', '');
         $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop-Domain', '')));
 
-        // Dedup read before HMAC: short-circuit already-processed IDs without recomputing the hash.
+        // Cheap Redis upfront dedup on webhook-id before recomputing HMAC.
         $dedupeKey = $webhookId !== '' ? "shopify:webhook:order:{$webhookId}" : null;
         if ($dedupeKey && Cache::has($dedupeKey)) {
             return $this->success(['received' => true, 'duplicate' => true]);
@@ -37,7 +40,7 @@ class ShopifyOrderWebhookController extends ApiController
             return $this->error('invalid signature', 401);
         }
 
-        // Dedup write after HMAC passes: claim this ID to prevent concurrent double-dispatch.
+        // Claim the webhook-id to prevent concurrent double-dispatch.
         if ($dedupeKey && ! Cache::add($dedupeKey, true, now()->addHours(24))) {
             return $this->success(['received' => true, 'duplicate' => true]);
         }
@@ -66,7 +69,8 @@ class ShopifyOrderWebhookController extends ApiController
 
         ProcessShopifyOrderWebhookJob::dispatch(
             (string) $integration->professional_id,
-            $payload
+            $payload,
+            $eventId,
         );
 
         return $this->success(['received' => true]);

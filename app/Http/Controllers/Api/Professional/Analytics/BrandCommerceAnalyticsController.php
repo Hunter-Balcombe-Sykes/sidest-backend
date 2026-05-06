@@ -17,12 +17,17 @@ class BrandCommerceAnalyticsController extends ApiController
 {
     use ResolveCurrentProfessional;
 
+    // Status values excluded from all live-query commerce aggregations.
+    // 'approved' is the canonical "paid" status — do NOT exclude it.
+    private const EXCLUDED_STATUSES = ['stub', 'cancelled', 'voided', 'refunded'];
+
     public function __construct(private CacheLockService $cacheLock) {}
 
     /**
      * Brand's commerce performance overview.
-     * Brand totals use brand_metrics_hourly for last 24h, brand_metrics_daily for older ranges.
-     * Per-affiliate breakdown and commission summary always use their daily tables (no hourly equivalent).
+     * Live queries against commerce.orders + commerce.brand_affiliate_rollup.
+     * Replaces reads of analytics.brand_metrics_daily/hourly, brand_affiliate_daily,
+     * brand_commission_daily, and site_metrics_daily.
      *
      * @return JsonResponse{ data: { range, granularity, totals, timeseries, affiliates, commission_summary } }
      */
@@ -32,132 +37,43 @@ class BrandCommerceAnalyticsController extends ApiController
         $professionalId = (string) $professional->id;
 
         $filters = $this->resolveFilters($request);
+        // v3: cache key bumped from v2 because derivation changed to live commerce queries
         $cacheKey = CacheKeyGenerator::brandCommerceAnalytics($professionalId, $filters['from'], $filters['to']);
 
-        return $this->success($this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $filters): array {
-            [$totals, $timeseries, $currencyCode] = $filters['use_hourly']
-                ? $this->buildHourlyTotals($professionalId, $filters)
-                : $this->buildDailyTotals($professionalId, $filters);
+        return $this->success($this->cacheLock->rememberLocked($cacheKey, 60, function () use ($professionalId, $filters): array {
+            $granularity = $filters['use_hourly'] ? 'hour' : 'day';
 
-            // Per-affiliate commerce breakdown — daily only (no hourly equivalent table)
-            $affiliateRows = DB::table('analytics.brand_affiliate_daily')
-                ->where('brand_professional_id', $professionalId)
-                ->whereBetween('day', [$filters['from'], $filters['to']])
-                ->get()
-                ->groupBy('affiliate_professional_id');
+            // ── Totals from commerce.orders ──────────────────────────────────
+            $totalsRow = $this->queryOrderTotals($professionalId, $filters, filterBrand: true);
 
-            // Per-affiliate page views — pulled from site_metrics_daily for
-            // every linked affiliate of this brand. Joined here (not via
-            // a backend SQL JOIN) so the existing brand_affiliate_daily
-            // groupBy stays simple. Only affiliates with at least one
-            // BrandPartnerLink to this brand are included; the LEFT JOIN
-            // to brand_partner_links keeps the query brand-scoped without
-            // pulling in every site on the platform.
-            $linkedAffiliateIds = DB::table('brand.brand_partner_links')
-                ->where('brand_professional_id', $professionalId)
-                ->pluck('affiliate_professional_id');
-
-            // Skip identity and pageview lookups when there are no linked
-            // affiliates — avoids unnecessary DB round-trips and keeps the
-            // PostgreSQL-specific ::int cast out of the query entirely.
-            $identityRows = collect();
-            $pageviewByAffiliate = collect();
-
-            if ($linkedAffiliateIds->isNotEmpty()) {
-                // Display labels keyed by professional id so the leaderboard
-                // can render real names instead of UUIDs.
-                $identityRows = DB::table('core.professionals')
-                    ->whereIn('id', $linkedAffiliateIds)
-                    ->whereNull('deleted_at')
-                    ->select('id', 'display_name', 'first_name', 'last_name', 'handle')
-                    ->get()
-                    ->keyBy('id');
-
-                $pageviewByAffiliate = DB::table('analytics.site_metrics_daily')
-                    ->whereIn('professional_id', $linkedAffiliateIds)
-                    ->whereBetween('day', [$filters['from'], $filters['to']])
-                    ->select(
-                        'professional_id',
-                        DB::raw('SUM(visits_count)::int as visits_count'),
-                        DB::raw('SUM(unique_visitors)::int as unique_visitors'),
-                    )
-                    ->groupBy('professional_id')
-                    ->get()
-                    ->keyBy('professional_id');
-            }
-
-            $affiliates = $affiliateRows->map(function ($rows, $affiliateId) use ($pageviewByAffiliate, $identityRows) {
-                $affiliateCurrency = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
-                $primary = $rows->filter(fn ($r) => $r->currency_code === $affiliateCurrency);
-                $views = $pageviewByAffiliate->get($affiliateId);
-                $orders = (int) $primary->sum('orders_count');
-                $visits = (int) ($views->visits_count ?? 0);
-                // Conversion = orders / unique_visitors (more meaningful than
-                // raw visits which can include the same browser bouncing).
-                // Falls back to 0 when there's no traffic at all.
-                $uniqueVisitors = (int) ($views->unique_visitors ?? 0);
-                $conversionRate = $uniqueVisitors > 0
-                    ? round(($orders / $uniqueVisitors) * 100, 2)
-                    : 0.0;
-
-                // Resolve affiliate label: prefer first+last → display_name
-                // → handle. Pure UUID is a last resort so the dashboard
-                // never has to render a 36-char hex id in the table.
-                $identity = $identityRows->get($affiliateId);
-                $fullName = trim(implode(' ', array_filter([$identity?->first_name, $identity?->last_name])));
-                $displayName = $fullName !== ''
-                    ? $fullName
-                    : ($identity?->display_name ?? $identity?->handle ?? 'Affiliate');
-
-                return [
-                    'affiliate_professional_id' => $affiliateId,
-                    'affiliate_display_name' => $displayName,
-                    'affiliate_handle' => $identity?->handle,
-                    'orders_count' => $orders,
-                    'gross_cents' => (int) $primary->sum('gross_cents'),
-                    'net_cents' => (int) $primary->sum('net_cents'),
-                    'commission_net_cents' => (int) $primary->sum('commission_net_cents'),
-                    'customers_count' => (int) $primary->sum('customers_count'),
-                    'page_views' => $visits,
-                    'unique_visitors' => $uniqueVisitors,
-                    'conversion_rate_percent' => $conversionRate,
-                    'currency_code' => strtoupper($affiliateCurrency),
-                ];
-            })->values()->all();
-
-            // Brand-level page-view total — sum across every linked
-            // affiliate for the requested window. Surfaces as a KPI on
-            // the brand analytics page ("Page views across all your
-            // affiliates").
-            $totalPageviews = (int) $pageviewByAffiliate->sum('visits_count');
-            $totalUniqueVisitors = (int) $pageviewByAffiliate->sum('unique_visitors');
-
-            // Commission summary — daily only
-            $commissionRows = DB::table('analytics.brand_commission_daily')
-                ->where('brand_professional_id', $professionalId)
-                ->whereBetween('day', [$filters['from'], $filters['to']])
-                ->get()
-                ->groupBy('payout_status');
-
-            $commissionCurrencyCode = $commissionRows->flatten(1)->first()?->currency_code ?? $currencyCode;
-
-            $commissionSummary = [
-                'pending_cents' => (int) ($commissionRows->get('pending')?->sum('net_outstanding_cents') ?? 0),
-                'approved_cents' => (int) ($commissionRows->get('approved')?->sum('net_outstanding_cents') ?? 0),
-                'paid_cents' => (int) ($commissionRows->get('paid')?->sum('payout_cents') ?? 0),
-                'reversed_cents' => (int) ($commissionRows->get('reversed')?->sum('reversal_cents') ?? 0),
-                'currency_code' => strtoupper($commissionCurrencyCode),
+            $currencyCode = $totalsRow->currency_code ?? 'AUD';
+            $totals = [
+                'orders_count' => (int) ($totalsRow->orders_count ?? 0),
+                'gross_cents' => (int) ($totalsRow->gross_cents ?? 0),
+                'refunded_cents' => (int) ($totalsRow->refunded_cents ?? 0),
+                'net_cents' => (int) ($totalsRow->net_cents ?? 0),
+                'currency_code' => strtoupper($currencyCode),
             ];
 
-            // Layer the page-view totals onto the existing totals block so
-            // the dashboard can show "X orders / $Y gross / Z page views"
-            // as a coherent KPI strip.
+            // ── Timeseries from commerce.orders ──────────────────────────────
+            $timeseries = $this->queryOrderTimeseries($professionalId, $filters, $granularity, filterBrand: true);
+
+            // ── Brand page-views from analytics.site_visits ──────────────────
+            // The brand professional_id IS the professional_id for the brand's own pages.
+            [$totalPageviews, $totalUniqueVisitors] = $this->querySiteVisitTotals($professionalId, $filters);
+
             $totals['page_views'] = $totalPageviews;
             $totals['unique_visitors'] = $totalUniqueVisitors;
 
+            // ── Per-affiliate breakdown from commerce.brand_affiliate_rollup ─
+            $affiliates = $this->buildAffiliateBreakdown($professionalId, $filters, $currencyCode);
+
+            // ── Commission summary ────────────────────────────────────────────
+            $commissionSummary = $this->buildCommissionSummary($professionalId, $filters, $currencyCode);
+
             return [
                 'range' => ['from' => $filters['from'], 'to' => $filters['to']],
-                'granularity' => $filters['use_hourly'] ? 'hour' : 'day',
+                'granularity' => $granularity,
                 'totals' => $totals,
                 'timeseries' => $timeseries,
                 'affiliates' => $affiliates,
@@ -166,63 +82,269 @@ class BrandCommerceAnalyticsController extends ApiController
         }));
     }
 
-    /** @return array{0: array, 1: array, 2: string} [totals, timeseries, currencyCode] */
-    private function buildDailyTotals(string $professionalId, array $filters): array
+    /**
+     * Aggregate order totals for a brand or affiliate in the requested window.
+     * Returns a stdClass with orders_count, gross_cents, refunded_cents, net_cents, currency_code.
+     */
+    private function queryOrderTotals(string $professionalId, array $filters, bool $filterBrand): object
     {
-        $rows = DB::table('analytics.brand_metrics_daily')
-            ->where('brand_professional_id', $professionalId)
-            ->whereBetween('day', [$filters['from'], $filters['to']])
-            ->get();
+        $column = $filterBrand ? 'brand_professional_id' : 'affiliate_professional_id';
 
-        $currencyCode = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
-        $primary = $rows->filter(fn ($r) => $r->currency_code === $currencyCode);
+        $row = DB::table('commerce.orders')
+            ->where($column, $professionalId)
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+            ->selectRaw('
+                COUNT(*) AS orders_count,
+                COALESCE(SUM(gross_cents), 0) AS gross_cents,
+                COALESCE(SUM(refund_cents), 0) AS refunded_cents,
+                COALESCE(SUM(net_cents), 0) AS net_cents
+            ')
+            ->first();
 
-        $totals = [
-            'orders_count' => (int) $primary->sum('orders_count'),
-            'gross_cents' => (int) $primary->sum('gross_cents'),
-            'refunded_cents' => (int) $primary->sum('refunded_cents'),
-            'net_cents' => (int) $primary->sum('net_cents'),
-            'currency_code' => strtoupper($currencyCode),
-        ];
+        // Determine the dominant currency from the period's orders (most orders wins).
+        $currencyRow = DB::table('commerce.orders')
+            ->where($column, $professionalId)
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+            ->selectRaw('currency_code, COUNT(*) as cnt')
+            ->groupBy('currency_code')
+            ->orderByDesc('cnt')
+            ->first();
 
-        $timeseries = $primary->sortBy('day')->map(fn ($row) => [
-            'bucket' => (string) $row->day,
-            'orders_count' => (int) $row->orders_count,
-            'gross_cents' => (int) $row->gross_cents,
-            'net_cents' => (int) $row->net_cents,
-        ])->values()->all();
+        if ($row) {
+            $row->currency_code = $currencyRow->currency_code ?? 'AUD';
+        } else {
+            $row = (object) ['orders_count' => 0, 'gross_cents' => 0, 'refunded_cents' => 0, 'net_cents' => 0, 'currency_code' => 'AUD'];
+        }
 
-        return [$totals, $timeseries, $currencyCode];
+        return $row;
     }
 
-    /** @return array{0: array, 1: array, 2: string} [totals, timeseries, currencyCode] */
-    private function buildHourlyTotals(string $professionalId, array $filters): array
+    /**
+     * Order timeseries bucketed by hour or day.
+     * Returns array of ['bucket' => string, 'orders_count' => int, 'gross_cents' => int, 'net_cents' => int]
+     */
+    private function queryOrderTimeseries(string $professionalId, array $filters, string $granularity, bool $filterBrand, bool $includeCommission = false): array
     {
-        $rows = DB::table('analytics.brand_metrics_hourly')
-            ->where('brand_professional_id', $professionalId)
-            ->where('hour_start', '>=', $filters['hourly_from'])
-            ->where('hour_start', '<', $filters['hourly_to'])
+        $column = $filterBrand ? 'brand_professional_id' : 'affiliate_professional_id';
+        $conn = DB::connection('pgsql');
+        $driver = $conn->getDriverName();
+
+        // DATE_TRUNC is Postgres-only — fall back to strftime for SQLite test environment
+        if ($driver === 'sqlite') {
+            $fmtMap = ['hour' => '%Y-%m-%d %H:00:00', 'day' => '%Y-%m-%d'];
+            $fmt = $fmtMap[$granularity] ?? '%Y-%m-%d';
+            $bucketExpr = "strftime('{$fmt}', occurred_at)";
+        } else {
+            $bucketExpr = "DATE_TRUNC('{$granularity}', occurred_at)";
+        }
+
+        $commissionSelect = $includeCommission
+            ? ', COALESCE(SUM(commission_cents), 0) AS commission_accrued_cents'
+            : '';
+
+        $rows = DB::table('commerce.orders')
+            ->where($column, $professionalId)
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+            ->selectRaw("
+                {$bucketExpr} AS bucket,
+                COUNT(*) AS orders_count,
+                COALESCE(SUM(gross_cents), 0) AS gross_cents,
+                COALESCE(SUM(net_cents), 0) AS net_cents
+                {$commissionSelect}
+            ")
+            ->groupByRaw($bucketExpr)
+            ->orderByRaw($bucketExpr)
             ->get();
 
-        $currencyCode = $rows->sortByDesc('orders_count')->first()?->currency_code ?? 'AUD';
-        $primary = $rows->filter(fn ($r) => $r->currency_code === $currencyCode);
+        return $rows->map(function ($row) use ($granularity, $includeCommission) {
+            $bucket = $granularity === 'hour'
+                ? Carbon::parse($row->bucket)->toIso8601String()
+                : (string) $row->bucket;
 
-        $totals = [
-            'orders_count' => (int) $primary->sum('orders_count'),
-            'gross_cents' => (int) $primary->sum('gross_cents'),
-            'refunded_cents' => (int) $primary->sum('refunded_cents'),
-            'net_cents' => (int) $primary->sum('net_cents'),
+            $entry = [
+                'bucket' => $bucket,
+                'orders_count' => (int) $row->orders_count,
+                'gross_cents' => (int) $row->gross_cents,
+                'net_cents' => (int) $row->net_cents,
+            ];
+
+            if ($includeCommission) {
+                $entry['commission_accrued_cents'] = (int) $row->commission_accrued_cents;
+            }
+
+            return $entry;
+        })->values()->all();
+    }
+
+    /**
+     * Total page views + unique visitors for the brand's own site in the window.
+     * Returns [$pageViews, $uniqueVisitors].
+     */
+    private function querySiteVisitTotals(string $professionalId, array $filters): array
+    {
+        $row = DB::table('analytics.site_visits')
+            ->where('professional_id', $professionalId)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+            ->selectRaw('COUNT(*) AS page_views, COUNT(DISTINCT visitor_id) AS unique_visitors')
+            ->first();
+
+        return [(int) ($row->page_views ?? 0), (int) ($row->unique_visitors ?? 0)];
+    }
+
+    /**
+     * Per-affiliate breakdown using the trigger-maintained brand_affiliate_rollup.
+     * Joins core.professionals for display labels. Adds customers_count from orders
+     * and per-affiliate site visits (page_views / unique_visitors / conversion_rate).
+     *
+     * @return array<int, array>
+     */
+    private function buildAffiliateBreakdown(string $professionalId, array $filters, string $currencyCode): array
+    {
+        // Aggregate from the rollup — fast, trigger-maintained
+        $rollupRows = DB::table('commerce.brand_affiliate_rollup')
+            ->where('brand_professional_id', $professionalId)
+            ->where('day', '>=', $filters['from'])
+            ->where('day', '<=', $filters['to'])
+            ->where('currency_code', $currencyCode)
+            ->selectRaw('
+                affiliate_professional_id,
+                SUM(orders_count) AS orders_count,
+                SUM(gross_cents) AS gross_cents,
+                SUM(gross_cents - refund_cents) AS net_cents,
+                SUM(commission_cents - reversed_commission_cents) AS commission_net_cents
+            ')
+            ->groupBy('affiliate_professional_id')
+            ->orderByRaw('SUM(commission_cents - reversed_commission_cents) DESC')
+            ->limit(100)
+            ->get();
+
+        if ($rollupRows->isEmpty()) {
+            return [];
+        }
+
+        $affiliateIds = $rollupRows->pluck('affiliate_professional_id')->all();
+
+        // Identity labels for affiliates
+        $identityRows = DB::table('core.professionals')
+            ->whereIn('id', $affiliateIds)
+            ->whereNull('deleted_at')
+            ->select('id', 'display_name', 'first_name', 'last_name', 'handle')
+            ->get()
+            ->keyBy('id');
+
+        // customers_count per affiliate from orders (not in rollup)
+        $customerCounts = DB::table('commerce.orders')
+            ->where('brand_professional_id', $professionalId)
+            ->whereIn('affiliate_professional_id', $affiliateIds)
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+            ->selectRaw('affiliate_professional_id, COUNT(DISTINCT customer_id) AS customers_count')
+            ->groupBy('affiliate_professional_id')
+            ->get()
+            ->keyBy('affiliate_professional_id');
+
+        // Per-affiliate site visits (from each affiliate's own pages)
+        $pageviewsByAffiliate = DB::table('analytics.site_visits')
+            ->whereIn('professional_id', $affiliateIds)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+            ->selectRaw('professional_id, COUNT(*) AS page_views, COUNT(DISTINCT visitor_id) AS unique_visitors')
+            ->groupBy('professional_id')
+            ->get()
+            ->keyBy('professional_id');
+
+        return $rollupRows->map(function ($row) use ($identityRows, $customerCounts, $pageviewsByAffiliate, $currencyCode) {
+            $affiliateId = (string) $row->affiliate_professional_id;
+            $identity = $identityRows->get($affiliateId);
+
+            $fullName = trim(implode(' ', array_filter([$identity?->first_name, $identity?->last_name])));
+            $displayName = $fullName !== ''
+                ? $fullName
+                : ($identity?->display_name ?? $identity?->handle ?? 'Affiliate');
+
+            $orders = (int) $row->orders_count;
+            $views = $pageviewsByAffiliate->get($affiliateId);
+            $uniqueVisitors = (int) ($views?->unique_visitors ?? 0);
+            $conversionRate = $uniqueVisitors > 0
+                ? round(($orders / $uniqueVisitors) * 100, 2)
+                : 0.0;
+
+            return [
+                'affiliate_professional_id' => $affiliateId,
+                'affiliate_display_name' => $displayName,
+                'affiliate_handle' => $identity?->handle,
+                'orders_count' => $orders,
+                'gross_cents' => (int) $row->gross_cents,
+                'net_cents' => (int) $row->net_cents,
+                'commission_net_cents' => (int) $row->commission_net_cents,
+                'customers_count' => (int) ($customerCounts->get($affiliateId)?->customers_count ?? 0),
+                'page_views' => (int) ($views?->page_views ?? 0),
+                'unique_visitors' => $uniqueVisitors,
+                'conversion_rate_percent' => $conversionRate,
+                'currency_code' => strtoupper($currencyCode),
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * Commission summary derived from live tables:
+     *   approved_cents  = SUM(commission_cents) on non-excluded orders
+     *   paid_cents      = SUM(commission_cents) WHERE payout_id IS NOT NULL
+     *   reversed_cents  = SUM(reversed_commission_cents) from rollup
+     *   pending_cents   = clamp(approved - paid - reversed, 0, ∞)
+     */
+    private function buildCommissionSummary(string $professionalId, array $filters, string $currencyCode): array
+    {
+        $endOfDay = Carbon::parse($filters['to'])->endOfDay();
+
+        // approved = all non-excluded commissions in window
+        $approvedRow = DB::table('commerce.orders')
+            ->where('brand_professional_id', $professionalId)
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', $endOfDay)
+            ->selectRaw('COALESCE(SUM(commission_cents), 0) AS approved_cents')
+            ->first();
+
+        // paid = subset with a payout assigned
+        $paidRow = DB::table('commerce.orders')
+            ->where('brand_professional_id', $professionalId)
+            ->whereNotIn('status', self::EXCLUDED_STATUSES)
+            ->whereNotNull('payout_id')
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', $endOfDay)
+            ->selectRaw('COALESCE(SUM(commission_cents), 0) AS paid_cents')
+            ->first();
+
+        // reversed = sum from rollup
+        $reversedRow = DB::table('commerce.brand_affiliate_rollup')
+            ->where('brand_professional_id', $professionalId)
+            ->where('day', '>=', $filters['from'])
+            ->where('day', '<=', $filters['to'])
+            ->selectRaw('COALESCE(SUM(reversed_commission_cents), 0) AS reversed_cents')
+            ->first();
+
+        $approvedCents = (int) ($approvedRow->approved_cents ?? 0);
+        $paidCents = (int) ($paidRow->paid_cents ?? 0);
+        $reversedCents = (int) ($reversedRow->reversed_cents ?? 0);
+        // pending = approved minus what's already paid or reversed; clamp to >= 0
+        $pendingCents = max(0, $approvedCents - $paidCents - $reversedCents);
+
+        return [
+            'pending_cents' => $pendingCents,
+            'approved_cents' => $approvedCents,
+            'paid_cents' => $paidCents,
+            'reversed_cents' => $reversedCents,
             'currency_code' => strtoupper($currencyCode),
         ];
-
-        $timeseries = $primary->sortBy('hour_start')->map(fn ($row) => [
-            'bucket' => Carbon::parse($row->hour_start)->toIso8601String(),
-            'orders_count' => (int) $row->orders_count,
-            'gross_cents' => (int) $row->gross_cents,
-            'net_cents' => (int) $row->net_cents,
-        ])->values()->all();
-
-        return [$totals, $timeseries, $currencyCode];
     }
 
     private function resolveFilters(Request $request): array
@@ -275,15 +397,13 @@ class BrandCommerceAnalyticsController extends ApiController
         $fromUtc = Carbon::parse($from)->utc()->startOfDay();
         $toUtc = Carbon::parse($to)->utc()->endOfDay();
 
-        // Use hourly table when the entire range falls within the last 24h.
+        // Use hourly granularity when the entire range falls within the last 24h.
         $useHourly = $fromUtc->gte($cutoff) && $toUtc->lte(now()->utc()->addMinute());
 
         return [
             'from' => $from,
             'to' => $to,
             'use_hourly' => $useHourly,
-            'hourly_from' => $cutoff,
-            'hourly_to' => now()->utc()->addMinute(),
         ];
     }
 }
