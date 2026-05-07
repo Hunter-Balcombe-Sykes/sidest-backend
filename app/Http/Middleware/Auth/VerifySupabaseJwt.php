@@ -110,11 +110,13 @@ class VerifySupabaseJwt
 
         $header = json_decode($this->b64urlDecode($parts[0]), true) ?: [];
 
-        // Reject non-RS256 tokens before key lookup to prevent algorithm confusion attacks
-        // (e.g. HS256 signed with the public key as the HMAC secret).
+        // Reject non-asymmetric algorithms before key lookup to prevent algorithm confusion attacks
+        // (e.g. HS256 signed with the public key as the HMAC secret). RS256 and ES256 are both
+        // asymmetric — Supabase issues ES256 by default for projects on migrated signing keys, so
+        // both must be accepted here. NEVER add HS256 to this allowlist.
         $alg = $header['alg'] ?? null;
-        if ($alg !== 'RS256') {
-            throw new \RuntimeException('JWT alg must be RS256, got: '.($alg ?? 'none'));
+        if (! in_array($alg, ['RS256', 'ES256'], true)) {
+            throw new \RuntimeException('JWT alg must be RS256 or ES256, got: '.($alg ?? 'none'));
         }
 
         $kid = $header['kid'] ?? null;
