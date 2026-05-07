@@ -14,6 +14,21 @@ use Symfony\Component\HttpFoundation\Response;
 // V2: JWT authentication via Supabase JWKS (asymmetric). Falls back to Auth Server query. All authenticated routes require this.
 class VerifySupabaseJwt
 {
+    /**
+     * Process-local memo of parsed JWKS keys, keyed by a hash of the raw JWKS
+     * payload. JWK::parseKeySet() rebuilds OpenSSL EC public-key resources from
+     * JSON on every call (~150-300ms for ES256 — dominates the auth path) but
+     * the JWKS itself rarely changes; caching the parsed Key map across requests
+     * within a PHP-FPM worker drops repeat-request cost to a single signature
+     * verification (~5-15ms). Hashing the payload means a Supabase signing-key
+     * rotation invalidates the memo automatically (the JWKS Redis cache TTL is
+     * 5 min, so we pick up rotations within that window). Capped at 4 entries
+     * to bound long-running-worker memory across multiple rotations.
+     *
+     * @var array<string, array<string, \Firebase\JWT\Key>>
+     */
+    private static array $parsedKeysByJwksHash = [];
+
     public function __construct(private CacheLockService $cacheLock) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -150,7 +165,16 @@ class VerifySupabaseJwt
             throw new \RuntimeException('JWKS empty');
         }
 
-        $keys = JWK::parseKeySet($jwks);
+        $jwksHash = md5((string) json_encode($jwks));
+        if (! isset(self::$parsedKeysByJwksHash[$jwksHash])) {
+            // Bound worker memory across multiple key rotations — drop the oldest
+            // entry once we already hold a small set of recent JWKS payloads.
+            if (count(self::$parsedKeysByJwksHash) >= 4) {
+                array_shift(self::$parsedKeysByJwksHash);
+            }
+            self::$parsedKeysByJwksHash[$jwksHash] = JWK::parseKeySet($jwks);
+        }
+        $keys = self::$parsedKeysByJwksHash[$jwksHash];
         $key = $keys[$kid] ?? null;
         if (! $key) {
             throw new \RuntimeException('No matching JWKS key for kid');
