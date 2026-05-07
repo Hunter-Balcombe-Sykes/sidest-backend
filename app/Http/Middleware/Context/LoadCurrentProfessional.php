@@ -19,9 +19,6 @@ class LoadCurrentProfessional
 
     public function handle(Request $request, Closure $next): Response
     {
-
-        Log::debug('LoadCurrentProfessional start');
-
         $uid = $request->attributes->get('supabase_uid');
         if (! $uid) {
             Log::debug('LoadCurrentProfessional missing uid');
@@ -36,15 +33,8 @@ class LoadCurrentProfessional
             return response()->json(['message' => 'Invalid uid'], 401);
         }
 
-        Log::debug('LoadCurrentProfessional before cache getByAuthId', ['uid' => $uid]);
-
         // Use cache service instead of a direct query
         $professional = $this->professionalCache->getByAuthId($uid);
-
-        Log::debug('LoadCurrentProfessional after cache getByAuthId', [
-            'uid' => $uid,
-            'found' => (bool) $professional,
-        ]);
 
         if (! $professional) {
             // Important: /api/bootstrap should create this row
@@ -77,8 +67,6 @@ class LoadCurrentProfessional
             'professional_id' => (string) $professional->id,
             'professional_type' => (string) ($professional->professional_type ?? ''),
         ]);
-
-        Log::debug('LoadCurrentProfessional before next middleware');
 
         return $next($request);
     }

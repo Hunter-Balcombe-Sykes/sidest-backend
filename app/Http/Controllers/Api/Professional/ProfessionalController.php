@@ -15,7 +15,6 @@ use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 // V2: Returns authenticated professional's full profile with site, services, and blocks. Dashboard entry point.
 class ProfessionalController extends ApiController
@@ -32,26 +31,12 @@ class ProfessionalController extends ApiController
     public function show(ProfessionalShowRequest $request)
     {
         $uid = $request->attributes->get('supabase_uid');
-        Log::info('/api/me start');
 
         $pro = $this->currentProfessional($request);
         $pro->load('squareIntegration');
         $brandStoreSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
-        Log::info('/api/me after currentProfessional', ['pro_id' => $pro->id]);
 
         $cache = app(ProfessionalCacheService::class);
-
-        $t = microtime(true);
-        $payload = $cache->getPayloadById($pro->id);
-        Log::info('/api/me after payload', ['ms' => (microtime(true) - $t) * 1000]);
-
-        $t = microtime(true);
-        $services = $cache->getActiveServices($pro->id);
-        Log::info('/api/me after services', ['ms' => (microtime(true) - $t) * 1000]);
-
-        $t = microtime(true);
-        $customersCount = $cache->getCustomerCount($pro->id);
-        Log::info('/api/me after customers', ['ms' => (microtime(true) - $t) * 1000]);
 
         $siteSettings = [];
         $primaryBrandStatus = null;
@@ -75,7 +60,6 @@ class ProfessionalController extends ApiController
             }
         }
 
-        // Use the already-loaded professional to build payload instead of querying again
         $payload = [
             'professional' => new ProfessionalDashboardResource($pro),
             'site' => $pro->site ? [
