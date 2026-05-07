@@ -10,6 +10,7 @@ use App\Http\Requests\Api\Professional\Services\StoreServiceRequest;
 use App\Http\Requests\Api\Professional\Services\UpdateServiceRequest;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Professional\ServiceCategory;
+use App\Services\Cache\ProfessionalCacheService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,23 @@ class ProfessionalServiceController extends ApiController
         $onlyArchived = $request->boolean('only_archived');
         $grouped = $request->boolean('grouped');
         $source = strtolower((string) $request->query('source', 'all'));
+
+        // Hot path: dashboard's default services list (no archive toggle, no
+        // grouping, source=all). Served from ProfessionalCacheService —
+        // 30-min TTL, single-flight, busted by ServiceObserver on any write.
+        // Filtered or grouped views fall through to the raw query because
+        // their cache keys would either explode in cardinality (per-source)
+        // or duplicate the categories join logic.
+        if (! $includeArchived && ! $onlyArchived && ! $grouped && $source === 'all') {
+            return $this->success([
+                'services' => app(ProfessionalCacheService::class)->getDashboardServices($pro->id),
+                'filters' => [
+                    'include_archived' => false,
+                    'only_archived' => false,
+                    'source' => 'all',
+                ],
+            ]);
+        }
 
         $servicesQuery = Service::query()
             ->where('professional_id', $pro->id);

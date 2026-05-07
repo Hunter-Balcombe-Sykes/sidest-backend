@@ -2,8 +2,10 @@
 
 namespace App\Services\Cache;
 
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
+use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -133,6 +135,16 @@ class ProfessionalCacheService
      * no real mid-request race between the cached ID lookup and the model fetch.
      * The mismatch guard below is a belt-and-suspenders defence against stale/corrupt
      * cache entries only, not a concurrency fix.
+     *
+     * Two-level cache:
+     *   1. id lookup (`pro:map:auth:{uid}`) — 30 min, immutable mapping
+     *   2. hydrated model (`pro:model:{id}`) — 60 s with SWR + jitter via CacheLockService
+     *
+     * The model layer is what makes the auth path a Redis hit instead of a Postgres
+     * round-trip on every authenticated request. Eloquent models serialize cleanly
+     * through Redis; relations preserved across the boundary stay marked as loaded
+     * (so `$pro->site` does not silently re-query). Bust both keys on profile writes
+     * via `invalidateProfessional()`.
      */
     public function getByAuthId(string $authUserId): ?Professional
     {
@@ -141,19 +153,25 @@ class ProfessionalCacheService
             return null;
         }
 
-        // Eager-load site: nearly every authenticated controller reads $pro->site,
-        // and a lazy load costs ~70ms on a cold Postgres connection (~4ms when warm).
-        // Bundling it here makes the auth path one round-trip instead of two and
-        // eliminates per-request connection-warmth jitter on the site query.
-        $professional = Professional::query()->with('site')->find($id);
+        // Cache the hydrated model for 60s with SWR + jitter. Eager-loading site +
+        // squareIntegration here makes them effectively free for every authenticated
+        // request — they ride along inside the cached model, paid once per 60s window.
+        $professional = $this->cacheLock->rememberLocked(
+            CacheKeyGenerator::professionalModel($id),
+            60,
+            fn () => Professional::query()->with(['site', 'squareIntegration'])->find($id),
+        );
         if (! $professional) {
             return null;
         }
 
         // Defensive guard: if cache is stale/corrupt, never return another user's profile.
         if ((string) $professional->auth_user_id !== $authUserId) {
-            $cacheKey = CacheKeyGenerator::professionalIdByAuthId($authUserId);
-            Cache::forget($cacheKey);
+            $authIdKey = CacheKeyGenerator::professionalIdByAuthId($authUserId);
+            $modelKey = CacheKeyGenerator::professionalModel($id);
+            Cache::forget($authIdKey);
+            Cache::forget($modelKey);
+            Cache::forget($modelKey.':stale');
 
             $freshId = Professional::query()
                 ->where('auth_user_id', $authUserId)
@@ -163,9 +181,9 @@ class ProfessionalCacheService
                 return null;
             }
 
-            Cache::put($cacheKey, $freshId, now()->addMinutes(30));
+            Cache::put($authIdKey, $freshId, now()->addMinutes(30));
 
-            return Professional::query()->with('site')->find($freshId);
+            return Professional::query()->with(['site', 'squareIntegration'])->find($freshId);
         }
 
         return $professional;
@@ -190,6 +208,87 @@ class ProfessionalCacheService
         );
     }
 
+    /**
+     * Services list for the dashboard /api/services index — includes inactive
+     * services so the management UI can render the visibility toggle. Excludes
+     * soft-deleted (those surface only when ?include_archived=true, which the
+     * controller serves uncached). 30-minute TTL mirrors getActiveServices.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getDashboardServices(string $professionalId): array
+    {
+        return $this->cacheLock->rememberLocked(
+            CacheKeyGenerator::professionalDashboardServices($professionalId),
+            now()->addMinutes(30),
+            fn () => Service::query()
+                ->where('professional_id', $professionalId)
+                ->whereNull('deleted_at')
+                ->orderBy('sort_order')
+                ->orderBy('created_at')
+                ->get()
+                ->toArray()
+        );
+    }
+
+    /**
+     * Cached BrandStoreSettings row for the dashboard /api/me payload. Returns
+     * the row as an associative array (or null when no row exists for this pro).
+     * 30-min TTL with a short null-TTL so a brand creating their first store
+     * settings doesn't see "missing" for the full window. BrandStoreSettingsObserver
+     * busts the key on any write.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function getBrandStoreSettings(string $professionalId): ?array
+    {
+        return $this->cacheLock->rememberLockedNullable(
+            CacheKeyGenerator::brandStoreSettings($professionalId),
+            now()->addMinutes(30),
+            fn () => BrandStoreSettings::query()
+                ->where('professional_id', $professionalId)
+                ->first()
+                ?->toArray(),
+            nullTtl: now()->addSeconds(30),
+        );
+    }
+
+    /**
+     * Cached (brand_status, display_name) tuple for an affiliate's linked brand
+     * partner. Used by /api/me to render the "your brand is live / building /
+     * down" banner without two extra Postgres lookups (BrandProfile + Professional)
+     * on every dashboard load. 5-min TTL because brand_status transitions are
+     * affiliate-facing and shouldn't lag noticeably; BrandProfileObserver and
+     * ProfessionalObserver bust this key on the underlying writes.
+     *
+     * @return array{brand_status: ?string, display_name: ?string}|null
+     */
+    public function getBrandPartnerStatus(string $brandProfessionalId): ?array
+    {
+        return $this->cacheLock->rememberLockedNullable(
+            CacheKeyGenerator::brandPartnerStatus($brandProfessionalId),
+            now()->addMinutes(5),
+            function () use ($brandProfessionalId) {
+                $brandProfile = BrandProfile::query()
+                    ->where('professional_id', $brandProfessionalId)
+                    ->first(['brand_status']);
+                $professional = Professional::query()
+                    ->whereKey($brandProfessionalId)
+                    ->first(['display_name']);
+
+                if (! $brandProfile && ! $professional) {
+                    return null;
+                }
+
+                return [
+                    'brand_status' => $brandProfile?->brand_status,
+                    'display_name' => $professional?->display_name,
+                ];
+            },
+            nullTtl: now()->addSeconds(30),
+        );
+    }
+
     public function getCustomerCount(string $professionalId): int
     {
         return $this->cacheLock->rememberLocked(
@@ -206,6 +305,8 @@ class ProfessionalCacheService
     {
         $handleLc = strtolower($professional->handle);
 
+        $modelKey = CacheKeyGenerator::professionalModel($professional->id);
+
         $keys = [
             CacheKeyGenerator::professionalPayloadById($professional->id),
             CacheKeyGenerator::professionalPayloadByHandle($handleLc),
@@ -214,8 +315,20 @@ class ProfessionalCacheService
             CacheKeyGenerator::professionalIdByHandle($handleLc),
             CacheKeyGenerator::professionalIdByAuthId($professional->auth_user_id),
 
+            // Auth-path hydrated-model cache (60 s SWR). Both the primary key and
+            // the `:stale` last-good copy must die here, otherwise stale-while-
+            // revalidate would let writes appear cached for up to 10 minutes.
+            $modelKey,
+            $modelKey.':stale',
+
             CacheKeyGenerator::professionalServices($professional->id),
+            CacheKeyGenerator::professionalDashboardServices($professional->id),
             CacheKeyGenerator::customerCount($professional->id),
+
+            // brand-partner-status (CACHE-5): keyed by brand professional id, so
+            // when *this* professional's display_name changes, every affiliate
+            // pointing at this brand re-reads it. Cheap to bust unconditionally.
+            CacheKeyGenerator::brandPartnerStatus($professional->id),
         ];
 
         if ($professional->wasChanged('handle')) {

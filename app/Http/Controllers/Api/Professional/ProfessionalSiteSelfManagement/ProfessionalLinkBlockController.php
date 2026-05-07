@@ -12,6 +12,7 @@ use App\Http\Requests\Api\Professional\Site\StoreLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Block;
+use App\Services\Cache\SiteCacheService;
 use App\Services\Site\SocialLinkNormalizer;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -52,9 +53,20 @@ class ProfessionalLinkBlockController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        return $this->success([
-            'blocks' => $pro->linkBlocks()->orderBy('sort_order')->get(),
-        ]);
+        // Served from SiteCacheService::getSiteLinkBlocks (15-min TTL, single-flight,
+        // SWR + jitter). Same helper that powers /api/me's `blocks` payload, so the
+        // two endpoints stay consistent. Returns active link blocks only — inactive
+        // (is_active=false) blocks aren't surfaced here. BlockObserver / SiteObserver
+        // bust the key on every link write through SiteCacheService::invalidateSite.
+        // $pro->site rides along on the AUTH-1 cached Professional model, so reading
+        // $pro->site->id costs nothing.
+        if ($pro->site) {
+            return $this->success([
+                'blocks' => app(SiteCacheService::class)->getSiteLinkBlocks($pro->site->id),
+            ]);
+        }
+
+        return $this->success(['blocks' => []]);
     }
 
     public function store(StoreLinkBlockRequest $request)

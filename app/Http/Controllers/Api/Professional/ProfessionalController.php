@@ -9,9 +9,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
 use App\Http\Resources\ProfessionalDashboardResource;
-use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Site\Block;
-use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\DB;
@@ -33,10 +31,11 @@ class ProfessionalController extends ApiController
         $uid = $request->attributes->get('supabase_uid');
 
         $pro = $this->currentProfessional($request);
-        $pro->load('squareIntegration');
-        $brandStoreSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
+        // squareIntegration eager-loads inside the AUTH-1 cached Professional
+        // (60s SWR), so no extra round-trip is needed here on cache hits.
 
         $cache = app(ProfessionalCacheService::class);
+        $brandStoreSettings = $cache->getBrandStoreSettings($pro->id);
 
         $siteSettings = [];
         $primaryBrandStatus = null;
@@ -50,12 +49,15 @@ class ProfessionalController extends ApiController
 
             // Resolve primary brand partner status + name so the dashboard can
             // surface affiliate-facing banners and status dots for non-live brands.
+            // Served from the brand-partner-status cache (5-min TTL) — busted by
+            // BrandProfileObserver on brand_status writes and ProfessionalObserver
+            // on display_name writes, so transitions surface within seconds.
             if ($pro->professional_type !== 'brand') {
                 $brandPartnerId = $siteSettings['brand_partner']['professional_id'] ?? null;
                 if ($brandPartnerId) {
-                    $brandProfile = BrandProfile::where('professional_id', $brandPartnerId)->first();
-                    $primaryBrandStatus = $brandProfile?->brand_status ?? BrandStatus::Onboarding->value;
-                    $primaryBrandName = \App\Models\Core\Professional\Professional::find($brandPartnerId)?->display_name ?? null;
+                    $partner = $cache->getBrandPartnerStatus((string) $brandPartnerId);
+                    $primaryBrandStatus = $partner['brand_status'] ?? BrandStatus::Onboarding->value;
+                    $primaryBrandName = $partner['display_name'] ?? null;
                 }
             }
         }
@@ -67,9 +69,7 @@ class ProfessionalController extends ApiController
                 'subdomain' => $pro->site->subdomain,
                 'is_published' => (bool) $pro->site->is_published,
                 'settings' => $siteSettings,
-                'storefront_base_url' => $brandStoreSettings
-                    ? $brandStoreSettings->storefrontBaseUrl($pro->site->subdomain)
-                    : 'https://'.$pro->site->subdomain.'.sidest.co',
+                'storefront_base_url' => $this->resolveStorefrontBaseUrl($brandStoreSettings, $pro->site->subdomain),
             ] : null,
         ];
 
@@ -123,5 +123,27 @@ class ProfessionalController extends ApiController
             ->update([
                 'is_active' => false,
             ]);
+    }
+
+    /**
+     * Mirrors BrandStoreSettings::storefrontBaseUrl() but operates on the
+     * cached array shape returned by ProfessionalCacheService::getBrandStoreSettings.
+     * Custom domain wins only when the brand is fully provisioned (domain_mode=custom,
+     * custom_domain set, and TLS issued); otherwise we serve the platform subdomain.
+     *
+     * @param  array<string, mixed>|null  $settings
+     */
+    private function resolveStorefrontBaseUrl(?array $settings, string $subdomain): string
+    {
+        if (
+            $settings !== null
+            && ($settings['domain_mode'] ?? null) === 'custom'
+            && ! empty($settings['custom_domain'])
+            && ! empty($settings['custom_domain_tls_provisioned_at'])
+        ) {
+            return 'https://'.$settings['custom_domain'];
+        }
+
+        return 'https://'.$subdomain.'.sidest.co';
     }
 }

@@ -51,9 +51,67 @@ class CacheKeyGenerator
         return "pro:{$professionalId}:services:active";
     }
 
+    /**
+     * Dashboard /api/services index cache. Distinct from professionalServices
+     * because the management view returns active + inactive (so the user can
+     * toggle is_active on/off), while professionalServices is the public-site
+     * view that filters is_active=true. Same invalidation triggers as the
+     * active-only key — both die on any service write through ServiceObserver.
+     */
+    public static function professionalDashboardServices(string $professionalId): string
+    {
+        return "pro:{$professionalId}:services:dashboard";
+    }
+
     public static function siteImages(string $siteId): string
     {
         return "site:{$siteId}:images:active";
+    }
+
+    /**
+     * Filtered gallery-view cache for /api/images. Keyed by site + (pool,
+     * media_type) so the dashboard's pool/type filter chips don't poison
+     * one another. Polling requests with ?ids[] use siteImagesPolling
+     * instead — those have unbounded cardinality.
+     *
+     * Bustable by invalidateSite() because the (pool, media_type) space is
+     * small and enumerable.
+     */
+    public static function siteImagesView(string $siteId, ?string $pool, string $mediaType): string
+    {
+        return "site:{$siteId}:images:active:p=".($pool ?? 'all').":t={$mediaType}";
+    }
+
+    /**
+     * Polling cache for /api/images?ids[]=uuid. The ids hash makes each
+     * caller's batch of in-progress uploads its own single-flight bucket,
+     * collapsing the 3–5s frontend poll cadence onto a single DB read while
+     * still letting the next 5s window pick up `pending → ready` transitions.
+     * Not enumerable in invalidateSite (unbounded cardinality); the 5s TTL
+     * is the only bust mechanism.
+     */
+    public static function siteImagesPolling(string $siteId, ?string $pool, string $mediaType, string $idsHash): string
+    {
+        return "site:{$siteId}:images:active:p=".($pool ?? 'all').":t={$mediaType}:i={$idsHash}";
+    }
+
+    /**
+     * Pool/media_type tuples enumerated by invalidateSite to bust every
+     * filtered-view variant. Keep this aligned with the filter-input space
+     * accepted in ProfessionalUploadController::index.
+     *
+     * @return array<int, array{0: ?string, 1: string}>
+     */
+    public static function siteImagesViewVariants(): array
+    {
+        $variants = [];
+        foreach ([null, 'gallery', 'content'] as $pool) {
+            foreach (['image', 'video', 'all'] as $mediaType) {
+                $variants[] = [$pool, $mediaType];
+            }
+        }
+
+        return $variants;
     }
 
     // @multi-site: needs site_id — visits belong to a site, not just a professional
@@ -96,6 +154,18 @@ class CacheKeyGenerator
     public static function professionalIdByAuthId(string $authUserId): string
     {
         return "pro:map:auth:{$authUserId}";
+    }
+
+    /**
+     * Hydrated Eloquent model cache for the auth path. Holds the Professional
+     * with its `site` + `squareIntegration` relations preloaded so every
+     * authenticated request reuses one Redis hit instead of two Postgres
+     * round-trips. Keyed by professional id (immutable), so writes that
+     * change auth_user_id or handle do not need a key rewrite — only a bust.
+     */
+    public static function professionalModel(string $id): string
+    {
+        return "pro:model:{$id}";
     }
 
     // @multi-site: needs site_id — summary aggregates site traffic, scoped to one site under current model
@@ -178,6 +248,47 @@ class CacheKeyGenerator
     public static function brandProductCustomPhotos(string $brandProfessionalId, string $productGid): string
     {
         return "brand:{$brandProfessionalId}:product:{$productGid}:custom_photos";
+    }
+
+    /**
+     * Cached BrandStoreSettings row for /api/me's dashboard payload. The model
+     * itself changes only when a brand edits store settings (rare), so a long
+     * TTL is safe — invalidation is observer-driven on any BrandStoreSettings
+     * write. Returns the row as an array (or sentinel-null) so the cache is
+     * portable across deploys that change Eloquent attribute order.
+     */
+    public static function brandStoreSettings(string $professionalId): string
+    {
+        return "pro:{$professionalId}:brand-store-settings";
+    }
+
+    /**
+     * Cached brand-partner status snapshot for /api/me when an affiliate has a
+     * configured brand_partner. Holds the (brand_status, display_name) tuple
+     * that the dashboard uses to render the affiliate's "linked brand" banner.
+     * Keyed by the brand's professional id (not the affiliate's), so one cache
+     * entry serves every affiliate connected to that brand. Busted by
+     * BrandProfileObserver on brand_status change and by ProfessionalObserver
+     * on display_name change.
+     */
+    public static function brandPartnerStatus(string $brandProfessionalId): string
+    {
+        return "pro:{$brandProfessionalId}:brand-partner-status";
+    }
+
+    /**
+     * Cached "is this brand's Hydrogen storefront serving requests?" probe
+     * result. The status check itself is a synchronous outbound HTTP GET
+     * with timeouts, so /api/brand/store-settings paid up to 8s of P95 on
+     * every read before this cache existed. The status only changes on
+     * deploy or domain reconfiguration — both write actions that bust this
+     * key. 60s TTL is short enough that brand operators see deploys reflect
+     * within a poll interval but long enough to absorb the dashboard's open-
+     * close-reopen pattern. Keyed by professional (1:1 with the brand).
+     */
+    public static function brandStorefrontStatus(string $professionalId): string
+    {
+        return "brand:{$professionalId}:storefront-status";
     }
 
     /**

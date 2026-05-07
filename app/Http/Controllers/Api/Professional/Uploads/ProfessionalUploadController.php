@@ -254,8 +254,54 @@ class ProfessionalUploadController extends ApiController
         $rawMediaType = strtolower(trim((string) request()->input('media_type', 'image')));
         $mediaTypeFilter = in_array($rawMediaType, ['image', 'video', 'all'], true) ? $rawMediaType : 'image';
 
+        $pool = null;
+        if (request()->has('pool')) {
+            $candidate = strtolower(trim((string) request()->input('pool')));
+            if (in_array($candidate, ['gallery', 'content'], true)) {
+                $pool = $candidate;
+            }
+        }
+
+        $ids = [];
+        if (request()->has('ids')) {
+            $ids = array_values(array_unique(array_filter(
+                (array) request()->input('ids'),
+                fn ($id) => is_string($id) && Str::isUuid($id),
+            )));
+            sort($ids); // canonicalise so different request orderings hit the same key
+        }
+
+        // Cache key: gallery views are enumerable and busted by invalidateSite;
+        // ?ids[] polling uses a fingerprint key with a 5s TTL only — its
+        // cardinality is unbounded so explicit invalidation isn't viable, and
+        // the short TTL is enough to surface processing-state transitions
+        // within one poll cycle without holding a stampede on the DB.
+        if (! empty($ids)) {
+            $idsHash = substr(sha1(implode(',', $ids)), 0, 12);
+            $cacheKey = \App\Services\Cache\CacheKeyGenerator::siteImagesPolling($site->id, $pool, $mediaTypeFilter, $idsHash);
+            $ttl = 5;
+        } else {
+            $cacheKey = \App\Services\Cache\CacheKeyGenerator::siteImagesView($site->id, $pool, $mediaTypeFilter);
+            $ttl = 30;
+        }
+
+        $payload = app(\App\Services\Cache\CacheLockService::class)->rememberLocked(
+            $cacheKey,
+            $ttl,
+            fn () => $this->buildIndexPayload($site->id, $pool, $mediaTypeFilter, $ids),
+        );
+
+        return $this->success($payload);
+    }
+
+    /**
+     * @param  array<int, string>  $ids
+     * @return array{images: array<int, mixed>, limits: array<string, int>}
+     */
+    private function buildIndexPayload(string $siteId, ?string $pool, string $mediaTypeFilter, array $ids): array
+    {
         $query = SiteMedia::query()
-            ->where('site_id', $site->id)
+            ->where('site_id', $siteId)
             ->where('is_active', true)
             ->orderBy('pool')
             ->orderBy('sort_order')
@@ -265,32 +311,25 @@ class ProfessionalUploadController extends ApiController
             $query->where('media_type', $mediaTypeFilter);
         }
 
-        if (request()->has('pool')) {
-            $pool = strtolower(trim(request()->input('pool')));
-            if (in_array($pool, ['gallery', 'content'], true)) {
-                $query->where('pool', $pool);
-            }
+        if ($pool !== null) {
+            $query->where('pool', $pool);
         }
 
-        // Efficient polling: return only the requested IDs.
-        if (request()->has('ids')) {
-            $ids = array_filter((array) request()->input('ids'), fn ($id) => is_string($id) && Str::isUuid($id));
-            if (! empty($ids)) {
-                $query->whereIn('id', array_values($ids));
-            }
+        if (! empty($ids)) {
+            $query->whereIn('id', $ids);
         }
 
         $query->with('mediaVariants');
 
         $items = $query->get()->map(fn (SiteMedia $item) => $this->buildMediaPayload($item, includeVariants: true));
 
-        return $this->success([
-            'images' => $items,
+        return [
+            'images' => $items->values()->all(),
             'limits' => [
                 'gallery' => config('partna.image_pools.gallery.max', 5),
                 'content' => config('partna.image_pools.content.max', 5),
             ],
-        ]);
+        ];
     }
 
     /**

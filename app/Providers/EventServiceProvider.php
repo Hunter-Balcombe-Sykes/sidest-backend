@@ -11,6 +11,7 @@ use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
+use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionMovement;
 use App\Models\Retail\CommissionPayout;
 use App\Observers\Core\BlockObserver;
@@ -24,6 +25,7 @@ use App\Observers\Core\ServiceObserver;
 use App\Observers\Core\SiteMediaObserver;
 use App\Observers\Core\SiteObserver;
 use App\Observers\Professional\ProfessionalObserver;
+use App\Observers\Retail\BrandStoreSettingsObserver;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 
 // V2: Registers Eloquent model observers for professionals, sites, blocks, services, customers, integrations, commissions, and media.
@@ -45,6 +47,7 @@ class EventServiceProvider extends ServiceProvider
         CommissionPayout::observe(CommissionPayoutObserver::class);
         ProfessionalIntegration::observe(ProfessionalIntegrationObserver::class);
         BrandProfile::observe(BrandProfileObserver::class);
+        BrandStoreSettings::observe(BrandStoreSettingsObserver::class);
         SiteMedia::observe(SiteMediaObserver::class);
     }
 }

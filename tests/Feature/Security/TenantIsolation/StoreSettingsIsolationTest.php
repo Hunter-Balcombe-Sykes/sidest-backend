@@ -98,6 +98,13 @@ it('brand design show returns only the callers own design tokens from site setti
         'settings' => json_encode(['design' => ['colors' => ['accent' => '#bbbbbb']]]),
     ]);
 
+    // The DB::table write above bypasses Eloquent, so the in-memory $b->site
+    // still holds the pre-update settings. BrandDesignController::show now
+    // reads $pro->site (eager-loaded by AUTH-1's auth middleware in production)
+    // rather than re-querying, so this test must refresh the relation to mimic
+    // what an authenticated request gets after the cache is busted.
+    $b->load('site');
+
     // BrandDesignMediaService is injected; stub it so no real DB/media queries run.
     $this->mock(BrandDesignMediaService::class, fn ($m) => $m->shouldReceive('listDesignMedia')->andReturn([
         'logo' => ['full_url' => null, 'square_url' => null],

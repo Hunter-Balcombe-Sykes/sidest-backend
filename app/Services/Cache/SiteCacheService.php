@@ -788,6 +788,24 @@ class SiteCacheService
             CacheKeyGenerator::siteImages($site->id),
         ];
 
+        // CACHE-1: every (pool, media_type) variant of /api/images. The polling
+        // path (?ids[]) uses unbounded fingerprint keys and relies on its own 5s
+        // TTL — not enumerated here.
+        foreach (CacheKeyGenerator::siteImagesViewVariants() as [$pool, $mediaType]) {
+            $variantKey = CacheKeyGenerator::siteImagesView($site->id, $pool, $mediaType);
+            $keys[] = $variantKey;
+            $keys[] = $variantKey.':stale';
+        }
+
+        // The auth-path Professional model cache (AUTH-1) holds the site relation
+        // preloaded — site writes must bust it or the next 60s of authenticated
+        // requests would see a stale subdomain / settings on $pro->site.
+        if ($professionalId !== '') {
+            $modelKey = CacheKeyGenerator::professionalModel($professionalId);
+            $keys[] = $modelKey;
+            $keys[] = $modelKey.':stale';
+        }
+
         // If subdomain changed, kill the OLD cache key too.
         // This is critical so old URLs redirect (via alias) instead of returning cached payload.
         if ($site->wasChanged('subdomain')) {

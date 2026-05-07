@@ -17,6 +17,8 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionMovement;
+use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cloudflare\CloudflareDnsService;
 use App\Services\Hydrogen\HydrogenDeploymentService;
@@ -25,6 +27,7 @@ use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -39,6 +42,7 @@ class EmbeddedSetupController extends ApiController
         private readonly ProfessionalCacheService $cache,
         private readonly BrandCatalogService $catalog,
         private readonly HydrogenDeploymentService $deployment,
+        private readonly CacheLockService $cacheLock,
     ) {}
 
     // ── Brand Profile ────────────────────────────────────────────────────────
@@ -60,8 +64,17 @@ class EmbeddedSetupController extends ApiController
         $storefrontBaseUrl = $storeSettings && $site
             ? $storeSettings->storefrontBaseUrl($site->subdomain)
             : null;
+        // Cached via CacheLockService (60s TTL, SWR + jitter). The probe itself is
+        // a synchronous HTTP GET to the brand's storefront — bypassing the cache
+        // would put a 5s timeout in the wizard's setup-prefill path on every poll.
+        // BrandStoreSettingsController::update() / deploy() bust this same key
+        // when wizard transitions actually flip the underlying state.
         $storefrontStatus = $storeSettings && $site
-            ? $this->checkStorefrontStatus($storeSettings, $site->subdomain)
+            ? $this->cacheLock->rememberLocked(
+                CacheKeyGenerator::brandStorefrontStatus($professionalId),
+                60,
+                fn () => $this->checkStorefrontStatus($storeSettings, $site->subdomain),
+            )
             : 'unreachable';
 
         // Auto-heal wizard flags when infrastructure is already live (e.g.

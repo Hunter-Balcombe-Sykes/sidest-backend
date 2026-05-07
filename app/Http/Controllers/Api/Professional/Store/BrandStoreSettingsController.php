@@ -11,12 +11,15 @@ use App\Http\Resources\BrandStoreSettingsResource;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
+use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use App\Services\Hydrogen\HydrogenDeploymentService;
 use App\Services\Professional\BrandStatusService;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 class BrandStoreSettingsController extends ApiController
@@ -30,6 +33,7 @@ class BrandStoreSettingsController extends ApiController
     public function __construct(
         private readonly BrandCatalogService $catalogService,
         private readonly HydrogenDeploymentService $deployment,
+        private readonly CacheLockService $cacheLock,
     ) {}
 
     public function show(Request $request): JsonResponse
@@ -69,7 +73,7 @@ class BrandStoreSettingsController extends ApiController
                 ? $storeSettings->storefrontBaseUrl($site?->subdomain ?? '')
                 : 'https://'.($site?->subdomain ?? '').'.sidest.co',
             'storefront_status' => $storeSettings
-                ? $this->checkStorefrontStatus($storeSettings, $site?->subdomain ?? '')
+                ? $this->cachedStorefrontStatus($pro->id, $storeSettings, $site?->subdomain ?? '')
                 : 'unreachable',
             'brand_status' => $brandProfile?->brand_status ?? BrandStatus::Onboarding->value,
         ]));
@@ -214,9 +218,12 @@ class BrandStoreSettingsController extends ApiController
             }
         }
 
-        // Return fresh state
+        // Return fresh state. Stash $site->fresh() once — calling it twice runs
+        // two identical SELECTs against Supabase even though the second result
+        // is byte-identical to the first.
         $storeSettings = BrandStoreSettings::where('professional_id', $pro->id)->first();
-        $freshSiteSettings = is_array($site?->fresh()?->settings) ? $site->fresh()->settings : [];
+        $freshSite = $site?->fresh();
+        $freshSiteSettings = is_array($freshSite?->settings) ? $freshSite->settings : [];
         $freshDesign = is_array($freshSiteSettings['design'] ?? null) ? $freshSiteSettings['design'] : [];
 
         // When Shopify sync ran, use fresh metadata from integration; otherwise fall back to stored metadata
@@ -246,7 +253,7 @@ class BrandStoreSettingsController extends ApiController
                 ? $storeSettings->storefrontBaseUrl($site?->subdomain ?? '')
                 : 'https://'.($site?->subdomain ?? '').'.sidest.co',
             'storefront_status' => $storeSettings
-                ? $this->checkStorefrontStatus($storeSettings, $site?->subdomain ?? '')
+                ? $this->cachedStorefrontStatus($pro->id, $storeSettings, $site?->subdomain ?? '', forceRefresh: true)
                 : 'unreachable',
         ]));
     }
@@ -267,9 +274,43 @@ class BrandStoreSettingsController extends ApiController
             return $this->error('No Oxygen deployment token saved. Please complete Oxygen setup first.', 400);
         }
 
+        // Deploys flip the storefront from unreachable → live; clear the cache
+        // so the next show() probes fresh state instead of returning the
+        // pre-deploy answer for up to 60s.
+        Cache::forget(CacheKeyGenerator::brandStorefrontStatus($pro->id));
+
         $this->deployment->dispatchDeployment($pro->id);
 
         return $this->success(['message' => 'Deployment triggered. It usually takes 1–2 minutes.']);
+    }
+
+    /**
+     * Cache wrapper around checkStorefrontStatus(). The probe itself is a
+     * synchronous outbound HTTP GET with 5s timeout — without this, every
+     * /api/brand/store-settings read paid up to 8s of P95 latency on a slow
+     * storefront. 60s TTL with SWR collapses that to one probe per minute
+     * per brand. update() and deploy() bust the key so wizard transitions
+     * surface immediately. Pass forceRefresh from write paths that want a
+     * fresh probe but no read-side staleness.
+     */
+    private function cachedStorefrontStatus(
+        string $professionalId,
+        BrandStoreSettings $settings,
+        string $subdomain,
+        bool $forceRefresh = false,
+    ): string {
+        $key = CacheKeyGenerator::brandStorefrontStatus($professionalId);
+
+        if ($forceRefresh) {
+            Cache::forget($key);
+            Cache::forget($key.':stale');
+        }
+
+        return $this->cacheLock->rememberLocked(
+            $key,
+            60,
+            fn () => $this->checkStorefrontStatus($settings, $subdomain),
+        );
     }
 
     /**

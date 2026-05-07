@@ -6,8 +6,10 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Models\Core\Notifications\Notification;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -30,9 +32,33 @@ class NotificationController extends ApiController
         $limit = max(1, min($limit, 200));
 
         $includeDismissed = filter_var($request->query('include_dismissed', false), FILTER_VALIDATE_BOOLEAN);
-        $now = now();
 
-        $base = $this->baseQuery($pro->id, $now);
+        // 15s TTL: short enough that a server-side notification publish
+        // (NotificationPublisher::publish, BrandPartnerLinkNotifier, etc — none
+        // of which fire Eloquent observers because they write via DB::table())
+        // surfaces within one poll cycle of the dashboard bell. markRead and
+        // dismiss bust this key explicitly. Cache key segments by limit +
+        // include_dismissed so frontend variants don't poison each other.
+        $payload = app(CacheLockService::class)->rememberLocked(
+            $this->cacheKey($pro->id, $limit, $includeDismissed),
+            15,
+            fn () => $this->buildIndexPayload($pro->id, $limit, $includeDismissed),
+        );
+
+        return $this->success($payload);
+    }
+
+    /**
+     * Build the raw index() payload (used by both the cached fast-path and the
+     * cache-fill closure). Two queries: one paginated list with limit+1 to
+     * detect `has_more`, plus one COUNT for the unread badge.
+     *
+     * @return array{unread_count: int, has_more: bool, notifications: array<int, mixed>}
+     */
+    private function buildIndexPayload(string $professionalId, int $limit, bool $includeDismissed): array
+    {
+        $now = now();
+        $base = $this->baseQuery($professionalId, $now);
 
         $listQuery = clone $base;
         if (! $includeDismissed) {
@@ -80,11 +106,38 @@ class NotificationController extends ApiController
             ->whereNull('r.dismissed_at')
             ->count();
 
-        return $this->success([
+        return [
             'unread_count' => $unreadCount,
             'has_more' => $hasMore,
-            'notifications' => $rows,
-        ]);
+            // Re-index to a plain array so JSON encodes as `[...]` not `{0:...}`
+            // after the trailing limit+1 row was sliced off above.
+            'notifications' => $rows->values()->all(),
+        ];
+    }
+
+    private function cacheKey(string $professionalId, int $limit, bool $includeDismissed): string
+    {
+        return "pro:{$professionalId}:notifications:".$limit.':'.($includeDismissed ? 'dismissed' : 'live');
+    }
+
+    /**
+     * Bust every variant of the notifications index cache for a professional.
+     * Called from markRead / dismiss after the receipt write so the next poll
+     * sees the new state immediately rather than waiting up to 15s for TTL.
+     * Iterates the small known set of (limit, include_dismissed) keys the
+     * frontend uses — narrower than a tagged flush and cheap on Redis.
+     */
+    private function bustIndexCache(string $professionalId): void
+    {
+        // Common limit values observed in the frontend; if a new variant is
+        // ever added the 15s TTL will absorb the lag until next poll.
+        foreach ([50, 100, 200] as $limit) {
+            foreach ([false, true] as $includeDismissed) {
+                $key = $this->cacheKey($professionalId, $limit, $includeDismissed);
+                Cache::forget($key);
+                Cache::forget($key.':stale');
+            }
+        }
     }
 
     private const RECEIPT_COLUMNS = ['read_at', 'dismissed_at'];
@@ -114,6 +167,7 @@ class NotificationController extends ApiController
         $this->assertNotificationActive($notification);
 
         $this->upsertReceipt($notification->id, $pro->id, ['read_at' => now()]);
+        $this->bustIndexCache($pro->id);
 
         return $this->success(['ok' => true]);
     }
@@ -125,6 +179,7 @@ class NotificationController extends ApiController
         $this->assertNotificationActive($notification);
 
         $this->upsertReceipt($notification->id, $pro->id, ['dismissed_at' => now()]);
+        $this->bustIndexCache($pro->id);
 
         return $this->success(['ok' => true]);
     }

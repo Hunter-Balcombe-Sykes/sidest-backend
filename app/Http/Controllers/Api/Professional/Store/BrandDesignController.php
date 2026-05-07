@@ -7,7 +7,6 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Resources\BrandDesignResource;
 use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
-use App\Models\Core\Site\Site;
 use App\Services\Media\BrandDesignMediaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -61,7 +60,9 @@ class BrandDesignController extends ApiController
     {
         $pro = $this->currentProfessional($request);
 
-        $site = Site::where('professional_id', $pro->id)->first();
+        // $pro->site rides along on the AUTH-1 cached Professional model; reading
+        // it here is a memory access rather than a Postgres round-trip.
+        $site = $pro->site;
         $settings = is_array($site?->settings) ? $site->settings : [];
         $design = is_array($settings['design'] ?? null) ? $settings['design'] : [];
 
