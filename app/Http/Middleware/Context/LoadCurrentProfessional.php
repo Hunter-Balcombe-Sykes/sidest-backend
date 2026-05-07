@@ -5,6 +5,7 @@ namespace App\Http\Middleware\Context;
 use App\Services\Cache\ProfessionalCacheService;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
@@ -67,6 +68,15 @@ class LoadCurrentProfessional
         }
 
         $request->attributes->set('professional', $professional);
+
+        // Tag Nightwatch records with tenant identity. The full Context blob is
+        // serialized into every request/job/exception record (RecordsContext trait),
+        // so these become searchable filters in the dashboard without extra plumbing.
+        // No DB cost: $professional is already loaded above.
+        Context::add([
+            'professional_id' => (string) $professional->id,
+            'professional_type' => (string) ($professional->professional_type ?? ''),
+        ]);
 
         Log::debug('LoadCurrentProfessional before next middleware');
 

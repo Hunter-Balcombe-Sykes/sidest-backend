@@ -11,7 +11,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-// V2: Marks expired affiliate invites and publishes expiry notifications to brand managers.
+// Marks expired affiliate invites and publishes expiry notifications to brand managers.
 class InviteExpirySweepJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -34,13 +34,17 @@ class InviteExpirySweepJob implements ShouldQueue
             ->where('expires_at', '<', $now)
             ->select(['id', 'brand_professional_id', 'email', 'first_name'])
             ->chunkById(500, function ($chunk) use ($publisher, $now) {
+                $ids = $chunk->pluck('id')->all();
+
+                // Bulk update reduces N×UPDATE round-trips to one per chunk;
+                // status='pending' still guards against concurrent expiry.
+                DB::table('brand.brand_affiliate_invites')
+                    ->whereIn('id', $ids)
+                    ->where('status', 'pending')
+                    ->update(['status' => 'expired', 'updated_at' => $now]);
+
                 foreach ($chunk as $invite) {
                     try {
-                        DB::table('brand.brand_affiliate_invites')
-                            ->where('id', $invite->id)
-                            ->where('status', 'pending') // guard against concurrent updates
-                            ->update(['status' => 'expired', 'updated_at' => $now]);
-
                         $brandId = trim((string) ($invite->brand_professional_id ?? ''));
                         if ($brandId === '') {
                             continue;

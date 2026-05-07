@@ -179,4 +179,16 @@ class CacheKeyGenerator
     {
         return "brand:{$brandProfessionalId}:product:{$productGid}:custom_photos";
     }
+
+    /**
+     * Booking-milestone totals snapshot. Caches the (lifetime bookings_count,
+     * lifetime total_spent_cents) tuple for the milestone-notification path so
+     * a burst of bookings doesn't re-scan analytics.booking_events for each one.
+     * Once a pro crosses the highest threshold, the same value is read from cache
+     * and the publisher's dedupe key suppresses the redundant notification.
+     */
+    public static function bookingMilestoneTotals(string $professionalId): string
+    {
+        return "pro:{$professionalId}:bookings:milestone-totals";
+    }
 }

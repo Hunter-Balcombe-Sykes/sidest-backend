@@ -5,6 +5,7 @@ namespace App\Jobs\Notifications;
 use App\Mail\StaffBroadcastMail;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
+use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -13,10 +14,11 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
-// V2: Sends individual staff broadcast email, respecting unsubscribe preferences and subscriber status.
+// Sends individual staff broadcast email, respecting unsubscribe preferences and subscriber status.
+// Dispatched by SendStaffBroadcastEmailsJob — one job per recipient so failures isolate and retry independently.
 class SendStaffBroadcastEmailToSubscriberJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Batchable, Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 

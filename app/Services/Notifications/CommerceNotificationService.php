@@ -2,6 +2,8 @@
 
 namespace App\Services\Notifications;
 
+use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -15,7 +17,18 @@ class CommerceNotificationService
     /** @var array<int, int> */
     private const BOOKING_REVENUE_MILESTONES_CENTS = [5_000, 10_000, 25_000, 50_000, 100_000, 250_000];
 
-    public function __construct(private readonly NotificationPublisher $publisher) {}
+    /**
+     * Short TTL for the milestone-totals snapshot. Long enough to absorb a burst
+     * of bookings without re-scanning analytics.booking_events; short enough that
+     * a newly-crossed milestone fires within ~60s of being earned. The publisher's
+     * dedupe key keeps a re-publish at the next refresh idempotent.
+     */
+    private const MILESTONE_TOTALS_TTL_SECONDS = 60;
+
+    public function __construct(
+        private readonly NotificationPublisher $publisher,
+        private readonly CacheLockService $cacheLock,
+    ) {}
 
     /**
      * @param  array{
@@ -113,14 +126,29 @@ class CommerceNotificationService
             return;
         }
 
-        $totals = DB::table('analytics.booking_events')
-            ->where('professional_id', $professionalId)
-            ->selectRaw('COUNT(*) as bookings_count')
-            ->selectRaw('COALESCE(SUM(amount_paid_cents), 0) as total_spent_cents')
-            ->first();
+        // Cache the lifetime COUNT/SUM tuple for 60s. A burst of bookings within
+        // this window reads the cached snapshot instead of rescanning every time;
+        // the publisher's dedupe key (`booking:count:<threshold>`) keeps a stale
+        // milestone read from re-firing the notification it already sent.
+        $totals = $this->cacheLock->rememberLocked(
+            CacheKeyGenerator::bookingMilestoneTotals($professionalId),
+            self::MILESTONE_TOTALS_TTL_SECONDS,
+            function () use ($professionalId): array {
+                $row = DB::table('analytics.booking_events')
+                    ->where('professional_id', $professionalId)
+                    ->selectRaw('COUNT(*) as bookings_count')
+                    ->selectRaw('COALESCE(SUM(amount_paid_cents), 0) as total_spent_cents')
+                    ->first();
 
-        $bookingsCount = max(0, (int) ($totals->bookings_count ?? 0));
-        $totalSpentCents = max(0, (int) ($totals->total_spent_cents ?? 0));
+                return [
+                    'bookings_count' => max(0, (int) ($row->bookings_count ?? 0)),
+                    'total_spent_cents' => max(0, (int) ($row->total_spent_cents ?? 0)),
+                ];
+            },
+        );
+
+        $bookingsCount = (int) ($totals['bookings_count'] ?? 0);
+        $totalSpentCents = (int) ($totals['total_spent_cents'] ?? 0);
 
         $bookingMilestone = $this->latestReachedThreshold($bookingsCount, self::BOOKING_COUNT_MILESTONES);
         if ($bookingMilestone !== null) {

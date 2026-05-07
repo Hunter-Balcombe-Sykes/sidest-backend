@@ -802,6 +802,8 @@ function setupBrandAffiliateInvitesTable(): void
         token TEXT NULL,
         handle TEXT NULL,
         email TEXT NULL,
+        first_name TEXT NULL,
+        last_name TEXT NULL,
         status TEXT NULL,
         claimed_by_professional_id TEXT NULL,
         claimed_professional_id TEXT NULL,
@@ -1122,6 +1124,32 @@ function setupLinkClicksTable(): void
         utm_medium TEXT NULL,
         utm_campaign TEXT NULL,
         created_at TEXT NULL
+    )');
+}
+
+/**
+ * notifications.email_subscriptions — minimal columns for broadcast fan-out tests.
+ */
+function setupEmailSubscriptionsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS notifications.email_subscriptions (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        list_key TEXT NOT NULL DEFAULT "marketing",
+        email TEXT NOT NULL,
+        email_lc TEXT NOT NULL,
+        full_name TEXT NULL,
+        status TEXT NOT NULL DEFAULT "subscribed",
+        subscribed_at TEXT NULL,
+        unsubscribed_at TEXT NULL,
+        unsubscribe_token TEXT NOT NULL,
+        consent_source TEXT NULL,
+        consent_ip_hash TEXT NULL,
+        consent_user_agent TEXT NULL,
+        qr_slug TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
     )');
 }
 

@@ -9,9 +9,12 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 
-// V2: Fans out staff broadcast emails to subscribers in 500-row batches.
+// Fans out staff broadcast emails to all marketing-list subscribers using Bus::batch()
+// so each sub-chunk of jobs shares one Redis pipeline write instead of one write per job —
+// the marketing list grows unboundedly with sign-ups, so this is the urgent batch fix.
 class SendStaffBroadcastEmailsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -19,6 +22,10 @@ class SendStaffBroadcastEmailsJob implements ShouldQueue
     public int $tries = 3;
 
     public array $backoff = [10, 30, 60];
+
+    // Bound batch size so any one Redis pipeline write stays predictable.
+    // Shared with FanOutBrandStatusNotificationJob — keep in sync if changed.
+    private const BATCH_CHUNK_SIZE = 200;
 
     public function __construct(
         public string $notificationId,
@@ -38,11 +45,28 @@ class SendStaffBroadcastEmailsJob implements ShouldQueue
             ->where('status', 'subscribed')
             ->orderBy('id')
             ->chunkById(500, function ($subs) use ($notification) {
-                foreach ($subs as $sub) {
-                    SendStaffBroadcastEmailToSubscriberJob::dispatch(
-                        $notification->id,
-                        $sub->id
-                    )->onQueue('mail');
+                $jobs = $subs->map(fn ($sub) => new SendStaffBroadcastEmailToSubscriberJob(
+                    $notification->id,
+                    $sub->id,
+                ))->all();
+
+                // One Redis pipeline write per batch vs. one per job if dispatched
+                // individually. allowFailures() preserves the per-job retry semantics
+                // SendStaffBroadcastEmailToSubscriberJob's $tries=3 promises — without it,
+                // a single failure cancels remaining (still-pending) jobs in the batch.
+                foreach (array_chunk($jobs, self::BATCH_CHUNK_SIZE) as $chunk) {
+                    $batch = Bus::batch($chunk)
+                        ->onQueue('mail')
+                        ->name('staff-broadcast:'.$notification->id)
+                        ->allowFailures()
+                        ->dispatch();
+
+                    Log::info('Staff broadcast batch dispatched', [
+                        'batch_id' => $batch->id,
+                        'notification_id' => $notification->id,
+                        'list_key' => $this->listKey,
+                        'job_count' => count($chunk),
+                    ]);
                 }
             });
     }
