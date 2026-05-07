@@ -36,25 +36,73 @@ class ProfessionalSectionBlockController extends ApiController
         $allSections = config('partna.section_block_types', []);
         $unavailableSections = array_values(array_diff($allSections, $allowedSections));
 
-        $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
+        // Read all section blocks once. We need every type (not just allowed)
+        // to detect drift correctly — `syncAllowedSections` historically ran
+        // unconditionally inside a write transaction + advisory lock on every
+        // GET, serializing concurrent dashboard polls. The lazy fast path here
+        // keeps that guarantee while skipping the lock when state is already in sync.
+        $allSectionBlocks = $pro->sectionBlocks()
+            ->where('site_id', $site->id)
+            ->orderBy('sort_order')
+            ->get();
+
+        if ($this->needsSyncForAllowed($allSectionBlocks, $allowedSections)) {
+            $this->syncAllowedSections($pro->id, $site->id, $allowedSections);
+            $allSectionBlocks = $pro->sectionBlocks()
+                ->where('site_id', $site->id)
+                ->orderBy('sort_order')
+                ->get();
+        }
 
         // Returns both published and drafted sections so the dashboard can
         // render the Draft → Live toggle for each. The is_enabled filter
         // used to hide drafts but was always-true for allowed sections
         // anyway — dropping it is explicit, not behavioural.
-        $sections = $pro->sectionBlocks()
-            ->where('site_id', $site->id)
-            ->whereIn('block_type', $allowedSections)
-            ->orderBy('sort_order')
-            ->get();
+        $sections = $allSectionBlocks
+            ->filter(fn (Block $b) => in_array($b->block_type, $allowedSections, true))
+            ->values();
+
+        // Batched visibility: replaces N×checkVisibilityRequirements() (each
+        // doing 1–4 exists() queries) with one pass that loads each data-source
+        // at most once across all sections.
+        $visibilityMap = $this->visibilityService->batchCheck(
+            (string) $pro->id,
+            (string) $site->id,
+            $sections,
+        );
 
         return $this->success([
             'sections' => $sections
-                ->map(fn (Block $section) => $this->serializeSection($section, (string) $pro->id, (string) $site->id))
+                ->map(fn (Block $section) => $this->serializeSection($section, $visibilityMap))
                 ->values(),
             'allowed_sections' => array_values($allowedSections),
             'unavailable_sections' => $unavailableSections,
         ]);
+    }
+
+    /**
+     * Determine whether the stored section blocks have drifted from the allowed
+     * set — either an allowed type has no row yet, or its row has is_enabled=false.
+     * Fast path runs on every read, so it must avoid further DB calls.
+     *
+     * @param  \Illuminate\Support\Collection<int, Block>  $sectionBlocks
+     * @param  array<int, string>  $allowedSections
+     */
+    private function needsSyncForAllowed($sectionBlocks, array $allowedSections): bool
+    {
+        $byType = $sectionBlocks->keyBy('block_type');
+
+        foreach ($allowedSections as $type) {
+            if (! is_string($type)) {
+                continue;
+            }
+            $block = $byType->get($type);
+            if (! $block || ! (bool) $block->is_enabled) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function upsert(UpsertSectionBlockRequest $request, string $blockType)
@@ -312,24 +360,25 @@ class ProfessionalSectionBlockController extends ApiController
         });
     }
 
-    private function serializeSection(Block $section, ?string $professionalId = null, ?string $siteId = null): array
+    /**
+     * Serialize a section block for API output.
+     *
+     * @param  array<string, array{0: bool, 1: ?string}>|null  $visibilityMap
+     *                                                                         Optional precomputed map of block_type → [canPublish, reason].
+     *                                                                         Supplied by the index action (one batched lookup for all sections);
+     *                                                                         upsert/remove pass null since they've already enforced visibility
+     *                                                                         at write time and the post-mutation response doesn't need the gate.
+     */
+    private function serializeSection(Block $section, ?array $visibilityMap = null): array
     {
         $payload = $section->toArray();
         $isLive = (bool) ($section->is_active ?? false);
         $payload['publication_state'] = $isLive ? 'live' : 'draft';
         $payload['is_live'] = $isLive;
 
-        // Expose the visibility gate state to the frontend so the Publish
-        // button can disable + show its tooltip reason without duplicating
-        // the rule set. Only queried when the ids are provided (the index
-        // action supplies them; upsert/remove reuse this serializer post-
-        // mutation and can skip the check since they already enforced it).
-        if ($professionalId !== null && $siteId !== null) {
-            [$canPublish, $reason] = $this->visibilityService->checkVisibilityRequirements(
-                $professionalId,
-                $siteId,
-                (string) $section->block_type,
-            );
+        if ($visibilityMap !== null) {
+            $type = (string) $section->block_type;
+            [$canPublish, $reason] = $visibilityMap[$type] ?? [true, null];
             $payload['can_publish'] = $canPublish;
             $payload['requirement_reason'] = $reason;
         }

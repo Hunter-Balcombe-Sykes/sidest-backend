@@ -6,6 +6,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\SiteMedia;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -35,6 +36,151 @@ class SectionVisibilityService
             'contact' => $this->checkContactRequirements($professionalId, $siteId, $pendingSettings),
             default => [true, null],
         };
+    }
+
+    /**
+     * Batch-evaluate visibility for a set of already-loaded section blocks.
+     *
+     * Loads each visibility data-source at most once (and only when at least one
+     * section in the input requires it), then resolves every block against that
+     * shared context. Replaces the N×checkVisibilityRequirements() pattern that
+     * the index endpoint used to issue 1–4 exists() queries per section.
+     *
+     * @param  iterable<Block>  $sectionBlocks  Already-loaded blocks; their
+     *                                          stored settings are used for
+     *                                          countdown/contact (no DB call).
+     * @return array<string, array{0: bool, 1: ?string}> Map of block_type → [canBeVisible, reason]
+     */
+    public function batchCheck(string $professionalId, string $siteId, iterable $sectionBlocks): array
+    {
+        $blocks = $sectionBlocks instanceof Collection
+            ? $sectionBlocks
+            : Collection::make($sectionBlocks);
+
+        $types = $blocks->pluck('block_type')
+            ->filter(fn ($t) => is_string($t))
+            ->unique()
+            ->values()
+            ->all();
+
+        // Only query for data-sources that at least one present block needs.
+        // Sites without (e.g.) a booking section never pay for ProfessionalIntegration
+        // / link-block lookups.
+        $context = [
+            'has_gallery_image' => in_array('gallery', $types, true)
+                ? $this->galleryHasImage($siteId)
+                : null,
+            'has_document' => in_array('documents', $types, true)
+                ? $this->siteHasDocument($siteId)
+                : null,
+            'has_priced_service' => in_array('services', $types, true)
+                ? $this->professionalHasPricedService($professionalId)
+                : null,
+            'has_active_service' => in_array('booking', $types, true)
+                ? $this->professionalHasActiveService($professionalId)
+                : null,
+            'has_booking_integration' => in_array('booking', $types, true)
+                ? $this->professionalHasBookingIntegration($professionalId)
+                : null,
+            'has_booking_link_block' => in_array('booking', $types, true)
+                ? $this->professionalHasBookingLinkBlock($professionalId)
+                : null,
+        ];
+
+        $byType = [];
+        foreach ($blocks as $block) {
+            $type = (string) ($block->block_type ?? '');
+            if ($type === '' || array_key_exists($type, $byType)) {
+                continue;
+            }
+            $byType[$type] = $this->resolveFromContext($block, $context);
+        }
+
+        return $byType;
+    }
+
+    /**
+     * Resolve a single block's visibility from a precomputed context.
+     * Booking's legacy `settings->booking_url` path reads from the loaded block,
+     * not the DB — same data source, no extra round-trip.
+     *
+     * @param  array<string, bool|null>  $context
+     * @return array{0: bool, 1: ?string}
+     */
+    private function resolveFromContext(Block $block, array $context): array
+    {
+        $type = (string) ($block->block_type ?? '');
+
+        return match ($type) {
+            'gallery' => $context['has_gallery_image']
+                ? [true, null]
+                : [false, 'Gallery section requires at least 1 uploaded image.'],
+
+            'documents' => $context['has_document']
+                ? [true, null]
+                : [false, 'Documents section requires an uploaded document.'],
+
+            'services' => $context['has_priced_service']
+                ? [true, null]
+                : [false, 'Services section requires at least 1 service with a title and price.'],
+
+            'booking' => $this->resolveBookingFromContext($block, $context),
+
+            // Countdown + contact requirements live entirely in the block's own
+            // settings — no DB lookup needed when the block is already loaded.
+            'countdown' => $this->resolveCountdownFromBlock($block),
+            'contact' => $this->resolveContactFromBlock($block),
+
+            default => [true, null],
+        };
+    }
+
+    /**
+     * @param  array<string, bool|null>  $context
+     * @return array{0: bool, 1: ?string}
+     */
+    private function resolveBookingFromContext(Block $block, array $context): array
+    {
+        if (! $context['has_active_service']) {
+            return [false, 'Booking section requires at least 1 active service.'];
+        }
+
+        if ($context['has_booking_integration']) {
+            return [true, null];
+        }
+
+        if ($context['has_booking_link_block']) {
+            return [true, null];
+        }
+
+        // Legacy fallback: booking_url stored on the section block itself.
+        // Already loaded via $block->settings — no DB hit.
+        $url = data_get(is_array($block->settings) ? $block->settings : [], 'booking_url');
+        if (is_string($url) && trim($url) !== '') {
+            return [true, null];
+        }
+
+        return [false, 'Booking section requires a booking link or booking integration.'];
+    }
+
+    /**
+     * @return array{0: bool, 1: ?string}
+     */
+    private function resolveCountdownFromBlock(Block $block): array
+    {
+        $settings = is_array($block->settings) ? $block->settings : [];
+
+        return $this->validateCountdownSettings($settings);
+    }
+
+    /**
+     * @return array{0: bool, 1: ?string}
+     */
+    private function resolveContactFromBlock(Block $block): array
+    {
+        $settings = is_array($block->settings) ? $block->settings : [];
+
+        return $this->validateContactSettings($settings);
     }
 
     /**
@@ -73,15 +219,7 @@ class SectionVisibilityService
 
     private function checkGalleryRequirements(string $siteId): array
     {
-        $hasImage = SiteMedia::query()
-            ->where('site_id', $siteId)
-            ->where('pool', SiteMedia::POOL_GALLERY)
-            ->where('media_type', SiteMedia::MEDIA_TYPE_IMAGE)
-            ->where('is_active', true)
-            ->whereNull('deleted_at')
-            ->exists();
-
-        if (! $hasImage) {
+        if (! $this->galleryHasImage($siteId)) {
             return [false, 'Gallery section requires at least 1 uploaded image.'];
         }
 
@@ -95,16 +233,7 @@ class SectionVisibilityService
         // price > 0. Matches the "valid enough to show publicly" bar used by
         // the dashboard's service editor — title and price are the two
         // fields customers actually see in the rendered list.
-        $hasPricedService = Service::query()
-            ->where('professional_id', $professionalId)
-            ->where('is_active', true)
-            ->whereNull('deleted_at')
-            ->whereNotNull('title')
-            ->where('title', '!=', '')
-            ->where('price_cents', '>', 0)
-            ->exists();
-
-        if (! $hasPricedService) {
+        if (! $this->professionalHasPricedService($professionalId)) {
             return [false, 'Services section requires at least 1 service with a title and price.'];
         }
 
@@ -113,18 +242,80 @@ class SectionVisibilityService
 
     private function checkDocumentsRequirements(string $siteId): array
     {
-        $hasDocument = SiteMedia::query()
+        if (! $this->siteHasDocument($siteId)) {
+            return [false, 'Documents section requires an uploaded document.'];
+        }
+
+        return [true, null];
+    }
+
+    private function galleryHasImage(string $siteId): bool
+    {
+        return SiteMedia::query()
+            ->where('site_id', $siteId)
+            ->where('pool', SiteMedia::POOL_GALLERY)
+            ->where('media_type', SiteMedia::MEDIA_TYPE_IMAGE)
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->exists();
+    }
+
+    private function siteHasDocument(string $siteId): bool
+    {
+        return SiteMedia::query()
             ->where('site_id', $siteId)
             ->where('pool', SiteMedia::POOL_DOCUMENTS)
             ->where('is_active', true)
             ->whereNull('deleted_at')
             ->exists();
+    }
 
-        if (! $hasDocument) {
-            return [false, 'Documents section requires an uploaded document.'];
+    private function professionalHasPricedService(string $professionalId): bool
+    {
+        return Service::query()
+            ->where('professional_id', $professionalId)
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->whereNotNull('title')
+            ->where('title', '!=', '')
+            ->where('price_cents', '>', 0)
+            ->exists();
+    }
+
+    private function professionalHasActiveService(string $professionalId): bool
+    {
+        return Service::query()
+            ->where('professional_id', $professionalId)
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->exists();
+    }
+
+    private function professionalHasBookingIntegration(string $professionalId): bool
+    {
+        // Smart-booking integration path is only available when the feature flag is on.
+        // Pre-launch, only the manual booking_url (redirect link) path is accepted.
+        if (! config('partna.features.smart_booking', false)) {
+            return false;
         }
 
-        return [true, null];
+        return ProfessionalIntegration::query()
+            ->where('professional_id', $professionalId)
+            ->whereIn('provider', [
+                ProfessionalIntegration::PROVIDER_SQUARE,
+                ProfessionalIntegration::PROVIDER_FRESHA,
+            ])
+            ->exists();
+    }
+
+    private function professionalHasBookingLinkBlock(string $professionalId): bool
+    {
+        return Block::query()
+            ->where('professional_id', $professionalId)
+            ->where('block_group', 'links')
+            ->where('settings->category', 'booking')
+            ->whereNull('deleted_at')
+            ->exists();
     }
 
     /**
@@ -153,6 +344,15 @@ class SectionVisibilityService
             ? array_replace_recursive($stored, $pendingSettings)
             : $stored;
 
+        return $this->validateCountdownSettings($settings);
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     * @return array{0: bool, 1: ?string}
+     */
+    private function validateCountdownSettings(array $settings): array
+    {
         $drop = data_get($settings, 'timeline.drop_time');
         $expiry = data_get($settings, 'timeline.expiry_time');
 
@@ -206,6 +406,15 @@ class SectionVisibilityService
             ? array_replace_recursive($stored, $pendingSettings)
             : $stored;
 
+        return $this->validateContactSettings($settings);
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     * @return array{0: bool, 1: ?string}
+     */
+    private function validateContactSettings(array $settings): array
+    {
         $email = data_get($settings, 'notification_email');
         $email = is_string($email) ? trim($email) : '';
 
@@ -218,42 +427,17 @@ class SectionVisibilityService
 
     private function checkBookingRequirements(string $professionalId): array
     {
-        $hasService = Service::query()
-            ->where('professional_id', $professionalId)
-            ->where('is_active', true)
-            ->whereNull('deleted_at')
-            ->exists();
-
-        if (! $hasService) {
+        if (! $this->professionalHasActiveService($professionalId)) {
             return [false, 'Booking section requires at least 1 active service.'];
         }
 
-        // Smart-booking integration path is only available when the feature flag is on.
-        // Pre-launch, only the manual booking_url (redirect link) path is accepted.
-        $hasBookingIntegration = (bool) config('partna.features.smart_booking', false)
-            && ProfessionalIntegration::query()
-                ->where('professional_id', $professionalId)
-                ->whereIn('provider', [
-                    ProfessionalIntegration::PROVIDER_SQUARE,
-                    ProfessionalIntegration::PROVIDER_FRESHA,
-                ])
-                ->exists();
-
-        if ($hasBookingIntegration) {
+        if ($this->professionalHasBookingIntegration($professionalId)) {
             return [true, null];
         }
 
-        // Check for a booking link block — the current path. Link blocks use
-        // block_group='links' with settings->category='booking'. This replaced
-        // the old settings->booking_url field on the section block itself.
-        $hasLinkBlock = Block::query()
-            ->where('professional_id', $professionalId)
-            ->where('block_group', 'links')
-            ->where('settings->category', 'booking')
-            ->whereNull('deleted_at')
-            ->exists();
-
-        if ($hasLinkBlock) {
+        // Current path: a link block (block_group='links', settings->category='booking').
+        // Replaced the old settings->booking_url field on the section block itself.
+        if ($this->professionalHasBookingLinkBlock($professionalId)) {
             return [true, null];
         }
 
