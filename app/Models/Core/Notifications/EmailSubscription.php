@@ -78,20 +78,19 @@ class EmailSubscription extends BaseModel
     /**
      * Sync customer cache after save (when status changes).
      * Source of truth is this EmailSubscription.status, but we cache on Customer for UX/perf.
+     * Dispatched async (CACHE-11) so bulk subscribe imports don't pay a per-row Customer lookup
+     * inside the originating request — Customer.isMarketingOptedIn() falls back to a live
+     * read while the cache catches up.
      */
     protected static function booted(): void
     {
         static::saved(function (self $subscription) {
             if ($subscription->list_key === 'marketing' && $subscription->professional_id && $subscription->email) {
-                $customer = \App\Models\Core\Professional\Customer::query()
-                    ->where('professional_id', $subscription->professional_id)
-                    ->where('email', $subscription->email)
-                    ->first();
-
-                if ($customer) {
-                    $customer->marketing_opt_in_cached = $subscription->status === 'subscribed';
-                    $customer->saveQuietly();
-                }
+                \App\Jobs\Notifications\SyncCustomerMarketingOptInJob::dispatch(
+                    (string) $subscription->professional_id,
+                    (string) $subscription->email,
+                    $subscription->status === 'subscribed',
+                );
             }
         });
     }

@@ -63,6 +63,45 @@ it('dispatchFreshaSync queues PushServiceToFreshaJob', function () {
     });
 });
 
+// CACHE-12: jitter the dispatch by 0-30s so a bulk service import doesn't burst Square/Fresha
+// rate limits. We assert the job is scheduled in the future within the 30s window — the exact
+// random value isn't relevant, only that the spreader is wired up.
+it('dispatchSquareSync schedules the job with a 0-30s random delay', function () {
+    Queue::fake();
+
+    $before = now();
+    invokeDispatchMethod('dispatchSquareSync', 'svc-jitter', 'upsert');
+
+    Queue::assertPushed(PushServiceToSquareJob::class, function ($job) use ($before) {
+        $delay = $job->delay;
+        if (! $delay instanceof \DateTimeInterface) {
+            return false;
+        }
+
+        $deltaSeconds = $delay->getTimestamp() - $before->getTimestamp();
+
+        return $deltaSeconds >= 0 && $deltaSeconds <= 30;
+    });
+});
+
+it('dispatchFreshaSync schedules the job with a 0-30s random delay', function () {
+    Queue::fake();
+
+    $before = now();
+    invokeDispatchMethod('dispatchFreshaSync', 'svc-jitter', 'upsert');
+
+    Queue::assertPushed(PushServiceToFreshaJob::class, function ($job) use ($before) {
+        $delay = $job->delay;
+        if (! $delay instanceof \DateTimeInterface) {
+            return false;
+        }
+
+        $deltaSeconds = $delay->getTimestamp() - $before->getTimestamp();
+
+        return $deltaSeconds >= 0 && $deltaSeconds <= 30;
+    });
+});
+
 // CR-005: bust() failure must not abort the rest of the runHooks pipeline.
 // A service whose professional doesn't exist causes bust() to return null.
 // The pipeline should complete without exception and dispatch no sync jobs.

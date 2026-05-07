@@ -131,11 +131,23 @@ class ServiceObserver
         }
     }
 
+    /**
+     * Random 0-30s delay (CACHE-12) so a bulk service import (e.g. 50 edits in seconds)
+     * spreads sync calls across a 30s window instead of bursting Square/Fresha and
+     * tripping their rate limits. Single edits feel instant: 0-30s of queue lag is
+     * already within normal Horizon backlog.
+     */
+    private function syncDispatchDelay(): \DateTimeInterface
+    {
+        return now()->addSeconds(random_int(0, 30));
+    }
+
     private function dispatchSquareSync(string $serviceId, string $action): void
     {
         try {
             // Queued on the 'integrations' queue (Horizon required for syncs to process).
-            PushServiceToSquareJob::dispatch($serviceId, $action);
+            PushServiceToSquareJob::dispatch($serviceId, $action)
+                ->delay($this->syncDispatchDelay());
         } catch (\Throwable $e) {
             // Never fail core service CRUD because sync dispatch failed.
             Log::warning('PushServiceToSquareJob dispatch failed', [
@@ -150,7 +162,8 @@ class ServiceObserver
     {
         try {
             // Queued on the 'integrations' queue (Horizon required for syncs to process).
-            PushServiceToFreshaJob::dispatch($serviceId, $action);
+            PushServiceToFreshaJob::dispatch($serviceId, $action)
+                ->delay($this->syncDispatchDelay());
         } catch (\Throwable $e) {
             // Never fail core service CRUD because sync dispatch failed.
             Log::warning('PushServiceToFreshaJob dispatch failed', [
