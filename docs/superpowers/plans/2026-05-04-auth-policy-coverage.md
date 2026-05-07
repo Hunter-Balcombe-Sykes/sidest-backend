@@ -50,7 +50,7 @@ The audit explicitly endorses `SitePolicy` covering `Site`/`Block`/`SiteMedia`. 
 Total: **11 policies** for 33 tenant-owned models. (Plus existing `IntegrationPolicy`.)
 
 **Models that get NO policy** (Shape D — global/system, allowlisted in sweep test):
-- `Plan` (catalog), `WebhookEvent` (system log), `MediaVariant` (parent-controlled), `SidestStaff` (separate auth surface), `WaitlistSignup` (public submission), `CartEvent`/`LinkClick`/`SiteVisit` (public ingestion endpoints, scoped by site at write-time).
+- `Plan` (catalog), `WebhookEvent` (system log), `MediaVariant` (parent-controlled), `PartnaStaff` (separate auth surface), `WaitlistSignup` (public submission), `CartEvent`/`LinkClick`/`SiteVisit` (public ingestion endpoints, scoped by site at write-time).
 
 ### Decision 2: Brand-only checks become middleware, not policy abilities
 
@@ -232,7 +232,7 @@ const POLICY_EXEMPT = [
     \App\Models\Billing\Plan::class,
     \App\Models\Billing\WebhookEvent::class,
     \App\Models\Core\MediaVariant::class,           // owned via parent SiteMedia
-    \App\Models\Core\Staff\SidestStaff::class,      // separate auth surface
+    \App\Models\Core\Staff\PartnaStaff::class,      // separate auth surface
     \App\Models\Core\Waitlist\WaitlistSignup::class, // public submission, no actor
 
     // Public ingestion — write-only via public site endpoints; scoped by

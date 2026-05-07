@@ -1,11 +1,11 @@
 <?php
 
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAccountDeletionController;
-use App\Http\Middleware\Auth\EnsureSidestAdmin;
+use App\Http\Middleware\Auth\EnsurePartnaAdmin;
 use App\Mail\Notifications\AccountDeletionScheduledMail;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\AccountDeletionService;
 use App\Services\Stripe\StripeBillingService;
 use Illuminate\Http\Request;
@@ -21,7 +21,7 @@ beforeEach(function () {
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-function makeAdminStaff(array $overrides = []): SidestStaff
+function makeAdminStaff(array $overrides = []): PartnaStaff
 {
     $id = (string) Str::uuid();
     $data = array_merge([
@@ -34,7 +34,7 @@ function makeAdminStaff(array $overrides = []): SidestStaff
 
     DB::connection('pgsql')->table('core.sidest_staff')->insert($data);
 
-    return SidestStaff::query()->where('id', $id)->first();
+    return PartnaStaff::query()->where('id', $id)->first();
 }
 
 function makeActiveProfessional(array $overrides = []): Professional
@@ -56,10 +56,10 @@ function makeActiveProfessional(array $overrides = []): Professional
     return Professional::query()->where('id', $id)->first();
 }
 
-function makeAdminRequest(SidestStaff $staff, array $body = []): Request
+function makeAdminRequest(PartnaStaff $staff, array $body = []): Request
 {
     $request = Request::create('/', 'POST', $body);
-    $request->attributes->set('sidest_staff', $staff);
+    $request->attributes->set('partna_staff', $staff);
 
     return $request;
 }
@@ -268,7 +268,7 @@ it('admin cancel fails with 409 if no pending deletion exists', function () {
         ->and($result['code'])->toBe(409);
 });
 
-it('non-admin staff get 403 from EnsureSidestAdmin middleware', function () {
+it('non-admin staff get 403 from EnsurePartnaAdmin middleware', function () {
     $nonAdminUid = (string) Str::uuid();
     $staffId = (string) Str::uuid();
 
@@ -280,13 +280,13 @@ it('non-admin staff get 403 from EnsureSidestAdmin middleware', function () {
         'primary_email' => 'support@sidest.test',
     ]);
 
-    $nonAdmin = SidestStaff::query()->where('id', $staffId)->first();
+    $nonAdmin = PartnaStaff::query()->where('id', $staffId)->first();
 
     $request = Request::create('/', 'POST');
     $request->attributes->set('supabase_uid', $nonAdminUid);
-    $request->attributes->set('sidest_staff', $nonAdmin);
+    $request->attributes->set('partna_staff', $nonAdmin);
 
-    $middleware = new EnsureSidestAdmin;
+    $middleware = new EnsurePartnaAdmin;
     $response = $middleware->handle($request, fn () => response()->json(['ok' => true]));
 
     expect($response->getStatusCode())->toBe(403);

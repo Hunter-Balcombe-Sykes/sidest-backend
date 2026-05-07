@@ -234,7 +234,7 @@ git commit -m "feat(db): add document media_type + public_site_payload projectio
 - [ ] **Step 1: Create the test directory**
 
 ```bash
-mkdir -p "/Users/joshuahunter/Herd/Side Street/backend/tests/Feature/Documents"
+mkdir -p "/Users/joshuahunter/Herd/Partna/backend/tests/Feature/Documents"
 ```
 
 - [ ] **Step 2: Write the failing test**
@@ -703,7 +703,7 @@ Expected: all 10 tests FAIL — request class doesn't exist, controller doesn't 
 - [ ] **Step 3: Create the request class directory and file**
 
 ```bash
-mkdir -p "/Users/joshuahunter/Herd/Side Street/backend/app/Http/Requests/Api/Professional/Documents"
+mkdir -p "/Users/joshuahunter/Herd/Partna/backend/app/Http/Requests/Api/Professional/Documents"
 ```
 
 Create `app/Http/Requests/Api/Professional/Documents/UploadDocumentRequest.php`:

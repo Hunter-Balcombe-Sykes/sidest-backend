@@ -178,7 +178,7 @@ class BrandSignupService
 
         foreach ($tokens as $token) {
             $title = (string) ($token['title'] ?? '');
-            if ($title !== 'Side St' && $title !== 'Side St Hydrogen') {
+            if ($title !== 'Partna' && $title !== 'Partna Hydrogen') {
                 continue;
             }
 

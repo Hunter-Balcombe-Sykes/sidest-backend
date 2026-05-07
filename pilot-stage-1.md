@@ -1,4 +1,4 @@
-# Side St — Stage 1 Pilot Readiness Checklist
+# Partna — Stage 1 Pilot Readiness Checklist
 
 **Stage 1: 1 brand, ~10 affiliates, ~50 links**
 
@@ -73,7 +73,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.5–1h)
     - **What to do:**
         - Run `composer update aws/aws-sdk-php` to a version > 3.371.3.
-        - Audit any caller of CloudFront client APIs (likely none — Side St media is on R2 — but confirm).
+        - Audit any caller of CloudFront client APIs (likely none — Partna media is on R2 — but confirm).
         - See finding #10-07: add `composer audit` to CI so future advisories don't sit undetected.
     - **Technical:** A one-line dependency bump. Verify the bump doesn't cascade-break other AWS clients (the S3 client is used by the R2 media disk). Cross-check with `composer outdated --direct`.
     - **Plain English:** A security flaw in a third-party AWS package. Even if we don't use the affected feature directly, the code is in our application. Update the package.
@@ -958,7 +958,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** M (~3h)
     - **What to do:**
         - Track deletion origin; skip resync of services manually deleted within retention window.
-    - **Technical:** Side St delete + Square full sync = service zombie reappears.
+    - **Technical:** Partna delete + Square full sync = service zombie reappears.
     - **Source:** v5 audit (discovery_lens: domain-subagent-5; in_scope_v4: yes).
 
 - [x] **#V5-036** · P2 — Hydrogen affiliate response shape changed (added id) — Hydrogen cache may be stale
@@ -1050,7 +1050,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Source:** v5 audit (discovery_lens: domain-subagent-7-pass2; in_scope_v4: no).
 
 - [x] **#V5-048** · P2 — Staff middleware doesn't differentiate fine-grained permissions
-    - **Where:** app/Http/Middleware/Auth/EnsureSidestStaff.php:22
+    - **Where:** app/Http/Middleware/Auth/EnsurePartnaStaff.php:22
     - **Effort:** M (~2h)
     - **What to do:**
         - Role-based gates if planning a more limited support-staff surface.
@@ -1333,10 +1333,10 @@ These are best in their own session because bundling would force unrelated archi
     - **Effort:** S (~0.5h)
     - **What to do:** Document the immutability assumption (auth_user_id never changes) inline.
 
-- [x] **#1-07** · P3 — `EnsureSidestStaff` fail-closed but creation flow not asserted by test
-    - **Where:** app/Http/Middleware/Auth/EnsureSidestStaff.php
+- [x] **#1-07** · P3 — `EnsurePartnaStaff` fail-closed but creation flow not asserted by test
+    - **Where:** app/Http/Middleware/Auth/EnsurePartnaStaff.php
     - **Effort:** S (~1h)
-    - **What to do:** Add a Pest test that confirms staff creation requires both Supabase + SidestStaff atomically.
+    - **What to do:** Add a Pest test that confirms staff creation requires both Supabase + PartnaStaff atomically.
 
 - [x] **#1-06** · P3 — `BrandAccessService::isBrandProfessional()` is a type-check living next to capability methods
     - **Where:** app/Http/Controllers/Api/Professional/ShopifyIntegration/ShopifyIntegrationController.php:64

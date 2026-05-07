@@ -72,7 +72,7 @@ class PurgeRawAnalyticsEvents extends Command
 
     private function retentionDays(): ?int
     {
-        $raw = $this->option('days') ?? config('sidest.analytics_raw_event_retention_days', 90);
+        $raw = $this->option('days') ?? config('partna.analytics_raw_event_retention_days', 90);
         $days = (int) $raw;
 
         if ($days < 30) {

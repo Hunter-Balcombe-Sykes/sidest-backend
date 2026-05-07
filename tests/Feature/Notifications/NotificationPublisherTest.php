@@ -58,7 +58,7 @@ beforeEach(function () {
          WHERE dedupe_key IS NOT NULL'
     );
 
-    Config::set('sidest.notifications.email_enabled', false);
+    Config::set('partna.notifications.email_enabled', false);
 });
 
 it('stores dedupe_key in its own column, not smuggled into the CTA URL', function () {
@@ -154,7 +154,7 @@ it('rejects empty professional_id or empty title/body silently', function () {
 
 it('dispatches the mailable class resolved from config for the category', function () {
     Mail::fake();
-    Config::set('sidest.notifications.email_enabled', true);
+    Config::set('partna.notifications.email_enabled', true);
 
     // Seed a notification row the job can load.
     DB::table('notifications.notifications')->insert([
@@ -195,8 +195,8 @@ it('dispatches the mailable class resolved from config for the category', functi
 
 it('skips email dispatch when category maps to null (in-app only)', function () {
     Mail::fake();
-    Config::set('sidest.notifications.email_enabled', true);
-    Config::set('sidest.notifications.mailables.in_app_only_demo', null);
+    Config::set('partna.notifications.email_enabled', true);
+    Config::set('partna.notifications.mailables.in_app_only_demo', null);
 
     // Minimal seed — job should bail on null mapping before DB reads matter.
     (new SendTransactionalNotificationEmailJob('n-x', 'in_app_only_demo', 'pro-1'))->handle();

@@ -133,7 +133,7 @@ class AffiliateProductController extends ApiController
             return $errorResponse;
         }
 
-        $max = (int) config('sidest.store.max_featured_products', 10);
+        $max = (int) config('partna.store.max_featured_products', 10);
 
         try {
             $selection = DB::transaction(function () use ($pro, $validated, $brandProfessionalId, $selectedVariantGids, $max) {

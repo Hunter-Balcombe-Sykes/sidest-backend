@@ -29,7 +29,7 @@ class RedactCustomerJob implements ShouldQueue
 
     public function __construct(public string $gdprRequestId)
     {
-        $this->onQueue(config('sidest.gdpr.queue'));
+        $this->onQueue(config('partna.gdpr.queue'));
     }
 
     public function backoff(): array
@@ -83,7 +83,7 @@ class RedactCustomerJob implements ShouldQueue
                 ->first();
 
             if ($customer) {
-                $placeholderDomain = config('sidest.gdpr.redact_placeholder_domain', 'gdpr.sidest.io');
+                $placeholderDomain = config('partna.gdpr.redact_placeholder_domain', 'gdpr.sidest.io');
 
                 $customer->update([
                     'email' => 'redacted-'.Str::uuid()->toString().'@'.$placeholderDomain,
@@ -220,7 +220,7 @@ class RedactCustomerJob implements ShouldQueue
             }
 
             // Nothing found for this email — legitimate skip (email address may
-            // never have interacted with this shop via Side St).
+            // never have interacted with this shop via Partna).
             if (! $customer && $deletedSubs === 0 && $deletedEnquiries === 0
                 && $scrubbedBookings === 0 && $scrubbedOrders === 0) {
                 $gdpr->markSkipped('no data found for email in this shop');

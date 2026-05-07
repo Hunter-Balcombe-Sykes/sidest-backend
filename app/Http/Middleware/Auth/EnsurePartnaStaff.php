@@ -2,15 +2,15 @@
 
 namespace App\Http\Middleware\Auth;
 
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-// V2: Staff-only gate. Checks supabase_uid maps to a SidestStaff record.
+// V2: Staff-only gate. Checks supabase_uid maps to a PartnaStaff record.
 // Accepts optional role parameters: middleware('staff:admin') restricts to a specific role,
 // middleware('staff') allows any authenticated staff.
-class EnsureSidestStaff
+class EnsurePartnaStaff
 {
     public function handle(Request $request, Closure $next, string ...$roles): Response
     {
@@ -21,8 +21,8 @@ class EnsureSidestStaff
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        $staff = $request->attributes->get('sidest_staff')
-            ?? SidestStaff::query()->where('auth_user_id', $uid)->first();
+        $staff = $request->attributes->get('partna_staff')
+            ?? PartnaStaff::query()->where('auth_user_id', $uid)->first();
 
         if (! $staff) {
             return response()->json(['message' => 'Staff access required'], 403);
@@ -33,7 +33,7 @@ class EnsureSidestStaff
         }
 
         // Attach for controllers to use
-        $request->attributes->set('sidest_staff', $staff);
+        $request->attributes->set('partna_staff', $staff);
 
         return $next($request);
     }

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the stub `ShopifyGdprWebhookController` with functional handlers for the three mandatory Shopify GDPR webhooks (`customers/data_request`, `customers/redact`, `shop/redact`). Each webhook validates HMAC, writes an audit row for idempotency, dispatches a dedicated queued job, and returns 202. Without this, Side St cannot be submitted to the Shopify App Store.
+**Goal:** Replace the stub `ShopifyGdprWebhookController` with functional handlers for the three mandatory Shopify GDPR webhooks (`customers/data_request`, `customers/redact`, `shop/redact`). Each webhook validates HMAC, writes an audit row for idempotency, dispatches a dedicated queued job, and returns 202. Without this, Partna cannot be submitted to the Shopify App Store.
 
 **Architecture:** Thin controller (HMAC + idempotent audit row + dispatch) plus three queued jobs on a dedicated `gdpr` queue. A `GdprRequest` audit table keyed on sha256-of-raw-body provides idempotency against Shopify retries. A shared `ShopifyShopResolver` service maps `shop_domain → professional_id`. `shop/redact` uses **narrow scope**: delete the Shopify integration + Shopify-derived data (affiliate selections, synced customers) but **keep** the professional account (they may still use Fresha/Square). Customer data export is **merchant-forward** — the shop owner receives a JSON dump via email and forwards to the requesting customer (Shopify-recommended pattern).
 
@@ -84,8 +84,8 @@ Expected output (as of 2026-04-23) — columns on these tables only:
 | `notifications.email_subscriptions` | email, full_name | hard-deleted in RedactCustomerJob |
 | `core.customers` | email, phone, full_name | anonymised in RedactCustomerJob / RedactShopJob |
 | `core.professionals` | phone, first_name, last_name | **out of scope** — merchant PII, handled by account deletion feature |
-| `core.comet_staff` | email, phone | **out of scope** — Side St internal staff |
-| `core.waitlist_signups` | email, phone | **out of scope** — Side St's own pre-signup leads, not shop-scoped |
+| `core.comet_staff` | email, phone | **out of scope** — Partna internal staff |
+| `core.waitlist_signups` | email, phone | **out of scope** — Partna's own pre-signup leads, not shop-scoped |
 | `brand.brand_affiliate_invites` | email, phone, first_name, last_name | **out of scope** — B2B affiliate invites (future professionals, not customers) |
 
 - [ ] **Step 2: Compare output against the expected set**
@@ -647,7 +647,7 @@ git commit -m "feat(gdpr): add gdpr config block (queue, placeholder domain, ret
 **Scope (narrow — do NOT touch):**
 - `core.professionals` row (account survives — professional may still use Fresha/Square)
 - `billing.subscriptions` (account-level, not shop)
-- `site.sites`, `site.blocks`, `site.site_media` (Side St site isn't Shopify data)
+- `site.sites`, `site.blocks`, `site.site_media` (Partna site isn't Shopify data)
 - Analytics aggregate tables (no PII, pre-aggregated business metrics)
 - `commerce.commission_ledger_entries` (affiliates' earnings records — keep; customer_id links become dangling but that's fine, they reference the anonymised row)
 
@@ -1669,13 +1669,13 @@ Create `resources/views/emails/gdpr/customer-data-export.blade.php`:
 
     <p>A customer at your store <strong>{{ $shopDomain }}</strong> has invoked their GDPR right to access the personal data you hold about them (via Shopify's <code>customers/data_request</code> webhook).</p>
 
-    <p>Attached is a JSON file containing every record Side St holds about <strong>{{ $customerEmail }}</strong> scoped to your store ({{ $recordCount }} records total).</p>
+    <p>Attached is a JSON file containing every record Partna holds about <strong>{{ $customerEmail }}</strong> scoped to your store ({{ $recordCount }} records total).</p>
 
     <p><strong>What to do next:</strong> forward this file to the requesting customer within 30 days of their Shopify request. Shopify tracks compliance on the merchant side.</p>
 
     <p>If you believe this request was sent in error, or if you want help interpreting the contents, reply to this email and we'll assist.</p>
 
-    <p>— Side St</p>
+    <p>— Partna</p>
 
     <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0 16px;">
 
@@ -2463,7 +2463,7 @@ Create `docs/shopify-gdpr-runbook.md`:
 
 A publicly accessible privacy policy URL must be linked from the Shopify Partner dashboard app listing. Ensure the page covers:
 
-- What customer data Side St stores (email, phone, name, order-derived records)
+- What customer data Partna stores (email, phone, name, order-derived records)
 - The three GDPR webhook endpoints and how requests are handled
 - Retention periods: 30 days for soft-deleted records, indefinite for anonymised rows
 - Contact address for data requests outside the Shopify flow
@@ -2519,7 +2519,7 @@ Add a Nightwatch alert for rows older than 24 hours in `status IN ('received', '
 
 - Commission ledger entries referencing anonymised customers are retained. The `customer_id` FK is preserved; the row it points to has placeholder PII. This is standard practice for financial-record integrity.
 - Aggregate analytics tables (`*_daily`, `*_hourly`) are not touched. They contain pre-aggregated metrics with no PII.
-- `shop/redact` is narrow-scope: the Side St professional account and their site survive. If the merchant wants full account deletion, they use the in-dashboard account deletion flow (separate feature).
+- `shop/redact` is narrow-scope: the Partna professional account and their site survive. If the merchant wants full account deletion, they use the in-dashboard account deletion flow (separate feature).
 ```
 
 - [ ] **Step 2: Commit**

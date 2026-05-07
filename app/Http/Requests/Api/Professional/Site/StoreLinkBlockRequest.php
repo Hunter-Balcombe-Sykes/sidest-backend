@@ -10,7 +10,7 @@ use Illuminate\Validation\Rule;
  * Validates new link block creation. Supports two write modes:
  *
  *   1. **Social mode** — `platform` is set (must be a key in
- *      config('sidest.social_platforms')). Either `handle` OR `url` must be
+ *      config('partna.social_platforms')). Either `handle` OR `url` must be
  *      provided. The controller delegates to SocialLinkNormalizer to validate,
  *      strip a leading '@', and rebuild a canonical https URL.
  *
@@ -64,13 +64,13 @@ class StoreLinkBlockRequest extends BaseFormRequest
             // Social mode fields. `url` is validated lazily as a string here
             // because the normalizer runs its own host-allowlist check; using
             // Laravel's `url` rule would reject deep links we want to accept.
-            'platform' => ['sometimes', 'nullable', 'string', Rule::in(array_keys(config('sidest.social_platforms', [])))],
+            'platform' => ['sometimes', 'nullable', 'string', Rule::in(array_keys(config('partna.social_platforms', [])))],
             'handle' => ['sometimes', 'nullable', 'string', 'max:100'],
 
             // Custom mode fields (also reused for social mode auto-fallbacks)
             'title' => ['sometimes', 'nullable', 'string', 'max:80'],
             'url' => ['sometimes', 'nullable', 'string', 'max:2048'],
-            'icon_key' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_block_icon_keys', []))],
+            'icon_key' => ['sometimes', 'nullable', 'string', Rule::in(config('partna.link_block_icon_keys', []))],
 
             'is_active' => ['sometimes', 'boolean'],
             'settings' => ['sometimes', 'array'],
@@ -79,12 +79,12 @@ class StoreLinkBlockRequest extends BaseFormRequest
             // Defense-in-depth: even though the controller overwrites settings.category
             // with the top-level category before save, enum-validate the nested form
             // in case a code path ever merges settings without overwriting.
-            'settings.category' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_categories', []))],
+            'settings.category' => ['sometimes', 'nullable', 'string', Rule::in(config('partna.link_categories', []))],
 
             // Category enum — always validated against the registry when supplied.
             // Required for custom links (enforced in withValidator); optional for
             // social links (controller falls back to the platform's default_category).
-            'category' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_categories', []))],
+            'category' => ['sometimes', 'nullable', 'string', Rule::in(config('partna.link_categories', []))],
         ];
     }
 
@@ -125,16 +125,16 @@ class StoreLinkBlockRequest extends BaseFormRequest
             // disabled-Add-button UX. Resolves the link's effective category
             // (top-level `category`, then platform default) and counts
             // existing rows in the platform-links scope. Refuses creation
-            // beyond `config('sidest.platform_links_max')` so a savvy user
+            // beyond `config('partna.platform_links_max')` so a savvy user
             // can't bypass the UI cap by hammering the API.
             $effectiveCategory = $this->input('category');
             if (($effectiveCategory === null || $effectiveCategory === '') && is_string($platform) && $platform !== '') {
-                $effectiveCategory = config("sidest.social_platforms.{$platform}.default_category");
+                $effectiveCategory = config("partna.social_platforms.{$platform}.default_category");
             }
 
-            $cappedCategories = (array) config('sidest.platform_links_categories', []);
+            $cappedCategories = (array) config('partna.platform_links_categories', []);
             if (is_string($effectiveCategory) && in_array($effectiveCategory, $cappedCategories, true)) {
-                $max = (int) config('sidest.platform_links_max', 7);
+                $max = (int) config('partna.platform_links_max', 7);
                 // Resolve the professional whose cap we're enforcing. Auth::user()
                 // is always null under Supabase JWT, so $this->user() can't be
                 // used. Prefer the route-bound target (staff path:
@@ -162,7 +162,7 @@ class StoreLinkBlockRequest extends BaseFormRequest
             // Settings allowlist (existing behaviour)
             $settings = $this->input('settings');
             if (is_array($settings)) {
-                $allowed = config('sidest.link_block_settings_keys', []);
+                $allowed = config('partna.link_block_settings_keys', []);
                 $extra = array_diff(array_keys($settings), $allowed);
                 if (! empty($extra)) {
                     $validator->errors()->add(

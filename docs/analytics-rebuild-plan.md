@@ -281,7 +281,7 @@ CREATE POLICY order_events_staff_all ON commerce.order_events TO authenticated
 ### `commerce.order_items`
 Normalized mirror of `line_items` JSONB, populated by `AFTER INSERT OR UPDATE OF line_items` trigger that diffs JSONB and reconciles rows. Used for top-products / GMV-by-SKU queries.
 
-**Commission source contract (audit fix PLANV3-2):** Per-line commission cannot be computed from raw Shopify line_items alone — it depends on Side St product metafields, brand defaults, and platform defaults that live in PHP. Therefore the **webhook handler pre-computes per-line `commission_cents` and `commission_rate` and serializes them into each `line_items` JSONB element** before the upsert. The trigger reads these out, treating the values as authoritative.
+**Commission source contract (audit fix PLANV3-2):** Per-line commission cannot be computed from raw Shopify line_items alone — it depends on Partna product metafields, brand defaults, and platform defaults that live in PHP. Therefore the **webhook handler pre-computes per-line `commission_cents` and `commission_rate` and serializes them into each `line_items` JSONB element** before the upsert. The trigger reads these out, treating the values as authoritative.
 
 Required JSONB element shape (each line item):
 ```json

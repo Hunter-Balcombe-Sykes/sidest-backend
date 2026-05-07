@@ -6,7 +6,7 @@ use InvalidArgumentException;
 
 /**
  * Single source of truth for social link validation, normalization, and canonical
- * URL building. Reads the registry from config('sidest.social_platforms') and
+ * URL building. Reads the registry from config('partna.social_platforms') and
  * applies platform-specific rules to user input.
  *
  * Used by:
@@ -37,7 +37,7 @@ class SocialLinkNormalizer
      */
     public function getPublicRegistry(): array
     {
-        $registry = config('sidest.social_platforms', []);
+        $registry = config('partna.social_platforms', []);
         $public = [];
 
         foreach ($registry as $key => $config) {
@@ -55,7 +55,7 @@ class SocialLinkNormalizer
 
     public function isKnownPlatform(string $key): bool
     {
-        return array_key_exists($key, config('sidest.social_platforms', []));
+        return array_key_exists($key, config('partna.social_platforms', []));
     }
 
     /**
@@ -313,7 +313,7 @@ class SocialLinkNormalizer
      */
     private function resolvePlatform(string $platformKey): array
     {
-        $registry = config('sidest.social_platforms', []);
+        $registry = config('partna.social_platforms', []);
 
         if (! isset($registry[$platformKey])) {
             throw new InvalidArgumentException("Unknown social platform: {$platformKey}.");

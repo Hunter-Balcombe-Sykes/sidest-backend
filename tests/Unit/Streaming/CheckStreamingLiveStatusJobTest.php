@@ -15,7 +15,7 @@ beforeEach(fn () => Redis::flushdb());
 
 it('skips Kick entirely when rate_limited key is set in Redis', function () {
     setupBlocksTable();
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
     Redis::set('streaming:kick:rate_limited', '1', 'EX', 300);
 
     $poller = Mockery::mock(LiveStatusPoller::class);
@@ -31,7 +31,7 @@ it('skips Kick entirely when rate_limited key is set in Redis', function () {
 });
 
 it('logs critical and aborts when Redis is unavailable', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
 
     Redis::shouldReceive('exists')
         ->once()
@@ -54,7 +54,7 @@ it('logs critical and aborts when Redis is unavailable', function () {
 
 it('catches poller exceptions and logs per-platform error without crashing the job', function () {
     setupBlocksTable();
-    config(['sidest.streaming_platforms' => ['twitch']]);
+    config(['partna.streaming_platforms' => ['twitch']]);
 
     // Insert a live-check-enabled block so the job finds handles and calls poll.
     \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.blocks')->insert([

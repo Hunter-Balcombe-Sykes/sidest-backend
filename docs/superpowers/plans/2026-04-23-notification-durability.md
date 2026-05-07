@@ -53,7 +53,7 @@ Before starting, open these files once so you have the current shape in mind:
 **Files:**
 - Create: `supabase/migrations/20260423010000_add_dedupe_key_to_notifications.sql`
 
-Side St uses raw SQL migrations (no Laravel migrations — composer guard rejects them). Josh runs migrations against Supabase manually; the plan's job is to produce the correct SQL file.
+Partna uses raw SQL migrations (no Laravel migrations — composer guard rejects them). Josh runs migrations against Supabase manually; the plan's job is to produce the correct SQL file.
 
 The partial unique index is intentional: `dedupe_key` is nullable so non-deduplicated notifications (if any) coexist cleanly, and the unique constraint applies only when `dedupe_key IS NOT NULL`.
 

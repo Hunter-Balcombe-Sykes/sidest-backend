@@ -2,7 +2,7 @@
 
 ## Project Identity
 
-**Side St** — Laravel 12 + Supabase + PostgreSQL multi-tenant affiliate SaaS platform.
+**Partna** — Laravel 12 + Supabase + PostgreSQL multi-tenant affiliate SaaS platform.
 For full business context, domain model, and entity relationships, read `AI_CONTEXT.md`.
 For API endpoint reference, read `docs/api.md`.
 
@@ -48,7 +48,7 @@ routes/
   api.php                                             — bootstrap, health, webhooks, Shopify OAuth
   api/{professional,publicSite,staff}.php             — domain-specific routes
 config/
-  sidest.php                                           — all Side St feature config & limits
+  sidest.php                                           — all Partna feature config & limits
 ```
 
 ### Patterns

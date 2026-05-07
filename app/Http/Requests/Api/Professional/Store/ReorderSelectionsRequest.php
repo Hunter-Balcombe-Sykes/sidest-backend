@@ -8,7 +8,7 @@ class ReorderSelectionsRequest extends BaseFormRequest
 {
     public function rules(): array
     {
-        $max = (int) config('sidest.store.max_featured_products', 10);
+        $max = (int) config('partna.store.max_featured_products', 10);
 
         return [
             'items' => ['required', 'array', 'min:1', "max:{$max}"],

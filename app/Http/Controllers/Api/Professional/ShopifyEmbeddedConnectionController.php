@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 // Generates a short-lived connection code so a brand can link their
-// Shopify store (via the embedded app) to their existing Side St account.
+// Shopify store (via the embedded app) to their existing Partna account.
 // The code is stored in Redis for 30 minutes and consumed exactly once.
 class ShopifyEmbeddedConnectionController extends ApiController
 {

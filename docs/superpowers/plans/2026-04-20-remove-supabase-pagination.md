@@ -4,7 +4,7 @@
 
 **Goal:** Eliminate O(n) Supabase paginated lookups from the Shopify OAuth callback path by replacing the Supabase email lookup with a direct indexed query on `professionals.primary_email`.
 
-**Architecture:** Remove `getUserByEmail` entirely from `SupabaseAdminService`; remove the dead pagination fallback from `createUser`; replace the two-step Supabase→Professional lookup in the OAuth callback with a single `whereRaw('lower(primary_email) = ?', ...)` query that hits an existing index. Users whose Shopify email differs from their Side St email fall through to Path C (setup wizard) where they log in normally.
+**Architecture:** Remove `getUserByEmail` entirely from `SupabaseAdminService`; remove the dead pagination fallback from `createUser`; replace the two-step Supabase→Professional lookup in the OAuth callback with a single `whereRaw('lower(primary_email) = ?', ...)` query that hits an existing index. Users whose Shopify email differs from their Partna email fall through to Path C (setup wizard) where they log in normally.
 
 **Tech Stack:** PHP 8.2, Laravel 12, Pest 4, Mockery, SQLite in-memory (tests), `Http::fake()` for mocking Supabase/Shopify HTTP calls.
 
@@ -135,7 +135,7 @@ it('createUser throws on empty email', function () {
 - [ ] **Step 2: Run tests to verify they fail as expected**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend"
+cd "/Users/joshuahunter/Herd/Partna/backend"
 ./vendor/bin/pest tests/Unit/Auth/SupabaseAdminServiceTest.php --no-coverage
 ```
 
@@ -498,7 +498,7 @@ Old code:
 New code:
 ```php
             // Path B: Existing account — shop email matches a Professional's primary_email (indexed local lookup).
-            // Users whose Shopify email differs from their Side St email fall through to Path C.
+            // Users whose Shopify email differs from their Partna email fall through to Path C.
             if ($shopEmail !== '') {
                 $existingProfessional = Professional::whereRaw('lower(primary_email) = ?', [$shopEmail])->first();
 

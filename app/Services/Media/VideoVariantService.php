@@ -129,7 +129,7 @@ class VideoVariantService
         }
 
         $durationMs = $this->extractDurationMs($probe);
-        $maxDurSec = (int) config('sidest.video_max_duration_seconds', 300);
+        $maxDurSec = (int) config('partna.video_max_duration_seconds', 300);
 
         if ($durationMs > $maxDurSec * 1000) {
             $actualSec = (int) round($durationMs / 1000);
@@ -163,7 +163,7 @@ class VideoVariantService
         // Timeout budget: 2× video duration + 60s, floored at 120s for very short clips.
         $encodingTimeout = max(120, (int) round($durationMs / 1000) * 2 + 60);
 
-        $variantDefs = (array) config('sidest.video_variants', []);
+        $variantDefs = (array) config('partna.video_variants', []);
         $tmpDirs = [];
 
         try {
@@ -594,7 +594,7 @@ class VideoVariantService
 
     private function diskName(): string
     {
-        $configured = (string) config('sidest.media_disk', 'media');
+        $configured = (string) config('partna.media_disk', 'media');
 
         // $_ENV/$_SERVER are intentional here — Laravel Cloud caches config at deploy time
         // but injects platform env vars directly into the process environment at runtime,
@@ -629,11 +629,11 @@ class VideoVariantService
 
     private function ffmpegBinary(): string
     {
-        return (string) config('sidest.ffmpeg_binary', 'ffmpeg');
+        return (string) config('partna.ffmpeg_binary', 'ffmpeg');
     }
 
     private function ffprobeBinary(): string
     {
-        return (string) config('sidest.ffprobe_binary', 'ffprobe');
+        return (string) config('partna.ffprobe_binary', 'ffprobe');
     }
 }

@@ -21,7 +21,7 @@ function validateAgainstRequest(string $requestClass, array $payload): array
 }
 
 it('UpdateSiteRequest rejects settings.booking_mode=smart when smart_booking flag is off', function () {
-    config()->set('sidest.features.smart_booking', false);
+    config()->set('partna.features.smart_booking', false);
 
     $result = validateAgainstRequest(UpdateSiteRequest::class, [
         'settings' => ['booking_mode' => 'smart'],
@@ -32,7 +32,7 @@ it('UpdateSiteRequest rejects settings.booking_mode=smart when smart_booking fla
 });
 
 it('UpdateSiteRequest accepts settings.booking_mode=smart when smart_booking flag is on', function () {
-    config()->set('sidest.features.smart_booking', true);
+    config()->set('partna.features.smart_booking', true);
 
     $result = validateAgainstRequest(UpdateSiteRequest::class, [
         'settings' => ['booking_mode' => 'smart'],
@@ -42,7 +42,7 @@ it('UpdateSiteRequest accepts settings.booking_mode=smart when smart_booking fla
 });
 
 it('UpdateSiteRequest always accepts settings.booking_mode=manual', function () {
-    config()->set('sidest.features.smart_booking', false);
+    config()->set('partna.features.smart_booking', false);
 
     $result = validateAgainstRequest(UpdateSiteRequest::class, [
         'settings' => ['booking_mode' => 'manual'],
@@ -52,7 +52,7 @@ it('UpdateSiteRequest always accepts settings.booking_mode=manual', function () 
 });
 
 it('StaffUpdateSiteRequest rejects settings.booking_mode=smart when smart_booking flag is off', function () {
-    config()->set('sidest.features.smart_booking', false);
+    config()->set('partna.features.smart_booking', false);
 
     $result = validateAgainstRequest(StaffUpdateSiteRequest::class, [
         'settings' => ['booking_mode' => 'smart'],

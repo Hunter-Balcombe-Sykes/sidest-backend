@@ -19,7 +19,7 @@ use Illuminate\Support\Arr;
 class ShopProfileAutoFillService
 {
     /**
-     * The 12 Shopify → Side St field mappings used by both signup auto-fill and resync.
+     * The 12 Shopify → Partna field mappings used by both signup auto-fill and resync.
      *
      * Each entry:
      *   - 'shopify' = key on the shop.json payload

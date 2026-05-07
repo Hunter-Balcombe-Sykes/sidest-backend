@@ -160,7 +160,7 @@ it('stripe connect — account.application.deauthorized sets stripe_connect_stat
             'object' => [
                 'id' => 'ca_some_app_id',
                 'object' => 'application',
-                'name' => 'Side St',
+                'name' => 'Partna',
             ],
         ],
         'livemode' => false,

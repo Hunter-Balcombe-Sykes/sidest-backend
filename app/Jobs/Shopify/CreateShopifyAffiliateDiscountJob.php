@@ -14,10 +14,10 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Installs the Side St Price automatic discount on the brand's Shopify store.
+ * Installs the Partna Price automatic discount on the brand's Shopify store.
  *
  * The discount is backed by the `sidest-affiliate-discount` Shopify Function
- * bundled in the Side St app extension. Activating it via
+ * bundled in the Partna app extension. Activating it via
  * `discountAutomaticAppCreate` tells Shopify to run our function on every
  * checkout — the function itself gates on the cart attribute
  * `_sidest_affiliate_id` so brand-direct customers never see the discount.
@@ -53,7 +53,7 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
     // The function's title inside the Shopify app — used both as the discount
     // title and as the label customers see in checkout / receipts. Keep it
     // brand-neutral because it surfaces on every brand's order confirmation.
-    private const DISCOUNT_TITLE = 'Side St Price';
+    private const DISCOUNT_TITLE = 'Partna Price';
 
     // Matches the extension handle in Sidest-Embedded/extensions/sidest-affiliate-discount/
     // shopify.extension.toml. Shopify exposes this as `shopifyFunctions.edges.node.title`.
@@ -161,7 +161,7 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
 
                 $integration->mergeProviderMetadata(['sidest_discount_state' => 'registered']);
 
-                Log::info('Side St Price automatic discount installed', [
+                Log::info('Partna Price automatic discount installed', [
                     'integration_id' => $this->integrationId,
                     'shop_domain' => $shopDomain,
                     'function_id' => $functionId,
@@ -180,7 +180,7 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
         } catch (\Throwable $e) {
             $integration->mergeProviderMetadata(['sidest_discount_state' => 'failed']);
 
-            Log::error('Failed to install Side St Price automatic discount', [
+            Log::error('Failed to install Partna Price automatic discount', [
                 'integration_id' => $this->integrationId,
                 'shop_domain' => $shopDomain,
                 'error' => $e->getMessage(),
@@ -261,7 +261,7 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
             // Indefinite start — the function itself decides per-cart whether
             // to apply, so there's no reason to schedule this discount.
             'startsAt' => now()->toIso8601String(),
-            // No combines-with tweaks: Side St Price combines with nothing
+            // No combines-with tweaks: Partna Price combines with nothing
             // else by default, which is the safe behaviour when brands also
             // run their own promotions. Tighten later if brands ask.
             'combinesWith' => [

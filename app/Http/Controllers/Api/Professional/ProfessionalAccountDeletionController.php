@@ -30,7 +30,7 @@ class ProfessionalAccountDeletionController extends ApiController
         if ($professional->status === 'pending_deletion') {
             $deletesAt = null;
             if ($professional->deletion_confirmed_at) {
-                $retentionDays = (int) config('sidest.soft_delete_retention_days', 30);
+                $retentionDays = (int) config('partna.soft_delete_retention_days', 30);
                 $deletesAt = Carbon::parse((string) $professional->deletion_confirmed_at)
                     ->addDays($retentionDays)
                     ->toIso8601String();

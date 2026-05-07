@@ -75,7 +75,7 @@ class ProfessionalUploadController extends ApiController
         ]);
 
         // Pool limit is shared across media types (images + videos count toward the same cap).
-        $maxItems = (int) config("sidest.image_pools.{$pool}.max", 5);
+        $maxItems = (int) config("partna.image_pools.{$pool}.max", 5);
 
         $activeCount = SiteMedia::query()
             ->where('site_id', $site->id)
@@ -287,8 +287,8 @@ class ProfessionalUploadController extends ApiController
         return $this->success([
             'images' => $items,
             'limits' => [
-                'gallery' => config('sidest.image_pools.gallery.max', 5),
-                'content' => config('sidest.image_pools.content.max', 5),
+                'gallery' => config('partna.image_pools.gallery.max', 5),
+                'content' => config('partna.image_pools.content.max', 5),
             ],
         ]);
     }

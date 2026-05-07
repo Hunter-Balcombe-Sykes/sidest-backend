@@ -6,7 +6,7 @@
 
 A publicly accessible privacy policy URL must be linked from the Shopify Partner dashboard app listing. Ensure the page covers:
 
-- What customer data Side St stores (email, phone, name, order-derived records)
+- What customer data Partna stores (email, phone, name, order-derived records)
 - How long it is retained (soft-delete 30-day window, then purged on GDPR request)
 - How merchants and their customers can request data export or deletion
 - Contact details for data requests

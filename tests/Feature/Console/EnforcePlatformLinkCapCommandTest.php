@@ -18,8 +18,8 @@ beforeEach(function () {
     setupSitesTable();
     setupBlocksTable();
 
-    config(['sidest.platform_links_max' => 7]);
-    config(['sidest.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
+    config(['partna.platform_links_max' => 7]);
+    config(['partna.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
 });
 
 /**

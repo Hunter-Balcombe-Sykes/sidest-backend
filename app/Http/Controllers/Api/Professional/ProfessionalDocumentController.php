@@ -133,7 +133,7 @@ class ProfessionalDocumentController extends ApiController
 
                 // Stream to R2 (not in-memory) — matches the video upload path
                 // so 10 MB PDFs don't peg worker memory.
-                $mediaDisk = config('sidest.media_disk');
+                $mediaDisk = config('partna.media_disk');
                 $path = "documents/{$pro->id}/{$media->id}/original.{$ext}";
                 $stream = fopen($file->getRealPath(), 'rb');
                 Storage::disk($mediaDisk)->put($path, $stream, 'public');
@@ -151,7 +151,7 @@ class ProfessionalDocumentController extends ApiController
             // orphaned bytes so we don't leak storage on retries.
             if ($newUploadedPath !== null) {
                 try {
-                    Storage::disk(config('sidest.media_disk'))->delete($newUploadedPath);
+                    Storage::disk(config('partna.media_disk'))->delete($newUploadedPath);
                 } catch (\Throwable $cleanupError) {
                     Log::warning('Failed to clean up orphaned document R2 object after transaction failure', [
                         'path' => $newUploadedPath,
@@ -169,7 +169,7 @@ class ProfessionalDocumentController extends ApiController
         // would stay null and this is a no-op.
         if ($previousPath !== null && $previousPath !== '') {
             try {
-                Storage::disk(config('sidest.media_disk'))->delete($previousPath);
+                Storage::disk(config('partna.media_disk'))->delete($previousPath);
             } catch (\Throwable $e) {
                 Log::warning('Failed to delete previous document R2 object after commit', [
                     'path' => $previousPath,
@@ -249,7 +249,7 @@ class ProfessionalDocumentController extends ApiController
         $this->authorizeForUser($pro, 'delete', $document);
 
         try {
-            Storage::disk(config('sidest.media_disk'))->delete((string) $document->path);
+            Storage::disk(config('partna.media_disk'))->delete((string) $document->path);
         } catch (\Throwable $e) {
             Log::warning('Failed to delete document R2 object on destroy', [
                 'media_id' => $document->id,
@@ -270,7 +270,7 @@ class ProfessionalDocumentController extends ApiController
      */
     private function buildDocumentPayload(SiteMedia $media): array
     {
-        $mediaDisk = config('sidest.media_disk');
+        $mediaDisk = config('partna.media_disk');
         $previewUrl = Storage::disk($mediaDisk)->url((string) $media->path);
 
         return [

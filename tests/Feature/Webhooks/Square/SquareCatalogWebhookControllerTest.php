@@ -13,7 +13,7 @@ beforeEach(function () {
     Cache::flush();
     setupProfessionalIntegrationsTable();
 
-    Config::set('sidest.features.square_sync', true);
+    Config::set('partna.features.square_sync', true);
     Config::set('services.square.webhook_signature_key', 'test-square-key');
     Config::set('services.square.webhook_notification_url', 'http://localhost/api/webhooks/square');
 });
@@ -66,7 +66,7 @@ it('square — returns duplicate=true on second delivery of same event_id', func
 });
 
 it('square — returns feature_gated=true when square_sync flag is off', function () {
-    Config::set('sidest.features.square_sync', false);
+    Config::set('partna.features.square_sync', false);
 
     $this->postJson('/api/webhooks/square', ['type' => 'catalog.version.updated'])
         ->assertOk()

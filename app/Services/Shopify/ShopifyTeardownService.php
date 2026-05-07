@@ -48,14 +48,14 @@ class ShopifyTeardownService
     // Collection titles CreateShopifyCollectionsJob creates — match verbatim
     // because we look them up by title.
     private const COLLECTION_TITLES = [
-        'Side St — Active Products',
-        'Side St — Default Products',
-        'Side St — Brand Favourites',
-        'Side St — High Commission Products',
+        'Partna — Active Products',
+        'Partna — Default Products',
+        'Partna — Brand Favourites',
+        'Partna — High Commission Products',
     ];
 
     // Publication / sales channel title from CreateShopifySalesChannelJob.
-    private const PUBLICATION_TITLES = ['Side St'];
+    private const PUBLICATION_TITLES = ['Partna'];
 
     private const METAFIELD_DEFINITIONS_QUERY = <<<'GRAPHQL'
     query metafieldDefinitions($ownerType: MetafieldOwnerType!, $namespace: String!, $first: Int!) {
@@ -312,7 +312,7 @@ class ShopifyTeardownService
     }
 
     /**
-     * Delete every Side St smart/manual collection by matching exact titles.
+     * Delete every Partna smart/manual collection by matching exact titles.
      * Using title rather than storing the GID locally because the
      * CreateShopifyCollectionsJob also keys off title for idempotency —
      * matches the existing convention.
@@ -336,7 +336,7 @@ class ShopifyTeardownService
                 $node = $edge['node'] ?? [];
                 // Shopify's search can match partial titles — enforce exact match
                 // on our side so we never touch a brand-created collection that
-                // happens to contain "Side St" as a substring.
+                // happens to contain "Partna" as a substring.
                 if ((string) Arr::get($node, 'title', '') !== $title) {
                     continue;
                 }
@@ -399,7 +399,7 @@ class ShopifyTeardownService
 
                 // Namespace filter guarantees we only look at sidest.* but the
                 // belt-and-braces key check here stops us deleting anything
-                // another Side St feature may add in the future without
+                // another Partna feature may add in the future without
                 // tracking here first. Anything we don't recognise is logged
                 // but NOT deleted.
                 if (! in_array($key, $expectedKeys, true)) {
@@ -467,9 +467,9 @@ class ShopifyTeardownService
             $title = (string) Arr::get($token, 'title', '');
 
             // Only delete tokens we created. CreateStorefrontAccessTokenJob
-            // tags these with a "Side St" title — skip anything else so we
+            // tags these with a "Partna" title — skip anything else so we
             // don't nuke a merchant's own integrations.
-            if ($title !== 'Side St') {
+            if ($title !== 'Partna') {
                 continue;
             }
             if ($id === '') {
@@ -497,7 +497,7 @@ class ShopifyTeardownService
     }
 
     /**
-     * Delete the Side St sales channel publication. Matches on title to
+     * Delete the Partna sales channel publication. Matches on title to
      * mirror the create-side logic.
      */
     private function deletePublications(string $shopDomain, string $accessToken, string $apiVersion): int

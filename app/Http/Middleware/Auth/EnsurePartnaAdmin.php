@@ -2,13 +2,13 @@
 
 namespace App\Http\Middleware\Auth;
 
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 // V2: Admin-only gate. Requires staff record with role=admin.
-class EnsureSidestAdmin
+class EnsurePartnaAdmin
 {
     public function handle(Request $request, Closure $next): Response
     {
@@ -18,18 +18,18 @@ class EnsureSidestAdmin
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        $staff = $request->attributes->get('sidest_staff');
+        $staff = $request->attributes->get('partna_staff');
 
-        // If EnsureSidestStaff ran before this, we already have the staff record
+        // If EnsurePartnaStaff ran before this, we already have the staff record
         if (! $staff) {
-            $staff = SidestStaff::query()->where('auth_user_id', $uid)->first();
+            $staff = PartnaStaff::query()->where('auth_user_id', $uid)->first();
         }
 
         if (! $staff || ! $staff->isAdmin()) {
             return response()->json(['message' => 'Admin access required'], 403);
         }
 
-        $request->attributes->set('sidest_staff', $staff);
+        $request->attributes->set('partna_staff', $staff);
 
         return $next($request);
     }

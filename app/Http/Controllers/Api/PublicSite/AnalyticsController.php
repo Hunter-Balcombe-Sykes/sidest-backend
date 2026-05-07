@@ -115,7 +115,7 @@ class AnalyticsController extends ApiController
 
         $blockGroup = strtolower((string) $block->block_group);
         $blockType = strtolower((string) $block->block_type);
-        $trackableSectionTypes = collect(config('sidest.section_block_types', [
+        $trackableSectionTypes = collect(config('partna.section_block_types', [
             'gallery',
             'services',
             'shop',

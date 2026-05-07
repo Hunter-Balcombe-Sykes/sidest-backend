@@ -33,8 +33,8 @@ class CommissionVoidService
 
     public function __construct(private readonly NotificationPublisher $publisher)
     {
-        $this->voidWindowDays = (int) config('sidest.store.commission_void_window_days', 30);
-        $this->gracePeriodDays = (int) config('sidest.store.grace_period_days', 30);
+        $this->voidWindowDays = (int) config('partna.store.commission_void_window_days', 30);
+        $this->gracePeriodDays = (int) config('partna.store.grace_period_days', 30);
     }
 
     /**

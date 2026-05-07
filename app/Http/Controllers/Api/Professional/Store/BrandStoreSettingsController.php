@@ -53,7 +53,7 @@ class BrandStoreSettingsController extends ApiController
         $brandProfile = BrandProfile::where('professional_id', $pro->id)->first();
 
         return $this->success(new BrandStoreSettingsResource([
-            'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
+            'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('partna.store.default_commission_rate', 15),
             'payout_hold_days' => $storeSettings?->payout_hold_days,
             'accent_color' => $design['accent_color'] ?? null,
             'theme_variant' => $design['theme_variant'] ?? null,
@@ -232,7 +232,7 @@ class BrandStoreSettingsController extends ApiController
         }
 
         return $this->success(new BrandStoreSettingsResource([
-            'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('sidest.store.default_commission_rate', 15),
+            'default_commission_rate' => $storeSettings?->default_commission_rate ?? config('partna.store.default_commission_rate', 15),
             'payout_hold_days' => $storeSettings?->payout_hold_days,
             'accent_color' => $freshDesign['accent_color'] ?? null,
             'theme_variant' => $freshDesign['theme_variant'] ?? null,

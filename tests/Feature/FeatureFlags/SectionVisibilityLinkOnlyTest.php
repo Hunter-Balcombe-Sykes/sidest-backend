@@ -48,7 +48,7 @@ function seedSquareIntegration(string $proId): void
 }
 
 it('rejects booking section via Square integration when smart_booking flag is off', function () {
-    config()->set('sidest.features.smart_booking', false);
+    config()->set('partna.features.smart_booking', false);
 
     [$proId, $siteId] = seedProAndSite();
     seedActiveService($proId);
@@ -62,7 +62,7 @@ it('rejects booking section via Square integration when smart_booking flag is of
 });
 
 it('allows booking section via Square integration when smart_booking flag is on', function () {
-    config()->set('sidest.features.smart_booking', true);
+    config()->set('partna.features.smart_booking', true);
 
     [$proId, $siteId] = seedProAndSite();
     seedActiveService($proId);
@@ -75,7 +75,7 @@ it('allows booking section via Square integration when smart_booking flag is on'
 });
 
 it('allows booking section via booking link block', function () {
-    config()->set('sidest.features.smart_booking', false);
+    config()->set('partna.features.smart_booking', false);
 
     [$proId, $siteId] = seedProAndSite();
     seedActiveService($proId);
@@ -98,7 +98,7 @@ it('allows booking section via booking link block', function () {
 });
 
 it('allows booking section via manual booking_url when smart_booking flag is off', function () {
-    config()->set('sidest.features.smart_booking', false);
+    config()->set('partna.features.smart_booking', false);
 
     [$proId, $siteId] = seedProAndSite();
     seedActiveService($proId);

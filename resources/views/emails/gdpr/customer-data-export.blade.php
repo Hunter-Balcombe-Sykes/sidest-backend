@@ -11,13 +11,13 @@
 
     <p>A customer at your store <strong>{{ $shopDomain }}</strong> has invoked their GDPR right to access the personal data you hold about them (via Shopify's <code>customers/data_request</code> webhook).</p>
 
-    <p>Attached is a JSON file containing every record Side St holds about <strong>{{ $customerEmail }}</strong> scoped to your store ({{ $recordCount }} records total).</p>
+    <p>Attached is a JSON file containing every record Partna holds about <strong>{{ $customerEmail }}</strong> scoped to your store ({{ $recordCount }} records total).</p>
 
     <p><strong>What to do next:</strong> forward this file to the requesting customer within 30 days of their Shopify request. Shopify tracks compliance on the merchant side.</p>
 
     <p>If you believe this request was sent in error, or if you want help interpreting the contents, reply to this email and we'll assist.</p>
 
-    <p>— Side St</p>
+    <p>— Partna</p>
 
     <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0 16px;">
 

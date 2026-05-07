@@ -47,6 +47,30 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
         BrandCatalogService $catalogService,
         AnalyticsCacheService $analyticsCache,
     ): void {
+        $start = microtime(true);
+
+        $this->process($contactCapture, $catalogService, $analyticsCache);
+
+        // Alert threshold: 15s = 50% of job timeout. Slow path here usually means
+        // the BrandCatalogService metafield fetch or the LWW upsert is degraded.
+        // Configure a Nightwatch alert on this warning to catch trouble before
+        // the 30s timeout starts failing webhook deliveries.
+        $durationMs = (int) round((microtime(true) - $start) * 1000);
+        if ($durationMs > 15_000) {
+            Log::warning('ProcessShopifyOrderWebhookJob slow processing', [
+                'order_id' => (string) Arr::get($this->orderPayload, 'id', ''),
+                'brand_professional_id' => $this->brandProfessionalId,
+                'duration_ms' => $durationMs,
+                'attempt' => $this->attempts(),
+            ]);
+        }
+    }
+
+    private function process(
+        ContactCaptureService $contactCapture,
+        BrandCatalogService $catalogService,
+        AnalyticsCacheService $analyticsCache,
+    ): void {
         $orderId = (string) Arr::get($this->orderPayload, 'id', '');
         $shopDomain = strtolower(trim((string) Arr::get($this->orderPayload, 'domain', '')));
         $noteAttributes = Arr::get($this->orderPayload, 'note_attributes', []);
@@ -128,7 +152,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
         $shopDomain = $integration?->shopify_shop_domain ?? $shopDomain;
 
         $brandSettings = BrandStoreSettings::where('professional_id', $this->brandProfessionalId)->first();
-        $platformDefault = (float) config('sidest.store.default_commission_rate', 15);
+        $platformDefault = (float) config('partna.store.default_commission_rate', 15);
 
         // Collect GIDs for a single-call metafield override fetch.
         $productGids = $this->extractProductGids($lineItems);
@@ -512,7 +536,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
      * Resolve commission rate for a line item. Precedence:
      *   1. product metafield `sidest.commission_override` (brand-set per-product)
      *   2. brand.brand_store_settings.default_commission_rate (brand default)
-     *   3. config('sidest.store.default_commission_rate', 15) (platform fallback)
+     *   3. config('partna.store.default_commission_rate', 15) (platform fallback)
      *
      * @param  array<string, float|null>  $overrideMap
      * @return array{0: float, 1: string} [rate, rate_source]

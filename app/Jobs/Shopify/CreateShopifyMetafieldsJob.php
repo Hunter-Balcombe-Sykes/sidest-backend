@@ -90,23 +90,23 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
     private const PRODUCT_DEFINITIONS = [
         [
             'key' => 'active',
-            'name' => 'Side St Active',
+            'name' => 'Partna Active',
             'type' => 'boolean',
-            'description' => 'Whether this product is active for Side St affiliates',
+            'description' => 'Whether this product is active for Partna affiliates',
             'access' => ['storefront' => 'PUBLIC_READ'],
         ],
         [
             'key' => 'commission_override',
-            'name' => 'Side St Commission Override',
+            'name' => 'Partna Commission Override',
             'type' => 'number_decimal',
             'description' => 'Per-product commission % override (null = use brand default)',
             'access' => ['storefront' => 'PUBLIC_READ'],
         ],
         [
             'key' => 'affiliate_discount_pct',
-            'name' => 'Side St Affiliate Discount',
+            'name' => 'Partna Affiliate Discount',
             'type' => 'number_decimal',
-            'description' => 'Discount % applied at checkout for affiliate customers (read by the Side St Price Shopify Function + Hydrogen display)',
+            'description' => 'Discount % applied at checkout for affiliate customers (read by the Partna Price Shopify Function + Hydrogen display)',
             // PUBLIC_READ so Hydrogen fetches the value via Storefront API and
             // renders the discounted price directly — customers never see the
             // Shopify sticker price on an affiliate sitepage. Also read by the
@@ -121,7 +121,7 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
         // without requiring the brand to flip sidest.active themselves.
         [
             'key' => 'has_enabled_variants',
-            'name' => 'Side St Has Enabled Variants',
+            'name' => 'Partna Has Enabled Variants',
             'type' => 'boolean',
             'description' => 'Derived: true if the product has at least one variant with sidest.enabled != false (or no variants at all). Smart collection condition.',
             'access' => ['storefront' => 'PUBLIC_READ'],
@@ -135,24 +135,24 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
     private const PRODUCT_VARIANT_DEFINITIONS = [
         [
             'key' => 'enabled',
-            'name' => 'Side St Variant Enabled',
+            'name' => 'Partna Variant Enabled',
             'type' => 'boolean',
-            'description' => 'Whether this variant is available for Side St affiliates (missing = enabled)',
+            'description' => 'Whether this variant is available for Partna affiliates (missing = enabled)',
             'access' => ['storefront' => 'PUBLIC_READ'],
         ],
     ];
 
     private const SHOP_DEFINITIONS = [
-        ['key' => 'default_commission_rate', 'name' => 'Side St Default Commission Rate', 'type' => 'number_decimal', 'description' => 'Brand-wide default commission %'],
-        ['key' => 'accent_color', 'name' => 'Side St Accent Color', 'type' => 'single_line_text_field', 'description' => 'Hex colour for affiliate storefronts'],
-        ['key' => 'theme_variant', 'name' => 'Side St Theme Variant', 'type' => 'single_line_text_field', 'description' => 'Theme key (e.g. 1 through 5)'],
-        ['key' => 'product_image_ratio', 'name' => 'Side St Product Image Ratio', 'type' => 'single_line_text_field', 'description' => 'Product image ratio (1/1 or 4/5)'],
-        ['key' => 'active_collection_handle', 'name' => 'Side St Active Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of Active Products smart collection'],
-        ['key' => 'default_collection_handle', 'name' => 'Side St Default Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of Default Products manual collection'],
-        ['key' => 'favourites_collection_handle', 'name' => 'Side St Favourites Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of Brand Favourites manual collection'],
-        ['key' => 'high_commission_collection_handle', 'name' => 'Side St High Commission Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of High Commission Products smart collection'],
-        ['key' => 'setup_complete', 'name' => 'Side St Setup Complete', 'type' => 'boolean', 'description' => 'Whether brand has completed the setup wizard'],
-        ['key' => 'theme_tokens', 'name' => 'Side St Theme Tokens', 'type' => 'json', 'description' => 'Extracted CSS design tokens from the brand storefront theme'],
+        ['key' => 'default_commission_rate', 'name' => 'Partna Default Commission Rate', 'type' => 'number_decimal', 'description' => 'Brand-wide default commission %'],
+        ['key' => 'accent_color', 'name' => 'Partna Accent Color', 'type' => 'single_line_text_field', 'description' => 'Hex colour for affiliate storefronts'],
+        ['key' => 'theme_variant', 'name' => 'Partna Theme Variant', 'type' => 'single_line_text_field', 'description' => 'Theme key (e.g. 1 through 5)'],
+        ['key' => 'product_image_ratio', 'name' => 'Partna Product Image Ratio', 'type' => 'single_line_text_field', 'description' => 'Product image ratio (1/1 or 4/5)'],
+        ['key' => 'active_collection_handle', 'name' => 'Partna Active Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of Active Products smart collection'],
+        ['key' => 'default_collection_handle', 'name' => 'Partna Default Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of Default Products manual collection'],
+        ['key' => 'favourites_collection_handle', 'name' => 'Partna Favourites Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of Brand Favourites manual collection'],
+        ['key' => 'high_commission_collection_handle', 'name' => 'Partna High Commission Collection Handle', 'type' => 'single_line_text_field', 'description' => 'Handle of High Commission Products smart collection'],
+        ['key' => 'setup_complete', 'name' => 'Partna Setup Complete', 'type' => 'boolean', 'description' => 'Whether brand has completed the setup wizard'],
+        ['key' => 'theme_tokens', 'name' => 'Partna Theme Tokens', 'type' => 'json', 'description' => 'Extracted CSS design tokens from the brand storefront theme'],
     ];
 
     /** Populated by handle() — not serialized. */

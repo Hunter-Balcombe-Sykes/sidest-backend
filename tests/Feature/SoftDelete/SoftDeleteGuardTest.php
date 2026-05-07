@@ -95,8 +95,8 @@ it('email job exits without sending when professional is soft-deleted', function
     ]);
 
     config([
-        'sidest.notifications.email_enabled' => true,
-        'sidest.notifications.mailables.invites' => \App\Mail\Notifications\InviteNotificationMail::class,
+        'partna.notifications.email_enabled' => true,
+        'partna.notifications.mailables.invites' => \App\Mail\Notifications\InviteNotificationMail::class,
     ]);
 
     (new SendTransactionalNotificationEmailJob($notifId, 'invites', $proId))->handle();

@@ -12,7 +12,7 @@ class FeatureGate
 {
     public function handle(Request $request, Closure $next, string $flag)
     {
-        if (! (bool) config("sidest.features.{$flag}", false)) {
+        if (! (bool) config("partna.features.{$flag}", false)) {
             return response()->json([
                 'message' => 'Feature not available',
                 'feature' => $flag,

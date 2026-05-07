@@ -1,4 +1,4 @@
-# AI_CONTEXT.md — Side St Platform (V2)
+# AI_CONTEXT.md — Partna Platform (V2)
 
 > **Source of truth for AI tools working on this codebase.**
 > Read this before making changes. Update after meaningful progress.
@@ -8,17 +8,17 @@
 
 ## Project Overview
 
-**Side St** (codebase still references "Comet" / "OneLink" in places) is a multi-tenant SaaS affiliate platform that gives influencers and beauty/barbering professionals a branded one-page personal website, connected to a specific brand partner. It replaces link-in-bio tools (like Linktree), adds an affiliate e-commerce shop powered by Shopify Hydrogen storefronts, booking integrations, and detailed analytics.
+**Partna** (codebase still references "Comet" / "OneLink" in places) is a multi-tenant SaaS affiliate platform that gives influencers and beauty/barbering professionals a branded one-page personal website, connected to a specific brand partner. It replaces link-in-bio tools (like Linktree), adds an affiliate e-commerce shop powered by Shopify Hydrogen storefronts, booking integrations, and detailed analytics.
 
 **V2 Architecture:** Product data lives entirely in Shopify (Storefront API + metafields). Affiliate storefronts are Hydrogen apps deployed on Shopify Oxygen. Commission rates come from Shopify product metafields. Payouts flow through Stripe Connect (80% to affiliate, 20% platform fee). Each affiliate is scoped to a single brand.
 
 **What problem it solves:**
-Brands want influencers and professionals to sell their products without managing separate storefronts. Professionals/influencers want a polished all-in-one presence without design effort. Side St sits in the middle, handling the site, commerce, analytics, and commission accounting workflows.
+Brands want influencers and professionals to sell their products without managing separate storefronts. Professionals/influencers want a polished all-in-one presence without design effort. Partna sits in the middle, handling the site, commerce, analytics, and commission accounting workflows.
 
 **Main goals:**
 1. Give each professional/influencer a published one-page site on a subdomain
 2. Connect that site to a brand's Shopify store via Hydrogen storefronts
-3. Process commission-based sales — brand fulfils via Shopify, Side St records commissions, Stripe Connect handles payouts
+3. Process commission-based sales — brand fulfils via Shopify, Partna records commissions, Stripe Connect handles payouts
 4. Provide booking integrations (Square, Fresha) for service professionals
 5. Give brands and professionals actionable analytics (views, clicks, sales, earnings)
 
@@ -31,13 +31,13 @@ Brands want influencers and professionals to sell their products without managin
 ### Plain-English Explanation
 
 - A **brand** signs up and connects their **Shopify store** via OAuth.
-- Side St auto-creates Storefront API tokens and registers order webhooks.
+- Partna auto-creates Storefront API tokens and registers order webhooks.
 - The brand invites **affiliates** (barbers, hairdressers, Instagram influencers).
 - Each affiliate gets their own subdomain site (e.g., `john.sidest.co`) auto-themed in the brand's colours.
 - The affiliate's **Hydrogen storefront** fetches products directly from Shopify's Storefront API — no local product tables.
 - Customers visit the storefront, browse products, and purchase via Shopify native checkout.
 - The `orders/paid` webhook fires → commission recorded in the ledger based on Shopify metafield rates.
-- After a hold period, `ProcessCommissionPayoutsJob` transfers 80% of commission to the affiliate via Stripe Connect. Side St takes 20%.
+- After a hold period, `ProcessCommissionPayoutsJob` transfers 80% of commission to the affiliate via Stripe Connect. Partna takes 20%.
 - **Each affiliate belongs to one brand** (single-brand model in V2).
 - Service professionals can also take bookings via **Square or Fresha** through the same site.
 
@@ -46,7 +46,7 @@ Brands want influencers and professionals to sell their products without managin
 ```
 Brand connects Shopify store (OAuth)
     ↓
-Side St creates Storefront API token + registers order webhooks
+Partna creates Storefront API token + registers order webhooks
     ↓
 Brand invites affiliate (token-based invite)
     ↓
@@ -99,7 +99,7 @@ Stuck failed batches → POST /staff/commission-payouts/{payout}/retry (staff ad
 │   │   │   ├── Professional/ — Professional, BrandProfile, BrandPartnerLink, BrandAffiliateInvite, Customer, Service, ServiceCategory, ProfessionalIntegration, ProfessionalConfirmationPreference
 │   │   │   ├── Site/         — Site, Block, SiteMedia, SiteSubdomainAlias, Theme
 │   │   │   ├── Notifications/ — Notification, NotificationReceipt, EmailSubscription, NotificationEmailPolicy, NotificationEmailPreference
-│   │   │   ├── Staff/        — SidestStaff
+│   │   │   ├── Staff/        — PartnaStaff
 │   │   │   ├── Waitlist/     — WaitlistSignup
 │   │   │   └── MediaVariant
 │   │   ├── Retail/         — CommissionLedgerEntry, CommissionPayout, CommissionPayoutItem, BrandStoreSettings, BrandCommissionTopup, BrandTeamMembership
@@ -178,7 +178,7 @@ Stuck failed batches → POST /staff/commission-payouts/{payout}/retry (staff ad
 | `BrandCommissionTopup` | `commerce.brand_commission_topups` | Manual wallet top-ups via Stripe Checkout |
 | `BrandTeamMembership` | `brand.brand_team_memberships` | Brand team roles for RBAC |
 | `AffiliateProductSelection` | `commerce.affiliate_product_selections` | V2 new — uses `shopify_product_gid` (not local UUID) |
-| `SidestStaff` | `core.sidest_staff` | Staff/admin accounts for internal dashboard |
+| `PartnaStaff` | `core.sidest_staff` | Staff/admin accounts for internal dashboard |
 | `Notification` | `core.notifications` | In-app notification records |
 | `NotificationReceipt` | `core.notification_receipts` | Notification delivery tracking |
 | `EmailSubscription` | `core.email_subscriptions` | Notification preference per professional |
@@ -352,8 +352,8 @@ Video: ProcessVideoVariantsJob → FFmpeg MP4 + HLS (feature-flagged off)
 ```
 Request → VerifySupabaseJwt (validate JWT via JWKS, extract supabase_uid)
         → LoadCurrentProfessional (load Professional from cache)
-        → [EnsureSidestStaff] (require staff role)
-        → [EnsureSidestAdmin] (require admin role)
+        → [EnsurePartnaStaff] (require staff role)
+        → [EnsurePartnaAdmin] (require admin role)
         → [RequirePlan] (check subscription entitlement)
         → Controller
 ```
@@ -543,7 +543,7 @@ When another AI reads this file, it should:
 | 2026-04-03 | Post-OAuth Shopify setup pipeline | Auto-creates sales channel, collections, metafields, syncs logo, and marks setup complete after OAuth |
 | 2026-04-03 | Hydrogen internal API | Server-to-server endpoints for brand config, affiliate lookup, and affiliate products |
 | 2026-04-03 | Brand signup auto-fill | ShopProfileAutoFillService populates brand profile from Shopify shop data during OAuth |
-| 2026-04-03 | Renamed Comet → Side St | Full codebase rename across config, routes, middleware, models |
+| 2026-04-03 | Renamed Comet → Partna | Full codebase rename across config, routes, middleware, models |
 | 2026-04-11 | Shopify OAuth defers account creation | Shop owner email (e.g., CEO) was being used as login. Now caches credentials with encrypted setup token (1hr TTL); brand enters own email in setup wizard |
 | 2026-04-11 | Design tokens in `site.settings.design` | Design belongs to the brand, not the Shopify integration. Persists across disconnect/reconnect. Only Shopify-specific data in `provider_metadata` |
 | 2026-04-11 | All images through WebP variant pipeline | Consistent CDN delivery. Brand logo/placeholder were previously stored raw — now all go through SiteMedia → R2 → ProcessImageVariantsJob → MediaVariant |

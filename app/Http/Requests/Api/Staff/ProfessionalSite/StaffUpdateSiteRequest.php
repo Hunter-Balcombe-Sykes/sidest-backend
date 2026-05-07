@@ -44,7 +44,7 @@ class StaffUpdateSiteRequest extends BaseFormRequest
                 'max:63',
                 'regex:/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/',
                 function ($attribute, $value, $fail) use ($currentSiteId) {
-                    $reserved = array_map('strtolower', config('sidest.reserved_subdomains', []));
+                    $reserved = array_map('strtolower', config('partna.reserved_subdomains', []));
                     if (in_array(strtolower($value), $reserved, true)) {
                         $fail('The subdomain "'.$value.'" is reserved and cannot be used.');
 
@@ -123,7 +123,7 @@ class StaffUpdateSiteRequest extends BaseFormRequest
             'settings.booking_mode' => [
                 'sometimes',
                 'string',
-                Rule::in(config('sidest.features.smart_booking') ? ['manual', 'smart'] : ['manual']),
+                Rule::in(config('partna.features.smart_booking') ? ['manual', 'smart'] : ['manual']),
             ],
             'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'settings.selected_products' => ['prohibited'],

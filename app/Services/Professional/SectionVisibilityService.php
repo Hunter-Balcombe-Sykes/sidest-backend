@@ -230,7 +230,7 @@ class SectionVisibilityService
 
         // Smart-booking integration path is only available when the feature flag is on.
         // Pre-launch, only the manual booking_url (redirect link) path is accepted.
-        $hasBookingIntegration = (bool) config('sidest.features.smart_booking', false)
+        $hasBookingIntegration = (bool) config('partna.features.smart_booking', false)
             && ProfessionalIntegration::query()
                 ->where('professional_id', $professionalId)
                 ->whereIn('provider', [

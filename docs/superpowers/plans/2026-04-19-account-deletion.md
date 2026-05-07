@@ -143,7 +143,7 @@ ALTER TABLE commerce.brand_commission_topups
 - [ ] **Step 3: Commit**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend"
+cd "/Users/joshuahunter/Herd/Partna/backend"
 git add supabase/migrations/20260419000001_add_deletion_fields_to_professionals.sql \
         supabase/migrations/20260419000002_nullable_commission_fks.sql
 git commit -m "$(cat <<'EOF'
@@ -445,7 +445,7 @@ Create `resources/views/emails/account/deletion-requested.blade.php`:
     <div class="container">
         <h2>Confirm your account deletion</h2>
         <p>Hi {{ $displayName }},</p>
-        <p>We received a request to delete your Side St account. To confirm, click the button below.</p>
+        <p>We received a request to delete your Partna account. To confirm, click the button below.</p>
         <a href="{{ $confirmationUrl }}" class="btn">Confirm deletion</a>
         <p class="warn">This link expires in 24 hours. If you did not request this, ignore this email and your account will remain active.</p>
     </div>
@@ -477,7 +477,7 @@ Create `resources/views/emails/account/deletion-scheduled.blade.php`:
     <div class="container">
         <h2>Your account is scheduled for deletion</h2>
         <p>Hi {{ $displayName }},</p>
-        <p>Your Side St account will be permanently deleted on <span class="date">{{ $deletesAt }}</span>.</p>
+        <p>Your Partna account will be permanently deleted on <span class="date">{{ $deletesAt }}</span>.</p>
         <p>Your account is now in read-only mode and your public site, brand configuration, and affiliate pages are offline. You can still log in to cancel the deletion at any time during this window.</p>
         <a href="{{ $cancelUrl }}" class="btn">Cancel deletion</a>
     </div>
@@ -507,7 +507,7 @@ Create `resources/views/emails/account/deletion-cancelled.blade.php`:
     <div class="container">
         <h2>Your account deletion has been cancelled</h2>
         <p>Hi {{ $displayName }},</p>
-        <p>Your Side St account deletion has been cancelled. Your account is active again and your public site, brand configuration, and affiliate pages are back online.</p>
+        <p>Your Partna account deletion has been cancelled. Your account is active again and your public site, brand configuration, and affiliate pages are back online.</p>
         <p>If you did not request this, please contact support immediately.</p>
     </div>
 </body>
@@ -746,7 +746,7 @@ it('rejects request when brand has pending topups', function () {
 - [ ] **Step 3: Run tests to verify they fail**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend"
+cd "/Users/joshuahunter/Herd/Partna/backend"
 php artisan config:clear && ./vendor/bin/pest tests/Feature/Professional/AccountDeletion/RequestDeletionTest.php
 ```
 
@@ -2198,7 +2198,7 @@ Open `app/Http/Middleware/Context/LoadCurrentProfessional.php` and replace lines
 - [ ] **Step 2: Verify existing tests still pass**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend"
+cd "/Users/joshuahunter/Herd/Partna/backend"
 composer test
 ```
 
@@ -2648,7 +2648,7 @@ EOF
 - [ ] **Step 1: Run the full test suite**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend"
+cd "/Users/joshuahunter/Herd/Partna/backend"
 composer test
 ```
 

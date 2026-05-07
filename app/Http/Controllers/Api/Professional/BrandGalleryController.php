@@ -47,7 +47,7 @@ class BrandGalleryController extends ApiController
             ->get()
             ->map(fn (SiteMedia $media) => $this->buildPayload($media));
 
-        $max = (int) config('sidest.image_pools.brand_gallery.max', 5);
+        $max = (int) config('partna.image_pools.brand_gallery.max', 5);
 
         return $this->success([
             'images' => $images,
@@ -72,7 +72,7 @@ class BrandGalleryController extends ApiController
         $pro->loadMissing('site');
         $site = $this->currentSite($pro);
         $file = $request->file('image');
-        $maxItems = (int) config('sidest.image_pools.brand_gallery.max', 5);
+        $maxItems = (int) config('partna.image_pools.brand_gallery.max', 5);
 
         $media = DB::transaction(function () use ($site, $maxItems, $request, $file) {
             if (DB::getDriverName() === 'pgsql') {

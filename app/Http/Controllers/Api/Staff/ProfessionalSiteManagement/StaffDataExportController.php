@@ -7,13 +7,13 @@ use App\Exceptions\Gdpr\NoRecipientEmailException;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Staff\RequestStaffDataExportRequest;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\DataExportService;
 use Illuminate\Http\JsonResponse;
 
 // V2: Staff-triggered data export. Same DataExportService as self-service —
 // only difference is the recipient resolution path. send_to=staff requires
-// admin role (data exfiltration to a Side St inbox). Default send_to=professional
+// admin role (data exfiltration to a Partna inbox). Default send_to=professional
 // (the safer mode) is allowed for any staff role.
 class StaffDataExportController extends ApiController
 {
@@ -25,8 +25,8 @@ class StaffDataExportController extends ApiController
         RequestStaffDataExportRequest $request,
         Professional $professional,
     ): JsonResponse {
-        /** @var SidestStaff $staff */
-        $staff = $request->attributes->get('sidest_staff');
+        /** @var PartnaStaff $staff */
+        $staff = $request->attributes->get('partna_staff');
 
         // send_to is validated by RequestStaffDataExportRequest; default is 'professional'.
         $sendTo = (string) $request->query('send_to', 'professional');

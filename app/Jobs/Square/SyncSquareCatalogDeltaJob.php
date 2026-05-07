@@ -12,7 +12,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-// V2: Delta/full catalog sync from Square to Side St. Booking integration only. Queue: integrations.
+// V2: Delta/full catalog sync from Square to Partna. Booking integration only. Queue: integrations.
 class SyncSquareCatalogDeltaJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -31,7 +31,7 @@ class SyncSquareCatalogDeltaJob implements ShouldQueue
 
     public function handle(SquareServiceSyncService $syncService): void
     {
-        if (! (bool) config('sidest.features.square_sync', false)) {
+        if (! (bool) config('partna.features.square_sync', false)) {
             return;
         }
 

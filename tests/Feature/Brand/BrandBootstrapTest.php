@@ -18,7 +18,7 @@ beforeEach(function () {
     config([
         'database.default' => 'sqlite',
         'database.connections.pgsql' => array_merge($sqlite, ['database' => ':memory:']),
-        'sidest.waitlist.enabled' => false,
+        'partna.waitlist.enabled' => false,
     ]);
 
     DB::purge('pgsql');

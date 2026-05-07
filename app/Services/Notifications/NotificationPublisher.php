@@ -20,7 +20,7 @@ class NotificationPublisher
      */
     public static function categories(): array
     {
-        return array_keys((array) config('sidest.notifications.mailables', []));
+        return array_keys((array) config('partna.notifications.mailables', []));
     }
 
     public function publish(
@@ -56,8 +56,8 @@ class NotificationPublisher
         $now = now();
         $type = Notification::normalizeFrontendType($frontendType);
         $retentionKey = $retentionConfigKey ?? 'default';
-        $days = config("sidest.notification_retention_days.{$retentionKey}")
-            ?? config('sidest.notification_retention_days.default', 30);
+        $days = config("partna.notification_retention_days.{$retentionKey}")
+            ?? config('partna.notification_retention_days.default', 30);
 
         $notificationId = (string) Str::uuid();
 
@@ -85,7 +85,7 @@ class NotificationPublisher
 
         // Only dispatch the email job for genuinely-new rows. insertOrIgnore()
         // returns the number of rows actually inserted (0 on conflict).
-        if ($inserted > 0 && config('sidest.notifications.email_enabled', false)) {
+        if ($inserted > 0 && config('partna.notifications.email_enabled', false)) {
             SendTransactionalNotificationEmailJob::dispatch(
                 $notificationId,
                 $category,

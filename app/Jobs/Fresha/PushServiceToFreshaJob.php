@@ -29,7 +29,7 @@ class PushServiceToFreshaJob implements ShouldQueue
 
     public function handle(FreshaServiceSyncService $syncService): void
     {
-        if (! (bool) config('sidest.features.fresha_sync', false)) {
+        if (! (bool) config('partna.features.fresha_sync', false)) {
             return;
         }
 

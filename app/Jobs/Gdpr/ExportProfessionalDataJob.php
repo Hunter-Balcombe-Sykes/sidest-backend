@@ -29,7 +29,7 @@ class ExportProfessionalDataJob implements ShouldQueue
 
     public function __construct(public string $auditId)
     {
-        $this->onQueue(config('sidest.gdpr.queue'));
+        $this->onQueue(config('partna.gdpr.queue'));
     }
 
     public function backoff(): array
@@ -70,7 +70,7 @@ class ExportProfessionalDataJob implements ShouldQueue
             $written = $writer->write($payload);
             $tmpPath = $written['path'];
 
-            $disk = Storage::disk(config('sidest.media_disk'));
+            $disk = Storage::disk(config('partna.media_disk'));
             $remotePath = "exports/{$audit->professional_id}/{$audit->id}.zip";
 
             $stream = fopen($written['path'], 'rb');
@@ -79,7 +79,7 @@ class ExportProfessionalDataJob implements ShouldQueue
                 fclose($stream);
             }
 
-            $ttlDays = (int) config('sidest.gdpr.signed_url_ttl_days', 7);
+            $ttlDays = (int) config('partna.gdpr.signed_url_ttl_days', 7);
             $signedUrl = $disk->temporaryUrl($remotePath, now()->addDays($ttlDays));
 
             Mail::to($audit->recipient_email)->send(new ProfessionalDataExportMail(

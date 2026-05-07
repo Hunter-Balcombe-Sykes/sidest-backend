@@ -17,7 +17,7 @@ beforeEach(function () {
     setupProfessionalDeletionAuditTable();
 
     config([
-        'sidest.media_disk' => 'media',
+        'partna.media_disk' => 'media',
         'supabase.url' => 'https://test.supabase.co',
         'supabase.service_role_key' => 'test-key',
     ]);

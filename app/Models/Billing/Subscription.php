@@ -90,7 +90,7 @@ class Subscription extends BaseModel
             // current_period_end is when the billing period ended (= when payment first failed).
             // Guard for unit-test contexts where the config repository isn't bootstrapped.
             $graceDays = app()->bound('config')
-                ? (int) config('sidest.billing.past_due_grace_days', 7)
+                ? (int) config('partna.billing.past_due_grace_days', 7)
                 : 7;
 
             return $this->current_period_end !== null

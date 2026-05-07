@@ -13,7 +13,7 @@ beforeEach(function () {
     Cache::flush();
     setupProfessionalIntegrationsTable();
 
-    Config::set('sidest.features.fresha_sync', true);
+    Config::set('partna.features.fresha_sync', true);
     Config::set('services.fresha.webhook_signature_key', 'test-fresha-key');
     Config::set('services.fresha.webhook_notification_url', 'http://localhost/api/webhooks/fresha');
 });
@@ -73,7 +73,7 @@ it('returns duplicate=true on second delivery of the same event_id', function ()
 });
 
 it('short-circuits with feature_gated=true when fresha_sync flag is off', function () {
-    Config::set('sidest.features.fresha_sync', false);
+    Config::set('partna.features.fresha_sync', false);
 
     // No signature provided — should still 200 because we exit before signature check.
     $this->postJson('/api/webhooks/fresha', ['type' => 'catalog.version.updated'])

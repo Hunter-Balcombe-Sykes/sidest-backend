@@ -293,7 +293,7 @@ it('still rejects unknown settings keys', function () {
 it('accepts the new platform/handle keys in settings allowlist', function () {
     // platform and handle are added to link_block_settings_keys so the
     // controller can write them to settings without tripping the existing allowlist.
-    $allowed = config('sidest.link_block_settings_keys');
+    $allowed = config('partna.link_block_settings_keys');
     expect($allowed)->toContain('platform');
     expect($allowed)->toContain('handle');
 });

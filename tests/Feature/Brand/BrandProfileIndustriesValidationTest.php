@@ -16,7 +16,7 @@ function validateBrandIndustries(array $payload): array
         'industries' => ['sometimes', 'array', 'max:3'],
         'industries.*' => [
             'string',
-            Rule::in(array_keys(config('sidest.brand_industries', []))),
+            Rule::in(array_keys(config('partna.brand_industries', []))),
         ],
     ];
 
@@ -82,7 +82,7 @@ it('accepts a payload with no industries key at all (partial update)', function 
 });
 
 it('accepts every slug defined in the config', function () {
-    $allSlugs = array_keys(config('sidest.brand_industries'));
+    $allSlugs = array_keys(config('partna.brand_industries'));
 
     // Config exposes 13 slugs; cap at 3 per the rule, so test chunks of 3.
     foreach (array_chunk($allSlugs, 3) as $chunk) {

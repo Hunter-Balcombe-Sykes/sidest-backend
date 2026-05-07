@@ -631,8 +631,8 @@ class SiteCacheService
         if ($store === null) {
             $store = [
                 'selected_products' => [],
-                'default_commission_rate' => (float) config('sidest.store.default_commission_rate', 15),
-                'max_featured_products' => (int) config('sidest.store.max_featured_products', 12),
+                'default_commission_rate' => (float) config('partna.store.default_commission_rate', 15),
+                'max_featured_products' => (int) config('partna.store.max_featured_products', 12),
                 'checkout_mode' => 'shopify',
             ];
         }
@@ -755,7 +755,7 @@ class SiteCacheService
         // --- Document: resolve preview_url from storage path to full CDN URL ---
         if (isset($site['document']) && is_array($site['document']) && ! empty($site['document']['preview_url'])) {
             $rawPath = (string) $site['document']['preview_url'];
-            $site['document']['preview_url'] = Storage::disk(config('sidest.media_disk'))->url($rawPath);
+            $site['document']['preview_url'] = Storage::disk(config('partna.media_disk'))->url($rawPath);
         }
 
         return $site;

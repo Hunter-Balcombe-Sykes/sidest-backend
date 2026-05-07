@@ -12,7 +12,7 @@ class UpsertSectionBlockRequest extends BaseFormRequest
     public function rules(): array
     {
         $type = (string) $this->input('block_type');
-        $allowed = config('sidest.section_block_types', []);
+        $allowed = config('partna.section_block_types', []);
 
         $textRules = ['sometimes', 'nullable', 'string', 'max:4000'];
 

@@ -27,7 +27,7 @@ function invokeDispatchMethod(string $method, string $serviceId, string $action)
 }
 
 it('shouldDispatchSquareSync returns false when square_sync flag is off', function () {
-    config()->set('sidest.features.square_sync', false);
+    config()->set('partna.features.square_sync', false);
 
     $pro = new Professional(['id' => 'pro-anything']);
 
@@ -35,7 +35,7 @@ it('shouldDispatchSquareSync returns false when square_sync flag is off', functi
 });
 
 it('shouldDispatchFreshaSync returns false when fresha_sync flag is off', function () {
-    config()->set('sidest.features.fresha_sync', false);
+    config()->set('partna.features.fresha_sync', false);
 
     $pro = new Professional(['id' => 'pro-anything']);
 

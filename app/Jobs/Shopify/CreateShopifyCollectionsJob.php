@@ -13,7 +13,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
-// V2: Creates four Side St collections on the brand's Shopify store and writes handles to shop metafields.
+// V2: Creates four Partna collections on the brand's Shopify store and writes handles to shop metafields.
 class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -116,34 +116,34 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
     // backfill:has-enabled-variants artisan command (Phase 11).
     private const COLLECTIONS = [
         [
-            'title' => 'Side St — Active Products',
+            'title' => 'Partna — Active Products',
             'metafield_key' => 'active_collection_handle',
             'smart' => true,
             'rules' => [
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.has_enabled_variants'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'partna.active'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'partna.has_enabled_variants'],
             ],
         ],
         [
-            'title' => 'Side St — Default Products',
+            'title' => 'Partna — Default Products',
             'metafield_key' => 'default_collection_handle',
             'smart' => false,
             'rules' => [],
         ],
         [
-            'title' => 'Side St — Brand Favourites',
+            'title' => 'Partna — Brand Favourites',
             'metafield_key' => 'favourites_collection_handle',
             'smart' => false,
             'rules' => [],
         ],
         [
-            'title' => 'Side St — High Commission Products',
+            'title' => 'Partna — High Commission Products',
             'metafield_key' => 'high_commission_collection_handle',
             'smart' => true,
             'rules' => [
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.has_enabled_variants'],
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'GREATER_THAN', 'condition' => '0', 'metafield_ref' => 'sidest.commission_override'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'partna.active'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'partna.has_enabled_variants'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'GREATER_THAN', 'condition' => '0', 'metafield_ref' => 'partna.commission_override'],
             ],
         ],
     ];
@@ -253,7 +253,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
                 'shop_domain' => $shopDomain,
             ]);
 
-            // Collections are the last structural dependency of the Side St
+            // Collections are the last structural dependency of the Partna
             // Price automatic discount (we want collections in place before
             // the function starts firing, so "Active Products" behaviour is
             // coherent the moment the discount activates). Dispatch the
@@ -417,7 +417,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
     private array $metafieldDefinitionCache = [];
 
     /**
-     * Resolve a metafield reference (e.g. "sidest.active") to its Shopify MetafieldDefinition GID.
+     * Resolve a metafield reference (e.g. "partna.active") to its Shopify MetafieldDefinition GID.
      */
     private function resolveMetafieldDefinitionGid(string $shopDomain, string $accessToken, string $apiVersion, string $metafieldRef): ?string
     {
@@ -452,7 +452,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
      * Find the publication to publish collections to.
      *
      * Prefers the app's own publication (created by CreateShopifySalesChannelJob,
-     * named after the app — "Side St" or "sidest"). Falls back to "Online Store"
+     * named after the app — "Partna" or "sidest"). Falls back to "Online Store"
      * for legacy integrations that predate the app publication flow.
      */
     private function findPublicationId(string $shopDomain, string $accessToken, string $apiVersion): ?string

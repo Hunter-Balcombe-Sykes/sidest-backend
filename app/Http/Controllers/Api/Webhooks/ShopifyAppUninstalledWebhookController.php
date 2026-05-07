@@ -82,7 +82,7 @@ class ShopifyAppUninstalledWebhookController extends ApiController
         // access token has already been revoked by Shopify BEFORE this
         // webhook fires. Metafield definitions, collections, and the
         // storefront access token will remain in the brand's store unless
-        // they clicked "Disconnect" in the Side St dashboard first (that
+        // they clicked "Disconnect" in the Partna dashboard first (that
         // path runs the full teardown via ShopifyTeardownService while the
         // token is still alive). See docs/brand-catalog-v2.md for the
         // recommended disconnect flow.

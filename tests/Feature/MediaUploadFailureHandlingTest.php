@@ -23,7 +23,7 @@ beforeEach(function () {
     bootstrapMediaUploadFailureSchema();
 
     config([
-        'sidest.media_disk' => 'local',
+        'partna.media_disk' => 'local',
         'filesystems.disks.local.root' => storage_path('framework/testing/disks/media-upload-failure'),
     ]);
 
@@ -86,8 +86,8 @@ it('returns 503 and soft-deletes media when video dispatch fails', function () {
 
     config([
         'queue.default' => 'database',
-        'sidest.video_queue.connection' => 'missing_video_connection',
-        'sidest.video_uploads_enabled' => true,
+        'partna.video_queue.connection' => 'missing_video_connection',
+        'partna.video_uploads_enabled' => true,
     ]);
 
     app()->instance('env', 'production');
@@ -138,7 +138,7 @@ it('returns 422 and creates no DB row when probe finds no video stream', functio
 
     config([
         'queue.default' => 'sync',
-        'sidest.video_uploads_enabled' => true,
+        'partna.video_uploads_enabled' => true,
     ]);
 
     $video = UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4');
@@ -176,7 +176,7 @@ it('returns 422 and creates no DB row when video exceeds maximum duration', func
 
     config([
         'queue.default' => 'sync',
-        'sidest.video_uploads_enabled' => true,
+        'partna.video_uploads_enabled' => true,
     ]);
 
     $video = UploadedFile::fake()->create('long.mp4', 512, 'video/mp4');
@@ -214,7 +214,7 @@ it('returns 422 and creates no DB row when ffprobe cannot parse the container', 
 
     config([
         'queue.default' => 'sync',
-        'sidest.video_uploads_enabled' => true,
+        'partna.video_uploads_enabled' => true,
     ]);
 
     $video = UploadedFile::fake()->create('corrupt.mp4', 512, 'video/mp4');

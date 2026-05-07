@@ -39,7 +39,7 @@ class PublicDocumentDownloadController extends ApiController
             );
         }
 
-        $mediaDisk = config('sidest.media_disk');
+        $mediaDisk = config('partna.media_disk');
         $filename = $document->original_filename ?: 'document';
 
         $presignedUrl = Storage::disk($mediaDisk)->temporaryUrl(

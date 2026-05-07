@@ -13,7 +13,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
-// V2: Core. Creates Shopify Storefront API token ("Side St Hydrogen") via GraphQL. Required for Hydrogen storefronts to fetch product data. Matches existing "Side St" tokens for backward compat.
+// V2: Core. Creates Shopify Storefront API token ("Partna Hydrogen") via GraphQL. Required for Hydrogen storefronts to fetch product data. Matches existing "Partna" tokens for backward compat.
 class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -92,7 +92,7 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
         try {
-            // Check if a Side St token already exists in Shopify (e.g. from a previous run).
+            // Check if a Partna token already exists in Shopify (e.g. from a previous run).
             $existing = $this->findExistingToken($shopDomain, $accessToken, $apiVersion);
             if ($existing) {
                 $integration->update(['storefront_token' => $existing]);
@@ -148,7 +148,7 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
 
         foreach ($tokens as $token) {
             $title = (string) ($token['title'] ?? '');
-            if ($title === 'Side St' || $title === 'Side St Hydrogen') {
+            if ($title === 'Partna' || $title === 'Partna Hydrogen') {
                 return (string) ($token['access_token'] ?? '');
             }
         }
@@ -159,7 +159,7 @@ class CreateStorefrontAccessTokenJob implements ShouldBeUnique, ShouldQueue
     private function createToken(string $shopDomain, string $accessToken, string $apiVersion): string
     {
         $data = $this->queryShopify($shopDomain, $accessToken, $apiVersion, self::STOREFRONT_TOKEN_CREATE, [
-            'input' => ['title' => 'Side St Hydrogen'],
+            'input' => ['title' => 'Partna Hydrogen'],
         ]);
 
         $userErrors = Arr::get($data, 'storefrontAccessTokenCreate.userErrors', []);

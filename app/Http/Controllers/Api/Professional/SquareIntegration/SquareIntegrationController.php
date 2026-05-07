@@ -236,7 +236,7 @@ class SquareIntegrationController extends ApiController
 
     /**
      * POST /api/square/services/sync
-     * Runs a full pull from Square services into Commet immediately.
+     * Runs a full pull from Square services into Partna immediately.
      * This endpoint is used by the manual refresh button and must work without queue workers.
      */
     public function syncServicesNow(Request $request, SquareServiceSyncService $syncService)

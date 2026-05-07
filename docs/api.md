@@ -117,15 +117,15 @@ All authenticated requests MUST include the Supabase access token:
 - Also send: Accept: application/json
 - For JSON bodies: Content-Type: application/json Tokens are verified by the supabase.jwt middleware using Supabase JWKS + issuer/audience settings.
 
-### No login endpoint in Side St
+### No login endpoint in Partna
 
-- Side St does not manage passwords or sessions.
+- Partna does not manage passwords or sessions.
 - Frontend signs in with Supabase Auth.
-- Frontend calls Side St API with the returned access_token.
+- Frontend calls Partna API with the returned access_token.
 
 ### Bootstrap required for new users
 
-A Supabase-authenticated user is not automatically a professional in Side St.
+A Supabase-authenticated user is not automatically a professional in Partna.
 
 **For a new user, call:**
 
@@ -411,10 +411,10 @@ If you skip bootstrap, professional routes will return 403 with a message prompt
 
 ### RLS behavior
 
-Side St reads/writes Postgres through Laravel using the configured database user.
+Partna reads/writes Postgres through Laravel using the configured database user.
 
-- Database table RLS does not gate Side St API calls if the DB user bypasses RLS (typical for server-side roles).
-- Image uploads go through the Side St API (server-side), not through Supabase Storage. Supabase Storage is not used at all — all media is stored on Laravel Cloud Object Storage (Cloudflare R2).
+- Database table RLS does not gate Partna API calls if the DB user bypasses RLS (typical for server-side roles).
+- Image uploads go through the Partna API (server-side), not through Supabase Storage. Supabase Storage is not used at all — all media is stored on Laravel Cloud Object Storage (Cloudflare R2).
 
 ## 4) Data Models
 
@@ -681,7 +681,7 @@ Each `SiteImage` gets a set of universal WebP variants generated server-side via
 
 ### Standard error format
 
-**Most Side St errors use:**
+**Most Partna errors use:**
 
 ```json
 {
@@ -882,7 +882,7 @@ await fetch(`${API_BASE}/analytics/pageviews`, {
 
 ### `POST /api/public/waitlist`
 
-- Purpose: collect pre-launch waitlist submissions for Side St account access
+- Purpose: collect pre-launch waitlist submissions for Partna account access
 - Auth: None
 - Rate limit: waitlist
 - Request body:
@@ -1785,7 +1785,7 @@ Rollups:
 
 ### Media Uploads (images and videos, server-side processing)
 
-Images and videos are uploaded through the Side St API (not directly to storage). Each upload stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and enqueues a processing job.
+Images and videos are uploaded through the Partna API (not directly to storage). Each upload stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and enqueues a processing job.
 
 **Processing modes:**
 - **Images:** GD-based WebP transcoding on the `images` queue. Queue `sync` mode processes inline. Async mode: poll until `processing_state = ready`.
@@ -2095,9 +2095,9 @@ Square integration manages online booking appointments and service synchronizati
 
 ### Fresha Integration
 
-Fresha integration manages service catalog synchronization between Side St and Fresha.
+Fresha integration manages service catalog synchronization between Partna and Fresha.
 
-Unlike Square (which exposes a full platform API for bookings, payments, and catalog), Fresha restricts third-party integrations to **catalog sync only**. Bookings, payments, and availability remain within the Fresha ecosystem. The Fresha integration therefore focuses on keeping the service catalog in sync between Side St and Fresha. The `FreshaApiClient` does include prepared methods for availability, bookings, and customer creation — these are scaffolded for future use if Fresha opens its API further, but they are not currently wired to any public routes.
+Unlike Square (which exposes a full platform API for bookings, payments, and catalog), Fresha restricts third-party integrations to **catalog sync only**. Bookings, payments, and availability remain within the Fresha ecosystem. The Fresha integration therefore focuses on keeping the service catalog in sync between Partna and Fresha. The `FreshaApiClient` does include prepared methods for availability, bookings, and customer creation — these are scaffolded for future use if Fresha opens its API further, but they are not currently wired to any public routes.
 
 #### `GET /api/fresha/status`
 
@@ -2169,7 +2169,7 @@ Shopify order ingestion endpoints have **no auth middleware**. Signature validat
 #### `POST /api/webhooks/shopify/orders/fallback`
 
 - Purpose: fallback ingestion path when caller only has `shop_domain + order_id` (or cached payload)
-- Auth: Side St fallback HMAC via `X-Side St-Fallback-Signature` (`SHOPIFY_FALLBACK_SECRET`)
+- Auth: Partna fallback HMAC via `X-Partna-Fallback-Signature` (`SHOPIFY_FALLBACK_SECRET`)
 - Request body:
   - `shop_domain` (required)
   - `order_id` (required; numeric id or gid containing numeric id)
@@ -2186,7 +2186,7 @@ Shopify order ingestion endpoints have **no auth middleware**. Signature validat
 
 ### Fresha Webhooks
 
-Fresha sends catalog change notifications to the Side St webhook endpoint. These routes have **no auth middleware** — authentication is performed via HMAC signature validation.
+Fresha sends catalog change notifications to the Partna webhook endpoint. These routes have **no auth middleware** — authentication is performed via HMAC signature validation.
 
 #### `POST /api/webhooks/fresha`
 #### `POST /api/webhooks/fresha/catalog`
@@ -2219,7 +2219,7 @@ Fresha sends catalog change notifications to the Side St webhook endpoint. These
 | Observer auto-sync       | Yes (on service save/delete)   | Yes (on service save/delete)             |
 | Queue                    | `integrations`                 | `integrations`                           |
 
-**Why they differ:** Square exposes a complete platform API — catalog, bookings, payments, availability, customers, and locations are all accessible to third-party developers. Side St leverages this to offer a full public booking + payment flow embedded in the mini-site. Fresha, by contrast, restricts third-party API access to catalog (service) management. Bookings, payments, availability, and customer data remain within the Fresha ecosystem. The Fresha integration therefore focuses exclusively on keeping the service catalog synchronized. The `FreshaApiClient` includes scaffolded methods for availability, bookings, and customer creation to allow rapid expansion if Fresha opens these APIs in the future.
+**Why they differ:** Square exposes a complete platform API — catalog, bookings, payments, availability, customers, and locations are all accessible to third-party developers. Partna leverages this to offer a full public booking + payment flow embedded in the mini-site. Fresha, by contrast, restricts third-party API access to catalog (service) management. Bookings, payments, availability, and customer data remain within the Fresha ecosystem. The Fresha integration therefore focuses exclusively on keeping the service catalog synchronized. The `FreshaApiClient` includes scaffolded methods for availability, bookings, and customer creation to allow rapid expansion if Fresha opens these APIs in the future.
 
 ---
 
@@ -2353,7 +2353,7 @@ Update an existing selection's variant subset in place. Requires `brand_professi
 
 Returns the updated `AffiliateProductSelectionResource` with the new `selected_variant_gids` field. Rate-limited by `throttle:affiliate-writes`.
 
-#### Side St Price enforced via Shopify Function + cart attribute
+#### Partna Price enforced via Shopify Function + cart attribute
 
 `sidest.affiliate_discount_pct` (product-level, now `PUBLIC_READ`) is read by the `sidest-affiliate-discount` Shopify Function and applied as a line-level percentage discount at checkout. The function fires only when the cart carries the `_sidest_affiliate_id` attribute — set by Hydrogen on `cartCreate` from `$affiliateSlug.tsx` — so brand-direct customers pay the Shopify sticker price.
 
@@ -2376,7 +2376,7 @@ It requires a staff JWT (core.sidest_staff).
 
 ## 10) Media uploads & processing (images + videos)
 
-Images and videos are uploaded through the Side St API and processed entirely server-side. No direct-to-storage uploads from the frontend.
+Images and videos are uploaded through the Partna API and processed entirely server-side. No direct-to-storage uploads from the frontend.
 
 ### Architecture
 
@@ -2444,7 +2444,7 @@ Images and videos share the same per-pool cap.
 
 ## 11) Test users and getting tokens
 
-Tokens come from Supabase Auth. Side St does not issue tokens.
+Tokens come from Supabase Auth. Partna does not issue tokens.
 
 ### Create test users
 
@@ -2460,7 +2460,7 @@ Tokens come from Supabase Auth. Side St does not issue tokens.
 
 ### Body:
 
-Response includes access_token. Use that token as the Authorization Bearer token when calling Side St.
+Response includes access_token. Use that token as the Authorization Bearer token when calling Partna.
 This flow is included in the Insomnia collection as Login requests.
 
 ## 12) Insomnia collection
@@ -2502,7 +2502,7 @@ Note: The frontend does not need any storage credentials — all image URLs come
 - SUPABASE_JWKS_URL
 - SUPABASE_JWKS_CACHE_SECONDS (default: 600)
 
-### Side St app settings
+### Partna app settings
 
 - SIDEST_PUBLIC_DOMAIN (used for domain-scoped public routes)
 - SIDEST_MEDIA_DISK (default: media — the Laravel filesystem disk name)

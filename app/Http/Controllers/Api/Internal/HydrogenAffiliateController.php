@@ -351,7 +351,7 @@ class HydrogenAffiliateController extends ApiController
                 // there. Rebuild both from the platform config so the row still
                 // renders on Hydrogen without requiring a backfill migration.
                 if (($title === '' || $url === '') && $platform !== null) {
-                    $config = config("sidest.social_platforms.{$platform}");
+                    $config = config("partna.social_platforms.{$platform}");
                     $handle = is_string($settings['handle'] ?? null)
                         ? trim((string) $settings['handle'])
                         : '';

@@ -9,7 +9,7 @@ beforeEach(function () {
 });
 
 it('Square webhook returns 200 and does not dispatch sync when flag is off', function () {
-    config()->set('sidest.features.square_sync', false);
+    config()->set('partna.features.square_sync', false);
 
     $this->postJson('/api/webhooks/square', [
         'event_id' => 'test-evt-1',
@@ -22,7 +22,7 @@ it('Square webhook returns 200 and does not dispatch sync when flag is off', fun
 });
 
 it('Fresha webhook returns 200 and does not dispatch sync when flag is off', function () {
-    config()->set('sidest.features.fresha_sync', false);
+    config()->set('partna.features.fresha_sync', false);
 
     $this->postJson('/api/webhooks/fresha', [
         'event_id' => 'test-evt-2',

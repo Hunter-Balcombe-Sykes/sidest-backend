@@ -92,7 +92,7 @@ POST /api/staff/professionals/{professional}/data-export
 - `throttle:staff` (existing limiter)
 
 **Query params:**
-- `send_to` — `professional` (default) or `staff`. `send_to=staff` requires `SidestStaff::role === 'admin'`; non-admins get `403`.
+- `send_to` — `professional` (default) or `staff`. `send_to=staff` requires `PartnaStaff::role === 'admin'`; non-admins get `403`.
 
 **Response (202 Accepted):**
 ```json
@@ -177,7 +177,7 @@ Different lifecycles (deletion is one-shot; exports are recurring), different co
     "export_id": "01HF...",
     "schema_version": 1,
     "triggered_by": "self",
-    "notes": "This export contains personally identifiable information (PII) you collected from your customers via Side St (booking history, enquiries, email subscriptions). Handle in accordance with applicable privacy law."
+    "notes": "This export contains personally identifiable information (PII) you collected from your customers via Partna (booking history, enquiries, email subscriptions). Handle in accordance with applicable privacy law."
   },
   "profile": {
     "professional": { /* full professionals row, minus auth_user_id, deletion_token_hash */ },
@@ -246,7 +246,7 @@ Everything else lives only in `data.json`.
 ### Scope rings (from brainstorm)
 
 - **Ring 1 (always include):** profile + brand profile, site config, media manifest, integration metadata (no tokens), subscription + billing history, commission ledger + payouts referencing this professional, audit log entries.
-- **Ring 2 (always include):** customers, enquiries, booking_events, lead_submissions, email_subscriptions — PII the professional collected from their customers via Side St. Justification matches `ExportCustomerDataJob` precedent and is disclaimed in `metadata.notes`.
+- **Ring 2 (always include):** customers, enquiries, booking_events, lead_submissions, email_subscriptions — PII the professional collected from their customers via Partna. Justification matches `ExportCustomerDataJob` precedent and is disclaimed in `metadata.notes`.
 - **Ring 3 (always exclude):** other professionals' data, raw third-party API payloads, Stripe webhook payloads, internal staff notes.
 
 Same scope for self-service and staff endpoints.
@@ -325,11 +325,11 @@ Two manual steps required before the feature works in any environment:
 `App\Mail\Gdpr\ProfessionalDataExportMail` — new mailable parallel to `CustomerDataExportMail`.
 
 **Self-service recipient:**
-- Subject: `"Your Side St data export is ready"`
+- Subject: `"Your Partna data export is ready"`
 - Body: download link, "valid for 7 days", what's inside, support contact.
 
 **Staff recipient (`send_to=staff`):**
-- Subject: `"Side St data export — {professional_handle}"`
+- Subject: `"Partna data export — {professional_handle}"`
 - Body: same link plus a banner reminding the staff member that this contains customer PII and must be handled per the data-handling SOP.
 
 Same Blade template, conditional banner block.

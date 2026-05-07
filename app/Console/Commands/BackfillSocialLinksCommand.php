@@ -47,7 +47,7 @@ class BackfillSocialLinksCommand extends Command
 
     public function handle(SocialLinkNormalizer $normalizer): int
     {
-        $registry = config('sidest.social_platforms', []);
+        $registry = config('partna.social_platforms', []);
         $iconToPlatform = $this->buildIconToPlatformMap($registry);
 
         $dryRun = (bool) $this->option('dry-run');

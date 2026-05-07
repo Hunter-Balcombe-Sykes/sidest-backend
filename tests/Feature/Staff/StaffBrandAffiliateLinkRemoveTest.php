@@ -2,7 +2,7 @@
 
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandAffiliateLinkController;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\DTO\DisconnectResult;
 use Illuminate\Http\Request;
@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 it('returns 200 with void counts on sync path', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new PartnaStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('disconnect')->once()->andReturn(new DisconnectResult(
@@ -29,7 +29,7 @@ it('returns 200 with void counts on sync path', function () {
         'reason' => 'migrating off platform per customer request',
         'on_pending_commissions' => 'void',
     ]);
-    $request->attributes->set('sidest_staff', $staff);
+    $request->attributes->set('partna_staff', $staff);
 
     $response = $controller->destroy($request, $brand, $affiliate);
     $payload = json_decode($response->getContent(), true);
@@ -42,7 +42,7 @@ it('returns 200 with void counts on sync path', function () {
 it('returns 202 with voided_async:true on async overflow', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new PartnaStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('disconnect')->once()->andReturn(new DisconnectResult(
@@ -60,7 +60,7 @@ it('returns 202 with voided_async:true on async overflow', function () {
         'reason' => 'Brand account closure — affiliate notified via email',
         'on_pending_commissions' => 'void',
     ]);
-    $request->attributes->set('sidest_staff', $staff);
+    $request->attributes->set('partna_staff', $staff);
 
     $response = $controller->destroy($request, $brand, $affiliate);
     $payload = json_decode($response->getContent(), true);
@@ -73,7 +73,7 @@ it('returns 202 with voided_async:true on async overflow', function () {
 it('returns 404 when link does not exist', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new PartnaStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('disconnect')->once()->andReturn(new DisconnectResult(
@@ -88,7 +88,7 @@ it('returns 404 when link does not exist', function () {
         'reason' => 'some valid reason here',
         'on_pending_commissions' => 'keep',
     ]);
-    $request->attributes->set('sidest_staff', $staff);
+    $request->attributes->set('partna_staff', $staff);
 
     $response = $controller->destroy($request, $brand, $affiliate);
     expect($response->status())->toBe(404);
@@ -97,7 +97,7 @@ it('returns 404 when link does not exist', function () {
 it('returns 422 when on_pending_commissions is void but reason is under 20 chars', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new PartnaStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldNotReceive('disconnect');
@@ -107,7 +107,7 @@ it('returns 422 when on_pending_commissions is void but reason is under 20 chars
         'reason' => 'too short rsn', // 13 chars
         'on_pending_commissions' => 'void',
     ]);
-    $request->attributes->set('sidest_staff', $staff);
+    $request->attributes->set('partna_staff', $staff);
 
     $response = $controller->destroy($request, $brand, $affiliate);
     expect($response->status())->toBe(422);

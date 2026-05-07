@@ -56,14 +56,14 @@ beforeEach(function () {
 
     DB::table('core.professionals')->insert(['id' => 'pro-1', 'primary_email' => 'pro@example.com']);
 
-    Config::set('sidest.notifications.email_enabled', true);
+    Config::set('partna.notifications.email_enabled', true);
 });
 
 it('accepts a new category as a single config-map edit — no publisher/job changes', function () {
     Mail::fake();
 
     // EDIT #1 (simulated): register the new category + its mailable in config.
-    Config::set('sidest.notifications.mailables.brand_new_thing', FakeNewCategoryMail::class);
+    Config::set('partna.notifications.mailables.brand_new_thing', FakeNewCategoryMail::class);
 
     // categories() should now include it without touching the publisher.
     expect(NotificationPublisher::categories())->toContain('brand_new_thing');

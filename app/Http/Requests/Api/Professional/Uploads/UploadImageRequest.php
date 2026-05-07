@@ -14,14 +14,14 @@ class UploadImageRequest extends BaseFormRequest
 
     public function rules(): array
     {
-        $imageMaxKb = (int) config('sidest.image_max_upload_size', 10240);
-        $videoMaxKb = (int) config('sidest.video_max_upload_size', 512000);
+        $imageMaxKb = (int) config('partna.image_max_upload_size', 10240);
+        $videoMaxKb = (int) config('partna.video_max_upload_size', 512000);
 
         return [
             'pool' => [
                 'required',
                 'string',
-                Rule::in(config('sidest.upload_pools')),
+                Rule::in(config('partna.upload_pools')),
             ],
             // Either `image` or `video` must be provided (not both). The after-validator
             // enforces the one-of constraint; individual rules run only when the field exists.
@@ -63,7 +63,7 @@ class UploadImageRequest extends BaseFormRequest
                 return;
             }
 
-            if ($hasVideo && ! config('sidest.video_uploads_enabled', false)) {
+            if ($hasVideo && ! config('partna.video_uploads_enabled', false)) {
                 $v->errors()->add('video', 'Video uploads are not currently enabled.');
             }
 
@@ -82,11 +82,11 @@ class UploadImageRequest extends BaseFormRequest
 
     public function messages(): array
     {
-        $imageMaxMb = round(((int) config('sidest.image_max_upload_size', 10240)) / 1024, 1);
-        $videoMaxMb = round(((int) config('sidest.video_max_upload_size', 512000)) / 1024, 0);
+        $imageMaxMb = round(((int) config('partna.image_max_upload_size', 10240)) / 1024, 1);
+        $videoMaxMb = round(((int) config('partna.video_max_upload_size', 512000)) / 1024, 0);
 
         return [
-            'pool.in' => 'Pool must be one of: '.implode(', ', config('sidest.upload_pools')).'.',
+            'pool.in' => 'Pool must be one of: '.implode(', ', config('partna.upload_pools')).'.',
             'image.max' => "Image must be smaller than {$imageMaxMb} MB.",
             'image.mimes' => 'Image must be JPEG, PNG, or WebP.',
             'image.image' => 'The file must be a valid image.',

@@ -19,7 +19,7 @@ class StaffStoreSettingsController extends ApiController
      */
     public function update(Request $request, Professional $professional): JsonResponse
     {
-        $minHoldDays = (int) config('sidest.store.min_payout_hold_days', 7);
+        $minHoldDays = (int) config('partna.store.min_payout_hold_days', 7);
 
         $data = $request->validate([
             'default_commission_rate' => ['sometimes', 'numeric', 'min:0', 'max:100'],

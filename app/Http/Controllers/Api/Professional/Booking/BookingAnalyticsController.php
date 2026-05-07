@@ -26,7 +26,7 @@ class BookingAnalyticsController extends ApiController
         $professionalId = (string) $professional->id;
 
         // Booking analytics are only available in smart mode — manual mode
-        // affiliates don't route payments through Square via Side St.
+        // affiliates don't route payments through Square via Partna.
         $site = $professional->site;
         $siteSettings = is_array($site?->settings) ? $site->settings : [];
         $bookingMode = strtolower((string) ($siteSettings['booking_mode'] ?? ''));

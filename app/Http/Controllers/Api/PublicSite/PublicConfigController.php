@@ -38,7 +38,7 @@ class PublicConfigController extends ApiController
         return response()
             ->json([
                 'platforms' => $this->normalizer->getPublicRegistry(),
-                'categories' => config('sidest.link_categories', []),
+                'categories' => config('partna.link_categories', []),
             ])
             ->header('Cache-Control', 'public, max-age=3600');
     }

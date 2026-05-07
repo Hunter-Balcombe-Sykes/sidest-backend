@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Affiliates get 30 days to connect Stripe. After that, commissions past their 30-day void window are voided (Side St keeps 20% fee, affiliate's 80% returns to brand). Warning notifications nudge connection.
+**Goal:** Affiliates get 30 days to connect Stripe. After that, commissions past their 30-day void window are voided (Partna keeps 20% fee, affiliate's 80% returns to brand). Warning notifications nudge connection.
 
 **Architecture:** New `CommissionVoidService` handles void logic, called from the existing `ProcessCommissionPayoutsJob`. Grace period column on `professionals` gates the payout service. Stripe reconnection flushes eligible held commissions via webhook handler. Notifications use existing `NotificationPublisher`.
 
@@ -225,7 +225,7 @@ class CommissionVoidService
 
     /**
      * Void a single commission entry. The affiliate's 80% is returned to
-     * the brand (by simply not paying it out). Side St's 20% fee is still
+     * the brand (by simply not paying it out). Partna's 20% fee is still
      * collected from the brand via the normal payout flow — but since the
      * affiliate isn't getting paid, we just mark the entry voided.
      *

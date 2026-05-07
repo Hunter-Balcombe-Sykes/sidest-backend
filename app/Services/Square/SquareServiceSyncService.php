@@ -10,7 +10,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-// V2: Bidirectional service sync between Square and Side St. Booking integration — not V2 commerce.
+// V2: Bidirectional service sync between Square and Partna. Booking integration — not V2 commerce.
 class SquareServiceSyncService
 {
     public function __construct(
@@ -18,7 +18,7 @@ class SquareServiceSyncService
     ) {}
 
     /**
-     * Pull services from Square and upsert into Commet.
+     * Pull services from Square and upsert into Partna.
      *
      * @return array{synced:int, deleted:int, latest_time:string|null}
      */
@@ -59,7 +59,7 @@ class SquareServiceSyncService
     }
 
     /**
-     * Push one Commet service mutation to Square.
+     * Push one Partna service mutation to Square.
      */
     public function pushServiceToSquare(Service $service, string $action = 'upsert'): void
     {
@@ -191,7 +191,7 @@ class SquareServiceSyncService
                     ]);
             });
 
-            Log::warning('Square push from Commet failed', [
+            Log::warning('Square push from Partna failed', [
                 'service_id' => $service->id,
                 'professional_id' => $service->professional_id,
                 'message' => $e->getMessage(),
@@ -345,7 +345,7 @@ class SquareServiceSyncService
                         ]);
                     } else {
                         // Don't resurrect a service the professional manually deleted.
-                        // Only restore if Side St itself (via Square sync) did the deletion.
+                        // Only restore if Partna itself (via Square sync) did the deletion.
                         if ($service->trashed() && $service->deleted_origin !== 'square') {
                             continue;
                         }
@@ -474,6 +474,6 @@ class SquareServiceSyncService
 
         $hash = substr(str_replace('-', '', $serviceId), 0, 18);
 
-        return sprintf('#commet-%s-%s', $prefix, $hash);
+        return sprintf('#partna-%s-%s', $prefix, $hash);
     }
 }

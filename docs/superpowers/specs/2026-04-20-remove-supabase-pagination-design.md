@@ -22,7 +22,7 @@ Replace the `getUserByEmail` call with a local DB lookup on `professionals.prima
 - If `primary_email` matches → existing account found, proceed to `handleExistingBrandConnect` (Path B unchanged)
 - If no match → fall through to Path C (setup wizard) as today
 
-Users whose Shopify store email differs from their Side St `primary_email` will land in the setup wizard. They log in with their existing credentials and the wizard links the Shopify store to their account — no duplicate is created.
+Users whose Shopify store email differs from their Partna `primary_email` will land in the setup wizard. They log in with their existing credentials and the wizard links the Shopify store to their account — no duplicate is created.
 
 ### Change 2 — `createUser` fallback
 

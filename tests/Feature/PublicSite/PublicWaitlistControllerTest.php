@@ -5,7 +5,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
-    config(['sidest.throttle.enabled' => true]);
+    config(['partna.throttle.enabled' => true]);
 
     Cache::flush();
     setupWaitlistSchema();

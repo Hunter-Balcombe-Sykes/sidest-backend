@@ -296,7 +296,7 @@ return [
  * emails support requesting erasure (e.g., GDPR Article 17 request).
  *
  * @param  Professional  $professional   The user being deleted.
- * @param  string  $staffActorId         SidestStaff.id of the admin invoking this.
+ * @param  string  $staffActorId         PartnaStaff.id of the admin invoking this.
  * @param  string  $staffActorHandle     Snapshot of staff name (or email) for audit.
  * @param  string  $reason               GDPR reason / support ticket reference (10–500 chars).
  * @param  bool  $overrideObligations    If true, proceed despite unpaid balance / pending payouts.
@@ -482,7 +482,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Staff\StaffInitiateDeletionRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\AccountDeletionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -505,7 +505,7 @@ class StaffAccountDeletionController extends ApiController
         StaffInitiateDeletionRequest $request,
         Professional $professional,
     ): JsonResponse {
-        /** @var SidestStaff $staff */
+        /** @var PartnaStaff $staff */
         $staff = $request->attributes->get('sidest_staff');
 
         $result = $this->deletionService->adminInitiate(
@@ -534,7 +534,7 @@ class StaffAccountDeletionController extends ApiController
      */
     public function cancel(Request $request, Professional $professional): JsonResponse
     {
-        /** @var SidestStaff $staff */
+        /** @var PartnaStaff $staff */
         $staff = $request->attributes->get('sidest_staff');
 
         $result = $this->deletionService->adminCancel(
@@ -686,7 +686,7 @@ Create `tests/Feature/Staff/AccountDeletion/AdminInitiatedDeletionTest.php`. Req
 
 7. **admin cancel fails if no deletion in flight** — POST cancel against an active account; expect 409.
 
-8. **non-admin staff get 403 on initiate and cancel** — fixture a `SidestStaff` row that's not an admin; expect 403 from both POST endpoints; expect 200 from GET show (read access for all staff).
+8. **non-admin staff get 403 on initiate and cancel** — fixture a `PartnaStaff` row that's not an admin; expect 403 from both POST endpoints; expect 200 from GET show (read access for all staff).
 
 9. **GET show returns current deletion state and audit entries** — for an account with prior audit rows, response includes `status`, `deletes_at`, `audit_entries` array; PII fields (`actor_handle_snapshot`, `ip_address`, `user_agent`) are NOT in the response.
 

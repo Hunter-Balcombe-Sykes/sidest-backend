@@ -42,7 +42,7 @@ class ProfessionalLinkBlockController extends ApiController
     {
         $type = mb_strtolower(trim((string) ($pro->professional_type ?? '')));
         abort_unless(
-            (bool) config("sidest.account_type_defaults.{$type}.custom_links_allowed", false),
+            (bool) config("partna.account_type_defaults.{$type}.custom_links_allowed", false),
             403,
             'Custom links are not available on your account type.'
         );
@@ -199,7 +199,7 @@ class ProfessionalLinkBlockController extends ApiController
             }
 
             // Category: explicit override wins, else platform default.
-            $registry = config("sidest.social_platforms.{$normalized['platform_key']}", []);
+            $registry = config("partna.social_platforms.{$normalized['platform_key']}", []);
             $settings['category'] = $requestedCategory ?: ($registry['default_category'] ?? 'other');
 
             return [

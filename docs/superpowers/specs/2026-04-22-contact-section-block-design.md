@@ -7,7 +7,7 @@
 
 ## Problem
 
-Affiliates on Side St have no first-class way to receive direct enquiries from visitors on their public page. The newsletter section captures email subscribers (passive list-building), but there is no form for a visitor to actively send a message — a wholesale enquiry, a press request, a booking question, a collaboration pitch. Affiliates work around this by listing a contact email in their bio, which has no structure, no audit trail, and no CRM integration.
+Affiliates on Partna have no first-class way to receive direct enquiries from visitors on their public page. The newsletter section captures email subscribers (passive list-building), but there is no form for a visitor to actively send a message — a wholesale enquiry, a press request, a booking question, a collaboration pitch. Affiliates work around this by listing a contact email in their bio, which has no structure, no audit trail, and no CRM integration.
 
 A contact section block closes this gap. It gives affiliates a configurable enquiry form, routes submissions to a notification inbox of their choosing, stores each enquiry in the platform for reference, and automatically adds the submitter to their customer list as a lead.
 

@@ -43,7 +43,7 @@ class BrandProfileController extends ApiController
             'industries' => ['sometimes', 'array', 'max:3'],
             'industries.*' => [
                 'string',
-                Rule::in(array_keys(config('sidest.brand_industries', []))),
+                Rule::in(array_keys(config('partna.brand_industries', []))),
             ],
             'estimated_annual_income' => ['sometimes', 'nullable', 'string', 'max:100'],
             'business_website' => ['sometimes', 'nullable', 'string', 'max:500'],

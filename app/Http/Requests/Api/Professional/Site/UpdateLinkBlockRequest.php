@@ -67,13 +67,13 @@ class UpdateLinkBlockRequest extends BaseFormRequest
             'id' => ['required', 'uuid'],
 
             // Social mode fields
-            'platform' => ['sometimes', 'nullable', 'string', Rule::in(array_keys(config('sidest.social_platforms', [])))],
+            'platform' => ['sometimes', 'nullable', 'string', Rule::in(array_keys(config('partna.social_platforms', [])))],
             'handle' => ['sometimes', 'nullable', 'string', 'max:100'],
 
             // Custom / shared fields — all optional on update
             'title' => ['sometimes', 'nullable', 'string', 'max:80'],
             'url' => ['sometimes', 'nullable', 'string', 'max:2048'],
-            'icon_key' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_block_icon_keys', []))],
+            'icon_key' => ['sometimes', 'nullable', 'string', Rule::in(config('partna.link_block_icon_keys', []))],
 
             'is_active' => ['sometimes', 'boolean'],
             'settings' => ['sometimes', 'array'],
@@ -82,12 +82,12 @@ class UpdateLinkBlockRequest extends BaseFormRequest
             // Defense-in-depth: see StoreLinkBlockRequest for rationale. Enum-validate
             // settings.category so a client sending {category, settings: {category: 'bogus'}}
             // cannot bypass the top-level enum check through the update-path settings merge.
-            'settings.category' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_categories', []))],
+            'settings.category' => ['sometimes', 'nullable', 'string', Rule::in(config('partna.link_categories', []))],
             'settings.live_check_enabled' => ['sometimes', 'boolean'],
 
             // Category enum — all-optional on update (partial updates allowed).
             // Enum is still checked when present; controller applies override semantics.
-            'category' => ['sometimes', 'nullable', 'string', Rule::in(config('sidest.link_categories', []))],
+            'category' => ['sometimes', 'nullable', 'string', Rule::in(config('partna.link_categories', []))],
         ];
     }
 
@@ -114,7 +114,7 @@ class UpdateLinkBlockRequest extends BaseFormRequest
             // Settings allowlist (existing behaviour)
             $settings = $this->input('settings');
             if (is_array($settings)) {
-                $allowed = config('sidest.link_block_settings_keys', []);
+                $allowed = config('partna.link_block_settings_keys', []);
                 $extra = array_diff(array_keys($settings), $allowed);
                 if (! empty($extra)) {
                     $validator->errors()->add(
@@ -134,7 +134,7 @@ class UpdateLinkBlockRequest extends BaseFormRequest
                     : null;
 
                 if ($siteId) {
-                    $cap = (int) config('sidest.streaming.max_live_check_per_site', 5);
+                    $cap = (int) config('partna.streaming.max_live_check_per_site', 5);
                     $existing = \App\Models\Core\Site\Block::query()
                         ->where('site_id', $siteId)
                         ->where('block_group', 'links')

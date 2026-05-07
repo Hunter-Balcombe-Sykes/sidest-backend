@@ -11,7 +11,7 @@ use Illuminate\Console\Command;
  * Shopify brand (or a specific one via --brand).
  *
  * Why we have this:
- *   The Side St Price Shopify Function + discount auto-install was added
+ *   The Partna Price Shopify Function + discount auto-install was added
  *   after existing brands had already completed OAuth. This command catches
  *   them up by dispatching the install job for each integration row.
  *
@@ -26,7 +26,7 @@ class InstallAffiliateDiscountCommand extends Command
     protected $signature = 'sidest:install-affiliate-discount
         {--brand= : Only dispatch for this brand professional_id (UUID). If omitted, dispatches for every Shopify integration.}';
 
-    protected $description = 'Install the Side St Price automatic discount on connected Shopify stores via the sidest-affiliate-discount Function.';
+    protected $description = 'Install the Partna Price automatic discount on connected Shopify stores via the sidest-affiliate-discount Function.';
 
     public function handle(): int
     {

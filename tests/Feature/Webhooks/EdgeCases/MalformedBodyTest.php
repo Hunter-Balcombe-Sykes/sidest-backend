@@ -17,8 +17,8 @@ beforeEach(function () {
     Config::set('services.fresha.webhook_notification_url', 'http://localhost/api/webhooks/fresha');
     Config::set('services.square.webhook_signature_key', 'square-key');
     Config::set('services.square.webhook_notification_url', 'http://localhost/api/webhooks/square');
-    Config::set('sidest.features.fresha_sync', true);
-    Config::set('sidest.features.square_sync', true);
+    Config::set('partna.features.fresha_sync', true);
+    Config::set('partna.features.square_sync', true);
 });
 
 it('shopify orders/paid — empty body with valid HMAC for empty body returns 200 and dispatches nothing', function () {

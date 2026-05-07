@@ -71,8 +71,8 @@ class BrandStoreSettings extends BaseModel
      */
     public function getEffectivePayoutHoldDaysAttribute(): int
     {
-        $min = (int) config('sidest.store.min_payout_hold_days', 7);
-        $systemDefault = (int) config('sidest.store.payout_hold_days', 7);
+        $min = (int) config('partna.store.min_payout_hold_days', 7);
+        $systemDefault = (int) config('partna.store.payout_hold_days', 7);
 
         $brandDays = $this->payout_hold_days;
 

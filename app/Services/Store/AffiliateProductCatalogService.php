@@ -277,7 +277,7 @@ GRAPHQL;
         $storeSettings = BrandStoreSettings::where('professional_id', $brandId)->first();
         $defaultCommissionRate = $storeSettings
             ? (float) $storeSettings->default_commission_rate
-            : (float) config('sidest.store.default_commission_rate', 15);
+            : (float) config('partna.store.default_commission_rate', 15);
 
         // Brand-level product image ratio from site settings design JSON
         $site = Site::where('professional_id', $brandId)->first();

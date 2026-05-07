@@ -77,7 +77,7 @@ it('installs automatic app discount when function is present and none exists', f
                                 'id' => 'gid://shopify/ShopifyFunction/abc123',
                                 'apiType' => 'discount',
                                 'title' => 'sidest-affiliate-discount',
-                                'app' => ['title' => 'Side St'],
+                                'app' => ['title' => 'Partna'],
                             ]],
                         ],
                     ],
@@ -93,7 +93,7 @@ it('installs automatic app discount when function is present and none exists', f
                     'discountAutomaticAppCreate' => [
                         'automaticAppDiscount' => [
                             'discountId' => 'gid://shopify/DiscountAutomaticNode/999',
-                            'title' => 'Side St Price',
+                            'title' => 'Partna Price',
                             'status' => 'ACTIVE',
                         ],
                         'userErrors' => [],
@@ -122,7 +122,7 @@ it('skips create when automatic discount backed by function already exists', fun
                                 'id' => 'gid://shopify/ShopifyFunction/abc123',
                                 'apiType' => 'discount',
                                 'title' => 'sidest-affiliate-discount',
-                                'app' => ['title' => 'Side St'],
+                                'app' => ['title' => 'Partna'],
                             ]],
                         ],
                     ],
@@ -136,7 +136,7 @@ it('skips create when automatic discount backed by function already exists', fun
                             ['node' => [
                                 'id' => 'gid://shopify/DiscountAutomaticNode/existing',
                                 'automaticDiscount' => [
-                                    'title' => 'Side St Price',
+                                    'title' => 'Partna Price',
                                     'status' => 'ACTIVE',
                                     'appDiscountType' => [
                                         'functionId' => 'gid://shopify/ShopifyFunction/abc123',

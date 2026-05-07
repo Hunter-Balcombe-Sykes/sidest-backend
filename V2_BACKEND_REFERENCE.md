@@ -287,7 +287,7 @@
 
 | Job | Queue | V2 Role |
 |-----|-------|---------|
-| `CreateStorefrontAccessTokenJob` | integrations | **V2 core.** Creates Shopify Storefront API token ("Side St") via GraphQL. Stored in integration metadata. Required for Hydrogen to fetch products. |
+| `CreateStorefrontAccessTokenJob` | integrations | **V2 core.** Creates Shopify Storefront API token ("Partna") via GraphQL. Stored in integration metadata. Required for Hydrogen to fetch products. |
 | `RegisterShopifyOrderWebhooksJob` | integrations | **V2 core.** Registers `orders/paid` webhook via GraphQL. Required for commission recording. |
 
 ### Stripe
@@ -355,8 +355,8 @@
 | Middleware | V2 Role |
 |-----------|---------|
 | `VerifySupabaseJwt` | JWT authentication via Supabase JWKS. All authenticated routes. |
-| `EnsureSidestStaff` | Staff role gate. |
-| `EnsureSidestAdmin` | Admin role gate (subset of staff). |
+| `EnsurePartnaStaff` | Staff role gate. |
+| `EnsurePartnaAdmin` | Admin role gate (subset of staff). |
 | `LoadCurrentProfessional` | Loads professional into request context. Checks active/suspended status. |
 | `AddPublicCacheHeaders` | Cache-Control headers. Public GET = 15min cache; authenticated = no-store. |
 | `SecureHeaders` | Security headers (XFO, CSP, HSTS, etc). |
@@ -387,7 +387,7 @@
 | `SiteMedia` | `core.site_media` | Images and videos with processing states. |
 | `SiteSubdomainAlias` | `core.site_subdomain_aliases` | Subdomain redirects after handle changes. |
 | `MediaVariant` | `core.media_variants` | Processed media variants (WebP, MP4, HLS, poster). |
-| `SidestStaff` | `core.sidest_staff` | Internal staff accounts. |
+| `PartnaStaff` | `core.sidest_staff` | Internal staff accounts. |
 | `WaitlistSignup` | `core.waitlist_signups` | Pre-launch waitlist entries. |
 
 ### retail.* (commerce)

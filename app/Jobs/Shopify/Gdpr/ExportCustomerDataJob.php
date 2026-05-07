@@ -30,7 +30,7 @@ class ExportCustomerDataJob implements ShouldQueue
 
     public function __construct(public string $gdprRequestId)
     {
-        $this->onQueue(config('sidest.gdpr.queue'));
+        $this->onQueue(config('partna.gdpr.queue'));
     }
 
     public function backoff(): array

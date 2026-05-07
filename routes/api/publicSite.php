@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Route;
 
 // TODO(v1): all routes in this file should be prefixed /v1/ once frontend is ready for the migration
 
-$publicDomain = config('sidest.public_domain');
+$publicDomain = config('partna.public_domain');
 
 // Public/Anon
 Route::group([

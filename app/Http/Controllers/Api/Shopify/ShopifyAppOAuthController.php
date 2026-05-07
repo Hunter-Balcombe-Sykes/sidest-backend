@@ -147,7 +147,7 @@ class ShopifyAppOAuthController extends ApiController
             }
 
             // Path B: Existing account — shop email matches a Professional's primary_email (indexed local lookup).
-            // Users whose Shopify email differs from their Side St email fall through to Path C.
+            // Users whose Shopify email differs from their Partna email fall through to Path C.
             if ($shopEmail !== '') {
                 $existingProfessional = Professional::whereRaw('lower(primary_email) = ?', [$shopEmail])->first();
 

@@ -13,7 +13,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
-// V2: Creates Side St sales channel publication on the brand's Shopify store. Products must be published to this channel to appear on affiliate storefronts.
+// V2: Creates Partna sales channel publication on the brand's Shopify store. Products must be published to this channel to appear on affiliate storefronts.
 class CreateShopifySalesChannelJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

@@ -236,7 +236,7 @@ class FreshaIntegrationController extends ApiController
 
     /**
      * POST /api/fresha/services/sync
-     * Runs a full pull from Fresha services into Commet immediately.
+     * Runs a full pull from Fresha services into Partna immediately.
      */
     public function syncServicesNow(Request $request, FreshaServiceSyncService $syncService)
     {

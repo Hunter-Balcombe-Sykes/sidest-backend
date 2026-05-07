@@ -40,8 +40,8 @@ class PublicCustomerLeadController extends ApiController
             $nowMs = (int) floor(microtime(true) * 1000);
             $delta = $nowMs - $startedMs;
 
-            $minMs = (int) config('sidest.form_timing.min_ms', 2500);
-            $maxMs = (int) config('sidest.form_timing.max_ms', 12 * 60 * 60 * 1000);
+            $minMs = (int) config('partna.form_timing.min_ms', 2500);
+            $maxMs = (int) config('partna.form_timing.max_ms', 12 * 60 * 60 * 1000);
 
             if ($delta < $minMs || $delta > $maxMs) {
                 $this->logLead($request, $subdomain, null, null, null, 'too_fast', $startedMs);

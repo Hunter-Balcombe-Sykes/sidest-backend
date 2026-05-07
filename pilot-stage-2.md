@@ -1,4 +1,4 @@
-# Side St — Stage 2 Pilot Readiness Checklist
+# Partna — Stage 2 Pilot Readiness Checklist
 
 **Stage 2: 5 brands, 10–20 affiliates each (~50–100 affiliates, ~500–1,000 links)**
 

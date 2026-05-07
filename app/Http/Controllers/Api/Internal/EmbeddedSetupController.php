@@ -636,11 +636,11 @@ class EmbeddedSetupController extends ApiController
      * Fully provision the Shopify integration using the embedded app's access token.
      *
      * Called from the Sidest-Embedded wizard immediately after the connection-code
-     * step links the brand's Side St account to their Shopify store. The embedded
+     * step links the brand's Partna account to their Shopify store. The embedded
      * app has already completed Shopify OAuth and holds a fully-scoped access token
-     * — storing it here gives the Comet backend everything it needs to run catalog
+     * — storing it here gives the Partna backend everything it needs to run catalog
      * sync, webhook registration, and storefront token creation without requiring
-     * the brand to also do a separate OAuth from the Side St dashboard.
+     * the brand to also do a separate OAuth from the Partna dashboard.
      *
      * Safe to call multiple times (idempotent via updateOrCreate).
      *

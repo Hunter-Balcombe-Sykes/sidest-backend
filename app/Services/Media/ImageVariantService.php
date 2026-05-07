@@ -274,7 +274,7 @@ class ImageVariantService
 
     private function diskName(): string
     {
-        $configured = (string) config('sidest.media_disk', 'media');
+        $configured = (string) config('partna.media_disk', 'media');
 
         // $_ENV/$_SERVER are intentional here — Laravel Cloud caches config at deploy time
         // but injects platform env vars directly into the process environment at runtime,
@@ -320,7 +320,7 @@ class ImageVariantService
      */
     private function variantDefinitions(): array
     {
-        $definitions = (array) config('sidest.image_variants', []);
+        $definitions = (array) config('partna.image_variants', []);
 
         if ($definitions !== []) {
             return $definitions;
@@ -378,7 +378,7 @@ class ImageVariantService
 
         $width = (int) $info[0];
         $height = (int) $info[1];
-        $maxPixels = (int) config('sidest.image_max_pixels', 24_000_000);
+        $maxPixels = (int) config('partna.image_max_pixels', 24_000_000);
 
         if ($width * $height > $maxPixels) {
             throw new UnprocessableImageException(sprintf(

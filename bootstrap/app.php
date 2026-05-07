@@ -1,8 +1,8 @@
 <?php
 
 use App\Http\Middleware\AddPublicCacheHeaders;
-use App\Http\Middleware\Auth\EnsureSidestAdmin;
-use App\Http\Middleware\Auth\EnsureSidestStaff;
+use App\Http\Middleware\Auth\EnsurePartnaAdmin;
+use App\Http\Middleware\Auth\EnsurePartnaStaff;
 use App\Http\Middleware\Auth\VerifyEmbeddedApiKey;
 use App\Http\Middleware\Auth\VerifyHydrogenApiKey;
 use App\Http\Middleware\Auth\VerifyShopifySessionToken;
@@ -62,8 +62,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'supabase.jwt' => VerifySupabaseJwt::class,
             'current.pro' => LoadCurrentProfessional::class,
-            'staff' => EnsureSidestStaff::class,
-            'staff.admin' => EnsureSidestAdmin::class,
+            'staff' => EnsurePartnaStaff::class,
+            'staff.admin' => EnsurePartnaAdmin::class,
             'lead.log' => LogLeadRateLimits::class,
             'plan' => RequirePlan::class,
             'hydrogen.key' => VerifyHydrogenApiKey::class,

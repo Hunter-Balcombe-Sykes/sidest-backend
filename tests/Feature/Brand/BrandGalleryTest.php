@@ -348,5 +348,5 @@ it('has brand_gallery pool constant', function () {
 });
 
 it('has brand_gallery config limit of 5', function () {
-    expect(config('sidest.image_pools.brand_gallery.max'))->toBe(5);
+    expect(config('partna.image_pools.brand_gallery.max'))->toBe(5);
 });

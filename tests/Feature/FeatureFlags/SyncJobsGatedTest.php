@@ -9,7 +9,7 @@ use App\Services\Square\SquareServiceSyncService;
 use Mockery\MockInterface;
 
 it('PushServiceToSquareJob::handle does nothing when square_sync flag is off', function () {
-    config()->set('sidest.features.square_sync', false);
+    config()->set('partna.features.square_sync', false);
 
     $syncService = $this->mock(SquareServiceSyncService::class, function (MockInterface $m) {
         $m->shouldNotReceive('pushServiceToSquare');
@@ -19,7 +19,7 @@ it('PushServiceToSquareJob::handle does nothing when square_sync flag is off', f
 });
 
 it('SyncSquareCatalogDeltaJob::handle does nothing when square_sync flag is off', function () {
-    config()->set('sidest.features.square_sync', false);
+    config()->set('partna.features.square_sync', false);
 
     $syncService = $this->mock(SquareServiceSyncService::class, function (MockInterface $m) {
         $m->shouldNotReceive('syncFromSquare');
@@ -29,7 +29,7 @@ it('SyncSquareCatalogDeltaJob::handle does nothing when square_sync flag is off'
 });
 
 it('PushServiceToFreshaJob::handle does nothing when fresha_sync flag is off', function () {
-    config()->set('sidest.features.fresha_sync', false);
+    config()->set('partna.features.fresha_sync', false);
 
     $syncService = $this->mock(FreshaServiceSyncService::class, function (MockInterface $m) {
         $m->shouldNotReceive('pushServiceToFresha');
@@ -39,7 +39,7 @@ it('PushServiceToFreshaJob::handle does nothing when fresha_sync flag is off', f
 });
 
 it('SyncFreshaCatalogDeltaJob::handle does nothing when fresha_sync flag is off', function () {
-    config()->set('sidest.features.fresha_sync', false);
+    config()->set('partna.features.fresha_sync', false);
 
     $syncService = $this->mock(FreshaServiceSyncService::class, function (MockInterface $m) {
         $m->shouldNotReceive('syncFromFresha');

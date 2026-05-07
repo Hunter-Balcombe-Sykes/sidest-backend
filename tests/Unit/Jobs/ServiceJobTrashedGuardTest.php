@@ -22,8 +22,8 @@ beforeEach(function () {
     )');
 
     config([
-        'sidest.features.square_sync' => true,
-        'sidest.features.fresha_sync' => true,
+        'partna.features.square_sync' => true,
+        'partna.features.fresha_sync' => true,
     ]);
 });
 

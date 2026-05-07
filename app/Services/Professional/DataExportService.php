@@ -7,7 +7,7 @@ use App\Exceptions\Gdpr\NoRecipientEmailException;
 use App\Jobs\Gdpr\ExportProfessionalDataJob;
 use App\Models\Core\Gdpr\DataExportAudit;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use Illuminate\Support\Facades\DB;
 
 // V2: Single dispatch entry point for professional data exports. Inserts the
@@ -69,7 +69,7 @@ class DataExportService
      */
     public function findRecentInFlight(string $professionalId): ?DataExportAudit
     {
-        $windowMinutes = (int) config('sidest.gdpr.dedup_window_minutes', 30);
+        $windowMinutes = (int) config('partna.gdpr.dedup_window_minutes', 30);
 
         return DataExportAudit::query()
             ->where('professional_id', $professionalId)
@@ -81,7 +81,7 @@ class DataExportService
     private function resolveRecipient(Professional $professional, ?string $staffId, string $sendTo): ?string
     {
         if ($sendTo === 'staff' && $staffId) {
-            $staff = SidestStaff::find($staffId);
+            $staff = PartnaStaff::find($staffId);
 
             return $staff?->primary_email;
         }

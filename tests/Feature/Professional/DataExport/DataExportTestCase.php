@@ -15,10 +15,10 @@ class DataExportTestCase
         config([
             'database.default' => 'sqlite',
             'database.connections.pgsql' => array_merge($sqlite, ['database' => ':memory:']),
-            'sidest.gdpr.queue' => 'gdpr',
-            'sidest.gdpr.signed_url_ttl_days' => 7,
-            'sidest.gdpr.dedup_window_minutes' => 30,
-            'sidest.media_disk' => 'media',
+            'partna.gdpr.queue' => 'gdpr',
+            'partna.gdpr.signed_url_ttl_days' => 7,
+            'partna.gdpr.dedup_window_minutes' => 30,
+            'partna.media_disk' => 'media',
         ]);
 
         DB::purge('pgsql');

@@ -140,7 +140,7 @@ class AccountDeletionService
      */
     private function executeConfirmation(Professional $professional): Carbon
     {
-        $retentionDays = (int) config('sidest.soft_delete_retention_days', 30);
+        $retentionDays = (int) config('partna.soft_delete_retention_days', 30);
         $deletesAt = now()->addDays($retentionDays);
         $previousStatus = (string) ($professional->status ?? 'active');
 
@@ -189,7 +189,7 @@ class AccountDeletionService
      * emails support requesting erasure (e.g., GDPR Article 17 request).
      *
      * @param  Professional  $professional  The user being deleted.
-     * @param  string  $staffActorId  SidestStaff.id of the admin invoking this.
+     * @param  string  $staffActorId  PartnaStaff.id of the admin invoking this.
      * @param  string  $staffActorHandle  Snapshot of staff name (or email) for audit.
      * @param  string  $reason  GDPR reason / support ticket reference (10–500 chars).
      * @param  bool  $overrideObligations  If true, proceed despite unpaid balance / pending payouts.
@@ -628,7 +628,7 @@ class AccountDeletionService
             return;
         }
 
-        $disk = Storage::disk((string) config('sidest.media_disk'));
+        $disk = Storage::disk((string) config('partna.media_disk'));
         if ($disk->exists($media->path)) {
             $disk->delete($media->path);
         }

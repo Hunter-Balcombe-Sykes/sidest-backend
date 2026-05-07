@@ -23,8 +23,8 @@ class ProfessionalDataExportMail extends Mailable
     public function build(): static
     {
         $subject = $this->sendTo === 'staff'
-            ? "Side St data export — {$this->professionalHandle}"
-            : 'Your Side St data export is ready';
+            ? "Partna data export — {$this->professionalHandle}"
+            : 'Your Partna data export is ready';
 
         return $this
             ->subject($subject)
@@ -33,7 +33,7 @@ class ProfessionalDataExportMail extends Mailable
                 'professionalHandle' => $this->professionalHandle,
                 'isStaff' => $this->sendTo === 'staff',
                 'totalRecords' => array_sum($this->recordCounts),
-                'ttlDays' => (int) config('sidest.gdpr.signed_url_ttl_days', 7),
+                'ttlDays' => (int) config('partna.gdpr.signed_url_ttl_days', 7),
             ]);
     }
 }

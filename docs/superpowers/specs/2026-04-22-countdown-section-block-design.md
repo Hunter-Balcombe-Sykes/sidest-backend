@@ -7,7 +7,7 @@
 
 ## Problem
 
-Affiliates on Side St want to announce time-bounded events on their public page — a product drop, an education release, a limited-time class, a masterclass window. Today there is no first-class way to communicate "this goes live at time X and is available until time Y." Affiliates work around it by editing copy on other blocks, which is low-effort to author but weak as a call to attention: viewers have no urgency signal, no clear event state, and no way to track time until the drop.
+Affiliates on Partna want to announce time-bounded events on their public page — a product drop, an education release, a limited-time class, a masterclass window. Today there is no first-class way to communicate "this goes live at time X and is available until time Y." Affiliates work around it by editing copy on other blocks, which is low-effort to author but weak as a call to attention: viewers have no urgency signal, no clear event state, and no way to track time until the drop.
 
 A countdown section block closes this gap. It lets an affiliate declare a window (drop_time → expiry_time), author state-specific copy, and optionally attach a CTA that links externally (e.g., Stan.store) or internally (e.g., the affiliate's own shop section with filter params).
 

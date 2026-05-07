@@ -21,7 +21,7 @@ class PurgeSoftDeleted extends Command
 
     public function handle(AccountDeletionService $deletionService): int
     {
-        $days = (int) ($this->option('days') ?: config('sidest.soft_delete_retention_days', 30));
+        $days = (int) ($this->option('days') ?: config('partna.soft_delete_retention_days', 30));
         $cutoff = now()->subDays($days);
 
         $this->info("Purging soft-deleted rows older than {$days} days (before {$cutoff}).");

@@ -43,7 +43,7 @@ class VerifyEmbeddedApiKey
             // rather than a generic error.
             return response()->json([
                 'error' => 'shop_not_connected',
-                'message' => 'No Side St account is linked to this Shopify store.',
+                'message' => 'No Partna account is linked to this Shopify store.',
             ], 404);
         }
 

@@ -17,7 +17,7 @@
     <div class="container">
         <h2>Your account is scheduled for deletion</h2>
         <p>Hi {{ $displayName }},</p>
-        <p>Your Side St account will be permanently deleted on <span class="date">{{ $deletesAt }}</span>.</p>
+        <p>Your Partna account will be permanently deleted on <span class="date">{{ $deletesAt }}</span>.</p>
         <p>Your account is now in read-only mode and your public site, brand configuration, and affiliate pages are offline. You can still log in to cancel the deletion at any time during this window.</p>
         <a href="{{ $cancelUrl }}" class="btn">Cancel deletion</a>
     </div>

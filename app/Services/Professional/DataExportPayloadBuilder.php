@@ -12,7 +12,7 @@ class DataExportPayloadBuilder
 {
     private const SCHEMA_VERSION = 1;
 
-    private const PII_DISCLOSURE = 'This export contains personally identifiable information (PII) you collected from your customers via Side St (booking history, enquiries, email subscriptions). Handle in accordance with applicable privacy law.';
+    private const PII_DISCLOSURE = 'This export contains personally identifiable information (PII) you collected from your customers via Partna (booking history, enquiries, email subscriptions). Handle in accordance with applicable privacy law.';
 
     /**
      * Build the full payload for a single professional.

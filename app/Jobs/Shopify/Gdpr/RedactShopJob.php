@@ -31,7 +31,7 @@ class RedactShopJob implements ShouldQueue
     {
         // redis_gdpr connection has retry_after=660 so Redis won't re-queue
         // this job while the 600s chunkById sweep is still running.
-        $this->onConnection('redis_gdpr')->onQueue(config('sidest.gdpr.queue'));
+        $this->onConnection('redis_gdpr')->onQueue(config('partna.gdpr.queue'));
     }
 
     public function backoff(): array
@@ -201,7 +201,7 @@ class RedactShopJob implements ShouldQueue
      */
     private function anonymiseShopifyCustomers(string $professionalId): int
     {
-        $placeholderDomain = config('sidest.gdpr.redact_placeholder_domain', 'gdpr.sidest.io');
+        $placeholderDomain = config('partna.gdpr.redact_placeholder_domain', 'gdpr.sidest.io');
         $count = 0;
 
         Customer::query()

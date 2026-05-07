@@ -1,8 +1,8 @@
-# Side St — V2 Platform Plan
+# Partna — V2 Platform Plan
 
 ## Overview
 
-V2 gives each brand their own Hydrogen-powered affiliate storefront, deployed via Shopify Oxygen. Affiliates get a branded page at `evo.sidest.co/sarah` — the brand's subdomain on Side St's domain, with their Liquid storefront left completely untouched. The accounts dashboard stays on Vercel (Next.js). The backend stays on Laravel Cloud.
+V2 gives each brand their own Hydrogen-powered affiliate storefront, deployed via Shopify Oxygen. Affiliates get a branded page at `evo.sidest.co/sarah` — the brand's subdomain on Partna's domain, with their Liquid storefront left completely untouched. The accounts dashboard stays on Vercel (Next.js). The backend stays on Laravel Cloud.
 
 ---
 
@@ -27,7 +27,7 @@ flowchart TD
     direction TB
     A1["Brand invites affiliate by email\nOR affiliate uses open program link\napp.sidest.co/join/{brand-slug}"]
     A2["Affiliate receives invite email\nwith their link pre-generated\nOR submits open link form → active immediately"]
-    A3["Affiliate creates Side St account\nLink is live immediately — no redeploy"]
+    A3["Affiliate creates Partna account\nLink is live immediately — no redeploy"]
     A4["Affiliate customises their page\n(products · sort order · bio · services · gallery)\nOptional — defaults to brand collection"]
     A5["Affiliate has 30-day grace period\nto connect Stripe before\npending earnings are voided"]
   end
@@ -47,10 +47,10 @@ flowchart TD
     P1["orders/paid webhook fires\nCommission recorded in ledger\nHold period begins"]
     P2["Cron job runs daily\nChecks hold period + Stripe status"]
     P3{"Affiliate has\nStripe connected?"}
-    P4["Commission transferred\nBrand → Side St → Affiliate\nSide St retains 20%"]
+    P4["Commission transferred\nBrand → Partna → Affiliate\nSide St retains 20%"]
     P5["Affiliate receives 80%\nof commission"]
     P6{"30-day void\nwindow elapsed?"}
-    P7["Side St takes 20% from brand\nAffiliate 80% voided\nBrand keeps remainder"]
+    P7["Partna takes 20% from brand\nAffiliate 80% voided\nBrand keeps remainder"]
     P8["Commission stays pending\nWarning sent at day 20 + day 28"]
   end
 
@@ -89,7 +89,7 @@ flowchart TD
     B1A["Shopify install sequence\n(metafields · webhooks · collections\nStorefront token · sales channel · brand profile)"]
     B1B["Hydrogen reads brand + products\nfrom Shopify Storefront API"]
     B1C["Cart attributes carry commission\nthrough to checkout"]
-    B1D["orders/paid webhook records\ncommission in Side St DB"]
+    B1D["orders/paid webhook records\ncommission in Partna DB"]
     B1E["✅ Gate: end-to-end checkout\nwith commission recorded"]
   end
 
@@ -137,7 +137,7 @@ flowchart TD
 
 ### Who's Involved
 ```
-Side St (platform)
+Partna (platform)
   └── Brands       — connect Shopify, manage affiliates, set commission %
         └── Affiliates  — get personal link on brand's domain, drive sales, earn commission
               └── Customers — shop on branded affiliate page, pay via Shopify Payments
@@ -155,17 +155,17 @@ evo.sidest.co/john      → john's affiliate page for evo
 evo.sidest.co/          → evo's brand storefront page
 
 Brand's main site stays as Liquid, completely untouched:
-evo.com                 → Liquid theme (Side St never touches this)
+evo.com                 → Liquid theme (Partna never touches this)
 ```
 
 ### Hosting
 | Layer | What | Hosted On | Paid By |
 |---|---|---|---|
 | Affiliate storefronts | Hydrogen (per-brand deployment) | Oxygen (each brand's own store) | Free (Shopify covers Oxygen) |
-| Shopify embedded app | React Router (Remix) app | Vercel (embedded.sidest.co) | Side St |
-| Accounts dashboard | Next.js | Vercel (app.sidest.co) | Side St |
-| API backend | Laravel | Laravel Cloud | Side St |
-| Database | Postgres + RLS | Supabase | Side St |
+| Shopify embedded app | React Router (Remix) app | Vercel (embedded.sidest.co) | Partna |
+| Accounts dashboard | Next.js | Vercel (app.sidest.co) | Partna |
+| API backend | Laravel | Laravel Cloud | Partna |
+| Database | Postgres + RLS | Supabase | Partna |
 
 ---
 
@@ -224,7 +224,7 @@ Three repositories. Each owns a distinct surface. No feature lives in two repos.
 **Does NOT own:**
 - Brand settings or management UI
 - Affiliate account management (lives in `sidest-dashboard`)
-- Anything that requires a Side St Supabase JWT (customers don't have accounts)
+- Anything that requires a Partna Supabase JWT (customers don't have accounts)
 
 **Auth:** No user auth. Storefront API token (public) for Shopify. Server-side calls to `sidest-backend` use a shared `HYDROGEN_INTERNAL_SECRET` header — not user-scoped.
 
@@ -309,13 +309,13 @@ Complete list of every external service and account the platform requires.
 | Shopify Dev app — production | Live app listed in App Store (or private) |
 | Shopify Dev app — staging/dev | Development + QA installs |
 | Shopify App Store listing | Distribution to brands |
-| Shopify Payments | Customer checkout (managed per-brand, Side St does not touch this) |
+| Shopify Payments | Customer checkout (managed per-brand, Partna does not touch this) |
 | Shopify Functions (Alpha) | Discount Function WASM for affiliate checkout discounts |
 
 ### Payments
 | Resource | What it's for |
 |---|---|
-| Stripe platform account | Side St's Stripe account — receives brand payments, transfers to affiliates |
+| Stripe platform account | Partna's Stripe account — receives brand payments, transfers to affiliates |
 | Stripe Connect — per brand | Brand's connected Stripe account (source of commission funds) |
 | Stripe Connect — per affiliate | Affiliate's connected Stripe account (receives 80% payout) |
 | Square Developer account | Booking availability + appointment creation for affiliate services |
@@ -372,14 +372,14 @@ BACKEND_URL  ← Laravel Cloud
 
 **Mode B — Affiliates Only** _(Default for all brands)_
 Brand keeps their existing Shopify Liquid theme completely untouched.
-Hydrogen serves affiliate pages on the brand's Side St subdomain.
+Hydrogen serves affiliate pages on the brand's Partna subdomain.
 ```
 evo.com                 → Liquid theme (unchanged)
 evo.sidest.co/sarah     → Hydrogen affiliate page
 ```
 
 **Mode A — Full Hydrogen** _(Post-Alpha — see Full Release section)_
-Brand optionally replaces their Liquid theme entirely with a Side St Hydrogen theme.
+Brand optionally replaces their Liquid theme entirely with a Partna Hydrogen theme.
 ```
 evo.com                 → Hydrogen brand storefront (replaces Liquid)
 evo.com/sarah           → Hydrogen affiliate page (clean URL on brand's domain)
@@ -390,7 +390,7 @@ evo.com/sarah           → Hydrogen affiliate page (clean URL on brand's domain
 ## General Principles
 
 ### Hydrogen data fetching rule
-All third-party data (Side St API, Square, gallery, booking) is fetched server-side in React Router `loader` functions via `createSideStClient` — never client-side. No API keys in the browser. No CORS configuration needed. Hydrogen is the proxy; customers never see our endpoints.
+All third-party data (Partna API, Square, gallery, booking) is fetched server-side in React Router `loader` functions via `createSideStClient` — never client-side. No API keys in the browser. No CORS configuration needed. Hydrogen is the proxy; customers never see our endpoints.
 
 Cache strategy by volatility:
 - Static config (brand theme, Storefront token) → `CacheLong()` 10 min
@@ -414,8 +414,8 @@ Brands can sign up either manually or via Shopify OAuth. Both paths lead to the 
 ```
 Brand visits app.sidest.co → clicks "Sign up with Shopify"
   → redirected to Shopify OAuth
-  → authorises Side St app on their store
-  → OAuth callback → Side St creates brand account + Supabase user automatically
+  → authorises Partna app on their store
+  → OAuth callback → Partna creates brand account + Supabase user automatically
      (email taken from shop.email)
   → brand profile auto-populated from Shopify shop object
      (name, email, phone, address, website, logo)
@@ -435,17 +435,17 @@ Brand visits app.sidest.co → clicks "Sign up manually"
      → logo is always synced from Shopify when connected
 ```
 
-Returning brands who already have an account are linked by `myshopify_domain` — reinstalling the app reconnects their existing account rather than creating a new one. Manual signup brands who later connect Shopify are matched by email if the shop email matches their Side St account email.
+Returning brands who already have an account are linked by `myshopify_domain` — reinstalling the app reconnects their existing account rather than creating a new one. Manual signup brands who later connect Shopify are matched by email if the shop email matches their Partna account email.
 
 ---
 
 ## On Shopify App Install (Automated)
 
 ```
-Brand installs Side St from Shopify App Store
-  → OAuth → Side St receives store domain + access token
+Brand installs Partna from Shopify App Store
+  → OAuth → Partna receives store domain + access token
   → stored in DB
-  → Side St registers webhooks:
+  → Partna registers webhooks:
       orders/paid         (commission tracking)
       orders/updated      (refunds + returns)
       app/uninstalled     (cleanup)
@@ -456,26 +456,26 @@ Brand installs Side St from Shopify App Store
   → Storefront API token created (Admin API GraphQL: storefrontAccessTokenCreate)
   → Metafield definitions created on brand's store (idempotent — see below)
   → Sales channel publication created (publicationCreate)
-  → Four Side St collections created on brand's store (idempotent — see below):
-      "Side St — Active Products"           smart collection, auto-populated by sidest.active = true metafield
-      "Side St — Default Products"          manual collection, brand curates default affiliate product set
-      "Side St — Brand Favourites"          manual collection, brand's top picks — highlighted to affiliates when selecting products
-      "Side St — High Commission Products"  smart collection, sidest.active = true AND commission_override is set
+  → Four Partna collections created on brand's store (idempotent — see below):
+      "Partna — Active Products"           smart collection, auto-populated by sidest.active = true metafield
+      "Partna — Default Products"          manual collection, brand curates default affiliate product set
+      "Partna — Brand Favourites"          manual collection, brand's top picks — highlighted to affiliates when selecting products
+      "Partna — High Commission Products"  smart collection, sidest.active = true AND commission_override is set
   → Collection handles written to shop metafields (sidest.active_collection_handle, sidest.default_collection_handle, sidest.favourites_collection_handle, sidest.high_commission_collection_handle)
   → brand profile auto-populated from Shopify shop object
   → brand record created in DB
-  → brand redirected to Side St setup wizard (sidest.setup_complete = false)
+  → brand redirected to Partna setup wizard (sidest.setup_complete = false)
 ```
 
 ### Metafield definitions created on install
 
-Side St calls `metafieldDefinitionCreate` (Admin GraphQL) for all `sidest.*` definitions. Creation is idempotent — if they already exist (reinstall), skip.
+Partna calls `metafieldDefinitionCreate` (Admin GraphQL) for all `sidest.*` definitions. Creation is idempotent — if they already exist (reinstall), skip.
 
 **Product-level definitions** (`namespace: "sidest"`)
 
 | Key | Type | Storefront Visible | Purpose |
 |---|---|---|---|
-| `active` | `boolean` | YES (`PUBLIC_READ`) | Whether this product is active for Side St affiliates. Drives the "Active Products" smart collection. Also synced with Side St sales channel publication. |
+| `active` | `boolean` | YES (`PUBLIC_READ`) | Whether this product is active for Partna affiliates. Drives the "Active Products" smart collection. Also synced with Partna sales channel publication. |
 | `commission_override` | `number_decimal` | YES (`PUBLIC_READ`) | Per-product commission % override; NULL = use brand default |
 | `affiliate_discount_pct` | `number_decimal` | NO | Discount % applied at checkout for affiliate customers |
 
@@ -487,17 +487,17 @@ Side St calls `metafieldDefinitionCreate` (Admin GraphQL) for all `sidest.*` def
 | `accent_color` | `single_line_text_field` | Hex colour for affiliate storefronts |
 | `theme_variant` | `single_line_text_field` | Theme key (e.g. "1" through "5") |
 | `product_image_ratio` | `single_line_text_field` | "1/1" or "4/5" |
-| `active_collection_handle` | `single_line_text_field` | Handle of Side St-created "Active Products" smart collection (auto-set on install) |
-| `default_collection_handle` | `single_line_text_field` | Handle of Side St-created "Default Products" manual collection (auto-set on install) |
-| `favourites_collection_handle` | `single_line_text_field` | Handle of Side St-created "Brand Favourites" manual collection (auto-set on install) |
-| `high_commission_collection_handle` | `single_line_text_field` | Handle of Side St-created "High Commission Products" smart collection (auto-set on install) |
+| `active_collection_handle` | `single_line_text_field` | Handle of Partna-created "Active Products" smart collection (auto-set on install) |
+| `default_collection_handle` | `single_line_text_field` | Handle of Partna-created "Default Products" manual collection (auto-set on install) |
+| `favourites_collection_handle` | `single_line_text_field` | Handle of Partna-created "Brand Favourites" manual collection (auto-set on install) |
+| `high_commission_collection_handle` | `single_line_text_field` | Handle of Partna-created "High Commission Products" smart collection (auto-set on install) |
 | `setup_complete` | `boolean` | Wizard completion flag |
 
 > **API note:** Use `access: { storefront: PUBLIC_READ }` on `commission_override` in `metafieldDefinitionCreate`. The `metafieldStorefrontVisibilityCreate` mutation was removed in the 2025-01 API version — do not use it.
 
 ### Sales channel publication
 
-On install, Side St creates a publication for the "Side St" app channel via `publicationCreate`. Brand can then publish/unpublish individual products to this channel from Shopify admin or the Side St embedded app. Only products published to the Side St channel are visible on affiliate pages — unpublishing hides them instantly with no DB change needed.
+On install, Partna creates a publication for the "Partna" app channel via `publicationCreate`. Brand can then publish/unpublish individual products to this channel from Shopify admin or the Partna embedded app. Only products published to the Partna channel are visible on affiliate pages — unpublishing hides them instantly with no DB change needed.
 
 ---
 
@@ -506,7 +506,7 @@ On install, Side St creates a publication for the "Side St" app channel via `pub
 ```
 Brand invites affiliate (email) via dashboard
   → affiliate record created in DB with unique slug e.g. "sarah"
-  → invite email sent → affiliate creates Side St account
+  → invite email sent → affiliate creates Partna account
   → evo.sidest.co/sarah live immediately
      (no redeployment — Hydrogen resolves slug dynamically from DB)
   → affiliate connects Stripe to receive payouts
@@ -518,7 +518,7 @@ Brand invites affiliate (email) via dashboard
 
 ### Confirmed architecture (live tested)
 
-**The single DNS record Side St adds once:**
+**The single DNS record Partna adds once:**
 ```
 Type:    CNAME
 Name:    *
@@ -532,7 +532,7 @@ This covers every brand forever. `evo.sidest.co`, `radiorufus.sidest.co`, any ne
 **Per brand (one-time setup — guided wizard step, no public API to fully automate):**
 1. Brand connects `evo.sidest.co` in their Shopify admin → Settings → Domains → Connect existing domain
 2. Shopify shows a TXT verification record (ownership check for `sidest.co`)
-3. Side St adds the TXT record to Cloudflare on the brand's behalf
+3. Partna adds the TXT record to Cloudflare on the brand's behalf
 4. Shopify verifies and connects the domain
 5. `evo.sidest.co/sarah` is live
 
@@ -548,7 +548,7 @@ Request: evo.sidest.co/sarah
       → App Proxy mode: reads X-Shopify-Shop-Domain header → "evo.myshopify.com"
       → Subdomain mode: parses hostname → brand slug "evo" → resolves to shop domain
   → Extracts affiliate slug: "sarah" (URL path param)
-  → Looks up brand in Side St API using shop domain
+  → Looks up brand in Partna API using shop domain
   → Validates affiliate slug
   → Renders affiliate page with evo's products and sarah's attribution
 ```
@@ -562,13 +562,13 @@ Customer visits evo.sidest.co/sarah
   → DNS resolves evo.sidest.co → shops.myshopify.com (via *.sidest.co wildcard)
   → Shopify routes to evo's Oxygen deployment (registered custom domain)
   → Hydrogen getBrandContext(request) → brand slug "evo", affiliate slug "sarah"
-  → Hydrogen calls Side St API: validate brand + affiliate, get Storefront token + config
-  → Side St API returns: Storefront API token, commission config, affiliate validity
+  → Hydrogen calls Partna API: validate brand + affiliate, get Storefront token + config
+  → Partna API returns: Storefront API token, commission config, affiliate validity
   → Hydrogen calls Shopify Storefront API with evo's token → fetches evo's products
   → Page renders: evo's products, sarah's attribution context, commission rates
   → Customer adds to cart → cart attribute: { affiliate: "sarah" } + per-line attribute: { sidest_commission_rate: "15" } (rate resolved per product — override ?? brand default)
   → Shopify native checkout on evo's store → Shopify Payments
-  → orders/paid webhook → Side St records commission → starts hold period
+  → orders/paid webhook → Partna records commission → starts hold period
 ```
 
 ---
@@ -587,9 +587,9 @@ orders/paid webhook fires
 
 Cron job (after hold period):
   → commission status = "pending" AND hold period elapsed → eligible for transfer
-  → transfers full commission from brand's Stripe → Side St's Stripe (intermediary)
-  → Side St immediately transfers 80% of commission to affiliate's Stripe
-  → Side St retains 20% as platform fee
+  → transfers full commission from brand's Stripe → Partna's Stripe (intermediary)
+  → Partna immediately transfers 80% of commission to affiliate's Stripe
+  → Partna retains 20% as platform fee
   → commission record marked "paid"
   → writes notification to affiliate: "Payout released — $X sent to your Stripe account"
 
@@ -601,7 +601,7 @@ Refund within hold period (orders/updated webhook):
 
 Refund outside hold period:
   → commission already paid out — no reversal
-  → affiliate and Side St keep their portions
+  → affiliate and Partna keep their portions
   → brand absorbs the refund cost on their end (Shopify refunds customer from brand's account)
   → log refund event against canonical order for financial records
 ```
@@ -614,8 +614,8 @@ Refund outside hold period:
 
 | Data | Shopify mechanism | Set by |
 |---|---|---|
-| Product active/hidden for Side St | Product metafield `sidest.active` (boolean). When set to `true`: product published to Side St sales channel + appears in Active Products collection. When `false`: unpublished from channel + removed from all Side St collections automatically. | Brand (via app.sidest.co catalog page) |
-| Product availability on Storefront API | Sales channel publish/unpublish — always synced with `sidest.active` metafield, never changed independently | Automatic (Side St syncs when `sidest.active` changes) |
+| Product active/hidden for Partna | Product metafield `sidest.active` (boolean). When set to `true`: product published to Partna sales channel + appears in Active Products collection. When `false`: unpublished from channel + removed from all Partna collections automatically. | Brand (via app.sidest.co catalog page) |
+| Product availability on Storefront API | Sales channel publish/unpublish — always synced with `sidest.active` metafield, never changed independently | Automatic (Partna syncs when `sidest.active` changes) |
 | Per-product commission rate override | Product metafield `sidest.commission_override` | Brand |
 | Affiliate-only discount % per product | Product metafield `sidest.affiliate_discount_pct` | Brand |
 | Default commission rate (brand-wide) | Shop metafield `sidest.default_commission_rate` | Brand |
@@ -623,21 +623,21 @@ Refund outside hold period:
 | Theme variant (1–5) | Shop metafield `sidest.theme_variant` | Brand |
 | Accent colour | Shop metafield `sidest.accent_color` | Brand |
 | Product image ratio | Shop metafield `sidest.product_image_ratio` | Brand |
-| Onboarding complete flag | Shop metafield `sidest.setup_complete` | Side St (on wizard completion) |
-| Active products catalogue | "Side St — Active Products" — smart collection, rule: `sidest.active = true`. This is the master list of all products affiliates can browse and select from. | Automatic (Shopify smart collection rules driven by `sidest.active` metafield) |
-| Default affiliate product catalogue | "Side St — Default Products" — manual collection. Only active products can be added. When a product is deactivated, Side St automatically removes it from this collection too. Handle stored in `sidest.default_collection_handle`. | Brand (via app.sidest.co catalog page) |
-| Brand Favourites catalogue | "Side St — Brand Favourites" — manual collection. Brand's top picks, highlighted to affiliates in the product selection UI. Only active products can be added. Removed on deactivate. Handle stored in `sidest.favourites_collection_handle`. | Brand (via app.sidest.co catalog page) |
-| High Commission Products catalogue | "Side St — High Commission Products" — smart collection, compound rule: `sidest.active = true` AND `sidest.commission_override` not empty. Only active products with an override rate appear here. Handle stored in `sidest.high_commission_collection_handle`. | Automatic (Shopify smart collection rules) |
+| Onboarding complete flag | Shop metafield `sidest.setup_complete` | Partna (on wizard completion) |
+| Active products catalogue | "Partna — Active Products" — smart collection, rule: `sidest.active = true`. This is the master list of all products affiliates can browse and select from. | Automatic (Shopify smart collection rules driven by `sidest.active` metafield) |
+| Default affiliate product catalogue | "Partna — Default Products" — manual collection. Only active products can be added. When a product is deactivated, Partna automatically removes it from this collection too. Handle stored in `sidest.default_collection_handle`. | Brand (via app.sidest.co catalog page) |
+| Brand Favourites catalogue | "Partna — Brand Favourites" — manual collection. Brand's top picks, highlighted to affiliates in the product selection UI. Only active products can be added. Removed on deactivate. Handle stored in `sidest.favourites_collection_handle`. | Brand (via app.sidest.co catalog page) |
+| High Commission Products catalogue | "Partna — High Commission Products" — smart collection, compound rule: `sidest.active = true` AND `sidest.commission_override` not empty. Only active products with an override rate appear here. Handle stored in `sidest.high_commission_collection_handle`. | Automatic (Shopify smart collection rules) |
 | Product sort order within default collection | Manual collection ordering in Shopify | Brand |
 | Brand name, logo, description, currency | Shopify shop object (`shop.brand.squareLogo` etc.) | Shopify native |
 | Affiliate attribution in order | Cart attribute `affiliate` | Automatic at cart build |
 | Commission rate per line item | Cart line attribute `sidest_commission_rate` (written per product by Hydrogen) | Automatic at cart build — uses `commission_override` metafield ?? brand default |
 
-### What stays in Side St DB
+### What stays in Partna DB
 
 | Data | Reason |
 |---|---|
-| Affiliate identity, slug, auth | Side St users — no Shopify equivalent |
+| Affiliate identity, slug, auth | Partna users — no Shopify equivalent |
 | Affiliate → brand relationship (each affiliate belongs to exactly one brand) | Platform relationship — single-brand constraint |
 | Affiliate invites + tokens | Platform-managed onboarding |
 | Affiliate product selections (keyed to Shopify GIDs, no brand_id needed — implicit from affiliate's single brand) | Per-affiliate state |
@@ -703,7 +703,7 @@ app/
 
 | Feature | Implementation |
 |---|---|
-| Affiliate program overview | Polaris summary cards, data from Side St API |
+| Affiliate program overview | Polaris summary cards, data from Partna API |
 | "Manage affiliates →" CTA | App Bridge redirect to `app.sidest.co/account/affiliates` (new tab) |
 | First-install setup wizard | Polaris multi-step: commission, default collection confirmation, theme |
 | Product commission rate + discount % | **Admin UI Extension** on product detail page (Preact) |
@@ -728,7 +728,7 @@ These render inside Shopify's own product detail page — built with **Preact** 
 Extension: sidest-product-settings
   Target: admin.product-details.configuration.render
   Renders:
-    - "Side St Commission Rate" — NumberField (blank = use brand default)
+    - "Partna Commission Rate" — NumberField (blank = use brand default)
     - "Affiliate Discount %" — NumberField (0 = no discount)
     → writes to product metafields sidest.commission_override + sidest.affiliate_discount_pct
 ```
@@ -743,7 +743,7 @@ Extension: sidest-product-settings
 | Affiliate page product display (Hydrogen) | Shopify Storefront API | Storefront token (from DB, passed server-side) | Read-only, no Admin token in Hydrogen |
 | Setting metafield values | Shopify Admin GraphQL | Brand's stored OAuth token | Write access required |
 
-Side St's Laravel backend brokers all Admin API calls — the brand's access token never leaves the server.
+Partna's Laravel backend brokers all Admin API calls — the brand's access token never leaves the server.
 
 ### Affiliate page product query (Hydrogen → Storefront API)
 
@@ -761,7 +761,7 @@ query AffiliateProducts($ids: [ID!]!) {
 }
 ```
 
-Max 250 IDs per request. Filter nulls — products unpublished from the Side St channel return null from `nodes()`.
+Max 250 IDs per request. Filter nulls — products unpublished from the Partna channel return null from `nodes()`.
 
 ### Brand catalog view (dashboard → Admin API)
 
@@ -786,7 +786,7 @@ query CatalogProducts($cursor: String) {
 
 ## Affiliate Discount Function
 
-A `shopify.discount.function` extension in the Side St app runs at checkout (WebAssembly, server-side on Shopify). Reads the `affiliate` cart attribute and `sidest.affiliate_discount_pct` product metafield → applies discount natively in Shopify checkout.
+A `shopify.discount.function` extension in the Partna app runs at checkout (WebAssembly, server-side on Shopify). Reads the `affiliate` cart attribute and `sidest.affiliate_discount_pct` product metafield → applies discount natively in Shopify checkout.
 
 - Language: Rust recommended (compiles directly to WASM, best performance)
 - Limits: 256 KB binary, 10 MB memory, 11M instructions
@@ -800,7 +800,7 @@ A `shopify.discount.function` extension in the Side St app runs at checkout (Web
 - SSL on all subdomain URLs (Shopify handles it)
 - Commission calculation per order
 - Transferring commission from brand → affiliate Stripe after hold period
-- Side St platform fee deducted automatically from affiliate's commission
+- Partna platform fee deducted automatically from affiliate's commission
 - Releasing affiliate payouts after hold period
 - Storefront stays live (Oxygen managed by Shopify)
 
@@ -819,7 +819,7 @@ Each task is tagged with one or more segments indicating which part of the codeb
 
 | Segment | What it covers |
 |---|---|
-| **Laravel** | Backend API, services, jobs, webhooks (`Side St-Backend/`) |
+| **Laravel** | Backend API, services, jobs, webhooks (`Partna-Backend/`) |
 | **Supabase** | DB migrations, schema changes, RLS policies |
 | **Hydrogen** | Hydrogen app — affiliate storefronts, Oxygen deployment |
 | **Next Frontend** | Next.js dashboard — `app.sidest.co`, `Commet-web/` |
@@ -889,7 +889,7 @@ V1 services deleted (`BrandProductCatalogService`, `BrandProductSettingsService`
 
 Remove any dashboard UI components and pages that were built around V1's product sync model:
 - Any views that list or manage `brand_products`
-- Any product catalog management UI that expected products to come from the Side St DB rather than Shopify
+- Any product catalog management UI that expected products to come from the Partna DB rather than Shopify
 - Any `brand_product_settings` editing UI
 
 Do not remove anything that will exist in V2 (affiliate management, payout views, brand settings) — only remove things that relied on the now-deleted tables.
@@ -953,7 +953,7 @@ Verify the `shopify.app.toml` config is correctly set up for V2 before any Beta 
 
 **Focus:** Shopify as the single source of truth. Lock the data contract before any UI is built on top of it.
 
-**Goal:** Install Side St on a test store → all Shopify objects exist correctly (metafields, webhooks, sales channel publication) → Hydrogen can read brand config and products via Storefront API → cart attributes carry commission data through to checkout → `orders/paid` webhook records commission correctly.
+**Goal:** Install Partna on a test store → all Shopify objects exist correctly (metafields, webhooks, sales channel publication) → Hydrogen can read brand config and products via Storefront API → cart attributes carry commission data through to checkout → `orders/paid` webhook records commission correctly.
 
 **Gate:** No Beta 2 work starts until the end-to-end verification checklist below passes. Building UI before the data layer is locked is the V1 anti-pattern.
 
@@ -967,7 +967,7 @@ Verify the `shopify.app.toml` config is correctly set up for V2 before any Beta 
 On OAuth complete, call `metafieldDefinitionCreate` (Admin GraphQL) for every `sidest.*` metafield definition. This must be idempotent — if definitions already exist (reinstall scenario), skip without error.
 
 **Product-level definitions (`ownerType: PRODUCT`):**
-- `active` — `boolean`, `access: { storefront: PUBLIC_READ }` — whether the product is active for Side St affiliates. Drives the "Active Products" smart collection. Must be `PUBLIC_READ` so Hydrogen can read it. When set to `false`, Side St also unpublishes the product from the Side St sales channel.
+- `active` — `boolean`, `access: { storefront: PUBLIC_READ }` — whether the product is active for Partna affiliates. Drives the "Active Products" smart collection. Must be `PUBLIC_READ` so Hydrogen can read it. When set to `false`, Partna also unpublishes the product from the Partna sales channel.
 - `commission_override` — `number_decimal`, `access: { storefront: PUBLIC_READ }` — per-product commission % override; NULL means use brand default. Must be `PUBLIC_READ` so Hydrogen can read it without an Admin token.
 - `affiliate_discount_pct` — `number_decimal` — discount % applied at checkout; does not need Storefront visibility
 
@@ -1054,7 +1054,7 @@ One token per brand. This token is passed server-side to Hydrogen via the `/publ
 
 ```graphql
 mutation {
-  storefrontAccessTokenCreate(input: { title: "Side St Hydrogen" }) {
+  storefrontAccessTokenCreate(input: { title: "Partna Hydrogen" }) {
     storefrontAccessToken { accessToken }
     userErrors { field message }
   }
@@ -1068,7 +1068,7 @@ mutation {
 **Release Batch:** Beta 1
 **Segments:** Laravel, Supabase
 
-On OAuth complete, call `publicationCreate` to create a Side St sales channel publication on the brand's store. Store the returned publication ID in the DB — it's needed to publish/unpublish individual products to the Side St channel.
+On OAuth complete, call `publicationCreate` to create a Partna sales channel publication on the brand's store. Store the returned publication ID in the DB — it's needed to publish/unpublish individual products to the Partna channel.
 
 ```graphql
 mutation { publicationCreate(input: { autoPublish: false }) { publication { id name } userErrors { field message } } }
@@ -1078,19 +1078,19 @@ Products not published to this channel will return `null` from the Storefront AP
 
 ---
 
-#### App Install — Create Side St Collections
+#### App Install — Create Partna Collections
 **Assigned:** Backend Dev
 **Release Batch:** Beta 1
 **Segments:** Laravel, Supabase
 
 On OAuth complete, create three Shopify collections on the brand's store. All three are idempotent — check if a collection with the given handle already exists before creating (handles reinstall).
 
-**"Side St — Active Products"** — smart collection. Auto-populated whenever `sidest.active = true` on a product. This is the master list of all products affiliates can browse and select. Affiliate product selection dashboard loads exclusively from this collection — no page-load filtering needed.
+**"Partna — Active Products"** — smart collection. Auto-populated whenever `sidest.active = true` on a product. This is the master list of all products affiliates can browse and select. Affiliate product selection dashboard loads exclusively from this collection — no page-load filtering needed.
 
 ```graphql
 mutation {
   collectionCreate(input: {
-    title: "Side St — Active Products"
+    title: "Partna — Active Products"
     handle: "sidest-active-products"
     ruleSet: {
       appliedDisjunctively: false
@@ -1108,12 +1108,12 @@ mutation {
 }
 ```
 
-**"Side St — Default Products"** — manual collection. Brand curates this from app.sidest.co. Only active products should be added here. When a product is deactivated (`sidest.active = false`), Side St automatically removes it from this collection via `collectionRemoveProducts` to keep it in sync.
+**"Partna — Default Products"** — manual collection. Brand curates this from app.sidest.co. Only active products should be added here. When a product is deactivated (`sidest.active = false`), Partna automatically removes it from this collection via `collectionRemoveProducts` to keep it in sync.
 
 ```graphql
 mutation {
   collectionCreate(input: {
-    title: "Side St — Default Products"
+    title: "Partna — Default Products"
     handle: "sidest-default-products"
   }) {
     collection { id handle }
@@ -1122,12 +1122,12 @@ mutation {
 }
 ```
 
-**"Side St — Brand Favourites"** — manual collection. Brand marks their top picks here. These are highlighted to affiliates in the product selection dashboard (e.g. shown with a "Brand Pick" badge) so affiliates know which products the brand most wants to promote. Only active products should be added. Removed on deactivate same as Default Products.
+**"Partna — Brand Favourites"** — manual collection. Brand marks their top picks here. These are highlighted to affiliates in the product selection dashboard (e.g. shown with a "Brand Pick" badge) so affiliates know which products the brand most wants to promote. Only active products should be added. Removed on deactivate same as Default Products.
 
 ```graphql
 mutation {
   collectionCreate(input: {
-    title: "Side St — Brand Favourites"
+    title: "Partna — Brand Favourites"
     handle: "sidest-brand-favourites"
   }) {
     collection { id handle }
@@ -1136,12 +1136,12 @@ mutation {
 }
 ```
 
-**"Side St — High Commission Products"** — smart collection with compound AND rules: product must be active AND have a commission override set. This ensures inactive products never appear in the high commission list.
+**"Partna — High Commission Products"** — smart collection with compound AND rules: product must be active AND have a commission override set. This ensures inactive products never appear in the high commission list.
 
 ```graphql
 mutation {
   collectionCreate(input: {
-    title: "Side St — High Commission Products"
+    title: "Partna — High Commission Products"
     handle: "sidest-high-commission"
     ruleSet: {
       appliedDisjunctively: false
@@ -1261,7 +1261,7 @@ Wire up the Hydrogen loader to:
 1. Call `GET /public/shopify/storefront-config` → get Storefront token and default collection handle
 2. Query Shopify Storefront API for products in the default collection, including `sidest.commission_override` metafield (readable because it was set to `PUBLIC_READ` on install)
 3. Resolve commission rate per product: `commission_override` metafield value ?? `default_commission_rate` from brand config. The `??` (nullish coalescing) means: use the product-level override if set, otherwise fall back to the brand default.
-4. Filter null nodes from the `nodes()` query result — products unpublished from the Side St channel return null from the Storefront API
+4. Filter null nodes from the `nodes()` query result — products unpublished from the Partna channel return null from the Storefront API
 
 The resolved commission rate per product is used in the next task (cart attribute write) and displayed on the affiliate page ("Earn 15% on this").
 
@@ -1331,10 +1331,10 @@ No Stripe action at this point — money only moves after the hold period elapse
 Gate check before Beta 2 begins. Both developers verify together:
 
 - [ ] Install app on test Shopify store → all `sidest.*` metafield definitions visible in Shopify admin (Products → any product → Metafields section), including `sidest.active`
-- [ ] "Side St — Active Products" smart collection visible in Shopify admin → Collections
-- [ ] "Side St — Default Products" manual collection visible in Shopify admin → Collections
-- [ ] "Side St — Brand Favourites" manual collection visible in Shopify admin → Collections
-- [ ] "Side St — High Commission Products" smart collection visible in Shopify admin → Collections
+- [ ] "Partna — Active Products" smart collection visible in Shopify admin → Collections
+- [ ] "Partna — Default Products" manual collection visible in Shopify admin → Collections
+- [ ] "Partna — Brand Favourites" manual collection visible in Shopify admin → Collections
+- [ ] "Partna — High Commission Products" smart collection visible in Shopify admin → Collections
 - [ ] Set `sidest.active = true` on a product → it appears in "Active Products" automatically
 - [ ] Set `sidest.active = false` → it disappears from "Active Products" AND from "Default Products" AND from "Brand Favourites" AND from "High Commission Products"
 - [ ] Set `commission_override` on an active product → it appears in "High Commission Products"; clear it → it disappears
@@ -1345,7 +1345,7 @@ Gate check before Beta 2 begins. Both developers verify together:
 - [ ] Visit `{test-store}/apps/sidest/sarah` → products load
 - [ ] Add single product to cart → inspect Shopify cart → confirm `affiliate: "sarah"` as cart attribute + `sidest_commission_rate` as line attribute
 - [ ] Add two products with different commission rates → confirm each line has its own `sidest_commission_rate` line attribute
-- [ ] Complete test checkout → `orders/paid` webhook fires → commission record exists in Side St DB with correct per-line rates
+- [ ] Complete test checkout → `orders/paid` webhook fires → commission record exists in Partna DB with correct per-line rates
 - [ ] Notification records created for affiliate and brand in DB
 - [ ] Repeat webhook delivery manually → confirm no duplicate commission or notification records created
 
@@ -1395,7 +1395,7 @@ Build the affiliate page product grid.
 1. Call `GET /internal/hydrogen/affiliate-products?affiliate_id={id}` → returns ordered array of Shopify GIDs
 2. Parse `featured` query param from the URL (e.g. `?featured=gid://shopify/Product/123,gid://shopify/Product/456`) — up to 5 GIDs. These are set by the share link generator.
 3. Query Storefront API `nodes(ids: [...])` with the combined GID array (affiliate's products + any featured GIDs not already in the list) — max 250 IDs per request
-4. Filter nulls from the result (brand may have unpublished a product from the Side St channel — it returns null, not an error)
+4. Filter nulls from the result (brand may have unpublished a product from the Partna channel — it returns null, not an error)
 5. Render product cards: featured products appear first with a visual highlight (e.g. pinned row, subtle badge); remaining products in the affiliate's normal sort order below
 6. Display the effective commission rate per product ("Earn 15% on this") — read from `sidest.commission_override` metafield, falling back to brand default
 7. Loading state while data fetches; empty state if no products
@@ -1414,7 +1414,7 @@ Build the add-to-cart and checkout flow on the affiliate page.
 - Add-to-cart button triggers the Hydrogen cart action (server-side)
 - Cart action writes `affiliate` and `sidest_commission_rate` attributes (implemented in Beta 1 — this task is about the UI flow connecting to it)
 - Cart attributes are always set in the server-side action, never in client-side JavaScript
-- Checkout link goes to Shopify's native checkout (`/checkout`) — no custom Side St checkout UI
+- Checkout link goes to Shopify's native checkout (`/checkout`) — no custom Partna checkout UI
 - After adding to cart, show cart drawer or redirect to cart page (standard Hydrogen cart patterns)
 - Verify that cart attributes survive through to the completed order (check `orders/paid` webhook payload)
 
@@ -1429,7 +1429,7 @@ Hydrogen must never show a raw 500 or blank page to a customer. Handle:
 
 - **Invalid affiliate slug:** `redirect()` to brand's main Shopify store. Do not show a "not found" page — just silently redirect so the customer can still shop.
 - **Storefront API unavailable:** Show a fallback UI with a link to the brand's main Shopify store. Do not throw.
-- **Side St API unavailable:** If the Storefront token is cached (CacheLong), continue serving products. If not cached and API is down, redirect to brand's store.
+- **Partna API unavailable:** If the Storefront token is cached (CacheLong), continue serving products. If not cached and API is down, redirect to brand's store.
 - **Missing metafields:** Never crash on a null metafield value. Commission rate null → use `0` or brand default. Theme variant null → use theme 1. Image ratio null → use "1/1".
 
 ---
@@ -1457,8 +1457,8 @@ Create `GET /internal/hydrogen/affiliate-products?affiliate_id={id}`.
 Returns an ordered array of Shopify product GIDs.
 
 - **If affiliate has made selections:** return their saved GIDs from `retail.affiliate_product_selections`, ordered by `sort_order`. Validate each GID is still in the Active Products collection — silently drop any that have been deactivated since the affiliate saved them. Do not delete the stale rows — they are preserved so that if the brand reactivates a product, it returns to the affiliate's page automatically.
-- **If affiliate has made no selections** (new or hasn't customised): return GIDs from the brand's "Side St — Default Products" collection (the curated default set).
-- **If Default Products collection is also empty:** fall back to the brand's "Side St — Active Products" collection — at minimum, all active products are shown.
+- **If affiliate has made no selections** (new or hasn't customised): return GIDs from the brand's "Partna — Default Products" collection (the curated default set).
+- **If Default Products collection is also empty:** fall back to the brand's "Partna — Active Products" collection — at minimum, all active products are shown.
 
 Example response: `{ "gids": ["gid://shopify/Product/123", "gid://shopify/Product/456"] }`
 
@@ -1475,7 +1475,7 @@ Gate check before Beta 3 begins:
 - [ ] Add product to cart → Shopify cart shows `affiliate` + `sidest_commission_rate` attributes
 - [ ] Complete checkout → `orders/paid` → commission in DB
 - [ ] Invalid slug (e.g. `/apps/sidest/nobody`) → redirects to brand's Shopify store, no error page
-- [ ] Side St API mocked as down → fallback UI shown, no 500
+- [ ] Partna API mocked as down → fallback UI shown, no 500
 - [ ] `radiorufus.sidest.co/sarah` → products load → checkout → commission recorded
 
 ---
@@ -1499,7 +1499,7 @@ Before building any embedded app UI, confirm which Shopify session token library
 - `@shopify/shopify-app-js` — the maintained monorepo package, more current
 - `@shopify/shopify-app-next` — older template-based approach
 
-Spend a day spiking both. The chosen library handles: session token exchange (Shopify Admin iframe → Next.js API route), OAuth flow, and secure API calls from embedded pages to Side St's backend.
+Spend a day spiking both. The chosen library handles: session token exchange (Shopify Admin iframe → Next.js API route), OAuth flow, and secure API calls from embedded pages to Partna's backend.
 
 **Output of spike:** a working authenticated request from the embedded app to `GET /internal/embedded/test` — just proving the auth flow works. Then build everything else on top of that foundation.
 
@@ -1533,7 +1533,7 @@ The layout must detect if `sidest.setup_complete` shop metafield is `false` and 
 **Release Batch:** Beta 3
 **Segments:** Next Frontend, Shopify App
 
-Build the 5-step Polaris setup wizard at `app/shopify-admin/setup/page.tsx`. This is what a brand sees immediately after installing Side St.
+Build the 5-step Polaris setup wizard at `app/shopify-admin/setup/page.tsx`. This is what a brand sees immediately after installing Partna.
 
 **Step 1 — Brand Profile Review**
 Display auto-filled brand data (name, logo, contact email, contact number, business address, website URL) pulled from the Shopify shop object via `GET /internal/embedded/brand-profile`. All fields are editable — the brand reviews and corrects anything Shopify had wrong. On "Next", saves any edits to `retail.brand_profiles`.
@@ -1548,15 +1548,15 @@ Collects the fields Shopify cannot provide. All fields required before the wizar
 On "Next", saves all four to `retail.brand_profiles`.
 
 **Step 3 — Default Commission Rate**
-Polaris `TextField` (number). Brand sets their default commission % for all affiliates. On "Next", calls Side St API which writes `sidest.default_commission_rate` shop metafield via Admin API.
+Polaris `TextField` (number). Brand sets their default commission % for all affiliates. On "Next", calls Partna API which writes `sidest.default_commission_rate` shop metafield via Admin API.
 
 **Step 4 — Default Collection Confirmation**
-Display the "Side St — Default Products" collection that was automatically created on install. Show a link to manage its products on app.sidest.co. No input required — the collection already exists and the handle is already stored in the `sidest.default_collection_handle` shop metafield. This step is informational: it explains that the brand adds products to this collection from their catalog page and those products become the default shown on all affiliate pages.
+Display the "Partna — Default Products" collection that was automatically created on install. Show a link to manage its products on app.sidest.co. No input required — the collection already exists and the handle is already stored in the `sidest.default_collection_handle` shop metafield. This step is informational: it explains that the brand adds products to this collection from their catalog page and those products become the default shown on all affiliate pages.
 
 **Step 5 — Affiliate Page Theme**
-Display 5 theme thumbnail previews. Theme 1 is pre-selected by default — brand can change it or proceed with the default. Calls Side St API which writes `sidest.theme_variant` shop metafield. On account creation (both signup paths), `sidest.theme_variant` is initialised to `"1"` so affiliate pages are never themeless.
+Display 5 theme thumbnail previews. Theme 1 is pre-selected by default — brand can change it or proceed with the default. Calls Partna API which writes `sidest.theme_variant` shop metafield. On account creation (both signup paths), `sidest.theme_variant` is initialised to `"1"` so affiliate pages are never themeless.
 
-**On wizard complete:** Calls Side St API which writes `sidest.setup_complete = true`. Redirects to `/shopify-admin` home page.
+**On wizard complete:** Calls Partna API which writes `sidest.setup_complete = true`. Redirects to `/shopify-admin` home page.
 
 ---
 
@@ -1572,7 +1572,7 @@ Fields:
 - Accent colour — Polaris `ColorPicker` or hex `TextField` — writes `sidest.accent_color`
 - Product image ratio — Polaris `ChoiceList` ("Square 1:1" / "Portrait 4:5") — writes `sidest.product_image_ratio`
 
-Each field saves individually on change (no save button required). Calls Side St API → Admin API metafield write. Show Polaris `Toast` on success.
+Each field saves individually on change (no save button required). Calls Partna API → Admin API metafield write. Show Polaris `Toast` on success.
 
 ---
 
@@ -1591,11 +1591,11 @@ target = "admin.product-details.configuration.render"
 ```
 
 What it renders:
-- **"Active for Side St"** — `Checkbox` or `Toggle`. Sets `sidest.active` product metafield. When turned on/off, Side St API also publishes/unpublishes from the Side St sales channel and removes from Default Products if deactivating.
-- **"Side St Commission Rate"** — `NumberField`. Blank = use brand default (show brand default as placeholder text). Saves to `sidest.commission_override` product metafield. Setting this rate will also automatically add the product to the "High Commission Products" smart collection if the product is active.
+- **"Active for Partna"** — `Checkbox` or `Toggle`. Sets `sidest.active` product metafield. When turned on/off, Partna API also publishes/unpublishes from the Partna sales channel and removes from Default Products if deactivating.
+- **"Partna Commission Rate"** — `NumberField`. Blank = use brand default (show brand default as placeholder text). Saves to `sidest.commission_override` product metafield. Setting this rate will also automatically add the product to the "High Commission Products" smart collection if the product is active.
 - **"Affiliate Discount %"** — `NumberField`. 0 = no discount. Saves to `sidest.affiliate_discount_pct` product metafield.
 
-All fields call the Side St API (authenticated via session token from the extension context) which proxies the metafield write to Shopify Admin API.
+All fields call the Partna API (authenticated via session token from the extension context) which proxies the metafield write to Shopify Admin API.
 
 Deploy with `shopify app deploy` — this goes to Shopify's infrastructure, not Vercel.
 
@@ -1625,15 +1625,15 @@ No real-time push — polling on page load is sufficient for Beta. Initial notif
 Build `app/account/catalog/` — the page where brands control which products are visible to affiliates and which appear in their curated default set.
 
 **Primary view — Active / Inactive toggle:**
-List all products from the brand's Shopify store (paginated via Side St API → Admin API). Each row shows: product image, name, commission rate (override if set, otherwise brand default), and an **Active toggle**.
+List all products from the brand's Shopify store (paginated via Partna API → Admin API). Each row shows: product image, name, commission rate (override if set, otherwise brand default), and an **Active toggle**.
 
-- **Toggle ON (`sidest.active = true`):** calls `PATCH /api/brand/catalog/products/{gid}/activate` → Side St API sets `sidest.active` metafield to `true` AND publishes the product to the Side St sales channel. Shopify's smart collection rules automatically add it to "Active Products" and, if it has `commission_override` set, to "High Commission Products".
-- **Toggle OFF (`sidest.active = false`):** calls `PATCH /api/brand/catalog/products/{gid}/deactivate` → Side St API sets `sidest.active` metafield to `false` AND unpublishes from Side St channel AND calls `collectionRemoveProducts` to remove from "Default Products" (smart collections update automatically). Product immediately disappears from all affiliate pages and selection UIs.
+- **Toggle ON (`sidest.active = true`):** calls `PATCH /api/brand/catalog/products/{gid}/activate` → Partna API sets `sidest.active` metafield to `true` AND publishes the product to the Partna sales channel. Shopify's smart collection rules automatically add it to "Active Products" and, if it has `commission_override` set, to "High Commission Products".
+- **Toggle OFF (`sidest.active = false`):** calls `PATCH /api/brand/catalog/products/{gid}/deactivate` → Partna API sets `sidest.active` metafield to `false` AND unpublishes from Partna channel AND calls `collectionRemoveProducts` to remove from "Default Products" (smart collections update automatically). Product immediately disappears from all affiliate pages and selection UIs.
 
 Active products are shown first. Inactive products shown below with a muted "Hidden" badge.
 
 **Default Products tab:**
-A secondary tab that manages the "Side St — Default Products" manual collection — the curated set shown on affiliate pages when an affiliate hasn't made their own selections.
+A secondary tab that manages the "Partna — Default Products" manual collection — the curated set shown on affiliate pages when an affiliate hasn't made their own selections.
 
 - Only shows products from the Active Products collection (inactive products cannot be added)
 - **Maximum 10 products.** Show a count ("3 / 10 selected"). When at the limit, adding toggles are disabled and a note reads "Remove a product to add another."
@@ -1641,14 +1641,14 @@ A secondary tab that manages the "Side St — Default Products" manual collectio
 - Calls `POST /api/brand/catalog/default-collection/add` or `DELETE /api/brand/catalog/default-collection/remove`
 
 **Brand Favourites tab:**
-A third tab that manages the "Side St — Brand Favourites" manual collection — the brand's top picks, highlighted to affiliates in their product selection UI with a "Brand Pick" badge.
+A third tab that manages the "Partna — Brand Favourites" manual collection — the brand's top picks, highlighted to affiliates in their product selection UI with a "Brand Pick" badge.
 
 - Only shows products from the Active Products collection (inactive products cannot be added)
 - Toggle/checkbox to mark or unmark each active product as a favourite
 - Calls `POST /api/brand/catalog/favourites-collection/add` or `DELETE /api/brand/catalog/favourites-collection/remove`
 
 **High Commission Products — read-only panel:**
-Read-only view of the "Side St — High Commission Products" smart collection. Auto-managed: any active product with `sidest.commission_override` set appears here automatically. Show a note: "Updates automatically when you set a custom commission rate on an active product."
+Read-only view of the "Partna — High Commission Products" smart collection. Auto-managed: any active product with `sidest.commission_override` set appears here automatically. Show a note: "Updates automatically when you set a custom commission rate on an active product."
 
 All data fetched via `GET /api/brand/catalog/products?cursor={cursor}` (all products with active status and collection membership) and `GET /api/brand/catalog/collections` (products in each collection).
 
@@ -1695,7 +1695,7 @@ No pagination needed for Beta — most brands will have <50 affiliates initially
 Build `app/account/storefront/` — the page where affiliates manage which products appear on their page and in what order.
 
 **Product browser:**
-- Loads all products from the brand's "Side St — Active Products" collection via `GET /api/affiliate/products` (paginated)
+- Loads all products from the brand's "Partna — Active Products" collection via `GET /api/affiliate/products` (paginated)
 - Products in the "Brand Favourites" collection are shown with a "Brand Pick" badge
 - Affiliate can toggle individual products on/off → saves to `retail.affiliate_product_selections` via `POST /api/affiliate/selections`
 - **Maximum 10 products.** Show a count ("4 / 10 selected"). When at the limit, adding toggles are disabled and a note reads "Remove a product to add another."
@@ -1747,7 +1747,7 @@ Brand dashboard UI (`app/account/catalog/` or `app/account/affiliates/`):
 
 **Type 2 — Direct Checkout Link** _(buy-now, for social/email promotion)_ — **⚠️ Design decisions pending before implementation**
 
-The customer experience once they click is entirely Shopify's — the `checkoutUrl` goes to the brand's own Shopify checkout (their logo, colours, domain). Side St has zero control over that page. Shopify Checkout UI Extensions exist but are Plus-plan only. The only place Side St branding can live is the share URL itself, before the redirect.
+The customer experience once they click is entirely Shopify's — the `checkoutUrl` goes to the brand's own Shopify checkout (their logo, colours, domain). Partna has zero control over that page. Shopify Checkout UI Extensions exist but are Plus-plan only. The only place Partna branding can live is the share URL itself, before the redirect.
 
 **Decided: Option C — `evo.sidest.co/buy/{token}` redirect** _(302 to Shopify checkout)_
 
@@ -1763,7 +1763,7 @@ _Link lifetime:_
 - Shopify cart tokens live ~10 days by default. Do we (a) regenerate lazily on first click if expired, (b) pre-generate and let them expire, or (c) treat as one-shot?
 
 _Sold-out / price-changed handling:_
-- If a product is sold out or deactivated when the link is clicked, Shopify shows a checkout error. Do we intercept that with a friendlier Side St page, or let Shopify handle it?
+- If a product is sold out or deactivated when the link is clicked, Shopify shows a checkout error. Do we intercept that with a friendlier Partna page, or let Shopify handle it?
 
 _Who can generate:_
 - Brands, affiliates, or both? (PLAN.md copy says "brand or affiliate" — confirming.)
@@ -1779,7 +1779,7 @@ _Attribution:_
 - If no affiliate tag: commission goes nowhere (brand keeps full margin).
 
 _Guardrails:_
-- Rate limit `POST /api/share/checkout-link` at the Side St layer — Shopify Storefront API has per-IP and per-shop limits on `cartCreate`.
+- Rate limit `POST /api/share/checkout-link` at the Partna layer — Shopify Storefront API has per-IP and per-shop limits on `cartCreate`.
 - Cache by hash: if same `{brand, affiliate, line_items}` combo is requested twice within 10 days, return the same token or create a fresh cart?
 
 **Backend implementation (once decisions above are resolved):**
@@ -1824,18 +1824,18 @@ Build the Stripe Connect onboarding UI in the Next.js dashboard.
 - "Connect Stripe" button → initiates Stripe Connect OAuth (backend returns the Stripe OAuth URL)
 - After redirect back: show connected account status, last 4 of bank account
 - Brand must connect Stripe before any affiliate commissions can be paid — show warning in affiliate management if not connected
-- Copy: frame this as "so your affiliates can receive their commissions" — not as "so Side St can charge you"
+- Copy: frame this as "so your affiliates can receive their commissions" — not as "so Partna can charge you"
 
 **Affiliate (`app/account/payments/`):**
 - "Connect Stripe to receive payouts" button
 - Show payout hold period ("Earnings release X days after a sale")
 - Show connected status after OAuth completes
-- Show platform fee disclosure: "Side St takes 20% of your commission as a platform fee — you receive 80%"
+- Show platform fee disclosure: "Partna takes 20% of your commission as a platform fee — you receive 80%"
 - **Grace period banner (if Stripe not connected):** show a prominent warning with days remaining — e.g. "Connect Stripe within 18 days or your pending earnings will be forfeited". Use `stripe_grace_period_ends_at` from the affiliate record. Banner shows from day 1 but turns red in the final 5 days.
 - **Pending earnings at risk:** show the total value of pending commissions that will be voided if Stripe is not connected — e.g. "$240 at risk". Motivates connection.
 - Once Stripe is connected, banner disappears and the flush of eligible pending commissions happens automatically (backend handles this on OAuth callback — no UI action needed)
 
-Both connect flows call Side St API which handles the Stripe OAuth server-side and stores the connected account ID. The frontend never sees Stripe credentials directly.
+Both connect flows call Partna API which handles the Stripe OAuth server-side and stores the connected account ID. The frontend never sees Stripe credentials directly.
 
 ---
 
@@ -1857,7 +1857,7 @@ Build the financial dashboard views.
 - Status per order: "Pending (releases [date])", "Paid", "Refunded"
 - "Connect Stripe" prompt if not connected
 
-Both views call Side St API endpoints built in the backend tasks below.
+Both views call Partna API endpoints built in the backend tasks below.
 
 ---
 
@@ -1872,8 +1872,8 @@ Create the endpoints the catalog management UI calls. All calls proxy to the bra
 - `GET /api/brand/catalog/products?cursor={cursor}` — paginated list of all products, including `sidest.active` metafield value and whether each product is in the Default Products collection. Active products returned first.
 
 **Active/inactive toggle (the primary action):**
-- `PATCH /api/brand/catalog/products/{gid}/activate` — sets `sidest.active = true` via `metafieldsSet`, then publishes product to Side St sales channel via `publishablePublish`. Shopify smart collections update automatically.
-- `PATCH /api/brand/catalog/products/{gid}/deactivate` — sets `sidest.active = false` via `metafieldsSet`, unpublishes from Side St channel via `publishableUnpublish`, AND calls `collectionRemoveProducts` to remove from both "Default Products" and "Brand Favourites" (the two manual collections that need explicit removal — smart collections update automatically). Also queries `retail.affiliate_product_selections` for all affiliates who have this GID saved and writes a notification to each: `{ type: "product_deactivated", body: "[Product Name] is no longer available and has been removed from your page" }`. The selection rows are NOT deleted — if the brand reactivates the product, it automatically reappears on the affiliate's page without them having to re-select it.
+- `PATCH /api/brand/catalog/products/{gid}/activate` — sets `sidest.active = true` via `metafieldsSet`, then publishes product to Partna sales channel via `publishablePublish`. Shopify smart collections update automatically.
+- `PATCH /api/brand/catalog/products/{gid}/deactivate` — sets `sidest.active = false` via `metafieldsSet`, unpublishes from Partna channel via `publishableUnpublish`, AND calls `collectionRemoveProducts` to remove from both "Default Products" and "Brand Favourites" (the two manual collections that need explicit removal — smart collections update automatically). Also queries `retail.affiliate_product_selections` for all affiliates who have this GID saved and writes a notification to each: `{ type: "product_deactivated", body: "[Product Name] is no longer available and has been removed from your page" }`. The selection rows are NOT deleted — if the brand reactivates the product, it automatically reappears on the affiliate's page without them having to re-select it.
 
 **Default Products collection management:**
 - `POST /api/brand/catalog/default-collection/add` — accepts `{ product_gid }`. Validates product is active first. Validates Default Products collection currently has fewer than 10 products (return 422 with `{ message: "Default Products is limited to 10 products" }` if at cap). Then calls `collectionAddProducts`.
@@ -1884,9 +1884,9 @@ Create the endpoints the catalog management UI calls. All calls proxy to the bra
 - `DELETE /api/brand/catalog/favourites-collection/remove` — accepts `{ product_gid }`, calls `collectionRemoveProducts`.
 
 **Collection reads (for panels):**
-- `GET /api/brand/catalog/collections` — returns products in all four Side St collections (Active, Default, Brand Favourites, High Commission).
+- `GET /api/brand/catalog/collections` — returns products in all four Partna collections (Active, Default, Brand Favourites, High Commission).
 
-The "Active Products" and "High Commission Products" collections are managed automatically by Shopify's smart collection rules — Side St never manually adds or removes products from them.
+The "Active Products" and "High Commission Products" collections are managed automatically by Shopify's smart collection rules — Partna never manually adds or removes products from them.
 
 ---
 
@@ -1895,7 +1895,7 @@ The "Active Products" and "High Commission Products" collections are managed aut
 **Release Batch:** Beta 3
 **Segments:** Laravel
 
-Create the Laravel API endpoints that the embedded app wizard and settings page call to write shop metafields. The frontend never calls Shopify directly — it calls Side St API which proxies to the Shopify Admin API using the brand's stored OAuth token.
+Create the Laravel API endpoints that the embedded app wizard and settings page call to write shop metafields. The frontend never calls Shopify directly — it calls Partna API which proxies to the Shopify Admin API using the brand's stored OAuth token.
 
 Endpoints needed:
 - `PATCH /internal/embedded/brand-settings` — accepts `{ key, value }` pairs, writes to `sidest.*` shop metafields via `metafieldsSet` Admin GraphQL mutation
@@ -1912,7 +1912,7 @@ These are called from the embedded app (authenticated via Shopify session token)
 
 Create the endpoints the affiliate product selection UI calls.
 
-- `GET /api/affiliate/products?cursor={cursor}` — returns paginated products from the brand's "Side St — Active Products" collection (via Admin API using brand's OAuth token). Includes a `is_brand_favourite` flag per product (true if GID is in the "Brand Favourites" collection). Includes `is_selected` flag based on the authenticated affiliate's `affiliate_product_selections` rows.
+- `GET /api/affiliate/products?cursor={cursor}` — returns paginated products from the brand's "Partna — Active Products" collection (via Admin API using brand's OAuth token). Includes a `is_brand_favourite` flag per product (true if GID is in the "Brand Favourites" collection). Includes `is_selected` flag based on the authenticated affiliate's `affiliate_product_selections` rows.
 - `GET /api/affiliate/selections` — returns the authenticated affiliate's saved selections as ordered GIDs (same logic as `GET /internal/hydrogen/affiliate-products` — stale GIDs are dropped from the response but their rows are preserved)
 - `GET /api/affiliate/selections/stale` — returns saved selection rows where the GID is **no longer** in the brand's Active Products collection. Used by the frontend to surface the "No longer available" UI.
 - `POST /api/affiliate/selections` — accepts `{ product_gid, sort_order }`. Validates the affiliate does not already have 10 active selections (return 422 with `{ message: "Product selection is limited to 10 products" }` if at cap). Upserts into `affiliate_product_selections`.
@@ -1932,7 +1932,7 @@ Create the endpoints the affiliate product selection UI calls.
 3. Create signed invite token (expiry 7 days)
 4. Send invite email: their affiliate link (`evo.sidest.co/{slug}`) pre-generated in the email body, plus the accept invite URL and brand name
 
-When the affiliate accepts and creates their Side St account, status flips to `"active"` — link is live immediately, no redeploy needed.
+When the affiliate accepts and creates their Partna account, status flips to `"active"` — link is live immediately, no redeploy needed.
 
 **Open program link — `POST /api/affiliates/open-link/join`:**
 
@@ -2032,7 +2032,7 @@ Implement Stripe Connect OAuth for both brands and affiliates.
 
 **Flow:**
 1. Frontend calls `GET /api/stripe/connect-url?actor_type={brand|affiliate}` → returns Stripe OAuth URL
-2. User authorises on Stripe → redirected back to Side St with `code`
+2. User authorises on Stripe → redirected back to Partna with `code`
 3. `GET /api/stripe/connect-callback?code=` → exchange code for access token → store connected account ID in DB
 
 Store separately: `retail.brands.stripe_account_id` and `retail.professionals.stripe_account_id`. Never store Stripe secret keys — only account IDs.
@@ -2040,9 +2040,9 @@ Store separately: `retail.brands.stripe_account_id` and `retail.professionals.st
 **Three Stripe accounts in play:**
 - **Brand** — connected account, funds leave here (commission transfer out)
 - **Affiliate** — connected account, receives 80% of commission
-- **Side St platform** — the Stripe platform account, acts as intermediary and retains 20%
+- **Partna platform** — the Stripe platform account, acts as intermediary and retains 20%
 
-Side St's own Stripe platform account is configured via environment variables — it is never stored per-brand or per-affiliate in the DB.
+Partna's own Stripe platform account is configured via environment variables — it is never stored per-brand or per-affiliate in the DB.
 
 ---
 
@@ -2056,21 +2056,21 @@ Implement the commission transfer that runs after the hold period elapses. This 
 Before transferring, check whether the affiliate has connected Stripe. If not, the Stripe grace period logic (see next task) determines whether to void or continue holding.
 
 **Normal transfer flow (affiliate has Stripe connected):**
-1. Transfer full commission amount from brand's Stripe connected account → Side St's Stripe platform account
-2. Immediately transfer 80% of commission from Side St's platform account → affiliate's Stripe connected account
-3. Side St retains the remaining 20% as platform fee
+1. Transfer full commission amount from brand's Stripe connected account → Partna's Stripe platform account
+2. Immediately transfer 80% of commission from Partna's platform account → affiliate's Stripe connected account
+3. Partna retains the remaining 20% as platform fee
 4. Mark commission record as "paid" with `paid_at` timestamp
 5. Write payout notification to affiliate: `{ type: "payout_released", body: "$X sent to your Stripe account" }`
 
 **Void flow (affiliate has no Stripe and grace period has expired — see Stripe Grace Period task):**
-1. Transfer Side St's 20% fee from brand's Stripe → Side St's Stripe platform account
+1. Transfer Partna's 20% fee from brand's Stripe → Partna's Stripe platform account
 2. The remaining 80% is voided — brand keeps it, no transfer made
 3. Mark commission record as "voided" with `voided_at` timestamp and `void_reason: "no_stripe_connected"`
 4. Write notification to affiliate: `{ type: "commission_voided", body: "Your $X commission was voided because you haven't connected a Stripe account. Connect Stripe to receive future earnings." }`
 
 **Failure handling:**
-- If brand → Side St transfer fails: mark commission as "transfer_failed", add to retry queue. Do not mark as paid.
-- If Side St → affiliate transfer fails: commission is now in Side St's account. Mark as "affiliate_transfer_failed", alert manually — do not leave funds unaccounted.
+- If brand → Partna transfer fails: mark commission as "transfer_failed", add to retry queue. Do not mark as paid.
+- If Partna → affiliate transfer fails: commission is now in Partna's account. Mark as "affiliate_transfer_failed", alert manually — do not leave funds unaccounted.
 
 Use Stripe's idempotency key on both transfers (use the commission record ID) to prevent double-transfers on retry.
 
@@ -2109,7 +2109,7 @@ This job runs fully automatically. No manual action required after setup.
 **Release Batch:** Beta 3
 **Segments:** Laravel, Supabase, Stripe
 
-Affiliates have a 30-day grace period after signup to connect their Stripe account. During this window commissions accumulate as normal. After the window, any commission that reaches its void deadline without Stripe connected is partially voided — Side St takes its 20% fee from the brand, the affiliate's 80% is returned to the brand.
+Affiliates have a 30-day grace period after signup to connect their Stripe account. During this window commissions accumulate as normal. After the window, any commission that reaches its void deadline without Stripe connected is partially voided — Partna takes its 20% fee from the brand, the affiliate's 80% is returned to the brand.
 
 **Grace period rules:**
 
@@ -2126,7 +2126,7 @@ Affiliates have a 30-day grace period after signup to connect their Stripe accou
 **Day 30 reached without Stripe connected:**
 - The payout cron job identifies all `"pending"` commissions for this affiliate where the void window has elapsed
 - **Void window:** `commission.created_at + 30 days` (measured from when the commission was created, not from affiliate signup — so commissions created close to day 30 get slightly less than 30 days, but this keeps the logic simple and consistent)
-- For each commission past the void window: trigger the void flow — Side St transfers its 20% fee from the brand, affiliate's 80% voids back to brand, record marked `"voided"`
+- For each commission past the void window: trigger the void flow — Partna transfers its 20% fee from the brand, affiliate's 80% voids back to brand, record marked `"voided"`
 - Affiliate's access is NOT revoked — they can continue referring
 - Future commissions generated after day 30 also have a 30-day void window each (rolling per-commission, not per-affiliate)
 
@@ -2158,9 +2158,9 @@ Affiliates have a 30-day grace period after signup to connect their Stripe accou
 **Release Batch:** Beta 3
 **Segments:** Next Frontend, Laravel, Supabase
 
-Brands set how many days commission is held before it releases to affiliates. This is a per-brand financial setting stored in the Side St DB.
+Brands set how many days commission is held before it releases to affiliates. This is a per-brand financial setting stored in the Partna DB.
 
-**Where it lives:** `payout_hold_days` column on `retail.brand_store_settings` in Side St DB (not a Shopify metafield — this is a financial/legal setting Side St controls). Column is `DEFAULT NULL`; when unset, brands fall back to `SIDEST_STORE_PAYOUT_HOLD_DAYS` (system default: 7 days).
+**Where it lives:** `payout_hold_days` column on `retail.brand_store_settings` in Partna DB (not a Shopify metafield — this is a financial/legal setting Partna controls). Column is `DEFAULT NULL`; when unset, brands fall back to `SIDEST_STORE_PAYOUT_HOLD_DAYS` (system default: 7 days).
 
 **Frontend (`app/account/payments/` or `app/shopify-admin/settings/`):**
 - Dropdown: "Commission hold period" with three fixed options — 7 / 14 / 28 days
@@ -2191,7 +2191,7 @@ On receipt:
    - Business address → `shop.billingAddress` (street, city, state/province, country, postcode)
 4. Idempotent — re-processing the same payload produces the same result
 
-This keeps the Side St brand profile in sync with Shopify without requiring the brand to manually update their details in two places. Fields that the brand has manually overridden in the setup wizard (ABN, legal business name, business type, industry) are not touched by this handler — only the fields that originally came from the Shopify shop object.
+This keeps the Partna brand profile in sync with Shopify without requiring the brand to manually update their details in two places. Fields that the brand has manually overridden in the setup wizard (ABN, legal business name, business type, industry) are not touched by this handler — only the fields that originally came from the Shopify shop object.
 
 ---
 
@@ -2211,7 +2211,7 @@ Implement the `orders/updated` webhook handler. Fires when Shopify processes a r
 6. No Stripe action needed — no money was ever moved
 
 **Refund outside hold period (commission status = "paid"):**
-1. Commission already transferred — affiliate and Side St keep their portions
+1. Commission already transferred — affiliate and Partna keep their portions
 2. Log a `refund_event` against the canonical order for financial records
 3. No commission reversal, no Stripe action
 4. Brand absorbs the customer refund from their own account (standard Shopify behaviour)
@@ -2265,7 +2265,7 @@ Create read endpoints for the dashboard views built in the frontend tasks:
 - `GET /api/affiliate/earnings` — affiliate's own earnings, paginated
 - `GET /api/affiliate/payouts/summary` — affiliate's pending vs. released totals
 
-These are straightforward read queries from the canonical orders + commission ledger tables. No Shopify API calls needed — all financial data lives in the Side St DB.
+These are straightforward read queries from the canonical orders + commission ledger tables. No Shopify API calls needed — all financial data lives in the Partna DB.
 
 ---
 
@@ -2282,7 +2282,7 @@ The Hydrogen affiliate page (`evo.sidest.co/{slug}`) is a full personal sitepage
 - **Product grid** — affiliate's selected products with commission rates (built in Beta 2)
 - **Gallery** — affiliate's photos (optional section, hidden if no images)
 
-All non-product data (bio, services, gallery) is fetched from the Side St API in the Hydrogen loader using `CacheShort()` (5 min TTL). Products use the existing Storefront API query (Beta 2).
+All non-product data (bio, services, gallery) is fetched from the Partna API in the Hydrogen loader using `CacheShort()` (5 min TTL). Products use the existing Storefront API query (Beta 2).
 
 ---
 
@@ -2291,7 +2291,7 @@ All non-product data (bio, services, gallery) is fetched from the Side St API in
 **Release Batch:** Beta 3
 **Segments:** Hydrogen, Laravel, Supabase
 
-Manual mode: affiliate manages their services locally in the Side St DB and provides an external booking URL.
+Manual mode: affiliate manages their services locally in the Partna DB and provides an external booking URL.
 
 **Hydrogen:**
 - Services & Pricing section reads from `GET /internal/hydrogen/affiliate-services/{slug}` → returns `affiliate_services` rows for the affiliate
@@ -2315,14 +2315,14 @@ Manual mode: affiliate manages their services locally in the Side St DB and prov
 **Release Batch:** Beta 3
 **Segments:** Hydrogen, Laravel
 
-Smart mode: services are sourced live from Square via a Side St API proxy. No local copy of Square data is stored.
+Smart mode: services are sourced live from Square via a Partna API proxy. No local copy of Square data is stored.
 
 **Why no local copy:** V1 stored a local mirror of Square services which created sync drift (Square edits didn't propagate reliably; bi-directional push was fragile). V2 reads Square live with a short cache — Square is always authoritative with no sync job needed.
 
 **Hydrogen:**
 - `GET /internal/hydrogen/affiliate-services/{slug}` — detects smart mode, proxies to Square `ListCatalogObjects` for the affiliate's linked Square account, cached with `CacheShort()` (5 min)
 - "Book Now" opens booking panel → date picker → service selector → time slot → Square Web Payments SDK (native Square checkout flow)
-- All booking state is Square-native — no booking sessions or IDs stored on the Side St side
+- All booking state is Square-native — no booking sessions or IDs stored on the Partna side
 
 **Dashboard:**
 - Square connect/disconnect flow
@@ -2336,7 +2336,7 @@ Smart mode: services are sourced live from Square via a Side St API proxy. No lo
 **Release Batch:** Beta 3
 **Segments:** Laravel, Supabase
 
-Booking analytics are only available in smart mode — manual mode affiliates don't route payments through Square via Side St, so there is no data to record.
+Booking analytics are only available in smart mode — manual mode affiliates don't route payments through Square via Partna, so there is no data to record.
 
 **Data pipeline (unchanged from V1):**
 - Square webhooks fire on booking completion/payment → `BookingWebhookController` → upserts `analytics.booking_events` per `professional_id`
@@ -2417,7 +2417,7 @@ Build or verify `app/account/contacts/` — the existing V1 contacts page can be
 **Release Batch:** Beta 3
 **Segments:** Laravel, Shopify App, Next Frontend, Hydrogen
 
-Each brand's affiliate sitepages are styled using design tokens sourced from their Shopify theme, with a Side St-specific override layer on top.
+Each brand's affiliate sitepages are styled using design tokens sourced from their Shopify theme, with a Partna-specific override layer on top.
 
 **Sync mechanism:**
 - On OAuth install (and on manual "Re-sync from Shopify" trigger in app.sidest.co), fetch the brand's rendered storefront HTML
@@ -2439,7 +2439,7 @@ Each brand's affiliate sitepages are styled using design tokens sourced from the
 
 **Where values live:**
 - `sidest.theme_tokens` shop metafield — the synced Shopify-derived values (written by our sync job; Shopify stores them, not our DB)
-- `professional_integrations.provider_metadata` — sitepage override values keyed under `sitepage_overrides: { accent_color, heading_font, body_font, ... }` (Side St DB only)
+- `professional_integrations.provider_metadata` — sitepage override values keyed under `sitepage_overrides: { accent_color, heading_font, body_font, ... }` (Partna DB only)
 
 **Override system in app.sidest.co → Design tab:**
 - Each token shows its current resolved value with a "from Shopify" badge when unoverridden
@@ -2575,7 +2575,7 @@ Build `app/account/analytics/` for both brands and affiliates.
 **Metrics to display:**
 - Page visits (sourced from `analytics.page_views` — captured via Hydrogen Analytics integration)
 - Product views (sourced from `analytics.page_views` with `event = 'product_viewed'`)
-- Conversions (orders from Side St — from canonical orders table)
+- Conversions (orders from Partna — from canonical orders table)
 - GMV (gross merchandise value — sum of order values)
 - Commission earned (affiliate) / commission paid (brand)
 - Top performing affiliates (brand view)
@@ -2664,8 +2664,8 @@ This is particularly important for bulk operations (e.g. creating metafield defi
 
 Implement the three GDPR webhook handlers required for Shopify App Store submission:
 
-- `customers/data_request` — respond within 30 days with all data Side St holds on the customer
-- `customers/redact` — delete/anonymise all customer PII from Side St DB for the specified customer
+- `customers/data_request` — respond within 30 days with all data Partna holds on the customer
+- `customers/redact` — delete/anonymise all customer PII from Partna DB for the specified customer
 - `shop/redact` — delete all data for a shop (fired 48 hours after app uninstall)
 
 All three must return HTTP 200 immediately and process async. Shopify will reject the App Store submission if these are not implemented.
@@ -2677,7 +2677,7 @@ All three must return HTTP 200 immediately and process async. Shopify will rejec
 **Release Batch:** Alpha
 **Segments:** Hydrogen
 
-Set up Hydrogen's built-in analytics system and register a Side St integration that forwards events to the Side St API.
+Set up Hydrogen's built-in analytics system and register a Partna integration that forwards events to the Partna API.
 
 **Setup:**
 1. Wrap the Hydrogen root layout with `<Analytics.Provider>` — required before any events fire. Needs the Storefront API token created through the **Hydrogen sales channel** (separate from the install-time token — this one is tied to the Hydrogen channel specifically and enables Shopify's native analytics in the brand's admin).
@@ -2720,7 +2720,7 @@ function SideStAnalytics() {
 
 **What brands get for free:** by having `<Analytics.Provider>` set up, Shopify's native analytics fires automatically to `monorail-edge.shopifysvc.com` — brands see real-time visitor data in their Shopify admin Live View with no extra work.
 
-**Note:** Events are client-side and consent-aware — they do not fire if the customer hasn't consented. CORS must be configured on the Side St API for Oxygen deployment origins.
+**Note:** Events are client-side and consent-aware — they do not fire if the customer hasn't consented. CORS must be configured on the Partna API for Oxygen deployment origins.
 
 ---
 
@@ -2882,7 +2882,7 @@ mutation {
 
 ```graphql
 mutation {
-  storefrontAccessTokenCreate(input: { title: "Side St Hydrogen" }) {
+  storefrontAccessTokenCreate(input: { title: "Partna Hydrogen" }) {
     storefrontAccessToken { accessToken }
     userErrors { field message }
   }
@@ -2923,7 +2923,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const { shopDomain, brandSlug } = getBrandContext(request, env);
   const affiliateSlug = params.slug;
 
-  // All Side St API calls are server-side (no CORS, no secrets in browser)
+  // All Partna API calls are server-side (no CORS, no secrets in browser)
   const brandConfig = await fetch(`${env.SIDEST_API_URL}/internal/hydrogen/brand-config?shop_domain=${shopDomain}`);
   const affiliateData = await fetch(`${env.SIDEST_API_URL}/internal/hydrogen/affiliate?shop_domain=${shopDomain}&slug=${affiliateSlug}`);
 
@@ -3000,11 +3000,11 @@ Shopify adds `X-Shopify-Shop-Domain: evo.myshopify.com` to proxied requests. One
 ### Collections
 
 ```graphql
-# "Side St — Active Products" — smart, driven by sidest.active = true
+# "Partna — Active Products" — smart, driven by sidest.active = true
 # conditionObjectId = GID of the sidest.active metafield definition
 mutation {
   collectionCreate(input: {
-    title: "Side St — Active Products"
+    title: "Partna — Active Products"
     handle: "sidest-active-products"
     ruleSet: {
       appliedDisjunctively: false
@@ -3021,10 +3021,10 @@ mutation {
   }
 }
 
-# "Side St — Default Products" — manual, brand curates from Active Products
+# "Partna — Default Products" — manual, brand curates from Active Products
 mutation {
   collectionCreate(input: {
-    title: "Side St — Default Products"
+    title: "Partna — Default Products"
     handle: "sidest-default-products"
   }) {
     collection { id handle }
@@ -3032,10 +3032,10 @@ mutation {
   }
 }
 
-# "Side St — High Commission Products" — compound AND rule: active AND commission override set
+# "Partna — High Commission Products" — compound AND rule: active AND commission override set
 mutation {
   collectionCreate(input: {
-    title: "Side St — High Commission Products"
+    title: "Partna — High Commission Products"
     handle: "sidest-high-commission"
     ruleSet: {
       appliedDisjunctively: false   # AND logic — both rules must match

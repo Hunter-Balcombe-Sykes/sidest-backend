@@ -111,7 +111,7 @@ class BackfillHasEnabledVariantsCommand extends Command
                 if ($dryRun) {
                     $this->line(sprintf(
                         '  would write %s=%s on %s',
-                        'sidest.has_enabled_variants',
+                        'partna.has_enabled_variants',
                         $hasEnabled ? 'true' : 'false',
                         $gid
                     ));

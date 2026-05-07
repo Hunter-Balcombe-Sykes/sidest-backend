@@ -2556,7 +2556,7 @@ EOF
 - Create: `supabase/migrations/20260415120100_backfill_brand_design_media.sql`
 
 This migration does two things, in order:
-1. For any site with `settings.design.media.placeholder_sitepage_images` populated and no matching site_media rows, leave a warning (we can't generate variants from a URL — the original bytes are gone). For pre-beta this will only affect rows that were never re-uploaded after the schema landed, which the user has already verified isn't an issue (the dev brand "Side St" has site_media rows that match the JSONB URLs).
+1. For any site with `settings.design.media.placeholder_sitepage_images` populated and no matching site_media rows, leave a warning (we can't generate variants from a URL — the original bytes are gone). For pre-beta this will only affect rows that were never re-uploaded after the schema landed, which the user has already verified isn't an issue (the dev brand "Partna" has site_media rows that match the JSONB URLs).
 2. Strip `settings.design.logo` and `settings.design.media.placeholder_sitepage_images` from the JSONB on every site, regardless.
 
 Because pre-beta has no real user data and the user has explicitly skipped phasing, this is a destructive backfill. The migration logs a NOTICE for any site where the JSONB had data we couldn't migrate so it's visible in the migration log.
@@ -2720,7 +2720,7 @@ Expected: PASS.
 
 - [ ] **Step 3: Smoke-test the dev DB against the new shape**
 
-In a separate terminal, against the V2 dev project (`glncumufgaqcmqhzwrxm`) on Supabase, run a query to confirm the dev brand "Side St" still has its design rows after the schema change. The plan author already verified this site has logo + placeholder rows in site_media.
+In a separate terminal, against the V2 dev project (`glncumufgaqcmqhzwrxm`) on Supabase, run a query to confirm the dev brand "Partna" still has its design rows after the schema change. The plan author already verified this site has logo + placeholder rows in site_media.
 
 ```sql
 SELECT id, pool, purpose, alt_text, processing_state, sort_order
@@ -2731,7 +2731,7 @@ WHERE site_id = '019d58b6-4248-72e1-bed9-43b35ae33b2a'
 ORDER BY purpose, sort_order;
 ```
 
-Expected after the deploy: 1 row with `purpose='logo_full'`, possibly 1 row with `purpose='logo_square'` (if Shopify resync has run), and 1+ rows with `purpose='placeholder'`. The Side St brand currently has 1 active placeholder and 1 active logo_full, so expect at least those.
+Expected after the deploy: 1 row with `purpose='logo_full'`, possibly 1 row with `purpose='logo_square'` (if Shopify resync has run), and 1+ rows with `purpose='placeholder'`. The Partna brand currently has 1 active placeholder and 1 active logo_full, so expect at least those.
 
 - [ ] **Step 4: Check Nightwatch after deploy**
 

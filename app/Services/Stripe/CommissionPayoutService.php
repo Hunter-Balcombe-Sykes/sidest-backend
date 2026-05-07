@@ -35,11 +35,11 @@ class CommissionPayoutService
     {
         $this->stripe = $stripe ?? new StripeClient(config('services.stripe.secret_key'));
         $this->publisher = $publisher ?? app(NotificationPublisher::class);
-        $this->platformFeePercent = config('sidest.store.platform_fee_percent', 3);
-        $this->systemHoldDays = max(0, (int) config('sidest.store.payout_hold_days', 7));
-        $this->minHoldDays = (int) config('sidest.store.min_payout_hold_days', 7);
+        $this->platformFeePercent = config('partna.store.platform_fee_percent', 3);
+        $this->systemHoldDays = max(0, (int) config('partna.store.payout_hold_days', 7));
+        $this->minHoldDays = (int) config('partna.store.min_payout_hold_days', 7);
         // Clamp to [1, 365] — values outside this range produce nonsensical void_at timestamps.
-        $this->gracePeriodDays = max(1, min(365, (int) config('sidest.store.grace_period_days', 60)));
+        $this->gracePeriodDays = max(1, min(365, (int) config('partna.store.grace_period_days', 60)));
     }
 
     /**

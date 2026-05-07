@@ -32,7 +32,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
 
     public function handle(): void
     {
-        if (! config('sidest.notifications.email_enabled', false)) {
+        if (! config('partna.notifications.email_enabled', false)) {
             Log::debug('Notification email skipped: feature disabled', [
                 'category' => $this->category,
             ]);
@@ -42,7 +42,7 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
 
         // Early-exit if this category has no mailable (in-app-only or unregistered).
         // Avoids unnecessary DB queries when there's nothing to send.
-        $class = config("sidest.notifications.mailables.{$this->category}");
+        $class = config("partna.notifications.mailables.{$this->category}");
         if (! is_string($class) || ! class_exists($class)) {
             Log::debug('Notification email skipped: category has no mailable', [
                 'category' => $this->category,

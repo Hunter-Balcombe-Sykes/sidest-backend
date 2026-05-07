@@ -12,7 +12,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-// V2: Delta/full catalog sync from Fresha to Side St. Booking integration only. Queue: integrations.
+// V2: Delta/full catalog sync from Fresha to Partna. Booking integration only. Queue: integrations.
 class SyncFreshaCatalogDeltaJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -31,7 +31,7 @@ class SyncFreshaCatalogDeltaJob implements ShouldQueue
 
     public function handle(FreshaServiceSyncService $syncService): void
     {
-        if (! (bool) config('sidest.features.fresha_sync', false)) {
+        if (! (bool) config('partna.features.fresha_sync', false)) {
             return;
         }
 

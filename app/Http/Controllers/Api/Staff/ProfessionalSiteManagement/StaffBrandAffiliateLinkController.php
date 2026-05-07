@@ -31,7 +31,7 @@ class StaffBrandAffiliateLinkController extends ApiController
             return $this->error($e->getMessage(), 422, $e->errors());
         }
 
-        $staff = $request->attributes->get('sidest_staff');
+        $staff = $request->attributes->get('partna_staff');
         if (! $staff) {
             return $this->error('Staff context missing.', 500);
         }
@@ -74,7 +74,7 @@ class StaffBrandAffiliateLinkController extends ApiController
             return $this->error($e->getMessage(), 422, $e->errors());
         }
 
-        $staff = $request->attributes->get('sidest_staff');
+        $staff = $request->attributes->get('partna_staff');
         if (! $staff) {
             return $this->error('Staff context missing.', 500);
         }

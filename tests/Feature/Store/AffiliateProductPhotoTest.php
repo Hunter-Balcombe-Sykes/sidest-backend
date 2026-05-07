@@ -376,7 +376,7 @@ it('returns 422 for invalid GID format', function () {
 // --- Config Tests ---
 
 it('has product_custom pool limit of 1', function () {
-    expect(config('sidest.image_pools.product_custom.max'))->toBe(1);
+    expect(config('partna.image_pools.product_custom.max'))->toBe(1);
 });
 
 it('SiteMedia has product_gid in fillable', function () {

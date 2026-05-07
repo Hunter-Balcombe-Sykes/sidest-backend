@@ -2035,7 +2035,7 @@ Run: `composer dev` — then trigger a Shopify onboarding flow locally (or repla
 
 - [ ] **Step 5: Check Nightwatch post-deploy**
 
-After deploying to staging, use the Nightwatch MCP (`list_issues` on the Side St application) to confirm:
+After deploying to staging, use the Nightwatch MCP (`list_issues` on the Partna application) to confirm:
 - No new exceptions with class containing `Shopify` or `Throttled`
 - No regressions in previously-passing Shopify job success rates
 

@@ -9,7 +9,7 @@ use App\Models\Core\Professional\ServiceCategory;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
-// V2: Bidirectional service sync between Fresha and Side St. Booking integration — not V2 commerce.
+// V2: Bidirectional service sync between Fresha and Partna. Booking integration — not V2 commerce.
 class FreshaServiceSyncService
 {
     public function __construct(
@@ -17,7 +17,7 @@ class FreshaServiceSyncService
     ) {}
 
     /**
-     * Pull services from Fresha and upsert into Commet.
+     * Pull services from Fresha and upsert into Partna.
      * Mirrors SquareServiceSyncService::syncFromSquare().
      *
      * @return array{synced:int, deleted:int, latest_time:string|null}
@@ -185,7 +185,7 @@ class FreshaServiceSyncService
     }
 
     /**
-     * Push one Commet service mutation to Fresha.
+     * Push one Partna service mutation to Fresha.
      * Mirrors SquareServiceSyncService::pushServiceToSquare().
      *
      * NOTE: May require partner-level API access. If Fresha's API is read-only for services,

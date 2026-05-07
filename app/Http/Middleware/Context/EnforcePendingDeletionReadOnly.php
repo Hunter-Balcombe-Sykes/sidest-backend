@@ -28,7 +28,7 @@ class EnforcePendingDeletionReadOnly
             return $next($request);
         }
 
-        $retentionDays = (int) config('sidest.soft_delete_retention_days', 30);
+        $retentionDays = (int) config('partna.soft_delete_retention_days', 30);
         $confirmedAt = $professional->deletion_confirmed_at;
 
         $deletesAt = null;

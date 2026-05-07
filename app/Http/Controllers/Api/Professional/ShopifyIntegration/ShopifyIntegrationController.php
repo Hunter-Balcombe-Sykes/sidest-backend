@@ -299,11 +299,11 @@ class ShopifyIntegrationController extends ApiController
      * sweep. Unlike a Shopify-initiated uninstall (where the token is
      * revoked BEFORE we hear about it), this runs while we still hold a
      * valid token, so we can delete:
-     *   - The Side St Price automatic discount
-     *   - The four Side St collections
+     *   - The Partna Price automatic discount
+     *   - The four Partna collections
      *   - Every sidest.* metafield definition (with values)
-     *   - The Side St storefront access token
-     *   - The Side St sales channel publication
+     *   - The Partna storefront access token
+     *   - The Partna sales channel publication
      *   - Revoke the OAuth token itself
      *
      * Then locally:
@@ -350,7 +350,7 @@ class ShopifyIntegrationController extends ApiController
                 // catch only fires on a truly unexpected exception. We keep
                 // going so the local disconnect still runs — leaving the
                 // brand half-disconnected (Shopify side still present but
-                // Side St thinks it's gone) is worse than orphaning a few
+                // Partna thinks it's gone) is worse than orphaning a few
                 // Shopify-side artifacts we can't re-reach.
                 Log::error('Shopify teardown threw unexpectedly; continuing with local disconnect', [
                     'actor_professional_id' => (string) $actorProfessional->id,

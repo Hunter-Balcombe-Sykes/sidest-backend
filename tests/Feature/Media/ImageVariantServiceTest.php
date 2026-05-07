@@ -21,7 +21,7 @@ beforeEach(function () {
     // inspectable and avoids Storage::fake() quirks around the media disk.
     $testRoot = storage_path('framework/testing/disks/image-variant-service');
     config([
-        'sidest.media_disk' => 'local',
+        'partna.media_disk' => 'local',
         'filesystems.disks.local.root' => $testRoot,
     ]);
 
@@ -206,7 +206,7 @@ it('throws UnprocessableImageException when pixel count exceeds the guard', func
 });
 
 it('respects the SIDEST_IMAGE_MAX_PIXELS env override', function () {
-    config(['sidest.image_max_pixels' => 1_000_000]); // 1 MP
+    config(['partna.image_max_pixels' => 1_000_000]); // 1 MP
 
     $service = new ImageVariantService;
     $imageId = seedVariantTestMediaRow();

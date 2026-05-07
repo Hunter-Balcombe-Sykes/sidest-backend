@@ -3,7 +3,7 @@
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandAffiliateLinkController;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 it('returns 201 with the new link on success', function () {
     $brand = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new PartnaStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $link = new BrandPartnerLink([
         'id' => (string) Str::uuid(),
@@ -28,7 +28,7 @@ it('returns 201 with the new link on success', function () {
 
     $controller = new StaffBrandAffiliateLinkController($svc);
     $request = Request::create('/', 'POST', ['reason' => 'Lost invite email recovery']);
-    $request->attributes->set('sidest_staff', $staff);
+    $request->attributes->set('partna_staff', $staff);
 
     $response = $controller->store($request, $brand, $affiliate);
     $payload = json_decode($response->getContent(), true);
@@ -40,14 +40,14 @@ it('returns 201 with the new link on success', function () {
 it('returns 422 when reason is too short', function () {
     $brand = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new PartnaStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldNotReceive('createForStaff');
 
     $controller = new StaffBrandAffiliateLinkController($svc);
     $request = Request::create('/', 'POST', ['reason' => 'too short']);
-    $request->attributes->set('sidest_staff', $staff);
+    $request->attributes->set('partna_staff', $staff);
 
     $response = $controller->store($request, $brand, $affiliate);
     expect($response->status())->toBe(422);
@@ -56,7 +56,7 @@ it('returns 422 when reason is too short', function () {
 it('returns 409 when link already exists', function () {
     $brand = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $staff = (new SidestStaff)->forceFill(['id' => (string) Str::uuid()]);
+    $staff = (new PartnaStaff)->forceFill(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('createForStaff')
@@ -64,7 +64,7 @@ it('returns 409 when link already exists', function () {
 
     $controller = new StaffBrandAffiliateLinkController($svc);
     $request = Request::create('/', 'POST', ['reason' => 'Manual recovery attempt']);
-    $request->attributes->set('sidest_staff', $staff);
+    $request->attributes->set('partna_staff', $staff);
 
     $response = $controller->store($request, $brand, $affiliate);
     expect($response->status())->toBe(409);

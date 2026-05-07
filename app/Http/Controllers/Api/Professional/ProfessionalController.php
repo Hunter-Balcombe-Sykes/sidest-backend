@@ -23,7 +23,7 @@ class ProfessionalController extends ApiController
     /** @return array<int, string> */
     private function professionalOnlySectionTypes(): array
     {
-        return config('sidest.professional_only_section_types', []);
+        return config('partna.professional_only_section_types', []);
     }
 
     use ResolveCurrentProfessional;

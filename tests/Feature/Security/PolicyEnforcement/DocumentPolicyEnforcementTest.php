@@ -14,7 +14,7 @@ beforeEach(function () {
 
 it('allows the owner to update their own document', function () {
     // Fake storage so buildDocumentPayload() url() call doesn't hit real R2.
-    Storage::fake(config('sidest.media_disk'));
+    Storage::fake(config('partna.media_disk'));
 
     $owner = createTenant('doc-update-owner');
     $document = createDocumentFor($owner);

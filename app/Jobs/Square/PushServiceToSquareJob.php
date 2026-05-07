@@ -29,7 +29,7 @@ class PushServiceToSquareJob implements ShouldQueue
 
     public function handle(SquareServiceSyncService $syncService): void
     {
-        if (! (bool) config('sidest.features.square_sync', false)) {
+        if (! (bool) config('partna.features.square_sync', false)) {
             return;
         }
 

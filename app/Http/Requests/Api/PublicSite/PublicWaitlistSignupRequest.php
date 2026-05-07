@@ -35,9 +35,9 @@ class PublicWaitlistSignupRequest extends BaseFormRequest
             'email' => ['required', 'email:rfc', 'max:255'],
             'name' => ['nullable', 'string', 'max:200'],
             'phone' => ['nullable', ...$this->phoneRule(), 'regex:/^\+?[0-9]{7,20}$/'],
-            'type' => ['nullable', 'string', Rule::in(array_keys(config('sidest.waitlist.types', [])))],
+            'type' => ['nullable', 'string', Rule::in(array_keys(config('partna.waitlist.types', [])))],
             'type_other_text' => ['nullable', 'string', 'max:200', 'required_if:type,other', 'prohibited_unless:type,other'],
-            'industry' => ['nullable', 'string', Rule::in(array_keys(config('sidest.waitlist.industries', [])))],
+            'industry' => ['nullable', 'string', Rule::in(array_keys(config('partna.waitlist.industries', [])))],
             'industry_other_text' => ['nullable', 'string', 'max:200', 'required_if:industry,other', 'prohibited_unless:industry,other'],
             'pilot_program_opt_in' => ['nullable', 'boolean'],
             // Conditional fields still enforced when applicant_type is supplied; absent type means none of these are allowed.

@@ -20,7 +20,7 @@ const POLICY_EXEMPT = [
     \App\Models\Billing\Plan::class,
     \App\Models\Billing\WebhookEvent::class,
     \App\Models\Core\MediaVariant::class,           // owned via parent SiteMedia
-    \App\Models\Core\Staff\SidestStaff::class,      // separate auth surface
+    \App\Models\Core\Staff\PartnaStaff::class,      // separate auth surface
     \App\Models\Core\Waitlist\WaitlistSignup::class, // public submission, no actor
 
     // Shared catalog — one Theme can be applied to many sites; read by public

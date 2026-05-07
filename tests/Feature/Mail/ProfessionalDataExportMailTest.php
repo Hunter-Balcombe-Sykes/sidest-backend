@@ -35,6 +35,6 @@ it('uses different subject lines for each variant', function () {
     $self = new ProfessionalDataExportMail('https://x', 'jane', 'professional', []);
     $staff = new ProfessionalDataExportMail('https://x', 'jane', 'staff', []);
 
-    expect($self->build()->subject)->toContain('Your Side St data export');
+    expect($self->build()->subject)->toContain('Your Partna data export');
     expect($staff->build()->subject)->toContain('jane');
 });

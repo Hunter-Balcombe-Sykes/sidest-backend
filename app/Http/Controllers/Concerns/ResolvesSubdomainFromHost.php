@@ -46,7 +46,7 @@ trait ResolvesSubdomainFromHost
 
         // Extract from host
         $host = $request->getHost();
-        $publicDomain = config('sidest.public_domain');
+        $publicDomain = config('partna.public_domain');
 
         if (! $publicDomain || ! str_ends_with($host, $publicDomain)) {
             return null;

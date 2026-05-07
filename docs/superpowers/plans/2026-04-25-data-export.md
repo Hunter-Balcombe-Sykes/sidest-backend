@@ -363,7 +363,7 @@ namespace App\Models\Core\Gdpr;
 
 use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -448,7 +448,7 @@ class DataExportAudit extends BaseModel
 
     public function triggeringStaff(): BelongsTo
     {
-        return $this->belongsTo(SidestStaff::class, 'triggered_by_staff_id');
+        return $this->belongsTo(PartnaStaff::class, 'triggered_by_staff_id');
     }
 
     public function markProcessing(): void
@@ -854,7 +854,7 @@ class DataExportPayloadBuilder
 {
     private const SCHEMA_VERSION = 1;
 
-    private const PII_DISCLOSURE = 'This export contains personally identifiable information (PII) you collected from your customers via Side St (booking history, enquiries, email subscriptions). Handle in accordance with applicable privacy law.';
+    private const PII_DISCLOSURE = 'This export contains personally identifiable information (PII) you collected from your customers via Partna (booking history, enquiries, email subscriptions). Handle in accordance with applicable privacy law.';
 
     /**
      * Build the full payload for a single professional.
@@ -1442,7 +1442,7 @@ it('uses different subject lines for each variant', function () {
     $self = new ProfessionalDataExportMail('https://x', 'jane', 'professional', []);
     $staff = new ProfessionalDataExportMail('https://x', 'jane', 'staff', []);
 
-    expect($self->build()->subject)->toContain('Your Side St data export');
+    expect($self->build()->subject)->toContain('Your Partna data export');
     expect($staff->build()->subject)->toContain('jane');
 });
 ```
@@ -1482,8 +1482,8 @@ class ProfessionalDataExportMail extends Mailable
     public function build(): static
     {
         $subject = $this->sendTo === 'staff'
-            ? "Side St data export — {$this->professionalHandle}"
-            : 'Your Side St data export is ready';
+            ? "Partna data export — {$this->professionalHandle}"
+            : 'Your Partna data export is ready';
 
         return $this
             ->subject($subject)
@@ -1507,7 +1507,7 @@ Create `resources/views/emails/gdpr/professional-data-export.blade.php`:
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Your Side St data export</title>
+    <title>Your Partna data export</title>
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #111; max-width: 640px; margin: 0 auto; padding: 24px;">
     @if ($isStaff)
@@ -1516,7 +1516,7 @@ Create `resources/views/emails/gdpr/professional-data-export.blade.php`:
         </div>
     @endif
 
-    <h2 style="margin-top: 0;">Your Side St data export is ready</h2>
+    <h2 style="margin-top: 0;">Your Partna data export is ready</h2>
 
     <p>The data export for <strong>{{ $professionalHandle }}</strong> has been prepared.</p>
 
@@ -1527,12 +1527,12 @@ Create `resources/views/emails/gdpr/professional-data-export.blade.php`:
     <p><strong>What's inside:</strong> a <code>data.json</code> file with the full machine-readable export, plus per-table CSVs (<code>customers.csv</code>, <code>bookings.csv</code>, <code>enquiries.csv</code>) for the tables you'd typically open in Excel or Numbers.</p>
 
     @unless ($isStaff)
-        <p>If you collected customer information through Side St, this export includes it. You're responsible for handling that information in accordance with applicable privacy law.</p>
+        <p>If you collected customer information through Partna, this export includes it. You're responsible for handling that information in accordance with applicable privacy law.</p>
     @endunless
 
     <p>If you didn't request this export, reply to this email — we'll investigate.</p>
 
-    <p>— Side St</p>
+    <p>— Partna</p>
 
     <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0 16px;">
 
@@ -1874,7 +1874,7 @@ namespace Tests\Feature\Professional\DataExport;
 use App\Jobs\Gdpr\ExportProfessionalDataJob;
 use App\Models\Core\Gdpr\DataExportAudit;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\DataExportService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -2045,7 +2045,7 @@ use App\Exceptions\Gdpr\NoRecipientEmailException;
 use App\Jobs\Gdpr\ExportProfessionalDataJob;
 use App\Models\Core\Gdpr\DataExportAudit;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use Illuminate\Support\Facades\DB;
 
 // V2: Single dispatch entry point for professional data exports. Inserts the
@@ -2119,7 +2119,7 @@ class DataExportService
     private function resolveRecipient(Professional $professional, ?string $staffId, string $sendTo): ?string
     {
         if ($sendTo === 'staff' && $staffId) {
-            $staff = SidestStaff::find($staffId);
+            $staff = PartnaStaff::find($staffId);
 
             return $staff?->primary_email;
         }
@@ -2437,7 +2437,7 @@ namespace Tests\Feature\Staff\DataExport;
 use App\Jobs\Gdpr\ExportProfessionalDataJob;
 use App\Models\Core\Gdpr\DataExportAudit;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -2448,7 +2448,7 @@ beforeEach(function () {
     Queue::fake();
 });
 
-function seedStaff(string $role): SidestStaff
+function seedStaff(string $role): PartnaStaff
 {
     $id = (string) Str::uuid();
     DB::connection('pgsql')->table('core.sidest_staff')->insert([
@@ -2459,7 +2459,7 @@ function seedStaff(string $role): SidestStaff
         'updated_at' => '2026-01-01T00:00:00Z',
     ]);
 
-    return SidestStaff::find($id);
+    return PartnaStaff::find($id);
 }
 
 function seedProForStaff(string $email = 'jane@example.com'): Professional
@@ -2565,13 +2565,13 @@ use App\Exceptions\Gdpr\NoRecipientEmailException;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Staff\RequestStaffDataExportRequest;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\DataExportService;
 use Illuminate\Http\JsonResponse;
 
 // V2: Staff-triggered data export. Same DataExportService as self-service —
 // only difference is the recipient resolution path. send_to=staff requires
-// admin role (data exfiltration to a Side St inbox). Default send_to=professional
+// admin role (data exfiltration to a Partna inbox). Default send_to=professional
 // (the safer mode) is allowed for any staff role.
 class StaffDataExportController extends ApiController
 {
@@ -2583,7 +2583,7 @@ class StaffDataExportController extends ApiController
         RequestStaffDataExportRequest $request,
         Professional $professional,
     ): JsonResponse {
-        /** @var SidestStaff $staff */
+        /** @var PartnaStaff $staff */
         $staff = $request->attributes->get('staff');
 
         $sendTo = (string) $request->validated('send_to');

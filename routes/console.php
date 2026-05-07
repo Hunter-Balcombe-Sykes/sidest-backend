@@ -122,7 +122,7 @@ Schedule::job(new \App\Jobs\Streaming\CheckStreamingLiveStatusJob)
 // SIDEST_RECONCILER_SCHEDULE='0 * * * *' for the first 60 days post-launch,
 // then revert to the default daily-at-3am value.
 Schedule::command('sidest:reconcile-shopify-orders')
-    ->cron(config('sidest.reconciler.schedule', '0 3 * * *'))
+    ->cron(config('partna.reconciler.schedule', '0 3 * * *'))
     ->withoutOverlapping(60 * 60) // 1h overlap guard
     ->description('Backstop reconcile of Shopify orders against commerce.orders (Phase 3)')
     ->onFailure(function (): void {

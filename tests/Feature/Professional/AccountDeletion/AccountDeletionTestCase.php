@@ -18,7 +18,7 @@ class AccountDeletionTestCase
             'supabase.url' => 'https://test.supabase.co',
             'supabase.service_role_key' => 'test-service-role-key',
             'app.frontend_url' => 'https://app.sidest.test',
-            'sidest.soft_delete_retention_days' => 30,
+            'partna.soft_delete_retention_days' => 30,
         ]);
 
         DB::purge('pgsql');

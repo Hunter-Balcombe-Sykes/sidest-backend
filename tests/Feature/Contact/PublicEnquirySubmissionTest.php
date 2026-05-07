@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 beforeEach(function () {
-    config(['sidest.throttle.enabled' => false]);
+    config(['partna.throttle.enabled' => false]);
     Cache::flush();
 
     setupContactSubmissionSchema();
@@ -260,7 +260,7 @@ it('logs outcome=created on success', function () {
 
 it('stops dispatching notification job once per-brand hourly limit is exceeded but still returns 200', function () {
     seedPublishedContactSite();
-    config(['sidest.throttle.enquiry_notification_per_hour' => 2]);
+    config(['partna.throttle.enquiry_notification_per_hour' => 2]);
     Bus::fake();
 
     // Three submissions from different submitters; limit is 2.

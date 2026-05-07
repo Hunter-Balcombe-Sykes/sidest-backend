@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
  *
  * Before this fix the controller keyed the retention map by the normalized
  * frontend type ('Info' / 'Critical' / ...) which never matched the semantic
- * keys in config('sidest.notification_retention_days') — so the lookup silently
+ * keys in config('partna.notification_retention_days') — so the lookup silently
  * fell through to the 'default' value every single time. The fix removes the
  * dead per-key branch and uses the 'default' value directly; this test asserts
  * that changing the config default actually propagates to the notification row.
@@ -74,7 +74,7 @@ it('uses the default retention window when ends_at is not provided', function ()
     // staff broadcast retention: the controller has no category to key by, so
     // only 'default' is consulted. The large 'invite' value here is the
     // canary — if the map lookup ever comes back, this test will catch it.
-    Config::set('sidest.notification_retention_days', [
+    Config::set('partna.notification_retention_days', [
         'default' => 45,
         'invite' => 999,
     ]);
@@ -100,7 +100,7 @@ it('uses the default retention window when ends_at is not provided', function ()
 });
 
 it('honours an explicit ends_at on the request', function () {
-    Config::set('sidest.notification_retention_days.default', 30);
+    Config::set('partna.notification_retention_days.default', 30);
 
     $controller = new StaffNotificationController;
 

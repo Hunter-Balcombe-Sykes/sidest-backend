@@ -36,7 +36,7 @@ class CheckStreamingLiveStatusJob implements ShouldQueue
             Log::warning('streaming: skipping Kick — rate limited from previous cycle');
         }
 
-        $streamingPlatforms = config('sidest.streaming_platforms', []);
+        $streamingPlatforms = config('partna.streaming_platforms', []);
 
         /** @var array<string, list<string>> $handlesByPlatform */
         $handlesByPlatform = array_fill_keys($streamingPlatforms, []);

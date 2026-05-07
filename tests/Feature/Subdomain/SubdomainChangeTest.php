@@ -81,7 +81,7 @@ it('stores old subdomain as alias after a valid change', function () {
 });
 
 it('redirects old subdomain to new site host', function () {
-    $domain = config('sidest.public_domain');
+    $domain = config('partna.public_domain');
     $oldHost = 'old.'.$domain;
     $newHost = 'new.'.$domain;
 

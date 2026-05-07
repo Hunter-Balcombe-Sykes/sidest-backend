@@ -42,7 +42,7 @@ class LiveStatusInjector
      */
     public function injectIntoBlocks(array $blocks): array
     {
-        $streamingPlatforms = config('sidest.streaming_platforms', []);
+        $streamingPlatforms = config('partna.streaming_platforms', []);
 
         return array_map(function ($block) use ($streamingPlatforms) {
             if (! is_array($block)) {

@@ -41,8 +41,8 @@ class PublicEnquiryController extends ApiController
         if (is_int($startedMs)) {
             $nowMs = (int) floor(microtime(true) * 1000);
             $delta = $nowMs - $startedMs;
-            $minMs = (int) config('sidest.form_timing.min_ms', 2500);
-            $maxMs = (int) config('sidest.form_timing.max_ms', 12 * 60 * 60 * 1000);
+            $minMs = (int) config('partna.form_timing.min_ms', 2500);
+            $maxMs = (int) config('partna.form_timing.max_ms', 12 * 60 * 60 * 1000);
 
             if ($delta < $minMs || $delta > $maxMs) {
                 $this->logLead($request, $subdomain, null, null, 'too_fast', $startedMs);
@@ -78,7 +78,7 @@ class PublicEnquiryController extends ApiController
         }
 
         // 4) Validate subject against merged options (platform defaults + affiliate additions).
-        $defaults = (array) config('sidest.contact_subject_defaults', []);
+        $defaults = (array) config('partna.contact_subject_defaults', []);
         $custom = data_get($block->settings, 'subject_options');
         $custom = is_array($custom) ? $custom : [];
         $mergedOptions = array_values(array_unique(array_merge($defaults, $custom)));
@@ -110,7 +110,7 @@ class PublicEnquiryController extends ApiController
         $notificationEmail = data_get($block->settings, 'notification_email');
         if (is_string($notificationEmail) && trim($notificationEmail) !== '') {
             $notifyKey = 'enquiry_notify:'.$site->professional_id;
-            $notifyLimit = config('sidest.throttle.enquiry_notification_per_hour', 10);
+            $notifyLimit = config('partna.throttle.enquiry_notification_per_hour', 10);
 
             if (! RateLimiter::tooManyAttempts($notifyKey, $notifyLimit)) {
                 RateLimiter::hit($notifyKey, 3600);

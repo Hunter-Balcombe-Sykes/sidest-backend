@@ -39,7 +39,7 @@ class StaffNotificationController extends ApiController
         // the caller hasn't explicitly set ends_at. A null default is intentional —
         // it means "keep until manually ended/dismissed", so leave ends_at unset.
         if (empty($data['ends_at'])) {
-            $days = config('sidest.notification_retention_days.default', 30);
+            $days = config('partna.notification_retention_days.default', 30);
             if ($days !== null) {
                 $data['ends_at'] = now()->addDays((int) $days);
             }

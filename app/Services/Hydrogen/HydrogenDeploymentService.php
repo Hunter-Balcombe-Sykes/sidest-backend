@@ -22,7 +22,7 @@ class HydrogenDeploymentService
      */
     public function dispatchDeployment(string $professionalId): void
     {
-        $token = config('sidest.hydrogen.github_token');
+        $token = config('partna.hydrogen.github_token');
 
         if (empty($token)) {
             Log::info('HydrogenDeployment: skipping dispatch — SIDEST_HYDROGEN_GITHUB_TOKEN not set.', [
@@ -32,8 +32,8 @@ class HydrogenDeploymentService
             return;
         }
 
-        $repo = config('sidest.hydrogen.github_repo', 'hunterbalcombesykes/sidest-storefront');
-        $ref = config('sidest.hydrogen.github_ref', 'main');
+        $repo = config('partna.hydrogen.github_repo', 'hunterbalcombesykes/sidest-storefront');
+        $ref = config('partna.hydrogen.github_ref', 'main');
         $url = "https://api.github.com/repos/{$repo}/actions/workflows/oxygen-deployment.yml/dispatches";
 
         try {

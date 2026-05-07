@@ -4,7 +4,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffDataExportCon
 use App\Http\Requests\Staff\RequestStaffDataExportRequest;
 use App\Models\Core\Gdpr\DataExportAudit;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -15,7 +15,7 @@ beforeEach(function () {
     Queue::fake();
 });
 
-function seedStaff(string $role): SidestStaff
+function seedStaff(string $role): PartnaStaff
 {
     $id = (string) Str::uuid();
     DB::connection('pgsql')->table('core.sidest_staff')->insert([
@@ -26,7 +26,7 @@ function seedStaff(string $role): SidestStaff
         'updated_at' => '2026-01-01T00:00:00Z',
     ]);
 
-    return SidestStaff::find($id);
+    return PartnaStaff::find($id);
 }
 
 function seedProForStaff(string $email = 'jane@example.com'): Professional
@@ -46,10 +46,10 @@ function seedProForStaff(string $email = 'jane@example.com'): Professional
     return Professional::find($id);
 }
 
-function makeStaffExportRequest(SidestStaff $staff, string $sendTo = 'professional'): RequestStaffDataExportRequest
+function makeStaffExportRequest(PartnaStaff $staff, string $sendTo = 'professional'): RequestStaffDataExportRequest
 {
     $request = RequestStaffDataExportRequest::create('/?send_to='.$sendTo, 'POST');
-    $request->attributes->set('sidest_staff', $staff);
+    $request->attributes->set('partna_staff', $staff);
 
     return $request;
 }

@@ -11,7 +11,7 @@ uses(TestCase::class)->in(__FILE__);
 beforeEach(fn () => Redis::flushdb());
 
 it('injects is_live=true into a streaming block whose handle is live in Redis', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
     Redis::set('streaming:live:twitch:shroud', '1', 'EX', 180);
 
     $blocks = [[
@@ -29,7 +29,7 @@ it('injects is_live=true into a streaming block whose handle is live in Redis', 
 });
 
 it('injects is_live=false when Redis key is missing', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
     // No Redis key set
 
     $blocks = [[
@@ -47,7 +47,7 @@ it('injects is_live=false when Redis key is missing', function () {
 });
 
 it('does not add is_live to blocks where live_check_enabled is false', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
     Redis::set('streaming:live:twitch:shroud', '1', 'EX', 180);
 
     $blocks = [[
@@ -65,7 +65,7 @@ it('does not add is_live to blocks where live_check_enabled is false', function 
 });
 
 it('does not add is_live to non-streaming platform blocks', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
 
     $blocks = [[
         'settings' => [
@@ -82,7 +82,7 @@ it('does not add is_live to non-streaming platform blocks', function () {
 });
 
 it('passes through non-link blocks unchanged', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
 
     $blocks = [['block_group' => 'sections', 'type' => 'gallery']];
 
@@ -93,7 +93,7 @@ it('passes through non-link blocks unchanged', function () {
 });
 
 it('injects is_live into both links and blocks in the full payload', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
     Redis::set('streaming:live:twitch:shroud', '1', 'EX', 180);
 
     $block = [

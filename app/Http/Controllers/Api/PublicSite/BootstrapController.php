@@ -54,7 +54,7 @@ class BootstrapController extends ApiController
         $data = $request->validated();
 
         try {
-            $allowedProfessionalTypes = array_keys(config('sidest.professional_types', []));
+            $allowedProfessionalTypes = array_keys(config('partna.professional_types', []));
             $resolveProfessionalType = static function (mixed $candidate) use ($allowedProfessionalTypes): string {
                 if (is_string($candidate)) {
                     $normalized = mb_strtolower(trim($candidate));
@@ -123,7 +123,7 @@ class BootstrapController extends ApiController
                 }
                 $professional->save();
 
-                // Add to Side St updates list once (global list). Do NOT overwrite if they already unsubscribed.
+                // Add to Partna updates list once (global list). Do NOT overwrite if they already unsubscribed.
                 $this->ensureSidestUpdatesSubscription($professional->primary_email);
 
                 $site = Site::query()->where('professional_id', $professional->id)->first();
@@ -360,7 +360,7 @@ class BootstrapController extends ApiController
 
     private function isWaitlistModeEnabled(): bool
     {
-        return (bool) config('sidest.waitlist.enabled', false);
+        return (bool) config('partna.waitlist.enabled', false);
     }
 
     private function hasExistingProfessional(string $uid): bool

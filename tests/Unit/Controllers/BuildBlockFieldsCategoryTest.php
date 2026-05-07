@@ -1,7 +1,7 @@
 <?php
 
 // Bootstrap the Laravel app so config() is available — SocialLinkNormalizer reads
-// the social_platforms registry from config('sidest.*') during normalize().
+// the social_platforms registry from config('partna.*') during normalize().
 uses(Tests\TestCase::class)->in(__FILE__);
 
 use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;

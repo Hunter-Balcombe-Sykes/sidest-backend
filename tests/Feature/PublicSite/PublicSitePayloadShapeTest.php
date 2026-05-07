@@ -60,8 +60,8 @@ it('includes featured products and combined blocks in the public payload', funct
                     'sort_order' => 0,
                 ],
             ],
-            'default_commission_rate' => (float) config('sidest.store.default_commission_rate', 15),
-            'max_featured_products' => (int) config('sidest.store.max_featured_products', 10),
+            'default_commission_rate' => (float) config('partna.store.default_commission_rate', 15),
+            'max_featured_products' => (int) config('partna.store.max_featured_products', 10),
         ],
         'legal' => [
             'privacy_policy' => 'Privacy policy',
@@ -87,8 +87,8 @@ it('includes featured products and combined blocks in the public payload', funct
     // Don't cast to float — PHP's json_encode strips trailing zeros from "15.0",
     // so by the time assertJsonPath decodes the response, the numeric becomes
     // an int. Expecting an int matches what the wire actually carries.
-    $response->assertJsonPath('default_commission_rate', (int) config('sidest.store.default_commission_rate', 15));
-    $response->assertJsonPath('max_featured_products', (int) config('sidest.store.max_featured_products', 10));
+    $response->assertJsonPath('default_commission_rate', (int) config('partna.store.default_commission_rate', 15));
+    $response->assertJsonPath('max_featured_products', (int) config('partna.store.max_featured_products', 10));
     $response->assertJsonPath('store.selected_products.0.shopify_product_id', 'gid://shopify/Product/111');
 
     $response->assertJsonCount(2, 'blocks');

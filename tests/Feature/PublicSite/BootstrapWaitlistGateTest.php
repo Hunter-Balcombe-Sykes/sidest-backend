@@ -9,7 +9,7 @@ use App\Services\Professional\SiteProvisioningService;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
-    config(['sidest.waitlist.enabled' => true]);
+    config(['partna.waitlist.enabled' => true]);
 
     // TestCase::setUp redirects 'pgsql' to in-memory SQLite. Use the shared
     // helper to attach 'core' and create core.professionals.

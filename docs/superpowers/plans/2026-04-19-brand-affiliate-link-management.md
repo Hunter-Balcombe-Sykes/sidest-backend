@@ -18,7 +18,7 @@
 - **No Laravel migrations.** Composer guard (`guard:no-laravel-migrations`) rejects them. All DDL goes in `supabase/migrations/` as raw SQL.
 - **Base model:** All models extend `App\Models\BaseModel` which forces `pgsql` connection.
 - **Schema prefixes on tables:** Eloquent `$table = 'brand.brand_partner_links'` — the dot-qualified name is how cross-schema tables are declared.
-- **Staff middleware exposes staff:** `EnsureSidestStaff` sets `$request->attributes->set('sidest_staff', $staff)`. Read with `$request->attributes->get('sidest_staff')`. `$staff->id` is a UUID string.
+- **Staff middleware exposes staff:** `EnsurePartnaStaff` sets `$request->attributes->set('sidest_staff', $staff)`. Read with `$request->attributes->get('sidest_staff')`. `$staff->id` is a UUID string.
 - **Staff auth groups in `routes/api/staff.php`:** two groups — one under `staff` middleware (read/list), one under `staff.admin` (mutations). All new endpoints in this plan go under `staff.admin`.
 - **Route binding:** `->whereUuid('professional')` on Route::*; `Professional` resolves via implicit model binding. For two params, use `->whereUuid(['brand', 'affiliate'])`.
 - **ApiController helpers:**
@@ -2180,7 +2180,7 @@ Create `tests/Feature/Staff/StaffBrandAffiliateLinkCreateTest.php`:
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandAffiliateLinkController;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -2188,7 +2188,7 @@ use Illuminate\Support\Str;
 it('returns 201 with the new link on success', function () {
     $brand = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $staff = new SidestStaff(['id' => (string) Str::uuid()]);
+    $staff = new PartnaStaff(['id' => (string) Str::uuid()]);
 
     $link = new BrandPartnerLink([
         'id' => (string) Str::uuid(),
@@ -2217,7 +2217,7 @@ it('returns 201 with the new link on success', function () {
 it('returns 422 when reason is too short', function () {
     $brand = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $staff = new SidestStaff(['id' => (string) Str::uuid()]);
+    $staff = new PartnaStaff(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldNotReceive('createForStaff');
@@ -2233,7 +2233,7 @@ it('returns 422 when reason is too short', function () {
 it('returns 409 when link already exists', function () {
     $brand = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'brand']);
     $affiliate = new Professional(['id' => (string) Str::uuid(), 'professional_type' => 'professional']);
-    $staff = new SidestStaff(['id' => (string) Str::uuid()]);
+    $staff = new PartnaStaff(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('createForStaff')
@@ -2346,7 +2346,7 @@ Create `tests/Feature/Staff/StaffBrandAffiliateLinkRemoveTest.php`:
 
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandAffiliateLinkController;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\DTO\DisconnectResult;
 use Illuminate\Http\Request;
@@ -2355,7 +2355,7 @@ use Illuminate\Support\Str;
 it('returns 200 with void counts on sync path', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = new SidestStaff(['id' => (string) Str::uuid()]);
+    $staff = new PartnaStaff(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('disconnect')->once()->andReturn(new DisconnectResult(
@@ -2386,7 +2386,7 @@ it('returns 200 with void counts on sync path', function () {
 it('returns 202 with voided_async:true on async overflow', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = new SidestStaff(['id' => (string) Str::uuid()]);
+    $staff = new PartnaStaff(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('disconnect')->once()->andReturn(new DisconnectResult(
@@ -2417,7 +2417,7 @@ it('returns 202 with voided_async:true on async overflow', function () {
 it('returns 404 when link does not exist', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = new SidestStaff(['id' => (string) Str::uuid()]);
+    $staff = new PartnaStaff(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldReceive('disconnect')->once()->andReturn(new DisconnectResult(
@@ -2441,7 +2441,7 @@ it('returns 404 when link does not exist', function () {
 it('returns 422 when on_pending_commissions is void but reason is under 20 chars', function () {
     $brand = new Professional(['id' => (string) Str::uuid()]);
     $affiliate = new Professional(['id' => (string) Str::uuid()]);
-    $staff = new SidestStaff(['id' => (string) Str::uuid()]);
+    $staff = new PartnaStaff(['id' => (string) Str::uuid()]);
 
     $svc = Mockery::mock(BrandPartnerLinkLifecycleService::class);
     $svc->shouldNotReceive('disconnect');

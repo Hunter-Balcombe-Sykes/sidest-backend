@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Redis;
 beforeEach(fn () => Redis::flushdb());
 
 it('returns is_live=true for a live streaming link block on the public profile', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
     Redis::set('streaming:live:twitch:shroud', '1', 'EX', 180);
 
     $payload = [
@@ -39,7 +39,7 @@ it('returns is_live=true for a live streaming link block on the public profile',
 });
 
 it('returns is_live=false when the handle is not in Redis', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
     // No Redis key for this handle
 
     $payload = [

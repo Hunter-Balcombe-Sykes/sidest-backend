@@ -11,7 +11,7 @@
 
 ### What's broken
 
-Right now, every time someone uploads an image to Side St (gallery photo, product photo, brand logo — anything), the server tries to make two copies of it: one medium-quality "optimized" copy and one high-quality "maximized" copy. These two copies are what actually get shown on storefronts and the public site. The original is also saved separately as a backup.
+Right now, every time someone uploads an image to Partna (gallery photo, product photo, brand logo — anything), the server tries to make two copies of it: one medium-quality "optimized" copy and one high-quality "maximized" copy. These two copies are what actually get shown on storefronts and the public site. The original is also saved separately as a backup.
 
 The problem is that both copies are currently made **at the same resolution as the original**. So if you upload a 24-megapixel photo from a modern phone, the server has to hold the original (~96 MB in raw form) *and* a second full-resolution copy (~96 MB) in memory at the same time. That's ~200 MB of RAM for one image. Background worker processes usually only have 256 MB to play with, so anything larger than a typical phone photo can crash the worker.
 
@@ -40,7 +40,7 @@ When a worker crashes, the image gets stuck in a "failed" state, the user sees a
 
 - **The originals are untouched.** `storeOriginal()` saves the raw uploaded file to R2 before any variant processing happens. We're only bounding the *derived* copies, not the source archive.
 - **Re-processing is always an option.** If we ever want to change variant strategy, raise the caps, or add a new variant format, we re-run the pipeline against the stored originals. No data loss.
-- **No customer impact.** Side St is pre-beta with no live customers. The fix can be shipped and observed before any real user hits it.
+- **No customer impact.** Partna is pre-beta with no live customers. The fix can be shipped and observed before any real user hits it.
 
 ---
 

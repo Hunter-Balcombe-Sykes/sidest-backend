@@ -6,7 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Staff\StaffInitiateDeletionRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use App\Services\Professional\AccountDeletionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,8 +29,8 @@ class StaffAccountDeletionController extends ApiController
         StaffInitiateDeletionRequest $request,
         Professional $professional,
     ): JsonResponse {
-        /** @var SidestStaff $staff */
-        $staff = $request->attributes->get('sidest_staff');
+        /** @var PartnaStaff $staff */
+        $staff = $request->attributes->get('partna_staff');
 
         $result = $this->deletionService->adminInitiate(
             professional: $professional,
@@ -58,8 +58,8 @@ class StaffAccountDeletionController extends ApiController
      */
     public function cancel(Request $request, Professional $professional): JsonResponse
     {
-        /** @var SidestStaff $staff */
-        $staff = $request->attributes->get('sidest_staff');
+        /** @var PartnaStaff $staff */
+        $staff = $request->attributes->get('partna_staff');
 
         $result = $this->deletionService->adminCancel(
             professional: $professional,
@@ -88,7 +88,7 @@ class StaffAccountDeletionController extends ApiController
     {
         $deletesAt = null;
         if ($professional->deletion_confirmed_at) {
-            $retentionDays = (int) config('sidest.soft_delete_retention_days', 30);
+            $retentionDays = (int) config('partna.soft_delete_retention_days', 30);
             $deletesAt = Carbon::parse((string) $professional->deletion_confirmed_at)
                 ->addDays($retentionDays)
                 ->toIso8601String();

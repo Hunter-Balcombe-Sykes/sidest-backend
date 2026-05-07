@@ -3,7 +3,7 @@
 /**
  * Platform-link cap enforcement on the StoreLinkBlockRequest pipeline.
  *
- * The cap (config('sidest.platform_links_max'), default 7) is the API-side
+ * The cap (config('partna.platform_links_max'), default 7) is the API-side
  * defence-in-depth on top of the dashboard's disabled-Add-button. It must
  * fire on BOTH the professional self-management endpoint and the staff
  * management endpoint:
@@ -66,8 +66,8 @@ function runStoreLinkValidator(StoreLinkBlockRequest $request): \Illuminate\Supp
 }
 
 it('rejects an 8th capped-category link on the professional self path when the cap is 7', function () {
-    config(['sidest.platform_links_max' => 7]);
-    config(['sidest.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
+    config(['partna.platform_links_max' => 7]);
+    config(['partna.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
 
     setupBlocksTable();
     $pro = createTenant('cap-self-pro');
@@ -89,8 +89,8 @@ it('rejects an 8th capped-category link on the professional self path when the c
 });
 
 it('allows the 7th capped-category link on the professional self path (boundary)', function () {
-    config(['sidest.platform_links_max' => 7]);
-    config(['sidest.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
+    config(['partna.platform_links_max' => 7]);
+    config(['partna.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
 
     setupBlocksTable();
     $pro = createTenant('cap-self-boundary-pro');
@@ -109,8 +109,8 @@ it('allows the 7th capped-category link on the professional self path (boundary)
 });
 
 it('rejects an 8th capped-category link on the staff path against the route-bound target professional', function () {
-    config(['sidest.platform_links_max' => 7]);
-    config(['sidest.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
+    config(['partna.platform_links_max' => 7]);
+    config(['partna.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
 
     setupBlocksTable();
     $staffPro = createTenant('cap-staff-actor');
@@ -140,8 +140,8 @@ it('rejects an 8th capped-category link on the staff path against the route-boun
 });
 
 it('does NOT count the staff actor\'s blocks against the target on the staff path', function () {
-    config(['sidest.platform_links_max' => 7]);
-    config(['sidest.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
+    config(['partna.platform_links_max' => 7]);
+    config(['partna.platform_links_categories' => ['social', 'content', 'events', 'streaming']]);
 
     setupBlocksTable();
     $staffPro = createTenant('cap-staff-actor-2');

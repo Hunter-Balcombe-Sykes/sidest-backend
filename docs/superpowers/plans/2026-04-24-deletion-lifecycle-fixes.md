@@ -232,7 +232,7 @@ it('continues purge even when an individual media artifact cleanup throws', func
 - [ ] **Step 3: Run tests to confirm they fail**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Feature/Account/AccountDeletionPurgeMediaTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Feature/Account/AccountDeletionPurgeMediaTest.php --no-coverage
 ```
 
 Expected: 6 failures (method `purgeMediaArtifacts` does not exist; cache mock expectation never satisfied).
@@ -348,7 +348,7 @@ Add these three private methods before the closing `}` of the class:
 - [ ] **Step 5: Run tests to confirm they pass**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Feature/Account/AccountDeletionPurgeMediaTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Feature/Account/AccountDeletionPurgeMediaTest.php --no-coverage
 ```
 
 Expected: 6 passing.
@@ -356,7 +356,7 @@ Expected: 6 passing.
 - [ ] **Step 6: Run full suite to check for regressions**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && composer test
+cd "/Users/joshuahunter/Herd/Partna/backend" && composer test
 ```
 
 Expected: green.
@@ -484,7 +484,7 @@ it('calls FreshaServiceSyncService when service is not deleted', function () {
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Unit/Jobs/ServiceJobTrashedGuardTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Unit/Jobs/ServiceJobTrashedGuardTest.php --no-coverage
 ```
 
 Expected: 2 failures (the "should not receive" assertions fire because the guard doesn't exist yet).
@@ -540,7 +540,7 @@ In `app/Jobs/Fresha/PushServiceToFreshaJob.php`, replace the `handle()` method b
 - [ ] **Step 5: Run tests to confirm they pass**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Unit/Jobs/ServiceJobTrashedGuardTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Unit/Jobs/ServiceJobTrashedGuardTest.php --no-coverage
 ```
 
 Expected: 4 passing.
@@ -548,7 +548,7 @@ Expected: 4 passing.
 - [ ] **Step 6: Run full suite**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && composer test
+cd "/Users/joshuahunter/Herd/Partna/backend" && composer test
 ```
 
 Expected: green.
@@ -744,7 +744,7 @@ it('RebuildBookingHourlyAggregatesJob runs when professional exists', function (
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Unit/Jobs/AnalyticsJobEntityGuardTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Unit/Jobs/AnalyticsJobEntityGuardTest.php --no-coverage
 ```
 
 Expected: the "skips when professional does not exist" tests fail (service is called when it shouldn't be).
@@ -813,7 +813,7 @@ Apply the same pattern to `RebuildCommerceHourlyAggregatesJob` (replacing `$day`
 - [ ] **Step 5: Run tests to confirm they pass**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Unit/Jobs/AnalyticsJobEntityGuardTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Unit/Jobs/AnalyticsJobEntityGuardTest.php --no-coverage
 ```
 
 Expected: all passing.
@@ -821,7 +821,7 @@ Expected: all passing.
 - [ ] **Step 6: Run full suite**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && composer test
+cd "/Users/joshuahunter/Herd/Partna/backend" && composer test
 ```
 
 Expected: green.
@@ -959,7 +959,7 @@ it('processes refund normally when the brand professional exists', function () {
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Unit/Jobs/ShopifyOrderUpdatedWebhookGuardTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Unit/Jobs/ShopifyOrderUpdatedWebhookGuardTest.php --no-coverage
 ```
 
 Expected: first test fails (entry is reversed even though professional is missing).
@@ -991,7 +991,7 @@ Replace the first few lines of `handle()`:
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Unit/Jobs/ShopifyOrderUpdatedWebhookGuardTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Unit/Jobs/ShopifyOrderUpdatedWebhookGuardTest.php --no-coverage
 ```
 
 Expected: 2 passing.
@@ -999,7 +999,7 @@ Expected: 2 passing.
 - [ ] **Step 5: Run full suite**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && composer test
+cd "/Users/joshuahunter/Herd/Partna/backend" && composer test
 ```
 
 Expected: green.
@@ -1075,7 +1075,7 @@ it('publishes deactivation notifications when the brand exists and has affiliate
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Unit/Jobs/FanOutBrandStatusNotificationGuardTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Unit/Jobs/FanOutBrandStatusNotificationGuardTest.php --no-coverage
 ```
 
 Expected: first test fails (`publish` is called even though no brand exists).
@@ -1151,7 +1151,7 @@ Replace the `handle()` method:
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan test tests/Unit/Jobs/FanOutBrandStatusNotificationGuardTest.php --no-coverage
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan test tests/Unit/Jobs/FanOutBrandStatusNotificationGuardTest.php --no-coverage
 ```
 
 Expected: 2 passing.
@@ -1159,7 +1159,7 @@ Expected: 2 passing.
 - [ ] **Step 5: Run full suite**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && composer test
+cd "/Users/joshuahunter/Herd/Partna/backend" && composer test
 ```
 
 Expected: green.
@@ -1196,7 +1196,7 @@ Schedule::command('queue:prune-failed --hours=72')
 - [ ] **Step 2: Verify the entry appears in the schedule list**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && php artisan schedule:list
+cd "/Users/joshuahunter/Herd/Partna/backend" && php artisan schedule:list
 ```
 
 Expected: a row for `queue:prune-failed --hours=72` with frequency `Daily`.
@@ -1204,7 +1204,7 @@ Expected: a row for `queue:prune-failed --hours=72` with frequency `Daily`.
 - [ ] **Step 3: Run full suite to confirm nothing broke**
 
 ```bash
-cd "/Users/joshuahunter/Herd/Side Street/backend" && composer test
+cd "/Users/joshuahunter/Herd/Partna/backend" && composer test
 ```
 
 Expected: green.

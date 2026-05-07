@@ -24,7 +24,7 @@ beforeEach(function () {
     })->bindTo($this->syncService, SquareServiceSyncService::class);
 });
 
-// Zombie service: manually deleted in Side St, still active in Square → must stay deleted.
+// Zombie service: manually deleted in Partna, still active in Square → must stay deleted.
 it('does not restore a manually-deleted service during full sync', function () {
     $svcId = (string) Str::uuid();
     DB::connection('pgsql')->table('site.services')->insert([

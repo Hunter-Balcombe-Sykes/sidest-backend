@@ -1,6 +1,6 @@
-# Side St Backend API
+# Partna Backend API
 
-Laravel API for Side St.
+Laravel API for Partna.
 
 - Public mini-site API (domain-scoped, unauthenticated)
 - Barber dashboard API (authenticated via Supabase JWT)
@@ -20,13 +20,13 @@ Public mini-site endpoints must be called on the **mini-site host**, not the API
 - Public API base: `https://{subdomain}.{SIDEST_PUBLIC_DOMAIN}/api`
 
 ### Authentication
-Side St uses **Supabase Auth** access tokens (JWT).
+Partna uses **Supabase Auth** access tokens (JWT).
 
 Send on authenticated endpoints:
 - `Authorization: Bearer <SUPABASE_ACCESS_TOKEN>`
 - `Accept: application/json`
 
-Side St does not provide a login endpoint. The frontend signs in via Supabase and forwards the token.
+Partna does not provide a login endpoint. The frontend signs in via Supabase and forwards the token.
 
 ### Media uploads
 Uploads are direct from the frontend to **Supabase Storage**.  

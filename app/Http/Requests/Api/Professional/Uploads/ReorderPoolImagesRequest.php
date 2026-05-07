@@ -14,7 +14,7 @@ class ReorderPoolImagesRequest extends BaseFormRequest
             'pool' => [
                 'required',
                 'string',
-                Rule::in(config('sidest.upload_pools')),
+                Rule::in(config('partna.upload_pools')),
             ],
             'media_type' => [
                 'sometimes',

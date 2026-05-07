@@ -20,7 +20,7 @@ class AccountTypeDefaultsService
      */
     public function resolveDefaults(string $professionalType): array
     {
-        $all = config('sidest.account_type_defaults', []);
+        $all = config('partna.account_type_defaults', []);
         $typeConfig = $all[$professionalType] ?? $all['influencer'] ?? [];
 
         if (isset($typeConfig['inherits'])) {
@@ -93,7 +93,7 @@ class AccountTypeDefaultsService
         Site $site,
         string $brandProfessionalId
     ): void {
-        $config = config('sidest.account_type_defaults.affiliate', []);
+        $config = config('partna.account_type_defaults.affiliate', []);
 
         // 1. Auto-enable shop section
         $autoSections = $config['auto_enable_sections'] ?? [];

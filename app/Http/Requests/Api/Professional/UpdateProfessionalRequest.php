@@ -41,7 +41,7 @@ class UpdateProfessionalRequest extends BaseFormRequest
                 'sometimes',
                 'required',
                 'string',
-                Rule::in(array_keys(config('sidest.professional_types', []))),
+                Rule::in(array_keys(config('partna.professional_types', []))),
             ],
 
             // Location

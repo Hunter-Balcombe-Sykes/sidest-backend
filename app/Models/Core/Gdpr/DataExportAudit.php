@@ -4,7 +4,7 @@ namespace App\Models\Core\Gdpr;
 
 use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Staff\SidestStaff;
+use App\Models\Core\Staff\PartnaStaff;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -87,7 +87,7 @@ class DataExportAudit extends BaseModel
 
     public function triggeringStaff(): BelongsTo
     {
-        return $this->belongsTo(SidestStaff::class, 'triggered_by_staff_id');
+        return $this->belongsTo(PartnaStaff::class, 'triggered_by_staff_id');
     }
 
     public function markProcessing(): void

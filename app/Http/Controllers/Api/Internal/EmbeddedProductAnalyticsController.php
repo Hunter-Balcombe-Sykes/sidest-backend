@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 // Backs the affiliate-product-block Shopify admin UI extension.
 // Returns 30-day affiliate sales for a single product: totals, variant rollup,
-// recent sales, and the Side St active state.
+// recent sales, and the Partna active state.
 //
 // Cached per (brand, product) for 5 minutes — the variant rollup query is
 // non-trivial and the data only refreshes on Shopify orders/paid webhooks.

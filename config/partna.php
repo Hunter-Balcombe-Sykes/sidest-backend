@@ -8,7 +8,7 @@ return [
     'reserved_subdomains' => [
         'www', 'api', 'admin', 'app', 'staff', 'dashboard',
         'support', 'help', 'billing', 'static', 'cdn', 'assets',
-        'auth', 'docs', 'status', 'comet',
+        'auth', 'docs', 'status', 'comet', 'sidest', 'partna',
     ],
     'link_block_icon_keys' => [
         // Functional / custom-link icons
@@ -77,7 +77,7 @@ return [
         // a real column (Option B) only when query-ability matters. See docs/social-links.md.
         'platform',
         'handle',
-        // Link category — one of config('sidest.link_categories'). Required on every
+        // Link category — one of config('partna.link_categories'). Required on every
         // write; resolved from the platform's default_category when not supplied.
         // Same JSONB-first rationale as `platform` above.
         'category',

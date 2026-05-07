@@ -73,7 +73,7 @@ class AppServiceProvider extends ServiceProvider
 
         // Refuse to boot in production with throttling disabled — a misconfigured
         // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.
-        if (app()->isProduction() && ! (bool) config('sidest.throttle.enabled', true)) {
+        if (app()->isProduction() && ! (bool) config('partna.throttle.enabled', true)) {
             throw new \RuntimeException('SIDEST_THROTTLE_ENABLED must not be false in production.');
         }
 
@@ -93,7 +93,7 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function configureRateLimiting(): void
     {
-        $throttleEnabled = (bool) config('sidest.throttle.enabled', true);
+        $throttleEnabled = (bool) config('partna.throttle.enabled', true);
 
         // Health-check and ping endpoints
         RateLimiter::for('health-check', function (Request $request) use ($throttleEnabled) {

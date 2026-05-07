@@ -6,8 +6,8 @@ use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
 use Illuminate\Support\Facades\Validator;
 
 it('accepts live_check_enabled=true in settings for a streaming platform context', function () {
-    config(['sidest.streaming_platforms' => ['twitch', 'kick']]);
-    config(['sidest.link_block_settings_keys' => [
+    config(['partna.streaming_platforms' => ['twitch', 'kick']]);
+    config(['partna.link_block_settings_keys' => [
         'platform', 'handle', 'category', 'highlight', 'note',
         'open_in_new_tab', 'rel_nofollow', 'rel_sponsored', 'rel_ugc',
         'live_check_enabled',
@@ -25,7 +25,7 @@ it('accepts live_check_enabled=true in settings for a streaming platform context
 });
 
 it('rejects live_check_enabled as a non-boolean', function () {
-    config(['sidest.link_block_settings_keys' => [
+    config(['partna.link_block_settings_keys' => [
         'platform', 'handle', 'category', 'highlight', 'note',
         'open_in_new_tab', 'rel_nofollow', 'rel_sponsored', 'rel_ugc',
         'live_check_enabled',
@@ -44,7 +44,7 @@ it('rejects live_check_enabled as a non-boolean', function () {
 });
 
 it('rejects is_live in settings — it is read-only and not in the allowlist', function () {
-    config(['sidest.link_block_settings_keys' => [
+    config(['partna.link_block_settings_keys' => [
         'platform', 'handle', 'category', 'highlight', 'note',
         'open_in_new_tab', 'rel_nofollow', 'rel_sponsored', 'rel_ugc',
         'live_check_enabled',
@@ -76,8 +76,8 @@ it('rejects is_live in settings — it is read-only and not in the allowlist', f
 
 it('rejects live_check_enabled=true when site already has max_live_check_per_site blocks enabled', function () {
     config([
-        'sidest.streaming.max_live_check_per_site' => 2,
-        'sidest.link_block_settings_keys' => [
+        'partna.streaming.max_live_check_per_site' => 2,
+        'partna.link_block_settings_keys' => [
             'platform', 'handle', 'category', 'highlight', 'note',
             'open_in_new_tab', 'rel_nofollow', 'rel_sponsored', 'rel_ugc',
             'live_check_enabled',

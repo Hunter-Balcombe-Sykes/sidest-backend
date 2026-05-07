@@ -17,7 +17,7 @@
     <div class="container">
         <h2>Confirm your account deletion</h2>
         <p>Hi {{ $displayName }},</p>
-        <p>We received a request to delete your Side St account. To confirm, click the button below.</p>
+        <p>We received a request to delete your Partna account. To confirm, click the button below.</p>
         <a href="{{ $confirmationUrl }}" class="btn">Confirm deletion</a>
         <p class="warn">This link expires in 24 hours. If you did not request this, ignore this email and your account will remain active.</p>
     </div>

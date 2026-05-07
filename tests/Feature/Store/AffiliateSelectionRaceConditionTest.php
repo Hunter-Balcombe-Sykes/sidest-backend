@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 // Feature tests already use TestCase (configured in Pest.php for Feature/).
 
 beforeEach(function () {
-    config(['sidest.store.max_featured_products' => 3]);
+    config(['partna.store.max_featured_products' => 3]);
 
     DB::purge('pgsql');
 

@@ -46,8 +46,8 @@ class ProcessVideoVariantsJob implements ShouldQueue
         public readonly string $originalPath,
         public readonly string $basePath,
     ) {
-        $this->onConnection((string) config('sidest.video_queue.connection', 'redis_video'));
-        $this->onQueue((string) config('sidest.video_queue.name', 'videos'));
+        $this->onConnection((string) config('partna.video_queue.connection', 'redis_video'));
+        $this->onQueue((string) config('partna.video_queue.name', 'videos'));
     }
 
     public function handle(VideoVariantService $service): void

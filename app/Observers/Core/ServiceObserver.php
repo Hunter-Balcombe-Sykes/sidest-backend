@@ -176,7 +176,7 @@ class ServiceObserver
 
     private function shouldDispatchSquareSync(?Professional $professional): bool
     {
-        if (! (bool) config('sidest.features.square_sync', false)) {
+        if (! (bool) config('partna.features.square_sync', false)) {
             return false;
         }
 
@@ -194,7 +194,7 @@ class ServiceObserver
 
     private function shouldDispatchFreshaSync(?Professional $professional): bool
     {
-        if (! (bool) config('sidest.features.fresha_sync', false)) {
+        if (! (bool) config('partna.features.fresha_sync', false)) {
             return false;
         }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# audit-scan.sh — DeepSeek scan tier for the Side St dual-worker audit pipeline.
+# audit-scan.sh — DeepSeek scan tier for the Partna dual-worker audit pipeline.
 #
-# Reads source files, fires deepseek-v4-pro with the Side St audit format spec,
+# Reads source files, fires deepseek-v4-pro with the Partna audit format spec,
 # and writes drafts.md. Drafts must then be adjudicated by Claude Sonnet — the
 # scan tier reliably catches real findings but mis-tiers ~30% and occasionally
 # proposes the wrong fix when it lacks adjacent context (validated 2026-05-04).
