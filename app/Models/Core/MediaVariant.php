@@ -88,12 +88,30 @@ class MediaVariant extends BaseModel
 
     /**
      * Public URL for this artifact (CDN-friendly).
+     *
+     * Fast-path string concatenation when the disk has an explicit `url`
+     * configured (the production case for our `media` disk). The slow path
+     * via `Storage::disk()->url()` lazily constructs an S3 client on first
+     * call — ~150–300ms of AWS SDK init that previously happened on every
+     * cache-miss `/api/images` response, multiplied by every variant URL
+     * resolved in the response. The fast path avoids that entirely; the
+     * fallback is preserved so disks without a configured URL (e.g. local
+     * development without MEDIA_DISK_URL set, or any future disk that needs
+     * presigning) keep working.
      */
     public function getUrlAttribute(): string
     {
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
-        $disk = Storage::disk($this->disk);
+        $disk = (string) $this->disk;
+        if ($disk !== '') {
+            $baseUrl = config("filesystems.disks.{$disk}.url");
+            if (is_string($baseUrl) && $baseUrl !== '') {
+                return rtrim($baseUrl, '/').'/'.ltrim((string) $this->path, '/');
+            }
+        }
 
-        return $disk->url($this->path);
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $adapter */
+        $adapter = Storage::disk($this->disk);
+
+        return $adapter->url($this->path);
     }
 }
