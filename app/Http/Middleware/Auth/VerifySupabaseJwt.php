@@ -29,6 +29,27 @@ class VerifySupabaseJwt
      */
     private static array $parsedKeysByJwksHash = [];
 
+    /**
+     * Hash of the most recently loaded JWKS payload. Identifies which entry of
+     * $parsedKeysByJwksHash is the "current" map — used by the fast-path that
+     * skips Redis when a recent parsed map already contains the requested kid.
+     */
+    private static ?string $jwksCurrentHash = null;
+
+    /**
+     * Monotonic millis of the last successful JWKS load (Redis hit OR closure
+     * refresh). The Redis-skip fast path is only taken while this is fresh.
+     */
+    private static ?int $jwksLoadedAtMs = null;
+
+    /**
+     * Process-local TTL on the Redis-skip fast path. Independent of the upstream
+     * Redis cache's TTL: this only governs how long a worker trusts its in-memory
+     * parsed map without re-checking Redis. A new kid (rotation) bypasses the
+     * fast path automatically — the cache.get below picks up the new payload.
+     */
+    private const JWKS_FRESH_TTL_MS = 60_000;
+
     public function __construct(private CacheLockService $cacheLock) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -139,6 +160,28 @@ class VerifySupabaseJwt
             throw new \RuntimeException('JWT header missing kid');
         }
 
+        $nowMs = (int) (microtime(true) * 1000);
+
+        // Redis-skip fast path: if this worker has loaded JWKS within the last
+        // JWKS_FRESH_TTL_MS *and* the current parsed map already contains the
+        // kid this token was signed with, verify directly. This eliminates the
+        // 100–300ms supabase:jwks Redis round-trip (and any SWR-triggered
+        // closure refresh that would otherwise fire HTTP at Supabase) from the
+        // common authenticated-request path. Rotations bypass this branch
+        // automatically — a new kid won't be in the memoised map, so we fall
+        // through to the cache.get below which has its own (5 min) TTL.
+        if (
+            self::$jwksCurrentHash !== null
+            && self::$jwksLoadedAtMs !== null
+            && ($nowMs - self::$jwksLoadedAtMs) < self::JWKS_FRESH_TTL_MS
+            && isset(self::$parsedKeysByJwksHash[self::$jwksCurrentHash][$kid])
+        ) {
+            JWT::$leeway = 60;
+            $decoded = JWT::decode($jwt, self::$parsedKeysByJwksHash[self::$jwksCurrentHash][$kid]);
+
+            return json_decode(json_encode($decoded), true) ?: [];
+        }
+
         $jwksUrl = config('supabase.jwks_url');
         if (! $jwksUrl) {
             throw new \RuntimeException('Missing SUPABASE_JWKS_URL');
@@ -174,6 +217,14 @@ class VerifySupabaseJwt
             }
             self::$parsedKeysByJwksHash[$jwksHash] = JWK::parseKeySet($jwks);
         }
+
+        // Mark this hash as the current JWKS map for the worker's fast path.
+        // Updated on every successful Redis fetch so a rotation transition
+        // pivots the fast path onto the new payload as soon as one request
+        // pays the cache.get cost.
+        self::$jwksCurrentHash = $jwksHash;
+        self::$jwksLoadedAtMs = $nowMs;
+
         $keys = self::$parsedKeysByJwksHash[$jwksHash];
         $key = $keys[$kid] ?? null;
         if (! $key) {
