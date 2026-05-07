@@ -1,0 +1,135 @@
+<?php
+
+namespace App\Jobs\Notifications;
+
+use App\Enums\BrandStatus;
+use App\Services\Notifications\NotificationPublisher;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+
+// Daily sweep that nudges brand professionals stuck early in the onboarding
+// funnel (still in BrandStatus::Onboarding or ShopifyLinked) at day 3, 10,
+// and 30 since signup. One in-app notification per (brand, milestone),
+// deduped by NotificationPublisher's insertOrIgnore on dedupe_key — so the
+// sweep is safely re-runnable and each brand gets at most three nudges total.
+class NudgeStuckOnboardingJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public int $tries = 3;
+
+    public int $timeout = 300;
+
+    /**
+     * Day-since-signup milestones to nudge at. Each entry defines the day
+     * window, the notification severity, and the title/body copy. Order
+     * isn't significant — we run a separate query per milestone.
+     *
+     * @var array<int, array{day: int, severity: string, title: string, body: string}>
+     */
+    private const MILESTONES = [
+        [
+            'day' => 3,
+            'severity' => 'Info',
+            'title' => 'Finish setting up your brand',
+            'body' => 'Connect Shopify to start running affiliate campaigns. It takes about 5 minutes.',
+        ],
+        [
+            'day' => 10,
+            'severity' => 'Info',
+            'title' => 'Need a hand with setup?',
+            'body' => 'Your brand is still waiting on setup. Reply to this notification or visit the dashboard if you need help.',
+        ],
+        [
+            'day' => 30,
+            'severity' => 'Warning',
+            'title' => "Your brand isn't live yet",
+            'body' => "It's been a month since signup and your brand still isn't connected. Finish setup to start earning.",
+        ],
+    ];
+
+    public function __construct()
+    {
+        $this->onQueue('notifications');
+    }
+
+    public function handle(NotificationPublisher $publisher): void
+    {
+        foreach (self::MILESTONES as $milestone) {
+            $this->sweepMilestone($publisher, $milestone);
+        }
+    }
+
+    /**
+     * @param  array{day: int, severity: string, title: string, body: string}  $milestone
+     */
+    private function sweepMilestone(NotificationPublisher $publisher, array $milestone): void
+    {
+        $day = $milestone['day'];
+
+        // 24-hour window: brands whose created_at falls between (now - day - 1)
+        // and (now - day). Catches each brand exactly once per milestone, even
+        // if the sweep runs slightly off-schedule. Combined with the per-day
+        // dedupe key, no brand ever gets the same milestone nudge twice.
+        $windowStart = now()->subDays($day + 1);
+        $windowEnd = now()->subDays($day);
+
+        // LEFT JOIN brand_profiles: a freshly-signed-up brand may not have a
+        // brand_profiles row yet (created lazily on first status sync). Treat
+        // null as Onboarding — that cohort is exactly who we most want to nudge.
+        DB::table('core.professionals as p')
+            ->leftJoin('brand.brand_profiles as bp', 'bp.professional_id', '=', 'p.id')
+            ->where('p.professional_type', 'brand')
+            ->whereNull('p.deleted_at')
+            ->whereBetween('p.created_at', [$windowStart, $windowEnd])
+            ->where(function ($q): void {
+                $q->whereNull('bp.brand_status')
+                    ->orWhereIn('bp.brand_status', [
+                        BrandStatus::Onboarding->value,
+                        BrandStatus::ShopifyLinked->value,
+                    ]);
+            })
+            ->select(['p.id', 'p.first_name', 'p.display_name'])
+            ->orderBy('p.id')
+            ->chunkById(500, function ($chunk) use ($publisher, $day, $milestone) {
+                foreach ($chunk as $row) {
+                    try {
+                        $proId = trim((string) ($row->id ?? ''));
+                        if ($proId === '') {
+                            continue;
+                        }
+
+                        $publisher->publish(
+                            professionalId: $proId,
+                            frontendType: $milestone['severity'],
+                            category: 'profile_tasks',
+                            title: $milestone['title'],
+                            body: $milestone['body'],
+                            dedupeKey: "onboarding.nudge.{$proId}.day_{$day}",
+                            ctaUrl: '/account/overview',
+                            primaryActionLabel: 'Continue setup',
+                            retentionConfigKey: 'profile_task',
+                        );
+                    } catch (\Throwable $e) {
+                        Log::warning('NudgeStuckOnboardingJob failed for professional', [
+                            'professional_id' => $row->id ?? null,
+                            'day' => $day,
+                            'message' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            }, 'p.id', 'id');
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        Log::error('NudgeStuckOnboardingJob failed', [
+            'message' => $e->getMessage(),
+        ]);
+    }
+}

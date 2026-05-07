@@ -87,6 +87,13 @@ Schedule::job(new \App\Jobs\Notifications\InviteExpirySweepJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: invite-expiry-sweep');
     });
 
+Schedule::job(new \App\Jobs\Notifications\NudgeStuckOnboardingJob)
+    ->dailyAt('09:00')
+    ->withoutOverlapping(600)
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: nudge-stuck-onboarding');
+    });
+
 Schedule::job(new \App\Jobs\Notifications\SendWeeklyAnalyticsNotificationJob)
     ->weeklyOn(1, '09:00') // Monday 9 AM UTC
     ->withoutOverlapping()
