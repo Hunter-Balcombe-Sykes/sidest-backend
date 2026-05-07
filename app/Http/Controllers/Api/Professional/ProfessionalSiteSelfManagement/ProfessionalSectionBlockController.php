@@ -82,8 +82,10 @@ class ProfessionalSectionBlockController extends ApiController
 
     /**
      * Determine whether the stored section blocks have drifted from the allowed
-     * set — either an allowed type has no row yet, or its row has is_enabled=false.
-     * Fast path runs on every read, so it must avoid further DB calls.
+     * set — i.e. an allowed type has no row yet. `is_enabled` is no longer a
+     * sync-managed field (observers + reevaluateEnabled own it now), so we
+     * deliberately do NOT treat is_enabled=false as drift; that's a legitimate
+     * state meaning "data requirements aren't met yet."
      *
      * @param  \Illuminate\Support\Collection<int, Block>  $sectionBlocks
      * @param  array<int, string>  $allowedSections
@@ -96,8 +98,7 @@ class ProfessionalSectionBlockController extends ApiController
             if (! is_string($type)) {
                 continue;
             }
-            $block = $byType->get($type);
-            if (! $block || ! (bool) $block->is_enabled) {
+            if (! $byType->has($type)) {
                 return true;
             }
         }
@@ -178,8 +179,6 @@ class ProfessionalSectionBlockController extends ApiController
                 $block->settings = $data['settings'] ?? [];
             }
 
-            // Account-allowed sections are always available in account pages.
-            $block->is_enabled = true;
             $block->is_active = $nextIsLive;
 
             // merge settings (PATCH semantics)
@@ -190,6 +189,19 @@ class ProfessionalSectionBlockController extends ApiController
             } elseif (! $block->exists) {
                 $block->settings = [];
             }
+
+            // Re-evaluate is_enabled from the post-merge state. Pending settings
+            // (countdown timeline, contact email) are passed through so first-time
+            // publish where settings + Live arrive together sees the same merged
+            // shape that's about to be saved. Public render path filters on
+            // is_enabled, so any drift here would silently hide the section.
+            [$canBeEnabled] = $this->visibilityService->checkVisibilityRequirements(
+                (string) $pro->id,
+                (string) $site->id,
+                $blockType,
+                is_array($data['settings'] ?? null) ? $data['settings'] : null,
+            );
+            $block->is_enabled = $canBeEnabled;
 
             $block->save();
 
@@ -299,7 +311,9 @@ class ProfessionalSectionBlockController extends ApiController
 
         if ($block) {
             // DELETE behaves as "move to draft" for backward compatibility.
-            $block->is_enabled = true;
+            // is_enabled (the requirements gate) is owned by the visibility
+            // observers — leaving it untouched here means a remove can't
+            // accidentally re-enable a section whose data went away.
             $block->is_active = false;
             $block->save();
         }
@@ -311,7 +325,12 @@ class ProfessionalSectionBlockController extends ApiController
     }
 
     /**
-     * Ensure every account-type-allowed section exists and is always enabled.
+     * Ensure every account-type-allowed section has a row. Never touches existing
+     * rows' is_enabled / is_active — those are owned by the visibility observers
+     * and the pro's Draft/Live toggle respectively. New rows are seeded with
+     * is_enabled reflecting the current data state (so a freshly-created gallery
+     * row starts is_enabled=false until the pro uploads images).
+     *
      * Never changes sort_order for existing blocks — only assigns one to new blocks
      * (max existing + 1) to avoid conflicts with the partial unique index on
      * (site_id, block_group, sort_order) WHERE block_group = 'sections'.
@@ -338,20 +357,33 @@ class ProfessionalSectionBlockController extends ApiController
             $maxSortOrder = $allBlocks->max('sort_order') ?? -1;
 
             foreach ($orderedAllowed as $blockType) {
-                $block = $byType->get($blockType) ?? new Block([
+                $existing = $byType->get($blockType);
+                if ($existing) {
+                    // Existing row: leave is_enabled / is_active untouched.
+                    continue;
+                }
+
+                $block = new Block([
                     'professional_id' => $professionalId,
                     'site_id' => $siteId,
                     'block_group' => 'sections',
                     'block_type' => $blockType,
                 ]);
 
-                if (! $block->exists) {
-                    $block->settings = [];
-                    $block->is_active = false;
-                    $block->sort_order = ++$maxSortOrder;
-                }
+                $block->settings = [];
+                $block->is_active = false;
+                $block->sort_order = ++$maxSortOrder;
 
-                $block->is_enabled = true;
+                // Seed is_enabled honestly from current data state. One exists()
+                // per new block — only fires on first-time setup or a
+                // professional_type change, so the cost is one-shot, not hot-path.
+                [$canBeEnabled] = $this->visibilityService->checkVisibilityRequirements(
+                    $professionalId,
+                    $siteId,
+                    $blockType,
+                );
+                $block->is_enabled = $canBeEnabled;
+
                 $block->save();
                 $byType->put($blockType, $block);
             }

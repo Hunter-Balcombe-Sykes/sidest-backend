@@ -105,7 +105,16 @@ class AccountTypeDefaultsService
                 'block_type' => $blockType,
             ]);
 
-            $block->is_enabled = true;
+            // is_enabled (data-requirements gate) is computed honestly so this
+            // path stays consistent if auto_enable_sections grows beyond 'shop'
+            // (which has no requirements). Today shop always evaluates to true,
+            // so behaviour is unchanged for the current config.
+            [$canBeEnabled] = $this->visibilityService->checkVisibilityRequirements(
+                (string) $professional->id,
+                (string) $site->id,
+                $blockType,
+            );
+            $block->is_enabled = $canBeEnabled;
             $block->is_active = true;
 
             if (! $block->exists) {

@@ -21,10 +21,13 @@ use Illuminate\Validation\ValidationException;
 // booking), bio + about, document, newsletter, services, and booking.
 //
 // Every section that has a Draft/Live toggle in the dashboard is returned as an
-// envelope `{state: "draft"|"live", data: <payload>|null}`. Hydrogen reads `state`
-// to decide whether to mount the section; `data` is always null when draft so draft
-// content never leaks publicly even if Hydrogen has a bug. Per-row Draft/Live (links)
-// is handled server-side: is_active=false rows are simply filtered out.
+// envelope `{state: "draft"|"live", data: <payload>|null}`. State is `live` only
+// when BOTH is_enabled (data requirements met — e.g. gallery has images) AND
+// is_active (the pro chose Live) are true; either being false drops the section
+// to draft, even mid-session if a pro deletes the underlying data. Hydrogen reads
+// `state` to decide whether to mount the section; `data` is always null when draft
+// so draft content never leaks publicly even if Hydrogen has a bug. Per-row
+// Draft/Live (links) is handled server-side: is_active=false rows are filtered out.
 class HydrogenAffiliateController extends ApiController
 {
     public function show(Request $request): JsonResponse
@@ -173,7 +176,14 @@ class HydrogenAffiliateController extends ApiController
     private function sectionEnvelope($sections, string $blockType, callable $buildData): array
     {
         $section = $sections->get($blockType);
-        $isLive = $section !== null && (bool) $section->is_active;
+        // Live = the section row exists, the pro chose Live (is_active),
+        // AND requirements are currently met (is_enabled, written by the
+        // visibility observers when underlying data changes). All three
+        // must hold; any one being false drops the section to draft on the
+        // public site, even if previously published.
+        $isLive = $section !== null
+            && (bool) $section->is_enabled
+            && (bool) $section->is_active;
 
         $envelope = [
             'state' => $isLive ? 'live' : 'draft',
