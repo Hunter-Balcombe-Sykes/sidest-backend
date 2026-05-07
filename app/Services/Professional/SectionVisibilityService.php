@@ -66,35 +66,7 @@ class SectionVisibilityService
             ->values()
             ->all();
 
-        // Only query for data-sources that at least one present block needs.
-        // Sites without (e.g.) a booking section never pay for ProfessionalIntegration
-        // / link-block lookups.
-        $context = [
-            'has_gallery_image' => in_array('gallery', $types, true)
-                ? $this->galleryHasImage($siteId)
-                : null,
-            'has_document' => in_array('documents', $types, true)
-                ? $this->siteHasDocument($siteId)
-                : null,
-            'has_priced_service' => in_array('services', $types, true)
-                ? $this->professionalHasPricedService($professionalId)
-                : null,
-            'has_active_service' => in_array('booking', $types, true)
-                ? $this->professionalHasActiveService($professionalId)
-                : null,
-            'has_booking_integration' => in_array('booking', $types, true)
-                ? $this->professionalHasBookingIntegration($professionalId)
-                : null,
-            'has_booking_link_block' => in_array('booking', $types, true)
-                ? $this->professionalHasBookingLinkBlock($professionalId)
-                : null,
-            'has_credential' => in_array('credentials', $types, true)
-                ? $this->professionalHasCredential($professionalId)
-                : null,
-            'has_experience' => in_array('experience', $types, true)
-                ? $this->professionalHasExperience($professionalId)
-                : null,
-        ];
+        $context = $this->loadVisibilityContext($professionalId, $siteId, $types);
 
         $byType = [];
         foreach ($blocks as $block) {
@@ -106,6 +78,170 @@ class SectionVisibilityService
         }
 
         return $byType;
+    }
+
+    /**
+     * Build the visibility data context for the present section types in a
+     * single round-trip. Each requirement becomes an `EXISTS(...)` subquery
+     * inside one SELECT, so we pay one network round-trip instead of N. The
+     * Eloquent-built subqueries keep the same SQL the per-helper methods
+     * generate today, so dialect-specific bits (e.g. JSON arrow operators
+     * for the link-block check) stay portable across pgsql and sqlite tests.
+     *
+     * Sites without a given section type skip the corresponding subquery.
+     * Smart-booking-off mirrors the legacy `professionalHasBookingIntegration`
+     * semantics: a definitive `false`, not an unknown `null`.
+     *
+     * @param  array<int, string>  $presentTypes
+     * @return array<string, bool|null>
+     */
+    private function loadVisibilityContext(string $professionalId, string $siteId, array $presentTypes): array
+    {
+        $defaults = [
+            'has_gallery_image' => null,
+            'has_document' => null,
+            'has_priced_service' => null,
+            'has_active_service' => null,
+            'has_booking_integration' => null,
+            'has_booking_link_block' => null,
+            'has_credential' => null,
+            'has_experience' => null,
+        ];
+
+        $needsGallery = in_array('gallery', $presentTypes, true);
+        $needsDocument = in_array('documents', $presentTypes, true);
+        $needsPricedService = in_array('services', $presentTypes, true);
+        $needsBooking = in_array('booking', $presentTypes, true);
+        $needsCredentials = in_array('credentials', $presentTypes, true);
+        $needsExperience = in_array('experience', $presentTypes, true);
+        $smartBookingEnabled = (bool) config('partna.features.smart_booking', false);
+
+        $subqueries = [];
+
+        if ($needsGallery) {
+            $subqueries['has_gallery_image'] = SiteMedia::query()
+                ->select(DB::raw('1'))
+                ->where('site_id', $siteId)
+                ->where('pool', SiteMedia::POOL_GALLERY)
+                ->where('media_type', SiteMedia::MEDIA_TYPE_IMAGE)
+                ->where('is_active', true)
+                ->whereNull('deleted_at')
+                ->getQuery();
+        }
+
+        if ($needsDocument) {
+            $subqueries['has_document'] = SiteMedia::query()
+                ->select(DB::raw('1'))
+                ->where('site_id', $siteId)
+                ->where('pool', SiteMedia::POOL_DOCUMENTS)
+                ->where('is_active', true)
+                ->whereNull('deleted_at')
+                ->getQuery();
+        }
+
+        if ($needsPricedService) {
+            $subqueries['has_priced_service'] = Service::query()
+                ->select(DB::raw('1'))
+                ->where('professional_id', $professionalId)
+                ->where('is_active', true)
+                ->whereNull('deleted_at')
+                ->whereNotNull('title')
+                ->where('title', '!=', '')
+                ->where('price_cents', '>', 0)
+                ->getQuery();
+        }
+
+        if ($needsBooking) {
+            $subqueries['has_active_service'] = Service::query()
+                ->select(DB::raw('1'))
+                ->where('professional_id', $professionalId)
+                ->where('is_active', true)
+                ->whereNull('deleted_at')
+                ->getQuery();
+
+            if ($smartBookingEnabled) {
+                $subqueries['has_booking_integration'] = ProfessionalIntegration::query()
+                    ->select(DB::raw('1'))
+                    ->where('professional_id', $professionalId)
+                    ->whereIn('provider', [
+                        ProfessionalIntegration::PROVIDER_SQUARE,
+                        ProfessionalIntegration::PROVIDER_FRESHA,
+                    ])
+                    ->getQuery();
+            }
+
+            $subqueries['has_booking_link_block'] = Block::query()
+                ->select(DB::raw('1'))
+                ->where('professional_id', $professionalId)
+                ->where('block_group', 'links')
+                ->where('settings->category', 'booking')
+                ->whereNull('deleted_at')
+                ->getQuery();
+        }
+
+        // Credentials / experience subqueries mirror professionalHasCredential /
+        // professionalHasExperience exactly — same Eloquent base + raw JSON checks
+        // so the bundled SELECT generates the same SQL the per-helper methods do.
+        // The whereRaw clauses are pgsql-specific (jsonb_array_length, jsonb_array_elements);
+        // SectionVisibilityService is only called on the pgsql connection in
+        // production, so dialect portability lives at the Eloquent layer above.
+        if ($needsCredentials) {
+            $subqueries['has_credential'] = Professional::query()
+                ->select(DB::raw('1'))
+                ->where('id', $professionalId)
+                ->whereNull('deleted_at')
+                ->whereNotNull('about->credentials')
+                ->whereRaw("jsonb_array_length(COALESCE(about->'credentials', '[]'::jsonb)) > 0")
+                ->whereRaw(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(about->'credentials', '[]'::jsonb)) AS c WHERE c->>'title' IS NOT NULL AND TRIM(c->>'title') <> '')",
+                )
+                ->getQuery();
+        }
+
+        if ($needsExperience) {
+            $subqueries['has_experience'] = Professional::query()
+                ->select(DB::raw('1'))
+                ->where('id', $professionalId)
+                ->whereNull('deleted_at')
+                ->whereNotNull('about->experience')
+                ->whereRaw("jsonb_array_length(COALESCE(about->'experience', '[]'::jsonb)) > 0")
+                ->whereRaw(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(about->'experience', '[]'::jsonb)) AS e WHERE e->>'role' IS NOT NULL AND TRIM(e->>'role') <> '')",
+                )
+                ->getQuery();
+        }
+
+        if (empty($subqueries)) {
+            // Smart-booking off + booking section present is handled below.
+            if ($needsBooking && ! $smartBookingEnabled) {
+                $defaults['has_booking_integration'] = false;
+            }
+
+            return $defaults;
+        }
+
+        // Combine every requirement into one SELECT row of booleans. Bindings
+        // accumulate in select-clause order, which matches the placeholder
+        // order in the compiled SQL.
+        $query = DB::query();
+        foreach ($subqueries as $alias => $sub) {
+            $query->selectRaw('exists ('.$sub->toSql().') as '.$alias, $sub->getBindings());
+        }
+
+        $row = $query->first();
+        if ($row !== null) {
+            foreach ($defaults as $col => $_) {
+                if (isset($row->$col)) {
+                    $defaults[$col] = (bool) $row->$col;
+                }
+            }
+        }
+
+        if ($needsBooking && ! $smartBookingEnabled) {
+            $defaults['has_booking_integration'] = false;
+        }
+
+        return $defaults;
     }
 
     /**
