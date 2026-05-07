@@ -2,6 +2,7 @@
 
 namespace App\Services\Professional;
 
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
@@ -34,6 +35,8 @@ class SectionVisibilityService
             'documents' => $this->checkDocumentsRequirements($siteId),
             'countdown' => $this->checkCountdownRequirements($professionalId, $siteId, $pendingSettings),
             'contact' => $this->checkContactRequirements($professionalId, $siteId, $pendingSettings),
+            'credentials' => $this->checkCredentialsRequirements($professionalId),
+            'experience' => $this->checkExperienceRequirements($professionalId),
             default => [true, null],
         };
     }
@@ -85,6 +88,12 @@ class SectionVisibilityService
             'has_booking_link_block' => in_array('booking', $types, true)
                 ? $this->professionalHasBookingLinkBlock($professionalId)
                 : null,
+            'has_credential' => in_array('credentials', $types, true)
+                ? $this->professionalHasCredential($professionalId)
+                : null,
+            'has_experience' => in_array('experience', $types, true)
+                ? $this->professionalHasExperience($professionalId)
+                : null,
         ];
 
         $byType = [];
@@ -125,6 +134,14 @@ class SectionVisibilityService
                 : [false, 'Services section requires at least 1 service with a title and price.'],
 
             'booking' => $this->resolveBookingFromContext($block, $context),
+
+            'credentials' => $context['has_credential']
+                ? [true, null]
+                : [false, 'Credentials section requires at least 1 credential with a title.'],
+
+            'experience' => $context['has_experience']
+                ? [true, null]
+                : [false, 'Experience section requires at least 1 entry with a role.'],
 
             // Countdown + contact requirements live entirely in the block's own
             // settings — no DB lookup needed when the block is already loaded.
@@ -315,6 +332,50 @@ class SectionVisibilityService
             ->where('block_group', 'links')
             ->where('settings->category', 'booking')
             ->whereNull('deleted_at')
+            ->exists();
+    }
+
+    private function checkCredentialsRequirements(string $professionalId): array
+    {
+        if (! $this->professionalHasCredential($professionalId)) {
+            return [false, 'Credentials section requires at least 1 credential with a title.'];
+        }
+
+        return [true, null];
+    }
+
+    private function checkExperienceRequirements(string $professionalId): array
+    {
+        if (! $this->professionalHasExperience($professionalId)) {
+            return [false, 'Experience section requires at least 1 entry with a role.'];
+        }
+
+        return [true, null];
+    }
+
+    private function professionalHasCredential(string $professionalId): bool
+    {
+        return Professional::query()
+            ->where('id', $professionalId)
+            ->whereNull('deleted_at')
+            ->whereNotNull('about->credentials')
+            ->whereRaw("jsonb_array_length(COALESCE(about->'credentials', '[]'::jsonb)) > 0")
+            ->whereRaw(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(about->'credentials', '[]'::jsonb)) AS c WHERE c->>'title' IS NOT NULL AND TRIM(c->>'title') <> '')",
+            )
+            ->exists();
+    }
+
+    private function professionalHasExperience(string $professionalId): bool
+    {
+        return Professional::query()
+            ->where('id', $professionalId)
+            ->whereNull('deleted_at')
+            ->whereNotNull('about->experience')
+            ->whereRaw("jsonb_array_length(COALESCE(about->'experience', '[]'::jsonb)) > 0")
+            ->whereRaw(
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(about->'experience', '[]'::jsonb)) AS e WHERE e->>'role' IS NOT NULL AND TRIM(e->>'role') <> '')",
+            )
             ->exists();
     }
 

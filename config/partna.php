@@ -599,7 +599,7 @@ return [
         ],
     ],
 
-    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact', 'bio'],
+    'section_block_types' => ['gallery', 'services', 'shop', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact', 'credentials', 'experience', 'bio'],
 
     // Platform-default subject dropdown options for the contact section block.
     // Merged with the affiliate's settings.subject_options at render and
@@ -681,7 +681,7 @@ return [
             // 'sections' rejects any re-packing that would momentarily shift
             // an existing row's sort_order onto another's. Placing new block
             // types at the tail keeps existing rows at their stored indices.
-            'allowed_sections' => ['shop', 'services', 'gallery', 'documents', 'newsletter', 'countdown', 'contact', 'bio'],
+            'allowed_sections' => ['shop', 'services', 'gallery', 'documents', 'newsletter', 'countdown', 'contact', 'credentials', 'experience', 'bio'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'is_published' => true,
             'allowed_theme_count' => 3,
@@ -699,7 +699,7 @@ return [
             'inherits' => 'influencer',
             // 'bio' stays at the end — see the note on the influencer block
             // for why ordering here is load-bearing.
-            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact', 'bio'],
+            'allowed_sections' => ['shop', 'services', 'gallery', 'booking', 'contacts_collection', 'sitepage_analytics', 'barbershop_info', 'documents', 'newsletter', 'countdown', 'contact', 'credentials', 'experience', 'bio'],
             'default_sections' => ['shop', 'services', 'gallery'],
             'custom_links_allowed' => true,
         ],
