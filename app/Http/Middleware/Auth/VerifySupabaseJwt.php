@@ -6,6 +6,7 @@ use App\Services\Cache\CacheLockService;
 use Closure;
 use Firebase\JWT\JWK;
 use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -15,40 +16,32 @@ use Symfony\Component\HttpFoundation\Response;
 class VerifySupabaseJwt
 {
     /**
-     * Process-local memo of parsed JWKS keys, keyed by a hash of the raw JWKS
-     * payload. JWK::parseKeySet() rebuilds OpenSSL EC public-key resources from
-     * JSON on every call (~150-300ms for ES256 — dominates the auth path) but
-     * the JWKS itself rarely changes; caching the parsed Key map across requests
-     * within a PHP-FPM worker drops repeat-request cost to a single signature
-     * verification (~5-15ms). Hashing the payload means a Supabase signing-key
-     * rotation invalidates the memo automatically (the JWKS Redis cache TTL is
-     * 5 min, so we pick up rotations within that window). Capped at 4 entries
-     * to bound long-running-worker memory across multiple rotations.
+     * Per-request memo of resolved Key objects keyed by kid. Avoids redundant
+     * APCu lookups if the same JWT is verified twice within one request — short-lived
+     * by definition, so no bounding is required.
      *
-     * @var array<string, array<string, \Firebase\JWT\Key>>
+     * @var array<string, Key>
      */
-    private static array $parsedKeysByJwksHash = [];
+    private static array $keysByKid = [];
 
     /**
-     * Hash of the most recently loaded JWKS payload. Identifies which entry of
-     * $parsedKeysByJwksHash is the "current" map — used by the fast-path that
-     * skips Redis when a recent parsed map already contains the requested kid.
+     * APCu key prefix for cached PEM-encoded public keys. APCu is shared across
+     * every PHP-FPM worker in the same container, so newly-spawned workers (a
+     * common occurrence under Laravel Cloud autoscaling, where workers idle out
+     * within seconds during low traffic) skip the 150-300ms JWK::parseKeySet()
+     * path entirely. APCu can't store OpenSSLAsymmetricKey resources directly,
+     * so we cache the PEM string and rebuild the Key object per-request — the
+     * openssl_pkey_get_public() call inside JWT::decode is a few ms.
      */
-    private static ?string $jwksCurrentHash = null;
+    private const APCU_KEY_PREFIX = 'partna:jwks:pem:';
 
     /**
-     * Monotonic millis of the last successful JWKS load (Redis hit OR closure
-     * refresh). The Redis-skip fast path is only taken while this is fresh.
+     * APCu TTL on cached PEMs. Independent of the JWKS Redis cache TTL — this
+     * only bounds how long a kid lingers after Supabase retires it. Old kids
+     * stop appearing in incoming JWTs (Supabase signs only with current keys),
+     * so a stale entry is harmless until evicted.
      */
-    private static ?int $jwksLoadedAtMs = null;
-
-    /**
-     * Process-local TTL on the Redis-skip fast path. Independent of the upstream
-     * Redis cache's TTL: this only governs how long a worker trusts its in-memory
-     * parsed map without re-checking Redis. A new kid (rotation) bypasses the
-     * fast path automatically — the cache.get below picks up the new payload.
-     */
-    private const JWKS_FRESH_TTL_MS = 60_000;
+    private const APCU_TTL_SECONDS = 3600;
 
     public function __construct(private CacheLockService $cacheLock) {}
 
@@ -160,28 +153,74 @@ class VerifySupabaseJwt
             throw new \RuntimeException('JWT header missing kid');
         }
 
-        $nowMs = (int) (microtime(true) * 1000);
+        $key = $this->resolveSigningKey((string) $kid, (string) $alg);
 
-        // Redis-skip fast path: if this worker has loaded JWKS within the last
-        // JWKS_FRESH_TTL_MS *and* the current parsed map already contains the
-        // kid this token was signed with, verify directly. This eliminates the
-        // 100–300ms supabase:jwks Redis round-trip (and any SWR-triggered
-        // closure refresh that would otherwise fire HTTP at Supabase) from the
-        // common authenticated-request path. Rotations bypass this branch
-        // automatically — a new kid won't be in the memoised map, so we fall
-        // through to the cache.get below which has its own (5 min) TTL.
-        if (
-            self::$jwksCurrentHash !== null
-            && self::$jwksLoadedAtMs !== null
-            && ($nowMs - self::$jwksLoadedAtMs) < self::JWKS_FRESH_TTL_MS
-            && isset(self::$parsedKeysByJwksHash[self::$jwksCurrentHash][$kid])
-        ) {
-            JWT::$leeway = 60;
-            $decoded = JWT::decode($jwt, self::$parsedKeysByJwksHash[self::$jwksCurrentHash][$kid]);
+        // Decode + verify signature + exp/nbf automatically
+        JWT::$leeway = 60; // clock skew tolerance
+        $decoded = JWT::decode($jwt, $key);
 
-            return json_decode(json_encode($decoded), true) ?: [];
+        return json_decode(json_encode($decoded), true) ?: [];
+    }
+
+    /**
+     * Resolve a JWT signing key for a given kid using a layered cache:
+     *
+     *   1. Per-request static memo (~0ms)
+     *   2. APCu shared memory (~0.05ms) — survives PHP-FPM worker recycling
+     *   3. Redis JWKS cache + JWK::parseKeySet() (~150-300ms for ES256)
+     *
+     * The third layer only fires on a fresh container or when the kid has aged
+     * out of APCu. Once it fires, *every* parsed kid is written back to APCu so
+     * subsequent requests for any kid in the set skip parseKeySet entirely.
+     *
+     * Why cache by kid (not by JWKS hash): Supabase issues a unique kid per
+     * signing key. A rotation produces a new kid; old kids simply stop appearing
+     * in incoming JWTs. A forged token presenting a stale kid still fails
+     * signature verification, so retired kids in APCu are harmless until evicted.
+     */
+    private function resolveSigningKey(string $kid, string $alg): Key
+    {
+        if (isset(self::$keysByKid[$kid])) {
+            return self::$keysByKid[$kid];
         }
 
+        $cached = $this->apcuFetch(self::APCU_KEY_PREFIX.$kid);
+        if (is_array($cached) && isset($cached['pem'], $cached['alg']) && is_string($cached['pem'])) {
+            $key = new Key($cached['pem'], (string) $cached['alg']);
+            self::$keysByKid[$kid] = $key;
+
+            return $key;
+        }
+
+        // Cold path: parseKeySet is the 150-300ms ES256 cost we're trying to avoid.
+        $jwks = $this->fetchJwks();
+        $parsed = JWK::parseKeySet($jwks);
+
+        if (! isset($parsed[$kid])) {
+            throw new \RuntimeException('No matching JWKS key for kid');
+        }
+
+        // Warm APCu for every kid in the set — the next authenticated request,
+        // regardless of which kid it presents, then hits APCu instead of parseKeySet.
+        foreach ($parsed as $parsedKid => $parsedKey) {
+            $pem = $this->extractPemFromKey($parsedKey);
+            if ($pem !== null) {
+                $this->apcuStore(
+                    self::APCU_KEY_PREFIX.$parsedKid,
+                    ['pem' => $pem, 'alg' => $alg],
+                );
+            }
+            self::$keysByKid[$parsedKid] = $parsedKey;
+        }
+
+        return $parsed[$kid];
+    }
+
+    /**
+     * @return array{keys?: array<int, array<string, mixed>>}
+     */
+    private function fetchJwks(): array
+    {
         $jwksUrl = config('supabase.jwks_url');
         if (! $jwksUrl) {
             throw new \RuntimeException('Missing SUPABASE_JWKS_URL');
@@ -203,39 +242,52 @@ class VerifySupabaseJwt
             return $payload;
         });
 
-        // If your project isn't using asymmetric keys, JWKS may be empty. :contentReference[oaicite:3]{index=3}
+        // If your project isn't using asymmetric keys, JWKS may be empty.
         if (empty($jwks['keys'])) {
             throw new \RuntimeException('JWKS empty');
         }
 
-        $jwksHash = md5((string) json_encode($jwks));
-        if (! isset(self::$parsedKeysByJwksHash[$jwksHash])) {
-            // Bound worker memory across multiple key rotations — drop the oldest
-            // entry once we already hold a small set of recent JWKS payloads.
-            if (count(self::$parsedKeysByJwksHash) >= 4) {
-                array_shift(self::$parsedKeysByJwksHash);
-            }
-            self::$parsedKeysByJwksHash[$jwksHash] = JWK::parseKeySet($jwks);
+        return $jwks;
+    }
+
+    /**
+     * Extract the PEM-encoded public key from a parsed Key. Returns null if the
+     * material isn't an OpenSSL key resource — defensive for future algorithm
+     * additions; today's RS256/ES256 paths always produce OpenSSLAsymmetricKey.
+     */
+    private function extractPemFromKey(Key $key): ?string
+    {
+        $material = $key->getKeyMaterial();
+        if (! $material instanceof \OpenSSLAsymmetricKey) {
+            return null;
         }
 
-        // Mark this hash as the current JWKS map for the worker's fast path.
-        // Updated on every successful Redis fetch so a rotation transition
-        // pivots the fast path onto the new payload as soon as one request
-        // pays the cache.get cost.
-        self::$jwksCurrentHash = $jwksHash;
-        self::$jwksLoadedAtMs = $nowMs;
-
-        $keys = self::$parsedKeysByJwksHash[$jwksHash];
-        $key = $keys[$kid] ?? null;
-        if (! $key) {
-            throw new \RuntimeException('No matching JWKS key for kid');
+        $details = openssl_pkey_get_details($material);
+        if (! is_array($details) || ! isset($details['key']) || ! is_string($details['key'])) {
+            return null;
         }
 
-        // Decode + verify signature + exp/nbf automatically
-        JWT::$leeway = 60; // clock skew tolerance
-        $decoded = JWT::decode($jwt, $key);
+        return $details['key'];
+    }
 
-        return json_decode(json_encode($decoded), true) ?: [];
+    private function apcuFetch(string $key): mixed
+    {
+        if (! function_exists('apcu_fetch') || ! ini_get('apc.enabled')) {
+            return null;
+        }
+
+        $value = apcu_fetch($key, $hit);
+
+        return $hit ? $value : null;
+    }
+
+    private function apcuStore(string $key, mixed $value): void
+    {
+        if (! function_exists('apcu_store') || ! ini_get('apc.enabled')) {
+            return;
+        }
+
+        @apcu_store($key, $value, self::APCU_TTL_SECONDS);
     }
 
     private function verifyWithAuthServer(string $jwt): ?string
