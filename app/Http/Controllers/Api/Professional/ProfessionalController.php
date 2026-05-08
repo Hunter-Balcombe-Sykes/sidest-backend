@@ -136,23 +136,4 @@ class ProfessionalController extends ApiController
 
     /**
      * Mirrors BrandStoreSettings::storefrontBaseUrl() but operates on the
-     * cached array shape returned by ProfessionalCacheService::getBrandStoreSettings.
-     * Custom domain wins only when the brand is fully provisioned (domain_mode=custom,
-     * custom_domain set, and TLS issued); otherwise we serve the platform subdomain.
-     *
-     * @param  array<string, mixed>|null  $settings
-     */
-    private function resolveStorefrontBaseUrl(?array $settings, string $subdomain): string
-    {
-        if (
-            $settings !== null
-            && ($settings['domain_mode'] ?? null) === 'custom'
-            && ! empty($settings['custom_domain'])
-            && ! empty($settings['custom_domain_tls_provisioned_at'])
-        ) {
-            return 'https://'.$settings['custom_domain'];
-        }
-
-        return 'https://'.$subdomain.'.sidest.co';
-    }
-}
+     * cached array shape returned by ProfessionalCacheService::getBrandStoreSettings.}
