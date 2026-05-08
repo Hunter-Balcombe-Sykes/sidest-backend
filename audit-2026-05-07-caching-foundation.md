@@ -304,7 +304,7 @@
         }
         ```
 
-- [ ] **#GS-6** · P3 — Add `Cache::memo()` decorator to hot read paths (Laravel 12.9+)
+- [x] **#GS-6** · P3 — Add `Cache::memo()` decorator to hot read paths (Laravel 12.9+)
     - **Where:** New: dispatchers in `BrandCatalogService`, `SiteCacheService::hydrateSitePayload`, controllers that read pro-info more than once per request
     - **Affects:** Per-request throughput on hot endpoints — collapses N Redis round-trips for the same key into 1.
     - **Effort:** S (~0.5–1h to identify hot paths; trivial to apply)
