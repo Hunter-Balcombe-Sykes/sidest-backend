@@ -51,6 +51,21 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
         };
     }
 
+    public function failed(\Throwable $e): void
+    {
+        report($e);
+
+        // refunds/create uses order_id for the parent order; all other topics use id.
+        $shopifyOrderId = (string) (Arr::get($this->payload, 'id') ?? Arr::get($this->payload, 'order_id', ''));
+
+        Log::error('ProcessShopifyOrderUpdatedWebhookJob exhausted all retries', [
+            'professional_id' => $this->professionalId,
+            'topic' => $this->topic,
+            'shopify_order_id' => $shopifyOrderId,
+            'error' => $e->getMessage(),
+        ]);
+    }
+
     /**
      * orders/updated — LWW snapshot update. Updates gross, refund, status, and raw data.
      * commission_cents / commission_rate are intentionally NOT updated (frozen at paid time).

@@ -68,6 +68,18 @@ class VoidPendingCommissionsForLinkJob implements ShouldQueue
         $notifier->notifyBrandOfRemoval($brand, $affiliate);
     }
 
+    public function failed(\Throwable $e): void
+    {
+        report($e);
+
+        Log::error('VoidPendingCommissionsForLinkJob exhausted all retries', [
+            'affiliate_professional_id' => $this->affiliateProfessionalId,
+            'brand_professional_id' => $this->brandProfessionalId,
+            'reason' => $this->reason,
+            'error' => $e->getMessage(),
+        ]);
+    }
+
     /** @return array{0: ?Professional, 1: ?Professional} */
     public function loadProfessionals(): array
     {

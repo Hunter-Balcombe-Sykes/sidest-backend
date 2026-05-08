@@ -17,7 +17,7 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 1;
+    public int $tries = 2;
 
     public int $timeout = 300;
 
@@ -70,6 +70,15 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
                     }
                 }
             });
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        report($e);
+
+        Log::error('SendWeeklyAnalyticsNotificationJob permanently failed', [
+            'error' => $e->getMessage(),
+        ]);
     }
 
     private function notifyProfessional(

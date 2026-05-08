@@ -225,6 +225,18 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
         ]);
     }
 
+    public function failed(\Throwable $e): void
+    {
+        report($e);
+
+        Log::error('ProcessShopifyOrderWebhookJob exhausted all retries', [
+            'brand_professional_id' => $this->brandProfessionalId,
+            'shopify_event_id' => $this->shopifyEventId,
+            'shopify_order_id' => (string) Arr::get($this->orderPayload, 'id', ''),
+            'error' => $e->getMessage(),
+        ]);
+    }
+
     /**
      * INSERT ... ON CONFLICT DO UPDATE WHERE EXCLUDED.shopify_updated_at > orders.shopify_updated_at.
      * The LWW guard is entirely in SQL — PHP never compares timestamps.

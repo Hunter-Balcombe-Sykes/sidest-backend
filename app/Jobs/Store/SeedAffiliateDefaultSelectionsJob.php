@@ -28,6 +28,17 @@ class SeedAffiliateDefaultSelectionsJob implements ShouldQueue
         $this->onQueue('integrations');
     }
 
+    public function failed(\Throwable $e): void
+    {
+        report($e);
+
+        Log::error('SeedAffiliateDefaultSelectionsJob exhausted all retries', [
+            'affiliate_professional_id' => $this->affiliateProfessionalId,
+            'brand_professional_id' => $this->brandProfessionalId,
+            'error' => $e->getMessage(),
+        ]);
+    }
+
     public function handle(AffiliateProductCatalogService $catalogService): void
     {
         $affiliate = Professional::find($this->affiliateProfessionalId);
