@@ -1,0 +1,14 @@
+{
+  "name": "partna-subdomain-router",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that routes *.partna.au — brand subdomains pass through to Shopify, affiliate subdomains 301 to brand.partna.au/handle.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

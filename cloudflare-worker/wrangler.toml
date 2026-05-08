@@ -1,0 +1,18 @@
+name = "partna-subdomain-router"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Runs on every *.partna.au request. Specific subdomain DNS records (e.g.,
+# brand CNAMEs to shops.myshopify.com) and a wildcard *.partna.au record
+# both flow through this Worker.
+[[routes]]
+pattern = "*.partna.au/*"
+zone_name = "partna.au"
+
+# KV namespace holding the subdomain routing table.
+# Replace `id` with the namespace ID from `wrangler kv:namespace create`.
+# `preview_id` is used during `wrangler dev`; create with `--preview`.
+[[kv_namespaces]]
+binding = "SUBDOMAIN_KV"
+id = "REPLACE_WITH_PRODUCTION_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
