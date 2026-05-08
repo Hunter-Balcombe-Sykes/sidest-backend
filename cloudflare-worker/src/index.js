@@ -76,14 +76,18 @@ export default {
     }
 
     if (entry.type === "affiliate" && typeof entry.redirect === "string") {
-      const target = new URL(entry.redirect);
-      // Append the original path/query to the affiliate's brand path so deep links work:
-      //   jane.partna.au/products/x?foo=1  →  brand.partna.au/jane/products/x?foo=1
-      const basePath = target.pathname.replace(/\/+$/, "");
-      const incomingPath = url.pathname.replace(/^\/+/, "/");
-      target.pathname = (basePath + incomingPath).replace(/\/{2,}/g, "/") || "/";
-      target.search = url.search;
-      return Response.redirect(target.toString(), 301);
+      // Drop incoming path/query — Hydrogen only has $affiliateSlug.tsx (no nested
+      // affiliate routes), so preserving paths produces 404s. Redirect cleanly to
+      // the affiliate's brand-side page.
+      return new Response(null, {
+        status: 301,
+        headers: {
+          Location: entry.redirect,
+          // Without this, browsers cache 301s indefinitely. A primary-brand swap
+          // would leave stale redirects in client caches until users manually clear.
+          "Cache-Control": "max-age=0, must-revalidate",
+        },
+      });
     }
 
     // type === "brand" or anything else: pass through to the origin defined by DNS.
