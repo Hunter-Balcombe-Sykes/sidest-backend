@@ -61,6 +61,11 @@ class BrandCommerceAnalyticsController extends ApiController
             $totals['page_views'] = $totalPageviews;
             $totals['unique_visitors'] = $totalUniqueVisitors;
 
+            // ── Cart events from analytics.cart_events (across all affiliates) ─
+            [$totalCartAdds, $totalCheckouts] = $this->queryCartEventCounts($professionalId, $filters);
+            $totals['cart_adds'] = $totalCartAdds;
+            $totals['checkouts'] = $totalCheckouts;
+
             // ── Per-affiliate breakdown from commerce.brand_affiliate_rollup ─
             $affiliates = $this->buildAffiliateBreakdown($professionalId, $filters, $currencyCode);
 
@@ -192,6 +197,40 @@ class BrandCommerceAnalyticsController extends ApiController
             ->first();
 
         return [(int) ($row->page_views ?? 0), (int) ($row->unique_visitors ?? 0)];
+    }
+
+    /**
+     * Cart add and checkout start counts across all of the brand's affiliates.
+     * Returns [$cartAdds, $checkouts].
+     */
+    private function queryCartEventCounts(string $brandProfessionalId, array $filters): array
+    {
+        $affiliateIds = DB::table('brand.brand_partner_links')
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->pluck('affiliate_professional_id')
+            ->toArray();
+
+        if (empty($affiliateIds)) {
+            return [0, 0];
+        }
+
+        $endOfDay = Carbon::parse($filters['to'])->endOfDay();
+
+        $cartAdds = (int) DB::table('analytics.cart_events')
+            ->whereIn('professional_id', $affiliateIds)
+            ->where('event_type', 'cart_add')
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', $endOfDay)
+            ->count();
+
+        $checkouts = (int) DB::table('analytics.cart_events')
+            ->whereIn('professional_id', $affiliateIds)
+            ->where('event_type', 'checkout_start')
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', $endOfDay)
+            ->count();
+
+        return [$cartAdds, $checkouts];
     }
 
     /**

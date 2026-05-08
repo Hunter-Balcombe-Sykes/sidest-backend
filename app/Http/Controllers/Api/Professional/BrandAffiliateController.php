@@ -53,7 +53,7 @@ class BrandAffiliateController extends ApiController
             ->keyBy('professional_id');
 
         $affiliates = $links
-            ->map(function (BrandPartnerLink $link) use ($sitesByProfessionalId): ?array {
+            ->map(function (BrandPartnerLink $link) use ($sitesByProfessionalId, $professional): ?array {
                 /** @var Site|null $site */
                 $site = $sitesByProfessionalId->get($link->affiliate_professional_id);
                 if (! $site) {
@@ -77,6 +77,9 @@ class BrandAffiliateController extends ApiController
                     'connected_at' => optional($link->updated_at)->toIso8601String(),
                     'is_primary' => (int) $link->slot === BrandPartnerLinkService::PRIMARY_SLOT,
                     'custom_photos_enabled' => $link->custom_photos_enabled,
+                    'affiliate_page_url' => $site->subdomain
+                        ? 'https://'.$site->subdomain.'.'.config('partna.public_domain', 'sidest.co').'/'.$professional->handle
+                        : null,
                 ];
             })
             ->filter(fn (?array $affiliate): bool => is_array($affiliate) && filled($affiliate['id']))

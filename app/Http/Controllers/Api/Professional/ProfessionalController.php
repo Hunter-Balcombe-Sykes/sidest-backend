@@ -40,6 +40,7 @@ class ProfessionalController extends ApiController
         $siteSettings = [];
         $primaryBrandStatus = null;
         $primaryBrandName = null;
+        $primaryBrandHandle = null;
         if ($pro->site) {
             $siteSettings = is_array($pro->site->settings) ? $pro->site->settings : [];
             $siteSettings = app(SiteCacheService::class)->hydrateTypographySettings(
@@ -47,17 +48,17 @@ class ProfessionalController extends ApiController
                 (string) $pro->id
             );
 
-            // Resolve primary brand partner status + name so the dashboard can
-            // surface affiliate-facing banners and status dots for non-live brands.
-            // Served from the brand-partner-status cache (5-min TTL) — busted by
-            // BrandProfileObserver on brand_status writes and ProfessionalObserver
-            // on display_name writes, so transitions surface within seconds.
+            // Resolve primary brand partner status + name + handle so the
+            // dashboard can surface affiliate-facing banners, status dots,
+            // and the canonical affiliate page URL for non-live brands.
+            $primaryBrandHandle = null;
             if ($pro->professional_type !== 'brand') {
                 $brandPartnerId = $siteSettings['brand_partner']['professional_id'] ?? null;
                 if ($brandPartnerId) {
                     $partner = $cache->getBrandPartnerStatus((string) $brandPartnerId);
                     $primaryBrandStatus = $partner['brand_status'] ?? BrandStatus::Onboarding->value;
                     $primaryBrandName = $partner['display_name'] ?? null;
+                    $primaryBrandHandle = $partner['handle'] ?? null;
                 }
             }
         }
@@ -69,7 +70,15 @@ class ProfessionalController extends ApiController
                 'subdomain' => $pro->site->subdomain,
                 'is_published' => (bool) $pro->site->is_published,
                 'settings' => $siteSettings,
-                'storefront_base_url' => $this->resolveStorefrontBaseUrl($brandStoreSettings, $pro->site->subdomain),
+                'storefront_base_url' => $brandStoreSettings
+                    ? $brandStoreSettings->storefrontBaseUrl($pro->site->subdomain)
+                    : 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'sidest.co'),
+                'affiliate_page_url' => $pro->site->subdomain
+                    ? 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'sidest.co')
+                        .($pro->professional_type !== 'brand' && $primaryBrandHandle
+                            ? '/'.$primaryBrandHandle
+                            : '')
+                    : null,
             ] : null,
         ];
 

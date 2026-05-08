@@ -274,7 +274,7 @@ class ProfessionalCacheService
                     ->first(['brand_status']);
                 $professional = Professional::query()
                     ->whereKey($brandProfessionalId)
-                    ->first(['display_name']);
+                    ->first(['display_name', 'handle']);
 
                 if (! $brandProfile && ! $professional) {
                     return null;
@@ -283,6 +283,7 @@ class ProfessionalCacheService
                 return [
                     'brand_status' => $brandProfile?->brand_status,
                     'display_name' => $professional?->display_name,
+                    'handle' => $professional?->handle,
                 ];
             },
             nullTtl: now()->addSeconds(30),

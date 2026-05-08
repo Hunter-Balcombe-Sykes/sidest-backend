@@ -22,7 +22,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 //   logo: { full_url, square_url },                        url|null
 //   slogan: string|null,
 //   font_family: string,                                    enum slug — always set (default applied upstream)
-//   placeholders: [{ id, alt_text, url, sort_order }],
+//   placeholders: [{ id, alt_text, url, sort_order, processing_state }],
 //   shopify_connected: bool
 // }
 class BrandDesignResource extends JsonResource
@@ -53,6 +53,7 @@ class BrandDesignResource extends JsonResource
                     'alt_text' => $p['alt_text'] ?? null,
                     'url' => $p['url'] ?? null,
                     'sort_order' => isset($p['sort_order']) ? (int) $p['sort_order'] : 0,
+                    'processing_state' => $p['processing_state'] ?? 'ready',
                 ],
                 $placeholders
             ),
