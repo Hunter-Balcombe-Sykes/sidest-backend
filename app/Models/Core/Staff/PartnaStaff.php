@@ -15,7 +15,7 @@ class PartnaStaff extends BaseModel
 
     const ROLE_ADMIN = 'admin';
 
-    protected $table = 'core.sidest_staff';
+    protected $table = 'core.partna_staff';
 
     public $incrementing = false;
 

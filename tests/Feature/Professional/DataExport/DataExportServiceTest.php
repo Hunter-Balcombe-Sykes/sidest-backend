@@ -72,7 +72,7 @@ it('allows a new export after the dedup window passes', function () {
 it('staff dispatch with send_to=staff resolves recipient to the staff email', function () {
     $pro = seedProForService((string) Str::uuid());
     $staffId = (string) Str::uuid();
-    DB::connection('pgsql')->table('core.sidest_staff')->insert([
+    DB::connection('pgsql')->table('core.partna_staff')->insert([
         'id' => $staffId,
         'role' => 'admin',
         'primary_email' => 'admin@sidest.io',
@@ -90,7 +90,7 @@ it('staff dispatch with send_to=staff resolves recipient to the staff email', fu
 it('staff dispatch with send_to=professional resolves recipient to the professional email', function () {
     $pro = seedProForService((string) Str::uuid(), 'jane@example.com');
     $staffId = (string) Str::uuid();
-    DB::connection('pgsql')->table('core.sidest_staff')->insert([
+    DB::connection('pgsql')->table('core.partna_staff')->insert([
         'id' => $staffId,
         'role' => 'support',
         'primary_email' => 'support@sidest.io',

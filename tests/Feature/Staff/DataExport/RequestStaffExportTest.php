@@ -18,7 +18,7 @@ beforeEach(function () {
 function seedStaff(string $role): PartnaStaff
 {
     $id = (string) Str::uuid();
-    DB::connection('pgsql')->table('core.sidest_staff')->insert([
+    DB::connection('pgsql')->table('core.partna_staff')->insert([
         'id' => $id,
         'role' => $role,
         'primary_email' => $role.'@sidest.io',

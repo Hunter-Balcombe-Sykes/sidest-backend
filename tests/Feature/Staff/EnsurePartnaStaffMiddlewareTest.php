@@ -75,7 +75,7 @@ it('accepts multiple allowed roles (any match passes)', function () {
     expect($response->getStatusCode())->toBe(200);
 });
 
-// The next two tests exercise the DB lookup path (no pre-set sidest_staff attribute).
+// The next two tests exercise the DB lookup path (no pre-set partna_staff attribute).
 // They verify the middleware is fail-closed: a valid Supabase UID alone is not enough —
 // a matching PartnaStaff DB record must also exist.
 
@@ -99,7 +99,7 @@ it('passes through when supabase uid maps to a PartnaStaff record in DB', functi
     $uid = 'uid-with-staff-record';
     $now = now()->toDateTimeString();
 
-    \Illuminate\Support\Facades\DB::connection('pgsql')->table('core.sidest_staff')->insert([
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('core.partna_staff')->insert([
         'id' => (string) \Illuminate\Support\Str::uuid(),
         'auth_user_id' => $uid,
         'role' => PartnaStaff::ROLE_SUPPORT,

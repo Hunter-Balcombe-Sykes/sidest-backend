@@ -69,7 +69,7 @@ class AccountDeletionTestCase
             created_at TEXT
         )');
 
-        $conn->statement('CREATE TABLE IF NOT EXISTS core.sidest_staff (
+        $conn->statement('CREATE TABLE IF NOT EXISTS core.partna_staff (
             id TEXT PRIMARY KEY,
             auth_user_id TEXT,
             role TEXT,

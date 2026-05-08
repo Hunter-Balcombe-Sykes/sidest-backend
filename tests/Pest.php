@@ -1061,12 +1061,12 @@ function setupCommerceOrdersTables(): void
 }
 
 /**
- * core.sidest_staff — internal staff accounts, linked to Supabase auth users.
+ * core.partna_staff — internal staff accounts, linked to Supabase auth users.
  */
 function setupPartnaStaffTable(): void
 {
     attachTestSchemas();
-    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.sidest_staff (
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.partna_staff (
         id TEXT PRIMARY KEY,
         auth_user_id TEXT NULL,
         role TEXT NULL,

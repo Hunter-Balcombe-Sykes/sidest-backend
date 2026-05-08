@@ -32,7 +32,7 @@ function makeAdminStaff(array $overrides = []): PartnaStaff
         'primary_email' => 'admin@sidest.test',
     ], $overrides);
 
-    DB::connection('pgsql')->table('core.sidest_staff')->insert($data);
+    DB::connection('pgsql')->table('core.partna_staff')->insert($data);
 
     return PartnaStaff::query()->where('id', $id)->first();
 }
@@ -272,7 +272,7 @@ it('non-admin staff get 403 from EnsurePartnaAdmin middleware', function () {
     $nonAdminUid = (string) Str::uuid();
     $staffId = (string) Str::uuid();
 
-    DB::connection('pgsql')->table('core.sidest_staff')->insert([
+    DB::connection('pgsql')->table('core.partna_staff')->insert([
         'id' => $staffId,
         'auth_user_id' => $nonAdminUid,
         'role' => 'support',
