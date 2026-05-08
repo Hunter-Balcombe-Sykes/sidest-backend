@@ -43,6 +43,7 @@ use App\Http\Controllers\Api\Professional\Store\BrandCatalogController;
 use App\Http\Controllers\Api\Professional\Store\BrandCollectionController;
 use App\Http\Controllers\Api\Professional\Store\BrandDesignController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreSettingsController;
+use App\Http\Controllers\Api\Professional\Store\ShareCheckoutLinkController;
 use App\Http\Controllers\Api\Professional\Store\ShopifyResyncController;
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
@@ -430,6 +431,10 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
                 ->middleware('throttle:affiliate-writes')
                 ->where('productGid', '.*');
             Route::post('/affiliate/selections/reset-to-defaults', [AffiliateProductController::class, 'resetToDefaults'])
+                ->middleware('throttle:affiliate-writes');
+
+            // Share link checkout — creates a pre-filled Shopify cart and returns the checkout URL
+            Route::post('/share/checkout-link', [ShareCheckoutLinkController::class, 'store'])
                 ->middleware('throttle:affiliate-writes');
 
             // Affiliate Custom Product Photos
