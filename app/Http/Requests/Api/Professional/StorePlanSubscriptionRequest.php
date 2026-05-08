@@ -22,7 +22,7 @@ class StorePlanSubscriptionRequest extends BaseFormRequest
 
     private function freePlanId(): string
     {
-        return Cache::remember('billing.free_plan_id', 3600, function () {
+        return Cache::memo()->remember('billing.free_plan_id', 3600, function () {
             return Plan::where('plan_key', 'free')->value('id') ?? '';
         });
     }

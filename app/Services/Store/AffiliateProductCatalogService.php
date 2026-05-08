@@ -189,7 +189,7 @@ GRAPHQL;
      */
     public function fetchActiveCatalog(string $brandProfessionalId): array
     {
-        return Cache::remember(
+        return Cache::memo()->remember(
             CacheKeyGenerator::brandActiveCatalog($brandProfessionalId),
             now()->addMinutes(5),
             fn () => $this->queryStorefrontCatalog($brandProfessionalId),

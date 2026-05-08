@@ -41,7 +41,7 @@ class EmbeddedProductAnalyticsController extends ApiController
 
         $cacheKey = "embedded:product-analytics:{$professionalId}:{$productId}";
 
-        return Cache::remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $productId) {
+        return Cache::memo()->remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $productId) {
             return $this->success($this->build($professionalId, $productId));
         });
     }

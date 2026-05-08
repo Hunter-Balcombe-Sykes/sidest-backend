@@ -376,7 +376,7 @@ GRAPHQL;
      */
     public function fetchBrandCatalog(Professional $brand): array
     {
-        return Cache::remember(
+        return Cache::memo()->remember(
             CacheKeyGenerator::brandAdminCatalog((string) $brand->id),
             now()->addMinutes(5),
             fn () => $this->queryAdminCatalog($brand),
@@ -837,7 +837,7 @@ GRAPHQL;
     {
         $cacheKey = CacheKeyGenerator::brandCollectionGid((string) $integration->professional_id, $handle);
 
-        return Cache::remember($cacheKey, now()->addMinutes(self::COLLECTION_GID_CACHE_TTL_MINUTES), function () use ($integration, $handle) {
+        return Cache::memo()->remember($cacheKey, now()->addMinutes(self::COLLECTION_GID_CACHE_TTL_MINUTES), function () use ($integration, $handle) {
             $resolved = $this->resolveCredentials($integration);
 
             $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::COLLECTIONS_QUERY, [

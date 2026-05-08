@@ -53,7 +53,7 @@ class HydrogenBrandDesignController extends ApiController
         $site = Site::where('professional_id', $professional->id)->first();
         $cacheKey = CacheKeyGenerator::hydrogenBrandDesign((string) ($site?->id ?? "nosite:{$professional->id}"));
 
-        $payload = Cache::remember(
+        $payload = Cache::memo()->remember(
             $cacheKey,
             self::CACHE_TTL_SECONDS,
             fn () => $this->buildDesignPayload($professional, $site)
