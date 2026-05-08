@@ -363,7 +363,7 @@
     - **Plain English:** Some clients (like the Shopify storefront and mobile apps) ask "has this changed since last time?" instead of always downloading the full page. We can answer "no, same as before" with a tiny response. It only helps repeat visitors, but they're our most common case.
     - **Evidence:** Not yet implemented — net new middleware.
 
-- [ ] **#GS-10** · P3 — Wire phpredis serializer (igbinary) + LZ4 compression when payload size warrants
+- [x] **#GS-10** · P3 — Wire phpredis serializer (igbinary) + LZ4 compression when payload size warrants
     - **Where:** config/database.php — Redis connection options; trigger when median cached payload exceeds ~10KB or Redis memory crosses ~1GB
     - **Affects:** Redis memory footprint + network I/O. Roughly 3× compression ratio with igbinary alone, more with LZ4 on top.
     - **Effort:** S (~1h plus phpredis rebuild check)
