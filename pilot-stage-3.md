@@ -59,7 +59,7 @@
 
 ### P0
 
-- [ ] **#AUTH-1** · P0 — VerifyEmbeddedApiKey silently bypasses auth when `embedded.api_key` config is empty
+- [x] **#AUTH-1** · P0 — VerifyEmbeddedApiKey silently bypasses auth when `embedded.api_key` config is empty
     - **Where:** app/Http/Middleware/Auth/VerifyEmbeddedApiKey.php:20–28
     - **Affects:** All routes under `internal/embedded/*` — setup wizard, deployment token creation, deploy-now trigger, domain provisioning, brand config. Any of these can be called without a valid key if the env var is absent at deploy time.
     - **Effort:** S (~0.5–1h)
