@@ -97,7 +97,7 @@
 
 ### P1
 
-- [ ] **#AUTH-2** · P1 — BrandAffiliateInvite write and delete endpoints missing `brand.only` middleware — any authenticated professional can reach brand-only controllers
+- [x] **#AUTH-2** · P1 — BrandAffiliateInvite write and delete endpoints missing `brand.only` middleware — any authenticated professional can reach brand-only controllers
     - **Where:** routes/api/professional.php:105–111
     - **Affects:** POST `/brand-affiliate-invites`, `/brand-affiliate-invites/bulk`, `/brand-affiliate-invites/import-csv`, and DELETE `/brand-affiliate-invites/{invite}` — all are reachable by any authenticated professional (affiliate, influencer, or professional type), not just brands.
     - **Effort:** S (~0.5–1h)
@@ -136,7 +136,7 @@
 
 ### P2
 
-- [ ] **#AUTH-3** · P2 — `/internal/hydrogen/affiliate` is the only Hydrogen route outside `hydrogen.key` middleware with no explicit unauthenticated annotation
+- [x] **#AUTH-3** · P2 — `/internal/hydrogen/affiliate` is the only Hydrogen route outside `hydrogen.key` middleware with no explicit unauthenticated annotation
     - **Where:** routes/api.php:115–117
     - **Affects:** The affiliate identity endpoint used by the Hydrogen storefront client-side. Security relies entirely on controller-level verification that a valid, active brand-affiliate link exists — not verifiable from route definitions alone.
     - **Effort:** S (~0.5–1h)
@@ -205,7 +205,7 @@
 
 ### P3
 
-- [ ] **#AUTH-5** · P3 — Duplicate `Gate::policy` registration for `CommissionMovement` in AppServiceProvider
+- [x] **#AUTH-5** · P3 — Duplicate `Gate::policy` registration for `CommissionMovement` in AppServiceProvider
     - **Where:** app/Providers/AppServiceProvider.php:46–47
     - **Affects:** No runtime behavior — `Gate::policy` registration is idempotent. Indicates a copy-paste error that may mask a missing registration for a different model.
     - **Effort:** S (~0.5–1h)
