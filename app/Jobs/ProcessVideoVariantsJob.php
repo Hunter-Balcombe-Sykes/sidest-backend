@@ -75,6 +75,17 @@ class ProcessVideoVariantsJob implements ShouldQueue
             return;
         }
 
+        // Guard against redelivered jobs overwriting a terminal state back to processing.
+        // At-least-once delivery makes this a certainty rather than a theory on Horizon.
+        if (in_array($siteMedia->processing_state, [SiteMedia::PROCESSING_STATE_READY, SiteMedia::PROCESSING_STATE_FAILED], true)) {
+            Log::info('ProcessVideoVariantsJob: already in terminal state, skipping.', [
+                'media_id' => $this->mediaId,
+                'processing_state' => $siteMedia->processing_state,
+            ]);
+
+            return;
+        }
+
         SiteMedia::query()
             ->where('id', $this->mediaId)
             ->whereNull('deleted_at')
@@ -120,6 +131,14 @@ class ProcessVideoVariantsJob implements ShouldQueue
                 mediaId: $this->mediaId,
                 basePath: $this->basePath,
             );
+
+            SiteMedia::query()
+                ->where('id', $this->mediaId)
+                ->whereNull('deleted_at')
+                ->update([
+                    'processing_state' => SiteMedia::PROCESSING_STATE_READY,
+                    'processing_error' => null,
+                ]);
 
             Log::info('ProcessVideoVariantsJob: completed.', ['media_id' => $this->mediaId]);
         } catch (Throwable $e) {

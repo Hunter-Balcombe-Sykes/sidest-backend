@@ -70,6 +70,17 @@ class ProcessImageVariantsJob implements ShouldQueue
             return;
         }
 
+        // Guard against redelivered jobs overwriting a terminal state back to processing.
+        // At-least-once delivery makes this a certainty rather than a theory on Horizon.
+        if (in_array($siteMedia->processing_state, [SiteMedia::PROCESSING_STATE_READY, SiteMedia::PROCESSING_STATE_FAILED], true)) {
+            Log::info('ProcessImageVariantsJob: already in terminal state, skipping.', [
+                'image_id' => $this->imageId,
+                'processing_state' => $siteMedia->processing_state,
+            ]);
+
+            return;
+        }
+
         SiteMedia::query()
             ->where('id', $this->imageId)
             ->whereNull('deleted_at')
