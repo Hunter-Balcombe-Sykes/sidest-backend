@@ -95,10 +95,7 @@ return [
 
         'failover' => [
             'driver' => 'failover',
-            'stores' => [
-                'database',
-                'array',
-            ],
+            'stores' => ['redis', 'array'],
         ],
 
     ],
