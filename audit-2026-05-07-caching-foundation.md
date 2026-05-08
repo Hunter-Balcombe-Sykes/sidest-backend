@@ -30,7 +30,7 @@
 
 ## P1 — Fix before pilot launch
 
-- [ ] **#CACHE-1** · P1 — `invalidateSite` does not bust `:stale` copies for site block caches → 2.5 hours of stale blocks after every edit
+- [x] **#CACHE-1** · P1 — `invalidateSite` does not bust `:stale` copies for site block caches → 2.5 hours of stale blocks after every edit
     - **Where:** app/Services/Cache/SiteCacheService.php:786-787 (the bust list inside `invalidateSite()` at line 780)
     - **Affects:** Any site visitor who loads a page within 2.5 hours of a block edit (link or section change). The SWR fast path returns the pre-edit block list.
     - **Effort:** S (~0.5–1h)
