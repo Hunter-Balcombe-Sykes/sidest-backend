@@ -218,7 +218,7 @@
         ],
         ```
 
-- [ ] **#GS-3** · P2 — Centralize TTL constants in `config/cache.php` (currently scattered as magic numbers)
+- [x] **#GS-3** · P2 — Centralize TTL constants in `config/cache.php` (currently scattered as magic numbers)
     - **Where:** `app/Services/Cache/SiteCacheService.php:25` (15m), `AnalyticsCacheService.php:23` (5m), `ProfessionalCacheService.php:27` (30m), `:41` (60s), `:161` (60s); webhook controllers (24h); `BrandCatalogService` (~10m)
     - **Affects:** Operational agility — currently any TTL change requires a code edit + redeploy. Cannot tune for a degraded Redis or a hot-key incident.
     - **Effort:** S (~0.5–1h)
