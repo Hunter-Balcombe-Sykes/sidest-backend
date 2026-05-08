@@ -413,7 +413,7 @@
         // No check against PROCESSING_STATE_READY or PROCESSING_STATE_FAILED before overwriting
         ```
 
-- [ ] **#JOB-3** · P1 — VoidPendingCommissionsForLinkJob has no `failed()` handler; terminal void failures leave commission in indeterminate state with no alert
+- [x] **#JOB-3** · P1 — VoidPendingCommissionsForLinkJob has no `failed()` handler; terminal void failures leave commission in indeterminate state with no alert
     - **Where:** app/Jobs/Stripe/VoidPendingCommissionsForLinkJob.php (class-level omission)
     - **Affects:** Brand-affiliate disconnections where the pending commission void job exhausts its 3 retries. No Nightwatch alert fires, no audit trail is written, and the disconnected pair's stale commission entries remain active with no expiry mechanism. Operations cannot detect the gap without manually querying `commission_movements` for the disconnected pair.
     - **Effort:** S (~0.5–1h)
@@ -447,7 +447,7 @@
         }
         ```
 
-- [ ] **#JOB-4** · P1 — ProcessShopifyOrderWebhookJob has no `failed()` handler; terminal orders/paid failures silently drop commission records
+- [x] **#JOB-4** · P1 — ProcessShopifyOrderWebhookJob has no `failed()` handler; terminal orders/paid failures silently drop commission records
     - **Where:** app/Jobs/Shopify/ProcessShopifyOrderWebhookJob.php (class-level omission)
     - **Affects:** Every Shopify `orders/paid` event. A terminal failure after 3 retries means the `commerce.orders` row is never written, no `order_events` row exists, no rollup trigger fires, no analytics cache invalidation occurs, and no Nightwatch alert surfaces. From the platform's perspective the sale never happened. The affiliate is never paid; the brand never sees the attributed sale.
     - **Effort:** S (~0.5–1h)
@@ -483,7 +483,7 @@
         }
         ```
 
-- [ ] **#JOB-5** · P1 — ProcessShopifyOrderUpdatedWebhookJob has no `failed()` handler; terminal refund/cancel failures cause silent commission drift
+- [x] **#JOB-5** · P1 — ProcessShopifyOrderUpdatedWebhookJob has no `failed()` handler; terminal refund/cancel failures cause silent commission drift
     - **Where:** app/Jobs/Shopify/ProcessShopifyOrderUpdatedWebhookJob.php (class-level omission)
     - **Affects:** Order lifecycle corrections: `orders/cancelled`, `refunds/create`, `orders/edited`. A terminal failure after 3 retries means `commerce.orders` drifts from Shopify — cancelled orders remain `approved`, refunds are not applied, and `brand_affiliate_rollup.reversed_commission_cents` is understated because the `trg_rollup_clawback` trigger never fires. Affiliates receive commission payouts for sales that were fully refunded or cancelled, with no alert that the correction failed.
     - **Effort:** S (~0.5–1h)
@@ -522,7 +522,7 @@
 
 ### P2
 
-- [ ] **#JOB-6** · P2 — SeedAffiliateDefaultSelectionsJob has no `failed()` handler; terminal failure leaves new affiliates with an empty store and no alert
+- [x] **#JOB-6** · P2 — SeedAffiliateDefaultSelectionsJob has no `failed()` handler; terminal failure leaves new affiliates with an empty store and no alert
     - **Where:** app/Jobs/Store/SeedAffiliateDefaultSelectionsJob.php (class-level omission)
     - **Affects:** Any affiliate who connects to a brand for the first time. After 3 retries exhaust with no success, the affiliate's product catalog is empty — the brand's default collection is not seeded. There is no Nightwatch alert, no support ticket, and no retry path beyond the initial 3 attempts. The affiliate sees a blank store and has no indication of whether this is normal or broken.
     - **Effort:** S (~0.5–1h)
@@ -555,7 +555,7 @@
         }
         ```
 
-- [ ] **#JOB-7** · P2 — SendWeeklyAnalyticsNotificationJob has `tries=1` with no `failed()` handler; a single exception silently drops the entire weekly fan-out for all users
+- [x] **#JOB-7** · P2 — SendWeeklyAnalyticsNotificationJob has `tries=1` with no `failed()` handler; a single exception silently drops the entire weekly fan-out for all users
     - **Where:** app/Jobs/Notifications/SendWeeklyAnalyticsNotificationJob.php:27–28
     - **Affects:** All active professionals on the platform. Any exception during the chunked DB scan — Redis unavailable, Postgres timeout, OOM kill mid-loop — terminates the job immediately with no retry and no Nightwatch alert. Every active user misses that week's analytics summary. There is no way to know this happened except by noticing the absence of notifications in a week's worth of user feedback.
     - **Effort:** S (~0.5–1h)
