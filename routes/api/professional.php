@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Professional\AffiliateInviteController;
 use App\Http\Controllers\Api\Professional\Analytics\AffiliateCommerceAnalyticsController;
+use App\Http\Controllers\Api\Professional\Analytics\AffiliateProjectionsController;
 use App\Http\Controllers\Api\Professional\Analytics\BrandCommerceAnalyticsController;
 use App\Http\Controllers\Api\Professional\Booking\BookingAnalyticsController;
 use App\Http\Controllers\Api\Professional\BrandAffiliateController;
@@ -164,6 +165,7 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
             Route::get('/booking/my-analytics/overview', [BookingAnalyticsController::class, 'myOverview']);
         });
         Route::get('/affiliate/commerce-analytics', [AffiliateCommerceAnalyticsController::class, 'overview']);
+        Route::get('/affiliate/projections', [AffiliateProjectionsController::class, 'show'])->name('professional.affiliate.projections');
         Route::get('/brand/commerce-analytics', [BrandCommerceAnalyticsController::class, 'overview']);
 
         // View Analytics

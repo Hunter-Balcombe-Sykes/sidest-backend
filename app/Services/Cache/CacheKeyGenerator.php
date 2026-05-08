@@ -198,6 +198,22 @@ class CacheKeyGenerator
         return "analytics:booking:{$professionalId}:{$from}:{$to}:{$groupBy}";
     }
 
+    /**
+     * Cache key for the per-professional affiliate projections payload.
+     * No date-range component — projections are always computed "as of now".
+     *
+     * Optional $windowDays argument: when null, the key is the adaptive default;
+     * when set (one of the allowlist tiers), it appends a `:wN` suffix so explicit
+     * overrides don't share cache state with the default. Bump v1 → v2 if the
+     * response shape changes.
+     */
+    public static function affiliateProjections(string $professionalId, ?int $windowDays = null): string
+    {
+        $base = "analytics:commerce:affiliate:projections:v1:{$professionalId}";
+
+        return $windowDays === null ? $base : "{$base}:w{$windowDays}";
+    }
+
     // @multi-site: needs site_id — commerce traffic is tied to a site storefront
     public static function affiliateCommerceAnalytics(string $professionalId, string $from, string $to): string
     {

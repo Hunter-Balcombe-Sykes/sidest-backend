@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Models\Commerce\BrandAffiliateRollup;
 use App\Models\Core\Professional\Professional;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Auth\Access\Response;
@@ -53,6 +54,18 @@ class CommissionPolicy extends BasePolicy
         }
 
         return $this->denyAsNotFound();
+    }
+
+    /**
+     * Authorizes a professional to view their own affiliate projections.
+     *
+     * The skeleton must carry the affiliate_professional_id of the *requested* projections.
+     * Defense-in-depth: RLS on commerce.brand_affiliate_rollup also blocks cross-tenant reads,
+     * but we want a clean 403 at the HTTP layer rather than an empty result.
+     */
+    public function viewProjections(Professional $pro, BrandAffiliateRollup $skeleton): bool
+    {
+        return (string) $pro->id === (string) $skeleton->affiliate_professional_id;
     }
 
     public function update(Professional $actor, Model $record): bool|Response

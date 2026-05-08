@@ -155,3 +155,21 @@ it('denies view on a BrandCommissionTopup with 404 when actor has no claim and l
     expect($result->denied())->toBeTrue();
     expect($result->status())->toBe(404);
 });
+
+// ---------------------------------------------------------------------------
+// viewProjections — BrandAffiliateRollup skeleton (affiliate self-access)
+// ---------------------------------------------------------------------------
+
+it('allows a professional to view their own projections', function () {
+    $pro = (new Professional)->forceFill(['id' => '11111111-1111-1111-1111-111111111111']);
+    $skeleton = (new \App\Models\Commerce\BrandAffiliateRollup)->forceFill(['affiliate_professional_id' => $pro->id]);
+
+    expect($this->policy->viewProjections($pro, $skeleton))->toBeTrue();
+});
+
+it('denies a professional from viewing another professional projections', function () {
+    $pro = (new Professional)->forceFill(['id' => '11111111-1111-1111-1111-111111111111']);
+    $skeleton = (new \App\Models\Commerce\BrandAffiliateRollup)->forceFill(['affiliate_professional_id' => '22222222-2222-2222-2222-222222222222']);
+
+    expect($this->policy->viewProjections($pro, $skeleton))->toBeFalse();
+});

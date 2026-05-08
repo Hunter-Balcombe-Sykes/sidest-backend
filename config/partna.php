@@ -729,6 +729,22 @@ return [
 
     'analytics_raw_event_retention_days' => (int) env('ANALYTICS_RAW_EVENT_RETENTION_DAYS', 90),
 
+    'commerce_analytics' => [
+        // SWR cache TTL (seconds) for the affiliate projections endpoint. Push-invalidated on every commerce
+        // webhook write via AnalyticsCacheService::invalidateAnalytics(), so this is the upper bound on staleness
+        // when no writes happen — not the typical staleness.
+        'projections_ttl_seconds' => (int) env('COMMERCE_PROJECTIONS_TTL_SECONDS', 300),
+
+        // Adaptive window tiers, descending. Service picks the largest tier the affiliate has ≥ days of history for.
+        // Below the smallest tier, response returns status=insufficient_data.
+        'projections_window_tiers' => [90, 60, 30, 14],
+
+        // Confidence band thresholds. CV = stddev / mean of daily net-commission within the window.
+        'projections_confidence_high' => ['min_history_days' => 90, 'max_cv' => 0.5],
+        'projections_confidence_medium' => ['min_history_days' => 30, 'max_cv' => 1.0],
+        // Anything qualifying for the window but not above is "low".
+    ],
+
     // How many days after the billing period ends a past_due subscription retains plan entitlements.
     // After this window, access is revoked until Stripe collects payment or cancels.
     'billing' => [

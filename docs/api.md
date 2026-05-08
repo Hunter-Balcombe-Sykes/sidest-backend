@@ -1783,6 +1783,60 @@ Rollups:
 - Weekly/monthly results are query-time rollups from daily tables
 - Week buckets use Monday start (`date_trunc('week', day::timestamp)::date`)
 
+### Affiliate Projections
+
+#### `GET /api/affiliate/projections`
+
+Returns straight-line annual + year-end forecasts, run-rate, momentum, YTD, best-month, and engagement metrics for the authenticated affiliate.
+
+**Auth:** Bearer Supabase JWT (professional). Defense-in-depth via `CommissionPolicy::viewProjections`.
+
+**Query params:**
+- `window_days` (optional, integer): one of `14`, `30`, `60`, `90`. When omitted, the service picks the largest tier the affiliate has enough history for (history must *exceed* the tier — e.g. 31+ days of history qualifies for the 30-day window).
+
+**Caching:** SWR via `CacheLockService::rememberLocked`. TTL 5 min (configurable via `partna.commerce_analytics.projections_ttl_seconds`). Push-invalidated by `AnalyticsCacheService::invalidateAnalytics()` on every order/edit/cancel/refund webhook. Per-window cache keys when `window_days` is provided so explicit overrides don't share cache state with the adaptive default.
+
+**Status values:**
+- `ok` — projections returned per currency.
+- `insufficient_data` — affiliate has less than 14 days of history (or insufficient history for an explicitly requested window). `window` is `null`, `by_currency` is `[]`.
+
+**Response (status=ok):**
+```json
+{
+  "as_of": "2026-05-07T14:23:11+00:00",
+  "data_history_days": 47,
+  "status": "ok",
+  "window": { "days": 30, "from": "2026-04-07", "to": "2026-05-06" },
+  "engagement": { "earning_days_count": 22, "active_brand_count": 2 },
+  "by_currency": [
+    {
+      "currency_code": "USD",
+      "run_rate": { "commission_cents_per_day": 4231, "orders_per_day": 1.2 },
+      "projections": {
+        "annual_commission_cents": 1544315,
+        "year_end_commission_cents": 1102000,
+        "annual_orders": 438,
+        "confidence": "medium"
+      },
+      "momentum": { "pct_change_vs_prior_window": 0.23, "prior_run_rate_cents_per_day": 3440 },
+      "ytd": {
+        "commission_cents": 612000,
+        "orders_count": 178,
+        "best_month": "2026-03",
+        "best_month_commission_cents": 184000
+      }
+    }
+  ]
+}
+```
+
+**Confidence band:**
+- `high` — ≥90 days of history AND coefficient of variation (stddev / mean) < 0.5
+- `medium` — ≥30 days of history AND CV < 1.0
+- `low` — qualifying for the smallest tier but above thresholds (or CV unmeasurable)
+
+`by_currency` is sorted descending by in-window net commission, so the frontend can render `by_currency[0]` as the primary currency.
+
 ### Media Uploads (images and videos, server-side processing)
 
 Images and videos are uploaded through the Partna API (not directly to storage). Each upload stores the original on the media disk (Laravel Cloud Object Storage / Cloudflare R2) and enqueues a processing job.

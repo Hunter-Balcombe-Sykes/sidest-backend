@@ -82,6 +82,20 @@ class AnalyticsCacheService
         // The stale entries will expire on their own TTL (≤ 24 h).
         Cache::increment(CacheKeyGenerator::analyticsSummaryVersion($professionalId));
 
+        // Drop every variant of the affiliate projections cache (adaptive default + each
+        // window-tier override). Driven from config so that adding/removing a tier in
+        // `partna.commerce_analytics.projections_window_tiers` automatically updates
+        // invalidation — pragmatic explicit list rather than wildcard SCAN.
+        $projectionVariants = array_merge(
+            [null],
+            (array) config('partna.commerce_analytics.projections_window_tiers', [90, 60, 30, 14])
+        );
+        foreach ($projectionVariants as $w) {
+            $w = $w === null ? null : (int) $w;
+            Cache::forget(CacheKeyGenerator::affiliateProjections($professionalId, $w));
+            Cache::forget(CacheKeyGenerator::affiliateProjections($professionalId, $w).':stale');
+        }
+
         // Delete the rolling 90-day window of visit and click stat keys.
         $keys = [];
         $end = Carbon::now();
