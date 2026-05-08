@@ -11,19 +11,12 @@ class ProfessionalDashboardResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $isBrand = $this->resource->isBrand();
-
-        return array_merge(
-            [
-                'id' => $this->id,
-                'auth_user_id' => $this->auth_user_id,
-                'professional_type' => $this->professional_type,
-            ],
-            $isBrand
-                ? ['brand_name' => $this->display_name]
-                : ['username' => $this->display_name],
-            [
-                'partna_url' => $this->partna_url,
+        return [
+            'id' => $this->id,
+            'auth_user_id' => $this->auth_user_id,
+            'professional_type' => $this->professional_type,
+            'display_name' => $this->display_name,
+            'partna_url' => $this->partna_url,
                 'first_name' => $this->first_name,
                 'last_name' => $this->last_name,
                 'bio' => $this->bio,
@@ -53,7 +46,6 @@ class ProfessionalDashboardResource extends JsonResource
                         && ! empty($integration->external_account_id);
                 }),
                 'square_merchant_id' => $this->whenLoaded('squareIntegration', fn () => $this->squareIntegration?->external_account_id),
-            ]
-        );
+        ];
     }
 }

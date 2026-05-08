@@ -11,19 +11,12 @@ class ProfessionalStaffResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $isBrand = $this->resource->isBrand();
-
-        return array_merge(
-            [
-                'id' => $this->id,
-                'auth_user_id' => $this->auth_user_id,
-                'professional_type' => $this->professional_type,
-            ],
-            $isBrand
-                ? ['brand_name' => $this->display_name]
-                : ['username' => $this->display_name],
-            [
-                'partna_url' => $this->partna_url,
+        return [
+            'id' => $this->id,
+            'auth_user_id' => $this->auth_user_id,
+            'professional_type' => $this->professional_type,
+            'display_name' => $this->display_name,
+            'partna_url' => $this->partna_url,
                 'first_name' => $this->first_name,
                 'last_name' => $this->last_name,
                 'bio' => $this->bio,
@@ -44,7 +37,6 @@ class ProfessionalStaffResource extends JsonResource
                 'stripe_connect_status' => $this->stripe_connect_status,
                 'created_at' => $this->created_at?->toIso8601String(),
                 'updated_at' => $this->updated_at?->toIso8601String(),
-            ]
-        );
+        ];
     }
 }

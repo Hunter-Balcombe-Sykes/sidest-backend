@@ -39,23 +39,13 @@ function buildPro(array $overrides = []): Professional
     return $pro;
 }
 
-it('returns brand_name for brand-type professionals', function () {
-    $pro = buildPro(['professional_type' => 'brand', 'display_name' => 'Push Pull']);
+it('returns display_name and partna_url', function () {
+    $pro = buildPro(['display_name' => 'Push Pull', 'partna_url' => 'https://pushpull.partna.au']);
     $array = (new ProfessionalResource($pro))->toArray(Request::create('/'));
 
     expect($array)
-        ->toHaveKey('brand_name', 'Push Pull')
-        ->not->toHaveKey('username')
-        ->toHaveKey('partna_url', $pro->partna_url);
-});
-
-it('returns username for non-brand professionals', function () {
-    $pro = buildPro(['professional_type' => 'influencer', 'display_name' => 'Barber Josh']);
-    $array = (new ProfessionalResource($pro))->toArray(Request::create('/'));
-
-    expect($array)
-        ->toHaveKey('username', 'Barber Josh')
-        ->not->toHaveKey('brand_name');
+        ->toHaveKey('display_name', 'Push Pull')
+        ->toHaveKey('partna_url', 'https://pushpull.partna.au');
 });
 
 it('does not expose handle or internal fields', function () {
@@ -64,6 +54,5 @@ it('does not expose handle or internal fields', function () {
 
     expect($array)
         ->not->toHaveKey('handle')
-        ->not->toHaveKey('handle_lc')
-        ->not->toHaveKey('display_name');
+        ->not->toHaveKey('handle_lc');
 });

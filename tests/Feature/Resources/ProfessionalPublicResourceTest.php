@@ -4,7 +4,7 @@ use App\Http\Resources\ProfessionalPublicResource;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\Request;
 
-it('returns brand_name and partna_url, no PII', function () {
+it('returns display_name and partna_url, no PII', function () {
     $pro = new Professional;
     $pro->setRawAttributes([
         'id' => 'pro-1',
@@ -27,29 +27,10 @@ it('returns brand_name and partna_url, no PII', function () {
     $array = (new ProfessionalPublicResource($pro))->toArray(Request::create('/'));
 
     expect($array)
-        ->toHaveKey('brand_name', 'Evo')
+        ->toHaveKey('display_name', 'Evo')
         ->toHaveKey('partna_url', 'https://evo.partna.au')
         ->not->toHaveKey('handle')
-        ->not->toHaveKey('display_name')
         ->not->toHaveKey('first_name')
         ->not->toHaveKey('last_name')
         ->not->toHaveKey('primary_email');
-});
-
-it('returns username for non-brand professionals', function () {
-    $pro = new Professional;
-    $pro->setRawAttributes([
-        'id' => 'pro-2',
-        'handle' => 'barber-josh',
-        'handle_lc' => 'barber-josh',
-        'display_name' => 'Barber Josh',
-        'professional_type' => 'influencer',
-        'partna_url' => 'https://barber-josh.partna.au',
-    ]);
-
-    $array = (new ProfessionalPublicResource($pro))->toArray(Request::create('/'));
-
-    expect($array)
-        ->toHaveKey('username', 'Barber Josh')
-        ->not->toHaveKey('brand_name');
 });
