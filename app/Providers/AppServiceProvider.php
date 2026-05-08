@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Horizon\Horizon;
 
 // V2: Bootstraps application-wide rate limiters for public, authenticated, webhook, staff, and internal API routes.
 class AppServiceProvider extends ServiceProvider
@@ -75,6 +76,11 @@ class AppServiceProvider extends ServiceProvider
         if (app()->isProduction() && ! (bool) config('partna.throttle.enabled', true)) {
             throw new \RuntimeException('PARTNA_THROTTLE_ENABLED must not be false in production.');
         }
+
+        // Auth::user() is always null in this app (Supabase JWT), so a user-based
+        // Horizon gate is not possible. Block the dashboard in production entirely;
+        // use Nightwatch for queue monitoring instead.
+        Horizon::auth(fn (Request $request) => ! app()->isProduction());
 
         $this->configureRateLimiting();
 

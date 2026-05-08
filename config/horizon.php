@@ -162,6 +162,32 @@ return [
             'supervisor-videos' => ['maxProcesses' => 2],
         ],
 
+        'development' => [
+            'supervisor-1' => [
+                'connection' => 'redis',
+                'queue' => ['stripe', 'integrations', 'notifications', 'mail', 'default', 'analytics', 'images'],
+                'balance' => 'simple',
+                'maxProcesses' => 3,
+                'tries' => 1,
+                'timeout' => 300,
+            ],
+            'supervisor-gdpr' => [
+                'connection' => 'redis_gdpr',
+                'queue' => ['gdpr'],
+                'balance' => false,
+                'maxProcesses' => 1,
+                'tries' => 1,
+                'timeout' => 660,
+            ],
+            'supervisor-videos' => [
+                'connection' => 'redis_video',
+                'queue' => ['videos'],
+                'balance' => false,
+                'maxProcesses' => 1,
+                'timeout' => 3600,
+            ],
+        ],
+
         'local' => [
             // Single supervisor for local dev — processes all queues in priority order.
             // `gdpr` is split out into its own supervisor because it requires the
