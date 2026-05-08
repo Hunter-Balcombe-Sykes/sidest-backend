@@ -556,7 +556,6 @@ function setupBrandStoreSettingsTable(): void
         theme_id INTEGER NULL,
         oxygen_deployment_token TEXT NULL,
         oxygen_storefront_id TEXT NULL,
-        domain_mode TEXT NULL,
         domain_wizard_complete INTEGER NULL,
         custom_domain TEXT NULL,
         custom_domain_verified_at TEXT NULL,

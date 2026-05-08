@@ -126,8 +126,6 @@ class EmbeddedSetupController extends ApiController
             // Storefront settings
             'default_commission_rate' => (string) ($storeSettings?->default_commission_rate ?? ''),
             'theme_id' => (int) ($storeSettings?->theme_id ?? 1),
-            'domain_mode' => (string) ($storeSettings?->domain_mode ?? ''),
-            'custom_domain' => (string) ($storeSettings?->custom_domain ?? ''),
             // Shopify wizard progress fields
             'oxygen_token_set' => ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token')),
             'oxygen_storefront_id' => (string) ($storeSettings?->oxygen_storefront_id ?? ''),
@@ -498,13 +496,10 @@ class EmbeddedSetupController extends ApiController
     /**
      * Return the current domain verification status for this brand.
      *
-     * Handles both modes:
-     *   - platform: brand.partna.au — live once domain_wizard_complete and
-     *     domain_txt_confirmed, verifying if only CNAME provisioned, else pending.
-     *   - custom: brand-supplied domain — live after TLS, verifying after
-     *     ownership verified, else pending.
+     * Platform mode only (brand.partna.au). Status is derived from wizard
+     * completion flags: pending → verifying (CNAME set) → live (TXT confirmed).
      *
-     * @return JsonResponse { data: { status: 'pending'|'verifying'|'live'|'error', domain: string } }
+     * @return JsonResponse { data: { status: 'pending'|'verifying'|'live', domain: string } }
      */
     public function domainStatus(Request $request): JsonResponse
     {
@@ -516,38 +511,17 @@ class EmbeddedSetupController extends ApiController
             return $this->success(['status' => 'pending', 'domain' => '']);
         }
 
-        // Platform domain — derive status from wizard completion flags.
-        if ($settings->domain_mode === 'platform') {
-            $site = Site::where('professional_id', $professionalId)->first();
-            $platformDomain = $site?->subdomain ? "{$site->subdomain}.".config('partna.public_domain') : '';
+        $site = Site::where('professional_id', $professionalId)->first();
+        $platformDomain = $site?->subdomain ? "{$site->subdomain}.".config('partna.public_domain') : '';
 
-            if (! $settings->domain_wizard_complete) {
-                return $this->success(['status' => 'pending', 'domain' => $platformDomain]);
-            }
-
-            // CNAME exists; TXT confirmed = live, otherwise verifying.
-            $status = $settings->domain_txt_confirmed ? 'live' : 'verifying';
-
-            return $this->success(['status' => $status, 'domain' => $platformDomain]);
+        if (! $settings->domain_wizard_complete) {
+            return $this->success(['status' => 'pending', 'domain' => $platformDomain]);
         }
 
-        // Custom domain.
-        if ($settings->domain_mode !== 'custom' || ! $settings->custom_domain) {
-            return $this->success(['status' => 'pending', 'domain' => '']);
-        }
+        // CNAME exists; TXT confirmed = live, otherwise verifying.
+        $status = $settings->domain_txt_confirmed ? 'live' : 'verifying';
 
-        $status = 'pending';
-
-        if ($settings->custom_domain_tls_provisioned_at) {
-            $status = 'live';
-        } elseif ($settings->custom_domain_verified_at) {
-            $status = 'verifying';
-        }
-
-        return $this->success([
-            'status' => $status,
-            'domain' => $settings->custom_domain,
-        ]);
+        return $this->success(['status' => $status, 'domain' => $platformDomain]);
     }
 
     // ── Domain Setup ─────────────────────────────────────────────────────────
@@ -589,7 +563,6 @@ class EmbeddedSetupController extends ApiController
             ['professional_id' => $professionalId],
             [
                 'oxygen_storefront_id' => (string) $request->input('oxygen_storefront_id'),
-                'domain_mode' => 'platform',
                 'domain_wizard_complete' => true,
             ],
         );
