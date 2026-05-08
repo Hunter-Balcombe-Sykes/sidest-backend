@@ -26,19 +26,13 @@
 ## Suggested Bundled Sessions
 
 ### Bundle: missing failed() handlers across financial / onboarding jobs
-- **Items:** #JOB-3, #JOB-4, #JOB-5, #JOB-6, #JOB-7
-- **Why bundle:** Identical fix shape — add `public function failed(\Throwable $e): void { report($e); Log::error(...); }`. Same review concerns (Nightwatch routing, log fields). Touches five sibling job classes; one PR is cleaner than five.
-- **Total effort:** S (~2–3h for all five)
+- [ ] **B1 — Missing failed() handlers across financial / onboarding jobs.** #JOB-3, #JOB-4, #JOB-5, #JOB-6, #JOB-7. ~2–3h. Identical fix shape — add `public function failed(\Throwable $e): void { report($e); Log::error(...); }`. Same review concerns (Nightwatch routing, log fields). Touches five sibling job classes; one PR is cleaner than five.
 
 ### Bundle: media job terminal-state idempotency guards
-- **Items:** #JOB-1, #JOB-2
-- **Why bundle:** Both `ProcessVideoVariantsJob` and `ProcessImageVariantsJob` need the same idempotency guard at the top of `handle()`, plus JOB-1 needs the missing `ready` write. They're sister classes that share an architectural contract.
-- **Total effort:** S (~1–2h for both)
+- [ ] **B2 — Media job terminal-state idempotency guards.** #JOB-1, #JOB-2. ~1–2h. Both `ProcessVideoVariantsJob` and `ProcessImageVariantsJob` need the same idempotency guard at the top of `handle()`, plus JOB-1 needs the missing `ready` write. They're sister classes that share an architectural contract.
 
 ### Bundle: auth-surface mechanical cleanup
-- **Items:** #AUTH-2, #AUTH-3, #AUTH-5
-- **Why bundle:** All `routes/api*` and `AppServiceProvider` edits, all S-effort. Low risk, mechanical.
-- **Total effort:** S (~2h for all three)
+- [ ] **B3 — Auth-surface mechanical cleanup.** #AUTH-2, #AUTH-3, #AUTH-5. ~2h. All `routes/api*` and `AppServiceProvider` edits, all S-effort. Low risk, mechanical.
 
 ### Standalone — do NOT bundle
 
@@ -65,7 +59,7 @@
 
 ### P0
 
-- [ ] **AUTH-1** · P0 — VerifyEmbeddedApiKey silently bypasses auth when `embedded.api_key` config is empty
+- [ ] **#AUTH-1** · P0 — VerifyEmbeddedApiKey silently bypasses auth when `embedded.api_key` config is empty
     - **Where:** app/Http/Middleware/Auth/VerifyEmbeddedApiKey.php:20–28
     - **Affects:** All routes under `internal/embedded/*` — setup wizard, deployment token creation, deploy-now trigger, domain provisioning, brand config. Any of these can be called without a valid key if the env var is absent at deploy time.
     - **Effort:** S (~0.5–1h)
@@ -103,7 +97,7 @@
 
 ### P1
 
-- [ ] **AUTH-2** · P1 — BrandAffiliateInvite write and delete endpoints missing `brand.only` middleware — any authenticated professional can reach brand-only controllers
+- [ ] **#AUTH-2** · P1 — BrandAffiliateInvite write and delete endpoints missing `brand.only` middleware — any authenticated professional can reach brand-only controllers
     - **Where:** routes/api/professional.php:105–111
     - **Affects:** POST `/brand-affiliate-invites`, `/brand-affiliate-invites/bulk`, `/brand-affiliate-invites/import-csv`, and DELETE `/brand-affiliate-invites/{invite}` — all are reachable by any authenticated professional (affiliate, influencer, or professional type), not just brands.
     - **Effort:** S (~0.5–1h)
@@ -142,7 +136,7 @@
 
 ### P2
 
-- [ ] **AUTH-3** · P2 — `/internal/hydrogen/affiliate` is the only Hydrogen route outside `hydrogen.key` middleware with no explicit unauthenticated annotation
+- [ ] **#AUTH-3** · P2 — `/internal/hydrogen/affiliate` is the only Hydrogen route outside `hydrogen.key` middleware with no explicit unauthenticated annotation
     - **Where:** routes/api.php:115–117
     - **Affects:** The affiliate identity endpoint used by the Hydrogen storefront client-side. Security relies entirely on controller-level verification that a valid, active brand-affiliate link exists — not verifiable from route definitions alone.
     - **Effort:** S (~0.5–1h)
@@ -174,7 +168,7 @@
         });
         ```
 
-- [ ] **AUTH-4** · P2 — IntegrationPolicy::view returns a bare `false` (yields HTTP 403) instead of `denyAsNotFound()` (HTTP 404) when integration has no owner
+- [ ] **#AUTH-4** · P2 — IntegrationPolicy::view returns a bare `false` (yields HTTP 403) instead of `denyAsNotFound()` (HTTP 404) when integration has no owner
     - **Where:** app/Policies/IntegrationPolicy.php:44–51
     - **Affects:** Any authenticated professional testing a UUID for an integration record with a null or empty `professional_id` — they receive a 403 response instead of 404, leaking that the record exists.
     - **Effort:** S (~0.5–1h)
@@ -211,7 +205,7 @@
 
 ### P3
 
-- [ ] **AUTH-5** · P3 — Duplicate `Gate::policy` registration for `CommissionMovement` in AppServiceProvider
+- [ ] **#AUTH-5** · P3 — Duplicate `Gate::policy` registration for `CommissionMovement` in AppServiceProvider
     - **Where:** app/Providers/AppServiceProvider.php:46–47
     - **Affects:** No runtime behavior — `Gate::policy` registration is idempotent. Indicates a copy-paste error that may mask a missing registration for a different model.
     - **Effort:** S (~0.5–1h)
@@ -235,7 +229,7 @@
 
 ### P1
 
-- [ ] **PAY-1** · P1 — Currency-mismatch payout loops forever; `void_at` not reset on `pending_funds`
+- [ ] **#PAY-1** · P1 — Currency-mismatch payout loops forever; `void_at` not reset on `pending_funds`
     - **Where:** `app/Services/Stripe/CommissionPayoutService.php:339–361`, `:631–644`
     - **Affects:** Any brand whose Stripe manual wallet is denominated in a different currency than the commission being paid out — commissions for those affiliates stay permanently frozen in `pending_funds` while `processEligiblePayouts` re-dispatches them on every sweep, silently flooding Horizon.
     - **Effort:** S (~1h)
@@ -286,7 +280,7 @@
 
 ### P2
 
-- [ ] **WEB-4** · P2 — `themes/publish` webhook returns 200 on invalid HMAC
+- [ ] **#WEB-4** · P2 — `themes/publish` webhook returns 200 on invalid HMAC
     - **Where:** `app/Http/Controllers/Api/Webhooks/ShopifyThemePublishedWebhookController.php:27–34`
     - **Affects:** Shopify's webhook delivery health tracking; operators lose visibility when HMAC verification fails in production.
     - **Effort:** S (~0.5h)
@@ -308,7 +302,7 @@
         }
         ```
 
-- [ ] **PAY-2** · P2 — `transfer.reversed` routed to `handleTransferFailed`; guard silently no-ops on completed payouts
+- [ ] **#PAY-2** · P2 — `transfer.reversed` routed to `handleTransferFailed`; guard silently no-ops on completed payouts
     - **Where:** `app/Http/Controllers/Api/Webhooks/StripeConnectWebhookController.php:129`, `:250–257`
     - **Affects:** Affiliates whose Stripe Connect transfers are reversed after the payout completes — their commission record shows `completed` but their Stripe balance was clawed back with no system-level record of the reversal.
     - **Effort:** S (~1h)
@@ -335,7 +329,7 @@
         }
         ```
 
-- [ ] **PAY-3** · P2 — Post-creation refund window unguarded; `processPayoutBatch` doesn't re-validate order state after batch is in `collecting`
+- [ ] **#PAY-3** · P2 — Post-creation refund window unguarded; `processPayoutBatch` doesn't re-validate order state after batch is in `collecting`
     - **Where:** `app/Services/Stripe/CommissionPayoutService.php:154–161`, `:302–306`
     - **Affects:** Any affiliate whose orders are refunded in the window between `createPayoutBatch` stamping `payout_id` on the orders and `processPayoutBatch` completing the Stripe transfer. The affiliate receives the full commission on a refunded order.
     - **Effort:** M (~2–4h)
@@ -375,7 +369,7 @@
 
 ### P0
 
-- [ ] **JOB-1** · P0 — Video processing job never promotes SiteMedia to `ready` after successful transcode
+- [ ] **#JOB-1** · P0 — Video processing job never promotes SiteMedia to `ready` after successful transcode
     - **Where:** app/Jobs/ProcessVideoVariantsJob.php:117–120 (try block, successful path)
     - **Affects:** Every video uploaded to the platform. After FFmpeg transcoding and variant creation succeed, the `SiteMedia` row stays permanently in `processing_state = processing`. Videos are invisible on every page, and dashboards show perpetual loading spinners for all users. The job's own docblock documents the intended `processing → ready` transition; only the success-path write is absent.
     - **Effort:** S (~0.5–1h)
@@ -398,7 +392,7 @@
 
 ### P1
 
-- [ ] **JOB-2** · P1 — Image variant job has no terminal-state idempotency guard; retry after success can permanently flip the image to `failed`
+- [ ] **#JOB-2** · P1 — Image variant job has no terminal-state idempotency guard; retry after success can permanently flip the image to `failed`
     - **Where:** app/Jobs/ProcessImageVariantsJob.php:93–97
     - **Affects:** Any image upload where the queue redelivers a previously-successful job (Horizon worker restart, Redis ack loss, job timeout exceeded before broker acknowledgement). The row rewinds to `processing`, variants are regenerated, and if the retry fails for any transient reason (e.g., an OOM kill that killed the first run before ack, not before write) the row lands permanently in `failed` — even though the image and all its variants already exist on the media disk and are perfectly usable.
     - **Effort:** S (~0.5–1h)
@@ -419,7 +413,7 @@
         // No check against PROCESSING_STATE_READY or PROCESSING_STATE_FAILED before overwriting
         ```
 
-- [ ] **JOB-3** · P1 — VoidPendingCommissionsForLinkJob has no `failed()` handler; terminal void failures leave commission in indeterminate state with no alert
+- [ ] **#JOB-3** · P1 — VoidPendingCommissionsForLinkJob has no `failed()` handler; terminal void failures leave commission in indeterminate state with no alert
     - **Where:** app/Jobs/Stripe/VoidPendingCommissionsForLinkJob.php (class-level omission)
     - **Affects:** Brand-affiliate disconnections where the pending commission void job exhausts its 3 retries. No Nightwatch alert fires, no audit trail is written, and the disconnected pair's stale commission entries remain active with no expiry mechanism. Operations cannot detect the gap without manually querying `commission_movements` for the disconnected pair.
     - **Effort:** S (~0.5–1h)
@@ -453,7 +447,7 @@
         }
         ```
 
-- [ ] **JOB-4** · P1 — ProcessShopifyOrderWebhookJob has no `failed()` handler; terminal orders/paid failures silently drop commission records
+- [ ] **#JOB-4** · P1 — ProcessShopifyOrderWebhookJob has no `failed()` handler; terminal orders/paid failures silently drop commission records
     - **Where:** app/Jobs/Shopify/ProcessShopifyOrderWebhookJob.php (class-level omission)
     - **Affects:** Every Shopify `orders/paid` event. A terminal failure after 3 retries means the `commerce.orders` row is never written, no `order_events` row exists, no rollup trigger fires, no analytics cache invalidation occurs, and no Nightwatch alert surfaces. From the platform's perspective the sale never happened. The affiliate is never paid; the brand never sees the attributed sale.
     - **Effort:** S (~0.5–1h)
@@ -489,7 +483,7 @@
         }
         ```
 
-- [ ] **JOB-5** · P1 — ProcessShopifyOrderUpdatedWebhookJob has no `failed()` handler; terminal refund/cancel failures cause silent commission drift
+- [ ] **#JOB-5** · P1 — ProcessShopifyOrderUpdatedWebhookJob has no `failed()` handler; terminal refund/cancel failures cause silent commission drift
     - **Where:** app/Jobs/Shopify/ProcessShopifyOrderUpdatedWebhookJob.php (class-level omission)
     - **Affects:** Order lifecycle corrections: `orders/cancelled`, `refunds/create`, `orders/edited`. A terminal failure after 3 retries means `commerce.orders` drifts from Shopify — cancelled orders remain `approved`, refunds are not applied, and `brand_affiliate_rollup.reversed_commission_cents` is understated because the `trg_rollup_clawback` trigger never fires. Affiliates receive commission payouts for sales that were fully refunded or cancelled, with no alert that the correction failed.
     - **Effort:** S (~0.5–1h)
@@ -528,7 +522,7 @@
 
 ### P2
 
-- [ ] **JOB-6** · P2 — SeedAffiliateDefaultSelectionsJob has no `failed()` handler; terminal failure leaves new affiliates with an empty store and no alert
+- [ ] **#JOB-6** · P2 — SeedAffiliateDefaultSelectionsJob has no `failed()` handler; terminal failure leaves new affiliates with an empty store and no alert
     - **Where:** app/Jobs/Store/SeedAffiliateDefaultSelectionsJob.php (class-level omission)
     - **Affects:** Any affiliate who connects to a brand for the first time. After 3 retries exhaust with no success, the affiliate's product catalog is empty — the brand's default collection is not seeded. There is no Nightwatch alert, no support ticket, and no retry path beyond the initial 3 attempts. The affiliate sees a blank store and has no indication of whether this is normal or broken.
     - **Effort:** S (~0.5–1h)
@@ -561,7 +555,7 @@
         }
         ```
 
-- [ ] **JOB-7** · P2 — SendWeeklyAnalyticsNotificationJob has `tries=1` with no `failed()` handler; a single exception silently drops the entire weekly fan-out for all users
+- [ ] **#JOB-7** · P2 — SendWeeklyAnalyticsNotificationJob has `tries=1` with no `failed()` handler; a single exception silently drops the entire weekly fan-out for all users
     - **Where:** app/Jobs/Notifications/SendWeeklyAnalyticsNotificationJob.php:27–28
     - **Affects:** All active professionals on the platform. Any exception during the chunked DB scan — Redis unavailable, Postgres timeout, OOM kill mid-loop — terminates the job immediately with no retry and no Nightwatch alert. Every active user misses that week's analytics summary. There is no way to know this happened except by noticing the absence of notifications in a week's worth of user feedback.
     - **Effort:** S (~0.5–1h)
@@ -597,7 +591,7 @@
 
 ### P2
 
-- [ ] **PUB-1** · P2 — Public lead-capture endpoints rely on weak passive bot defenses (reconstructed from orphaned adjudicator output)
+- [ ] **#PUB-1** · P2 — Public lead-capture endpoints rely on weak passive bot defenses (reconstructed from orphaned adjudicator output)
     - **Where:** app/Http/Controllers/Api/PublicSite/PublicEnquiryController.php; app/Http/Controllers/Api/PublicSite/PublicWaitlistController.php; routes/api.php (`/public/customers`, `/public/enquiry`, `/public/waitlist`)
     - **Affects:** Public lead-capture endpoints visible to unauthenticated traffic. Without a server-side cryptographic challenge, an automated script can flood every professional's inbox with fake leads daily.
     - **Effort:** M (~2–4h once a CAPTCHA vendor is selected)
@@ -642,7 +636,7 @@
 
 ### P3
 
-- [ ] **PUB-8** · P3 — Welcome notification hardcodes stale product name "Sight" after the Partna rebrand
+- [ ] **#PUB-8** · P3 — Welcome notification hardcodes stale product name "Sight" after the Partna rebrand
     - **Where:** app/Http/Controllers/Api/PublicSite/BootstrapController.php (`createWelcomeNotification`)
     - **Affects:** Every new professional who signs up after pilot launch. Their first in-app notification reads "Welcome to Sight" — a name that does not match the product.
     - **Effort:** S (~0.5–1h)

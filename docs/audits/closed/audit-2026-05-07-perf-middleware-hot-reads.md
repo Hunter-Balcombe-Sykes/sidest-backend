@@ -52,15 +52,17 @@
 ## Progress
 
 - P0 Blockers: 0 of 0 complete
-- P1 High: 0 of 2 complete
-- P2 Medium: 0 of 5 complete
-- P3 Low: 0 of 2 complete
+- P1 High: **2 of 2 complete** ✅
+- P2 Medium: **5 of 5 complete** ✅
+- P3 Low: **2 of 2 complete** ✅
+
+**All findings closed by `fdb7655` perf(api): cache hot read endpoints and auth-path Professional model (2026-05-07).** Verified against working tree on 2026-05-08.
 
 ---
 
 ## P1 — Fix before pilot launch
 
-- [ ] **#EXT-1** · P1 — Synchronous storefront HTTP probe blocks every /api/brand/store-settings read
+- [x] **#EXT-1** · P1 — Synchronous storefront HTTP probe blocks every /api/brand/store-settings read ✅ closed in `fdb7655` (`BrandStoreSettingsController::cachedStorefrontStatus` wraps probe in 60s `rememberLocked`)
     - **Where:** app/Http/Controllers/Api/Professional/Store/BrandStoreSettingsController.php — `show()` and `update()` both call `checkStorefrontStatus()`
     - **Affects:** Every brand that opens their store settings dashboard page. Adds up to 8 seconds of blocking network latency (5s timeout + 3s connect timeout) to a read endpoint that is otherwise fast.
     - **Effort:** S (~0.5–1h)
@@ -92,7 +94,7 @@
                 ])->get($url);
         ```
 
-- [ ] **#AUTH-1** · P1 — Professional model fetched from Postgres on every authenticated request despite payload cache existing
+- [x] **#AUTH-1** · P1 — Professional model fetched from Postgres on every authenticated request despite payload cache existing ✅ closed in `fdb7655` (`ProfessionalCacheService::getByAuthId` caches hydrated model with `site`+`squareIntegration` eager-loaded; busted by `invalidateProfessional` and `invalidateSite`)
     - **Where:** app/Services/Cache/ProfessionalCacheService.php — `getByAuthId()` · app/Http/Middleware/Context/LoadCurrentProfessional.php — `handle()`
     - **Affects:** Every authenticated API request across all 14 hot endpoints. With ~10–40ms Supabase round-trip time, this single uncached query accounts for 25–60% of request latency on every authenticated path.
     - **Effort:** M (~2–4h)
@@ -137,7 +139,7 @@
 
 ## P2 — Should fix
 
-- [ ] **#CACHE-2** · P2 — /api/services bypasses existing active-services cache for the common unfiltered case
+- [x] **#CACHE-2** · P2 — /api/services bypasses existing active-services cache for the common unfiltered case ✅ closed in `fdb7655` (default branch now serves from new `getDashboardServices()` helper, distinct from `getActiveServices` public-site view)
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalSiteSelfManagement/ProfessionalServiceController.php — `index()`
     - **Affects:** Dashboard services list on every load. The cache already exists and is busted on every write; the controller simply doesn't use it.
     - **Effort:** S (~0.5–1h)
@@ -181,7 +183,7 @@
         }
         ```
 
-- [ ] **#CACHE-3** · P2 — /api/links bypasses existing cached link-blocks helper
+- [x] **#CACHE-3** · P2 — /api/links bypasses existing cached link-blocks helper ✅ closed in `fdb7655` (`ProfessionalLinkBlockController::index` now serves from `SiteCacheService::getSiteLinkBlocks`, active-only)
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalSiteSelfManagement/ProfessionalLinkBlockController.php — `index()`
     - **Affects:** Dashboard link blocks list on every load. `SiteCacheService::getSiteLinkBlocks` is cached with single-flight + SWR; the controller ignores it.
     - **Effort:** S (~0.5–1h)
@@ -221,7 +223,7 @@
         }
         ```
 
-- [ ] **#CACHE-5** · P2 — /api/me executes 3–4 uncached DB queries beyond the auth model fetch on every dashboard load
+- [x] **#CACHE-5** · P2 — /api/me executes 3–4 uncached DB queries beyond the auth model fetch on every dashboard load ✅ closed in `fdb7655` (extras collapsed to `getBrandStoreSettings` 30m + `getBrandPartnerStatus` 5m; new `BrandStoreSettingsObserver` and `BrandProfileObserver` bust on writes; `squareIntegration` absorbed by AUTH-1 eager-load)
     - **Where:** app/Http/Controllers/Api/Professional/ProfessionalController.php — `show()`
     - **Affects:** Every authenticated user loading the dashboard. Adds 3–4 Supabase round-trips (~30–120ms at 10–40ms RTT each) to the primary entry point before any business logic runs.
     - **Effort:** M (~2–4h)
@@ -249,7 +251,7 @@
         }
         ```
 
-- [ ] **#CACHE-4** · P2 — /api/me/notifications uncached with two Postgres queries on every poll
+- [x] **#CACHE-4** · P2 — /api/me/notifications uncached with two Postgres queries on every poll ✅ closed in `fdb7655` (wrapped in 15s `rememberLocked` keyed by `(pro, limit, include_dismissed)`; `markRead`/`dismiss` bust common variants)
     - **Where:** app/Http/Controllers/Api/Professional/Notifications/NotificationController.php — `index()`
     - **Affects:** Dashboard notification bell. Polled by the frontend on a timer (likely every 30–60 seconds per active session). Every user, every session, steady-state.
     - **Effort:** M (~2–4h)
@@ -289,7 +291,7 @@
             ->count();  // Query 2 — unread badge count
         ```
 
-- [ ] **#CACHE-1** · P2 — /api/images endpoint completely uncached; full SiteMedia + variants query on every poll
+- [x] **#CACHE-1** · P2 — /api/images endpoint completely uncached; full SiteMedia + variants query on every poll ✅ closed in `fdb7655` (two key shapes: enumerable `siteImagesView` 30s keys for filtered gallery views busted by `invalidateSite`; fingerprint `siteImagesPolling` 5s TTL keys for `?ids[]` upload polling)
     - **Where:** app/Http/Controllers/Api/Professional/Uploads/ProfessionalUploadController.php — `index()`
     - **Affects:** Dashboard image gallery on load and during upload flows. Clients poll this endpoint every few seconds while waiting for `processing_state` to flip from `pending` → `ready`. Multiple concurrent polls per upload session hit raw Postgres each time.
     - **Effort:** M (~2–4h)
@@ -337,7 +339,7 @@
 
 ## P3 — Nice to have
 
-- [ ] **#PERF-2** · P3 — BrandStoreSettingsController::update() calls $site->fresh() twice, paying two identical Postgres queries
+- [x] **#PERF-2** · P3 — BrandStoreSettingsController::update() calls $site->fresh() twice, paying two identical Postgres queries ✅ closed in `fdb7655` (`$freshSite = $site?->fresh()` stashed once at line 225)
     - **Where:** app/Http/Controllers/Api/Professional/Store/BrandStoreSettingsController.php — `update()`, final return block
     - **Affects:** Every brand that saves store settings. Two identical `SELECT * FROM sites WHERE id = ?` queries fire where one would suffice.
     - **Effort:** S (~0.5–1h)
@@ -352,7 +354,7 @@
         $freshDesign = is_array($freshSiteSettings['design'] ?? null) ? $freshSiteSettings['design'] : [];
         ```
 
-- [ ] **#PERF-1** · P3 — BrandDesignController::show() queries Site::where() despite $pro->site already eager-loaded
+- [x] **#PERF-1** · P3 — BrandDesignController::show() queries Site::where() despite $pro->site already eager-loaded ✅ closed in `fdb7655` (now reads `$pro->site` directly — eager-loaded by AUTH-1)
     - **Where:** app/Http/Controllers/Api/Professional/Store/BrandDesignController.php — `show()`
     - **Affects:** Every brand loading the /api/brand/design endpoint. One redundant Postgres round-trip per call.
     - **Effort:** S (~0.5–1h)

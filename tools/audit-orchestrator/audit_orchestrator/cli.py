@@ -20,22 +20,9 @@ def _config_path() -> Path:
 
 
 def _gather_sources(config) -> list[Path]:
-    """Collect source paths from explicit config + auto-discovery, deduplicated."""
-    cwd = Path.cwd()
-    explicit = [cwd / s for s in config.sources]
-    discovered: list[Path] = []
-    if config.auto_discover:
-        discovered = sorted(set(
-            list(cwd.glob("pilot-*.md")) + list(cwd.glob("audit-*.md"))
-        ))
-    seen: set[Path] = set()
-    out: list[Path] = []
-    for p in explicit + discovered:
-        if p in seen or not p.exists():
-            continue
-        seen.add(p)
-        out.append(p)
-    return out
+    """Delegate to canonical queue_ops.gather_sources (applies companion-file filter)."""
+    from audit_orchestrator.queue_ops import gather_sources
+    return gather_sources(config, Path.cwd())
 
 
 def _build_classifier_context(config, parse_results) -> ClassifierContext:

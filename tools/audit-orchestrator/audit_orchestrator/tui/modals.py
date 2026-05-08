@@ -209,20 +209,14 @@ class HelpModal(ModalScreen[None]):
 # extract to audit_orchestrator/discovery.py.
 
 def _gather_sources(config, repo_root: Path) -> list[Path]:
-    explicit = [repo_root / s for s in config.sources]
-    discovered: list[Path] = []
-    if config.auto_discover:
-        discovered = sorted(set(
-            list(repo_root.glob("pilot-*.md")) + list(repo_root.glob("audit-*.md"))
-        ))
-    seen: set[Path] = set()
-    out: list[Path] = []
-    for p in explicit + discovered:
-        if p in seen or not p.exists():
-            continue
-        seen.add(p)
-        out.append(p)
-    return out
+    """Delegate to the canonical implementation in queue_ops.
+
+    Local copy used to drift: it omitted the companion-file filter, so
+    non-checklist files (e.g. pilot-manual-queue.md) leaked into the TUI's
+    progress panel and Queue Browser as ghost rows.
+    """
+    from audit_orchestrator.queue_ops import gather_sources
+    return gather_sources(config, repo_root)
 
 
 def _build_classifier_ctx(config, parse_results) -> ClassifierContext:
