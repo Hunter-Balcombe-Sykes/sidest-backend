@@ -121,7 +121,7 @@ return [
     'streaming' => [
         // Hard cap on blocks with live_check_enabled=true per site — prevents a single
         // user from monopolizing the polling budget. Enforced in UpdateLinkBlockRequest.
-        'max_live_check_per_site' => (int) env('SIDEST_STREAMING_MAX_LIVE_CHECK_PER_SITE', 5),
+        'max_live_check_per_site' => (int) env('PARTNA_STREAMING_MAX_LIVE_CHECK_PER_SITE', env('SIDEST_STREAMING_MAX_LIVE_CHECK_PER_SITE', 5)),
     ],
 
     /*
@@ -619,7 +619,7 @@ return [
     ],
 
     'waitlist' => [
-        'enabled' => (bool) env('SIDEST_WAITLIST_ENABLED', false),
+        'enabled' => (bool) env('PARTNA_WAITLIST_ENABLED', env('SIDEST_WAITLIST_ENABLED', false)),
         'types' => [
             'influencer' => 'Influencer',
             'professional' => 'Professional',
@@ -748,16 +748,16 @@ return [
     // How many days after the billing period ends a past_due subscription retains plan entitlements.
     // After this window, access is revoked until Stripe collects payment or cancels.
     'billing' => [
-        'past_due_grace_days' => (int) env('SIDEST_PAST_DUE_GRACE_DAYS', 7),
+        'past_due_grace_days' => (int) env('PARTNA_PAST_DUE_GRACE_DAYS', env('SIDEST_PAST_DUE_GRACE_DAYS', 7)),
     ],
 
     'throttle' => [
-        'enabled' => (bool) env('SIDEST_THROTTLE_ENABLED', true),
+        'enabled' => (bool) env('PARTNA_THROTTLE_ENABLED', env('SIDEST_THROTTLE_ENABLED', true)),
         // Max notification emails sent per brand inbox per hour regardless of how many enquiries arrive.
-        'enquiry_notification_per_hour' => (int) env('SIDEST_ENQUIRY_NOTIFY_PER_HOUR', 10),
+        'enquiry_notification_per_hour' => (int) env('PARTNA_ENQUIRY_NOTIFY_PER_HOUR', env('SIDEST_ENQUIRY_NOTIFY_PER_HOUR', 10)),
     ],
 
-    'media_disk' => env('SIDEST_MEDIA_DISK', 'media'),
+    'media_disk' => env('PARTNA_MEDIA_DISK', env('SIDEST_MEDIA_DISK', 'media')),
 
     /*
     |----------------------------------------------------------------------
@@ -775,11 +775,11 @@ return [
     'image_pools' => [
         // Affiliate sitepage gallery + content panels both expose 6 slots
         // in the dashboard — keep the env override available, default to 6.
-        'gallery' => ['max' => (int) env('SIDEST_GALLERY_IMAGE_MAX', 6)],
-        'content' => ['max' => (int) env('SIDEST_CONTENT_IMAGE_MAX', 6)],
-        'product' => ['max' => (int) env('SIDEST_PRODUCT_IMAGE_MAX', 5)],
-        'brand_gallery' => ['max' => (int) env('SIDEST_BRAND_GALLERY_IMAGE_MAX', 5)],
-        'product_custom' => ['max' => (int) env('SIDEST_PRODUCT_CUSTOM_PHOTO_MAX', 1)],
+        'gallery' => ['max' => (int) env('PARTNA_GALLERY_IMAGE_MAX', env('SIDEST_GALLERY_IMAGE_MAX', 6))],
+        'content' => ['max' => (int) env('PARTNA_CONTENT_IMAGE_MAX', env('SIDEST_CONTENT_IMAGE_MAX', 6))],
+        'product' => ['max' => (int) env('PARTNA_PRODUCT_IMAGE_MAX', env('SIDEST_PRODUCT_IMAGE_MAX', 5))],
+        'brand_gallery' => ['max' => (int) env('PARTNA_BRAND_GALLERY_IMAGE_MAX', env('SIDEST_BRAND_GALLERY_IMAGE_MAX', 5))],
+        'product_custom' => ['max' => (int) env('PARTNA_PRODUCT_CUSTOM_PHOTO_MAX', env('SIDEST_PRODUCT_CUSTOM_PHOTO_MAX', 1))],
         'documents' => ['max' => 1],
     ],
 
@@ -812,16 +812,16 @@ return [
             'width' => 2400,
             'height' => 2400,
             'fit' => 'inside',
-            'quality' => (int) env('SIDEST_IMAGE_QUALITY', 92),
-            'min_quality' => (int) env('SIDEST_IMAGE_MIN_QUALITY', 60),
-            'target_kb' => (int) env('SIDEST_IMAGE_TARGET_KB', 500),
+            'quality' => (int) env('PARTNA_IMAGE_QUALITY', env('SIDEST_IMAGE_QUALITY', 92)),
+            'min_quality' => (int) env('PARTNA_IMAGE_MIN_QUALITY', env('SIDEST_IMAGE_MIN_QUALITY', 60)),
+            'target_kb' => (int) env('PARTNA_IMAGE_TARGET_KB', env('SIDEST_IMAGE_TARGET_KB', 500)),
         ],
         'maximized' => [
             'format' => 'webp',
             'width' => 4000,
             'height' => 4000,
             'fit' => 'inside',
-            'quality' => (int) env('SIDEST_IMAGE_MAXIMIZED_QUALITY', 92),
+            'quality' => (int) env('PARTNA_IMAGE_MAXIMIZED_QUALITY', env('SIDEST_IMAGE_MAXIMIZED_QUALITY', 92)),
         ],
     ],
 
@@ -829,12 +829,12 @@ return [
         // GitHub PAT with actions:write scope on the sidest-storefront repo.
         // Used by HydrogenDeploymentService to trigger single-brand Oxygen
         // deployments when a brand saves credentials in the wizard.
-        'github_token' => env('SIDEST_HYDROGEN_GITHUB_TOKEN'),
-        'github_repo' => env('SIDEST_HYDROGEN_GITHUB_REPO', 'hunterbalcombesykes/sidest-storefront'),
-        'github_ref' => env('SIDEST_HYDROGEN_GITHUB_REF', 'main'),
+        'github_token' => env('PARTNA_HYDROGEN_GITHUB_TOKEN', env('SIDEST_HYDROGEN_GITHUB_TOKEN')),
+        'github_repo' => env('PARTNA_HYDROGEN_GITHUB_REPO', env('SIDEST_HYDROGEN_GITHUB_REPO', 'hunterbalcombesykes/sidest-storefront')),
+        'github_ref' => env('PARTNA_HYDROGEN_GITHUB_REF', env('SIDEST_HYDROGEN_GITHUB_REF', 'main')),
     ],
 
-    'image_max_upload_size' => (int) env('SIDEST_IMAGE_MAX_UPLOAD_KB', 10240), // 10 MB
+    'image_max_upload_size' => (int) env('PARTNA_IMAGE_MAX_UPLOAD_KB', env('SIDEST_IMAGE_MAX_UPLOAD_KB', 10240)), // 10 MB
 
     /*
     |----------------------------------------------------------------------
@@ -850,13 +850,13 @@ return [
     | flagship 48 MP sensors. Conservative for a 256 MB worker memory_limit;
     | can be raised to ~50 MP when workers have more headroom.
     */
-    'image_max_pixels' => (int) env('SIDEST_IMAGE_MAX_PIXELS', 24_000_000), // 24 MP
+    'image_max_pixels' => (int) env('PARTNA_IMAGE_MAX_PIXELS', env('SIDEST_IMAGE_MAX_PIXELS', 24_000_000)), // 24 MP
 
     /*
     |----------------------------------------------------------------------
     | Video uploads – feature flag + processing config
     |----------------------------------------------------------------------
-    | Set SIDEST_VIDEO_UPLOADS_ENABLED=true only after dedicated video
+    | Set PARTNA_VIDEO_UPLOADS_ENABLED=true only after dedicated video
     | workers are running on the "videos" queue.
     |
     | video_max_upload_size  = max video file size accepted (KB)
@@ -871,30 +871,30 @@ return [
     | video_variants define the two MP4 output tiers.  HLS streams are
     | packaged from these MP4 files (no extra re-encode).
     */
-    'video_uploads_enabled' => (bool) env('SIDEST_VIDEO_UPLOADS_ENABLED', false),
+    'video_uploads_enabled' => (bool) env('PARTNA_VIDEO_UPLOADS_ENABLED', env('SIDEST_VIDEO_UPLOADS_ENABLED', false)),
 
-    'video_max_upload_size' => (int) env('SIDEST_VIDEO_MAX_UPLOAD_KB', 512000), // 500 MB
-    'video_max_duration_seconds' => (int) env('SIDEST_VIDEO_MAX_DURATION_SECONDS', 300), // 5 min
+    'video_max_upload_size' => (int) env('PARTNA_VIDEO_MAX_UPLOAD_KB', env('SIDEST_VIDEO_MAX_UPLOAD_KB', 512000)), // 500 MB
+    'video_max_duration_seconds' => (int) env('PARTNA_VIDEO_MAX_DURATION_SECONDS', env('SIDEST_VIDEO_MAX_DURATION_SECONDS', 300)), // 5 min
 
-    'ffmpeg_binary' => env('SIDEST_FFMPEG_BINARY', 'ffmpeg'),
-    'ffprobe_binary' => env('SIDEST_FFPROBE_BINARY', 'ffprobe'),
+    'ffmpeg_binary' => env('PARTNA_FFMPEG_BINARY', env('SIDEST_FFMPEG_BINARY', 'ffmpeg')),
+    'ffprobe_binary' => env('PARTNA_FFPROBE_BINARY', env('SIDEST_FFPROBE_BINARY', 'ffprobe')),
 
     'video_queue' => [
-        'connection' => env('SIDEST_VIDEO_QUEUE_CONNECTION', 'redis_video'),
-        'name' => env('SIDEST_VIDEO_QUEUE_NAME', 'videos'),
-        'timeout' => (int) env('SIDEST_VIDEO_QUEUE_TIMEOUT', 3600),
+        'connection' => env('PARTNA_VIDEO_QUEUE_CONNECTION', env('SIDEST_VIDEO_QUEUE_CONNECTION', 'redis_video')),
+        'name' => env('PARTNA_VIDEO_QUEUE_NAME', env('SIDEST_VIDEO_QUEUE_NAME', 'videos')),
+        'timeout' => (int) env('PARTNA_VIDEO_QUEUE_TIMEOUT', env('SIDEST_VIDEO_QUEUE_TIMEOUT', 3600)),
     ],
 
     'video_variants' => [
         'optimized' => [
-            'resolution' => env('SIDEST_VIDEO_OPTIMIZED_RESOLUTION', '1280x720'),
-            'video_bitrate_kbps' => (int) env('SIDEST_VIDEO_OPTIMIZED_BITRATE', 2000),
-            'audio_bitrate_kbps' => (int) env('SIDEST_VIDEO_OPTIMIZED_AUDIO_BITRATE', 128),
+            'resolution' => env('PARTNA_VIDEO_OPTIMIZED_RESOLUTION', env('SIDEST_VIDEO_OPTIMIZED_RESOLUTION', '1280x720')),
+            'video_bitrate_kbps' => (int) env('PARTNA_VIDEO_OPTIMIZED_BITRATE', env('SIDEST_VIDEO_OPTIMIZED_BITRATE', 2000)),
+            'audio_bitrate_kbps' => (int) env('PARTNA_VIDEO_OPTIMIZED_AUDIO_BITRATE', env('SIDEST_VIDEO_OPTIMIZED_AUDIO_BITRATE', 128)),
         ],
         'maximized' => [
-            'resolution' => env('SIDEST_VIDEO_MAXIMIZED_RESOLUTION', '1920x1080'),
-            'video_bitrate_kbps' => (int) env('SIDEST_VIDEO_MAXIMIZED_BITRATE', 5000),
-            'audio_bitrate_kbps' => (int) env('SIDEST_VIDEO_MAXIMIZED_AUDIO_BITRATE', 192),
+            'resolution' => env('PARTNA_VIDEO_MAXIMIZED_RESOLUTION', env('SIDEST_VIDEO_MAXIMIZED_RESOLUTION', '1920x1080')),
+            'video_bitrate_kbps' => (int) env('PARTNA_VIDEO_MAXIMIZED_BITRATE', env('SIDEST_VIDEO_MAXIMIZED_BITRATE', 5000)),
+            'audio_bitrate_kbps' => (int) env('PARTNA_VIDEO_MAXIMIZED_AUDIO_BITRATE', env('SIDEST_VIDEO_MAXIMIZED_AUDIO_BITRATE', 192)),
         ],
     ],
 
@@ -905,19 +905,19 @@ return [
     ],
 
     'store' => [
-        'default_commission_rate' => (float) env('SIDEST_STORE_DEFAULT_COMMISSION', 15),
-        'max_featured_products' => (int) env('SIDEST_STORE_MAX_FEATURED', 10),
-        'checkout_session_ttl_minutes' => (int) env('SIDEST_STORE_CHECKOUT_SESSION_TTL_MINUTES', 120),
-        'payout_hold_days' => (int) env('SIDEST_STORE_PAYOUT_HOLD_DAYS', 7),
+        'default_commission_rate' => (float) env('PARTNA_STORE_DEFAULT_COMMISSION', env('SIDEST_STORE_DEFAULT_COMMISSION', 15)),
+        'max_featured_products' => (int) env('PARTNA_STORE_MAX_FEATURED', env('SIDEST_STORE_MAX_FEATURED', 10)),
+        'checkout_session_ttl_minutes' => (int) env('PARTNA_STORE_CHECKOUT_SESSION_TTL_MINUTES', env('SIDEST_STORE_CHECKOUT_SESSION_TTL_MINUTES', 120)),
+        'payout_hold_days' => (int) env('PARTNA_STORE_PAYOUT_HOLD_DAYS', env('SIDEST_STORE_PAYOUT_HOLD_DAYS', 7)),
         'min_payout_hold_days' => 7,
-        'platform_fee_percent' => (float) env('SIDEST_STORE_PLATFORM_FEE_PERCENT', 20),
+        'platform_fee_percent' => (float) env('PARTNA_STORE_PLATFORM_FEE_PERCENT', env('SIDEST_STORE_PLATFORM_FEE_PERCENT', 20)),
         // Per-payout grace deadline. Each commission_payouts row's
         // void_at is set to created_at + this many days. After that,
         // if the affiliate's Stripe Connect isn't 'active', the
         // VoidExpiredPayoutsJob cancels the payout (brand keeps the
         // money — never charged).
-        'grace_period_days' => (int) env('SIDEST_STORE_GRACE_PERIOD_DAYS', 60),
-        'commission_void_window_days' => (int) env('SIDEST_STORE_COMMISSION_VOID_WINDOW_DAYS', 30),
+        'grace_period_days' => (int) env('PARTNA_STORE_GRACE_PERIOD_DAYS', env('SIDEST_STORE_GRACE_PERIOD_DAYS', 60)),
+        'commission_void_window_days' => (int) env('PARTNA_STORE_COMMISSION_VOID_WINDOW_DAYS', env('SIDEST_STORE_COMMISSION_VOID_WINDOW_DAYS', 30)),
     ],
 
     'form_timing' => [
@@ -992,12 +992,12 @@ return [
     | provider before the other post-launch.
     */
     'features' => [
-        'smart_booking' => (bool) env('SIDEST_SMART_BOOKING_ENABLED', false),
-        'square_sync' => (bool) env('SIDEST_SQUARE_SYNC_ENABLED', false),
-        'fresha_sync' => (bool) env('SIDEST_FRESHA_SYNC_ENABLED', false),
+        'smart_booking' => (bool) env('PARTNA_SMART_BOOKING_ENABLED', env('SIDEST_SMART_BOOKING_ENABLED', false)),
+        'square_sync' => (bool) env('PARTNA_SQUARE_SYNC_ENABLED', env('SIDEST_SQUARE_SYNC_ENABLED', false)),
+        'fresha_sync' => (bool) env('PARTNA_FRESHA_SYNC_ENABLED', env('SIDEST_FRESHA_SYNC_ENABLED', false)),
         // Gates Turnstile CAPTCHA on public lead-capture endpoints. Enable only after
         // the frontend has integrated the Turnstile widget and sends cf_turnstile_response.
-        'captcha' => (bool) env('SIDEST_CAPTCHA_ENABLED', false),
+        'captcha' => (bool) env('PARTNA_CAPTCHA_ENABLED', env('SIDEST_CAPTCHA_ENABLED', false)),
     ],
 
     /*
@@ -1039,7 +1039,7 @@ return [
     */
 
     'reconciler' => [
-        'schedule' => env('SIDEST_RECONCILER_SCHEDULE', '0 3 * * *'),
+        'schedule' => env('PARTNA_RECONCILER_SCHEDULE', env('SIDEST_RECONCILER_SCHEDULE', '0 3 * * *')),
     ],
 
     /*
@@ -1071,15 +1071,15 @@ return [
     */
     'cache' => [
         'ttls' => [
-            'public_payload'             => (int) env('CACHE_TTL_PUBLIC_PAYLOAD', 900),         // 15m
-            'analytics_short'            => (int) env('CACHE_TTL_ANALYTICS_SHORT', 300),        // 5m
-            'auth_id_lookup'             => (int) env('CACHE_TTL_AUTH_ID_LOOKUP', 1800),        // 30m
-            'professional_model'         => (int) env('CACHE_TTL_PROFESSIONAL_MODEL', 60),      // 60s
+            'public_payload' => (int) env('CACHE_TTL_PUBLIC_PAYLOAD', 900),         // 15m
+            'analytics_short' => (int) env('CACHE_TTL_ANALYTICS_SHORT', 300),        // 5m
+            'auth_id_lookup' => (int) env('CACHE_TTL_AUTH_ID_LOOKUP', 1800),        // 30m
+            'professional_model' => (int) env('CACHE_TTL_PROFESSIONAL_MODEL', 60),      // 60s
             'professional_handle_lookup' => (int) env('CACHE_TTL_PROFESSIONAL_HANDLE_LOOKUP', 3600), // 60m
-            'webhook_idempotency'        => (int) env('CACHE_TTL_WEBHOOK_IDEMPOTENCY', 86400),  // 24h
-            'brand_admin_catalog'        => (int) env('CACHE_TTL_BRAND_ADMIN_CATALOG', 300),    // 5m
-            'collection_gid'             => (int) env('CACHE_TTL_COLLECTION_GID', 3600),        // 60m
-            'product_custom_photos'      => (int) env('CACHE_TTL_PRODUCT_CUSTOM_PHOTOS', 60),   // 60s
+            'webhook_idempotency' => (int) env('CACHE_TTL_WEBHOOK_IDEMPOTENCY', 86400),  // 24h
+            'brand_admin_catalog' => (int) env('CACHE_TTL_BRAND_ADMIN_CATALOG', 300),    // 5m
+            'collection_gid' => (int) env('CACHE_TTL_COLLECTION_GID', 3600),        // 60m
+            'product_custom_photos' => (int) env('CACHE_TTL_PRODUCT_CUSTOM_PHOTOS', 60),   // 60s
         ],
     ],
 ];

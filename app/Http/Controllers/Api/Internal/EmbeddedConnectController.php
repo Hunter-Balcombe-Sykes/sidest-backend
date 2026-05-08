@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Cache;
 // Handles connecting a Shopify shop to an existing Partna brand account.
 // Called by the Sidest-Embedded app when a brand installs the Shopify app
 // but their shop domain is not yet linked to a professional record.
-// Auth: validates the SIDEST_EMBEDDED_API_KEY Bearer token manually (the
+// Auth: validates the PARTNA_EMBEDDED_API_KEY Bearer token manually (the
 // shop can't be resolved yet, so we can't use the embedded.key middleware).
 class EmbeddedConnectController extends ApiController
 {

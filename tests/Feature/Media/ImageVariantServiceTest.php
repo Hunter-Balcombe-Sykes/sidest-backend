@@ -205,7 +205,7 @@ it('throws UnprocessableImageException when pixel count exceeds the guard', func
     expect($variantCount)->toBe(0);
 });
 
-it('respects the SIDEST_IMAGE_MAX_PIXELS env override', function () {
+it('respects the PARTNA_IMAGE_MAX_PIXELS env override', function () {
     config(['partna.image_max_pixels' => 1_000_000]); // 1 MP
 
     $service = new ImageVariantService;

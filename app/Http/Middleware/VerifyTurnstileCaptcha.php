@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 // Verifies Cloudflare Turnstile tokens on public lead-capture endpoints.
-// Bypassed when SIDEST_CAPTCHA_ENABLED=false (default) so frontends can add
+// Bypassed when PARTNA_CAPTCHA_ENABLED=false (default) so frontends can add
 // the Turnstile widget before the gate is flipped on in production.
 class VerifyTurnstileCaptcha
 {

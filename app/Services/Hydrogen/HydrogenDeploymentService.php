@@ -25,7 +25,7 @@ class HydrogenDeploymentService
         $token = config('partna.hydrogen.github_token');
 
         if (empty($token)) {
-            Log::info('HydrogenDeployment: skipping dispatch — SIDEST_HYDROGEN_GITHUB_TOKEN not set.', [
+            Log::info('HydrogenDeployment: skipping dispatch — PARTNA_HYDROGEN_GITHUB_TOKEN not set (legacy fallback: SIDEST_HYDROGEN_GITHUB_TOKEN).', [
                 'professional_id' => $professionalId,
             ]);
 

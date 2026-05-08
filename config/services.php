@@ -77,15 +77,15 @@ return [
     ],
 
     // Cloudflare Turnstile — bot-protection for public lead-capture endpoints.
-    // Only required when SIDEST_CAPTCHA_ENABLED=true.
+    // Only required when PARTNA_CAPTCHA_ENABLED=true.
     'turnstile' => [
         'secret_key' => env('CLOUDFLARE_TURNSTILE_SECRET_KEY'),
     ],
 
     // Shared key for Sidest-Embedded Shopify app → backend calls.
-    // Set in both .env (Laravel) and SIDEST_EMBEDDED_API_KEY env var in the Remix app.
+    // Set in both .env (Laravel) and PARTNA_EMBEDDED_API_KEY env var in the Remix app.
     'embedded' => [
-        'api_key' => env('SIDEST_EMBEDDED_API_KEY'),
+        'api_key' => env('PARTNA_EMBEDDED_API_KEY', env('SIDEST_EMBEDDED_API_KEY')),
     ],
 
     'twitch' => [

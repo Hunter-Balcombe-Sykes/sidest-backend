@@ -71,9 +71,9 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Commerce\AffiliateProductSelection::class, \App\Policies\AffiliateProductPolicy::class);
 
         // Refuse to boot in production with throttling disabled — a misconfigured
-        // SIDEST_THROTTLE_ENABLED=false would silently strip all rate limiting.
+        // PARTNA_THROTTLE_ENABLED=false would silently strip all rate limiting.
         if (app()->isProduction() && ! (bool) config('partna.throttle.enabled', true)) {
-            throw new \RuntimeException('SIDEST_THROTTLE_ENABLED must not be false in production.');
+            throw new \RuntimeException('PARTNA_THROTTLE_ENABLED must not be false in production.');
         }
 
         $this->configureRateLimiting();

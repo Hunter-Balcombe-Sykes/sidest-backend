@@ -8,7 +8,7 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 // Verifies requests from the Sidest-Embedded Shopify app.
-// Expects Authorization: Bearer {SIDEST_EMBEDDED_API_KEY} + X-Shopify-Shop: {shop_domain}.
+// Expects Authorization: Bearer {PARTNA_EMBEDDED_API_KEY} + X-Shopify-Shop: {shop_domain}.
 // Resolves the brand professional from the shop domain and attaches it as
 // request attribute 'embedded_professional_id' for downstream controllers.
 class VerifyEmbeddedApiKey
@@ -25,7 +25,7 @@ class VerifyEmbeddedApiKey
             // Dev/test bypass: missing config is acceptable when running locally
             // or under the test suite. Anywhere else (production, staging, any
             // unrecognized env) we fail closed — without this gate, an empty
-            // SIDEST_EMBEDDED_API_KEY on a production deploy would silently open every
+            // PARTNA_EMBEDDED_API_KEY on a production deploy would silently open every
             // /internal/embedded/* route, including the deployment-token endpoint
             // that can rewrite a brand's storefront, to anonymous traffic.
             if (app()->environment(['local', 'testing'])) {

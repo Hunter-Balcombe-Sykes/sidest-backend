@@ -85,8 +85,8 @@ return [
         'redis_video' => [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
-            'queue' => env('SIDEST_VIDEO_QUEUE_NAME', 'videos'),
-            'retry_after' => (int) env('SIDEST_VIDEO_QUEUE_RETRY_AFTER', 3600),
+            'queue' => env('PARTNA_VIDEO_QUEUE_NAME', env('SIDEST_VIDEO_QUEUE_NAME', 'videos')),
+            'retry_after' => (int) env('PARTNA_VIDEO_QUEUE_RETRY_AFTER', env('SIDEST_VIDEO_QUEUE_RETRY_AFTER', 3600)),
             'block_for' => null,
             'after_commit' => false,
         ],

@@ -119,7 +119,7 @@ Schedule::job(new \App\Jobs\Streaming\CheckStreamingLiveStatusJob)
     });
 
 // Phase 3 backstop reconciler. Cron expression is env-overridable: set
-// SIDEST_RECONCILER_SCHEDULE='0 * * * *' for the first 60 days post-launch,
+// PARTNA_RECONCILER_SCHEDULE='0 * * * *' for the first 60 days post-launch,
 // then revert to the default daily-at-3am value.
 Schedule::command('partna:reconcile-shopify-orders')
     ->cron(config('partna.reconciler.schedule', '0 3 * * *'))
