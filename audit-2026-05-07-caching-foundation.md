@@ -351,7 +351,7 @@
         $response->headers->set('Vary', 'X-Site-Subdomain, Accept-Encoding');
         ```
 
-- [ ] **#GS-9** · P3 — Add ETag / 304 middleware on heavy public reads (mobile + Hydrogen revalidation)
+- [x] **#GS-9** · P3 — Add ETag / 304 middleware on heavy public reads (mobile + Hydrogen revalidation)
     - **Where:** New: lightweight middleware applied to `/api/public/*` GET routes
     - **Affects:** Bandwidth + perceived latency for clients that revalidate (mobile apps, Hydrogen worker, browser back/forward cache).
     - **Effort:** S (~1h with `werk365/etagconditionals`, or 30 lines custom)
