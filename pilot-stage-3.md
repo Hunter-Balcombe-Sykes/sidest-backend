@@ -369,7 +369,7 @@
 
 ### P0
 
-- [ ] **#JOB-1** · P0 — Video processing job never promotes SiteMedia to `ready` after successful transcode
+- [x] **#JOB-1** · P0 — Video processing job never promotes SiteMedia to `ready` after successful transcode
     - **Where:** app/Jobs/ProcessVideoVariantsJob.php:117–120 (try block, successful path)
     - **Affects:** Every video uploaded to the platform. After FFmpeg transcoding and variant creation succeed, the `SiteMedia` row stays permanently in `processing_state = processing`. Videos are invisible on every page, and dashboards show perpetual loading spinners for all users. The job's own docblock documents the intended `processing → ready` transition; only the success-path write is absent.
     - **Effort:** S (~0.5–1h)
@@ -392,7 +392,7 @@
 
 ### P1
 
-- [ ] **#JOB-2** · P1 — Image variant job has no terminal-state idempotency guard; retry after success can permanently flip the image to `failed`
+- [x] **#JOB-2** · P1 — Image variant job has no terminal-state idempotency guard; retry after success can permanently flip the image to `failed`
     - **Where:** app/Jobs/ProcessImageVariantsJob.php:93–97
     - **Affects:** Any image upload where the queue redelivers a previously-successful job (Horizon worker restart, Redis ack loss, job timeout exceeded before broker acknowledgement). The row rewinds to `processing`, variants are regenerated, and if the retry fails for any transient reason (e.g., an OOM kill that killed the first run before ack, not before write) the row lands permanently in `failed` — even though the image and all its variants already exist on the media disk and are perfectly usable.
     - **Effort:** S (~0.5–1h)
