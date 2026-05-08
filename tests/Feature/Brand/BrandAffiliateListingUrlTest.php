@@ -100,7 +100,7 @@ function affiliateListingMakeRequest(string $brandId): Request
 }
 
 it('exposes site_url from brand_partner_links in the affiliate listing', function () {
-    $expectedUrl = 'https://jane.partna.au/brand-co';
+    $expectedUrl = 'https://brand-co.partna.au/jane';
     [$brandId] = affiliateListingSeedTenants($expectedUrl);
 
     $controller = app(BrandAffiliateController::class);

@@ -69,11 +69,9 @@ class BrandStoreSettingsController extends ApiController
             'oxygen_token_set' => ! empty($storeSettings?->oxygen_deployment_token),
             'oxygen_storefront_id' => $storeSettings?->oxygen_storefront_id,
             'hydrogen_install_confirmed' => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
-            'storefront_base_url' => $storeSettings
-                ? $storeSettings->storefrontBaseUrl($site?->subdomain ?? '')
-                : 'https://'.($site?->subdomain ?? '').'.partna.au',
+            'storefront_base_url' => 'https://'.($site?->subdomain ?? '').'.'.config('partna.public_domain', 'partna.au'),
             'storefront_status' => $storeSettings
-                ? $this->cachedStorefrontStatus($pro->id, $storeSettings, $site?->subdomain ?? '')
+                ? $this->cachedStorefrontStatus($pro->id, $site?->subdomain ?? '')
                 : 'unreachable',
             'brand_status' => $brandProfile?->brand_status ?? BrandStatus::Onboarding->value,
         ]));
@@ -249,11 +247,9 @@ class BrandStoreSettingsController extends ApiController
             'theme_id' => $storeSettings?->theme_id ?? 1,
             'oxygen_token_set' => ! empty($storeSettings?->oxygen_deployment_token),
             'oxygen_storefront_id' => $storeSettings?->oxygen_storefront_id,
-            'storefront_base_url' => $storeSettings
-                ? $storeSettings->storefrontBaseUrl($site?->subdomain ?? '')
-                : 'https://'.($site?->subdomain ?? '').'.partna.au',
+            'storefront_base_url' => 'https://'.($site?->subdomain ?? '').'.'.config('partna.public_domain', 'partna.au'),
             'storefront_status' => $storeSettings
-                ? $this->cachedStorefrontStatus($pro->id, $storeSettings, $site?->subdomain ?? '', forceRefresh: true)
+                ? $this->cachedStorefrontStatus($pro->id, $site?->subdomain ?? '', forceRefresh: true)
                 : 'unreachable',
         ]));
     }
@@ -295,7 +291,6 @@ class BrandStoreSettingsController extends ApiController
      */
     private function cachedStorefrontStatus(
         string $professionalId,
-        BrandStoreSettings $settings,
         string $subdomain,
         bool $forceRefresh = false,
     ): string {
@@ -309,7 +304,7 @@ class BrandStoreSettingsController extends ApiController
         return $this->cacheLock->rememberLocked(
             $key,
             60,
-            fn () => $this->checkStorefrontStatus($settings, $subdomain),
+            fn () => $this->checkStorefrontStatus($subdomain),
         );
     }
 
@@ -322,9 +317,9 @@ class BrandStoreSettingsController extends ApiController
      *
      * @return 'live'|'redirecting'|'unreachable'
      */
-    private function checkStorefrontStatus(BrandStoreSettings $settings, string $subdomain): string
+    private function checkStorefrontStatus(string $subdomain): string
     {
-        $url = $settings->storefrontBaseUrl($subdomain);
+        $url = 'https://'.$subdomain.'.'.config('partna.public_domain', 'partna.au');
 
         try {
             $response = Http::withOptions([

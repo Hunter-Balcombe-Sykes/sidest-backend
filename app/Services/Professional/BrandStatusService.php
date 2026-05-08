@@ -219,12 +219,11 @@ class BrandStatusService
             return false;
         }
 
-        // All four wizard flags must be set
+        // All wizard flags must be set
         if (
             ! $settings->hydrogen_install_confirmed ||
             empty($settings->getRawOriginal('oxygen_deployment_token')) ||
-            empty($settings->oxygen_storefront_id) ||
-            ! $settings->domain_wizard_complete
+            empty($settings->oxygen_storefront_id)
         ) {
             return false;
         }
@@ -247,7 +246,7 @@ class BrandStatusService
             return false;
         }
 
-        $url = $settings->storefrontBaseUrl($subdomain);
+        $url = 'https://'.$subdomain.'.'.config('partna.public_domain', 'partna.au');
         $cacheKey = 'brand_status:storefront_reachable:'.sha1($url);
 
         $cached = Cache::get($cacheKey);
