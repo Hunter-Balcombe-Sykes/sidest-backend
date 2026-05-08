@@ -12,7 +12,8 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-// V2: Weekly sales/commission rollup notification for all active professionals. Runs on scheduled cron.
+// Weekly sales/commission rollup notification for all active professionals.
+// Scheduled: every Monday at 09:00 UTC via routes/console.php.
 class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

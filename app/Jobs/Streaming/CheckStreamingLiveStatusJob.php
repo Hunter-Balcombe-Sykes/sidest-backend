@@ -12,7 +12,8 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 
-// Polls Twitch and Kick every 2 minutes for live status of all blocks with live_check_enabled=true.
+// Polls Twitch and Kick for live status of all blocks with live_check_enabled=true.
+// Scheduled: every 2 minutes via routes/console.php.
 class CheckStreamingLiveStatusJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

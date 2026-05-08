@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 // Marks expired affiliate invites and publishes expiry notifications to brand managers.
+// Scheduled: daily at 08:00 UTC via routes/console.php.
 class InviteExpirySweepJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
