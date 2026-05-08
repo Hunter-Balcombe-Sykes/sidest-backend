@@ -310,6 +310,36 @@ it('marks wallet_currency_mismatch and notifies brand when wallet currency diffe
     expect($brandRow->stripe_manual_balance_cents)->toBe(15000);
 });
 
+it('resets void_at on wallet_currency_mismatch so the grace window counts from the latest hold, not creation', function () {
+    // Payout was created 50 days ago — without the void_at reset, VoidExpiredPayoutsJob
+    // would void it in 10 days even though the brand might still be resolving the mismatch.
+    $pastVoidAt = now()->subDays(50)->addDays(60); // original void_at = creation + 60 days
+
+    payoutSvc_seedBrand('brand-1', [
+        'stripe_manual_balance_cents' => 15000,
+        'stripe_manual_balance_currency' => 'EUR',
+    ]);
+    payoutSvc_seedAffiliate('aff-1');
+    $payout = payoutSvc_seedPayout('p1', [
+        'currency_code' => 'AUD',
+        'gross_commission_cents' => 10000,
+        'void_at' => $pastVoidAt->toDateTimeString(),
+    ]);
+
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldReceive('publish')->once();
+
+    $service = new CommissionPayoutService(payoutSvc_makeStripe(), $publisher);
+    $service->processPayoutBatch($payout);
+
+    $fresh = $payout->fresh();
+    expect($fresh->status)->toBe('pending_funds');
+    expect($fresh->failure_code)->toBe('wallet_currency_mismatch');
+    // void_at should now be approximately now() + 60 days, not the original stale value.
+    $newVoidAt = \Illuminate\Support\Carbon::parse($fresh->void_at);
+    expect($newVoidAt->isAfter(now()->addDays(55)))->toBeTrue();
+});
+
 it('does NOT flag currency mismatch when wallet balance is zero regardless of currency', function () {
     // Zero balance with wrong currency code should proceed to card charge, not halt.
     payoutSvc_seedBrand('brand-1', [
@@ -894,6 +924,26 @@ it('does not include orders with non-zero refund_cents in payout sweep', functio
     $stats = $service->processEligiblePayouts();
 
     expect($stats['batches_created'])->toBe(0);
+});
+
+it('does not re-dispatch a pending_funds payout stuck on wallet_currency_mismatch', function () {
+    // A wallet_currency_mismatch payout re-dispatched on every sweep would hit the
+    // same mismatch check, call markPendingFunding again (no-op), and flood Horizon.
+    // The sweep must skip it until an admin clears the failure_code via /retry.
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1');
+    payoutSvc_seedPayout('stuck-1', [
+        'status' => 'pending_funds',
+        'failure_code' => 'wallet_currency_mismatch',
+        'eligible_after' => now()->subDay()->toDateTimeString(),
+    ]);
+
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    // The mismatch payout must not be counted as requeued.
+    expect($stats['batches_requeued'])->toBe(0);
+    expect($stats['batches_dispatched'])->toBe(0);
 });
 
 // ============================================================

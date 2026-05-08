@@ -31,20 +31,29 @@ class StaffCommissionPayoutController extends ApiController
      * GET /staff/commission-payouts
      *
      * List all payouts platform-wide. Query params:
-     *   status            — pending|processing|completed|failed|...
+     *   status              — pending|processing|completed|failed|pending_funds|...
+     *   failure_code        — filter by failure code, e.g. wallet_currency_mismatch
      *   needs_manual_refund — true|false (filter for stuck double-failure cases)
-     *   per_page          — default 25, max 100
+     *   per_page            — default 25, max 100
+     *
+     * Tip: ?status=pending_funds&failure_code=wallet_currency_mismatch lists all
+     * payouts blocked on a brand wallet currency mismatch (requires admin action).
      */
     public function index(Request $request): JsonResponse
     {
         $perPage = $this->normalizePerPage($request, 25, 100);
         $status = $request->query('status');
+        $failureCode = $request->query('failure_code');
         $needsManualRefund = $request->query('needs_manual_refund');
 
         $query = DB::table('commerce.commission_payouts')->orderByDesc('created_at');
 
         if (is_string($status) && $status !== '') {
             $query->where('status', $status);
+        }
+
+        if (is_string($failureCode) && $failureCode !== '') {
+            $query->where('failure_code', $failureCode);
         }
 
         if ($needsManualRefund === 'true') {

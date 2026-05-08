@@ -59,10 +59,17 @@ class CommissionPayoutService
 
         // Re-dispatch any in-flight batches. ExecuteCommissionPayoutJob's idempotent
         // resume logic handles collecting/transferring states safely.
+        // Skip wallet_currency_mismatch payouts — they cannot proceed until the brand
+        // resolves the mismatch manually. Re-dispatching them floods Horizon with no
+        // forward progress; the sweep picks them up again once an admin clears the code.
         $existingPending = CommissionPayout::query()
             ->whereIn('status', ['pending', 'pending_funds', 'collecting', 'transferring'])
             ->whereNull('processed_at')
             ->where('eligible_after', '<=', now())
+            ->where(function ($q) {
+                $q->whereNull('failure_code')
+                    ->orWhere('failure_code', '!=', 'wallet_currency_mismatch');
+            })
             ->orderBy('eligible_after')
             ->limit(500)
             ->get();
@@ -635,6 +642,10 @@ class CommissionPayoutService
             'failure_code' => $code,
             'failure_reason' => $reason,
             'processed_at' => null,
+            // Reset expiry each time we park the payout — without this, the void clock
+            // counts from original creation while the payout loops in pending_funds,
+            // causing VoidExpiredPayoutsJob to silently erase the affiliate's commission.
+            'void_at' => now()->addDays($this->gracePeriodDays),
         ])->save();
 
         Log::notice('Commission payout pending funding', [
