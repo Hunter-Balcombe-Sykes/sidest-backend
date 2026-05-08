@@ -14,5 +14,5 @@ zone_name = "partna.au"
 # `preview_id` is used during `wrangler dev`; create with `--preview`.
 [[kv_namespaces]]
 binding = "SUBDOMAIN_KV"
-id = "REPLACE_WITH_PRODUCTION_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+id = "e726607804d41a296d6da150b0c537f"
+preview_id = "e6a8eecd305148f9a75b879aa6faf790"
