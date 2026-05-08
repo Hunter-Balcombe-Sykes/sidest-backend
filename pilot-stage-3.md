@@ -168,7 +168,7 @@
         });
         ```
 
-- [ ] **#AUTH-4** · P2 — IntegrationPolicy::view returns a bare `false` (yields HTTP 403) instead of `denyAsNotFound()` (HTTP 404) when integration has no owner
+- [x] **#AUTH-4** · P2 — IntegrationPolicy::view returns a bare `false` (yields HTTP 403) instead of `denyAsNotFound()` (HTTP 404) when integration has no owner
     - **Where:** app/Policies/IntegrationPolicy.php:44–51
     - **Affects:** Any authenticated professional testing a UUID for an integration record with a null or empty `professional_id` — they receive a 403 response instead of 404, leaking that the record exists.
     - **Effort:** S (~0.5–1h)
