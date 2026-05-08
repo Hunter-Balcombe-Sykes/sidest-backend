@@ -280,7 +280,7 @@
 
 ### P2
 
-- [ ] **#WEB-4** · P2 — `themes/publish` webhook returns 200 on invalid HMAC
+- [x] **#WEB-4** · P2 — `themes/publish` webhook returns 200 on invalid HMAC
     - **Where:** `app/Http/Controllers/Api/Webhooks/ShopifyThemePublishedWebhookController.php:27–34`
     - **Affects:** Shopify's webhook delivery health tracking; operators lose visibility when HMAC verification fails in production.
     - **Effort:** S (~0.5h)
