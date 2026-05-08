@@ -97,16 +97,14 @@ class AnalyticsCacheService
         }
 
         // Delete the rolling 90-day window of visit and click stat keys.
+        // Each entry covers a single day (start === end === that day's date).
         $keys = [];
-        $end = Carbon::now();
 
         for ($i = 0; $i < 90; $i++) {
-            $date = $end->copy()->subDays($i);
-            $start = $date->format('Ymd');
-            $endStr = $end->format('Ymd');
+            $date = Carbon::now()->subDays($i)->format('Ymd');
 
-            $keys[] = CacheKeyGenerator::analyticsVisits($professionalId, $start, $endStr);
-            $keys[] = CacheKeyGenerator::analyticsClicks($professionalId, $start, $endStr);
+            $keys[] = CacheKeyGenerator::analyticsVisits($professionalId, $date, $date);
+            $keys[] = CacheKeyGenerator::analyticsClicks($professionalId, $date, $date);
         }
 
         Cache::deleteMultiple(array_values(array_unique($keys)));

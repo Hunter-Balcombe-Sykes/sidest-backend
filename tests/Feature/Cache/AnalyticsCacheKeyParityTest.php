@@ -87,12 +87,11 @@ it('analytics summary cache key uses YmdH format matching the controller', funct
 
 it('invalidateAnalytics deletes visit stat cache keys for last 90 days', function () {
     $professionalId = (string) Str::uuid();
-    $end = Carbon::now();
-    $start = $end->copy()->subDays(1)->format('Ymd');
-    $endStr = $end->format('Ymd');
+    // Keys are single-day: start === end === the day itself.
+    $dayStr = Carbon::now()->subDays(1)->format('Ymd');
 
-    $visitKey = CacheKeyGenerator::analyticsVisits($professionalId, $start, $endStr);
-    $clickKey = CacheKeyGenerator::analyticsClicks($professionalId, $start, $endStr);
+    $visitKey = CacheKeyGenerator::analyticsVisits($professionalId, $dayStr, $dayStr);
+    $clickKey = CacheKeyGenerator::analyticsClicks($professionalId, $dayStr, $dayStr);
 
     Cache::put($visitKey, ['total_visits' => 99], now()->addMinutes(5));
     Cache::put($clickKey, ['total_clicks' => 42], now()->addMinutes(5));
