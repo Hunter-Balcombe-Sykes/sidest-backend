@@ -375,7 +375,7 @@
     - **Plain English:** Redis stores our cached data in a verbose format by default. We can switch to a denser format that takes ~3× less space, but the payoff only matters once we're storing a lot of data. Not worth the deploy risk yet.
     - **Evidence:** Trigger-based — defer until cache memory or payload size warrants.
 
-- [ ] **#GS-11** · P3 — Confirm `getPublicSitePayload` rebuild doesn't run inside session middleware (CDN-blocking `Set-Cookie`)
+- [x] **#GS-11** · P3 — Confirm `getPublicSitePayload` rebuild doesn't run inside session middleware (CDN-blocking `Set-Cookie`)
     - **Where:** routes/api/publicSite.php (verify), config/session.php (current `'driver' => 'redis'`)
     - **Affects:** Any future Cloudflare/edge caching on public routes (see GS-8) — `Set-Cookie` on a response makes Cloudflare bypass cache.
     - **Effort:** S (~30min, mostly verification)
