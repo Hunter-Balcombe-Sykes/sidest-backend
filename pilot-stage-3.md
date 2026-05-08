@@ -591,7 +591,7 @@
 
 ### P2
 
-- [ ] **#PUB-1** · P2 — Public lead-capture endpoints rely on weak passive bot defenses (reconstructed from orphaned adjudicator output)
+- [x] **#PUB-1** · P2 — Public lead-capture endpoints rely on weak passive bot defenses (reconstructed from orphaned adjudicator output)
     - **Where:** app/Http/Controllers/Api/PublicSite/PublicEnquiryController.php; app/Http/Controllers/Api/PublicSite/PublicWaitlistController.php; routes/api.php (`/public/customers`, `/public/enquiry`, `/public/waitlist`)
     - **Affects:** Public lead-capture endpoints visible to unauthenticated traffic. Without a server-side cryptographic challenge, an automated script can flood every professional's inbox with fake leads daily.
     - **Effort:** M (~2–4h once a CAPTCHA vendor is selected)
