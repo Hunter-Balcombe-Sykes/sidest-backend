@@ -229,7 +229,7 @@
 
 ### P1
 
-- [ ] **#PAY-1** · P1 — Currency-mismatch payout loops forever; `void_at` not reset on `pending_funds`
+- [x] **#PAY-1** · P1 — Currency-mismatch payout loops forever; `void_at` not reset on `pending_funds`
     - **Where:** `app/Services/Stripe/CommissionPayoutService.php:339–361`, `:631–644`
     - **Affects:** Any brand whose Stripe manual wallet is denominated in a different currency than the commission being paid out — commissions for those affiliates stay permanently frozen in `pending_funds` while `processEligiblePayouts` re-dispatches them on every sweep, silently flooding Horizon.
     - **Effort:** S (~1h)
