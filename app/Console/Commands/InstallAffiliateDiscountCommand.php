@@ -23,7 +23,7 @@ use Illuminate\Console\Command;
  */
 class InstallAffiliateDiscountCommand extends Command
 {
-    protected $signature = 'sidest:install-affiliate-discount
+    protected $signature = 'partna:install-affiliate-discount
         {--brand= : Only dispatch for this brand professional_id (UUID). If omitted, dispatches for every Shopify integration.}';
 
     protected $description = 'Install the Partna Price automatic discount on connected Shopify stores via the sidest-affiliate-discount Function.';

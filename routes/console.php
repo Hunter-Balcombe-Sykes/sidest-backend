@@ -9,7 +9,7 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Artisan::command('sidest:normalize-professional-types {--dry-run : Show count only without updating}', function () {
+Artisan::command('partna:normalize-professional-types {--dry-run : Show count only without updating}', function () {
     $allowed = ['professional', 'influencer', 'brand'];
 
     $query = DB::table('professionals')->where(function ($builder) use ($allowed): void {
@@ -40,14 +40,14 @@ Artisan::command('sidest:normalize-professional-types {--dry-run : Show count on
     $this->info("Normalized {$updated} professional record(s) to professional_type=professional.");
 })->purpose('Normalize legacy professional_type values to professional.');
 
-Schedule::command('sidest:purge-soft-deletes')
+Schedule::command('partna:purge-soft-deletes')
     ->dailyAt('03:20')
     ->withoutOverlapping(600)
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: purge-soft-deletes');
     });
 
-Schedule::command('sidest:prune-notifications', ['--days' => 30])
+Schedule::command('partna:prune-notifications', ['--days' => 30])
     ->dailyAt('03:25')
     ->onFailure(function (?\Throwable $e = null): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-notifications', [
@@ -73,7 +73,7 @@ Schedule::job(new \App\Jobs\Stripe\VoidExpiredPayoutsJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: void-expired-payouts');
     });
 
-Schedule::command('sidest:analytics:purge-raw-events')
+Schedule::command('partna:analytics:purge-raw-events')
     ->dailyAt('03:00')
     ->withoutOverlapping()
     ->onFailure(function (): void {
@@ -121,10 +121,10 @@ Schedule::job(new \App\Jobs\Streaming\CheckStreamingLiveStatusJob)
 // Phase 3 backstop reconciler. Cron expression is env-overridable: set
 // SIDEST_RECONCILER_SCHEDULE='0 * * * *' for the first 60 days post-launch,
 // then revert to the default daily-at-3am value.
-Schedule::command('sidest:reconcile-shopify-orders')
+Schedule::command('partna:reconcile-shopify-orders')
     ->cron(config('partna.reconciler.schedule', '0 3 * * *'))
     ->withoutOverlapping(60 * 60) // 1h overlap guard
     ->description('Backstop reconcile of Shopify orders against commerce.orders (Phase 3)')
     ->onFailure(function (): void {
-        \Log::error('sidest:reconcile-shopify-orders schedule failure');
+        \Log::error('partna:reconcile-shopify-orders schedule failure');
     });

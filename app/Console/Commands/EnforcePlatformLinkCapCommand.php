@@ -29,7 +29,7 @@ use Illuminate\Support\Facades\Log;
  */
 class EnforcePlatformLinkCapCommand extends Command
 {
-    protected $signature = 'sidest:enforce-platform-link-cap
+    protected $signature = 'partna:enforce-platform-link-cap
         {--dry-run : Preview which blocks would be soft-deleted without writing}';
 
     protected $description = 'Soft-delete excess platform link blocks for professionals already over the cap. Idempotent.';

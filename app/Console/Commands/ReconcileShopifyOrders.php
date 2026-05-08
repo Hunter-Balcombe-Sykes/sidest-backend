@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Log;
 // upsert provides idempotency; no unique event-id constraint is needed here.
 class ReconcileShopifyOrders extends Command
 {
-    protected $signature = 'sidest:reconcile-shopify-orders
+    protected $signature = 'partna:reconcile-shopify-orders
                             {--integration= : Restrict to a single integration UUID (for testing)}
                             {--since= : Override per-integration reconciled_through (ISO 8601)}
                             {--dry-run : Log what would be dispatched without dispatching}';

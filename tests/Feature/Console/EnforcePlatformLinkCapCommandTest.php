@@ -58,7 +58,7 @@ it('does not touch blocks when the professional is at the cap', function () {
     [$proId, $siteId] = createBackfillFixtureIds();
     $ids = seedCapBlocks($proId, $siteId, 7);
 
-    Artisan::call('sidest:enforce-platform-link-cap');
+    Artisan::call('partna:enforce-platform-link-cap');
 
     $surviving = Block::query()->where('professional_id', $proId)->whereNull('deleted_at')->count();
     expect($surviving)->toBe(7);
@@ -68,7 +68,7 @@ it('soft-deletes the newest excess blocks keeping the oldest cap worth', functio
     [$proId, $siteId] = createBackfillFixtureIds();
     $ids = seedCapBlocks($proId, $siteId, 9); // 9 blocks, 2 over the cap
 
-    Artisan::call('sidest:enforce-platform-link-cap');
+    Artisan::call('partna:enforce-platform-link-cap');
 
     $surviving = Block::query()
         ->where('professional_id', $proId)
@@ -98,7 +98,7 @@ it('does not write in dry-run mode', function () {
     [$proId, $siteId] = createBackfillFixtureIds();
     seedCapBlocks($proId, $siteId, 9);
 
-    Artisan::call('sidest:enforce-platform-link-cap', ['--dry-run' => true]);
+    Artisan::call('partna:enforce-platform-link-cap', ['--dry-run' => true]);
 
     $surviving = Block::query()->where('professional_id', $proId)->whereNull('deleted_at')->count();
     expect($surviving)->toBe(9); // nothing touched
@@ -110,7 +110,7 @@ it('ignores blocks in non-capped categories', function () {
     seedCapBlocks($proId, $siteId, 3, 'social');
     seedCapBlocks($proId, $siteId, 6, 'booking');
 
-    Artisan::call('sidest:enforce-platform-link-cap');
+    Artisan::call('partna:enforce-platform-link-cap');
 
     $surviving = Block::query()->where('professional_id', $proId)->whereNull('deleted_at')->count();
     expect($surviving)->toBe(9); // all 9 survive; social count (3) is under cap
@@ -120,8 +120,8 @@ it('is idempotent when run twice', function () {
     [$proId, $siteId] = createBackfillFixtureIds();
     seedCapBlocks($proId, $siteId, 9);
 
-    Artisan::call('sidest:enforce-platform-link-cap');
-    Artisan::call('sidest:enforce-platform-link-cap'); // second run
+    Artisan::call('partna:enforce-platform-link-cap');
+    Artisan::call('partna:enforce-platform-link-cap'); // second run
 
     $surviving = Block::query()->where('professional_id', $proId)->whereNull('deleted_at')->count();
     expect($surviving)->toBe(7);
@@ -136,7 +136,7 @@ it('scopes remediation per professional — does not bleed across accounts', fun
     seedCapBlocks($proIdA, $siteIdA, 9); // over cap
     seedCapBlocks($proIdB, $siteIdB, 5); // under cap
 
-    Artisan::call('sidest:enforce-platform-link-cap');
+    Artisan::call('partna:enforce-platform-link-cap');
 
     expect(Block::query()->where('professional_id', $proIdA)->whereNull('deleted_at')->count())->toBe(7);
     expect(Block::query()->where('professional_id', $proIdB)->whereNull('deleted_at')->count())->toBe(5);

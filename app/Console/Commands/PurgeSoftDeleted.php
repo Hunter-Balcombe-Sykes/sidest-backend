@@ -15,7 +15,7 @@ use Illuminate\Support\Carbon;
 // has elapsed (via AccountDeletionService).
 class PurgeSoftDeleted extends Command
 {
-    protected $signature = 'sidest:purge-soft-deletes {--days= : Override retention days}';
+    protected $signature = 'partna:purge-soft-deletes {--days= : Override retention days}';
 
     protected $description = 'Permanently delete soft-deleted rows and pending-deletion professionals older than retention window.';
 

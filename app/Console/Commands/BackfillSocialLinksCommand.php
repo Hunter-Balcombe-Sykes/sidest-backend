@@ -39,7 +39,7 @@ use InvalidArgumentException;
  */
 class BackfillSocialLinksCommand extends Command
 {
-    protected $signature = 'sidest:backfill-social-links
+    protected $signature = 'partna:backfill-social-links
         {--dry-run : Show what would change without writing}
         {--limit=0 : Process at most N rows (0 = unlimited)}';
 

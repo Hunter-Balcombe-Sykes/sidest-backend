@@ -197,7 +197,7 @@ it('skips an order whose local row has a NEWER shopify_updated_at', function () 
 
     app()->instance(ShopifyAdminClient::class, $mockClient);
 
-    $this->artisan('sidest:reconcile-shopify-orders', ['--integration' => DB::connection('pgsql')
+    $this->artisan('partna:reconcile-shopify-orders', ['--integration' => DB::connection('pgsql')
         ->table('core.professional_integrations')
         ->where('professional_id', $proId)
         ->value('id'),
@@ -228,7 +228,7 @@ it('dispatches for an order whose local row has an OLDER shopify_updated_at', fu
 
     app()->instance(ShopifyAdminClient::class, $mockClient);
 
-    $this->artisan('sidest:reconcile-shopify-orders', ['--integration' => $integrationId])
+    $this->artisan('partna:reconcile-shopify-orders', ['--integration' => $integrationId])
         ->assertExitCode(0);
 
     Bus::assertDispatchedSync(ProcessShopifyOrderWebhookJob::class, function (ProcessShopifyOrderWebhookJob $job) {
@@ -254,7 +254,7 @@ it('dispatches for an order with NO local row', function () {
 
     app()->instance(ShopifyAdminClient::class, $mockClient);
 
-    $this->artisan('sidest:reconcile-shopify-orders', ['--integration' => $integrationId])
+    $this->artisan('partna:reconcile-shopify-orders', ['--integration' => $integrationId])
         ->assertExitCode(0);
 
     Bus::assertDispatchedSync(ProcessShopifyOrderWebhookJob::class, function (ProcessShopifyOrderWebhookJob $job) {
@@ -294,7 +294,7 @@ it('continues to the next integration when one throws', function () {
     Log::shouldReceive('warning')->zeroOrMoreTimes();
 
     // Run without --integration filter so both integrations are processed.
-    $this->artisan('sidest:reconcile-shopify-orders')
+    $this->artisan('partna:reconcile-shopify-orders')
         ->assertExitCode(0);
 
     // Brand B's order should still be dispatched despite A failing.
@@ -320,7 +320,7 @@ it('does NOT dispatch in --dry-run mode', function () {
 
     app()->instance(ShopifyAdminClient::class, $mockClient);
 
-    $this->artisan('sidest:reconcile-shopify-orders', [
+    $this->artisan('partna:reconcile-shopify-orders', [
         '--integration' => $integrationId,
         '--dry-run' => true,
     ])->assertExitCode(0);
@@ -350,7 +350,7 @@ it('passes the --since override timestamp to the Shopify REST call', function ()
 
     app()->instance(ShopifyAdminClient::class, $mockClient);
 
-    $this->artisan('sidest:reconcile-shopify-orders', [
+    $this->artisan('partna:reconcile-shopify-orders', [
         '--integration' => $integrationId,
         '--since' => $since,
     ])->assertExitCode(0);

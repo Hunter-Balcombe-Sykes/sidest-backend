@@ -55,7 +55,7 @@ it('backfills settings.category=social for pre-existing instagram links', functi
         'settings' => [],
     ]);
 
-    Artisan::call('sidest:backfill-social-links');
+    Artisan::call('partna:backfill-social-links');
 
     $block->refresh();
     expect($block->settings['platform'] ?? null)->toBe('instagram');
@@ -78,7 +78,7 @@ it('backfills settings.category=other for custom (icon_key=link) blocks', functi
         'settings' => [],
     ]);
 
-    Artisan::call('sidest:backfill-social-links');
+    Artisan::call('partna:backfill-social-links');
 
     $block->refresh();
     expect($block->settings['category'] ?? null)->toBe('other');
@@ -100,7 +100,7 @@ it('is idempotent — existing category is preserved on re-run', function () {
         'settings' => ['platform' => 'instagram', 'category' => 'events'], // manually overridden
     ]);
 
-    Artisan::call('sidest:backfill-social-links');
+    Artisan::call('partna:backfill-social-links');
 
     $block->refresh();
     expect($block->settings['category'] ?? null)->toBe('events'); // preserved

@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Log;
 // V2: Deletes raw analytics events older than retention window (min 30 days). Aggregate data preserved in hourly/daily tables.
 class PurgeRawAnalyticsEvents extends Command
 {
-    protected $signature = 'sidest:analytics:purge-raw-events
+    protected $signature = 'partna:analytics:purge-raw-events
                             {--days= : Retain events newer than N days (default from config, minimum 30)}
                             {--dry-run : Report row counts without deleting}';
 
@@ -60,7 +60,7 @@ class PurgeRawAnalyticsEvents extends Command
             $totalDeleted
         ));
 
-        Log::info('sidest:analytics:purge-raw-events completed', [
+        Log::info('partna:analytics:purge-raw-events completed', [
             'dry_run' => $dryRun,
             'days' => $days,
             'cutoff' => $cutoff->toIso8601String(),

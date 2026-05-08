@@ -130,7 +130,7 @@ it('command purges professionals past 30 days but skips within grace', function 
         'deletion_confirmed_at' => now()->subDays(5)->toIso8601String(),
     ]);
 
-    \Illuminate\Support\Facades\Artisan::call('sidest:purge-soft-deletes');
+    \Illuminate\Support\Facades\Artisan::call('partna:purge-soft-deletes');
 
     $purgeableExists = DB::connection('pgsql')->table('core.professionals')
         ->where('id', $purgeable->id)->exists();

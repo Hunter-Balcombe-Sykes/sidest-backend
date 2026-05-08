@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 // V2: Deletes expired notifications older than N days. Cascades to notification receipts.
 class PruneNotifications extends Command
 {
-    protected $signature = 'sidest:prune-notifications {--days=30} {--dry-run}';
+    protected $signature = 'partna:prune-notifications {--days=30} {--dry-run}';
 
     protected $description = 'Delete notifications whose ends_at is older than N days (cascades receipts)';
 

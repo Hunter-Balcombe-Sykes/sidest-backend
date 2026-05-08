@@ -33,7 +33,7 @@ use Illuminate\Support\Facades\Log;
  */
 class BackfillHasEnabledVariantsCommand extends Command
 {
-    protected $signature = 'sidest:backfill-has-enabled-variants
+    protected $signature = 'partna:backfill-has-enabled-variants
         {--brand= : Only process this brand professional_id (UUID). If omitted, all connected Shopify brands are processed.}
         {--dry-run : Log what would be written without hitting Shopify.}';
 
