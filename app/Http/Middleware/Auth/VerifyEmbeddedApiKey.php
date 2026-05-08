@@ -21,13 +21,26 @@ class VerifyEmbeddedApiKey
     {
         $expected = (string) config('services.embedded.api_key');
 
-        // Skip key validation in dev/test when no key is configured
-        if ($expected !== '') {
-            $provided = (string) str_replace('Bearer ', '', $request->header('Authorization', ''));
-
-            if ($provided === '' || ! hash_equals($expected, $provided)) {
-                return response()->json(['message' => 'Invalid or missing embedded API key.'], 403);
+        if ($expected === '') {
+            // Dev/test bypass: missing config is acceptable when running locally
+            // or under the test suite. Anywhere else (production, staging, any
+            // unrecognized env) we fail closed — without this gate, an empty
+            // SIDEST_EMBEDDED_API_KEY on a production deploy would silently open every
+            // /internal/embedded/* route, including the deployment-token endpoint
+            // that can rewrite a brand's storefront, to anonymous traffic.
+            if (app()->environment(['local', 'testing'])) {
+                return $next($request);
             }
+
+            throw new \RuntimeException(
+                'services.embedded.api_key is not configured — refusing to fall through to bypass outside local/testing.'
+            );
+        }
+
+        $provided = (string) str_replace('Bearer ', '', $request->header('Authorization', ''));
+
+        if ($provided === '' || ! hash_equals($expected, $provided)) {
+            return response()->json(['message' => 'Invalid or missing embedded API key.'], 403);
         }
 
         $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop', '')));
