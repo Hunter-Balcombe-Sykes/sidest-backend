@@ -24,7 +24,7 @@ class ProfessionalCacheService
         // Short null-TTL (30s) so a freshly-signed-up user doesn't see "not found" for 30 minutes.
         return $this->cacheLock->rememberLockedNullable(
             CacheKeyGenerator::professionalIdByAuthId($authUserId),
-            now()->addMinutes(30),
+            (int) config('partna.cache.ttls.auth_id_lookup'),
             fn () => Professional::query()
                 ->where('auth_user_id', $authUserId)
                 ->value('id'),
@@ -38,7 +38,7 @@ class ProfessionalCacheService
 
         return $this->cacheLock->rememberLockedNullable(
             CacheKeyGenerator::professionalIdByHandle($handleLc),
-            now()->addHour(),
+            (int) config('partna.cache.ttls.professional_handle_lookup'),
             fn () => Professional::query()
                 ->where('handle_lc', $handleLc)
                 ->value('id'),
@@ -54,7 +54,7 @@ class ProfessionalCacheService
     {
         return $this->cacheLock->rememberLockedNullable(
             CacheKeyGenerator::professionalPayloadById($id),
-            now()->addHour(),
+            (int) config('partna.cache.ttls.professional_handle_lookup'),
             function () use ($id) {
                 $pro = Professional::query()->with('site')->find($id);
 
@@ -158,7 +158,7 @@ class ProfessionalCacheService
         // request — they ride along inside the cached model, paid once per 60s window.
         $professional = $this->cacheLock->rememberLocked(
             CacheKeyGenerator::professionalModel($id),
-            60,
+            (int) config('partna.cache.ttls.professional_model'),
             fn () => Professional::query()->with(['site', 'squareIntegration'])->find($id),
         );
         if (! $professional) {
@@ -181,7 +181,7 @@ class ProfessionalCacheService
                 return null;
             }
 
-            Cache::put($authIdKey, $freshId, now()->addMinutes(30));
+            Cache::put($authIdKey, $freshId, (int) config('partna.cache.ttls.auth_id_lookup'));
 
             return Professional::query()->with(['site', 'squareIntegration'])->find($freshId);
         }
@@ -197,7 +197,7 @@ class ProfessionalCacheService
     {
         return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::professionalServices($professionalId),
-            now()->addMinutes(30),
+            (int) config('partna.cache.ttls.auth_id_lookup'),
             fn () => Service::query()
                 ->where('professional_id', $professionalId)
                 ->where('is_active', true)
@@ -220,7 +220,7 @@ class ProfessionalCacheService
     {
         return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::professionalDashboardServices($professionalId),
-            now()->addMinutes(30),
+            (int) config('partna.cache.ttls.auth_id_lookup'),
             fn () => Service::query()
                 ->where('professional_id', $professionalId)
                 ->whereNull('deleted_at')
@@ -244,7 +244,7 @@ class ProfessionalCacheService
     {
         return $this->cacheLock->rememberLockedNullable(
             CacheKeyGenerator::brandStoreSettings($professionalId),
-            now()->addMinutes(30),
+            (int) config('partna.cache.ttls.auth_id_lookup'),
             fn () => BrandStoreSettings::query()
                 ->where('professional_id', $professionalId)
                 ->first()
@@ -267,7 +267,7 @@ class ProfessionalCacheService
     {
         return $this->cacheLock->rememberLockedNullable(
             CacheKeyGenerator::brandPartnerStatus($brandProfessionalId),
-            now()->addMinutes(5),
+            (int) config('partna.cache.ttls.analytics_short'),
             function () use ($brandProfessionalId) {
                 $brandProfile = BrandProfile::query()
                     ->where('professional_id', $brandProfessionalId)
@@ -294,7 +294,7 @@ class ProfessionalCacheService
     {
         return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::customerCount($professionalId),
-            now()->addMinutes(15),
+            (int) config('partna.cache.ttls.public_payload'),
             fn () => DB::table('core.customers')
                 ->where('professional_id', $professionalId)
                 ->whereNull('deleted_at')

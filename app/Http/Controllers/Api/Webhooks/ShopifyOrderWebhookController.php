@@ -41,7 +41,7 @@ class ShopifyOrderWebhookController extends ApiController
         }
 
         // Claim the webhook-id to prevent concurrent double-dispatch.
-        if ($dedupeKey && ! Cache::add($dedupeKey, true, now()->addHours(24))) {
+        if ($dedupeKey && ! Cache::add($dedupeKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
             return $this->success(['received' => true, 'duplicate' => true]);
         }
 

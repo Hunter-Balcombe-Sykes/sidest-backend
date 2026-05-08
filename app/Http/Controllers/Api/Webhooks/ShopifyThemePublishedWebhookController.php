@@ -35,7 +35,7 @@ class ShopifyThemePublishedWebhookController extends ApiController
         // Deduplicate: Shopify may deliver the same webhook ID more than once.
         if ($webhookId !== '') {
             $dedupeKey = "shopify:webhook:themes-publish:{$webhookId}";
-            if (! Cache::add($dedupeKey, true, now()->addHours(24))) {
+            if (! Cache::add($dedupeKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
                 return $this->success(['received' => true, 'duplicate' => true]);
             }
         }

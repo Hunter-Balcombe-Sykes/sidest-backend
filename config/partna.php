@@ -1041,4 +1041,45 @@ return [
     'reconciler' => [
         'schedule' => env('SIDEST_RECONCILER_SCHEDULE', '0 3 * * *'),
     ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Cache TTL tiers (seconds)
+    |----------------------------------------------------------------------
+    | All env-overridable so Redis tuning during a hot-key incident or
+    | memory pressure event does not require a code redeploy — just flip
+    | the env var and run `php artisan config:cache`.
+    |
+    | Tiers:
+    |   public_payload             Hot public-site read; jittered ±20% on write to
+    |                              spread expiry bursts across the fleet.
+    |   analytics_short            Warm analytics/affiliate-status reads; push-
+    |                              invalidated on every write so staleness is bounded.
+    |   auth_id_lookup             Immutable Supabase auth UUID → professional_id mapping
+    |                              plus profile/services/settings caches (same tier).
+    |   professional_model         Hydrated Eloquent model on every authenticated request
+    |                              (auth hot path — short TTL, SWR-backed).
+    |   professional_handle_lookup Handle → id and payload reads; tuned separately from
+    |                              the auth path because they serve different traffic.
+    |   webhook_idempotency        Dedup window for inbound webhooks; prevents a Shopify
+    |                              retry from processing the same event twice.
+    |   brand_admin_catalog        Shopify product catalog fetched for order-commission
+    |                              resolution; push-invalidated on catalog webhooks.
+    |   collection_gid             Shopify collection GID lookups; long-lived stable data.
+    |   product_custom_photos      Per-affiliate custom product photo flags; hot reads on
+    |                              every order item, short TTL to limit stale-state window.
+    */
+    'cache' => [
+        'ttls' => [
+            'public_payload'             => (int) env('CACHE_TTL_PUBLIC_PAYLOAD', 900),         // 15m
+            'analytics_short'            => (int) env('CACHE_TTL_ANALYTICS_SHORT', 300),        // 5m
+            'auth_id_lookup'             => (int) env('CACHE_TTL_AUTH_ID_LOOKUP', 1800),        // 30m
+            'professional_model'         => (int) env('CACHE_TTL_PROFESSIONAL_MODEL', 60),      // 60s
+            'professional_handle_lookup' => (int) env('CACHE_TTL_PROFESSIONAL_HANDLE_LOOKUP', 3600), // 60m
+            'webhook_idempotency'        => (int) env('CACHE_TTL_WEBHOOK_IDEMPOTENCY', 86400),  // 24h
+            'brand_admin_catalog'        => (int) env('CACHE_TTL_BRAND_ADMIN_CATALOG', 300),    // 5m
+            'collection_gid'             => (int) env('CACHE_TTL_COLLECTION_GID', 3600),        // 60m
+            'product_custom_photos'      => (int) env('CACHE_TTL_PRODUCT_CUSTOM_PHOTOS', 60),   // 60s
+        ],
+    ],
 ];

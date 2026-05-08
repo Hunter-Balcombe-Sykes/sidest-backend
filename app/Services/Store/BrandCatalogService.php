@@ -16,11 +16,6 @@ class BrandCatalogService
         private readonly ShopifyAdminClient $client,
     ) {}
 
-    private const CATALOG_CACHE_TTL_MINUTES = 10;
-
-    private const COLLECTION_GID_CACHE_TTL_MINUTES = 60;
-
-    private const PRODUCT_CUSTOM_PHOTOS_TTL_SECONDS = 60;
 
     private const PRODUCTS_PER_PAGE = 50;
 
@@ -378,7 +373,7 @@ GRAPHQL;
     {
         return Cache::memo()->remember(
             CacheKeyGenerator::brandAdminCatalog((string) $brand->id),
-            now()->addMinutes(5),
+            (int) config('partna.cache.ttls.brand_admin_catalog'),
             fn () => $this->queryAdminCatalog($brand),
         );
     }
@@ -477,7 +472,7 @@ GRAPHQL;
                 'error' => $e->getMessage(),
             ]);
 
-            Cache::put($cacheKey, 'unset', now()->addSeconds(self::PRODUCT_CUSTOM_PHOTOS_TTL_SECONDS));
+            Cache::put($cacheKey, 'unset', now()->addSeconds((int) config('partna.cache.ttls.product_custom_photos')));
 
             return null;
         }
@@ -485,13 +480,13 @@ GRAPHQL;
         $value = Arr::get($response->json(), 'data.product.metafield.value');
 
         if ($value === null) {
-            Cache::put($cacheKey, 'unset', now()->addSeconds(self::PRODUCT_CUSTOM_PHOTOS_TTL_SECONDS));
+            Cache::put($cacheKey, 'unset', now()->addSeconds((int) config('partna.cache.ttls.product_custom_photos')));
 
             return null;
         }
 
         $bool = filter_var($value, FILTER_VALIDATE_BOOLEAN);
-        Cache::put($cacheKey, $bool ? 'true' : 'false', now()->addSeconds(self::PRODUCT_CUSTOM_PHOTOS_TTL_SECONDS));
+        Cache::put($cacheKey, $bool ? 'true' : 'false', now()->addSeconds((int) config('partna.cache.ttls.product_custom_photos')));
 
         return $bool;
     }
@@ -837,7 +832,7 @@ GRAPHQL;
     {
         $cacheKey = CacheKeyGenerator::brandCollectionGid((string) $integration->professional_id, $handle);
 
-        return Cache::memo()->remember($cacheKey, now()->addMinutes(self::COLLECTION_GID_CACHE_TTL_MINUTES), function () use ($integration, $handle) {
+        return Cache::memo()->remember($cacheKey, now()->addSeconds((int) config('partna.cache.ttls.collection_gid')), function () use ($integration, $handle) {
             $resolved = $this->resolveCredentials($integration);
 
             $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::COLLECTIONS_QUERY, [

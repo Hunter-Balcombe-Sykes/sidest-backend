@@ -46,7 +46,7 @@ class FreshaCatalogWebhookController extends ApiController
         $eventId = trim((string) ($payload['event_id'] ?? $payload['id'] ?? ''));
         if ($eventId !== '') {
             $cacheKey = 'fresha_webhook:'.$eventId;
-            if (! Cache::add($cacheKey, true, now()->addHours(24))) {
+            if (! Cache::add($cacheKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
                 return $this->success(['received' => true, 'duplicate' => true]);
             }
         }

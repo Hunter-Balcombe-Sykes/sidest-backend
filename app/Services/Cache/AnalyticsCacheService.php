@@ -20,7 +20,7 @@ class AnalyticsCacheService
             $endDate->format('Ymd')
         );
 
-        return $this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
+        return $this->cacheLock->rememberLocked($cacheKey, (int) config('partna.cache.ttls.analytics_short'), function () use ($professionalId, $startDate, $endDate) {
             return SiteVisit::where('professional_id', $professionalId)
                 ->whereBetween('occurred_at', [$startDate, $endDate])
                 ->selectRaw('
@@ -49,7 +49,7 @@ class AnalyticsCacheService
             $endDate->format('Ymd')
         );
 
-        return $this->cacheLock->rememberLocked($cacheKey, now()->addMinutes(5), function () use ($professionalId, $startDate, $endDate) {
+        return $this->cacheLock->rememberLocked($cacheKey, (int) config('partna.cache.ttls.analytics_short'), function () use ($professionalId, $startDate, $endDate) {
             return LinkClick::runForBlockForeignKey(
                 function (string $blockColumn) use ($professionalId, $startDate, $endDate) {
                     return LinkClick::where('professional_id', $professionalId)

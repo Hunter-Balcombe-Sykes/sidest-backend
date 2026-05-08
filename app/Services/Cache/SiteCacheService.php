@@ -18,19 +18,13 @@ class SiteCacheService
 {
     private const MISS_SENTINEL = '__MISS__';
 
-    // Public site payload TTL (15 min). Stored as int so we can jitter ±20% on
-    // each write — without it, a deploy fills 1,500 sites' caches in one window
-    // and they all expire in the same instant 15 min later (thundering-herd on
-    // expiry). Jitter spreads the expiry burst across a ~6-minute window.
-    private const PAYLOAD_TTL_SECONDS = 900;
-
     /** @var array<string, array<string, string|null>|null> */
     private array $brandPartnerEnrichmentCache = [];
 
     public function __construct(private readonly CacheLockService $cacheLock) {}
 
     /**
-     * Returns PAYLOAD_TTL_SECONDS with ±20% jitter applied.
+     * Returns the public_payload TTL with ±20% jitter applied.
      *
      * Mirrors CacheLockService::writeWithJitter's distribution so payload-cache
      * writes (which use raw Cache::put inside our manual single-flight) get the
@@ -38,7 +32,7 @@ class SiteCacheService
      */
     private function jitteredPayloadTtl(): int
     {
-        return (int) round(self::PAYLOAD_TTL_SECONDS * (0.8 + mt_rand(0, 4000) / 10000.0));
+        return (int) round((int) config('partna.cache.ttls.public_payload') * (0.8 + mt_rand(0, 4000) / 10000.0));
     }
 
     /**
@@ -865,7 +859,7 @@ class SiteCacheService
         // also spreads expiry across the fleet.
         return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::siteBlocks($siteId, 'links'),
-            self::PAYLOAD_TTL_SECONDS,
+            (int) config('partna.cache.ttls.public_payload'),
             fn () => Block::query()
                 ->where('site_id', $siteId)
                 ->where('block_group', 'links')

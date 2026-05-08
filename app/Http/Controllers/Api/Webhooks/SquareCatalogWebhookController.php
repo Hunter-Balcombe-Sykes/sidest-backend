@@ -43,7 +43,7 @@ class SquareCatalogWebhookController extends ApiController
         $eventId = trim((string) ($payload['event_id'] ?? ''));
         if ($eventId !== '') {
             $dedupeKey = 'square:webhook:event:'.$eventId;
-            if (! Cache::add($dedupeKey, true, now()->addHours(24))) {
+            if (! Cache::add($dedupeKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
                 return $this->success(['received' => true, 'duplicate' => true]);
             }
         }
