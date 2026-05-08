@@ -29,8 +29,7 @@ class ShopifyThemePublishedWebhookController extends ApiController
                 'shop_domain' => $shopDomain,
             ]);
 
-            // Return 200 regardless — Shopify retries on non-2xx, which would flood logs.
-            return $this->success(['received' => true]);
+            return $this->error('invalid signature', 401);
         }
 
         // Deduplicate: Shopify may deliver the same webhook ID more than once.
