@@ -205,7 +205,7 @@ class CommissionPayoutService
             // Per-payout grace window — 60d from creation. If the affiliate
             // hasn't activated Stripe Connect by then, VoidExpiredPayoutsJob
             // cancels this payout and clears the orders' payout_id stamps.
-            // grace_period_days lives in config/sidest.php so ops can tune
+            // grace_period_days lives in config/partna.php so ops can tune
             // the policy without a code release.
             // ledger_entry_count now counts orders included; column rename deferred to Phase 4.
             $payout = CommissionPayout::forceCreate([

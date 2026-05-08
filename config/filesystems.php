@@ -77,7 +77,7 @@ return [
             // managed storage resource, so the disk works out of the box on Cloud
             // while still allowing per-env MEDIA_DISK_* overrides (e.g. CDN domain).
             'bucket' => env('MEDIA_DISK_BUCKET', env('AWS_BUCKET', 'sidest-media')),
-            'url' => env('MEDIA_DISK_URL', env('AWS_URL')),               // e.g. https://media.sidest.co
+            'url' => env('MEDIA_DISK_URL', env('AWS_URL')),               // e.g. https://media.partna.au
             'endpoint' => env('MEDIA_DISK_ENDPOINT', env('AWS_ENDPOINT')), // e.g. https://<account>.r2.cloudflarestorage.com
             'use_path_style_endpoint' => env('MEDIA_DISK_PATH_STYLE', env('AWS_USE_PATH_STYLE_ENDPOINT', false)),
             'throw' => true,

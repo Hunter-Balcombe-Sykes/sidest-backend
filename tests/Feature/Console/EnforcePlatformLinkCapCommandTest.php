@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * Tests for sidest:enforce-platform-link-cap — the one-shot data remediation
+ * Tests for partna:enforce-platform-link-cap — the one-shot data remediation
  * command that soft-deletes excess platform link blocks for professionals
  * already over the platform_links_max cap.
  *

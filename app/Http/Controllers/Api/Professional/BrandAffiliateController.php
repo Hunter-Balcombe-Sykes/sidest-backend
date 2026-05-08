@@ -78,7 +78,7 @@ class BrandAffiliateController extends ApiController
                     'is_primary' => (int) $link->slot === BrandPartnerLinkService::PRIMARY_SLOT,
                     'custom_photos_enabled' => $link->custom_photos_enabled,
                     'affiliate_page_url' => $site->subdomain
-                        ? 'https://'.$site->subdomain.'.'.config('partna.public_domain', 'sidest.co').'/'.$professional->handle
+                        ? 'https://'.$site->subdomain.'.'.config('partna.public_domain', 'partna.au').'/'.$professional->handle
                         : null,
                 ];
             })

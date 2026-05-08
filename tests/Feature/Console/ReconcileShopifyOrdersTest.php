@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
-// Tests for sidest:reconcile-shopify-orders — the Phase 3 backstop that pulls
+// Tests for partna:reconcile-shopify-orders — the Phase 3 backstop that pulls
 // Shopify orders updated since reconciled_through and dispatches the webhook job
 // for missing or stale local rows.
 

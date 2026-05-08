@@ -5,8 +5,8 @@ namespace App\Services\Cloudflare;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-// Wraps Cloudflare DNS Records API for sidest.co zone management.
-// Used to provision platform subdomains (brand.sidest.co) for Hydrogen storefronts.
+// Wraps Cloudflare DNS Records API for partna.au zone management.
+// Used to provision platform subdomains (brand.partna.au) for Hydrogen storefronts.
 class CloudflareDnsService
 {
     private string $zoneId;

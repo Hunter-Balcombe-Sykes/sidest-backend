@@ -2,8 +2,11 @@
 
 return [
     'public_domain' => env(
-        'SIDEST_PUBLIC_DOMAIN',
-        parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST) ?: 'localhost'
+        'PARTNA_PUBLIC_DOMAIN',
+        env(
+            'SIDEST_PUBLIC_DOMAIN',
+            parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST) ?: 'localhost'
+        )
     ),
     'reserved_subdomains' => [
         'www', 'api', 'admin', 'app', 'staff', 'dashboard',
@@ -1015,7 +1018,7 @@ return [
 
     'gdpr' => [
         'queue' => env('GDPR_QUEUE', 'gdpr'),
-        'redact_placeholder_domain' => env('GDPR_REDACT_PLACEHOLDER_DOMAIN', 'gdpr.sidest.io'),
+        'redact_placeholder_domain' => env('GDPR_REDACT_PLACEHOLDER_DOMAIN', 'gdpr.partna.au'),
         'export_retention_days' => (int) env('GDPR_EXPORT_RETENTION_DAYS', 30),
         // Signed URL TTL emailed to recipients of a professional data export.
         // Must be <= export_retention_days (file is gone after that anyway).

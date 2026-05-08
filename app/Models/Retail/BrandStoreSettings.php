@@ -57,7 +57,7 @@ class BrandStoreSettings extends BaseModel
      */
     public function storefrontBaseUrl(string $subdomain): string
     {
-        return 'https://'.$subdomain.'.'.config('partna.public_domain', 'sidest.co');
+        return 'https://'.$subdomain.'.'.config('partna.public_domain', 'partna.au');
     }
 
     /**

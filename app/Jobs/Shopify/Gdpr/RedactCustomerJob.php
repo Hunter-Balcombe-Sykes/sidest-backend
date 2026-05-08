@@ -83,7 +83,7 @@ class RedactCustomerJob implements ShouldQueue
                 ->first();
 
             if ($customer) {
-                $placeholderDomain = config('partna.gdpr.redact_placeholder_domain', 'gdpr.sidest.io');
+                $placeholderDomain = config('partna.gdpr.redact_placeholder_domain', 'gdpr.partna.au');
 
                 $customer->update([
                     'email' => 'redacted-'.Str::uuid()->toString().'@'.$placeholderDomain,

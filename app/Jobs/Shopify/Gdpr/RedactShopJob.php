@@ -201,7 +201,7 @@ class RedactShopJob implements ShouldQueue
      */
     private function anonymiseShopifyCustomers(string $professionalId): int
     {
-        $placeholderDomain = config('partna.gdpr.redact_placeholder_domain', 'gdpr.sidest.io');
+        $placeholderDomain = config('partna.gdpr.redact_placeholder_domain', 'gdpr.partna.au');
         $count = 0;
 
         Customer::query()

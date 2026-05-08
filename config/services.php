@@ -69,8 +69,8 @@ return [
         'api_key' => env('HYDROGEN_API_KEY'),
     ],
 
-    // Cloudflare DNS API — used to provision platform subdomains (brand.sidest.co)
-    // for Hydrogen storefronts. Zone must correspond to the sidest.co domain.
+    // Cloudflare DNS API — used to provision platform subdomains (brand.partna.au)
+    // for Hydrogen storefronts. Zone must correspond to the partna.au domain.
     'cloudflare' => [
         'zone_id' => env('CLOUDFLARE_ZONE_ID'),
         'api_token' => env('CLOUDFLARE_API_TOKEN'),

@@ -69,9 +69,9 @@ class ProfessionalController extends ApiController
                 'subdomain' => $pro->site->subdomain,
                 'is_published' => (bool) $pro->site->is_published,
                 'settings' => $siteSettings,
-                'storefront_base_url' => 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'sidest.co'),
+                'storefront_base_url' => 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'partna.au'),
                 'affiliate_page_url' => $pro->site->subdomain
-                    ? 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'sidest.co')
+                    ? 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'partna.au')
                         .($pro->professional_type !== 'brand' && $primaryBrandHandle
                             ? '/'.$primaryBrandHandle
                             : '')

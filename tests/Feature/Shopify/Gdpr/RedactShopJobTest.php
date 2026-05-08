@@ -184,7 +184,7 @@ it('anonymises only shopify-sourced customers, preserving other sources', functi
 
     $shopify = Customer::find($ctx['shopifyCustomer']->id);
     expect($shopify->email)->toStartWith('redacted-');
-    expect($shopify->email)->toEndWith('@gdpr.sidest.io');
+    expect($shopify->email)->toEndWith('@gdpr.partna.au');
     expect($shopify->full_name)->toBe('Redacted Customer');
     expect($shopify->phone)->toBeNull();
     expect($shopify->redacted_at)->not->toBeNull();

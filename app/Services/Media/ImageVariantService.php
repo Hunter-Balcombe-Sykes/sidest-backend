@@ -327,7 +327,7 @@ class ImageVariantService
             return $definitions;
         }
 
-        // NOTE: this fallback MUST mirror config/sidest.php image_variants exactly.
+        // NOTE: this fallback MUST mirror config/partna.php image_variants exactly.
         // It runs only when config is empty (sparse test environments).
         return [
             'optimized' => [
@@ -352,7 +352,7 @@ class ImageVariantService
     /**
      * Load an image file into a GD resource regardless of source format.
      *
-     * Refuses images whose pixel count exceeds sidest.image_max_pixels by
+     * Refuses images whose pixel count exceeds partna.image_max_pixels by
      * throwing UnprocessableImageException BEFORE any bitmap memory is
      * allocated. This is the defense against image-bomb uploads — a tiny
      * JPEG/PNG file can decode to a huge bitmap (4 bytes per pixel), which

@@ -2,7 +2,7 @@
 
 ## Overview
 
-V2 gives each brand their own Hydrogen-powered affiliate storefront, deployed via Shopify Oxygen. Affiliates get a branded page at `evo.sidest.co/sarah` — the brand's subdomain on Partna's domain, with their Liquid storefront left completely untouched. The accounts dashboard stays on Vercel (Next.js). The backend stays on Laravel Cloud.
+V2 gives each brand their own Hydrogen-powered affiliate storefront, deployed via Shopify Oxygen. Affiliates get a branded page at `evo.partna.au/sarah` — the brand's subdomain on Partna's domain, with their Liquid storefront left completely untouched. The accounts dashboard stays on Vercel (Next.js). The backend stays on Laravel Cloud.
 
 ---
 
@@ -25,7 +25,7 @@ flowchart TD
 
   subgraph AO["AFFILIATE ONBOARDING"]
     direction TB
-    A1["Brand invites affiliate by email\nOR affiliate uses open program link\napp.sidest.co/join/{brand-slug}"]
+    A1["Brand invites affiliate by email\nOR affiliate uses open program link\napp.partna.au/join/{brand-slug}"]
     A2["Affiliate receives invite email\nwith their link pre-generated\nOR submits open link form → active immediately"]
     A3["Affiliate creates Partna account\nLink is live immediately — no redeploy"]
     A4["Affiliate customises their page\n(products · sort order · bio · services · gallery)\nOptional — defaults to brand collection"]
@@ -34,7 +34,7 @@ flowchart TD
 
   subgraph CP["CUSTOMER PURCHASE"]
     direction TB
-    C1["Customer visits affiliate link\nevo.sidest.co/sarah"]
+    C1["Customer visits affiliate link\nevo.partna.au/sarah"]
     C2["Hydrogen resolves brand + affiliate\nfrom URL — all server-side"]
     C3["Storefront API fetches affiliate's\nselected products + commission rates\nAffiliate discount applied if set"]
     C4["Customer adds to cart\nHydrogen writes:\naffiliate cart attribute\n+ sidest_commission_rate per line"]
@@ -123,7 +123,7 @@ flowchart TD
 
   subgraph FR["FULL RELEASE — Post-Alpha"]
     direction TB
-    FR1["Clean affiliate URLs\n(evo.sidest.co/sarah — no /apps/sidest/ prefix)"]
+    FR1["Clean affiliate URLs\n(evo.partna.au/sarah — no /apps/sidest/ prefix)"]
     FR2["Mode A: Full Hydrogen storefront\n(brand replaces Liquid theme entirely)"]
     FR3["V1 deprecation + migration"]
   end
@@ -147,12 +147,12 @@ Partna (platform)
 
 ### How Affiliate URLs Work
 
-Each brand gets a subdomain on `sidest.co`. Hydrogen reads the subdomain to identify the brand, and the path to identify the affiliate.
+Each brand gets a subdomain on `partna.au`. Hydrogen reads the subdomain to identify the brand, and the path to identify the affiliate.
 
 ```
-evo.sidest.co/sarah     → sarah's affiliate page for evo
-evo.sidest.co/john      → john's affiliate page for evo
-evo.sidest.co/          → evo's brand storefront page
+evo.partna.au/sarah     → sarah's affiliate page for evo
+evo.partna.au/john      → john's affiliate page for evo
+evo.partna.au/          → evo's brand storefront page
 
 Brand's main site stays as Liquid, completely untouched:
 evo.com                 → Liquid theme (Partna never touches this)
@@ -162,8 +162,8 @@ evo.com                 → Liquid theme (Partna never touches this)
 | Layer | What | Hosted On | Paid By |
 |---|---|---|---|
 | Affiliate storefronts | Hydrogen (per-brand deployment) | Oxygen (each brand's own store) | Free (Shopify covers Oxygen) |
-| Shopify embedded app | React Router (Remix) app | Vercel (embedded.sidest.co) | Partna |
-| Accounts dashboard | Next.js | Vercel (app.sidest.co) | Partna |
+| Shopify embedded app | React Router (Remix) app | Vercel (embedded.partna.au) | Partna |
+| Accounts dashboard | Next.js | Vercel (app.partna.au) | Partna |
 | API backend | Laravel | Laravel Cloud | Partna |
 | Database | Postgres + RLS | Supabase | Partna |
 
@@ -207,7 +207,7 @@ Three repositories. Each owns a distinct surface. No feature lives in two repos.
 
 **Auth:** Shopify App Bridge session token. No Supabase JWT in this repo.
 
-**Deploy:** Vercel project `embedded.sidest.co`. `shopify.app.toml` `application_url` points here.
+**Deploy:** Vercel project `embedded.partna.au`. `shopify.app.toml` `application_url` points here.
 
 ---
 
@@ -248,7 +248,7 @@ Three repositories. Each owns a distinct surface. No feature lives in two repos.
 - Setup wizard or product catalog (lives in `sidest-embedded`)
 - Customer-facing storefront (lives in `sidest-hydrogen`)
 
-**Deploy:** Vercel project `app.sidest.co`.
+**Deploy:** Vercel project `app.partna.au`.
 
 ---
 
@@ -281,8 +281,8 @@ Complete list of every external service and account the platform requires.
 | GitHub — `sidest-embedded` | Shopify embedded app source | `sidest-embedded` |
 | GitHub — `sidest-hydrogen` | Hydrogen storefront themes source | `sidest-hydrogen` |
 | GitHub — `sidest-dashboard` | Next.js brand/affiliate dashboard | `sidest-dashboard` (current repo) |
-| Vercel project — `app.sidest.co` | Dashboard deployment | `sidest-dashboard` |
-| Vercel project — `embedded.sidest.co` | Embedded app deployment | `sidest-embedded` |
+| Vercel project — `app.partna.au` | Dashboard deployment | `sidest-dashboard` |
+| Vercel project — `embedded.partna.au` | Embedded app deployment | `sidest-embedded` |
 | Laravel Cloud | Backend API deployment + cron jobs | `sidest-backend` |
 | Shopify Oxygen | Per-brand Hydrogen storefront deployments | `sidest-hydrogen` |
 
@@ -297,10 +297,10 @@ Complete list of every external service and account the platform requires.
 ### DNS & CDN
 | Resource | What it's for |
 |---|---|
-| Cloudflare — `sidest.co` zone | DNS for all subdomains + CDN + DDoS protection |
-| Cloudflare wildcard DNS — `*.sidest.co` | Routes per-brand subdomains to Oxygen |
-| Cloudflare DNS — `app.sidest.co` | Points to Vercel |
-| Cloudflare DNS — `embedded.sidest.co` | Points to Vercel |
+| Cloudflare — `partna.au` zone | DNS for all subdomains + CDN + DDoS protection |
+| Cloudflare wildcard DNS — `*.partna.au` | Routes per-brand subdomains to Oxygen |
+| Cloudflare DNS — `app.partna.au` | Points to Vercel |
+| Cloudflare DNS — `embedded.partna.au` | Points to Vercel |
 
 ### Shopify
 | Resource | What it's for |
@@ -324,7 +324,7 @@ Complete list of every external service and account the platform requires.
 | Resource | What it's for |
 |---|---|
 | Resend (or Mailgun) account | Transactional email (invites, payout alerts, grace period warnings) |
-| DNS sending domain — `mail.sidest.co` | Verified sending domain for email deliverability |
+| DNS sending domain — `mail.partna.au` | Verified sending domain for email deliverability |
 
 ### Monitoring & Error Tracking
 | Resource | What it's for |
@@ -375,7 +375,7 @@ Brand keeps their existing Shopify Liquid theme completely untouched.
 Hydrogen serves affiliate pages on the brand's Partna subdomain.
 ```
 evo.com                 → Liquid theme (unchanged)
-evo.sidest.co/sarah     → Hydrogen affiliate page
+evo.partna.au/sarah     → Hydrogen affiliate page
 ```
 
 **Mode A — Full Hydrogen** _(Post-Alpha — see Full Release section)_
@@ -412,7 +412,7 @@ Brands can sign up either manually or via Shopify OAuth. Both paths lead to the 
 
 **Path A — Sign up with Shopify:**
 ```
-Brand visits app.sidest.co → clicks "Sign up with Shopify"
+Brand visits app.partna.au → clicks "Sign up with Shopify"
   → redirected to Shopify OAuth
   → authorises Partna app on their store
   → OAuth callback → Partna creates brand account + Supabase user automatically
@@ -425,7 +425,7 @@ Brand visits app.sidest.co → clicks "Sign up with Shopify"
 
 **Path B — Manual signup:**
 ```
-Brand visits app.sidest.co → clicks "Sign up manually"
+Brand visits app.partna.au → clicks "Sign up manually"
   → fills in email + password
   → Supabase account created
   → brand redirected to setup wizard
@@ -507,7 +507,7 @@ On install, Partna creates a publication for the "Partna" app channel via `publi
 Brand invites affiliate (email) via dashboard
   → affiliate record created in DB with unique slug e.g. "sarah"
   → invite email sent → affiliate creates Partna account
-  → evo.sidest.co/sarah live immediately
+  → evo.partna.au/sarah live immediately
      (no redeployment — Hydrogen resolves slug dynamically from DB)
   → affiliate connects Stripe to receive payouts
 ```
@@ -524,26 +524,26 @@ Type:    CNAME
 Name:    *
 Content: shops.myshopify.com
 Proxy:   DNS only (grey cloud — no Cloudflare proxy)
-Zone:    sidest.co
+Zone:    partna.au
 ```
 
-This covers every brand forever. `evo.sidest.co`, `radiorufus.sidest.co`, any new brand — all resolve to Shopify's infrastructure automatically. Specific existing records (`app.sidest.co`, `www.sidest.co`) are unaffected — explicit records take precedence over wildcards in Cloudflare.
+This covers every brand forever. `evo.partna.au`, `radiorufus.partna.au`, any new brand — all resolve to Shopify's infrastructure automatically. Specific existing records (`app.partna.au`, `www.partna.au`) are unaffected — explicit records take precedence over wildcards in Cloudflare.
 
 **Per brand (one-time setup — guided wizard step, no public API to fully automate):**
-1. Brand connects `evo.sidest.co` in their Shopify admin → Settings → Domains → Connect existing domain
-2. Shopify shows a TXT verification record (ownership check for `sidest.co`)
+1. Brand connects `evo.partna.au` in their Shopify admin → Settings → Domains → Connect existing domain
+2. Shopify shows a TXT verification record (ownership check for `partna.au`)
 3. Partna adds the TXT record to Cloudflare on the brand's behalf
 4. Shopify verifies and connects the domain
-5. `evo.sidest.co/sarah` is live
+5. `evo.partna.au/sarah` is live
 
 > **API note:** `webPresenceCreate` in Admin GraphQL creates a `MarketWebPresence` (regional market routing) — it does not manage custom domain binding for Oxygen. Domain connection is handled through the Shopify admin UI (Settings → Domains) only. This step stays as a guided wizard step.
 
-**Confirmed by live test:** `radiorufus.sidest.co` successfully serves the Hydrogen app via this architecture.
+**Confirmed by live test:** `radiorufus.partna.au` successfully serves the Hydrogen app via this architecture.
 
 ### How Hydrogen identifies the brand and affiliate
 
 ```
-Request: evo.sidest.co/sarah
+Request: evo.partna.au/sarah
   → Hydrogen getBrandContext(request)
       → App Proxy mode: reads X-Shopify-Shop-Domain header → "evo.myshopify.com"
       → Subdomain mode: parses hostname → brand slug "evo" → resolves to shop domain
@@ -558,8 +558,8 @@ Request: evo.sidest.co/sarah
 ## Request Flow
 
 ```
-Customer visits evo.sidest.co/sarah
-  → DNS resolves evo.sidest.co → shops.myshopify.com (via *.sidest.co wildcard)
+Customer visits evo.partna.au/sarah
+  → DNS resolves evo.partna.au → shops.myshopify.com (via *.partna.au wildcard)
   → Shopify routes to evo's Oxygen deployment (registered custom domain)
   → Hydrogen getBrandContext(request) → brand slug "evo", affiliate slug "sarah"
   → Hydrogen calls Partna API: validate brand + affiliate, get Storefront token + config
@@ -614,7 +614,7 @@ Refund outside hold period:
 
 | Data | Shopify mechanism | Set by |
 |---|---|---|
-| Product active/hidden for Partna | Product metafield `sidest.active` (boolean). When set to `true`: product published to Partna sales channel + appears in Active Products collection. When `false`: unpublished from channel + removed from all Partna collections automatically. | Brand (via app.sidest.co catalog page) |
+| Product active/hidden for Partna | Product metafield `sidest.active` (boolean). When set to `true`: product published to Partna sales channel + appears in Active Products collection. When `false`: unpublished from channel + removed from all Partna collections automatically. | Brand (via app.partna.au catalog page) |
 | Product availability on Storefront API | Sales channel publish/unpublish — always synced with `sidest.active` metafield, never changed independently | Automatic (Partna syncs when `sidest.active` changes) |
 | Per-product commission rate override | Product metafield `sidest.commission_override` | Brand |
 | Affiliate-only discount % per product | Product metafield `sidest.affiliate_discount_pct` | Brand |
@@ -625,8 +625,8 @@ Refund outside hold period:
 | Product image ratio | Shop metafield `sidest.product_image_ratio` | Brand |
 | Onboarding complete flag | Shop metafield `sidest.setup_complete` | Partna (on wizard completion) |
 | Active products catalogue | "Partna — Active Products" — smart collection, rule: `sidest.active = true`. This is the master list of all products affiliates can browse and select from. | Automatic (Shopify smart collection rules driven by `sidest.active` metafield) |
-| Default affiliate product catalogue | "Partna — Default Products" — manual collection. Only active products can be added. When a product is deactivated, Partna automatically removes it from this collection too. Handle stored in `sidest.default_collection_handle`. | Brand (via app.sidest.co catalog page) |
-| Brand Favourites catalogue | "Partna — Brand Favourites" — manual collection. Brand's top picks, highlighted to affiliates in the product selection UI. Only active products can be added. Removed on deactivate. Handle stored in `sidest.favourites_collection_handle`. | Brand (via app.sidest.co catalog page) |
+| Default affiliate product catalogue | "Partna — Default Products" — manual collection. Only active products can be added. When a product is deactivated, Partna automatically removes it from this collection too. Handle stored in `sidest.default_collection_handle`. | Brand (via app.partna.au catalog page) |
+| Brand Favourites catalogue | "Partna — Brand Favourites" — manual collection. Brand's top picks, highlighted to affiliates in the product selection UI. Only active products can be added. Removed on deactivate. Handle stored in `sidest.favourites_collection_handle`. | Brand (via app.partna.au catalog page) |
 | High Commission Products catalogue | "Partna — High Commission Products" — smart collection, compound rule: `sidest.active = true` AND `sidest.commission_override` not empty. Only active products with an override rate appear here. Handle stored in `sidest.high_commission_collection_handle`. | Automatic (Shopify smart collection rules) |
 | Product sort order within default collection | Manual collection ordering in Shopify | Brand |
 | Brand name, logo, description, currency | Shopify shop object (`shop.brand.squareLogo` etc.) | Shopify native |
@@ -668,7 +668,7 @@ Refund outside hold period:
 
 ## Shopify Embedded App
 
-The embedded app lives inside the main `app.sidest.co` Next.js project under `/shopify-admin/*`. No second framework, no second Vercel project, no second repo.
+The embedded app lives inside the main `app.partna.au` Next.js project under `/shopify-admin/*`. No second framework, no second Vercel project, no second repo.
 
 `@shopify/shopify-app-js` handles session token exchange and OAuth for the embedded routes. The two auth systems are completely isolated in Next.js middleware:
 
@@ -679,7 +679,7 @@ The embedded app lives inside the main `app.sidest.co` Next.js project under `/s
 
 ```
 shopify.app.toml
-  app_url = "https://app.sidest.co/shopify-admin"
+  app_url = "https://app.partna.au/shopify-admin"
   embedded = true
   [app_proxy]
     url = "https://{oxygen-deployment-url}"
@@ -693,7 +693,7 @@ shopify.app.toml
 app/
   shopify-admin/
     layout.tsx          ← Polaris + App Bridge providers, session token auth
-    page.tsx            ← program summary (# affiliates, recent sales, CTA to app.sidest.co)
+    page.tsx            ← program summary (# affiliates, recent sales, CTA to app.partna.au)
     setup/page.tsx      ← first-install wizard
     settings/page.tsx   ← brand visual settings (theme, image ratio, accent colour)
   account/              ← existing dashboard (Supabase JWT, unchanged)
@@ -704,21 +704,21 @@ app/
 | Feature | Implementation |
 |---|---|
 | Affiliate program overview | Polaris summary cards, data from Partna API |
-| "Manage affiliates →" CTA | App Bridge redirect to `app.sidest.co/account/affiliates` (new tab) |
+| "Manage affiliates →" CTA | App Bridge redirect to `app.partna.au/account/affiliates` (new tab) |
 | First-install setup wizard | Polaris multi-step: commission, default collection confirmation, theme |
 | Product commission rate + discount % | **Admin UI Extension** on product detail page (Preact) |
 | Product availability toggle | Admin UI Extension on product detail page (Preact) |
 | Brand visual settings | Polaris form, writes to shop metafields |
 
-### What redirects out to app.sidest.co
+### What redirects out to app.partna.au
 
 | Feature | Where |
 |---|---|
-| Affiliate management (invite, view, manage) | `app.sidest.co/account/affiliates` |
-| Product catalog management (default collection) | `app.sidest.co/account/catalog` |
-| Commission ledger + payout history | `app.sidest.co/account/payouts` |
-| Full analytics | `app.sidest.co/account/analytics` |
-| Stripe setup + payout config | `app.sidest.co/account/payments` |
+| Affiliate management (invite, view, manage) | `app.partna.au/account/affiliates` |
+| Product catalog management (default collection) | `app.partna.au/account/catalog` |
+| Commission ledger + payout history | `app.partna.au/account/payouts` |
+| Full analytics | `app.partna.au/account/analytics` |
+| Stripe setup + payout config | `app.partna.au/account/payments` |
 
 ### Admin UI Extensions
 
@@ -822,7 +822,7 @@ Each task is tagged with one or more segments indicating which part of the codeb
 | **Laravel** | Backend API, services, jobs, webhooks (`Partna-Backend/`) |
 | **Supabase** | DB migrations, schema changes, RLS policies |
 | **Hydrogen** | Hydrogen app — affiliate storefronts, Oxygen deployment |
-| **Next Frontend** | Next.js dashboard — `app.sidest.co`, `Commet-web/` |
+| **Next Frontend** | Next.js dashboard — `app.partna.au`, `Commet-web/` |
 | **Shopify App** | `shopify.app.toml`, Shopify CLI, Admin UI Extensions, Discount Functions |
 | **Stripe** | Stripe Connect — server-side charge logic and frontend connect UI |
 | **DevOps** | Vercel config, Oxygen deployment, DNS, environment variables |
@@ -924,7 +924,7 @@ Go through every route, loader, and action in the Hydrogen app. Add `// V2: [pur
 **Segments:** Shopify App
 
 Verify the `shopify.app.toml` config is correctly set up for V2 before any Beta work begins. Check:
-- `app_url` points to `https://app.sidest.co/shopify-admin`
+- `app_url` points to `https://app.partna.au/shopify-admin`
 - `embedded = true`
 - `[app_proxy]` section exists with correct `url`, `prefix = "apps"`, `subpath = "sidest"`
 - All 7 webhook topics are listed: `ORDERS_PAID`, `ORDERS_UPDATED`, `APP_UNINSTALLED`, `SHOP_UPDATE`, `CUSTOMERS_DATA_REQUEST`, `CUSTOMERS_REDACT`, `SHOP_REDACT`
@@ -1013,10 +1013,10 @@ mutation {
 Register all 7 webhook topics via `webhookSubscriptionCreate` (Admin GraphQL) on OAuth complete. Idempotent — skip if already registered.
 
 **Functional webhooks:**
-- `ORDERS_PAID` → `https://api.sidest.co/webhooks/shopify/orders-paid`
-- `ORDERS_UPDATED` → `https://api.sidest.co/webhooks/shopify/orders-updated`
-- `APP_UNINSTALLED` → `https://api.sidest.co/webhooks/shopify/app-uninstalled`
-- `SHOP_UPDATE` → `https://api.sidest.co/webhooks/shopify/shop-update`
+- `ORDERS_PAID` → `https://api.partna.au/webhooks/shopify/orders-paid`
+- `ORDERS_UPDATED` → `https://api.partna.au/webhooks/shopify/orders-updated`
+- `APP_UNINSTALLED` → `https://api.partna.au/webhooks/shopify/app-uninstalled`
+- `SHOP_UPDATE` → `https://api.partna.au/webhooks/shopify/shop-update`
 
 **GDPR webhooks (required for App Store):**
 - `CUSTOMERS_DATA_REQUEST`
@@ -1029,7 +1029,7 @@ Register all 7 webhook topics via `webhookSubscriptionCreate` (Admin GraphQL) on
 mutation {
   webhookSubscriptionCreate(topic: ORDERS_PAID, webhookSubscription: {
     format: JSON
-    callbackUrl: "https://api.sidest.co/webhooks/shopify/orders-paid"
+    callbackUrl: "https://api.partna.au/webhooks/shopify/orders-paid"
   }) {
     webhookSubscription { id }
     userErrors { field message }
@@ -1108,7 +1108,7 @@ mutation {
 }
 ```
 
-**"Partna — Default Products"** — manual collection. Brand curates this from app.sidest.co. Only active products should be added here. When a product is deactivated (`sidest.active = false`), Partna automatically removes it from this collection via `collectionRemoveProducts` to keep it in sync.
+**"Partna — Default Products"** — manual collection. Brand curates this from app.partna.au. Only active products should be added here. When a product is deactivated (`sidest.active = false`), Partna automatically removes it from this collection via `collectionRemoveProducts` to keep it in sync.
 
 ```graphql
 mutation {
@@ -1381,7 +1381,7 @@ In the Hydrogen affiliate route loader:
 - Affiliate slug comes from the URL path: `/apps/sidest/{slug}` → `params.slug`
 - Call `GET /internal/hydrogen/affiliate?shop_domain={domain}&slug={slug}` to validate the affiliate
 - If affiliate not found or disabled → `redirect()` to the brand's main Shopify store (`shop.primaryDomain.url`)
-- If brand not found → `redirect()` to `https://sidest.co`
+- If brand not found → `redirect()` to `https://partna.au`
 
 ---
 
@@ -1439,11 +1439,11 @@ Hydrogen must never show a raw 500 or blank page to a customer. Handle:
 **Release Batch:** Beta 2
 **Segments:** Hydrogen, DevOps
 
-The `*.sidest.co` wildcard CNAME architecture is already live and was confirmed working with `radiorufus.sidest.co`. Verify it still works after all Beta 2 changes.
+The `*.partna.au` wildcard CNAME architecture is already live and was confirmed working with `radiorufus.partna.au`. Verify it still works after all Beta 2 changes.
 
 In subdomain mode, `getBrandContext(request)` parses the hostname instead of reading the App Proxy header. This mode is toggled by an env flag (`BRAND_RESOLUTION_MODE`). Confirm both modes work without code changes in route files.
 
-Test: `radiorufus.sidest.co/sarah` → products load → add to cart → checkout → commission recorded.
+Test: `radiorufus.partna.au/sarah` → products load → add to cart → checkout → commission recorded.
 
 ---
 
@@ -1476,7 +1476,7 @@ Gate check before Beta 3 begins:
 - [ ] Complete checkout → `orders/paid` → commission in DB
 - [ ] Invalid slug (e.g. `/apps/sidest/nobody`) → redirects to brand's Shopify store, no error page
 - [ ] Partna API mocked as down → fallback UI shown, no 500
-- [ ] `radiorufus.sidest.co/sarah` → products load → checkout → commission recorded
+- [ ] `radiorufus.partna.au/sarah` → products load → checkout → commission recorded
 
 ---
 
@@ -1520,7 +1520,7 @@ Add Next.js middleware so:
 
 Create the route files:
 - `app/shopify-admin/layout.tsx` — Polaris `AppProvider` + App Bridge `Provider`, session token passed as prop
-- `app/shopify-admin/page.tsx` — program summary (affiliate count, recent sales, "Manage →" CTA that App Bridge redirects to `app.sidest.co/account/affiliates` in a new tab)
+- `app/shopify-admin/page.tsx` — program summary (affiliate count, recent sales, "Manage →" CTA that App Bridge redirects to `app.partna.au/account/affiliates` in a new tab)
 - `app/shopify-admin/setup/page.tsx` — setup wizard (built in next task)
 - `app/shopify-admin/settings/page.tsx` — brand visual settings (built in next task)
 
@@ -1551,7 +1551,7 @@ On "Next", saves all four to `retail.brand_profiles`.
 Polaris `TextField` (number). Brand sets their default commission % for all affiliates. On "Next", calls Partna API which writes `sidest.default_commission_rate` shop metafield via Admin API.
 
 **Step 4 — Default Collection Confirmation**
-Display the "Partna — Default Products" collection that was automatically created on install. Show a link to manage its products on app.sidest.co. No input required — the collection already exists and the handle is already stored in the `sidest.default_collection_handle` shop metafield. This step is informational: it explains that the brand adds products to this collection from their catalog page and those products become the default shown on all affiliate pages.
+Display the "Partna — Default Products" collection that was automatically created on install. Show a link to manage its products on app.partna.au. No input required — the collection already exists and the handle is already stored in the `sidest.default_collection_handle` shop metafield. This step is informational: it explains that the brand adds products to this collection from their catalog page and those products become the default shown on all affiliate pages.
 
 **Step 5 — Affiliate Page Theme**
 Display 5 theme thumbnail previews. Theme 1 is pre-selected by default — brand can change it or proceed with the default. Calls Partna API which writes `sidest.theme_variant` shop metafield. On account creation (both signup paths), `sidest.theme_variant` is initialised to `"1"` so affiliate pages are never themeless.
@@ -1667,13 +1667,13 @@ Build the affiliate management pages in the existing Next.js dashboard at `app/a
 - Invited affiliate appears in the list with "Pending" status immediately
 
 **Open program link:**
-- Brand has a shareable "Join my affiliate program" URL: `app.sidest.co/join/{brand-slug}`
+- Brand has a shareable "Join my affiliate program" URL: `app.partna.au/join/{brand-slug}`
 - Shown in the affiliate management page with a copy button
 - Brand can toggle the open link on/off in settings
 - When someone uses the open link, they land on a branded page (brand logo, name, commission %), fill in their name + email, and get their link immediately (see backend task)
 
 **Affiliate list:**
-- Per affiliate: name, slug, link (`evo.sidest.co/{slug}`), status badge (active / pending / disabled), joined date
+- Per affiliate: name, slug, link (`evo.partna.au/{slug}`), status badge (active / pending / disabled), joined date
 - **Inline stats per row:** total orders, total GMV, commission paid, last sale date — sourced from `analytics.affiliate_daily` aggregates
 - Sortable by: most sales, most GMV, recently active, date joined
 - Enable/disable toggle, copy link button, remove affiliate action
@@ -1723,7 +1723,7 @@ In V1, brands could select products and generate a link to their sitepage with t
 
 **Type 1 — Featured Products Link** _(browse-first, for discovery)_ — **Frontend/Hydrogen only, no backend needed**
 
-Format: `evo.sidest.co/{affiliateSlug}?featured={gid1},{gid2}`
+Format: `evo.partna.au/{affiliateSlug}?featured={gid1},{gid2}`
 
 How it works:
 - Brand (or affiliate) selects up to 5 products in the dashboard and picks which affiliate's page to link to
@@ -1749,10 +1749,10 @@ Brand dashboard UI (`app/account/catalog/` or `app/account/affiliates/`):
 
 The customer experience once they click is entirely Shopify's — the `checkoutUrl` goes to the brand's own Shopify checkout (their logo, colours, domain). Partna has zero control over that page. Shopify Checkout UI Extensions exist but are Plus-plan only. The only place Partna branding can live is the share URL itself, before the redirect.
 
-**Decided: Option C — `evo.sidest.co/buy/{token}` redirect** _(302 to Shopify checkout)_
+**Decided: Option C — `evo.partna.au/buy/{token}` redirect** _(302 to Shopify checkout)_
 
 Rationale:
-- Brand's affiliate subdomain is the trust-signal domain customers are starting to recognise — using it keeps everything under one roof instead of introducing a bare `sidest.co/s/...` pattern
+- Brand's affiliate subdomain is the trust-signal domain customers are starting to recognise — using it keeps everything under one roof instead of introducing a bare `partna.au/s/...` pattern
 - Gives us a row in `shared_checkouts` on generation + a click increment on redirect — minimum data needed for "which share links converted" analytics
 - Keeps the option to regenerate expired cart tokens on-the-fly: look up the row, re-call `cartCreate`, update the row, 302 to the fresh URL
 - Shopify checkout still owns the entire buying experience — zero friction for brands
@@ -1788,7 +1788,7 @@ New table: `shared_checkouts` — stores `{ token, brand_id, affiliate_id, line_
 
 New route: `GET /{brand_subdomain}/buy/{token}` — resolves subdomain to brand, looks up row, regenerates if expired, 302s to `shopify_checkout_url`. No auth required.
 
-New route: `POST /api/share/checkout-link` — creates the cart, stores the row, returns `{ share_url: "evo.sidest.co/buy/{token}" }`.
+New route: `POST /api/share/checkout-link` — creates the cart, stores the row, returns `{ share_url: "evo.partna.au/buy/{token}" }`.
 
 ```
 POST /api/share/checkout-link
@@ -1930,20 +1930,20 @@ Create the endpoints the affiliate product selection UI calls.
 1. Generate unique slug from name ("Sarah Jones" → `sarah-jones`; collision → `sarah-jones-2`)
 2. Create affiliate record in DB with status `"pending"`
 3. Create signed invite token (expiry 7 days)
-4. Send invite email: their affiliate link (`evo.sidest.co/{slug}`) pre-generated in the email body, plus the accept invite URL and brand name
+4. Send invite email: their affiliate link (`evo.partna.au/{slug}`) pre-generated in the email body, plus the accept invite URL and brand name
 
 When the affiliate accepts and creates their Partna account, status flips to `"active"` — link is live immediately, no redeploy needed.
 
 **Open program link — `POST /api/affiliates/open-link/join`:**
 
-This is the public-facing endpoint hit when someone submits the open program landing page at `app.sidest.co/join/{brand-slug}`.
+This is the public-facing endpoint hit when someone submits the open program landing page at `app.partna.au/join/{brand-slug}`.
 
 1. Resolve brand from `brand-slug` in the URL
 2. Check that the brand has `open_link_enabled = true` on their affiliate settings — return 403 if disabled
 3. Validate `{ full_name, email }` — check email not already an affiliate for this brand
 4. Generate slug from name (same collision logic as direct invite)
 5. Create affiliate record with status `"active"` immediately (no pending step — open link bypasses the invite token flow)
-6. Send welcome email: their link (`evo.sidest.co/{slug}`), brand name, commission %
+6. Send welcome email: their link (`evo.partna.au/{slug}`), brand name, commission %
 
 **Open link enable/disable — `PATCH /api/brand/affiliate-settings`:**
 - Accepts `{ open_link_enabled: boolean }`
@@ -2274,7 +2274,7 @@ These are straightforward read queries from the canonical orders + commission le
 **Release Batch:** Beta 3
 **Segments:** Hydrogen
 
-The Hydrogen affiliate page (`evo.sidest.co/{slug}`) is a full personal sitepage — not just a product store. It includes:
+The Hydrogen affiliate page (`evo.partna.au/{slug}`) is a full personal sitepage — not just a product store. It includes:
 
 - **Bio & social links** — affiliate's photo, bio text, and social links (Instagram, TikTok, Facebook, YouTube)
 - **Services & Pricing section** — list of the affiliate's services, sourced from Square (smart mode) or local DB (manual mode)
@@ -2420,7 +2420,7 @@ Build or verify `app/account/contacts/` — the existing V1 contacts page can be
 Each brand's affiliate sitepages are styled using design tokens sourced from their Shopify theme, with a Partna-specific override layer on top.
 
 **Sync mechanism:**
-- On OAuth install (and on manual "Re-sync from Shopify" trigger in app.sidest.co), fetch the brand's rendered storefront HTML
+- On OAuth install (and on manual "Re-sync from Shopify" trigger in app.partna.au), fetch the brand's rendered storefront HTML
 - Parse CSS custom properties from the compiled stylesheet — map known theme patterns (Dawn, Debut, Prestige, Symmetry, etc.) to a normalised token set
 - Tokens stored in a `sidest.theme_tokens` shop metafield on the brand's Shopify store
 - Values captured: primary color, secondary color, background color, text color, border radius, border width, button background, button text color
@@ -2435,13 +2435,13 @@ Each brand's affiliate sitepages are styled using design tokens sourced from the
 
 **Default media:**
 - Logo: always synced from Shopify (`shop.brand.squareLogo.image.url`) — re-synced on `shop/update` webhook. Not uploaded manually.
-- Gallery fallbacks: uploaded via Design tab in app.sidest.co, stored in Supabase Storage. See Brand Media — Gallery Fallback Upload task.
+- Gallery fallbacks: uploaded via Design tab in app.partna.au, stored in Supabase Storage. See Brand Media — Gallery Fallback Upload task.
 
 **Where values live:**
 - `sidest.theme_tokens` shop metafield — the synced Shopify-derived values (written by our sync job; Shopify stores them, not our DB)
 - `professional_integrations.provider_metadata` — sitepage override values keyed under `sitepage_overrides: { accent_color, heading_font, body_font, ... }` (Partna DB only)
 
-**Override system in app.sidest.co → Design tab:**
+**Override system in app.partna.au → Design tab:**
 - Each token shows its current resolved value with a "from Shopify" badge when unoverridden
 - Brand edits a value → written to `provider_metadata.sitepage_overrides`; does not write back to Shopify or affect their Liquid theme
 - "Reset to Shopify" button per field removes the override key and falls back to the metafield value
@@ -2460,7 +2460,7 @@ Each brand's affiliate sitepages are styled using design tokens sourced from the
 **Release Batch:** Beta 3
 **Segments:** Laravel, Shopify App
 
-Implement the backend endpoint and sync logic that powers the "Re-sync from Shopify" button in `app.sidest.co` and the initial sync on OAuth install.
+Implement the backend endpoint and sync logic that powers the "Re-sync from Shopify" button in `app.partna.au` and the initial sync on OAuth install.
 
 **Endpoint:**
 - `POST /api/brand/design/resync` — triggers a fresh fetch of the brand's Shopify theme CSS and rewrites `sidest.theme_tokens` shop metafield. Authenticated via Supabase JWT (brand must be logged in).
@@ -2481,7 +2481,7 @@ Implement the backend endpoint and sync logic that powers the "Re-sync from Shop
 **Release Batch:** Beta 3
 **Segments:** Next Frontend, Laravel, Supabase
 
-Brands upload fallback gallery images via the Design tab in app.sidest.co. These are shown in the gallery section of affiliate sitepages when an affiliate has no images of their own — they act as the default visual set for any affiliate who hasn't uploaded a gallery.
+Brands upload fallback gallery images via the Design tab in app.partna.au. These are shown in the gallery section of affiliate sitepages when an affiliate has no images of their own — they act as the default visual set for any affiliate who hasn't uploaded a gallery.
 
 **Logo** is always synced from Shopify (`shop.brand.squareLogo.image.url`) — not uploaded here. See Auto-fill Brand Profile task.
 
@@ -2492,7 +2492,7 @@ Brands upload fallback gallery images via the Design tab in app.sidest.co. These
 - Stored in Supabase Storage bucket `brand-media` under `/{brand_id}/gallery/{filename}`
 - URL + sort order stored in a `brand_gallery` table keyed by `brand_id`
 
-**Frontend (app.sidest.co → Design tab → Gallery section):**
+**Frontend (app.partna.au → Design tab → Gallery section):**
 - Image grid showing uploaded fallbacks with drag-to-reorder and individual delete
 - Upload button — file picker or drag-and-drop, max 6 images
 - Shows count ("3 / 6 uploaded")
@@ -2682,7 +2682,7 @@ Set up Hydrogen's built-in analytics system and register a Partna integration th
 **Setup:**
 1. Wrap the Hydrogen root layout with `<Analytics.Provider>` — required before any events fire. Needs the Storefront API token created through the **Hydrogen sales channel** (separate from the install-time token — this one is tied to the Hydrogen channel specifically and enables Shopify's native analytics in the brand's admin).
 2. Add `Analytics.ProductView` to the product route.
-3. Set `cookieDomain=".sidest.co"` on `<Analytics.Provider>` so `_shopify_y` / `_shopify_s` cookies are consistent across all brand subdomains (`evo.sidest.co`, `radiorufus.sidest.co`, etc.).
+3. Set `cookieDomain=".partna.au"` on `<Analytics.Provider>` so `_shopify_y` / `_shopify_s` cookies are consistent across all brand subdomains (`evo.partna.au`, `radiorufus.partna.au`, etc.).
 
 **Register a `SideStAnalytics` component** in the root layout:
 
@@ -2742,7 +2742,7 @@ product_gid   text  -- nullable, populated for product_viewed events
 visited_at    timestamptz
 ```
 
-Create `POST /api/analytics/event` endpoint — receives events from the Hydrogen `SideStAnalytics` component. Validates affiliate + brand exist, inserts into `analytics.page_views`. Must allow CORS from `*.sidest.co` and `*.myshopify.com` (App Proxy origin).
+Create `POST /api/analytics/event` endpoint — receives events from the Hydrogen `SideStAnalytics` component. Validates affiliate + brand exist, inserts into `analytics.page_views`. Must allow CORS from `*.partna.au` and `*.myshopify.com` (App Proxy origin).
 
 **Aggregation:**
 
@@ -2818,8 +2818,8 @@ Onboard 1–2 real brands end-to-end. Both developers present.
 Explicitly out of scope until Alpha is stable and trading.
 
 ### Phase 1 — Clean URLs (Cloudflare Workers Migration)
-- Half-day migration: `*.sidest.co` DNS wildcard → Cloudflare Workers
-- URLs become `evo.sidest.co/sarah` instead of `evo.com/apps/sidest/sarah`
+- Half-day migration: `*.partna.au` DNS wildcard → Cloudflare Workers
+- URLs become `evo.partna.au/sarah` instead of `evo.com/apps/sidest/sarah`
 - All Hydrogen route/component/API code unchanged — only server.ts changes
 - Remove `[app_proxy]` from `shopify.app.toml`
 - Optional: brand adds one CNAME for `evo.com/sarah` on their own domain
@@ -2903,7 +2903,7 @@ mutation { publishablePublish(id: "gid://shopify/Product/123", input: [{ publica
 mutation {
   webhookSubscriptionCreate(topic: ORDERS_PAID, webhookSubscription: {
     format: JSON
-    callbackUrl: "https://api.sidest.co/webhooks/shopify/orders-paid"
+    callbackUrl: "https://api.partna.au/webhooks/shopify/orders-paid"
   }) {
     webhookSubscription { id }
     userErrors { field message }

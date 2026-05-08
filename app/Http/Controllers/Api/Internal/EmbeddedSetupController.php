@@ -499,7 +499,7 @@ class EmbeddedSetupController extends ApiController
      * Return the current domain verification status for this brand.
      *
      * Handles both modes:
-     *   - platform: brand.sidest.co — live once domain_wizard_complete and
+     *   - platform: brand.partna.au — live once domain_wizard_complete and
      *     domain_txt_confirmed, verifying if only CNAME provisioned, else pending.
      *   - custom: brand-supplied domain — live after TLS, verifying after
      *     ownership verified, else pending.
@@ -519,7 +519,7 @@ class EmbeddedSetupController extends ApiController
         // Platform domain — derive status from wizard completion flags.
         if ($settings->domain_mode === 'platform') {
             $site = Site::where('professional_id', $professionalId)->first();
-            $platformDomain = $site?->subdomain ? "{$site->subdomain}.sidest.co" : '';
+            $platformDomain = $site?->subdomain ? "{$site->subdomain}.".config('partna.public_domain') : '';
 
             if (! $settings->domain_wizard_complete) {
                 return $this->success(['status' => 'pending', 'domain' => $platformDomain]);
@@ -553,7 +553,7 @@ class EmbeddedSetupController extends ApiController
     // ── Domain Setup ─────────────────────────────────────────────────────────
 
     /**
-     * Provision a platform subdomain (brand.sidest.co) for this brand's Oxygen storefront.
+     * Provision a platform subdomain (brand.partna.au) for this brand's Oxygen storefront.
      * Creates a CNAME DNS record via Cloudflare and persists the storefront ID.
      *
      * @return JsonResponse { data: { domain: string } }
@@ -579,7 +579,7 @@ class EmbeddedSetupController extends ApiController
 
         $subdomain = (string) $site->subdomain;
 
-        // CNAME: {subdomain}.sidest.co → shops.myshopify.com, DNS-only (proxied=false).
+        // CNAME: {subdomain}.partna.au → shops.myshopify.com, DNS-only (proxied=false).
         // Shopify Oxygen does not support Cloudflare's proxy — it needs a direct CNAME.
         // upsertCname handles existing records so re-running fixes a previously proxied record.
         $dns = new CloudflareDnsService;
@@ -597,16 +597,16 @@ class EmbeddedSetupController extends ApiController
         $this->cache->invalidateProfessional($professional);
         app(BrandStatusService::class)->sync($professional);
 
-        return $this->success(['domain' => "{$subdomain}.sidest.co"]);
+        return $this->success(['domain' => "{$subdomain}.".config('partna.public_domain')]);
     }
 
     /**
      * Provision the Shopify domain ownership TXT record in Cloudflare on the brand's behalf.
      *
      * Shopify generates a unique verification token when a brand connects a domain to their
-     * Hydrogen storefront. Because the domain is brand.sidest.co (our zone), the brand cannot
+     * Hydrogen storefront. Because the domain is brand.partna.au (our zone), the brand cannot
      * add the record themselves — they copy the token from Shopify and we create:
-     *   shopify_verification_{subdomain}.sidest.co TXT → {txt_value}
+     *   shopify_verification_{subdomain}.partna.au TXT → {txt_value}
      *
      * Uses upsertTxt so re-attempts with a freshly generated Shopify token always win.
      *
@@ -640,7 +640,7 @@ class EmbeddedSetupController extends ApiController
         $this->cache->invalidateProfessional($professional);
         app(BrandStatusService::class)->sync($professional);
 
-        return $this->success(['record_name' => "{$recordName}.sidest.co"]);
+        return $this->success(['record_name' => "{$recordName}.".config('partna.public_domain')]);
     }
 
     // ── Integration provisioning ─────────────────────────────────────────────

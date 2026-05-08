@@ -34,7 +34,7 @@ use Symfony\Component\Process\Process;
  *       adaptive.m3u8             (master playlist)
  *     poster.jpg
  *
- * Requires ffmpeg and ffprobe to be available (configured via config/sidest.php).
+ * Requires ffmpeg and ffprobe to be available (configured via config/partna.php).
  */
 // V2: Transcodes videos to MP4 + HLS via FFmpeg. Feature-flagged (PARTNA_VIDEO_UPLOADS_ENABLED). Uses dedicated redis_video connection.
 class VideoVariantService
