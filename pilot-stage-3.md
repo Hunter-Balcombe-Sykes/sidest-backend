@@ -636,7 +636,7 @@
 
 ### P3
 
-- [ ] **#PUB-8** · P3 — Welcome notification hardcodes stale product name "Sight" after the Partna rebrand
+- [x] **#PUB-8** · P3 — Welcome notification hardcodes stale product name "Sight" after the Partna rebrand
     - **Where:** app/Http/Controllers/Api/PublicSite/BootstrapController.php (`createWelcomeNotification`)
     - **Affects:** Every new professional who signs up after pilot launch. Their first in-app notification reads "Welcome to Sight" — a name that does not match the product.
     - **Effort:** S (~0.5–1h)
