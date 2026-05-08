@@ -775,6 +775,17 @@ class SiteCacheService
     }
 
     /**
+     * Returns both the primary key and its SWR stale copy so invalidation is
+     * always symmetric — prevents stale copies surviving after a primary bust.
+     *
+     * @return array{string, string}
+     */
+    private static function bustWithStale(string $key): array
+    {
+        return [$key, $key.':stale'];
+    }
+
+    /**
      * Invalidate all cache keys for a site
      */
     public function invalidateSite(Site $site): void
@@ -783,8 +794,8 @@ class SiteCacheService
 
         $keys = [
             CacheKeyGenerator::publicSitePayload($site->subdomain),
-            CacheKeyGenerator::siteBlocks($site->id, 'links'),
-            CacheKeyGenerator::siteBlocks($site->id, 'sections'),
+            ...self::bustWithStale(CacheKeyGenerator::siteBlocks($site->id, 'links')),
+            ...self::bustWithStale(CacheKeyGenerator::siteBlocks($site->id, 'sections')),
             CacheKeyGenerator::siteImages($site->id),
         ];
 
