@@ -193,6 +193,25 @@ function payoutSvc_seedPayout(string $id, array $overrides = []): CommissionPayo
 }
 
 /**
+ * Insert a commerce.commission_payout_items row and stamp the order's payout_id,
+ * mirroring what createPayoutBatch does atomically in production.
+ */
+function payoutSvc_seedPayoutItem(string $payoutId, string $orderId, int $amountCents = 1000): void
+{
+    DB::connection('pgsql')->table('commerce.commission_payout_items')->insert([
+        'id' => (string) \Illuminate\Support\Str::uuid(),
+        'payout_id' => $payoutId,
+        'order_id' => $orderId,
+        'amount_cents' => $amountCents,
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
+    DB::connection('pgsql')->table('commerce.orders')
+        ->where('id', $orderId)
+        ->update(['payout_id' => $payoutId]);
+}
+
+/**
  * Build a Mockery StripeClient mock wired with per-service sub-mocks.
  * StripeClient::__get delegates to getService(), so we mock getService() —
  * that is the actual method Mockery intercepts when $stripe->paymentIntents is accessed.
@@ -1072,4 +1091,113 @@ it('after a voided payout, the linked orders are NOT picked up again — commiss
     $stats = $service->processEligiblePayouts();
 
     expect($stats['batches_created'])->toBe(0);
+});
+
+// ============================================================
+// #PAY-3 — post-creation refund window guard (revalidatePayoutOrders)
+// ============================================================
+
+it('cancels the payout and releases orders when all linked orders are refunded before processing', function () {
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1');
+    $payout = payoutSvc_seedPayout('p1', [
+        'gross_commission_cents' => 10000,
+        'platform_fee_cents' => 300,
+        'net_payout_cents' => 9700,
+    ]);
+
+    // Simulate refund webhook arriving after batch creation.
+    $orderId = payoutSvc_seedOrder('brand-1', 'aff-1', 10000, 'AUD', now()->subDays(10), 'refunded', 10000);
+    payoutSvc_seedPayoutItem('p1', $orderId, 10000);
+
+    $stripe = Mockery::mock(StripeClient::class);
+    $stripe->shouldNotReceive('__get'); // no Stripe calls should happen
+
+    $service = new CommissionPayoutService($stripe);
+    $result = $service->processPayoutBatch($payout);
+
+    expect($result)->toBeNull();
+    expect($payout->fresh()->status)->toBe('cancelled');
+
+    // Order released back to the pool (payout_id cleared).
+    $order = DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
+    expect($order->payout_id)->toBeNull();
+
+    // Payout item removed.
+    $itemCount = DB::connection('pgsql')->table('commerce.commission_payout_items')
+        ->where('payout_id', 'p1')->count();
+    expect($itemCount)->toBe(0);
+});
+
+it('rebuilds batch amounts and completes when some linked orders are refunded before processing', function () {
+    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
+    payoutSvc_seedAffiliate('aff-1');
+    // Batch was created for two orders totalling 20 000 cents.
+    $payout = payoutSvc_seedPayout('p1', [
+        'gross_commission_cents' => 20000,
+        'platform_fee_cents' => 600,
+        'net_payout_cents' => 19400,
+        'ledger_entry_count' => 2,
+    ]);
+
+    $goodId = payoutSvc_seedOrder('brand-1', 'aff-1', 10000, 'AUD', now()->subDays(10), 'approved', 0);
+    $refundedId = payoutSvc_seedOrder('brand-1', 'aff-1', 10000, 'AUD', now()->subDays(10), 'refunded', 10000);
+    payoutSvc_seedPayoutItem('p1', $goodId, 10000);
+    payoutSvc_seedPayoutItem('p1', $refundedId, 10000);
+
+    // After rebuild: gross=10000, fee=2000 (20%), net=8000. Card charged for gross (no wallet).
+    $piMock = Mockery::mock();
+    $piMock->shouldReceive('create')
+        ->once()
+        ->with(Mockery::on(fn ($p) => $p['amount'] === 10000), Mockery::any())
+        ->andReturn((object) ['id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test']);
+
+    $transferMock = Mockery::mock();
+    $transferMock->shouldReceive('create')
+        ->once()
+        ->with(Mockery::on(fn ($p) => $p['amount'] === 8000), Mockery::any())
+        ->andReturn((object) ['id' => 'tr_test']);
+
+    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
+    $result = $service->processPayoutBatch($payout);
+
+    expect($result)->toBeTrue();
+
+    $fresh = $payout->fresh();
+    expect($fresh->status)->toBe('completed');
+    expect($fresh->gross_commission_cents)->toBe(10000);
+    expect($fresh->net_payout_cents)->toBe(8000);
+    expect($fresh->ledger_entry_count)->toBe(1);
+
+    // Refunded order's payout_id cleared; good order's stamp retained.
+    $refunded = DB::connection('pgsql')->table('commerce.orders')->where('id', $refundedId)->first();
+    expect($refunded->payout_id)->toBeNull();
+    $good = DB::connection('pgsql')->table('commerce.orders')->where('id', $goodId)->first();
+    expect($good->payout_id)->toBe('p1');
+});
+
+it('fails with net_payout_zero when resuming from collecting with a zero net amount', function () {
+    // Belt-and-suspenders guard: if net_payout_cents somehow reached 0 while the
+    // payout is already in collecting state, we must not attempt a Stripe transfer.
+    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
+    payoutSvc_seedAffiliate('aff-1');
+    $payout = payoutSvc_seedPayout('p1', [
+        'status' => 'collecting',
+        'gross_commission_cents' => 0,
+        'platform_fee_cents' => 0,
+        'net_payout_cents' => 0,
+        'wallet_debit_cents' => 0,
+        'charge_cents' => 0,
+    ]);
+
+    $stripe = Mockery::mock(StripeClient::class);
+    $stripe->shouldNotReceive('__get');
+
+    $service = new CommissionPayoutService($stripe);
+    $result = $service->processPayoutBatch($payout);
+
+    expect($result)->toBeFalse();
+    $fresh = $payout->fresh();
+    expect($fresh->status)->toBe('failed');
+    expect($fresh->failure_code)->toBe('net_payout_zero');
 });

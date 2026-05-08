@@ -163,8 +163,8 @@ class CommissionPayoutService
      * Phase 3.5+: reads from commerce.orders directly (not commission_movements).
      * Orders that are refunded after status='approved' have their status flipped to
      * 'partially_refunded'/'refunded', which the WHERE clause already excludes. Refunds
-     * that arrive AFTER a payout is created are not reconciled in v1 — acceptable pre-beta;
-     * tracked for Phase 4.
+     * that arrive AFTER a payout is created are caught by revalidatePayoutOrders at the
+     * start of processPayoutBatch before any financial operations run.
      */
     private function createPayoutBatch(
         string $brandId,
@@ -240,6 +240,88 @@ class CommissionPayoutService
     }
 
     /**
+     * Re-validate orders linked to a pending payout against the current DB state.
+     *
+     * Runs inside a lockForUpdate transaction so a concurrent refund webhook cannot
+     * race this check. Stale orders (refund_cents > 0 or status != 'approved') are
+     * released back to the next sweep. If enough valid orders remain the payout is
+     * rebuilt in-place and the refreshed record is returned. If nothing valid remains
+     * (or the rebuilt net is non-positive) the payout is cancelled and null is returned.
+     */
+    private function revalidatePayoutOrders(CommissionPayout $payout): ?CommissionPayout
+    {
+        return DB::transaction(function () use ($payout) {
+            $orders = Order::query()
+                ->where('payout_id', $payout->id)
+                ->lockForUpdate()
+                ->get();
+
+            [$validOrders, $staleOrders] = $orders->partition(
+                fn ($o) => $o->status === 'approved' && (int) $o->refund_cents === 0
+            );
+
+            // All orders still eligible — nothing to do.
+            if ($staleOrders->isEmpty()) {
+                return $payout;
+            }
+
+            // Release stale orders so the next sweep can re-evaluate them.
+            $staleIds = $staleOrders->pluck('id')->all();
+            Order::whereIn('id', $staleIds)->update(['payout_id' => null]);
+            CommissionPayoutItem::where('payout_id', $payout->id)
+                ->whereIn('order_id', $staleIds)
+                ->delete();
+
+            if ($validOrders->isEmpty()) {
+                $payout->forceFill(['status' => 'cancelled', 'processed_at' => now()])->save();
+                Log::notice('Commission payout cancelled: all linked orders became ineligible before processing', [
+                    'payout_id' => $payout->id,
+                    'stale_count' => count($staleIds),
+                ]);
+
+                return null;
+            }
+
+            // Rebuild batch totals from the remaining valid orders.
+            $grossCents = (int) $validOrders->sum('commission_cents');
+            $platformFeeCents = (int) round($grossCents * $this->platformFeePercent / 100);
+            $netPayoutCents = $grossCents - $platformFeeCents;
+
+            if ($netPayoutCents <= 0) {
+                $validIds = $validOrders->pluck('id')->all();
+                Order::whereIn('id', $validIds)->update(['payout_id' => null]);
+                CommissionPayoutItem::where('payout_id', $payout->id)
+                    ->whereIn('order_id', $validIds)
+                    ->delete();
+                $payout->forceFill(['status' => 'cancelled', 'processed_at' => now()])->save();
+                Log::notice('Commission payout cancelled: net payout became non-positive after order revalidation', [
+                    'payout_id' => $payout->id,
+                    'gross_cents' => $grossCents,
+                ]);
+
+                return null;
+            }
+
+            $payout->forceFill([
+                'gross_commission_cents' => $grossCents,
+                'platform_fee_cents' => $platformFeeCents,
+                'net_payout_cents' => $netPayoutCents,
+                'ledger_entry_count' => $validOrders->count(),
+            ])->save();
+
+            Log::notice('Commission payout batch rebuilt after order revalidation', [
+                'payout_id' => $payout->id,
+                'stale_count' => count($staleIds),
+                'remaining_count' => $validOrders->count(),
+                'gross_cents' => $grossCents,
+                'net_cents' => $netPayoutCents,
+            ]);
+
+            return $payout->fresh();
+        });
+    }
+
+    /**
      * Process a single payout through the full 3-step flow with idempotent resume:
      *   1) Debit wallet balance (atomic with status update — crash-safe).
      *   2) Charge brand's card for any shortfall.
@@ -259,6 +341,16 @@ class CommissionPayoutService
     {
         if ($payout->status === 'completed') {
             return true;
+        }
+
+        // Re-validate orders before any financial operations. A refund webhook arriving
+        // after createPayoutBatch committed can flip orders ineligible; catch that here
+        // while we can still cancel cleanly rather than overpaying the affiliate.
+        if ($payout->status === 'pending') {
+            $payout = $this->revalidatePayoutOrders($payout);
+            if ($payout === null) {
+                return null; // Payout cancelled — all linked orders became ineligible.
+            }
         }
 
         $brand = Professional::find($payout->brand_professional_id);
@@ -307,6 +399,15 @@ class CommissionPayoutService
         $chargeAmountCents = $amountToCollect;
 
         if (in_array($payout->status, ['collecting', 'collected', 'transferring'], true)) {
+            // Guard: net_payout_cents should never reach 0 here via normal flow, but if
+            // it does (e.g. after an order revalidation narrowed the batch to zero net),
+            // abort rather than attempt a zero-value Stripe transfer.
+            if ($payout->net_payout_cents <= 0) {
+                $this->failPayout($payout, 'net_payout_zero', 'Net payout amount is zero after order revalidation.');
+
+                return false;
+            }
+
             // Wallet debit already committed in a previous run — read from DB, don't re-debit.
             $walletDebitCents = (int) ($payout->wallet_debit_cents ?? 0);
             $chargeAmountCents = (int) ($payout->charge_cents ?? $amountToCollect);
