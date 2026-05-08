@@ -107,11 +107,17 @@ class BrandDesignMediaService
         $this->assertMimeAllowed((new \finfo(FILEINFO_MIME_TYPE))->file($file->getRealPath()));
 
         $media = DB::transaction(function () use ($site, $file) {
+            // Only count rows that are actually visible in the UI (listDesignMedia
+            // filters identically). Rows stuck in 'failed' or with is_active=false
+            // must not consume quota — they are invisible to the brand dashboard
+            // and there is no affordance to clear them from there.
             $activeCount = SiteMedia::query()
                 ->where('site_id', $site->id)
                 ->where('pool', SiteMedia::POOL_DESIGN)
                 ->where('purpose', SiteMedia::PURPOSE_PLACEHOLDER)
                 ->whereNull('deleted_at')
+                ->where('is_active', true)
+                ->whereNotIn('processing_state', [SiteMedia::PROCESSING_STATE_FAILED])
                 ->count();
 
             if ($activeCount >= self::PLACEHOLDER_MAX) {
@@ -271,11 +277,13 @@ class BrandDesignMediaService
     /**
      * Resolve all brand design media for a site into the shape that every reader
      * (HydrogenBrandDesignController, BrandDesignController, SiteCacheService)
-     * consumes. Only ready rows are returned — pending/failed rows are skipped.
+     * consumes. Failed rows are skipped; pending/processing rows are included
+     * (with an empty url) so the dashboard can show a spinner instead of silently
+     * hiding them.
      *
      * @return array{
      *     logo: array{full_url: ?string, square_url: ?string},
-     *     placeholders: array<int, array{id: string, alt_text: ?string, url: string, sort_order: int}>
+     *     placeholders: array<int, array{id: string, alt_text: ?string, url: string, sort_order: int, processing_state: string}>
      * }
      */
     public function listDesignMedia(string $siteId): array
@@ -285,7 +293,7 @@ class BrandDesignMediaService
             ->where('pool', SiteMedia::POOL_DESIGN)
             ->whereNull('deleted_at')
             ->where('is_active', true)
-            ->where('processing_state', SiteMedia::PROCESSING_STATE_READY)
+            ->whereNotIn('processing_state', [SiteMedia::PROCESSING_STATE_FAILED])
             ->with('mediaVariants')
             ->orderBy('sort_order')
             ->get();
@@ -295,20 +303,30 @@ class BrandDesignMediaService
 
         foreach ($rows as $row) {
             $url = $row->variantUrls()['optimized'] ?? null;
-            if ($url === null) {
+            $ready = $row->processing_state === SiteMedia::PROCESSING_STATE_READY;
+
+            // Only skip failed rows (already excluded by query — defensive).
+            // Pending/processing rows appear in the dashboard with an empty url
+            // so the brand can see what's queued.
+            if ($ready && $url === null) {
                 continue;
             }
 
             if ($row->purpose === SiteMedia::PURPOSE_LOGO_FULL) {
-                $logo['full_url'] = $url;
+                if ($url !== null) {
+                    $logo['full_url'] = $url;
+                }
             } elseif ($row->purpose === SiteMedia::PURPOSE_LOGO_SQUARE) {
-                $logo['square_url'] = $url;
+                if ($url !== null) {
+                    $logo['square_url'] = $url;
+                }
             } elseif ($row->purpose === SiteMedia::PURPOSE_PLACEHOLDER) {
                 $placeholders[] = [
                     'id' => $row->id,
                     'alt_text' => $row->alt_text,
-                    'url' => $url,
+                    'url' => $url ?? '',
                     'sort_order' => (int) $row->sort_order,
+                    'processing_state' => $row->processing_state,
                 ];
             }
         }

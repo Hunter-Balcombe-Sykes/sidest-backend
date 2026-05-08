@@ -63,7 +63,11 @@ it('throws ValidationException when from is after to', function () {
 it('returns correct empty response shape when no data exists', function () {
     stubDbConnection();
     // Stub all DB::table calls the controller makes — all return empty results
-    DB::shouldReceive('table')->andReturn(brandEmptyQueryMock());
+    $defaultMock = brandEmptyQueryMock();
+    DB::shouldReceive('table')->with('commerce.orders')->andReturn($defaultMock);
+    DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($defaultMock);
+    DB::shouldReceive('table')->with('analytics.site_visits')->andReturn($defaultMock);
+    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($defaultMock);
 
     $request = Request::create('/', 'GET', ['from' => '2026-04-01', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);
@@ -127,6 +131,7 @@ it('builds affiliate breakdown from brand_affiliate_rollup rows', function () {
     DB::shouldReceive('table')->with('core.professionals')->andReturn($identityMock);
     DB::shouldReceive('table')->with('commerce.orders')->andReturn($defaultMock);
     DB::shouldReceive('table')->with('analytics.site_visits')->andReturn($defaultMock);
+    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($defaultMock);
 
     $request = Request::create('/', 'GET', ['from' => '2026-04-18', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);
@@ -186,6 +191,7 @@ it('derives commission_summary pending_cents as approved minus paid minus revers
     DB::shouldReceive('table')->with('commerce.orders')->andReturn($ordersMock);
     DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($rollupMock);
     DB::shouldReceive('table')->with('analytics.site_visits')->andReturn($defaultMock);
+    DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($defaultMock);
 
     $request = Request::create('/', 'GET', ['from' => '2026-04-01', 'to' => '2026-04-19']);
     $request->attributes->set('professional', $this->professional);
