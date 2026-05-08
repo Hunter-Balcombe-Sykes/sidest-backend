@@ -198,7 +198,7 @@
               ':!app/Services/*Token*'
         ```
 
-- [ ] **#GS-2** · P2 — Add `CACHE_STORE=failover` config so a Redis outage degrades to "no cache" instead of "site down"
+- [x] **#GS-2** · P2 — Add `CACHE_STORE=failover` config so a Redis outage degrades to "no cache" instead of "site down"
     - **Where:** config/cache.php (no `failover` driver block today; default `'redis'`)
     - **Affects:** Whole-site availability when Redis is unreachable (eviction storm, cluster failover, network partition).
     - **Effort:** S (~0.5–1h)
