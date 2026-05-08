@@ -14,7 +14,7 @@ class AddPublicCacheHeaders
      * Anything NOT in this list will not receive public Cache-Control headers.
      * This is an allowlist — add new public-cacheable paths explicitly.
      */
-    private const CACHEABLE_PATH_PREFIXES = [
+    public const CACHEABLE_PATH_PREFIXES = [
         'api/public/site-by-slug',
         'api/public/booking/config-by-slug',
         'api/public/booking/services-by-slug',

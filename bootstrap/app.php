@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AddETagHeaders;
 use App\Http\Middleware\AddPublicCacheHeaders;
 use App\Http\Middleware\Auth\EnsurePartnaAdmin;
 use App\Http\Middleware\Auth\EnsurePartnaStaff;
@@ -48,6 +49,11 @@ return Application::configure(basePath: dirname(__DIR__))
         // only emits Cache-Control/Vary headers for the allow-listed public paths;
         // all other routes pass through untouched.
         $middleware->appendToGroup('api', AddPublicCacheHeaders::class);
+
+        // Set ETag on cacheable public GET responses; return 304 when If-None-Match
+        // matches. Shares CACHEABLE_PATH_PREFIXES with AddPublicCacheHeaders so the
+        // two lists can never drift out of sync.
+        $middleware->appendToGroup('api', AddETagHeaders::class);
 
         // Pin VerifySupabaseJwt before ThrottleRequests in the middleware priority list.
         // Without this, Laravel's SortedMiddleware moves ThrottleRequests (priority 6)
