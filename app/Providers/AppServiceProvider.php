@@ -78,9 +78,24 @@ class AppServiceProvider extends ServiceProvider
         }
 
         // Auth::user() is always null in this app (Supabase JWT), so a user-based
-        // Horizon gate is not possible. Block the dashboard in production entirely;
-        // use Nightwatch for queue monitoring instead.
-        Horizon::auth(fn (Request $request) => ! app()->isProduction());
+        // Horizon gate is not possible. Default behavior: dashboard is open in
+        // non-production environments and sealed in production. Production access
+        // can be selectively enabled by setting HORIZON_DASHBOARD_USERNAME and
+        // HORIZON_DASHBOARD_PASSWORD — the gate then requires HTTP Basic auth.
+        // Nightwatch remains the primary prod queue-monitoring surface.
+        Horizon::auth(fn (Request $request) => static::authorizeHorizonRequest($request));
+
+        // Long-wait notification routing. Thresholds live in config/horizon.php
+        // 'waits'. Mail/Slack are independent — set either or both. These are
+        // *queue backlog* alerts (jobs sitting too long), distinct from Nightwatch
+        // which covers job *exceptions*.
+        if (($mail = config('horizon.notifications.mail')) !== null && $mail !== '') {
+            Horizon::routeMailNotificationsTo($mail);
+        }
+
+        if (($slack = config('horizon.notifications.slack_webhook')) !== null && $slack !== '') {
+            Horizon::routeSlackNotificationsTo($slack, config('horizon.notifications.slack_channel'));
+        }
 
         $this->configureRateLimiting();
 
@@ -91,6 +106,50 @@ class AppServiceProvider extends ServiceProvider
         // Strict-mode N+1 trap: throw on unloaded relation access outside production
         // so tests/local catch lazy loading instead of leaking slow queries to prod.
         Model::preventLazyLoading(! app()->isProduction());
+    }
+
+    /**
+     * Authorize a request to the Horizon dashboard.
+     *
+     * Behavior:
+     * - Non-production: always allowed (dev/staging convenience).
+     * - Production with no HORIZON_DASHBOARD credentials: denied → 403.
+     * - Production with credentials configured:
+     *     - Missing/invalid Basic auth header → 401 + WWW-Authenticate challenge.
+     *     - Valid credentials (constant-time compare) → allowed.
+     *
+     * Extracted as a static method so it can be unit-tested without standing up
+     * the full HTTP stack. Called from the Horizon::auth closure in boot().
+     */
+    public static function authorizeHorizonRequest(Request $request): bool
+    {
+        if (! app()->isProduction()) {
+            return true;
+        }
+
+        $expectedUser = (string) config('horizon.dashboard.username', '');
+        $expectedPassword = (string) config('horizon.dashboard.password', '');
+
+        // Unset credentials = sealed prod (matches prior behavior).
+        if ($expectedUser === '' || $expectedPassword === '') {
+            return false;
+        }
+
+        $providedUser = (string) ($request->getUser() ?? '');
+        $providedPassword = (string) ($request->getPassword() ?? '');
+
+        $valid = $providedUser !== ''
+            && $providedPassword !== ''
+            && hash_equals($expectedUser, $providedUser)
+            && hash_equals($expectedPassword, $providedPassword);
+
+        if (! $valid) {
+            // Send 401 + challenge so the browser shows the Basic auth prompt.
+            // Returning false would yield 403 with no challenge → user is stuck.
+            abort(401, 'Authentication required', ['WWW-Authenticate' => 'Basic realm="Horizon"']);
+        }
+
+        return true;
     }
 
     /**

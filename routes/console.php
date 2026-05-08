@@ -108,6 +108,16 @@ Schedule::command('queue:prune-failed --hours=72')
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-failed-jobs');
     });
 
+// Snapshots queue throughput / runtime metrics into Redis so the Horizon
+// Metrics tab has data to render. Without this, "Jobs per minute" and
+// "Runtime" graphs stay flat-empty. Five minutes is Horizon's standard cadence.
+Schedule::command('horizon:snapshot')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: horizon-snapshot');
+    });
+
 // withoutOverlapping(2) matches the every-2-min cadence: if a run exceeds 2 min
 // (should be rare now that both Twitch and Kick use batch endpoints), the next
 // scheduler tick skips exactly one cycle rather than stacking.

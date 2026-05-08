@@ -15,6 +15,41 @@ return [
 
     'middleware' => ['web'],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Dashboard Access
+    |--------------------------------------------------------------------------
+    |
+    | Optional HTTP Basic auth credentials for the Horizon dashboard. Used by
+    | the Horizon::auth gate in AppServiceProvider — when both are set, the
+    | dashboard accepts these credentials in non-local environments. When
+    | either is empty, prod stays sealed (Nightwatch is the prod story).
+    |
+    */
+
+    'dashboard' => [
+        'username' => env('HORIZON_DASHBOARD_USERNAME'),
+        'password' => env('HORIZON_DASHBOARD_PASSWORD'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Failure / Long-Wait Notifications
+    |--------------------------------------------------------------------------
+    |
+    | Routes for Horizon's built-in long-wait notifications. Thresholds are
+    | the per-queue 'waits' values below. Mail and Slack are independent —
+    | configure either, both, or neither. Nightwatch already covers job
+    | exception alerts, so these primarily add queue-backlog visibility.
+    |
+    */
+
+    'notifications' => [
+        'mail' => env('HORIZON_NOTIFICATION_EMAIL'),
+        'slack_webhook' => env('HORIZON_NOTIFICATION_SLACK_WEBHOOK'),
+        'slack_channel' => env('HORIZON_NOTIFICATION_SLACK_CHANNEL'),
+    ],
+
     'waits' => [
         'redis:stripe' => 30,
         'redis:integrations' => 60,
