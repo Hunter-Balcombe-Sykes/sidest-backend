@@ -9,6 +9,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
 use App\Http\Resources\ProfessionalDashboardResource;
+use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Site\Block;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
@@ -39,7 +40,7 @@ class ProfessionalController extends ApiController
         $siteSettings = [];
         $primaryBrandStatus = null;
         $primaryBrandName = null;
-        $primaryBrandHandle = null;
+        $primaryAffiliateSiteUrl = null;
         if ($pro->site) {
             $siteSettings = is_array($pro->site->settings) ? $pro->site->settings : [];
             $siteSettings = app(SiteCacheService::class)->hydrateTypographySettings(
@@ -47,17 +48,19 @@ class ProfessionalController extends ApiController
                 (string) $pro->id
             );
 
-            // Resolve primary brand partner status + name + handle so the
-            // dashboard can surface affiliate-facing banners, status dots,
-            // and the canonical affiliate page URL for non-live brands.
-            $primaryBrandHandle = null;
+            // Resolve primary brand partner status + name + affiliate site URL so the
+            // dashboard can surface affiliate-facing banners, status dots, and the
+            // canonical affiliate page URL (brand.partna.au/affiliate).
             if ($pro->professional_type !== 'brand') {
                 $brandPartnerId = $siteSettings['brand_partner']['professional_id'] ?? null;
                 if ($brandPartnerId) {
                     $partner = $cache->getBrandPartnerStatus((string) $brandPartnerId);
                     $primaryBrandStatus = $partner['brand_status'] ?? BrandStatus::Onboarding->value;
                     $primaryBrandName = $partner['display_name'] ?? null;
-                    $primaryBrandHandle = $partner['handle'] ?? null;
+                    $primaryAffiliateSiteUrl = BrandPartnerLink::query()
+                        ->where('brand_professional_id', $brandPartnerId)
+                        ->where('affiliate_professional_id', $pro->id)
+                        ->value('site_url');
                 }
             }
         }
@@ -70,9 +73,7 @@ class ProfessionalController extends ApiController
                 'is_published' => (bool) $pro->site->is_published,
                 'settings' => $siteSettings,
                 'storefront_base_url' => 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'partna.au'),
-                'affiliate_page_url' => $pro->partna_url
-                    ? $pro->partna_url.($pro->professional_type !== 'brand' && $primaryBrandHandle ? '/'.$primaryBrandHandle : '')
-                    : null,
+                'affiliate_page_url' => $pro->professional_type === 'brand' ? $pro->partna_url : $primaryAffiliateSiteUrl,
             ] : null,
         ];
 
