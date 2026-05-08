@@ -35,7 +35,6 @@ class ProfessionalController extends ApiController
         // (60s SWR), so no extra round-trip is needed here on cache hits.
 
         $cache = app(ProfessionalCacheService::class);
-        $brandStoreSettings = $cache->getBrandStoreSettings($pro->id);
 
         $siteSettings = [];
         $primaryBrandStatus = null;
@@ -70,9 +69,7 @@ class ProfessionalController extends ApiController
                 'subdomain' => $pro->site->subdomain,
                 'is_published' => (bool) $pro->site->is_published,
                 'settings' => $siteSettings,
-                'storefront_base_url' => $brandStoreSettings
-                    ? $brandStoreSettings->storefrontBaseUrl($pro->site->subdomain)
-                    : 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'sidest.co'),
+                'storefront_base_url' => 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'sidest.co'),
                 'affiliate_page_url' => $pro->site->subdomain
                     ? 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'sidest.co')
                         .($pro->professional_type !== 'brand' && $primaryBrandHandle
@@ -133,7 +130,4 @@ class ProfessionalController extends ApiController
                 'is_active' => false,
             ]);
     }
-
-    /**
-     * Mirrors BrandStoreSettings::storefrontBaseUrl() but operates on the
-     * cached array shape returned by ProfessionalCacheService::getBrandStoreSettings.}
+}
