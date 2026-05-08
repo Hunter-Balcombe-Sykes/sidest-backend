@@ -313,10 +313,10 @@ class BootstrapController extends ApiController
             [
                 'professional_id' => $professional->id,
                 'type' => 'Info',
-                'title' => 'Welcome to Sight',
+                'title' => 'Welcome to Partna',
             ],
             [
-                'body' => 'Welcome to Sight. This is placeholder content for now.',
+                'body' => 'Your account is ready. Complete your profile, connect with brands, and start tracking your commissions — all from your dashboard.',
                 'cta_url' => null,
                 'severity' => 'info',
                 'starts_at' => now(),
