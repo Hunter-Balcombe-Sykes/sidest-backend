@@ -302,7 +302,7 @@
         }
         ```
 
-- [ ] **#PAY-2** · P2 — `transfer.reversed` routed to `handleTransferFailed`; guard silently no-ops on completed payouts
+- [x] **#PAY-2** · P2 — `transfer.reversed` routed to `handleTransferFailed`; guard silently no-ops on completed payouts
     - **Where:** `app/Http/Controllers/Api/Webhooks/StripeConnectWebhookController.php:129`, `:250–257`
     - **Affects:** Affiliates whose Stripe Connect transfers are reversed after the payout completes — their commission record shows `completed` but their Stripe balance was clawed back with no system-level record of the reversal.
     - **Effort:** S (~1h)
