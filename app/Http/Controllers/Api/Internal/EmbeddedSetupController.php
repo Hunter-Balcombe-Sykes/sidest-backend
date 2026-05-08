@@ -61,40 +61,29 @@ class EmbeddedSetupController extends ApiController
         $site = $professional->site;
         $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
 
-        $storefrontBaseUrl = $storeSettings && $site
-            ? $storeSettings->storefrontBaseUrl($site->subdomain)
+        $storefrontBaseUrl = $site?->subdomain
+            ? 'https://'.$site->subdomain.'.'.config('partna.public_domain', 'partna.au')
             : null;
         // Cached via CacheLockService (60s TTL, SWR + jitter). The probe itself is
         // a synchronous HTTP GET to the brand's storefront — bypassing the cache
         // would put a 5s timeout in the wizard's setup-prefill path on every poll.
         // BrandStoreSettingsController::update() / deploy() bust this same key
         // when wizard transitions actually flip the underlying state.
-        $storefrontStatus = $storeSettings && $site
+        $storefrontStatus = $site?->subdomain
             ? $this->cacheLock->rememberLocked(
                 CacheKeyGenerator::brandStorefrontStatus($professionalId),
                 60,
-                fn () => $this->checkStorefrontStatus($storeSettings, $site->subdomain),
+                fn () => $this->checkStorefrontStatus($site->subdomain),
             )
             : 'unreachable';
 
         // Auto-heal wizard flags when infrastructure is already live (e.g.
-        // after a reinstall). If the storefront responds, domain provisioning
-        // and DNS must be in place — backfill the wizard bookkeeping so the
-        // brand isn't stuck on already-completed steps.
+        // after a reinstall). If the storefront responds, Hydrogen must be
+        // installed — backfill so the brand isn't stuck on an already-done step.
         if ($storefrontStatus === 'live' && $storeSettings) {
             $heal = [];
             if (! $storeSettings->hydrogen_install_confirmed) {
                 $heal['hydrogen_install_confirmed'] = true;
-            }
-            if (empty($storeSettings->oxygen_storefront_id)) {
-                // Can't heal without the storefront ID — but if we got here,
-                // the storefront is live so the ID must exist somewhere.
-            }
-            if (! $storeSettings->domain_wizard_complete) {
-                $heal['domain_wizard_complete'] = true;
-            }
-            if (! $storeSettings->domain_txt_confirmed) {
-                $heal['domain_txt_confirmed'] = true;
             }
             if (! empty($heal)) {
                 $storeSettings->update($heal);
@@ -121,7 +110,6 @@ class EmbeddedSetupController extends ApiController
                 && ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token'))
                 && ! empty($storeSettings?->oxygen_storefront_id)
                 && (bool) ($storeSettings?->hydrogen_install_confirmed ?? false)
-                && (bool) ($storeSettings?->domain_wizard_complete ?? false)
                 && $storefrontStatus === 'live',
             // Storefront settings
             'default_commission_rate' => (string) ($storeSettings?->default_commission_rate ?? ''),
@@ -130,8 +118,6 @@ class EmbeddedSetupController extends ApiController
             'oxygen_token_set' => ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token')),
             'oxygen_storefront_id' => (string) ($storeSettings?->oxygen_storefront_id ?? ''),
             'hydrogen_confirmed' => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
-            'domain_provisioned' => (bool) ($storeSettings?->domain_wizard_complete ?? false),
-            'domain_txt_set' => (bool) ($storeSettings?->domain_txt_confirmed ?? false),
             'storefront_base_url' => $storefrontBaseUrl,
             'storefront_status' => $storefrontStatus,
             'brand_status' => $brandProfile?->brand_status ?? BrandStatus::Onboarding->value,
@@ -496,10 +482,10 @@ class EmbeddedSetupController extends ApiController
     /**
      * Return the current domain verification status for this brand.
      *
-     * Platform mode only (brand.partna.au). Status is derived from wizard
-     * completion flags: pending → verifying (CNAME set) → live (TXT confirmed).
+     * Platform mode only (brand.partna.au). Status is derived from whether
+     * an oxygen_storefront_id has been set (CNAME provisioned).
      *
-     * @return JsonResponse { data: { status: 'pending'|'verifying'|'live', domain: string } }
+     * @return JsonResponse { data: { status: 'pending'|'live', domain: string } }
      */
     public function domainStatus(Request $request): JsonResponse
     {
@@ -507,19 +493,11 @@ class EmbeddedSetupController extends ApiController
 
         $settings = BrandStoreSettings::where('professional_id', $professionalId)->first();
 
-        if (! $settings) {
-            return $this->success(['status' => 'pending', 'domain' => '']);
-        }
-
         $site = Site::where('professional_id', $professionalId)->first();
         $platformDomain = $site?->subdomain ? "{$site->subdomain}.".config('partna.public_domain') : '';
 
-        if (! $settings->domain_wizard_complete) {
-            return $this->success(['status' => 'pending', 'domain' => $platformDomain]);
-        }
-
-        // CNAME exists; TXT confirmed = live, otherwise verifying.
-        $status = $settings->domain_txt_confirmed ? 'live' : 'verifying';
+        // Domain is provisioned when a CNAME has been set (storefront ID saved by setupDomain).
+        $status = (! empty($settings?->oxygen_storefront_id)) ? 'live' : 'pending';
 
         return $this->success(['status' => $status, 'domain' => $platformDomain]);
     }
@@ -563,7 +541,6 @@ class EmbeddedSetupController extends ApiController
             ['professional_id' => $professionalId],
             [
                 'oxygen_storefront_id' => (string) $request->input('oxygen_storefront_id'),
-                'domain_wizard_complete' => true,
             ],
         );
 
@@ -607,7 +584,7 @@ class EmbeddedSetupController extends ApiController
 
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],
-            ['domain_txt_confirmed' => true],
+            [],
         );
 
         $this->cache->invalidateProfessional($professional);
@@ -757,9 +734,9 @@ class EmbeddedSetupController extends ApiController
      *
      * @return 'live'|'redirecting'|'unreachable'
      */
-    private function checkStorefrontStatus(BrandStoreSettings $settings, string $subdomain): string
+    private function checkStorefrontStatus(string $subdomain): string
     {
-        $url = $settings->storefrontBaseUrl($subdomain);
+        $url = 'https://'.$subdomain.'.'.config('partna.public_domain', 'partna.au');
 
         try {
             $response = Http::withOptions([
