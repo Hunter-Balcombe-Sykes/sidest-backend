@@ -41,11 +41,14 @@ it('allows view when the actor is a brand team member with manage capability', f
     expect($this->policy->view($actor, $integration))->toBeTrue();
 });
 
-it('denies view when the integration has no professional_id', function () {
+it('denies view with 404 when the integration has no professional_id', function () {
     $actor = (new Professional)->forceFill(['id' => 'pro-1', 'status' => 'active', 'professional_type' => 'professional']);
     $integration = new ProfessionalIntegration(['professional_id' => null, 'provider' => 'fresha']);
 
-    expect($this->policy->view($actor, $integration))->toBeFalse();
+    $result = $this->policy->view($actor, $integration);
+
+    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
+    expect($result->status())->toBe(404);
 });
 
 it('allows manage when the actor owns the integration and is active', function () {

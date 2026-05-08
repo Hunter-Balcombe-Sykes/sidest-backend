@@ -22,7 +22,7 @@ class IntegrationPolicy extends BasePolicy
 {
     public function __construct(private readonly BrandAccessService $brandAccess) {}
 
-    public function view(Professional $actor, ProfessionalIntegration $integration): bool
+    public function view(Professional $actor, ProfessionalIntegration $integration): bool|Response
     {
         return $this->actorCanReachOwner($actor, $integration);
     }
@@ -36,11 +36,11 @@ class IntegrationPolicy extends BasePolicy
         return $this->actorCanReachOwner($actor, $integration);
     }
 
-    private function actorCanReachOwner(Professional $actor, ProfessionalIntegration $integration): bool
+    private function actorCanReachOwner(Professional $actor, ProfessionalIntegration $integration): bool|Response
     {
         $ownerId = trim((string) ($integration->professional_id ?? ''));
         if ($ownerId === '') {
-            return false;
+            return $this->denyAsNotFound();
         }
 
         if ((string) $actor->id === $ownerId) {
