@@ -279,7 +279,7 @@
 
 ## P3 — Nice to have
 
-- [ ] **#CACHE-5** · P3 — `invalidateAnalytics` key-enumeration loop uses fixed `$end = today` for every iteration, leaving historical date-range keys for visits/clicks undeleted until their 5-minute TTL
+- [x] **#CACHE-5** · P3 — `invalidateAnalytics` key-enumeration loop uses fixed `$end = today` for every iteration, leaving historical date-range keys for visits/clicks undeleted until their 5-minute TTL
     - **Where:** app/Services/Cache/AnalyticsCacheService.php:67-81
     - **Affects:** Analytics dashboard users viewing historical date ranges (e.g., "Jan 1 – Jan 31"). After new data triggers invalidation, those specific cache keys are not explicitly deleted and remain stale for up to 5 minutes.
     - **Effort:** S (~0.5–1h)
