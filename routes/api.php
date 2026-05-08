@@ -215,10 +215,11 @@ Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('inter
     Route::get('/affiliate-products', [HydrogenAffiliateProductsController::class, 'show']);
 });
 
-// Public affiliate endpoint — no API key needed. The affiliate is only returned
-// when a verified brand-affiliate link exists, so there's no enumeration risk.
-// Accessory endpoints (services, products) remain behind the hydrogen.key
-// middleware since they add load with no client-side initiator.
+// INTENTIONALLY UNAUTHENTICATED — enumeration mitigated by controller link verification.
+// HydrogenAffiliateController::show() enforces a 404 when no verified BrandPartnerLink
+// exists; unknown shop_domain or slug values never return affiliate data.
+// Accessory endpoints (services, products) remain behind hydrogen.key since they
+// add server load with no client-side initiator.
 Route::get('/internal/hydrogen/affiliate', [HydrogenAffiliateController::class, 'show'])
     ->middleware('throttle:hydrogen-internal');
 

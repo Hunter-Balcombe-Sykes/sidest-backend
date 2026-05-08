@@ -100,16 +100,18 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         });
         Route::get('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'index']);
         Route::post('/brand-affiliate-invites/availability', [BrandAffiliateInviteController::class, 'availability']);
-        // Write endpoints are gated by BrandFundingGate — a brand can't
-        // send invites without a payment method on file (the platform
-        // would absorb commission float for any lapsed brand otherwise).
-        Route::middleware('brand-funding-gate')->group(function (): void {
-            Route::post('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'store']);
-            Route::post('/brand-affiliate-invites/bulk', [BrandAffiliateInviteController::class, 'bulk']);
-            Route::post('/brand-affiliate-invites/import-csv', [BrandAffiliateInviteController::class, 'importCsv']);
+        // Write and delete endpoints are brand-only. BrandFundingGate is a second
+        // check (payment method on file) but explicitly passes non-brands through,
+        // so brand.only must be the outer gate.
+        Route::middleware(['brand.only'])->group(function (): void {
+            Route::middleware('brand-funding-gate')->group(function (): void {
+                Route::post('/brand-affiliate-invites', [BrandAffiliateInviteController::class, 'store']);
+                Route::post('/brand-affiliate-invites/bulk', [BrandAffiliateInviteController::class, 'bulk']);
+                Route::post('/brand-affiliate-invites/import-csv', [BrandAffiliateInviteController::class, 'importCsv']);
+            });
+            Route::delete('/brand-affiliate-invites/{invite}', [BrandAffiliateInviteController::class, 'destroy'])
+                ->whereUuid('invite');
         });
-        Route::delete('/brand-affiliate-invites/{invite}', [BrandAffiliateInviteController::class, 'destroy'])
-            ->whereUuid('invite');
         Route::post('/brand-affiliate-invites/{token}/claim', [BrandAffiliateInviteController::class, 'claim']);
         Route::post('/brand-affiliate-invites/{token}/decline', [BrandAffiliateInviteController::class, 'decline']);
         Route::get('/affiliate-invites', [AffiliateInviteController::class, 'index']);
