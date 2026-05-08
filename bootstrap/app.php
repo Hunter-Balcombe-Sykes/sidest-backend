@@ -11,6 +11,7 @@ use App\Http\Middleware\BrandFundingGate;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\FeatureGate;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
+use App\Http\Middleware\VerifyTurnstileCaptcha;
 use App\Http\Middleware\RequirePlan;
 use App\Http\Middleware\SecureHeaders;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -70,6 +71,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'embedded.key' => VerifyEmbeddedApiKey::class,
             'shopify.session' => VerifyShopifySessionToken::class,
             'feature' => FeatureGate::class,
+            'captcha' => VerifyTurnstileCaptcha::class,
             'brand-funding-gate' => BrandFundingGate::class,
             'brand.only' => \App\Http\Middleware\EnsureBrandAccount::class,
             'affiliate.only' => \App\Http\Middleware\EnsureAffiliateAccount::class,

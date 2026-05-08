@@ -155,7 +155,7 @@ Route::post('/public/subscribe', [PublicEmailSubscriptionController::class, 'sub
 Route::post('/public/signup/availability', [PublicSignupAvailabilityController::class, 'check'])
     ->middleware('throttle:public-site');
 Route::post('/public/waitlist', [PublicWaitlistController::class, 'store'])
-    ->middleware('throttle:waitlist');
+    ->middleware(['throttle:waitlist', 'captcha']);
 Route::get('/public/brand-affiliate-invites/{token}', [PublicBrandAffiliateInviteController::class, 'show'])
     ->middleware('throttle:public-site');
 Route::get('/public/join/{handle}', [PublicOpenInviteController::class, 'show'])
@@ -163,10 +163,10 @@ Route::get('/public/join/{handle}', [PublicOpenInviteController::class, 'show'])
     ->middleware('throttle:public-site');
 
 Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])
-    ->middleware(['lead.log', 'throttle:leads']);
+    ->middleware(['lead.log', 'throttle:leads', 'captcha']);
 
 Route::post('/public/enquiry', [PublicEnquiryController::class, 'submit'])
-    ->middleware(['lead.log', 'throttle:leads']);
+    ->middleware(['lead.log', 'throttle:leads', 'captcha']);
 
 // Account-linking endpoint — called before a shop is associated with any brand,
 // so it cannot use the embedded.key middleware (which requires the shop to exist).

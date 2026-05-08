@@ -76,6 +76,12 @@ return [
         'api_token' => env('CLOUDFLARE_API_TOKEN'),
     ],
 
+    // Cloudflare Turnstile — bot-protection for public lead-capture endpoints.
+    // Only required when SIDEST_CAPTCHA_ENABLED=true.
+    'turnstile' => [
+        'secret_key' => env('CLOUDFLARE_TURNSTILE_SECRET_KEY'),
+    ],
+
     // Shared key for Sidest-Embedded Shopify app → backend calls.
     // Set in both .env (Laravel) and SIDEST_EMBEDDED_API_KEY env var in the Remix app.
     'embedded' => [
