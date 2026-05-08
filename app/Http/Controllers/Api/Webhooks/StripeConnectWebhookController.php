@@ -126,7 +126,7 @@ class StripeConnectWebhookController extends Controller
             'checkout.session.completed' => $this->handleCheckoutSessionCompleted($event->data->object, (string) ($event->account ?? '')),
             'transfer.created' => $this->handleTransferCreated($event->data->object),
             'transfer.failed' => $this->handleTransferFailed($event->data->object),
-            'transfer.reversed' => $this->handleTransferFailed($event->data->object),
+            'transfer.reversed' => $this->handleTransferReversed($event->data->object),
             'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object, (string) ($event->account ?? '')),
             'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object),
             default => Log::debug('Unhandled Stripe Connect event', ['type' => $event->type]),
@@ -259,6 +259,58 @@ class StripeConnectWebhookController extends Controller
         Log::warning('Stripe transfer failed', [
             'transfer_id' => $transfer->id,
             'payout_id' => $payoutId,
+        ]);
+    }
+
+    /**
+     * Handle transfer.reversed — funds reached the affiliate and were subsequently
+     * clawed back by Stripe (compliance hold, account closure, etc.).
+     *
+     * Unlike transfer.failed (funds never left), a reversal can arrive after the payout
+     * is already 'completed'. The brand was charged; the affiliate's Stripe balance was
+     * drained. The only safe action is to mark the payout 'reversed', flag it for manual
+     * recovery, and surface it to ops — no auto-refund attempt here.
+     */
+    private function handleTransferReversed(object $transfer): void
+    {
+        $payoutId = $transfer->metadata?->sidest_payout_id ?? null;
+
+        if (! $payoutId) {
+            return;
+        }
+
+        $payout = CommissionPayout::find($payoutId);
+
+        if (! $payout) {
+            Log::warning('stripe.transfer_reversed.payout_not_found', [
+                'transfer_id' => $transfer->id,
+                'payout_id' => $payoutId,
+            ]);
+
+            return;
+        }
+
+        // Idempotent: a duplicate webhook for an already-reversed payout is a no-op.
+        if ($payout->status === 'reversed') {
+            return;
+        }
+
+        $previousStatus = $payout->status;
+
+        // transfer.reversed can arrive after 'completed' — this is the most common
+        // real-world scenario (transfer confirmed → payout marked complete → Stripe later
+        // reverses). Completed payouts must be updatable here, unlike handleTransferFailed.
+        $payout->forceFill([
+            'status' => 'reversed',
+            'failure_code' => 'transfer_reversed',
+            'failure_reason' => 'Transfer reversed by Stripe after delivery — funds clawed back',
+            'needs_manual_refund' => true,
+        ])->save();
+
+        Log::warning('stripe.transfer_reversed', [
+            'transfer_id' => $transfer->id,
+            'payout_id' => $payoutId,
+            'previous_status' => $previousStatus,
         ]);
     }
 

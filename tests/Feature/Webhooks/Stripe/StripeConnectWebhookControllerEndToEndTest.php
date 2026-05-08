@@ -223,3 +223,159 @@ it('stripe connect — status update rolls back when flushHeldCommissions throws
     $row = DB::table('core.professionals')->where('id', $proId)->first();
     expect($row->stripe_connect_status)->toBe('onboarding');
 });
+
+// ============================================================
+// transfer.reversed — dedicated handler tests
+// ============================================================
+
+describe('transfer.reversed webhook', function () {
+    beforeEach(function () {
+        DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
+            id TEXT PRIMARY KEY,
+            brand_professional_id TEXT,
+            affiliate_professional_id TEXT,
+            stripe_transfer_id TEXT,
+            status TEXT NOT NULL DEFAULT \'pending\',
+            gross_commission_cents INTEGER NOT NULL DEFAULT 0,
+            platform_fee_cents INTEGER NOT NULL DEFAULT 0,
+            net_payout_cents INTEGER NOT NULL DEFAULT 0,
+            currency_code TEXT NOT NULL DEFAULT \'AUD\',
+            failure_reason TEXT,
+            failure_code TEXT,
+            needs_manual_refund INTEGER NOT NULL DEFAULT 0,
+            ledger_entry_count INTEGER NOT NULL DEFAULT 0,
+            wallet_debit_cents INTEGER DEFAULT 0,
+            charge_cents INTEGER DEFAULT 0,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            void_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )');
+    });
+
+    // Helper: build a transfer.reversed Stripe Event via handleParsedEvent (no HMAC needed)
+    function makeTransferReversedEvent(string $payoutId, string $transferId = 'tr_test'): \Stripe\Event
+    {
+        return \Stripe\Event::constructFrom([
+            'id' => 'evt_reversed_'.Str::random(10),
+            'object' => 'event',
+            'api_version' => '2024-04-10',
+            'created' => time(),
+            'type' => 'transfer.reversed',
+            'data' => [
+                'object' => [
+                    'id' => $transferId,
+                    'object' => 'transfer',
+                    'metadata' => ['sidest_payout_id' => $payoutId],
+                ],
+            ],
+            'livemode' => false,
+        ]);
+    }
+
+    function insertWebhookPayout(string $id, string $status): void
+    {
+        DB::connection('pgsql')->table('commerce.commission_payouts')->insert([
+            'id' => $id,
+            'status' => $status,
+            'gross_commission_cents' => 10000,
+            'platform_fee_cents' => 300,
+            'net_payout_cents' => 9700,
+            'currency_code' => 'AUD',
+            'created_at' => now()->toDateTimeString(),
+            'updated_at' => now()->toDateTimeString(),
+        ]);
+    }
+
+    it('marks a completed payout as reversed with needs_manual_refund', function () {
+        insertWebhookPayout('payout-rev-1', 'completed');
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent(makeTransferReversedEvent('payout-rev-1'));
+
+        $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-rev-1')->first();
+        expect($row->status)->toBe('reversed');
+        expect($row->failure_code)->toBe('transfer_reversed');
+        expect((bool) $row->needs_manual_refund)->toBeTrue();
+    });
+
+    it('marks an in-flight (transferring) payout as reversed', function () {
+        insertWebhookPayout('payout-rev-2', 'transferring');
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent(makeTransferReversedEvent('payout-rev-2'));
+
+        $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-rev-2')->first();
+        expect($row->status)->toBe('reversed');
+        expect($row->failure_code)->toBe('transfer_reversed');
+        expect((bool) $row->needs_manual_refund)->toBeTrue();
+    });
+
+    it('is idempotent — duplicate transfer.reversed on already-reversed payout is a no-op', function () {
+        insertWebhookPayout('payout-rev-3', 'reversed');
+        DB::connection('pgsql')->table('commerce.commission_payouts')
+            ->where('id', 'payout-rev-3')
+            ->update(['failure_code' => 'transfer_reversed', 'needs_manual_refund' => 1]);
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent(makeTransferReversedEvent('payout-rev-3'));
+
+        $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-rev-3')->first();
+        expect($row->status)->toBe('reversed');
+    });
+
+    it('is a no-op when the transfer metadata has no sidest_payout_id', function () {
+        $event = \Stripe\Event::constructFrom([
+            'id' => 'evt_reversed_noid',
+            'object' => 'event',
+            'api_version' => '2024-04-10',
+            'created' => time(),
+            'type' => 'transfer.reversed',
+            'data' => ['object' => ['id' => 'tr_noid', 'object' => 'transfer', 'metadata' => []]],
+            'livemode' => false,
+        ]);
+
+        $controller = app(StripeConnectWebhookController::class);
+        // Should not throw
+        $response = $controller->handleParsedEvent($event);
+        expect($response->getStatusCode())->toBe(200);
+    });
+
+    it('transfer.reversed uses failure_code transfer_reversed, not transfer_failed_webhook', function () {
+        insertWebhookPayout('payout-rev-5', 'completed');
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent(makeTransferReversedEvent('payout-rev-5'));
+
+        $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-rev-5')->first();
+        expect($row->failure_code)->toBe('transfer_reversed')
+            ->not->toBe('transfer_failed_webhook');
+    });
+
+    it('transfer.failed still skips completed payouts (guard unchanged)', function () {
+        insertWebhookPayout('payout-fail-1', 'completed');
+
+        $event = \Stripe\Event::constructFrom([
+            'id' => 'evt_failed_'.Str::random(10),
+            'object' => 'event',
+            'api_version' => '2024-04-10',
+            'created' => time(),
+            'type' => 'transfer.failed',
+            'data' => [
+                'object' => [
+                    'id' => 'tr_failed',
+                    'object' => 'transfer',
+                    'metadata' => ['sidest_payout_id' => 'payout-fail-1'],
+                ],
+            ],
+            'livemode' => false,
+        ]);
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent($event);
+
+        // completed payouts must NOT be touched by transfer.failed
+        $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-fail-1')->first();
+        expect($row->status)->toBe('completed');
+    });
+});

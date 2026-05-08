@@ -72,4 +72,9 @@ class CommissionPayout extends BaseModel
     {
         return $this->status === 'failed';
     }
+
+    public function isReversed(): bool
+    {
+        return $this->status === 'reversed';
+    }
 }
