@@ -178,6 +178,14 @@ class StripeConnectWebhookController extends Controller
 
     private function handleAccountUpdated(object $account): void
     {
+        // Bust the /stripe/status cache for this account regardless of whether
+        // the local stripe_connect_status enum changes — fields like charges_enabled,
+        // payouts_enabled, and requirements can flip without affecting the
+        // collapsed status string, and the dashboard surfaces those directly.
+        // Done before the unknown-account / disconnected guards so a stale
+        // entry can never outlive a legitimate Stripe-side change.
+        StripeConnectService::forgetStatusCache((string) $account->id);
+
         $professional = Professional::where('stripe_connect_account_id', $account->id)->first();
 
         if (! $professional) {
