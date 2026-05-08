@@ -82,7 +82,6 @@ class BootstrapController extends ApiController
                         'professional_type' => $resolveProfessionalType($data['professional_type'] ?? null),
                         'status' => 'active',
                         'onboarding_step' => 0,
-                        'qr_slug' => $this->siteProvisioning->generateQrSlug($data['handle'] ?? null),
                         'phone' => $data['phone'] ?? null,
                         'primary_email' => $data['primary_email'],
                         'first_name' => $data['first_name'] ?? '',
@@ -117,9 +116,6 @@ class BootstrapController extends ApiController
                     }
 
                     $professional->fill($fill);
-                }
-                if (! is_string($professional->qr_slug) || $professional->qr_slug === '') {
-                    $professional->qr_slug = $this->siteProvisioning->generateQrSlug($professional->handle ?? null);
                 }
                 $professional->save();
 

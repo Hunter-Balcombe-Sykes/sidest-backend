@@ -101,7 +101,6 @@ class ProfessionalCacheService
                 'professional_type' => $pro->professional_type,
                 'status' => $pro->status,
                 'onboarding_step' => $pro->onboarding_step,
-                'qr_slug' => $pro->qr_slug,
 
                 'public_contact_number' => $pro->public_contact_number,
                 'public_contact_email' => $pro->public_contact_email,

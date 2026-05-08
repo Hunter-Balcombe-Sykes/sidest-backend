@@ -6,6 +6,7 @@ use App\Http\Controllers\Concerns\DetectsClientInfo;
 use App\Http\Requests\BaseFormRequest;
 use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use App\Models\Core\Professional\Professional;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 // V2: Validates professional onboarding/bootstrap — display name, email, phone, handle generation, and professional type normalization.
@@ -61,6 +62,35 @@ class BootstrapRequest extends BaseFormRequest
                 'string',
                 'max:50',
                 Rule::unique('professionals', 'handle_lc')->ignore($existingProfessionalId, 'id'),
+                // Also block handles that appear in the alias table — these are handles
+                // previously used by other professionals and must not be re-claimed.
+                function (string $attribute, mixed $value, \Closure $fail) use ($existingProfessionalId): void {
+                    if (! is_string($value) || $value === '') {
+                        return;
+                    }
+
+                    try {
+                        // Use the pgsql connection explicitly: in test environments the default
+                        // connection is redirected to a separate SQLite handle without schema
+                        // attachments, so the dot-prefixed table name only resolves on pgsql.
+                        $query = DB::connection('pgsql')
+                            ->table('site.professional_handle_aliases')
+                            ->whereRaw('LOWER(handle) = ?', [strtolower($value)]);
+
+                        // Exclude the current professional's own aliases (re-bootstrap scenario)
+                        if ($existingProfessionalId) {
+                            $query->where('professional_id', '!=', $existingProfessionalId);
+                        }
+
+                        $taken = $query->exists();
+
+                        if ($taken) {
+                            $fail('This handle has already been taken.');
+                        }
+                    } catch (\Exception) {
+                        // Alias table unavailable — skip the check rather than blocking signup.
+                    }
+                },
             ],
         ];
     }

@@ -148,7 +148,7 @@ class UpdateSiteRequest extends BaseFormRequest
                 'min:3',
                 'max:63',
                 'regex:/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/',
-                function ($attribute, $value, $fail) use ($currentSiteId) {
+                function ($attribute, $value, $fail) use ($currentSiteId, $professional) {
                     // Check reserved words
                     $reserved = array_map('strtolower', config('partna.reserved_subdomains', []));
                     if (in_array(strtolower($value), $reserved, true)) {
@@ -175,6 +175,26 @@ class UpdateSiteRequest extends BaseFormRequest
                         ->exists();
 
                     if ($aliasExists) {
+                        $fail('This subdomain is already taken.');
+
+                        return;
+                    }
+
+                    // Also block handles claimed by another professional's old handle alias.
+                    // These are preserved for redirect/SEO purposes and must not be re-used.
+                    $currentProfessionalId = $professional?->id;
+
+                    try {
+                        $existsInProfessionalAliases = DB::connection('pgsql')
+                            ->table('site.professional_handle_aliases')
+                            ->whereRaw('LOWER(handle) = LOWER(?)', [$value])
+                            ->where('professional_id', '!=', $currentProfessionalId)
+                            ->exists();
+                    } catch (\Exception) {
+                        $existsInProfessionalAliases = false;
+                    }
+
+                    if ($existsInProfessionalAliases) {
                         $fail('This subdomain is already taken.');
                     }
                 },

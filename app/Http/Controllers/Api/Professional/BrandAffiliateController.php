@@ -33,7 +33,7 @@ class BrandAffiliateController extends ApiController
         $links = BrandPartnerLink::query()
             ->where('brand_professional_id', $brandId)
             ->orderByDesc('updated_at')
-            ->get(['affiliate_professional_id', 'slot', 'custom_photos_enabled', 'updated_at']);
+            ->get(['affiliate_professional_id', 'slot', 'custom_photos_enabled', 'site_url', 'updated_at']);
 
         $affiliateIds = $links
             ->pluck('affiliate_professional_id')
@@ -53,7 +53,7 @@ class BrandAffiliateController extends ApiController
             ->keyBy('professional_id');
 
         $affiliates = $links
-            ->map(function (BrandPartnerLink $link) use ($sitesByProfessionalId, $professional): ?array {
+            ->map(function (BrandPartnerLink $link) use ($sitesByProfessionalId): ?array {
                 /** @var Site|null $site */
                 $site = $sitesByProfessionalId->get($link->affiliate_professional_id);
                 if (! $site) {
@@ -77,9 +77,9 @@ class BrandAffiliateController extends ApiController
                     'connected_at' => optional($link->updated_at)->toIso8601String(),
                     'is_primary' => (int) $link->slot === BrandPartnerLinkService::PRIMARY_SLOT,
                     'custom_photos_enabled' => $link->custom_photos_enabled,
-                    'affiliate_page_url' => $site->subdomain
-                        ? 'https://'.$site->subdomain.'.'.config('partna.public_domain', 'partna.au').'/'.$professional->handle
-                        : null,
+                    // Trigger-managed by Postgres from site subdomain + brand handle;
+                    // read directly rather than recomputing from related models.
+                    'site_url' => $link->site_url,
                 ];
             })
             ->filter(fn (?array $affiliate): bool => is_array($affiliate) && filled($affiliate['id']))

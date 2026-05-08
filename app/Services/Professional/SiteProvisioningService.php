@@ -10,7 +10,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 use RuntimeException;
 
-// V2: Provisions new professional sites with unique subdomains, generates QR slugs, and seeds free-tier subscriptions.
+// V2: Provisions new professional sites with unique subdomains and seeds free-tier subscriptions.
 class SiteProvisioningService
 {
     public function createSiteWithRetry(string $professionalId, string $base): Site
@@ -61,33 +61,6 @@ class SiteProvisioningService
         }
 
         return $v;
-    }
-
-    public function generateQrSlug(?string $handle): string
-    {
-        $base = is_string($handle) ? Str::slug($handle) : '';
-        if ($base === '') {
-            $base = 'pro';
-        }
-
-        $maxAttempts = 10;
-        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
-            $suffix = Str::lower(Str::random(6));
-            $slug = $base.'-'.$suffix;
-
-            try {
-                if (! Professional::query()->where('qr_slug', $slug)->exists()) {
-                    return $slug;
-                }
-            } catch (QueryException $e) {
-                if ($this->isUniqueViolation($e)) {
-                    continue;
-                }
-                throw $e;
-            }
-        }
-
-        throw new RuntimeException('Could not generate a unique QR slug.');
     }
 
     public function ensureFreeSubscription(Professional $professional): void

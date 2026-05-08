@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string $handle
  * @property string $display_name
  * @property int $onboarding_step
+ * @property string|null $partna_url Trigger-managed vanity URL — never mass-assignable.
  */
 
 // V2: Central identity model. Both brands and affiliates are professionals distinguished by professional_type. Owns site, services, customers, integrations.
@@ -56,7 +57,6 @@ class Professional extends BaseModel
         'professional_type',
         'status',
         'onboarding_step',
-        'qr_slug',
         'phone',
         'primary_email',
         'first_name',
