@@ -6,7 +6,11 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-// V2: Brand-affiliate connection record. V2 uses single-brand model (slot 0 = primary, one brand per affiliate).
+/**
+ * Brand-affiliate connection record. V2 uses single-brand model (slot 0 = primary, one brand per affiliate).
+ *
+ * @property string|null $site_url Trigger-managed by Postgres; read-only — never mass-assign.
+ */
 class BrandPartnerLink extends BaseModel
 {
     use HasUuids;

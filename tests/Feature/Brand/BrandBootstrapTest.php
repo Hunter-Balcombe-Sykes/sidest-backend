@@ -77,7 +77,6 @@ beforeEach(function () {
         professional_type TEXT DEFAULT "professional",
         status TEXT DEFAULT "active",
         onboarding_step INTEGER DEFAULT 0,
-        qr_slug TEXT,
         country_code TEXT,
         timezone TEXT,
         location_street_address TEXT,

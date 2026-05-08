@@ -22,7 +22,6 @@ function makeAboutProfessional(array $attrs = []): Professional
         'first_name' => 'About',
         'phone' => '+61400000000',
         'primary_email' => $handle.'@example.com',
-        'qr_slug' => 'q-'.Str::random(8),
         'professional_type' => 'professional',
         'status' => 'active',
     ], $attrs));
