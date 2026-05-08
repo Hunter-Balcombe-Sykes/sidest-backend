@@ -174,6 +174,18 @@ return [
             'username' => env('REDIS_USERNAME', null),
             'port' => env('REDIS_PORT', 6379),
             'database' => env('REDIS_CACHE_DB', 1),
+            // igbinary + LZ4: ~3× memory savings on large payloads.
+            // Prerequisites before setting REDIS_IGBINARY=true:
+            //   1. Confirm phpredis compiled with igbinary + LZ4 (check phpinfo()).
+            //   2. Flush the Redis cache on deploy — serializer change invalidates existing entries.
+            'options' => array_filter([
+                'serializer' => env('REDIS_IGBINARY', false) && defined('Redis::SERIALIZER_IGBINARY')
+                    ? Redis::SERIALIZER_IGBINARY
+                    : null,
+                'compression' => env('REDIS_IGBINARY', false) && defined('Redis::COMPRESSION_LZ4')
+                    ? Redis::COMPRESSION_LZ4
+                    : null,
+            ]),
         ],
 
         'session' => [
