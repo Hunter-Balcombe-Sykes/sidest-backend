@@ -41,6 +41,7 @@ class ProfessionalController extends ApiController
         $siteSettings = [];
         $primaryBrandStatus = null;
         $primaryBrandName = null;
+        $primaryBrandHandle = null;
         if ($pro->site) {
             $siteSettings = is_array($pro->site->settings) ? $pro->site->settings : [];
             $siteSettings = app(SiteCacheService::class)->hydrateTypographySettings(
@@ -48,14 +49,17 @@ class ProfessionalController extends ApiController
                 (string) $pro->id
             );
 
-            // Resolve primary brand partner status + name so the dashboard can
-            // surface affiliate-facing banners and status dots for non-live brands.
+            // Resolve primary brand partner status + name + handle so the
+            // dashboard can surface affiliate-facing banners, status dots,
+            // and the canonical affiliate page URL for non-live brands.
             if ($pro->professional_type !== 'brand') {
                 $brandPartnerId = $siteSettings['brand_partner']['professional_id'] ?? null;
                 if ($brandPartnerId) {
                     $brandProfile = BrandProfile::where('professional_id', $brandPartnerId)->first();
                     $primaryBrandStatus = $brandProfile?->brand_status ?? BrandStatus::Onboarding->value;
-                    $primaryBrandName = \App\Models\Core\Professional\Professional::find($brandPartnerId)?->display_name ?? null;
+                    $brandPartnerProfessional = \App\Models\Core\Professional\Professional::find($brandPartnerId);
+                    $primaryBrandName = $brandPartnerProfessional?->display_name ?? null;
+                    $primaryBrandHandle = $brandPartnerProfessional?->handle ?? null;
                 }
             }
         }
@@ -69,7 +73,13 @@ class ProfessionalController extends ApiController
                 'settings' => $siteSettings,
                 'storefront_base_url' => $brandStoreSettings
                     ? $brandStoreSettings->storefrontBaseUrl($pro->site->subdomain)
-                    : 'https://'.$pro->site->subdomain.'.sidest.co',
+                    : 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'sidest.co'),
+                'affiliate_page_url' => $pro->site->subdomain
+                    ? 'https://'.$pro->site->subdomain.'.'.config('partna.public_domain', 'sidest.co')
+                        .($pro->professional_type !== 'brand' && $primaryBrandHandle
+                            ? '/'.$primaryBrandHandle
+                            : '')
+                    : null,
             ] : null,
         ];
 

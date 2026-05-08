@@ -57,13 +57,7 @@ class BrandStoreSettings extends BaseModel
      */
     public function storefrontBaseUrl(string $subdomain): string
     {
-        if ($this->domain_mode === 'custom'
-            && $this->custom_domain
-            && $this->custom_domain_tls_provisioned_at) {
-            return 'https://'.$this->custom_domain;
-        }
-
-        return 'https://'.$subdomain.'.sidest.co';
+        return 'https://'.$subdomain.'.'.config('partna.public_domain', 'sidest.co');
     }
 
     /**
