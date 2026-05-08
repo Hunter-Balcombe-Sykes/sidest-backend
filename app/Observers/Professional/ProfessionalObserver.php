@@ -2,11 +2,13 @@
 
 namespace App\Observers\Professional;
 
+use App\Jobs\Cloudflare\SyncSubdomainToKvJob;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\ProfessionalCacheService;
 use Illuminate\Support\Facades\Log;
 
 // V2: Invalidates professional cache on profile update/delete/restore.
+// Also syncs Cloudflare KV when handle changes (subdomain routing table).
 class ProfessionalObserver
 {
     public bool $afterCommit = true;
@@ -24,6 +26,18 @@ class ProfessionalObserver
                 'professional_id' => $professional->id,
                 'message' => $e->getMessage(),
             ]);
+        }
+
+        // Handle change → the KV routing entry key changes; push updated entry.
+        if ($professional->wasChanged('handle')) {
+            try {
+                SyncSubdomainToKvJob::dispatch((string) $professional->id);
+            } catch (\Throwable $e) {
+                Log::warning('ProfessionalObserver: KV sync dispatch failed on handle change', [
+                    'professional_id' => $professional->id,
+                    'message' => $e->getMessage(),
+                ]);
+            }
         }
     }
 

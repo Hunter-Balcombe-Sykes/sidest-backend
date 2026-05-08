@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\Core\Professional\BrandAffiliateInvite;
+use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
@@ -16,6 +17,7 @@ use App\Models\Retail\CommissionMovement;
 use App\Models\Retail\CommissionPayout;
 use App\Observers\Core\BlockObserver;
 use App\Observers\Core\BrandAffiliateInviteObserver;
+use App\Observers\Core\BrandPartnerLinkObserver;
 use App\Observers\Core\BrandProfileObserver;
 use App\Observers\Core\CommissionMovementObserver;
 use App\Observers\Core\CommissionPayoutObserver;
@@ -43,6 +45,7 @@ class EventServiceProvider extends ServiceProvider
         Service::observe(ServiceObserver::class);
         Customer::observe(CustomerObserver::class);
         BrandAffiliateInvite::observe(BrandAffiliateInviteObserver::class);
+        BrandPartnerLink::observe(BrandPartnerLinkObserver::class);
         CommissionMovement::observe(CommissionMovementObserver::class);
         CommissionPayout::observe(CommissionPayoutObserver::class);
         ProfessionalIntegration::observe(ProfessionalIntegrationObserver::class);

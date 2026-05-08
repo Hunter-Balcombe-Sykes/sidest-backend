@@ -69,10 +69,12 @@ return [
         'api_key' => env('HYDROGEN_API_KEY'),
     ],
 
-    // Cloudflare DNS API — used to provision platform subdomains (brand.partna.au)
-    // for Hydrogen storefronts. Zone must correspond to the partna.au domain.
+    // Cloudflare DNS + KV — DNS provisions subdomains; KV holds the subdomain
+    // routing table read by the Edge Worker to route brands vs affiliate redirects.
     'cloudflare' => [
         'zone_id' => env('CLOUDFLARE_ZONE_ID'),
+        'account_id' => env('CLOUDFLARE_ACCOUNT_ID'),
+        'kv_namespace_id' => env('CLOUDFLARE_KV_NAMESPACE_ID'),
         'api_token' => env('CLOUDFLARE_API_TOKEN'),
     ],
 
