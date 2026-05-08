@@ -329,7 +329,7 @@
         }
         ```
 
-- [ ] **#PAY-3** · P2 — Post-creation refund window unguarded; `processPayoutBatch` doesn't re-validate order state after batch is in `collecting`
+- [x] **#PAY-3** · P2 — Post-creation refund window unguarded; `processPayoutBatch` doesn't re-validate order state after batch is in `collecting`
     - **Where:** `app/Services/Stripe/CommissionPayoutService.php:154–161`, `:302–306`
     - **Affects:** Any affiliate whose orders are refunded in the window between `createPayoutBatch` stamping `payout_id` on the orders and `processPayoutBatch` completing the Stripe transfer. The affiliate receives the full commission on a refunded order.
     - **Effort:** M (~2–4h)
