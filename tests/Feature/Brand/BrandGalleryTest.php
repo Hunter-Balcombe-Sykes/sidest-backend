@@ -130,13 +130,7 @@ beforeEach(function () {
         theme_id INTEGER NULL,
         oxygen_deployment_token TEXT NULL,
         oxygen_storefront_id TEXT NULL,
-        domain_mode TEXT NULL,
-        domain_wizard_complete INTEGER NULL,
-        custom_domain TEXT NULL,
-        custom_domain_verified_at TEXT NULL,
-        custom_domain_tls_provisioned_at TEXT NULL,
         hydrogen_install_confirmed INTEGER NULL,
-        domain_txt_confirmed INTEGER NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
     )');

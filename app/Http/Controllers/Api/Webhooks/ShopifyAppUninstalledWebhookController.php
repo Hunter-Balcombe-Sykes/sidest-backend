@@ -63,8 +63,6 @@ class ShopifyAppUninstalledWebhookController extends ApiController
             'hydrogen_install_confirmed' => (bool) ($storeSettings?->hydrogen_install_confirmed ?? false),
             'oxygen_deployment_token_set' => ! empty($storeSettings?->getRawOriginal('oxygen_deployment_token')),
             'oxygen_storefront_id_present' => ! empty($storeSettings?->oxygen_storefront_id),
-            'domain_wizard_complete' => (bool) ($storeSettings?->domain_wizard_complete ?? false),
-            'domain_txt_confirmed' => (bool) ($storeSettings?->domain_txt_confirmed ?? false),
         ];
 
         $integration->update([

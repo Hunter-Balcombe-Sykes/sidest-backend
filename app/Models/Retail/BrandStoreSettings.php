@@ -24,13 +24,7 @@ class BrandStoreSettings extends BaseModel
         'payout_hold_days',
         'theme_id',
         'oxygen_storefront_id',
-        'domain_mode',
-        'domain_wizard_complete',
-        'custom_domain',
-        'custom_domain_verified_at',
-        'custom_domain_tls_provisioned_at',
         'hydrogen_install_confirmed',
-        'domain_txt_confirmed',
     ];
 
     protected $hidden = [
@@ -43,22 +37,7 @@ class BrandStoreSettings extends BaseModel
         'theme_id' => 'integer',
         // Encrypted at-rest using APP_KEY (AES-256-CBC via Laravel's encrypter)
         'oxygen_deployment_token' => 'encrypted',
-        'custom_domain_verified_at' => 'datetime',
-        'custom_domain_tls_provisioned_at' => 'datetime',
     ];
-
-    /**
-     * Compute the public storefront base URL for this brand.
-     *
-     * Returns the custom domain when fully provisioned (verified + TLS),
-     * otherwise falls back to the platform subdomain URL. The $subdomain
-     * parameter is the brand's site.subdomain — passed in because this model
-     * doesn't own a direct relationship to Site.
-     */
-    public function storefrontBaseUrl(string $subdomain): string
-    {
-        return 'https://'.$subdomain.'.'.config('partna.public_domain', 'partna.au');
-    }
 
     /**
      * Effective hold days for this brand, respecting the system minimum.
@@ -88,12 +67,6 @@ class BrandStoreSettings extends BaseModel
             'hydrogen_install_confirmed' => false,
             'oxygen_deployment_token' => null,
             'oxygen_storefront_id' => null,
-            'domain_wizard_complete' => false,
-            'domain_txt_confirmed' => false,
-            'domain_mode' => 'platform',
-            'custom_domain' => null,
-            'custom_domain_verified_at' => null,
-            'custom_domain_tls_provisioned_at' => null,
         ]);
     }
 }

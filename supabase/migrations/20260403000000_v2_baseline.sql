@@ -2068,7 +2068,10 @@ GRANT SELECT ON billing.subscriptions TO authenticated;
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_backend') THEN
-        CREATE ROLE app_backend WITH LOGIN PASSWORD 'blaze@@1967HBS';
+        -- Created NOLOGIN; password + LOGIN must be set out-of-band after migration runs:
+        --   ALTER ROLE app_backend WITH LOGIN PASSWORD '<from-secret-store>';
+        -- Real credential lives in Laravel Cloud env (DB_PASSWORD), never in git.
+        CREATE ROLE app_backend NOLOGIN;
     END IF;
 
     -- Grant permissions (always runs now that role is guaranteed to exist)

@@ -3,8 +3,11 @@
 namespace App\Observers\Core;
 
 use App\Jobs\Cache\WarmPublicSiteCacheJob;
+use App\Jobs\Cloudflare\ProvisionBrandDnsJob;
+use App\Jobs\Cloudflare\RetireBrandDnsJob;
 use App\Jobs\Cloudflare\SyncSubdomainToKvJob;
 use App\Models\Core\Professional\BrandPartnerLink;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\Log;
@@ -19,6 +22,14 @@ class SiteObserver
     public function __construct(
         private readonly SiteCacheService $siteCache,
     ) {}
+
+    public function updating(Site $site): void
+    {
+        if ($site->isDirty('subdomain')) {
+            // Stash on the model so saved() can dispatch retirement of the old CNAME.
+            $site->_oldSubdomainPendingRetire = $site->getOriginal('subdomain');
+        }
+    }
 
     public function saved(Site $site): void
     {
@@ -70,6 +81,35 @@ class SiteObserver
                     'professional_id' => $professionalId,
                     'message' => $e->getMessage(),
                 ]);
+            }
+
+            // Provision DNS for brand sites only. Affiliates use the wildcard.
+            $pro = Professional::query()->find($professionalId);
+            if ($pro?->isBrand()) {
+                try {
+                    ProvisionBrandDnsJob::dispatch($professionalId);
+                } catch (\Throwable $e) {
+                    Log::warning('SiteObserver: ProvisionBrandDnsJob dispatch failed', [
+                        'site_id' => $site->id,
+                        'professional_id' => $site->professional_id,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // If the subdomain changed, retire the old CNAME (only meaningful for brands;
+            // for affiliates it's a no-op since there's no per-affiliate CNAME).
+            if (isset($site->_oldSubdomainPendingRetire) && $pro?->isBrand()) {
+                try {
+                    RetireBrandDnsJob::dispatch((string) $site->_oldSubdomainPendingRetire);
+                } catch (\Throwable $e) {
+                    Log::warning('SiteObserver: RetireBrandDnsJob dispatch failed', [
+                        'site_id' => $site->id,
+                        'old_subdomain' => $site->_oldSubdomainPendingRetire,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
+                unset($site->_oldSubdomainPendingRetire);
             }
         }
     }
