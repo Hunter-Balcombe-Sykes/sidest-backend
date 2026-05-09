@@ -42,10 +42,6 @@ class ProfessionalController extends ApiController
         $primaryBrandName = null;
         if ($pro->site) {
             $siteSettings = is_array($pro->site->settings) ? $pro->site->settings : [];
-            $siteSettings = app(SiteCacheService::class)->hydrateTypographySettings(
-                $siteSettings,
-                (string) $pro->id
-            );
 
             // Resolve primary brand partner status + name so the dashboard can surface
             // affiliate-facing banners and status dots.

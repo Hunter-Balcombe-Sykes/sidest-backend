@@ -5,16 +5,11 @@ namespace App\Http\Controllers\Api\Staff\StaffSite;
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Professional\Professional;
 use App\Models\Views\AllSiteData;
-use App\Services\Cache\SiteCacheService;
 use Illuminate\Http\JsonResponse;
 
 // V2: Staff views site data including unpublished sites. Used by internal staff dashboard.
 class StaffSiteController extends ApiController
 {
-    public function __construct(
-        private readonly SiteCacheService $siteCache
-    ) {}
-
     public function show(string $subdomain): JsonResponse
     {
         $row = AllSiteData::query()
@@ -26,10 +21,6 @@ class StaffSiteController extends ApiController
         }
 
         $siteSettings = is_array($row->site_settings) ? $row->site_settings : [];
-        $siteSettings = $this->siteCache->hydrateTypographySettings(
-            $siteSettings,
-            (string) $row->professional_id
-        );
 
         // Staff can see unpublished too, so we return published flag either way
         return $this->success([
@@ -76,10 +67,6 @@ class StaffSiteController extends ApiController
         }
 
         $siteSettings = is_array($row->site_settings) ? $row->site_settings : [];
-        $siteSettings = $this->siteCache->hydrateTypographySettings(
-            $siteSettings,
-            (string) $row->professional_id
-        );
 
         return $this->success([
             'is_published' => (bool) $row->is_published,

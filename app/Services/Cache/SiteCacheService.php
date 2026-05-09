@@ -284,7 +284,6 @@ class SiteCacheService
     private function safeHydrateSitePayload(array $site, string $professionalId, string $siteId, string $subdomain): array
     {
         try {
-            $site = $this->hydrateSiteWithBrandTypography($site, $professionalId);
             $site = $this->resolveImageVariantUrlsInSite($site, $siteId);
 
             return $this->enrichSiteWithBrandPartnerRadius($site);
@@ -336,27 +335,6 @@ class SiteCacheService
 
             return $payload;
         }
-    }
-
-    /**
-     * @param  array<string, mixed>  $site
-     * @return array<string, mixed>
-     */
-    public function hydrateSiteWithBrandTypography(array $site, string $brandProfessionalId): array
-    {
-        $settings = is_array($site['settings'] ?? null) ? $site['settings'] : [];
-        $site['settings'] = $this->hydrateTypographySettings($settings, $brandProfessionalId);
-
-        return $site;
-    }
-
-    /**
-     * @param  array<string, mixed>  $settings
-     * @return array<string, mixed>
-     */
-    public function hydrateTypographySettings(array $settings, string $brandProfessionalId): array
-    {
-        return $settings;
     }
 
     /**
