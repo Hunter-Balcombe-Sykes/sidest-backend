@@ -4,11 +4,16 @@ namespace App\Http\Controllers\Api\Professional\Stripe;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
+use App\Http\Requests\Stripe\ConfirmTopUpCheckoutRequest;
+use App\Http\Requests\Stripe\CreatePaymentMethodSetupRequest;
+use App\Http\Requests\Stripe\CreateTopUpCheckoutRequest;
+use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 // V2: Stripe Connect Express onboarding, payment methods, commission wallet top-ups, and payout history. Required for the 80/20 affiliate payout split.
 class StripeConnectController extends Controller
@@ -106,9 +111,7 @@ class StripeConnectController extends Controller
     public function setupPaymentMethod(Request $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
-        }
+        Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         $result = $this->connectService->createSetupIntent($pro);
 
@@ -119,17 +122,10 @@ class StripeConnectController extends Controller
      * POST /stripe/payment-method/setup-checkout
      * Creates a hosted Stripe Checkout setup session for brand payment method setup.
      */
-    public function createPaymentMethodCheckoutSession(Request $request): JsonResponse
+    public function createPaymentMethodCheckoutSession(CreatePaymentMethodSetupRequest $request): JsonResponse
     {
-        $request->validate([
-            'success_url' => 'required|url',
-            'cancel_url' => 'required|url',
-        ]);
-
         $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
-        }
+        Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         $result = $this->connectService->createPaymentMethodSetupCheckoutSession(
             $pro,
@@ -151,9 +147,7 @@ class StripeConnectController extends Controller
         ]);
 
         $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
-        }
+        Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         $this->connectService->savePaymentMethod($pro, $request->input('payment_method_id'));
 
@@ -164,16 +158,10 @@ class StripeConnectController extends Controller
      * POST /stripe/payment-method/sync-session
      * Syncs the default payment method from a completed Checkout setup session.
      */
-    public function syncPaymentMethodSession(Request $request): JsonResponse
+    public function syncPaymentMethodSession(SyncPaymentMethodSessionRequest $request): JsonResponse
     {
-        $request->validate([
-            'session_id' => 'required|string',
-        ]);
-
         $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
-        }
+        Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         try {
             $result = $this->connectService->syncPaymentMethodFromCheckoutSession(
@@ -197,9 +185,7 @@ class StripeConnectController extends Controller
     public function listPaymentMethods(Request $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
-        }
+        Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         $methods = $this->connectService->listPaymentMethods($pro);
 
@@ -213,9 +199,7 @@ class StripeConnectController extends Controller
     public function removePaymentMethod(Request $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
-        }
+        Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         $this->connectService->removeBrandPaymentSetup($pro);
 
@@ -233,9 +217,8 @@ class StripeConnectController extends Controller
         ]);
 
         $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can change commission funding mode.'], 403);
-        }
+        Gate::forUser($pro)->authorize('manageWallet', $pro);
+
         $mode = $request->input('mode');
 
         $this->connectService->setCommissionFundingMode($pro, $mode);
@@ -250,19 +233,10 @@ class StripeConnectController extends Controller
      * POST /stripe/topups/checkout
      * Creates hosted Stripe Checkout session to manually top up commission wallet.
      */
-    public function createTopUpCheckoutSession(Request $request): JsonResponse
+    public function createTopUpCheckoutSession(CreateTopUpCheckoutRequest $request): JsonResponse
     {
-        $request->validate([
-            'amount_cents' => 'required|integer|min:100|max:10000000',
-            'currency_code' => 'nullable|string|size:3',
-            'success_url' => 'required|url',
-            'cancel_url' => 'required|url',
-        ]);
-
         $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can top up commission wallet balance.'], 403);
-        }
+        Gate::forUser($pro)->authorize('topUp', $pro);
 
         $result = $this->connectService->createManualTopUpCheckoutSession(
             $pro,
@@ -279,16 +253,10 @@ class StripeConnectController extends Controller
      * POST /stripe/topups/confirm
      * Confirms a completed top-up Checkout session and credits the wallet.
      */
-    public function confirmTopUpCheckoutSession(Request $request): JsonResponse
+    public function confirmTopUpCheckoutSession(ConfirmTopUpCheckoutRequest $request): JsonResponse
     {
-        $request->validate([
-            'session_id' => 'required|string',
-        ]);
-
         $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can top up commission wallet balance.'], 403);
-        }
+        Gate::forUser($pro)->authorize('topUp', $pro);
 
         try {
             $result = $this->connectService->confirmManualTopUpCheckoutSession(

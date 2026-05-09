@@ -71,6 +71,14 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Gdpr\DataExportAudit::class, \App\Policies\GdprPolicy::class);
         Gate::policy(\App\Models\Commerce\AffiliateProductSelection::class, \App\Policies\AffiliateProductPolicy::class);
 
+        // Stripe wallet/payment-method abilities — bypasses model-class dispatch so
+        // CommissionPolicy methods are reachable without overriding the Professional→
+        // ProfessionalSelfPolicy registration. The $brand arg is always the acting
+        // professional (self-operation), so $actor->id === $brand->id is the primary guard.
+        Gate::define('topUp', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $brand) => app(\App\Policies\CommissionPolicy::class)->topUp($actor, $brand));
+        Gate::define('managePaymentMethod', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $brand) => app(\App\Policies\CommissionPolicy::class)->managePaymentMethod($actor, $brand));
+        Gate::define('manageWallet', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $brand) => app(\App\Policies\CommissionPolicy::class)->manageWallet($actor, $brand));
+
         // Refuse to boot in production with throttling disabled — a misconfigured
         // PARTNA_THROTTLE_ENABLED=false would silently strip all rate limiting.
         if (app()->isProduction() && ! (bool) config('partna.throttle.enabled', true)) {

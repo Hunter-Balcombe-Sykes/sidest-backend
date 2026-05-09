@@ -76,7 +76,7 @@ function something()
  *
  * Usage: actingAsProfessional($pro)->getJson('/api/stripe/payouts')
  */
-function actingAsProfessional(\App\Models\Core\Professional\Professional $professional): \Tests\TestCase
+function actingAsProfessional(\App\Models\Core\Professional\Professional $professional): \Pest\Support\HigherOrderTapProxy
 {
     // Replace both auth middleware with no-ops that inject the professional.
     test()->withoutMiddleware([
