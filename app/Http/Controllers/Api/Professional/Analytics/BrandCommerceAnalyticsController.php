@@ -349,14 +349,16 @@ class BrandCommerceAnalyticsController extends ApiController
             ->selectRaw('COALESCE(SUM(commission_cents), 0) AS approved_cents')
             ->first();
 
-        // paid = subset with a payout assigned
-        $paidRow = DB::table('commerce.orders')
-            ->where('brand_professional_id', $professionalId)
-            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
-            ->whereNotNull('payout_id')
-            ->where('occurred_at', '>=', $filters['from'])
-            ->where('occurred_at', '<=', $endOfDay)
-            ->selectRaw('COALESCE(SUM(commission_cents), 0) AS paid_cents')
+        // paid = subset with a completed payout (Stripe transfer settled, not just assigned).
+        // JOIN to commission_payouts prevents in-flight payouts from inflating the metric.
+        $paidRow = DB::table('commerce.orders as o')
+            ->join('commerce.commission_payouts as cp', 'cp.id', '=', 'o.payout_id')
+            ->where('o.brand_professional_id', $professionalId)
+            ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES)
+            ->where('cp.status', 'completed')
+            ->where('o.occurred_at', '>=', $filters['from'])
+            ->where('o.occurred_at', '<=', $endOfDay)
+            ->selectRaw('COALESCE(SUM(o.commission_cents), 0) AS paid_cents')
             ->first();
 
         // reversed = sum from rollup

@@ -23,6 +23,21 @@ function affiliateStubDbConnection(string $driver = 'pgsql'): void
 }
 
 /**
+ * Returns a Mockery query builder that emits paid_cents=0 for the
+ * commission_paid_cents JOIN query (commerce.orders as o → commission_payouts as cp).
+ */
+function affiliatePaidQueryMock(): \Illuminate\Database\Query\Builder
+{
+    $mock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['where', 'whereIn', 'whereNotIn', 'join', 'selectRaw'] as $m) {
+        $mock->shouldReceive($m)->andReturnSelf();
+    }
+    $mock->shouldReceive('first')->andReturn((object) ['paid_cents' => 0]);
+
+    return $mock;
+}
+
+/**
  * Stubs all sub-queries that aren't under test in these unit tests:
  * payout summary, grace summary, brand breakdown, and per-key order sub-queries.
  * Returns empty/zero shapes so main assertions stay isolated.
@@ -117,6 +132,7 @@ it('returns zero totals and empty timeseries when no commerce.orders data exists
     $rollupMock->shouldReceive('get')->andReturn(collect());
 
     DB::shouldReceive('table')->with('commerce.orders')->andReturn($ordersMock);
+    DB::shouldReceive('table')->with('commerce.orders as o')->andReturn(affiliatePaidQueryMock());
     DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($rollupMock);
 
     affiliateStubExtras();
@@ -152,6 +168,7 @@ it('defaults to last 30 days when no range params are given', function () {
     $rollupMock->shouldReceive('get')->andReturn(collect());
 
     DB::shouldReceive('table')->with('commerce.orders')->andReturn($ordersMock);
+    DB::shouldReceive('table')->with('commerce.orders as o')->andReturn(affiliatePaidQueryMock());
     DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($rollupMock);
 
     affiliateStubExtras();
@@ -190,9 +207,9 @@ it('returns timeseries from commerce.orders rows grouped by day', function () {
         'groupBy', 'groupByRaw', 'orderByDesc', 'orderByRaw'] as $m) {
         $ordersMock->shouldReceive($m)->andReturnSelf();
     }
-    // first() called multiple times: totals, currency, paid_cents
+    // first() called twice: totals, then currency (paid_cents now uses the aliased query)
     $ordersMock->shouldReceive('first')
-        ->andReturn($totalsResult, $currencyResult, (object) ['paid_cents' => 0]);
+        ->andReturn($totalsResult, $currencyResult);
     $ordersMock->shouldReceive('get')->andReturn($timeseriesRows);
 
     $rollupMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
@@ -203,6 +220,7 @@ it('returns timeseries from commerce.orders rows grouped by day', function () {
     $rollupMock->shouldReceive('get')->andReturn(collect());
 
     DB::shouldReceive('table')->with('commerce.orders')->andReturn($ordersMock);
+    DB::shouldReceive('table')->with('commerce.orders as o')->andReturn(affiliatePaidQueryMock());
     DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($rollupMock);
 
     affiliateStubExtras();

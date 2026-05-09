@@ -65,6 +65,8 @@ it('returns correct empty response shape when no data exists', function () {
     // Stub all DB::table calls the controller makes — all return empty results
     $defaultMock = brandEmptyQueryMock();
     DB::shouldReceive('table')->with('commerce.orders')->andReturn($defaultMock);
+    // paid_cents query now JOINs via aliased table — stub it separately
+    DB::shouldReceive('table')->with('commerce.orders as o')->andReturn($defaultMock);
     DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($defaultMock);
     DB::shouldReceive('table')->with('analytics.site_visits')->andReturn($defaultMock);
     DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($defaultMock);
@@ -130,6 +132,8 @@ it('builds affiliate breakdown from brand_affiliate_rollup rows', function () {
     DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($rollupMock);
     DB::shouldReceive('table')->with('core.professionals')->andReturn($identityMock);
     DB::shouldReceive('table')->with('commerce.orders')->andReturn($defaultMock);
+    // paid_cents query now JOINs via aliased table — stub it with empty result
+    DB::shouldReceive('table')->with('commerce.orders as o')->andReturn($defaultMock);
     DB::shouldReceive('table')->with('analytics.site_visits')->andReturn($defaultMock);
     DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($defaultMock);
 
@@ -150,19 +154,16 @@ it('derives commission_summary pending_cents as approved minus paid minus revers
     stubDbConnection();
 
     // Comprehensive commerce.orders mock: handles totals, currency detection, timeseries,
-    // approved_cents, and paid_cents calls. Returns meaningful values only for
-    // commission-related first() calls; everything else returns safe zeros.
+    // and approved_cents calls. paid_cents now uses a separate aliased builder (see below).
     $ordersMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
     foreach (['where', 'whereNotIn', 'whereNull', 'whereNotNull', 'whereBetween',
         'selectRaw', 'groupBy', 'groupByRaw', 'orderBy', 'orderByDesc', 'orderByRaw', 'limit'] as $m) {
         $ordersMock->shouldReceive($m)->andReturnSelf();
     }
-    // first() is called multiple times; use a counter-based approach via andReturnUsing
-    // to return different values per call type. We'll use a sequence:
-    //   1st: totals (orders_count etc.)     → zeros
-    //   2nd: currency detection              → AUD
+    // first() is called three times on the unaliased builder:
+    //   1st: totals (orders_count etc.)         → zeros
+    //   2nd: currency detection                  → AUD
     //   3rd: approved_cents (commission summary) → 10000
-    //   4th: paid_cents (commission summary) → 3000
     $callCount = 0;
     $ordersMock->shouldReceive('first')->andReturnUsing(function () use (&$callCount) {
         $callCount++;
@@ -171,11 +172,17 @@ it('derives commission_summary pending_cents as approved minus paid minus revers
             1 => (object) ['orders_count' => 0, 'gross_cents' => 0, 'refunded_cents' => 0, 'net_cents' => 0],
             2 => (object) ['currency_code' => 'AUD', 'cnt' => 0],
             3 => (object) ['approved_cents' => 10000],
-            4 => (object) ['paid_cents' => 3000],
             default => null,
         };
     });
     $ordersMock->shouldReceive('get')->andReturn(collect()); // timeseries
+
+    // paid_cents is now fetched via JOIN on the aliased builder (commerce.orders as o).
+    $paidMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
+    foreach (['where', 'whereIn', 'whereNotIn', 'join', 'selectRaw'] as $m) {
+        $paidMock->shouldReceive($m)->andReturnSelf();
+    }
+    $paidMock->shouldReceive('first')->andReturn((object) ['paid_cents' => 3000]);
 
     // brand_affiliate_rollup: reversed_cents for commission summary AND rollup for affiliates
     $rollupMock = Mockery::mock(\Illuminate\Database\Query\Builder::class);
@@ -189,6 +196,7 @@ it('derives commission_summary pending_cents as approved minus paid minus revers
     $defaultMock = brandEmptyQueryMock();
 
     DB::shouldReceive('table')->with('commerce.orders')->andReturn($ordersMock);
+    DB::shouldReceive('table')->with('commerce.orders as o')->andReturn($paidMock);
     DB::shouldReceive('table')->with('commerce.brand_affiliate_rollup')->andReturn($rollupMock);
     DB::shouldReceive('table')->with('analytics.site_visits')->andReturn($defaultMock);
     DB::shouldReceive('table')->with('brand.brand_partner_links')->andReturn($defaultMock);

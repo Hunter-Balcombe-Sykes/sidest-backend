@@ -53,14 +53,16 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 ->selectRaw('COALESCE(SUM(reversed_commission_cents), 0) AS reversed_cents')
                 ->first();
 
-            // commission_paid_cents: orders with an assigned payout in window
-            $paidRow = DB::table('commerce.orders')
-                ->where('affiliate_professional_id', $professionalId)
-                ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
-                ->whereNotNull('payout_id')
-                ->where('occurred_at', '>=', $filters['from'])
-                ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
-                ->selectRaw('COALESCE(SUM(commission_cents), 0) AS paid_cents')
+            // commission_paid_cents: orders whose payout has settled (Stripe transfer confirmed).
+            // JOIN to commission_payouts ensures only completed payouts count — not in-flight ones.
+            $paidRow = DB::table('commerce.orders as o')
+                ->join('commerce.commission_payouts as cp', 'cp.id', '=', 'o.payout_id')
+                ->where('o.affiliate_professional_id', $professionalId)
+                ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES)
+                ->where('cp.status', 'completed')
+                ->where('o.occurred_at', '>=', $filters['from'])
+                ->where('o.occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+                ->selectRaw('COALESCE(SUM(o.commission_cents), 0) AS paid_cents')
                 ->first();
 
             $totals = [
