@@ -1034,8 +1034,6 @@ function setupCommerceOrdersTables(): void
         currency_code TEXT NOT NULL DEFAULT \'AUD\',
         line_items TEXT NOT NULL DEFAULT \'[]\',
         shopify_data TEXT NOT NULL DEFAULT \'{}\',
-        stripe_payment_intent_id TEXT NULL,
-        stripe_transfer_id TEXT NULL,
         payout_id TEXT NULL,
         reconciled_at TEXT NULL,
         shopify_updated_at TEXT NOT NULL,
