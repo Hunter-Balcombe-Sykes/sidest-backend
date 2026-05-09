@@ -5,13 +5,14 @@ namespace App\Models\Retail;
 use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 // V2: Core. Tracks payout lifecycle (pending → processing → completed/failed). Links brand, affiliate, Stripe transfer, and funding details.
 class CommissionPayout extends BaseModel
 {
-    use HasUuids;
+    use HasFactory, HasUuids;
 
     protected $table = 'commerce.commission_payouts';
 
@@ -36,6 +37,13 @@ class CommissionPayout extends BaseModel
         'void_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+
+        // Lifecycle columns added 2026-05-10
+        'transfer_completed_at' => 'datetime',
+        'next_retry_at' => 'datetime',
+        'last_retry_at' => 'datetime',
+        'funding_failure_count' => 'integer',
+        'grace_notifications_sent' => 'array',
     ];
 
     public function brandProfessional(): BelongsTo

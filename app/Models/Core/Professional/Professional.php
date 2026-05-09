@@ -11,6 +11,7 @@ use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -28,7 +29,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 // V2: Central identity model. Both brands and affiliates are professionals distinguished by professional_type. Owns site, services, customers, integrations.
 class Professional extends BaseModel
 {
-    use HasUuids, SoftDeletes;
+    use HasFactory, HasUuids, SoftDeletes;
 
     protected $table = 'core.professionals';
 
@@ -80,6 +81,8 @@ class Professional extends BaseModel
         'stripe_connect_status',
         'stripe_customer_id',
         'stripe_payment_method_id',
+        'stripe_payment_method_brand',
+        'stripe_payment_method_last4',
         'stripe_commission_funding_mode',
         'stripe_manual_balance_cents',
         'stripe_manual_balance_currency',
