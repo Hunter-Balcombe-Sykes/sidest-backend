@@ -20,7 +20,10 @@ class StripeConnectService
 
     public function __construct()
     {
-        $this->stripe = new StripeClient(config('services.stripe.secret_key'));
+        $this->stripe = new StripeClient(array_filter([
+            'api_key' => config('services.stripe.secret_key'),
+            'stripe_version' => config('services.stripe.api_version'),
+        ]));
     }
 
     /**

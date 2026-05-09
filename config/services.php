@@ -63,6 +63,7 @@ return [
         'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
         'connect_webhook_secret' => env('STRIPE_CONNECT_WEBHOOK_SECRET'),
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'api_version' => env('STRIPE_API_VERSION'), // null falls back to SDK-pinned default
     ],
 
     'hydrogen' => [

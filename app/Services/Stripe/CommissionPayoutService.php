@@ -36,7 +36,10 @@ class CommissionPayoutService
 
     public function __construct(?StripeClient $stripe = null, ?NotificationPublisher $publisher = null, ?AnalyticsCacheService $analyticsCache = null)
     {
-        $this->stripe = $stripe ?? new StripeClient(config('services.stripe.secret_key'));
+        $this->stripe = $stripe ?? new StripeClient(array_filter([
+            'api_key' => config('services.stripe.secret_key'),
+            'stripe_version' => config('services.stripe.api_version'),
+        ]));
         $this->publisher = $publisher ?? app(NotificationPublisher::class);
         $this->analyticsCache = $analyticsCache ?? app(AnalyticsCacheService::class);
         $this->platformFeePercent = config('partna.store.platform_fee_percent', 3);

@@ -34,7 +34,10 @@ class ReconcileStuckTransferringPayoutsJob implements ShouldQueue
 
     public function handle(): void
     {
-        $stripe = $this->stripe ?? new StripeClient(config('services.stripe.secret_key'));
+        $stripe = $this->stripe ?? new StripeClient(array_filter([
+            'api_key' => config('services.stripe.secret_key'),
+            'stripe_version' => config('services.stripe.api_version'),
+        ]));
         $analytics = app(AnalyticsCacheService::class);
 
         CommissionPayout::query()
