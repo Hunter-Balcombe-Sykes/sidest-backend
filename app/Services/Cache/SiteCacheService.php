@@ -24,6 +24,75 @@ class SiteCacheService
     public function __construct(private readonly CacheLockService $cacheLock) {}
 
     /**
+     * Query the DB view and build the public site payload, then cache and return it.
+     * Returns null (with a short-lived sentinel cached) when the subdomain has no
+     * published site in the view.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function buildPayloadFromDb(string $subdomain, string $key): ?array
+    {
+        $row = PublicSitePayload::query()
+            ->whereRaw('lower(subdomain) = ?', [$subdomain])
+            ->first();
+
+        // View only contains published sites; if not found, treat as 404.
+        if (! $row) {
+            // Negative-cache briefly to reduce DB load from bot scans.
+            Cache::put($key, self::MISS_SENTINEL, now()->addSeconds(30));
+
+            return null;
+        }
+
+        $payload = $row->payload ?? [];
+
+        // The view's COALESCE guarantees services is always a jsonb array,
+        // so a missing key is the only thing we have to defend against.
+        $services = $payload['services'] ?? [];
+
+        $site = $payload['site'] ?? null;
+        if (is_array($site)) {
+            $site = $this->safeHydrateSitePayload(
+                $site,
+                (string) ($row->professional_id ?? ''),
+                (string) ($row->site_id ?? ''),
+                $subdomain
+            );
+        }
+
+        // Must match the controller response shape exactly.
+        $links = is_array($payload['links'] ?? null) ? array_values($payload['links']) : [];
+        $sections = is_array($payload['sections'] ?? null) ? array_values($payload['sections']) : [];
+        $existingBlocks = is_array($payload['blocks'] ?? null) ? array_values($payload['blocks']) : [];
+
+        $data = [
+            'published' => true,
+            'site' => $site,
+            'professional' => $payload['professional'] ?? null,
+            'theme' => $payload['theme'] ?? null,
+            'services' => $services,
+            'links' => $links,
+            'sections' => $sections,
+            'blocks' => $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks),
+            'legal' => $payload['legal'] ?? null,
+            // Preserve the store sub-object from the source payload so that
+            // withStorePayload() below can lift selected_products + commission
+            // settings out of payload.store. Without this, the rebuilt $data
+            // has no 'store' key and withStorePayload falls through to empty
+            // defaults — the front-end would see no featured products even
+            // though the view row contains them.
+            'store' => $payload['store'] ?? null,
+        ];
+        $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
+        $data = $this->safeWithStorePayload($data, (string) ($row->professional_id ?? ''), $subdomain);
+        $data = $this->safeApplyBrandImageFallbacks($data, $subdomain);
+
+        Cache::put($key, $data, $this->jitteredPayloadTtl());
+
+        return $data;
+    }
+
+    /**
      * Returns the public_payload TTL with ±20% jitter applied.
      *
      * Mirrors CacheLockService::writeWithJitter's distribution so payload-cache
@@ -97,13 +166,17 @@ class SiteCacheService
             $fillLock->block(5);
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
             // Another process is (or was) filling the cache.
-            // Return whatever is now in cache, or null if it's still a miss.
             $warm = Cache::get($key);
             if ($warm === self::MISS_SENTINEL) {
                 return null;
             }
+            if (is_array($warm)) {
+                return $warm;
+            }
 
-            return is_array($warm) ? $warm : null;
+            // Cache still empty — compute directly rather than flash-404.
+            // Bounded stampede risk: only requests in the lock-timeout window run this path.
+            return $this->buildPayloadFromDb($subdomain, $key);
         }
 
         try {
@@ -116,64 +189,7 @@ class SiteCacheService
                 return $rechecked;
             }
 
-            $row = PublicSitePayload::query()
-                ->whereRaw('lower(subdomain) = ?', [$subdomain])
-                ->first();
-
-            // View only contains published sites; if not found, treat as 404.
-            if (! $row) {
-                // Negative-cache briefly to reduce DB load from bot scans.
-                Cache::put($key, self::MISS_SENTINEL, now()->addSeconds(30));
-
-                return null;
-            }
-
-            $payload = $row->payload ?? [];
-
-            // The view's COALESCE guarantees services is always a jsonb array,
-            // so a missing key is the only thing we have to defend against.
-            $services = $payload['services'] ?? [];
-
-            $site = $payload['site'] ?? null;
-            if (is_array($site)) {
-                $site = $this->safeHydrateSitePayload(
-                    $site,
-                    (string) ($row->professional_id ?? ''),
-                    (string) ($row->site_id ?? ''),
-                    $subdomain
-                );
-            }
-
-            // Must match the controller response shape exactly.
-            $links = is_array($payload['links'] ?? null) ? array_values($payload['links']) : [];
-            $sections = is_array($payload['sections'] ?? null) ? array_values($payload['sections']) : [];
-            $existingBlocks = is_array($payload['blocks'] ?? null) ? array_values($payload['blocks']) : [];
-
-            $data = [
-                'published' => true,
-                'site' => $site,
-                'professional' => $payload['professional'] ?? null,
-                'theme' => $payload['theme'] ?? null,
-                'services' => $services,
-                'links' => $links,
-                'sections' => $sections,
-                'blocks' => $this->buildCombinedBlocksPayload($links, $sections, $existingBlocks),
-                'legal' => $payload['legal'] ?? null,
-                // Preserve the store sub-object from the source payload so that
-                // withStorePayload() below can lift selected_products + commission
-                // settings out of payload.store. Without this, the rebuilt $data
-                // has no 'store' key and withStorePayload falls through to empty
-                // defaults — the front-end would see no featured products even
-                // though the view row contains them.
-                'store' => $payload['store'] ?? null,
-            ];
-            $data = $this->ensureProfessionalType($data, (string) ($row->professional_id ?? ''));
-            $data = $this->safeWithStorePayload($data, (string) ($row->professional_id ?? ''), $subdomain);
-            $data = $this->safeApplyBrandImageFallbacks($data, $subdomain);
-
-            Cache::put($key, $data, $this->jitteredPayloadTtl());
-
-            return $data;
+            return $this->buildPayloadFromDb($subdomain, $key);
         } finally {
             $fillLock->release();
         }
