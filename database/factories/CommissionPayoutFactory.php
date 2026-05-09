@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\Retail\CommissionPayout;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -17,6 +18,8 @@ class CommissionPayoutFactory extends Factory
     {
         return [
             'id' => (string) Str::uuid(),
+            'brand_professional_id' => (string) Str::uuid(),
+            'affiliate_professional_id' => (string) Str::uuid(),
             'status' => 'pending',
             'gross_commission_cents' => 0,
             'platform_fee_cents' => 0,

@@ -6,6 +6,7 @@ use App\Models\Commerce\Order;
 use App\Models\Commerce\OrderEvent;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\AnalyticsCacheService;
+use App\Services\Stripe\CommissionPayoutRefundService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -308,6 +309,12 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
         ]);
 
         $this->insertEventIfNew($order->id, $refundEventType, $this->shopifyEventId, $metadata, $refundCreatedAt);
+
+        // If the order is linked to a pending/in-flight payout, recompute or void the
+        // payout batch to reflect the refund. Terminal-state payouts are skipped by the service.
+        if (in_array($order->status, ['refunded', 'partially_refunded'], true)) {
+            app(CommissionPayoutRefundService::class)->handleOrderRefund($order->fresh());
+        }
 
         $analyticsCache->invalidateAnalytics($this->professionalId);
         $analyticsCache->invalidateAnalytics($affiliateId);

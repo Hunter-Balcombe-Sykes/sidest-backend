@@ -6,7 +6,9 @@ use App\Models\BaseModel;
 use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
+use Database\Factories\Commerce\OrderFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -19,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 // commerce.order_events (audit log).
 class Order extends BaseModel
 {
-    use HasUuids;
+    use HasFactory, HasUuids;
 
     protected $table = 'commerce.orders';
 
@@ -85,5 +87,10 @@ class Order extends BaseModel
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class, 'order_id');
+    }
+
+    protected static function newFactory(): OrderFactory
+    {
+        return OrderFactory::new();
     }
 }

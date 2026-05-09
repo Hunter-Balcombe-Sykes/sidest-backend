@@ -4,6 +4,7 @@ namespace App\Models\Retail;
 
 use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
+use Database\Factories\CommissionPayoutFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -84,5 +85,10 @@ class CommissionPayout extends BaseModel
     public function isReversed(): bool
     {
         return $this->status === 'reversed';
+    }
+
+    protected static function newFactory(): CommissionPayoutFactory
+    {
+        return CommissionPayoutFactory::new();
     }
 }

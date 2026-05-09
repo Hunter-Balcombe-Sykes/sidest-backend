@@ -4,7 +4,9 @@ namespace App\Models\Retail;
 
 use App\Models\BaseModel;
 use App\Models\Commerce\Order;
+use Database\Factories\Retail\CommissionPayoutItemFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 // Line item linking a payout batch to a commerce.orders row via order_id.
@@ -12,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 // `commission_ledger_entry_id` link target was dropped in the same migration.
 class CommissionPayoutItem extends BaseModel
 {
-    use HasUuids;
+    use HasFactory, HasUuids;
 
     protected $table = 'commerce.commission_payout_items';
 
@@ -41,5 +43,10 @@ class CommissionPayoutItem extends BaseModel
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class, 'order_id');
+    }
+
+    protected static function newFactory(): CommissionPayoutItemFactory
+    {
+        return CommissionPayoutItemFactory::new();
     }
 }
