@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Notifications\Notifiable;
 
 /**
  * @property string $id
@@ -29,7 +30,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 // V2: Central identity model. Both brands and affiliates are professionals distinguished by professional_type. Owns site, services, customers, integrations.
 class Professional extends BaseModel
 {
-    use HasFactory, HasUuids, SoftDeletes;
+    use HasFactory, HasUuids, Notifiable, SoftDeletes;
 
     protected $table = 'core.professionals';
 
@@ -106,6 +107,12 @@ class Professional extends BaseModel
         'deletion_requested_at' => 'datetime',
         'deletion_confirmed_at' => 'datetime',
     ];
+
+    /** Route mail notifications to the professional's primary email address. */
+    public function routeNotificationForMail(): string
+    {
+        return $this->primary_email;
+    }
 
     public function isInfluencer(): bool
     {
