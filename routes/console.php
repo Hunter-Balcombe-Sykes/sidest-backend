@@ -128,6 +128,18 @@ Schedule::job(new \App\Jobs\Streaming\CheckStreamingLiveStatusJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: check-streaming-live-status');
     });
 
+// Daily reconciler: finds `transferring` payouts stuck > 6h and flips them
+// to completed/failed by fetching Transfer.status from Stripe. Backstop for
+// missed `transfer.paid` Connect webhooks (exhausted retries, delivery gaps).
+Schedule::job(new \App\Jobs\Stripe\ReconcileStuckTransferringPayoutsJob)
+    ->dailyAt('07:30')
+    ->timezone('UTC')
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: reconcile-stuck-transferring-payouts');
+    });
+
 // Phase 3 backstop reconciler. Cron expression is env-overridable: set
 // PARTNA_RECONCILER_SCHEDULE='0 * * * *' for the first 60 days post-launch,
 // then revert to the default daily-at-3am value.
