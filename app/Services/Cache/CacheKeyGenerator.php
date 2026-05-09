@@ -217,8 +217,11 @@ class CacheKeyGenerator
     // @multi-site: needs site_id — commerce traffic is tied to a site storefront
     public static function affiliateCommerceAnalytics(string $professionalId, string $from, string $to): string
     {
-        // v2: read path switched to live commerce.orders + brand_affiliate_rollup queries (Phase 3)
-        return "analytics:commerce:affiliate:v2:{$professionalId}:{$from}:{$to}";
+        // v3: version token embedded so bumpAnalyticsVersion() busts every date-window variant atomically.
+        // v2 was unversioned — bumping the token was a silent no-op for windowed keys.
+        $version = \Illuminate\Support\Facades\Cache::get(self::analyticsSummaryVersion($professionalId), 0);
+
+        return "analytics:commerce:affiliate:v3:{$professionalId}:{$version}:{$from}:{$to}";
     }
 
     // Payout + grace state are current-state snapshots, not window-dependent.
@@ -231,8 +234,11 @@ class CacheKeyGenerator
     // @multi-site: needs site_id — commerce traffic is tied to a site storefront
     public static function brandCommerceAnalytics(string $professionalId, string $from, string $to): string
     {
-        // v3: read path switched to live commerce.orders + brand_affiliate_rollup queries (Phase 3)
-        return "analytics:commerce:brand:v3:{$professionalId}:{$from}:{$to}";
+        // v4: version token embedded so bumpAnalyticsVersion() busts every date-window variant atomically.
+        // v3 was unversioned — bumping the token was a silent no-op for windowed keys.
+        $version = \Illuminate\Support\Facades\Cache::get(self::analyticsSummaryVersion($professionalId), 0);
+
+        return "analytics:commerce:brand:v4:{$professionalId}:{$version}:{$from}:{$to}";
     }
 
     public static function brandActiveCatalog(string $brandProfessionalId): string

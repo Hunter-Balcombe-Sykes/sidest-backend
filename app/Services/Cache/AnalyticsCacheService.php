@@ -75,12 +75,22 @@ class AnalyticsCacheService
         });
     }
 
+    /**
+     * Atomically invalidates every windowed cache variant for this professional
+     * by incrementing the version token embedded in all analytics cache keys.
+     * Reference: docs/caching-gold-standard.md §7.5.
+     */
+    public function bumpAnalyticsVersion(string $professionalId): void
+    {
+        Cache::increment(CacheKeyGenerator::analyticsSummaryVersion($professionalId));
+    }
+
     public function invalidateAnalytics(string $professionalId): void
     {
         // Bump the version token so every cached summary for this professional
         // becomes unreachable immediately, regardless of date-range or granularity.
         // The stale entries will expire on their own TTL (≤ 24 h).
-        Cache::increment(CacheKeyGenerator::analyticsSummaryVersion($professionalId));
+        $this->bumpAnalyticsVersion($professionalId);
 
         // Drop every variant of the affiliate projections cache (adaptive default + each
         // window-tier override). Driven from config so that adding/removing a tier in
