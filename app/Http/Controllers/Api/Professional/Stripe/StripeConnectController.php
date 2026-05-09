@@ -107,22 +107,6 @@ class StripeConnectController extends Controller
     }
 
     /**
-     * POST /stripe/payment-method/setup
-     * Creates a SetupIntent so the brand can save a payment method.
-     */
-    public function setupPaymentMethod(Request $request): JsonResponse
-    {
-        $pro = $request->attributes->get('professional');
-        if (($pro->professional_type ?? null) !== 'brand') {
-            return response()->json(['error' => 'Only brand accounts can manage commission payment methods.'], 403);
-        }
-
-        $result = $this->connectService->createSetupIntent($pro);
-
-        return response()->json($result);
-    }
-
-    /**
      * POST /stripe/payment-method/setup-checkout
      * Creates a hosted Stripe Checkout setup session for brand payment method setup.
      */

@@ -292,31 +292,6 @@ class StripeConnectService
     }
 
     /**
-     * Legacy SetupIntent path (kept for compatibility).
-     */
-    public function createSetupIntent(Professional $brand): array
-    {
-        $customerId = $brand->stripe_customer_id;
-
-        if (! $customerId) {
-            $customerId = $this->createCustomer($brand);
-        }
-
-        $setupIntent = $this->stripe->setupIntents->create([
-            'customer' => $customerId,
-            'payment_method_types' => ['card', 'au_becs_debit'],
-            'metadata' => [
-                'sidest_professional_id' => $brand->id,
-            ],
-        ]);
-
-        return [
-            'client_secret' => $setupIntent->client_secret,
-            'setup_intent_id' => $setupIntent->id,
-        ];
-    }
-
-    /**
      * Stripe Checkout hosted setup flow for collecting a reusable payment method.
      */
     public function createPaymentMethodSetupCheckoutSession(
