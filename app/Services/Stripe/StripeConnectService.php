@@ -2,12 +2,14 @@
 
 namespace App\Services\Stripe;
 
+use App\Models\Commerce\WalletMovement;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\WalletCurrencySwitchAudit;
 use App\Models\Retail\BrandCommissionTopup;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
 
@@ -466,9 +468,10 @@ class StripeConnectService
                 ],
             ]],
             'metadata' => [
-                'purpose' => 'brand_commission_topup',
-                'sidest_professional_id' => $brand->id,
-                'currency' => $currency,
+                'purpose'                => 'brand_commission_topup',
+                'professional_id'        => $brand->id,   // read by webhook handler
+                'sidest_professional_id' => $brand->id,   // kept for backward compat
+                'currency'               => $currency,
             ],
         ]);
 
@@ -479,38 +482,155 @@ class StripeConnectService
     }
 
     /**
+     * Credit the brand's wallet from a completed Stripe Checkout session.
+     * Race-safe (lockForUpdate), idempotent (UNIQUE idempotency_key), AUSTRAC-tagged.
+     *
+     * Called from: (1) confirmManualTopUpCheckoutSession (user hits success URL),
+     *              (2) handleCheckoutSessionCompleted webhook handler.
+     * Pass _actor_override on the session object to tag the WalletMovement actor_type
+     * as 'professional' instead of the default 'webhook'.
+     */
+    public function creditWalletFromCheckoutSession(string $professionalId, object $session): void
+    {
+        if (($session->payment_status ?? null) !== 'paid') {
+            Log::warning('stripe.topup.unpaid_session', ['session_id' => $session->id ?? null]);
+
+            return;
+        }
+
+        $amountCents = (int) ($session->amount_total ?? 0);
+        if ($amountCents <= 0) {
+            return;
+        }
+
+        $sessionId = $session->id;
+        $currency = strtoupper($session->currency ?? 'AUD');
+        $stripeEventId = $session->_stripe_event_id ?? null;
+        $actorOverride = $session->_actor_override ?? null;
+
+        DB::transaction(function () use ($professionalId, $session, $sessionId, $amountCents, $currency, $stripeEventId, $actorOverride) {
+            $brand = Professional::query()
+                ->where('id', $professionalId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $brand) {
+                Log::warning('stripe.topup.brand_not_found', ['professional_id' => $professionalId]);
+
+                return;
+            }
+
+            // Currency mismatch → auto-refund + alert (do not credit the wallet).
+            $walletCurrency = strtoupper($brand->stripe_manual_balance_currency ?? 'AUD');
+            if ($walletCurrency !== $currency) {
+                Log::error('stripe.topup.currency_mismatch', [
+                    'professional_id'  => $professionalId,
+                    'wallet_currency'  => $walletCurrency,
+                    'session_currency' => $currency,
+                    'amount_cents'     => $amountCents,
+                ]);
+
+                if (! empty($session->payment_intent)) {
+                    try {
+                        $this->stripe->refunds->create(
+                            [
+                                'payment_intent' => is_string($session->payment_intent)
+                                    ? $session->payment_intent
+                                    : ($session->payment_intent->id ?? null),
+                                'reason'   => 'requested_by_customer',
+                                'metadata' => [
+                                    'sidest_reason'   => 'currency_mismatch',
+                                    'professional_id' => $professionalId,
+                                ],
+                            ],
+                            ['idempotency_key' => 'currency_mismatch_refund:'.$sessionId],
+                        );
+                    } catch (ApiErrorException $e) {
+                        Log::critical('stripe.topup.currency_mismatch_refund_failed', [
+                            'session_id' => $sessionId,
+                            'error'      => $e->getMessage(),
+                        ]);
+                        report($e);
+                    }
+                }
+
+                return;
+            }
+
+            $idempotencyKey = 'topup:'.$sessionId;
+            $actor = $actorOverride ?? [
+                'type' => 'webhook',
+                'id'   => $stripeEventId ?? ('checkout.session.completed:'.$sessionId),
+            ];
+
+            // UNIQUE(idempotency_key) provides idempotency — a duplicate delivery throws
+            // QueryException which we catch and swallow; the balance is already correct.
+            // WalletMovement uses $guarded = ['*'] so we must use forceFill() on an instance.
+            try {
+                (new WalletMovement)->forceFill([
+                    'professional_id'    => $brand->id,
+                    'direction'          => 'credit',
+                    'amount_cents'       => $amountCents,
+                    'currency_code'      => $currency,
+                    'reason'             => 'top_up',
+                    'actor_type'         => $actor['type'],
+                    'actor_id'           => $actor['id'],
+                    'related_session_id' => $sessionId,
+                    'idempotency_key'    => $idempotencyKey,
+                    'metadata'           => [
+                        'session_id'             => $sessionId,
+                        'session_payment_intent' => is_string($session->payment_intent ?? null)
+                            ? $session->payment_intent
+                            : null,
+                    ],
+                ])->save();
+            } catch (\Illuminate\Database\QueryException $e) {
+                // Unique constraint violation — duplicate delivery, already credited.
+                if (str_contains($e->getMessage(), 'idempotency_key') || str_contains($e->getMessage(), 'UNIQUE')) {
+                    Log::info('stripe.topup.duplicate_session', ['session_id' => $sessionId]);
+
+                    return;
+                }
+
+                throw $e;
+            }
+
+            // Apply to balance atomically; row is locked above via lockForUpdate.
+            Professional::where('id', $brand->id)
+                ->update(['stripe_manual_balance_currency' => $currency]);
+            Professional::where('id', $brand->id)
+                ->increment('stripe_manual_balance_cents', $amountCents);
+
+            Log::info('stripe.topup.credited', [
+                'professional_id' => $brand->id,
+                'session_id'      => $sessionId,
+                'amount_cents'    => $amountCents,
+            ]);
+        });
+    }
+
+    /**
      * Confirm a completed top-up Checkout session and credit the brand balance.
-     * Idempotent by checkout session id.
+     * Delegates to creditWalletFromCheckoutSession — idempotent via wallet_movements UNIQUE key.
      */
     public function confirmManualTopUpCheckoutSession(Professional $brand, string $sessionId): array
     {
-        $existing = BrandCommissionTopup::query()
-            ->where('stripe_checkout_session_id', $sessionId)
-            ->first();
-
-        if ($existing) {
-            $brand->refresh();
-
-            return [
-                'status' => 'already_applied',
-                'balance_cents' => (int) ($brand->stripe_manual_balance_cents ?? 0),
-                'currency_code' => strtoupper((string) ($brand->stripe_manual_balance_currency ?: 'AUD')),
-                'topup_id' => $existing->id,
-            ];
-        }
-
-        $session = $this->stripe->checkout->sessions->retrieve($sessionId);
+        $session = $this->stripe->checkout->sessions->retrieve($sessionId, ['expand' => ['payment_intent']]);
 
         if (($session->mode ?? null) !== 'payment') {
-            throw new \RuntimeException('Checkout session is not a payment session.');
+            throw new \RuntimeException('Checkout session is not a top-up payment session.');
         }
 
         if (($session->payment_status ?? null) !== 'paid') {
             throw new \RuntimeException('Top-up payment is not completed yet.');
         }
 
-        $metadataProId = $session->metadata?->sidest_professional_id ?? null;
-        if ($metadataProId && $metadataProId !== $brand->id) {
+        // Check ownership via both metadata keys for backward compat with sessions
+        // created before the professional_id key was added.
+        $metaProId = $session->metadata?->professional_id
+            ?? $session->metadata?->sidest_professional_id
+            ?? null;
+        if ($metaProId && $metaProId !== $brand->id) {
             throw new \RuntimeException('Top-up session does not belong to this account.');
         }
 
@@ -519,84 +639,22 @@ class StripeConnectService
             throw new \RuntimeException('Invalid top-up session purpose.');
         }
 
-        $amountCents = (int) ($session->amount_total ?? 0);
-        if ($amountCents <= 0) {
-            throw new \RuntimeException('Top-up amount is invalid.');
-        }
+        // Tag this code path so the WalletMovement records actor_type='professional'
+        // (user hitting success URL) rather than 'webhook' (Stripe firing the event).
+        $session->_actor_override = ['type' => 'professional', 'id' => (string) $brand->id];
 
-        $currency = strtoupper((string) ($session->currency ?: ($brand->stripe_manual_balance_currency ?: 'AUD')));
-        $paymentIntentId = is_string($session->payment_intent)
-            ? $session->payment_intent
-            : ($session->payment_intent->id ?? null);
+        // Idempotent — if the webhook already fired, the UNIQUE idempotency_key
+        // constraint absorbs the duplicate and the balance is unchanged.
+        $this->creditWalletFromCheckoutSession((string) $brand->id, $session);
 
-        return DB::transaction(function () use ($brand, $sessionId, $paymentIntentId, $amountCents, $currency) {
-            $lockedBrand = Professional::query()
-                ->whereKey($brand->id)
-                ->lockForUpdate()
-                ->firstOrFail();
+        $brand->refresh();
 
-            $existingTopup = BrandCommissionTopup::query()
-                ->where('stripe_checkout_session_id', $sessionId)
-                ->first();
-
-            if ($existingTopup) {
-                return [
-                    'status' => 'already_applied',
-                    'balance_cents' => (int) ($lockedBrand->stripe_manual_balance_cents ?? 0),
-                    'currency_code' => strtoupper((string) ($lockedBrand->stripe_manual_balance_currency ?: 'AUD')),
-                    'topup_id' => $existingTopup->id,
-                ];
-            }
-
-            $currentBalance = (int) ($lockedBrand->stripe_manual_balance_cents ?? 0);
-            $currentCurrency = strtoupper((string) ($lockedBrand->stripe_manual_balance_currency ?: $currency));
-
-            if ($currentCurrency !== $currency && $currentBalance > 0) {
-                throw new \RuntimeException(
-                    sprintf(
-                        'Top-up currency %s does not match existing wallet currency %s.',
-                        $currency,
-                        $currentCurrency,
-                    )
-                );
-            }
-
-            $currencyChanged = $currentCurrency !== $currency;
-
-            if ($currencyChanged) {
-                $lockedBrand->stripe_manual_balance_currency = $currency;
-            }
-
-            $lockedBrand->stripe_manual_balance_cents = $currentBalance + $amountCents;
-            $lockedBrand->save();
-
-            $topup = BrandCommissionTopup::create([
-                'brand_professional_id' => $lockedBrand->id,
-                'stripe_checkout_session_id' => $sessionId,
-                'stripe_payment_intent_id' => $paymentIntentId,
-                'amount_cents' => $amountCents,
-                'currency_code' => $currency,
-                'status' => 'completed',
-            ]);
-
-            if ($currencyChanged) {
-                WalletCurrencySwitchAudit::create([
-                    'professional_id' => $lockedBrand->id,
-                    'previous_currency' => $currentCurrency,
-                    'new_currency' => $currency,
-                    'actor_type' => WalletCurrencySwitchAudit::ACTOR_TYPE_SYSTEM,
-                    'topup_id' => $topup->id,
-                    'metadata' => ['trigger' => 'top_up_empty_balance'],
-                ]);
-            }
-
-            return [
-                'status' => 'applied',
-                'balance_cents' => (int) $lockedBrand->stripe_manual_balance_cents,
-                'currency_code' => strtoupper((string) $lockedBrand->stripe_manual_balance_currency),
-                'topup_id' => $topup->id,
-            ];
-        });
+        return [
+            'session_id'    => $sessionId,
+            'amount_cents'  => (int) ($session->amount_total ?? 0),
+            'balance_cents' => (int) ($brand->stripe_manual_balance_cents ?? 0),
+            'status'        => 'credited',
+        ];
     }
 
     private function appendCheckoutSessionParam(string $url, string $param): string
