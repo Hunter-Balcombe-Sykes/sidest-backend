@@ -51,6 +51,52 @@ function something()
 
 /*
 |--------------------------------------------------------------------------
+| Auth Helpers
+|--------------------------------------------------------------------------
+|
+| The app uses Supabase JWT — Auth::user() is always null. The real
+| middleware chain is:
+|   supabase.jwt  → verifies Bearer token, sets supabase_uid attribute
+|   current.pro  → loads Professional by supabase_uid, sets professional attribute
+|
+| For HTTP-layer tests (using $this->getJson / postJson), actingAsProfessional()
+| bypasses both middleware by injecting the professional directly via a fake
+| middleware stub. This mirrors how tenantRequestAs() works for direct-controller
+| tests, but at the HTTP layer.
+|
+*/
+
+/**
+ * Authenticate the test HTTP client as a given Professional.
+ *
+ * Stubs out VerifySupabaseJwt and LoadCurrentProfessional so the
+ * real JWT verification never runs. The professional is injected into
+ * request attributes before the controller sees the request — exactly
+ * what the two middleware would have done in production.
+ *
+ * Usage: actingAsProfessional($pro)->getJson('/api/stripe/payouts')
+ */
+function actingAsProfessional(\App\Models\Core\Professional\Professional $professional): \Tests\TestCase
+{
+    // Replace both auth middleware with no-ops that inject the professional.
+    test()->withoutMiddleware([
+        \App\Http\Middleware\Auth\VerifySupabaseJwt::class,
+        \App\Http\Middleware\Context\LoadCurrentProfessional::class,
+    ]);
+
+    // Bind a request macro that fires before every route action: injects the
+    // professional into request attributes so controllers/policies can read it
+    // via $request->attributes->get('professional').
+    app()->resolving(\Illuminate\Http\Request::class, function ($request) use ($professional) {
+        $request->attributes->set('professional', $professional);
+        $request->attributes->set('supabase_uid', $professional->auth_user_id ?? (string) \Illuminate\Support\Str::uuid());
+    });
+
+    return test();
+}
+
+/*
+|--------------------------------------------------------------------------
 | Schema Bootstrap Helpers
 |--------------------------------------------------------------------------
 |
@@ -1159,4 +1205,100 @@ function setupSubdomainAliasesTable(): void
         subdomain TEXT NULL,
         created_at TEXT NULL
     )');
+}
+
+/*
+|--------------------------------------------------------------------------
+| Stripe Test Helpers
+|--------------------------------------------------------------------------
+|
+| Helpers for testing Stripe-integrated code paths. The Stripe service
+| classes self-instantiate StripeClient (not via the container), so
+| mockStripeClient() returns a Mockery mock you pass to the service
+| constructor directly. stripeWebhookEvent() / postStripeWebhook() handle
+| the webhook layer.
+|
+| Note: buildTestStripeSignature() is an alias for the existing
+| signStripeBody() — provided so tests that import from the task plan
+| can call either name without confusion.
+|
+*/
+
+/**
+ * Build a Mockery mock of StripeClient with getService() stubbed so that
+ * property-access like $stripe->paymentIntents works correctly.
+ *
+ * Pass per-service sub-mocks via $services. Keys: 'paymentIntents',
+ * 'transfers', 'refunds', 'charges', 'accounts' etc.
+ *
+ * Usage:
+ *   $stripe = mockStripeClient(['paymentIntents' => $piMock]);
+ *   $service = new CommissionPayoutService($stripe);
+ *
+ * @param  array<string, object>  $services
+ */
+function mockStripeClient(array $services = []): \Mockery\MockInterface
+{
+    $mock = Mockery::mock(\Stripe\StripeClient::class);
+
+    foreach ($services as $name => $stub) {
+        $mock->shouldReceive('getService')->with($name)->andReturn($stub);
+    }
+
+    // Default: any un-stubbed service returns a bare mock so tests that
+    // don't care about a specific sub-service don't explode on access.
+    $mock->shouldReceive('getService')->andReturn(Mockery::mock())->byDefault();
+
+    return $mock;
+}
+
+/**
+ * Build a minimal Stripe event array suitable for posting to a webhook endpoint.
+ *
+ * @param  array<string, mixed>  $object  The event data.object payload.
+ * @return array<string, mixed>
+ */
+function stripeWebhookEvent(string $type, array $object): array
+{
+    return [
+        'id'      => 'evt_'.\Illuminate\Support\Str::random(24),
+        'object'  => 'event',
+        'type'    => $type,
+        'data'    => ['object' => $object],
+        'account' => $object['id'] ?? 'acct_test',
+        'created' => now()->timestamp,
+        'livemode' => false,
+        'api_version' => '2024-04-10',
+    ];
+}
+
+/**
+ * Post a Stripe Connect webhook event to /api/webhooks/stripe-connect
+ * with a valid Stripe-Signature header computed from the connect webhook secret.
+ *
+ * The connect secret must be set before calling this:
+ *   Config::set('services.stripe.connect_webhook_secret', 'whsec_test')
+ *
+ * @param  array<string, mixed>  $event
+ */
+function postStripeWebhook(array $event): \Illuminate\Testing\TestResponse
+{
+    $body = json_encode($event);
+    $secret = (string) config('services.stripe.connect_webhook_secret', 'whsec_test');
+    $sig = buildTestStripeSignature($body, $secret);
+
+    return test()->call('POST', '/api/webhooks/stripe-connect', [], [], [], [
+        'CONTENT_TYPE'       => 'application/json',
+        'HTTP_STRIPE_SIGNATURE' => $sig,
+    ], $body);
+}
+
+/**
+ * Build a Stripe-Signature header value for the given raw body and secret.
+ * Alias for signStripeBody() — provided for naming consistency with the
+ * task plan; prefer signStripeBody() in existing tests.
+ */
+function buildTestStripeSignature(string $body, string $secret, ?int $timestamp = null): string
+{
+    return signStripeBody($body, $secret, $timestamp);
 }
