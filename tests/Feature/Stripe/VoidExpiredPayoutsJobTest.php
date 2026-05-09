@@ -7,6 +7,7 @@ use App\Models\Retail\CommissionPayout;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 
 // Tests for the nightly cron that voids commission payouts whose 60-day grace
 // window has expired without the affiliate connecting Stripe Connect.
@@ -22,6 +23,10 @@ afterEach(function () {
 });
 
 beforeEach(function () {
+    // Fake the notification system globally — fireGraceWarnings() calls ->notify() on
+    // every run, including tests that don't assert on notifications.
+    Notification::fake();
+
     setupProfessionalsTable();
     setupCommerceOrdersTables();
 
@@ -71,6 +76,26 @@ beforeEach(function () {
         amount_cents INTEGER,
         created_at TEXT
     )');
+
+    // Add lifecycle columns from A1.1 migration (ALTER is idempotent via try/catch).
+    foreach ([
+        "grace_notifications_sent TEXT NOT NULL DEFAULT '[]'",
+        'transfer_completed_at TEXT',
+        'funding_failure_count INTEGER NOT NULL DEFAULT 0',
+        'failure_category TEXT',
+    ] as $col) {
+        try {
+            $conn->statement("ALTER TABLE commerce.commission_payouts ADD COLUMN {$col}");
+        } catch (\Throwable) {
+        }
+    }
+
+    foreach (['primary_email TEXT'] as $col) {
+        try {
+            $conn->statement("ALTER TABLE core.professionals ADD COLUMN {$col}");
+        } catch (\Throwable) {
+        }
+    }
 });
 
 function expiredPayout_seedAffiliate(string $id, string $stripeStatus = 'not_connected'): void
@@ -84,6 +109,7 @@ function expiredPayout_seedAffiliate(string $id, string $stripeStatus = 'not_con
         'professional_type' => 'influencer',
         'status' => 'active',
         'stripe_connect_status' => $stripeStatus,
+        'primary_email' => "affiliate-{$id}@test.test",
         'created_at' => $now,
         'updated_at' => $now,
     ]);
@@ -369,4 +395,56 @@ it('publishes notification only once when the same expired payout is processed o
     $job = expiredPayout_makeJob();
     $job->handle($service);
     $job->handle($service);
+});
+
+// ============================================================
+// #VEP-8 — Grace warning notifications (T-30 / T-7 / T-1)
+// ============================================================
+
+it('fires a T-30 grace warning notification to an affiliate whose void_at is 30 days away', function () {
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+
+    // void_at exactly 30 days from now falls inside the startOfDay..endOfDay window.
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString());
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+
+    Notification::assertSentTo(
+        \App\Models\Core\Professional\Professional::find('aff-1'),
+        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class,
+        fn ($n) => $n->daysRemaining === 30
+    );
+
+    // grace_notifications_sent should now contain 'T-30'
+    $payout = \App\Models\Retail\CommissionPayout::find('p1');
+    expect($payout->grace_notifications_sent)->toContain('T-30');
+});
+
+it('does not re-fire a grace warning if T-30 already recorded in grace_notifications_sent', function () {
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString(), overrides: [
+        'grace_notifications_sent' => '["T-30"]',
+    ]);
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+
+    Notification::assertNotSentTo(
+        \App\Models\Core\Professional\Professional::find('aff-1'),
+        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class
+    );
+});
+
+it('does not send a grace warning when affiliate already has active Stripe Connect', function () {
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'active'); // already connected
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString());
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+
+    Notification::assertNothingSent();
 });

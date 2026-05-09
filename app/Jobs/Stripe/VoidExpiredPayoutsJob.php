@@ -2,6 +2,8 @@
 
 namespace App\Jobs\Stripe;
 
+use App\Models\Retail\CommissionPayout;
+use App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification;
 use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -41,6 +43,8 @@ class VoidExpiredPayoutsJob implements ShouldQueue
 
     public function handle(CommissionVoidService $voidService): void
     {
+        $this->fireGraceWarnings();
+
         $stats = $voidService->processExpiredPayouts();
 
         // Always emit a heartbeat — silence here would mask a stuck scheduler.
@@ -50,6 +54,37 @@ class VoidExpiredPayoutsJob implements ShouldQueue
             Log::notice('Expired payout void processing complete', $stats);
         } else {
             Log::info('Expired payout void processing complete', $stats);
+        }
+    }
+
+    /**
+     * Send T-30/T-7/T-1 grace warnings to affiliates who haven't connected Stripe.
+     * Tags are written to grace_notifications_sent JSONB to prevent duplicate sends.
+     */
+    private function fireGraceWarnings(): void
+    {
+        foreach ([30, 7, 1] as $daysOut) {
+            $tag = 'T-' . $daysOut;
+            $windowStart = now()->addDays($daysOut)->startOfDay();
+            $windowEnd = now()->addDays($daysOut)->endOfDay();
+
+            $candidates = CommissionPayout::query()
+                ->whereIn('status', ['pending', 'pending_funds'])
+                ->whereBetween('void_at', [$windowStart, $windowEnd])
+                ->whereDoesntHave('affiliateProfessional', fn ($q) =>
+                    $q->where('stripe_connect_status', 'active'))
+                ->get()
+                ->filter(fn ($p) => ! in_array($tag, $p->grace_notifications_sent ?? [], true));
+
+            foreach ($candidates as $payout) {
+                $payout->affiliateProfessional?->notify(
+                    new AffiliatePayoutGraceWarningNotification($payout, $daysOut)
+                );
+
+                $sent = $payout->grace_notifications_sent ?? [];
+                $sent[] = $tag;
+                $payout->forceFill(['grace_notifications_sent' => array_values(array_unique($sent))])->save();
+            }
         }
     }
 
