@@ -101,6 +101,23 @@ it('handle() calls processPayoutBatch for a mid-flight collecting payout', funct
     $job->handle($service);
 });
 
+it('handle() returns cleanly when processPayoutBatch returns null (transfer in-flight)', function () {
+    // null return means the transfer is parked at 'transferring'; the webhook will complete it.
+    // The job must not throw, must not retry, and must not alter payout state.
+    execJob_seedPayout('p1', ['status' => 'transferring']);
+
+    $service = Mockery::mock(CommissionPayoutService::class);
+    $service->shouldReceive('processPayoutBatch')
+        ->once()
+        ->andReturn(null);
+
+    $job = new ExecuteCommissionPayoutJob('p1');
+    $job->handle($service); // must not throw
+
+    // Payout status unchanged — webhook handles the final transition.
+    expect(CommissionPayout::find('p1')->status)->toBe('transferring');
+});
+
 // ─── failed() ────────────────────────────────────────────────────────────────
 
 it('failed() transitions a collecting payout to failed with job_exhausted code and clears wallet_debit_cents', function () {

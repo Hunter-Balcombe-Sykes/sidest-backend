@@ -56,8 +56,19 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
         }
 
         $start = microtime(true);
-        $payoutService->processPayoutBatch($payout);
+        $result = $payoutService->processPayoutBatch($payout);
         $durationMs = (int) round((microtime(true) - $start) * 1000);
+
+        if ($result === null) {
+            // Transfer is in flight — the transfer.paid webhook or ReconcileStuckTransferringPayoutsJob
+            // will flip the payout to completed. Return cleanly so Horizon does not retry.
+            Log::info('ExecuteCommissionPayoutJob parked at transferring — awaiting webhook', [
+                'payout_id' => $this->payoutId,
+                'duration_ms' => $durationMs,
+            ]);
+
+            return;
+        }
 
         // Alert threshold: 30s = 25% of job timeout. Nightwatch captures warning+
         // level logs — configure an alert on this message to catch batches trending
