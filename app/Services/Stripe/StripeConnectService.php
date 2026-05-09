@@ -7,7 +7,9 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\WalletCurrencySwitchAudit;
 use App\Models\Retail\BrandCommissionTopup;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiErrorException;
@@ -18,12 +20,51 @@ class StripeConnectService
 {
     private StripeClient $stripe;
 
-    public function __construct()
+    /**
+     * Cache TTL (seconds) for the syncAccountStatus payload. Short on purpose:
+     * Stripe Connect status changes are eventual via webhooks, so a 60s window
+     * bounds how long a non-onboarding caller can see stale charges_enabled /
+     * payouts_enabled data when the account.updated webhook is in transit.
+     */
+    private const STATUS_CACHE_TTL = 60;
+
+    public function __construct(private readonly CacheLockService $cacheLock)
     {
         $this->stripe = new StripeClient(array_filter([
             'api_key' => config('services.stripe.secret_key'),
             'stripe_version' => config('services.stripe.api_version'),
         ]));
+    }
+
+    /**
+     * Cache key for a connected account's status payload. Keyed on the Stripe
+     * account ID (not the professional ID) so the webhook bust path can
+     * forget the cache without a DB lookup — the webhook already carries the
+     * account ID in event->account.
+     *
+     * Static so the webhook handler can bust the cache without instantiating
+     * the service (which would force-load the Stripe SDK with a real secret).
+     */
+    public static function statusCacheKey(string $accountId): string
+    {
+        return 'stripe:connect:status:'.$accountId;
+    }
+
+    /**
+     * Evict the cached account status. MUST clear the SWR ":stale" copy too —
+     * forgetting only the primary key would leave the stale-while-revalidate
+     * last-good copy live for up to 10×TTL, defeating the bust entirely.
+     *
+     * Called from:
+     *   - StripeConnectController@status when the request includes ?fresh=1
+     *     (post-onboarding redirect; user must see live state, not cached).
+     *   - StripeConnectWebhookController on every account.updated event.
+     */
+    public static function forgetStatusCache(string $accountId): void
+    {
+        $key = self::statusCacheKey($accountId);
+        Cache::forget($key);
+        Cache::forget($key.':stale');
     }
 
     /**
@@ -112,10 +153,16 @@ class StripeConnectService
             }
         }
 
+        // Inject ?fresh=1 so the dashboard's first /stripe/status call after
+        // Stripe redirects the user back skips the cache. Without this the
+        // post-onboarding screen would race the account.updated webhook and
+        // typically render the pre-onboarding state for several seconds.
+        $returnUrlWithBypass = $returnUrl.(str_contains($returnUrl, '?') ? '&' : '?').'fresh=1';
+
         $link = $this->stripe->accountLinks->create([
             'account' => $accountId,
             'refresh_url' => $refreshUrl,
-            'return_url' => $returnUrl,
+            'return_url' => $returnUrlWithBypass,
             'type' => 'account_onboarding',
         ]);
 
@@ -152,6 +199,24 @@ class StripeConnectService
             ];
         }
 
+        // Cache wraps the Stripe round-trip only — the early-return branches
+        // above are already free. Bust paths: ?fresh=1 on the controller
+        // (post-onboarding redirect) and account.updated webhook.
+        return $this->cacheLock->rememberLocked(
+            self::statusCacheKey($accountId),
+            self::STATUS_CACHE_TTL,
+            fn () => $this->fetchAndSyncAccountStatus($professional, $accountId),
+        );
+    }
+
+    /**
+     * Inner closure for syncAccountStatus — single Stripe call + DB sync, then
+     * the response shape consumed by /api/stripe/status.
+     *
+     * @return array{status: string, charges_enabled: bool, payouts_enabled: bool, details_submitted: bool, requirements: array<int, string>}
+     */
+    private function fetchAndSyncAccountStatus(Professional $professional, string $accountId): array
+    {
         $account = $this->stripe->accounts->retrieve($accountId);
 
         $status = self::determineAccountStatus($account);
@@ -229,31 +294,6 @@ class StripeConnectService
         ]);
 
         return $customer->id;
-    }
-
-    /**
-     * Legacy SetupIntent path (kept for compatibility).
-     */
-    public function createSetupIntent(Professional $brand): array
-    {
-        $customerId = $brand->stripe_customer_id;
-
-        if (! $customerId) {
-            $customerId = $this->createCustomer($brand);
-        }
-
-        $setupIntent = $this->stripe->setupIntents->create([
-            'customer' => $customerId,
-            'payment_method_types' => ['card', 'au_becs_debit'],
-            'metadata' => [
-                'sidest_professional_id' => $brand->id,
-            ],
-        ]);
-
-        return [
-            'client_secret' => $setupIntent->client_secret,
-            'setup_intent_id' => $setupIntent->id,
-        ];
     }
 
     /**

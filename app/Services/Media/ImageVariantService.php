@@ -274,41 +274,7 @@ class ImageVariantService
 
     private function diskName(): string
     {
-        $configured = (string) config('partna.media_disk', 'media');
-
-        // $_ENV/$_SERVER are intentional here — Laravel Cloud caches config at deploy time
-        // but injects platform env vars directly into the process environment at runtime,
-        // so env()/config() won't see them. Direct superglobal access bypasses that cache.
-        $explicit = $_ENV['PARTNA_MEDIA_DISK'] ?? $_SERVER['PARTNA_MEDIA_DISK']
-            ?? $_ENV['SIDEST_MEDIA_DISK'] ?? $_SERVER['SIDEST_MEDIA_DISK'] ?? null;
-        if (is_string($explicit) && trim($explicit) !== '') {
-            return $configured;
-        }
-
-        // Laravel Cloud injects disks dynamically and may set a non-"media"
-        // filesystems.default disk. If media disk is only a fallback value,
-        // prefer the Cloud default to avoid missing/empty media credentials.
-        if ($configured === 'media') {
-            $default = (string) config('filesystems.default', 'local');
-            $defaultConfig = config("filesystems.disks.{$default}");
-
-            if (
-                $default !== '' &&
-                $default !== 'local' &&
-                $default !== 'media' &&
-                is_array($defaultConfig) &&
-                (($defaultConfig['driver'] ?? null) === 's3')
-            ) {
-                Log::warning('PARTNA_MEDIA_DISK not set (legacy fallback: SIDEST_MEDIA_DISK); using filesystems.default disk for media operations.', [
-                    'configured_media_disk' => $configured,
-                    'fallback_disk' => $default,
-                ]);
-
-                return $default;
-            }
-        }
-
-        return $configured;
+        return MediaDiskResolver::resolve();
     }
 
     private function disk(): \Illuminate\Contracts\Filesystem\Filesystem

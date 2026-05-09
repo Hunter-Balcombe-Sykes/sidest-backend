@@ -144,7 +144,7 @@ it('createConnectAccount passes deterministic idempotency_key to Stripe', functi
     $stripeClient = Mockery::mock(StripeClient::class);
     $stripeClient->shouldReceive('getService')->with('accounts')->andReturn($accountsSpy);
 
-    $service = new \App\Services\Stripe\StripeConnectService;
+    $service = app(\App\Services\Stripe\StripeConnectService::class);
     $reflProp = (new ReflectionClass($service))->getProperty('stripe');
     $reflProp->setAccessible(true);
     $reflProp->setValue($service, $stripeClient);
@@ -175,7 +175,7 @@ it('createCustomer (Connect/brand) passes deterministic idempotency_key to Strip
     $stripeClient = Mockery::mock(StripeClient::class);
     $stripeClient->shouldReceive('getService')->with('customers')->andReturn($customersSpy);
 
-    $service = new \App\Services\Stripe\StripeConnectService;
+    $service = app(\App\Services\Stripe\StripeConnectService::class);
     $reflProp = (new ReflectionClass($service))->getProperty('stripe');
     $reflProp->setAccessible(true);
     $reflProp->setValue($service, $stripeClient);

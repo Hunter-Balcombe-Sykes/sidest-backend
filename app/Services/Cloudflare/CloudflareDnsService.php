@@ -144,46 +144,8 @@ class CloudflareDnsService
     }
 
     /**
-     * Ensure a TXT record exists.
-     * Used for Shopify domain verification challenges.
-     * Returns the Cloudflare record ID, or null on error / dev mode.
-     */
-    public function ensureTxt(string $name, string $content): ?string
-    {
-        if (! $this->hasCredentials()) {
-            return null;
-        }
-
-        $existing = $this->findRecord('TXT', $name);
-        if ($existing !== null) {
-            return $existing['id'];
-        }
-
-        $response = Http::withToken($this->apiToken)
-            ->post($this->zonesUrl('/dns_records'), [
-                'type' => 'TXT',
-                'name' => $name,
-                'content' => $content,
-                'ttl' => 1,
-            ]);
-
-        if (! $response->successful()) {
-            Log::error('CloudflareDnsService: failed to create TXT record.', [
-                'name' => $name,
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
-
-            return null;
-        }
-
-        return (string) $response->json('result.id', '');
-    }
-
-    /**
-     * Create or update a TXT record. Unlike ensureTxt (which skips if it exists),
-     * this patches the content if the record exists with a different value — needed
-     * for Shopify verification tokens that rotate on each domain-connect attempt.
+     * Create or update a TXT record, patching its content if it already exists with a different value.
+     * Used for Shopify Hydrogen storefront verification records on the partna.au zone.
      */
     public function upsertTxt(string $name, string $content): ?string
     {

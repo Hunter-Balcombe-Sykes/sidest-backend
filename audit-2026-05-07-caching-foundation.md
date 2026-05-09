@@ -1,6 +1,6 @@
 # Caching Foundation Audit — 2026-05-07
 
-**Branch:** development-v2
+**Branch:** development
 **Lens:** Caching strategy and stampede protection for multi-tenant Laravel SaaS — verify the implementation against the 2026 gold standard, surface code-level gaps, additive improvements, and items to explicitly defer.
 **Pipeline:** scan-tier draft by `deepseek-v4-pro`, adjudicated by `claude-sonnet-4-6` (final landed 21:21) + research synthesis from web sources
 
@@ -94,7 +94,7 @@
 
 ## P2 — Should fix
 
-- [ ] **#CACHE-3** · P2 — `invalidateSite` cascade-busts all connected affiliate payloads synchronously, creating cross-tenant thundering herd on brand edits
+- [x] **#CACHE-3** · P2 — `invalidateSite` cascade-busts all connected affiliate payloads synchronously, creating cross-tenant thundering herd on brand edits
     - **Where:** app/Services/Cache/SiteCacheService.php:828-846 (the connected-affiliate enumeration block inside `invalidateSite`)
     - **Affects:** Every affiliate whose site is linked to a brand via `BrandPartnerLink`. A single brand site save (publish toggle, settings change, block edit) simultaneously cold-misses all affiliate public payload caches.
     - **Effort:** S (~0.5–1h)
@@ -123,7 +123,7 @@
         Cache::deleteMultiple(array_values(array_unique($keys)));
         ```
 
-- [ ] **#CACHE-4** · P2 — `getPublicSitePayload` returns null on lock timeout during active rebuild, producing flash 404s under load
+- [x] **#CACHE-4** · P2 — `getPublicSitePayload` returns null on lock timeout during active rebuild, producing flash 404s under load
     - **Where:** app/Services/Cache/SiteCacheService.php:108-118 (the `LockTimeoutException` catch block)
     - **Affects:** Public site visitors whose request arrives while another worker is rebuilding the payload and the rebuild takes longer than 5 seconds (slow DB, complex enrichment). They get a null/404 instead of the site.
     - **Effort:** S (~0.5–1h) — folds into CACHE-2 if you migrate to `rememberLocked`
@@ -144,7 +144,7 @@
         }
         ```
 
-- [ ] **#CACHE-6** · P2 — `invalidateProfessional` and `CustomerObserver` bust primary keys for services and customer count but leave `:stale` copies alive — dashboard data stays stale up to 5 hours after writes
+- [x] **#CACHE-6** · P2 — `invalidateProfessional` and `CustomerObserver` bust primary keys for services and customer count but leave `:stale` copies alive — dashboard data stays stale up to 5 hours after writes
     - **Where:** app/Services/Cache/ProfessionalCacheService.php:304-326 (`invalidateProfessional` key list); app/Observers/Core/CustomerObserver.php:34-37 (`invalidateCount`)
     - **Affects:** Dashboard users who edit a service (name, price, visibility) or whose customer count changes. The active-services list — which is also the public-facing services endpoint — and the customer count can reflect pre-edit data for up to 5 hours via the SWR stale-copy fast path.
     - **Effort:** S (~0.5–1h)
@@ -263,7 +263,7 @@
          */
         ```
 
-- [ ] **#GS-5** · P2 — Add cache hit/miss metrics surfaced to Nightwatch (and later Pulse)
+- [x] **#GS-5** · P2 — Add cache hit/miss metrics surfaced to Nightwatch (and later Pulse)
     - **Where:** New: a wrapper around `CacheLockService` (or a Laravel cache event listener) that increments counters tagged by key prefix
     - **Affects:** Observability — you currently can't answer "is `pro:model:*` actually hot?" or "did the deploy regress hit rate?"
     - **Effort:** M (~2–4h)

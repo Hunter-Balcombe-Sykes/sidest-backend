@@ -124,8 +124,6 @@ it('stripe connect — valid account.updated transitions stripe_connect_status',
     $body = json_encode($event);
     $sig = signStripeBody($body, 'whsec_connect_test');
 
-    // Phase 4+: flushHeldCommissions is a no-op (orders are 'approved' on creation;
-    // no held state to flush). The transaction rollback contract is still tested below.
     $this->call('POST', '/api/webhooks/stripe-connect', [], [], [], [
         'CONTENT_TYPE' => 'application/json',
         'HTTP_STRIPE_SIGNATURE' => $sig,
@@ -175,54 +173,6 @@ it('stripe connect — account.application.deauthorized sets stripe_connect_stat
 
     $row = DB::table('core.professionals')->where('id', $proId)->first();
     expect($row->stripe_connect_status)->toBe('disconnected');
-});
-
-// V5-009: atomic flush — if flushHeldCommissions throws, the status update rolls back
-it('stripe connect — status update rolls back when flushHeldCommissions throws', function () {
-    $proId = (string) Str::uuid();
-    DB::table('core.professionals')->insert([
-        'id' => $proId,
-        'handle' => 'aff_rollback',
-        'professional_type' => 'professional',
-        'status' => 'active',
-        'stripe_connect_account_id' => 'acct_rollback',
-        'stripe_connect_status' => 'onboarding',
-        'created_at' => now(),
-        'updated_at' => now(),
-    ]);
-
-    $this->mock(CommissionVoidService::class, function ($mock) {
-        $mock->shouldReceive('flushHeldCommissions')->andThrow(new \RuntimeException('flush failed'));
-    });
-
-    // Build an account.updated event that would transition onboarding → active
-    $event = \Stripe\Event::constructFrom([
-        'id' => 'evt_rollback_test',
-        'object' => 'event',
-        'account' => 'acct_rollback',
-        'api_version' => '2024-04-10',
-        'created' => time(),
-        'type' => 'account.updated',
-        'data' => [
-            'object' => [
-                'id' => 'acct_rollback',
-                'object' => 'account',
-                'charges_enabled' => true,
-                'payouts_enabled' => true,
-                'details_submitted' => true,
-                'requirements' => ['currently_due' => []],
-            ],
-        ],
-        'livemode' => false,
-    ]);
-
-    $controller = app(StripeConnectWebhookController::class);
-
-    expect(fn () => $controller->handleParsedEvent($event))->toThrow(\RuntimeException::class);
-
-    // Status must be rolled back — professional stays in 'onboarding'
-    $row = DB::table('core.professionals')->where('id', $proId)->first();
-    expect($row->stripe_connect_status)->toBe('onboarding');
 });
 
 // ============================================================

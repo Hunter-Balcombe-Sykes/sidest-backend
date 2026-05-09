@@ -9,6 +9,24 @@ Cross-project rules (git workflow, cost discipline, pre-agent gate) live in `../
 
 **Git reminder (shared repo — primary dev is someone else):** Always `git fetch && git pull` + `git log --oneline -10` before any work. Work on a feature branch. Never push without permission.
 
+## Environments
+
+| Env | Git branch | Backend URL | Supabase project ref |
+|-----|------------|-------------|----------------------|
+| **Production** | `production` | `https://api.partna.au` | `edplucmvkcnokyygxqsb` |
+| **Development** | `development` | `https://api-dev.partna.au` | `glncumufgaqcmqhzwrxm` |
+
+Feature branches off `development`. PR → merge into `development` → promote to `production` to deploy prod.
+
+**Push semantics** — when the user says "push to supabase dev/prod", the action is:
+1. `supabase link --project-ref <matching-ref>` (interactive; user runs with `!` prefix)
+2. `supabase db push --dry-run`
+3. `supabase db push`
+
+Dev (`glncumufgaqcmqhzwrxm`) — iterate freely. Prod (`edplucmvkcnokyygxqsb`) — always confirm before step 3 and show dry-run output first. Re-link required when switching projects.
+
+**Fresh prod DB caveat:** the v2 baseline creates `app_backend` as `NOLOGIN` (fail-closed). After pushing migrations to a brand-new Supabase project, run `ALTER ROLE app_backend WITH LOGIN PASSWORD '<from-secret>'` in the SQL editor before the app can connect. Laravel Cloud `DB_USERNAME` must be `app_backend.<project_ref>` (Supavisor tenant prefix), port 5432 (session mode).
+
 ## Tech Stack
 
 | Layer | Technology |

@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Log;
 // and 30 since signup. One in-app notification per (brand, milestone),
 // deduped by NotificationPublisher's insertOrIgnore on dedupe_key — so the
 // sweep is safely re-runnable and each brand gets at most three nudges total.
+// Scheduled: daily at 09:00 UTC via routes/console.php.
 class NudgeStuckOnboardingJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

@@ -54,7 +54,7 @@ command -v claude >/dev/null      || { echo "claude CLI not on PATH — install 
 
 # --- Drafts location ---
 if $KEEP_DRAFTS; then
-    DRAFTS="audit-drafts-$(date +%s).md"
+    DRAFTS="drafts-$(date +%s).md"
 else
     TMP="$(mktemp -d)"
     trap 'rm -rf "$TMP"' EXIT

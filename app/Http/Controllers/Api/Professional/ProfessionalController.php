@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Professional;
 
+use App\Actions\Site\UpdateSiteAction;
 use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
@@ -41,10 +42,6 @@ class ProfessionalController extends ApiController
         $primaryBrandName = null;
         if ($pro->site) {
             $siteSettings = is_array($pro->site->settings) ? $pro->site->settings : [];
-            $siteSettings = app(SiteCacheService::class)->hydrateTypographySettings(
-                $siteSettings,
-                (string) $pro->id
-            );
 
             // Resolve primary brand partner status + name so the dashboard can surface
             // affiliate-facing banners and status dots.
@@ -63,6 +60,12 @@ class ProfessionalController extends ApiController
             'site' => $pro->site ? [
                 'id' => $pro->site->id,
                 'subdomain' => $pro->site->subdomain,
+                // ISO timestamp at which the next subdomain change is allowed (null = available now,
+                // never been changed). Mirrors the cooldown enforced in UpdateSiteAction so the UI
+                // can disable the field upfront instead of relying on a 422 round-trip.
+                'subdomain_change_available_at' => $pro->site->subdomain_changed_at
+                    ? $pro->site->subdomain_changed_at->copy()->addDays(UpdateSiteAction::SUBDOMAIN_COOLDOWN_DAYS)->toIso8601String()
+                    : null,
                 'is_published' => (bool) $pro->site->is_published,
                 'settings' => $siteSettings,
             ] : null,

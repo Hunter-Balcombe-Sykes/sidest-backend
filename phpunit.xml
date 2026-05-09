@@ -33,5 +33,7 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="MEDIA_DISK_URL" value="https://test-media.partna.local"/>
+        <env name="AWS_URL" value="https://test-s3.partna.local"/>
     </php>
 </phpunit>

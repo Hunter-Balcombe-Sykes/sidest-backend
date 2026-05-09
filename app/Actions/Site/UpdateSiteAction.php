@@ -16,6 +16,10 @@ use Illuminate\Validation\ValidationException;
 // V2: Site update with business logic — subdomain cooldown (30-day), theme defaults, PATCH-style settings merge, publish validation.
 class UpdateSiteAction
 {
+    // Days between allowed subdomain changes. Mirrored in ProfessionalController::show
+    // when computing subdomain_change_available_at for the /me payload.
+    public const SUBDOMAIN_COOLDOWN_DAYS = 30;
+
     /**
      * Updates the given professional's site.
      *
@@ -49,7 +53,7 @@ class UpdateSiteAction
                     unset($data['subdomain']);
                 } else {
                     if (! $allowSubdomainOverride && $site->subdomain_changed_at) {
-                        $nextAllowed = $site->subdomain_changed_at->copy()->addDays(30);
+                        $nextAllowed = $site->subdomain_changed_at->copy()->addDays(self::SUBDOMAIN_COOLDOWN_DAYS);
 
                         if (Carbon::now()->lt($nextAllowed)) {
                             throw ValidationException::withMessages([

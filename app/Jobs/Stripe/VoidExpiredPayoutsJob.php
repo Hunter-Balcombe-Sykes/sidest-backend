@@ -12,14 +12,15 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-// Nightly cron: cancels commission payouts whose 60-day grace window
-// has expired without the affiliate connecting Stripe Connect.
+// Cancels commission payouts whose 60-day grace window has expired without
+// the affiliate connecting Stripe Connect.
 //
 // Backstop for the UI promise on the affiliate dashboard ("payout will be
 // voided in N days if you don't connect Stripe"). Without this job the
 // per-payout void_at column was being written but never enforced — the
 // older 30-day ledger-entry void path is unrelated and operates one layer
 // below. Closes #CR-003.
+// Scheduled: daily at 07:00 UTC via routes/console.php.
 class VoidExpiredPayoutsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

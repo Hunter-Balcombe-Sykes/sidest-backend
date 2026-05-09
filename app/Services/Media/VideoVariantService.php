@@ -594,33 +594,7 @@ class VideoVariantService
 
     private function diskName(): string
     {
-        $configured = (string) config('partna.media_disk', 'media');
-
-        // $_ENV/$_SERVER are intentional here — Laravel Cloud caches config at deploy time
-        // but injects platform env vars directly into the process environment at runtime,
-        // so env()/config() won't see them. Direct superglobal access bypasses that cache.
-        $explicit = $_ENV['PARTNA_MEDIA_DISK'] ?? $_SERVER['PARTNA_MEDIA_DISK']
-            ?? $_ENV['SIDEST_MEDIA_DISK'] ?? $_SERVER['SIDEST_MEDIA_DISK'] ?? null;
-        if (is_string($explicit) && trim($explicit) !== '') {
-            return $configured;
-        }
-
-        if ($configured === 'media') {
-            $default = (string) config('filesystems.default', 'local');
-            $defaultConfig = config("filesystems.disks.{$default}");
-
-            if (
-                $default !== '' &&
-                $default !== 'local' &&
-                $default !== 'media' &&
-                is_array($defaultConfig) &&
-                (($defaultConfig['driver'] ?? null) === 's3')
-            ) {
-                return $default;
-            }
-        }
-
-        return $configured;
+        return MediaDiskResolver::resolve();
     }
 
     private function disk(): \Illuminate\Contracts\Filesystem\Filesystem

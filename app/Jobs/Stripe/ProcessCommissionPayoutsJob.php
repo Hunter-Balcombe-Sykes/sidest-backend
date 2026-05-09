@@ -12,7 +12,8 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\RateLimitException;
 
-// V2: Core. Batch-processes all eligible commission payouts via CommissionPayoutService. Runs on daily cron.
+// Batch-processes all eligible commission payouts via CommissionPayoutService.
+// Scheduled: hourly via routes/console.php.
 class ProcessCommissionPayoutsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

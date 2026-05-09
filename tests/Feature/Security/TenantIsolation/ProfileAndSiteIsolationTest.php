@@ -16,9 +16,8 @@ it('site show returns only the authenticated professionals own site', function (
         'settings' => json_encode(['meta_title' => 'Site B']),
     ]);
 
-    // SiteCacheService does additional DB queries — stub hydration methods.
+    // SiteCacheService does additional DB queries — stub enrichment method.
     $this->mock(SiteCacheService::class, fn ($m) => $m
-        ->shouldReceive('hydrateSiteWithBrandTypography')->andReturnUsing(fn ($arr) => $arr)
         ->shouldReceive('enrichSiteWithBrandPartnerRadius')->andReturnUsing(fn ($arr) => $arr)
     );
 

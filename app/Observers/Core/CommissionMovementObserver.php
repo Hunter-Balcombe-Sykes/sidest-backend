@@ -4,6 +4,7 @@ namespace App\Observers\Core;
 
 use App\Models\Retail\CommissionMovement;
 use App\Services\Notifications\NotificationPublisher;
+use App\Support\Money;
 use Illuminate\Support\Facades\Log;
 
 // V2: Core. Publishes commission earned/reversed notifications to affiliates when ledger entries are created or status changes.
@@ -67,7 +68,7 @@ class CommissionMovementObserver
             return;
         }
 
-        $amount = $this->formatMoney((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
+        $amount = Money::format((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
 
         $this->publisher->publish(
             professionalId: $affiliateId,
@@ -88,7 +89,7 @@ class CommissionMovementObserver
             return;
         }
 
-        $amount = $this->formatMoney((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
+        $amount = Money::format((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
 
         $this->publisher->publish(
             professionalId: $affiliateId,
@@ -109,7 +110,7 @@ class CommissionMovementObserver
             return;
         }
 
-        $amount = $this->formatMoney((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
+        $amount = Money::format((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
 
         $this->publisher->publish(
             professionalId: $affiliateId,
@@ -131,7 +132,7 @@ class CommissionMovementObserver
             return;
         }
 
-        $amount = $this->formatMoney((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
+        $amount = Money::format((int) ($entry->amount_cents ?? 0), (string) ($entry->currency_code ?? 'AUD'));
         $affiliateName = $entry->affiliateProfessional?->display_name ?? 'An affiliate';
 
         $this->publisher->publish(
@@ -144,18 +145,5 @@ class CommissionMovementObserver
             ctaUrl: '/account/store?section=analytics',
             retentionConfigKey: 'commission',
         );
-    }
-
-    private function formatMoney(int $cents, string $currencyCode): string
-    {
-        $prefix = match (strtoupper($currencyCode)) {
-            'USD' => '$',
-            'GBP' => '£',
-            'EUR' => '€',
-            'AUD' => 'A$',
-            default => strtoupper($currencyCode).' ',
-        };
-
-        return $prefix.number_format($cents / 100, 2, '.', ',');
     }
 }

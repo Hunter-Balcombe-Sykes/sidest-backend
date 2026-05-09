@@ -47,7 +47,7 @@ class OpenInviteController extends ApiController
         $site = Site::query()->where('professional_id', $professional->id)->first();
         if ($site) {
             $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
-            $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, (string) $brandProfessional->id);
+            $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
             app(ProfessionalCacheService::class)->invalidateProfessional($professional);
         }
 

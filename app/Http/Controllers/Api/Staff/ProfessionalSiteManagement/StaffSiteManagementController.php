@@ -28,7 +28,6 @@ class StaffSiteManagementController extends ApiController
         );
 
         $siteArray = $site->toArray();
-        $siteArray = $this->siteCache->hydrateSiteWithBrandTypography($siteArray, (string) $professional->id);
         $siteArray = $this->siteCache->enrichSiteWithBrandPartnerRadius($siteArray);
 
         return $this->success(['site' => $siteArray]);

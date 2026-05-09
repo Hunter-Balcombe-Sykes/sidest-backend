@@ -6,11 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Billing\WebhookEvent;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
-use App\Services\Stripe\CommissionVoidService;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\Webhook;
@@ -216,6 +214,14 @@ class StripeConnectWebhookController extends Controller
 
     private function handleAccountUpdated(object $account): void
     {
+        // Bust the /stripe/status cache for this account regardless of whether
+        // the local stripe_connect_status enum changes — fields like charges_enabled,
+        // payouts_enabled, and requirements can flip without affecting the
+        // collapsed status string, and the dashboard surfaces those directly.
+        // Done before the unknown-account / disconnected guards so a stale
+        // entry can never outlive a legitimate Stripe-side change.
+        StripeConnectService::forgetStatusCache((string) $account->id);
+
         $professional = Professional::where('stripe_connect_account_id', $account->id)->first();
 
         if (! $professional) {
@@ -242,18 +248,7 @@ class StripeConnectWebhookController extends Controller
         if ($professional->stripe_connect_status !== $status) {
             $oldStatus = $professional->stripe_connect_status;
 
-            // Atomic: if flushHeldCommissions throws, the status update is rolled back.
-            // The professional stays in their prior state; the next account.updated
-            // (new event_id, bypasses idempotency) retries the full transition cleanly.
-            DB::transaction(function () use ($professional, $status, $oldStatus) {
-                $professional->update(['stripe_connect_status' => $status]);
-
-                // When an affiliate transitions to 'active', flush any held commissions
-                // so they enter the normal payout pipeline immediately.
-                if ($status === 'active' && $oldStatus !== 'active') {
-                    app(CommissionVoidService::class)->flushHeldCommissions($professional);
-                }
-            });
+            $professional->update(['stripe_connect_status' => $status]);
 
             Log::info('Stripe Connect status updated', [
                 'professional_id' => $professional->id,

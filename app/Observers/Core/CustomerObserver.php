@@ -34,7 +34,9 @@ class CustomerObserver
     private function invalidateCount(Customer $customer): void
     {
         if (! empty($customer->professional_id)) {
-            Cache::forget(CacheKeyGenerator::customerCount((string) $customer->professional_id));
+            $key = CacheKeyGenerator::customerCount((string) $customer->professional_id);
+            Cache::forget($key);
+            Cache::forget($key.':stale');
         }
     }
 }

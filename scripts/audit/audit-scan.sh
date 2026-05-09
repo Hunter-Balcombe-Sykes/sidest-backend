@@ -90,7 +90,7 @@ SYS_MSG="$TMP/system.md"
 
     for path in "${SCOPE_PATHS[@]}"; do
         if [[ -d "$path" ]]; then
-            files=$(find "$path" -type f \( -name "*.php" -o -name "*.blade.php" \) | sort)
+            files=$(find "$path" -type f \( -name "*.php" -o -name "*.blade.php" -o -name "*.sql" \) | sort)
         elif [[ -f "$path" ]]; then
             files="$path"
         else

@@ -34,6 +34,13 @@ class StripeConnectController extends Controller
     {
         $pro = $request->attributes->get('professional');
 
+        // ?fresh=1 forces a live Stripe round-trip — used immediately after the
+        // Stripe Connect onboarding redirect so the dashboard never renders a
+        // pre-onboarding cache hit while the account.updated webhook is in flight.
+        if ($request->boolean('fresh') && $pro->stripe_connect_account_id) {
+            StripeConnectService::forgetStatusCache($pro->stripe_connect_account_id);
+        }
+
         $connectStatus = $this->connectService->syncAccountStatus($pro);
         $hasPaymentMethod = $this->connectService->brandHasPaymentMethod($pro);
         $pro->refresh();
@@ -100,20 +107,6 @@ class StripeConnectController extends Controller
         $this->connectService->disconnectAccount($pro);
 
         return response()->json(['status' => 'disconnected']);
-    }
-
-    /**
-     * POST /stripe/payment-method/setup
-     * Creates a SetupIntent so the brand can save a payment method.
-     */
-    public function setupPaymentMethod(Request $request): JsonResponse
-    {
-        $pro = $request->attributes->get('professional');
-        Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
-
-        $result = $this->connectService->createSetupIntent($pro);
-
-        return response()->json($result);
     }
 
     /**

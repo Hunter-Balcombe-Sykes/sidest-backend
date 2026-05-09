@@ -52,7 +52,7 @@ beforeEach(function () {
 
 function walletLedger_makeService(?object $stripeClient = null): \App\Services\Stripe\StripeConnectService
 {
-    $service = new \App\Services\Stripe\StripeConnectService;
+    $service = app(\App\Services\Stripe\StripeConnectService::class);
 
     if ($stripeClient) {
         $prop = (new ReflectionClass($service))->getProperty('stripe');
