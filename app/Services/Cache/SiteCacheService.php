@@ -2,6 +2,7 @@
 
 namespace App\Services\Cache;
 
+use App\Jobs\Cache\InvalidateConnectedAffiliateCachesJob;
 use App\Models\Core\MediaVariant;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
@@ -846,6 +847,11 @@ class SiteCacheService
             $keys[] = CacheKeyGenerator::publicSitePayload(strtolower($aliasSubdomain));
         }
 
+        Cache::deleteMultiple(array_values(array_unique($keys)));
+
+        // CACHE-3: dispatch per-affiliate invalidations with a random 0–30s jitter so
+        // a brand edit (which may affect hundreds of affiliates) doesn't cold-miss every
+        // affiliate cache simultaneously and trigger a cache-rebuild stampede.
         if ($professionalId !== '') {
             $connectedProfessionalIds = BrandPartnerLink::query()
                 ->where('brand_professional_id', $professionalId)
@@ -860,11 +866,10 @@ class SiteCacheService
                 ->all();
 
             foreach ($connectedSubdomains as $connectedSubdomain) {
-                $keys[] = CacheKeyGenerator::publicSitePayload($connectedSubdomain);
+                InvalidateConnectedAffiliateCachesJob::dispatch($connectedSubdomain)
+                    ->delay(now()->addSeconds(random_int(0, 30)));
             }
         }
-
-        Cache::deleteMultiple(array_values(array_unique($keys)));
     }
 
     public function getSiteLinkBlocks(string $siteId): array
