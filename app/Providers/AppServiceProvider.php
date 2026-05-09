@@ -79,6 +79,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('topUp', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $brand) => app(\App\Policies\CommissionPolicy::class)->topUp($actor, $brand));
         Gate::define('managePaymentMethod', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $brand) => app(\App\Policies\CommissionPolicy::class)->managePaymentMethod($actor, $brand));
         Gate::define('manageWallet', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $brand) => app(\App\Policies\CommissionPolicy::class)->manageWallet($actor, $brand));
+        Gate::define('startConnect', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $pro) => app(\App\Policies\CommissionPolicy::class)->startConnect($actor, $pro));
 
         // Refuse to boot in production with throttling disabled — a misconfigured
         // PARTNA_THROTTLE_ENABLED=false would silently strip all rate limiting.

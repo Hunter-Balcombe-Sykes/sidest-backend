@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Stripe\OnboardRequest;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * POST /affiliate/stripe/connect/start
@@ -24,11 +25,7 @@ class AffiliateStripeOnboardingController extends Controller
     {
         $aff = $request->attributes->get('professional');
 
-        // Only affiliates (professional_type = 'professional') use Connect to
-        // receive payouts. Brands fund payouts but don't have Connect accounts.
-        if (($aff->professional_type ?? null) === 'brand') {
-            abort(403, 'Brand accounts do not use Stripe Connect payout onboarding.');
-        }
+        Gate::forUser($aff)->authorize('startConnect', $aff);
 
         $url = $this->connectService->createOnboardingLink(
             $aff,

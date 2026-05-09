@@ -360,8 +360,12 @@ class StripeConnectService
      */
     public function savePaymentMethod(Professional $brand, string $paymentMethodId): void
     {
+        $pm = $this->stripe->paymentMethods->retrieve($paymentMethodId);
+
         $brand->update([
-            'stripe_payment_method_id' => $paymentMethodId,
+            'stripe_payment_method_id'    => $paymentMethodId,
+            'stripe_payment_method_brand' => $pm->card?->brand ?? null,
+            'stripe_payment_method_last4' => $pm->card?->last4 ?? null,
         ]);
 
         if ($brand->stripe_customer_id) {

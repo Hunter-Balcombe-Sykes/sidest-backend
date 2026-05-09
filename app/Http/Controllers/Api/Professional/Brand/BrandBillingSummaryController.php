@@ -47,7 +47,13 @@ class BrandBillingSummaryController extends Controller
             ->where('reason', 'top_up')
             ->orderByDesc('occurred_at')
             ->limit(5)
-            ->get(['id', 'amount_cents', 'currency_code', 'occurred_at']);
+            ->get(['id', 'amount_cents', 'currency_code', 'occurred_at'])
+            ->map(fn ($m) => [
+                'id'            => $m->id,
+                'amount_cents'  => (int) $m->amount_cents,
+                'currency_code' => $m->currency_code,
+                'occurred_at'   => $m->occurred_at?->toIso8601String(),
+            ]);
 
         return response()->json([
             'has_card'              => $hasCard,

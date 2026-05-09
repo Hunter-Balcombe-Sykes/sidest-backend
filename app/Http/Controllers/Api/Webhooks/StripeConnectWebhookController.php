@@ -149,11 +149,22 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
+        $professional = Professional::find($professionalId);
+
+        if (! $professional) {
+            Log::warning('stripe.checkout_completed.professional_not_found', [
+                'session_id'      => $session->id ?? null,
+                'professional_id' => $professionalId,
+            ]);
+
+            return;
+        }
+
         $service = app(StripeConnectService::class);
 
         match ($session->mode ?? null) {
             'setup' => $service->syncPaymentMethodFromCheckoutSession(
-                Professional::find($professionalId),
+                $professional,
                 $session->id
             ),
             // 'payment' arm wired in Phase A3.1; stub log here to avoid 500 errors on early delivery.
@@ -311,6 +322,7 @@ class StripeConnectWebhookController extends Controller
         $payout->forceFill([
             'status'                => 'completed',
             'transfer_completed_at' => now(),
+            'processed_at'          => now(),
             'failure_code'          => null,
             'failure_reason'        => null,
             'failure_category'      => null,

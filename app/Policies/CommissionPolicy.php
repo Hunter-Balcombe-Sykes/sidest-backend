@@ -141,4 +141,14 @@ class CommissionPolicy extends BasePolicy
     {
         return $this->topUp($actor, $brand);
     }
+
+    /**
+     * Only non-brand professionals (affiliates/influencers) start Stripe Connect onboarding.
+     * Brands fund payouts but receive via bank, not Connect Express.
+     */
+    public function startConnect(Professional $actor, Professional $pro): bool
+    {
+        return $actor->id === $pro->id
+            && ($actor->professional_type ?? null) !== 'brand';
+    }
 }

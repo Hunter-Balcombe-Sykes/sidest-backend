@@ -10,6 +10,8 @@ use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -17,7 +19,7 @@ use Illuminate\Support\Facades\Log;
 // calls retryPayout() to advance them, and terminates any that have hit 7 failures.
 class RetryPendingFundsPayoutsJob implements ShouldQueue
 {
-    use Dispatchable, Queueable;
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 600;
 

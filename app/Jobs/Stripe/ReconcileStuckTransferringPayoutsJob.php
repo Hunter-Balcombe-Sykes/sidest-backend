@@ -82,6 +82,7 @@ class ReconcileStuckTransferringPayoutsJob implements ShouldQueue
         $payout->forceFill([
             'status'                => 'completed',
             'transfer_completed_at' => now(),
+            'processed_at'          => now(),
         ])->save();
 
         // Bump analytics cache for both parties so dashboards reflect the settled payout.
