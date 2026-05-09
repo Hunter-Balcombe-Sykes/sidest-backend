@@ -96,4 +96,30 @@ class CommissionPolicy extends BasePolicy
     {
         return $this->update($actor, $record);
     }
+
+    /**
+     * Brand can only top up their own wallet, not another professional's.
+     */
+    public function topUp(Professional $actor, Professional $brand): bool
+    {
+        return $actor->id === $brand->id
+            && ($actor->professional_type ?? null) === 'brand';
+    }
+
+    /**
+     * Brand can only manage their own payment method, not another professional's.
+     */
+    public function managePaymentMethod(Professional $actor, Professional $brand): bool
+    {
+        return $actor->id === $brand->id
+            && ($actor->professional_type ?? null) === 'brand';
+    }
+
+    /**
+     * Wallet management follows the same rules as topping up.
+     */
+    public function manageWallet(Professional $actor, Professional $brand): bool
+    {
+        return $this->topUp($actor, $brand);
+    }
 }
