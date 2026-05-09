@@ -14,9 +14,6 @@ class Block extends BaseModel
 {
     use HasUuids;
 
-    /**
-     * @var false|mixed
-     */
     protected $table = 'site.blocks';
 
     public $incrementing = false;
