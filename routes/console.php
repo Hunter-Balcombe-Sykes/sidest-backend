@@ -128,6 +128,17 @@ Schedule::job(new \App\Jobs\Streaming\CheckStreamingLiveStatusJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: check-streaming-live-status');
     });
 
+// Daily retry sweep: re-attempts pending_funds payouts whose next_retry_at has passed.
+// After MAX_ATTEMPTS (7) failures, marks the payout terminal and credits the wallet back.
+Schedule::job(new \App\Jobs\Stripe\RetryPendingFundsPayoutsJob)
+    ->dailyAt('07:15')
+    ->timezone('UTC')
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: retry-pending-funds-payouts');
+    });
+
 // Daily reconciler: finds `transferring` payouts stuck > 6h and flips them
 // to completed/failed by fetching Transfer.status from Stripe. Backstop for
 // missed `transfer.paid` Connect webhooks (exhausted retries, delivery gaps).
