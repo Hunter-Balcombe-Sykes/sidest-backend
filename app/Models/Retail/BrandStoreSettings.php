@@ -5,7 +5,12 @@ namespace App\Models\Retail;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
-// V2: Simplified. Now only holds default_commission_rate and payout_hold_days. Per-product overrides moved to Shopify metafields.
+/**
+ * Per-brand store configuration. Holds financial defaults (`default_commission_rate`,
+ * `payout_hold_days`), the storefront theme preset (`theme_id`, integer 1–5), and
+ * Shopify Hydrogen/Oxygen wizard state (`oxygen_storefront_id`, `hydrogen_install_confirmed`,
+ * `oxygen_deployment_token` — encrypted at-rest, hidden from serialisation).
+ */
 class BrandStoreSettings extends BaseModel
 {
     use HasUuids;
