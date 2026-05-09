@@ -50,14 +50,14 @@ CREATE POLICY wallet_movements_tenant_read ON commerce.wallet_movements
     FOR SELECT TO authenticated
     USING (
         professional_id = (SELECT id FROM core.professionals WHERE auth_user_id = auth.uid() AND deleted_at IS NULL)
-        OR EXISTS (SELECT 1 FROM core.sidest_staff s WHERE s.auth_user_id = auth.uid())
+        OR EXISTS (SELECT 1 FROM core.partna_staff s WHERE s.auth_user_id = auth.uid())
     );
 
 -- Writes come exclusively from the app_backend role (BYPASSRLS) or staff corrections.
 -- Professionals never write ledger rows directly.
 CREATE POLICY wallet_movements_staff_insert ON commerce.wallet_movements
     FOR INSERT TO authenticated
-    WITH CHECK (EXISTS (SELECT 1 FROM core.sidest_staff s WHERE s.auth_user_id = auth.uid()));
+    WITH CHECK (EXISTS (SELECT 1 FROM core.partna_staff s WHERE s.auth_user_id = auth.uid()));
 
 GRANT SELECT, INSERT ON commerce.wallet_movements TO app_backend;
 
