@@ -564,6 +564,15 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             if ($rate > 0 && $rate <= 100) {
                 return [$rate, 'metafield_override'];
             }
+
+            // Present but out-of-bounds: use a valid rate for the maths but quarantine
+            // from payout eligibility until ops corrects the metafield.
+            Log::warning('shopify.commission_override.out_of_bounds', [
+                'product_gid' => $productGid,
+                'value' => $rate,
+            ]);
+            $fallbackRate = (float) ($brandSettings?->default_commission_rate ?? $platformDefault);
+            return [$fallbackRate, 'pending'];
         }
 
         if ($brandSettings && $brandSettings->default_commission_rate !== null) {
