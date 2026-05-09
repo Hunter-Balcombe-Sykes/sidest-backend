@@ -1,6 +1,6 @@
 # Caching Foundation Audit — 2026-05-07
 
-**Branch:** development-v2
+**Branch:** development
 **Lens:** Caching strategy and stampede protection for multi-tenant Laravel SaaS — verify the implementation against the 2026 gold standard, surface code-level gaps, additive improvements, and items to explicitly defer.
 **Pipeline:** scan-tier draft by `deepseek-v4-pro`, adjudicated by `claude-sonnet-4-6` (final landed 21:21) + research synthesis from web sources
 

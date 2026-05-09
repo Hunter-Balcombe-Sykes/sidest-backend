@@ -19,7 +19,7 @@ class ClassifierConfig:
 class Config:
     sources: list[str] = field(default_factory=list)
     auto_discover: bool = True
-    push_target: str = "development-v2"
+    push_target: str = "development"
     push_on_tests_pass: bool = True
     test_command: str = "composer test"
     claude_model: str = "sonnet"
