@@ -6,11 +6,12 @@ use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Services\Media\BrandDesignMediaService;
 use Illuminate\Http\JsonResponse;
 
 class PublicOpenInviteController extends ApiController
 {
-    public function show(string $handle): JsonResponse
+    public function show(string $handle, BrandDesignMediaService $mediaService): JsonResponse
     {
         $handle = strtolower(trim($handle));
         if ($handle === '') {
@@ -38,16 +39,14 @@ class PublicOpenInviteController extends ApiController
             ->first();
         $siteSettings = is_array($brandSite?->settings ?? null) ? $brandSite->settings : [];
         $designSettings = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
-        $mediaSettings = is_array($designSettings['media'] ?? null) ? $designSettings['media'] : [];
 
         return $this->success([
             'brand' => [
                 'professional_id' => $brand->id,
                 'handle' => $brand->handle,
                 'display_name' => $brand->display_name,
-                'brand_logo_url' => is_string($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'] ?? null)
-                    ? ($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'])
-                    : null,
+                // Resolved from site_media (purpose=logo_full) — same source the brand uploads to.
+                'brand_logo_url' => $brandSite ? $mediaService->getLogoFullUrl((string) $brandSite->id) : null,
                 'brand_color' => is_string($designSettings['dark_color'] ?? $designSettings['darkColor'] ?? null)
                     ? ($designSettings['dark_color'] ?? $designSettings['darkColor'])
                     : null,

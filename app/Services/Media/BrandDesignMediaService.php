@@ -334,6 +334,46 @@ class BrandDesignMediaService
         return ['logo' => $logo, 'placeholders' => $placeholders];
     }
 
+    /**
+     * Resolve the optimized full-logo URL for a single site, or null if absent.
+     * Reads from site_media (pool=design, purpose=logo_full) — the same source
+     * BrandDesignResource exposes as logo.full_url. Use this anywhere the brand's
+     * full logo needs to be displayed (invites, partner cards, public pages).
+     */
+    public function getLogoFullUrl(string $siteId): ?string
+    {
+        return $this->getLogoFullUrls([$siteId])[$siteId] ?? null;
+    }
+
+    /**
+     * Bulk-resolve optimized full-logo URLs for multiple sites in a single query.
+     * Returns a [site_id => url] map; sites without a logo are omitted.
+     *
+     * @param  array<int, string>  $siteIds
+     * @return array<string, string>
+     */
+    public function getLogoFullUrls(array $siteIds): array
+    {
+        if (empty($siteIds)) {
+            return [];
+        }
+
+        return SiteMedia::query()
+            ->whereIn('site_id', $siteIds)
+            ->where('pool', SiteMedia::POOL_DESIGN)
+            ->where('purpose', SiteMedia::PURPOSE_LOGO_FULL)
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->where('processing_state', '!=', SiteMedia::PROCESSING_STATE_FAILED)
+            ->with('mediaVariants')
+            ->get()
+            ->mapWithKeys(fn (SiteMedia $m): array => [
+                (string) $m->site_id => $m->variantUrls()['optimized'] ?? null,
+            ])
+            ->filter()
+            ->all();
+    }
+
     /* ------------------------------------------------------------------ */
     /*  Internal helpers */
     /* ------------------------------------------------------------------ */

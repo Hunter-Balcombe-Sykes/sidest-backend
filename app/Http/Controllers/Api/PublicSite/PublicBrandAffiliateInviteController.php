@@ -4,14 +4,18 @@ namespace App\Http\Controllers\Api\PublicSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Site\Site;
+use App\Services\Media\BrandDesignMediaService;
 use App\Services\Professional\BrandAffiliateInviteService;
 use Illuminate\Http\JsonResponse;
 
 // V2: Public invite detail retrieval by token. Used by affiliate claim/decline pages during onboarding.
 class PublicBrandAffiliateInviteController extends ApiController
 {
-    public function show(string $token, BrandAffiliateInviteService $inviteService): JsonResponse
-    {
+    public function show(
+        string $token,
+        BrandAffiliateInviteService $inviteService,
+        BrandDesignMediaService $mediaService,
+    ): JsonResponse {
         $invite = $inviteService->findByToken($token);
 
         if (! $invite) {
@@ -21,10 +25,8 @@ class PublicBrandAffiliateInviteController extends ApiController
         $brandSite = Site::query()
             ->where('professional_id', $invite->brand_professional_id)
             ->first();
-        $brandSiteSettings = is_array($brandSite?->settings ?? null) ? $brandSite->settings : [];
-        $brandDesign = is_array($brandSiteSettings['design'] ?? null) ? $brandSiteSettings['design'] : [];
-        $brandMedia = is_array($brandDesign['media'] ?? null) ? $brandDesign['media'] : [];
-        $brandLogoUrl = $brandMedia['brand_logo_url'] ?? null;
+        // Resolved from site_media (purpose=logo_full) — same source the brand uploads to.
+        $brandLogoUrl = $brandSite ? $mediaService->getLogoFullUrl((string) $brandSite->id) : null;
 
         $effectiveStatus = $invite->status === 'pending' && $invite->expires_at && $invite->expires_at->isPast()
             ? 'expired'
@@ -43,7 +45,7 @@ class PublicBrandAffiliateInviteController extends ApiController
                 'brand_professional_id' => $invite->brand_professional_id,
                 'brand_display_name' => $invite->brandProfessional?->display_name ?? $invite->brandProfessional?->handle,
                 'brand_handle' => $invite->brandProfessional?->handle,
-                'brand_logo_url' => is_string($brandLogoUrl) ? $brandLogoUrl : null,
+                'brand_logo_url' => $brandLogoUrl,
                 'accepted_at' => optional($invite->accepted_at)->toIso8601String(),
             ],
         ]);

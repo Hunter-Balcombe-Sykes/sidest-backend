@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Professional;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Models\Core\Professional\BrandAffiliateInvite;
+use App\Services\Media\BrandDesignMediaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -13,7 +14,7 @@ class AffiliateInviteController extends ApiController
 {
     use ResolveCurrentProfessional;
 
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, BrandDesignMediaService $mediaService): JsonResponse
     {
         $professional = $this->currentProfessional($request);
 
@@ -30,7 +31,7 @@ class AffiliateInviteController extends ApiController
             return $this->success(['invites' => []]);
         }
 
-        $invites = BrandAffiliateInvite::query()
+        $inviteRows = BrandAffiliateInvite::query()
             ->with('brandProfessional.site')
             ->whereIn('email_lc', array_unique($emails))
             ->where('status', 'pending')
@@ -39,12 +40,23 @@ class AffiliateInviteController extends ApiController
                     ->orWhere('expires_at', '>', now());
             })
             ->orderByDesc('created_at')
-            ->get()
-            ->map(function (BrandAffiliateInvite $invite): array {
+            ->get();
+
+        // Bulk-resolve full logo URLs from site_media (purpose=logo_full).
+        $brandSiteIds = $inviteRows
+            ->map(fn (BrandAffiliateInvite $invite): ?string => $invite->brandProfessional?->site?->id ? (string) $invite->brandProfessional->site->id : null)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $logoUrls = $mediaService->getLogoFullUrls($brandSiteIds);
+
+        $invites = $inviteRows
+            ->map(function (BrandAffiliateInvite $invite) use ($logoUrls): array {
                 $brand = $invite->brandProfessional;
                 $siteSettings = is_array($brand?->site?->settings ?? null) ? $brand->site->settings : [];
                 $designSettings = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
-                $mediaSettings = is_array($designSettings['media'] ?? null) ? $designSettings['media'] : [];
+                $brandSiteId = $brand?->site?->id ? (string) $brand->site->id : null;
 
                 return [
                     'id' => $invite->id,
@@ -57,9 +69,7 @@ class AffiliateInviteController extends ApiController
                         'id' => $brand?->id,
                         'display_name' => $brand?->display_name,
                         'handle' => $brand?->handle,
-                        'brand_logo_url' => is_string($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'] ?? null)
-                            ? ($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'])
-                            : null,
+                        'brand_logo_url' => $brandSiteId ? ($logoUrls[$brandSiteId] ?? null) : null,
                         'brand_color' => is_string($designSettings['dark_color'] ?? $designSettings['darkColor'] ?? null)
                             ? ($designSettings['dark_color'] ?? $designSettings['darkColor'])
                             : null,

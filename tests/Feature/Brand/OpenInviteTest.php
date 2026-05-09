@@ -85,6 +85,45 @@ beforeEach(function () {
         deleted_at TEXT
     )');
 
+    // Brand logos live in site_media (purpose=logo_full) since the design-media
+    // upload pipeline took over from the legacy site.settings JSON path.
+    // BrandDesignMediaService::getLogoFullUrls queries this + media_variants.
+    $conn->statement('CREATE TABLE IF NOT EXISTS site.site_media (
+        id TEXT PRIMARY KEY,
+        site_id TEXT NOT NULL,
+        pool TEXT NOT NULL DEFAULT "gallery",
+        purpose TEXT,
+        path TEXT,
+        alt_text TEXT,
+        sort_order INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        media_type TEXT DEFAULT "image",
+        processing_state TEXT DEFAULT "pending",
+        processing_error TEXT,
+        created_at TEXT,
+        updated_at TEXT,
+        deleted_at TEXT
+    )');
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS site.media_variants (
+        id TEXT PRIMARY KEY,
+        media_id TEXT NOT NULL,
+        variant_key TEXT NOT NULL,
+        artifact_type TEXT NOT NULL,
+        disk TEXT,
+        path TEXT,
+        mime TEXT,
+        width INTEGER,
+        height INTEGER,
+        bitrate_kbps INTEGER,
+        file_size_bytes INTEGER,
+        duration_ms INTEGER,
+        metadata TEXT,
+        content_hash TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )');
+
     $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_partner_links (
         id TEXT PRIMARY KEY,
         affiliate_professional_id TEXT NOT NULL,
@@ -157,11 +196,42 @@ function createBrand(string $handle = 'testbrand', string $brandStatus = 'active
     ]);
 
     // Create site for brand
+    $siteId = (string) Str::uuid();
     DB::connection('pgsql')->table('site.sites')->insert([
-        'id' => (string) Str::uuid(),
+        'id' => $siteId,
         'professional_id' => $brandId,
         'subdomain' => $handle,
-        'settings' => json_encode(['design' => ['media' => ['brand_logo_url' => 'https://example.com/logo.png'], 'dark_color' => '#000000']]),
+        // brand_color still lives in JSON; logo moved to site_media (seeded below).
+        'settings' => json_encode(['design' => ['dark_color' => '#000000']]),
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    // Seed the full logo via site_media (the modern path) so BrandDesignMediaService
+    // resolves it. media_variants supplies the optimized URL via the model accessor.
+    $logoMediaId = (string) Str::uuid();
+    DB::connection('pgsql')->table('site.site_media')->insert([
+        'id' => $logoMediaId,
+        'site_id' => $siteId,
+        'pool' => 'design',
+        'purpose' => 'logo_full',
+        'path' => "images/{$brandId}/{$logoMediaId}/original.png",
+        'sort_order' => 0,
+        'is_active' => 1,
+        'media_type' => 'image',
+        'processing_state' => 'ready',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    DB::connection('pgsql')->table('site.media_variants')->insert([
+        'id' => (string) Str::uuid(),
+        'media_id' => $logoMediaId,
+        'variant_key' => 'optimized',
+        'artifact_type' => 'webp',
+        'disk' => 'media',
+        'path' => "images/{$brandId}/{$logoMediaId}/optimized.webp",
+        'mime' => 'image/webp',
         'created_at' => $now,
         'updated_at' => $now,
     ]);
@@ -206,7 +276,7 @@ it('returns brand preview for valid active brand', function () {
     $brand = createBrand('acmebrand');
 
     $controller = new PublicOpenInviteController;
-    $response = $controller->show('acmebrand');
+    $response = app()->call([$controller, 'show'], ['handle' => 'acmebrand']);
 
     expect($response->status())->toBe(200);
 
@@ -214,13 +284,13 @@ it('returns brand preview for valid active brand', function () {
     expect($data['brand']['handle'])->toBe('acmebrand');
     expect($data['brand']['display_name'])->toBe('Acmebrand');
     expect($data['brand']['professional_id'])->toBe($brand->id);
-    expect($data['brand']['brand_logo_url'])->toBe('https://example.com/logo.png');
+    expect($data['brand']['brand_logo_url'])->not->toBeNull();
     expect($data['brand']['brand_color'])->toBe('#000000');
 });
 
 it('returns 404 for nonexistent handle', function () {
     $controller = new PublicOpenInviteController;
-    $response = $controller->show('nonexistent');
+    $response = app()->call([$controller, 'show'], ['handle' => 'nonexistent']);
 
     expect($response->status())->toBe(404);
 });
@@ -229,7 +299,7 @@ it('returns 404 for systems_down brand', function () {
     createBrand('deadbrand', 'systems_down');
 
     $controller = new PublicOpenInviteController;
-    $response = $controller->show('deadbrand');
+    $response = app()->call([$controller, 'show'], ['handle' => 'deadbrand']);
 
     expect($response->status())->toBe(404);
 });
@@ -250,7 +320,7 @@ it('returns 404 for non-brand professional', function () {
     ]);
 
     $controller = new PublicOpenInviteController;
-    $response = $controller->show('regularpro');
+    $response = app()->call([$controller, 'show'], ['handle' => 'regularpro']);
 
     expect($response->status())->toBe(404);
 });
@@ -259,7 +329,7 @@ it('normalises handle to lowercase for lookup', function () {
     createBrand('mixedcase');
 
     $controller = new PublicOpenInviteController;
-    $response = $controller->show('MixedCase');
+    $response = app()->call([$controller, 'show'], ['handle' => 'MixedCase']);
 
     expect($response->status())->toBe(200);
 });

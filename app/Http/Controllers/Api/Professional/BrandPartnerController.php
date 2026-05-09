@@ -9,6 +9,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Services\Media\BrandDesignMediaService;
 use App\Services\Professional\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\BrandPartnerLinkService;
 use App\Services\Professional\BrandPartnerSiteSettingsSync;
@@ -74,8 +75,11 @@ class BrandPartnerController extends ApiController
         ]);
     }
 
-    public function index(Request $request, BrandPartnerLinkService $brandPartnerLinks): JsonResponse
-    {
+    public function index(
+        Request $request,
+        BrandPartnerLinkService $brandPartnerLinks,
+        BrandDesignMediaService $mediaService,
+    ): JsonResponse {
         $professional = $this->currentProfessional($request);
         $perPage = $this->normalizePerPage($request, 25, 100);
 
@@ -88,8 +92,11 @@ class BrandPartnerController extends ApiController
             ->paginate($perPage)
             ->appends($request->query());
 
+        $pageSiteIds = $page->getCollection()->pluck('site.id')->filter()->map(fn ($id): string => (string) $id)->all();
+        $logoUrls = $mediaService->getLogoFullUrls($pageSiteIds);
+
         $brands = $page->getCollection()
-            ->map(fn (Professional $p): array => $this->brandToArray($p))
+            ->map(fn (Professional $p): array => $this->brandToArray($p, $logoUrls[(string) $p->site?->id] ?? null))
             ->keyBy('id');
 
         // Always include brands the caller is already connected to, regardless of visibility,
@@ -102,14 +109,19 @@ class BrandPartnerController extends ApiController
             ->values();
 
         if ($connectedIds->isNotEmpty()) {
-            Professional::query()
+            $extraBrands = Professional::query()
                 ->whereIn('id', $connectedIds->all())
                 ->where('professional_type', 'brand')
                 ->with('site')
-                ->get()
-                ->each(function (Professional $p) use ($brands): void {
-                    $brands->put((string) $p->id, $this->brandToArray($p));
-                });
+                ->get();
+
+            $extraLogoUrls = $mediaService->getLogoFullUrls(
+                $extraBrands->pluck('site.id')->filter()->map(fn ($id): string => (string) $id)->all(),
+            );
+
+            $extraBrands->each(function (Professional $p) use ($brands, $extraLogoUrls): void {
+                $brands->put((string) $p->id, $this->brandToArray($p, $extraLogoUrls[(string) $p->site?->id] ?? null));
+            });
         }
 
         $payload = $this->paginatedResponse($page, 'brands');
@@ -192,20 +204,20 @@ class BrandPartnerController extends ApiController
         return $this->success($response);
     }
 
-    private function brandToArray(Professional $professional): array
+    private function brandToArray(Professional $professional, ?string $logoFullUrl): array
     {
         $siteSettings = is_array($professional->site?->settings ?? null) ? $professional->site->settings : [];
         $designSettings = is_array($siteSettings['design'] ?? null) ? $siteSettings['design'] : [];
-        $mediaSettings = is_array($designSettings['media'] ?? null) ? $designSettings['media'] : [];
 
         return [
             'id' => $professional->id,
             'display_name' => $professional->display_name,
             'handle' => $professional->handle,
             'subdomain' => $professional->site?->subdomain,
-            'brand_logo_url' => is_string($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'] ?? null)
-                ? ($mediaSettings['brand_logo_url'] ?? $mediaSettings['brandLogoUrl'])
-                : null,
+            // Resolved from site_media (purpose=logo_full) — same source the brand uploads to via
+            // the Design page. The legacy site.settings.design.media.brand_logo_url JSON path is
+            // not written by the modern uploader, so reading it produced null for every brand.
+            'brand_logo_url' => $logoFullUrl,
             'brand_color' => is_string($designSettings['dark_color'] ?? $designSettings['darkColor'] ?? null)
                 ? ($designSettings['dark_color'] ?? $designSettings['darkColor'])
                 : null,
