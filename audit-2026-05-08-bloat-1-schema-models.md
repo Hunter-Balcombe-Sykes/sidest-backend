@@ -128,7 +128,7 @@
 
 ## P3 — Nice to have
 
-- [ ] **#BLOT-2** · P3 — BrandStoreSettings class comment claims the model is "simplified" but contradicts its own fillable list
+- [x] **#BLOT-2** · P3 — BrandStoreSettings class comment claims the model is "simplified" but contradicts its own fillable list
     - **Where:** app/Models/Retail/BrandStoreSettings.php:8–11 (docblock) vs :21–28 (`$fillable`)
     - **Affects:** Developers onboarding to the Shopify wizard code path — the stale comment misdirects anyone trying to understand what lives in this table before they read the full file.
     - **Effort:** S (~0.5–1h)
@@ -161,7 +161,7 @@
         ];
         ```
 
-- [ ] **#BLOT-3** · P3 — Block model has a `@var false|mixed` docblock on its `$table` string property
+- [x] **#BLOT-3** · P3 — Block model has a `@var false|mixed` docblock on its `$table` string property
     - **Where:** app/Models/Core/Site/Block.php:17–19
     - **Affects:** Static analysis tools (PHPStan/Psalm) and any IDE using the type hint — `false|mixed` collapses to `mixed`, effectively suppressing type narrowing on a property that should always be `string`.
     - **Effort:** S (~0.5–1h)

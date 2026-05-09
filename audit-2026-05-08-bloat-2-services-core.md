@@ -145,7 +145,7 @@
         }
         ```
 
-- [ ] **#BLOT-4** · P3 — Dead `$brandProfessionalId` parameter in `AccountTypeDefaultsService::applyAffiliateDefaults`
+- [x] **#BLOT-4** · P3 — Dead `$brandProfessionalId` parameter in `AccountTypeDefaultsService::applyAffiliateDefaults`
     - **Where:** app/Services/Professional/AccountTypeDefaultsService.php (public method `applyAffiliateDefaults`, third parameter)
     - **Affects:** Callers of `applyAffiliateDefaults` — the public signature advertises brand-specific affiliate defaults, but the method body is entirely brand-agnostic. Any future caller that passes brand-specific data expecting it to be used will be silently ignored.
     - **Effort:** S (~0.5–1h)

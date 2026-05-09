@@ -59,7 +59,7 @@ Before adjudicating: three DeepSeek findings have verbatim evidence confirmed in
 
 ## P3 — Nice to have
 
-- [ ] **#DEAD-1** · P3 — `ensureTxt` and `upsertTxt` may be dead after custom-domain removal
+- [x] **#DEAD-1** · P3 — `ensureTxt` and `upsertTxt` may be dead after custom-domain removal
     - **Where:** app/Services/Cloudflare/CloudflareDnsService.php (`ensureTxt` and `upsertTxt` methods)
     - **Affects:** Cloudflare DNS service surface area — both methods add or patch TXT records for what their docblocks describe as "Shopify domain verification challenges," a flow eliminated by recent commits
     - **Effort:** S (~0.5–1h)
@@ -86,7 +86,7 @@ Before adjudicating: three DeepSeek findings have verbatim evidence confirmed in
         public function upsertTxt(string $name, string $content): ?string
         ```
 
-- [ ] **#NOOP-1** · P3 — `hydrateTypographySettings` is dead scaffolding called on every site cache fill
+- [x] **#NOOP-1** · P3 — `hydrateTypographySettings` is dead scaffolding called on every site cache fill
     - **Where:** app/Services/Cache/SiteCacheService.php (`hydrateTypographySettings` method, called from `hydrateSiteWithBrandTypography`)
     - **Affects:** Public site payload — three method calls deep on every cache fill, which the service docblock identifies as handling 95% of traffic; performs no transformation
     - **Effort:** S (~0.5–1h)
@@ -104,7 +104,7 @@ Before adjudicating: three DeepSeek findings have verbatim evidence confirmed in
         }
         ```
 
-- [ ] **#NOOP-2** · P3 — `flushHeldCommissions` is a self-documented no-op retained past its cleanup window
+- [x] **#NOOP-2** · P3 — `flushHeldCommissions` is a self-documented no-op retained past its cleanup window
     - **Where:** app/Services/Stripe/CommissionVoidService.php (`flushHeldCommissions` method)
     - **Affects:** `StripeConnectWebhookController` and any tests that call this method — each call writes a log entry and returns 0 with no other effect
     - **Effort:** S (~0.5–1h)
@@ -126,7 +126,7 @@ Before adjudicating: three DeepSeek findings have verbatim evidence confirmed in
         }
         ```
 
-- [ ] **#LEGACY-1** · P3 — `createSetupIntent` is a live Stripe API call on a documented legacy path
+- [x] **#LEGACY-1** · P3 — `createSetupIntent` is a live Stripe API call on a documented legacy path
     - **Where:** app/Services/Stripe/StripeConnectService.php:177-198
     - **Affects:** Brand payment method setup — the method creates a live `SetupIntent` object at Stripe on every call; as long as it coexists with `createPaymentMethodSetupCheckoutSession`, any caller using it bypasses hosted Checkout and requires client-side `client_secret` handling
     - **Effort:** S (~0.5–1h)
@@ -164,7 +164,7 @@ Before adjudicating: three DeepSeek findings have verbatim evidence confirmed in
         }
         ```
 
-- [ ] **#DISK-1** · P3 — `diskName()` duplicated between `ImageVariantService` and `VideoVariantService`, with a silent observability divergence
+- [x] **#DISK-1** · P3 — `diskName()` duplicated between `ImageVariantService` and `VideoVariantService`, with a silent observability divergence
     - **Where:** app/Services/Media/ImageVariantService.php (`diskName` method) and app/Services/Media/VideoVariantService.php (`diskName` method)
     - **Affects:** All R2/media-disk operations — if disk-resolution logic is updated in one service but not the other, image and video artifacts silently route to different storage buckets; `VideoVariantService` is missing the `Log::warning` that `ImageVariantService` emits when it falls through to `filesystems.default`
     - **Effort:** M (~2–4h)
@@ -214,7 +214,7 @@ Before adjudicating: three DeepSeek findings have verbatim evidence confirmed in
         }
         ```
 
-- [ ] **#DUP-1** · P3 — `formatMoney` triplicated across financial and notification services, with a behavioral divergence in the third copy
+- [x] **#DUP-1** · P3 — `formatMoney` triplicated across financial and notification services, with a behavioral divergence in the third copy
     - **Where:** app/Services/Stripe/CommissionPayoutService.php (~464–474), app/Services/Stripe/CommissionVoidService.php (~520–530), app/Services/Notifications/CommerceNotificationService.php (~176–186, named `formatMoneyFromCents`)
     - **Affects:** All currency-formatted strings in payout notifications, void warnings, and booking notifications — any new currency (e.g. NZD) must be added in three places; the third copy has a defensive AUD default and currency normalization the other two lack
     - **Effort:** S (~0.5–1h)

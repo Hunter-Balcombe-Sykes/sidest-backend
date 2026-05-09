@@ -28,7 +28,7 @@
 
 ## P2 — Should fix
 
-- [ ] **#SCHEMA-1** · P2 — Duplicate index on `analytics.site_visits (professional_id, occurred_at)`
+- [x] **#SCHEMA-1** · P2 — Duplicate index on `analytics.site_visits (professional_id, occurred_at)`
     - **Where:** supabase/migrations/20260403000000_v2_baseline.sql:1143-1144
     - **Affects:** Write throughput on `site_visits` — every INSERT pays double B-tree maintenance for two functionally identical indexes. Storage doubled for the index pair.
     - **Effort:** S (~0.5–1h)

@@ -132,7 +132,7 @@
 
 ## P3 — Nice to have
 
-- [ ] **#INTEG-1** · P3 — Booking sync push jobs redundantly re-check the feature flag already gated by `ServiceObserver`
+- [x] **#INTEG-1** · P3 — Booking sync push jobs redundantly re-check the feature flag already gated by `ServiceObserver`
     - **Where:** app/Observers/Core/ServiceObserver.php (`shouldDispatchFreshaSync`, `shouldDispatchSquareSync`); app/Jobs/Fresha/PushServiceToFreshaJob.php:35–37; app/Jobs/Square/PushServiceToSquareJob.php (handle guard)
     - **Affects:** Queue throughput when Fresha/Square sync features are disabled — jobs are dispatched to Redis and dequeued by workers only to exit immediately. More importantly, if the feature is enabled at dispatch time but disabled before the job runs (e.g., a config-only deploy mid-flight), the job silently discards the service mutation with no log entry.
     - **Effort:** S (~0.5–1h)
@@ -163,7 +163,7 @@
         }
         ```
 
-- [ ] **#KV-1** · P3 — Old Cloudflare KV handle entry not retired when a professional's handle changes
+- [x] **#KV-1** · P3 — Old Cloudflare KV handle entry not retired when a professional's handle changes
     - **Where:** app/Observers/Professional/ProfessionalObserver.php (`updated`); app/Jobs/Cloudflare/SyncSubdomainToKvJob.php (`handle`)
     - **Affects:** Any brand or affiliate who renames their handle — the old `<handle>.partna.au` subdomain continues to resolve via a stale KV routing entry. If the old handle is later claimed by a different user, the Worker routes their subdomain to the wrong routing profile until the KV entry is overwritten.
     - **Effort:** S (~0.5–1h)
