@@ -194,6 +194,7 @@ class ProfessionalCacheService
 
     public function getActiveServices(string $professionalId): array
     {
+        // busts: professionalServices + professionalServices:stale (invalidateProfessional)
         return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::professionalServices($professionalId),
             (int) config('partna.cache.ttls.auth_id_lookup'),
@@ -217,6 +218,7 @@ class ProfessionalCacheService
      */
     public function getDashboardServices(string $professionalId): array
     {
+        // busts: professionalDashboardServices + professionalDashboardServices:stale (invalidateProfessional)
         return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::professionalDashboardServices($professionalId),
             (int) config('partna.cache.ttls.auth_id_lookup'),
@@ -291,6 +293,7 @@ class ProfessionalCacheService
 
     public function getCustomerCount(string $professionalId): int
     {
+        // busts: customerCount + customerCount:stale (invalidateProfessional + CustomerObserver)
         return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::customerCount($professionalId),
             (int) config('partna.cache.ttls.public_payload'),
@@ -322,8 +325,11 @@ class ProfessionalCacheService
             $modelKey.':stale',
 
             CacheKeyGenerator::professionalServices($professional->id),
+            CacheKeyGenerator::professionalServices($professional->id).':stale',
             CacheKeyGenerator::professionalDashboardServices($professional->id),
+            CacheKeyGenerator::professionalDashboardServices($professional->id).':stale',
             CacheKeyGenerator::customerCount($professional->id),
+            CacheKeyGenerator::customerCount($professional->id).':stale',
 
             // brand-partner-status (CACHE-5): keyed by brand professional id, so
             // when *this* professional's display_name changes, every affiliate
