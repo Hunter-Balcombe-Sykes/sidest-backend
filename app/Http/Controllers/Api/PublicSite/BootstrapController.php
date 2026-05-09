@@ -150,7 +150,7 @@ class BootstrapController extends ApiController
 
                     $brandAffiliateInviteService->claimInvite($invite, $professional);
                     $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
-                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, (string) $invite->brand_professional_id);
+                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
                 } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
                     $brandPartnerProfessional = Professional::query()
                         ->whereKey((string) $data['brand_partner_professional_id'])
@@ -170,7 +170,7 @@ class BootstrapController extends ApiController
 
                     $brandPartnerLinks->promoteBrandToPrimary($affiliateId, $brandId);
                     $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
-                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, $brandId);
+                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
                 } elseif (is_string($data['join_brand_handle'] ?? null) && trim((string) $data['join_brand_handle']) !== '') {
                     $joinBrand = Professional::query()
                         ->where('handle_lc', strtolower(trim((string) $data['join_brand_handle'])))
@@ -188,7 +188,7 @@ class BootstrapController extends ApiController
                             if (! $brandPartnerLinks->isConnected($affiliateId, $brandId)) {
                                 $brandAffiliateInviteService->claimOpenInvite($joinBrand, $professional);
                                 $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
-                                $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site, $brandId);
+                                $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
                             }
                         }
                     }

@@ -91,7 +91,6 @@ class AccountTypeDefaultsService
     public function applyAffiliateDefaults(
         Professional $professional,
         Site $site,
-        string $brandProfessionalId
     ): void {
         $config = config('partna.account_type_defaults.affiliate', []);
 
