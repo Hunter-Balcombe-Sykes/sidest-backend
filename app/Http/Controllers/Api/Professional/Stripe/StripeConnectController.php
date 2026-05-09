@@ -4,10 +4,13 @@ namespace App\Http\Controllers\Api\Professional\Stripe;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
+use App\Http\Requests\Stripe\ConfirmPaymentMethodRequest;
 use App\Http\Requests\Stripe\ConfirmTopUpCheckoutRequest;
 use App\Http\Requests\Stripe\CreatePaymentMethodSetupRequest;
 use App\Http\Requests\Stripe\CreateTopUpCheckoutRequest;
+use App\Http\Requests\Stripe\OnboardRequest;
 use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
+use App\Http\Requests\Stripe\UpdateFundingModeRequest;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
@@ -52,13 +55,8 @@ class StripeConnectController extends Controller
      * Creates a Connect Express account and returns the onboarding URL.
      * Used by professionals/influencers to receive payouts.
      */
-    public function onboard(Request $request): JsonResponse
+    public function onboard(OnboardRequest $request): JsonResponse
     {
-        $request->validate([
-            'return_url' => 'required|url',
-            'refresh_url' => 'required|url',
-        ]);
-
         $pro = $request->attributes->get('professional');
 
         $url = $this->connectService->createOnboardingLink(
@@ -140,12 +138,8 @@ class StripeConnectController extends Controller
      * POST /stripe/payment-method/confirm
      * Saves the payment method after the brand confirms the SetupIntent.
      */
-    public function confirmPaymentMethod(Request $request): JsonResponse
+    public function confirmPaymentMethod(ConfirmPaymentMethodRequest $request): JsonResponse
     {
-        $request->validate([
-            'payment_method_id' => 'required|string',
-        ]);
-
         $pro = $request->attributes->get('professional');
         Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
@@ -210,12 +204,8 @@ class StripeConnectController extends Controller
      * PATCH /stripe/funding-mode
      * Set brand commission funding mode: auto_charge or manual_topup.
      */
-    public function updateFundingMode(Request $request): JsonResponse
+    public function updateFundingMode(UpdateFundingModeRequest $request): JsonResponse
     {
-        $request->validate([
-            'mode' => 'required|string|in:auto_charge,manual_topup',
-        ]);
-
         $pro = $request->attributes->get('professional');
         Gate::forUser($pro)->authorize('manageWallet', $pro);
 

@@ -47,7 +47,7 @@ beforeEach(function () {
  * lives at Database\Factories\ProfessionalFactory, not the nested path Laravel
  * would infer from the App\Models\Core\Professional\Professional namespace).
  */
-function makeProfessional(string $type = 'affiliate', ?string $displayName = null): Professional
+function graceWarning_makeProfessional(string $type = 'affiliate', ?string $displayName = null): Professional // renamed to avoid global fn collision
 {
     $id = (string) Str::uuid();
     $handle = 'pro-'.Str::random(8);
@@ -118,8 +118,8 @@ function makePayout(array $overrides = []): CommissionPayout
 it('sends mail + database channel for T-30 variant', function () {
     Notification::fake();
 
-    $aff = makeProfessional('affiliate');
-    $brand = makeProfessional('brand', 'Brand X');
+    $aff = graceWarning_makeProfessional('affiliate');
+    $brand = graceWarning_makeProfessional('brand', 'Brand X');
     $payout = makePayout([
         'affiliate_professional_id' => $aff->id,
         'brand_professional_id' => $brand->id,
@@ -136,8 +136,8 @@ it('sends mail + database channel for T-30 variant', function () {
 });
 
 it('database payload contains required fields for each variant', function (int $days) {
-    $aff = makeProfessional('affiliate');
-    $brand = makeProfessional('brand', 'Brand X');
+    $aff = graceWarning_makeProfessional('affiliate');
+    $brand = graceWarning_makeProfessional('brand', 'Brand X');
     $payout = makePayout([
         'affiliate_professional_id' => $aff->id,
         'brand_professional_id' => $brand->id,
@@ -158,8 +158,8 @@ it('database payload contains required fields for each variant', function (int $
 })->with([30, 7, 1]);
 
 it('mail subject escalates by days_remaining', function () {
-    $aff = makeProfessional('affiliate');
-    $brand = makeProfessional('brand', 'Brand Y');
+    $aff = graceWarning_makeProfessional('affiliate');
+    $brand = graceWarning_makeProfessional('brand', 'Brand Y');
     $payout = makePayout([
         'affiliate_professional_id' => $aff->id,
         'brand_professional_id' => $brand->id,

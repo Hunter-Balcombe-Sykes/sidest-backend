@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api\Professional\Stripe;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Stripe\OnboardRequest;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 
 /**
  * POST /affiliate/stripe/connect/start
@@ -20,13 +20,8 @@ class AffiliateStripeOnboardingController extends Controller
 {
     public function __construct(private readonly StripeConnectService $connectService) {}
 
-    public function startConnect(Request $request): JsonResponse
+    public function startConnect(OnboardRequest $request): JsonResponse
     {
-        $request->validate([
-            'return_url'  => 'required|url',
-            'refresh_url' => 'required|url',
-        ]);
-
         $aff = $request->attributes->get('professional');
 
         // Only affiliates (professional_type = 'professional') use Connect to
