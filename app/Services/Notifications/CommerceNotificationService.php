@@ -4,6 +4,7 @@ namespace App\Services\Notifications;
 
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
+use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -60,7 +61,7 @@ class CommerceNotificationService
                 $currencyCode = 'AUD';
             }
 
-            $amountLabel = $this->formatMoneyFromCents($amountPaidCents, $currencyCode);
+            $amountLabel = Money::format($amountPaidCents, $currencyCode);
             $serviceLabel = $serviceName !== '' ? $serviceName : 'Service';
             $customerLabel = $customerName !== '' ? $customerName : 'Customer';
             $eventKey = $eventId !== '' ? $eventId : ($bookingId !== '' ? $bookingId : Str::uuid()->toString());
@@ -171,7 +172,7 @@ class CommerceNotificationService
                 frontendType: 'Success',
                 category: 'analytics_milestones',
                 title: 'Booking revenue milestone reached',
-                body: 'Bookings revenue reached '.$this->formatMoneyFromCents($revenueMilestone, 'AUD').'.',
+                body: 'Bookings revenue reached '.Money::format($revenueMilestone, 'AUD').'.',
                 dedupeKey: 'booking:revenue:'.$revenueMilestone,
                 ctaUrl: '/account/sitepage?section=bookings',
                 retentionConfigKey: 'analytics_milestones',
@@ -193,23 +194,5 @@ class CommerceNotificationService
         }
 
         return (int) $reached->max();
-    }
-
-    private function formatMoneyFromCents(int $cents, string $currencyCode): string
-    {
-        $currencyCode = strtoupper(trim($currencyCode));
-        if ($currencyCode === '') {
-            $currencyCode = 'AUD';
-        }
-
-        $prefix = match ($currencyCode) {
-            'USD' => '$',
-            'GBP' => '£',
-            'EUR' => '€',
-            'AUD' => 'A$',
-            default => $currencyCode.' ',
-        };
-
-        return $prefix.number_format($cents / 100, 2, '.', ',');
     }
 }

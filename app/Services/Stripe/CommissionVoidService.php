@@ -8,6 +8,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Notifications\NotificationPublisher;
+use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -253,7 +254,7 @@ class CommissionVoidService
                 title: 'Commission payout expired',
                 body: sprintf(
                     'Your %s payout from %s has been cancelled because Stripe Connect was not activated within the grace period.',
-                    $this->formatMoney($payout->net_payout_cents, $payout->currency_code),
+                    Money::format($payout->net_payout_cents, $payout->currency_code),
                     $payout->brandProfessional?->display_name ?? 'a brand',
                 ),
                 dedupeKey: "payout_voided.{$payout->id}",
@@ -331,7 +332,7 @@ class CommissionVoidService
                             frontendType: 'Warning',
                             category: 'commissions',
                             title: $window['title'],
-                            body: sprintf($window['body'], $this->formatMoney($amount, 'AUD')),
+                            body: sprintf($window['body'], Money::format($amount, 'AUD')),
                             dedupeKey: "stripe_warning.{$key}.{$affiliate->id}",
                             ctaUrl: '/account/settings?section=stripe',
                             retentionConfigKey: 'commission',
@@ -392,7 +393,7 @@ class CommissionVoidService
                         body: sprintf(
                             'Connect Stripe within %d days or your %s commission from %s will be forfeited.',
                             $daysLeft,
-                            $this->formatMoney((int) $order->commission_cents, $order->currency_code),
+                            Money::format((int) $order->commission_cents, $order->currency_code),
                             $order->occurred_at->format('M j'),
                         ),
                         dedupeKey: "stripe_warning.commission.{$order->id}",
@@ -451,7 +452,7 @@ class CommissionVoidService
                             frontendType: 'Warning',
                             category: 'commissions',
                             title: $window['title'],
-                            body: sprintf($window['body'], $this->formatMoney($payout->net_payout_cents, $payout->currency_code)),
+                            body: sprintf($window['body'], Money::format($payout->net_payout_cents, $payout->currency_code)),
                             dedupeKey: "stripe_warning.payout.{$key}.{$payout->id}",
                             ctaUrl: '/account/settings?section=stripe',
                             retentionConfigKey: 'commission',
@@ -642,18 +643,5 @@ class CommissionVoidService
             Order::whereIn('id', $orderIds)
                 ->update(['payout_id' => null]);
         }
-    }
-
-    private function formatMoney(int $cents, string $currencyCode): string
-    {
-        $prefix = match (strtoupper($currencyCode)) {
-            'USD' => '$',
-            'GBP' => '£',
-            'EUR' => '€',
-            'AUD' => 'A$',
-            default => strtoupper($currencyCode).' ',
-        };
-
-        return $prefix.number_format($cents / 100, 2, '.', ',');
     }
 }

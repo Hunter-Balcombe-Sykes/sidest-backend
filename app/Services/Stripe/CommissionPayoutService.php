@@ -9,6 +9,7 @@ use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Notifications\NotificationPublisher;
+use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiConnectionException;
@@ -459,7 +460,7 @@ class CommissionPayoutService
                     title: 'Commission payout on hold',
                     body: sprintf(
                         'A commission payout of %s could not be processed because your wallet balance is in %s. Please contact support to resolve the currency mismatch.',
-                        $this->formatMoney($payout->gross_commission_cents, $payout->currency_code),
+                        Money::format($payout->gross_commission_cents, $payout->currency_code),
                         $walletCurrency,
                     ),
                     dedupeKey: "wallet_currency_mismatch.{$payout->id}",
@@ -807,19 +808,6 @@ class CommissionPayoutService
         ])->save();
 
         return $this->processPayoutBatch($payout) === true;
-    }
-
-    private function formatMoney(int $cents, string $currencyCode): string
-    {
-        $prefix = match (strtoupper($currencyCode)) {
-            'USD' => '$',
-            'GBP' => '£',
-            'EUR' => '€',
-            'AUD' => 'A$',
-            default => strtoupper($currencyCode).' ',
-        };
-
-        return $prefix.number_format($cents / 100, 2, '.', ',');
     }
 
     /**
