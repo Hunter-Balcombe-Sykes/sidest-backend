@@ -166,27 +166,6 @@ it('does not void commissions for affiliates with active Stripe', function () {
     expect(Order::find('c1')->status)->toBe('approved');
 });
 
-it('flushHeldCommissions is a no-op in Phase 4+', function () {
-    // Orders are 'approved' from creation; there is no held state to flush.
-    // This contract is documented on the method — the test guards against accidental regression.
-    $publisher = Mockery::mock(NotificationPublisher::class);
-    $service = new CommissionVoidService($publisher);
-
-    seedVoidBrand('brand-1');
-    seedVoidAffiliate('aff-1', 'active');
-
-    seedVoidCommission('c1', 'brand-1', 'aff-1', 1000, now()->subDays(10)->toDateTimeString());
-    seedVoidCommission('c2', 'brand-1', 'aff-1', 2000, now()->subDays(35)->toDateTimeString());
-
-    $affiliate = Professional::find('aff-1');
-    $count = $service->flushHeldCommissions($affiliate);
-
-    expect($count)->toBe(0);
-    // Orders are unchanged — flush does not mutate them.
-    expect(Order::find('c1')->status)->toBe('approved');
-    expect(Order::find('c2')->status)->toBe('approved');
-});
-
 it('identifies affiliates within grace period', function () {
     $publisher = Mockery::mock(NotificationPublisher::class);
     $service = new CommissionVoidService($publisher);

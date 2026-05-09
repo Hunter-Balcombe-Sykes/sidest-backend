@@ -466,27 +466,6 @@ class CommissionVoidService
     }
 
     /**
-     * Phase 4+: no-op. In the legacy ledger model, accruals were 'pending' until
-     * the affiliate connected Stripe, then promoted to 'approved'. The rebuilt
-     * commerce.orders model creates orders as 'approved' immediately (Phase 3.5+);
-     * there is no held state to flush. The next payout cron picks them up
-     * automatically once the affiliate's stripe_connect_status flips to 'active'.
-     *
-     * Kept on the public surface so the StripeConnectWebhookController and tests
-     * can still call it without conditional plumbing.
-     *
-     * @return int Always 0.
-     */
-    public function flushHeldCommissions(Professional $affiliate): int
-    {
-        Log::info('flushHeldCommissions is a no-op in Phase 4+ — orders are approved on creation', [
-            'affiliate_id' => (string) $affiliate->id,
-        ]);
-
-        return 0;
-    }
-
-    /**
      * Check if an affiliate is within their grace period (Stripe not yet required).
      */
     public function isInGracePeriod(Professional $affiliate): bool

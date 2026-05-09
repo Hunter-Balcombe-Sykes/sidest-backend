@@ -6,11 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Billing\WebhookEvent;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
-use App\Services\Stripe\CommissionVoidService;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\Webhook;
@@ -212,18 +210,7 @@ class StripeConnectWebhookController extends Controller
         if ($professional->stripe_connect_status !== $status) {
             $oldStatus = $professional->stripe_connect_status;
 
-            // Atomic: if flushHeldCommissions throws, the status update is rolled back.
-            // The professional stays in their prior state; the next account.updated
-            // (new event_id, bypasses idempotency) retries the full transition cleanly.
-            DB::transaction(function () use ($professional, $status, $oldStatus) {
-                $professional->update(['stripe_connect_status' => $status]);
-
-                // When an affiliate transitions to 'active', flush any held commissions
-                // so they enter the normal payout pipeline immediately.
-                if ($status === 'active' && $oldStatus !== 'active') {
-                    app(CommissionVoidService::class)->flushHeldCommissions($professional);
-                }
-            });
+            $professional->update(['stripe_connect_status' => $status]);
 
             Log::info('Stripe Connect status updated', [
                 'professional_id' => $professional->id,
