@@ -2,9 +2,13 @@
 
 namespace App\Providers;
 
+use App\Listeners\RecordCacheMetrics;
 use App\Listeners\RecordScheduledTaskHeartbeat;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Policies\IntegrationPolicy;
+use Illuminate\Cache\Events\CacheHit;
+use Illuminate\Cache\Events\CacheMissed;
+use Illuminate\Cache\Events\KeyWritten;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\ScheduledTaskStarting;
 use Illuminate\Database\Eloquent\Model;
@@ -102,6 +106,12 @@ class AppServiceProvider extends ServiceProvider
         // Scheduler heartbeat — feeds GET /api/health/scheduler so a stopped cron
         // runner becomes visible. See RecordScheduledTaskHeartbeat for rationale.
         Event::listen(ScheduledTaskStarting::class, RecordScheduledTaskHeartbeat::class);
+
+        // Cache hit/miss/write counters — bucketed by key prefix into Redis hashes so
+        // AggregateCacheMetricsJob can surface per-prefix hit rates to Nightwatch.
+        Event::listen(CacheHit::class, RecordCacheMetrics::class);
+        Event::listen(CacheMissed::class, RecordCacheMetrics::class);
+        Event::listen(KeyWritten::class, RecordCacheMetrics::class);
 
         // Strict-mode N+1 trap: throw on unloaded relation access outside production
         // so tests/local catch lazy loading instead of leaking slow queries to prod.

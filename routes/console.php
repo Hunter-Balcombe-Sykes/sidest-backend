@@ -108,6 +108,15 @@ Schedule::command('queue:prune-failed --hours=72')
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: prune-failed-jobs');
     });
 
+// Reads the previous hour's cache hit/miss Redis counters, logs structured metrics,
+// and reports SLO violations (hot prefixes below 90% hit rate) to Nightwatch.
+Schedule::job(new \App\Jobs\Cache\AggregateCacheMetricsJob)
+    ->hourly()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: aggregate-cache-metrics');
+    });
+
 // Snapshots queue throughput / runtime metrics into Redis so the Horizon
 // Metrics tab has data to render. Without this, "Jobs per minute" and
 // "Runtime" graphs stay flat-empty. Five minutes is Horizon's standard cadence.
