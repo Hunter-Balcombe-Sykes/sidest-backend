@@ -45,6 +45,10 @@ use App\Http\Controllers\Api\Professional\Store\BrandDesignController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreSettingsController;
 use App\Http\Controllers\Api\Professional\Store\ShareCheckoutLinkController;
 use App\Http\Controllers\Api\Professional\Store\ShopifyResyncController;
+use App\Http\Controllers\Api\Professional\Affiliate\AffiliatePayoutsController;
+use App\Http\Controllers\Api\Professional\Brand\BrandBillingSummaryController;
+use App\Http\Controllers\Api\Professional\Brand\BrandPayoutsController;
+use App\Http\Controllers\Api\Professional\Stripe\AffiliateStripeOnboardingController;
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Controllers\Api\Professional\SubscriptionController;
 use App\Http\Controllers\Api\Professional\Uploads\ProfessionalUploadController;
@@ -411,6 +415,14 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/stripe/topups/checkout', [StripeConnectController::class, 'createTopUpCheckoutSession']);
         Route::post('/stripe/topups/confirm', [StripeConnectController::class, 'confirmTopUpCheckoutSession']);
         Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
+
+        // Brand billing & payout history (Lane B prerequisites — new role-scoped endpoints)
+        Route::get('/brand/billing-summary', [BrandBillingSummaryController::class, 'show']);
+        Route::get('/brand/payouts', [BrandPayoutsController::class, 'index']);
+
+        // Affiliate payout history & Connect onboarding (Lane B prerequisites)
+        Route::get('/affiliate/payouts', [AffiliatePayoutsController::class, 'index']);
+        Route::post('/affiliate/stripe/connect/start', [AffiliateStripeOnboardingController::class, 'startConnect']);
 
         // Affiliate Product Selections & Custom Photos — affiliate accounts only
         Route::middleware(['affiliate.only'])->group(function () {

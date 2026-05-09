@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Commerce\BrandAffiliateRollup;
 use App\Models\Core\Professional\Professional;
+use App\Models\Retail\CommissionPayout;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Model;
@@ -65,6 +66,24 @@ class CommissionPolicy extends BasePolicy
      */
     public function viewProjections(Professional $pro, BrandAffiliateRollup $skeleton): bool
     {
+        return (string) $pro->id === (string) $skeleton->affiliate_professional_id;
+    }
+
+    /**
+     * Authorizes an affiliate to view their own payout list.
+     *
+     * Brands have a symmetric endpoint (/brand/payouts, guarded by manageWallet).
+     * This gate guards the affiliate-facing route — only non-brand professionals
+     * can access it, and only their own rows. The actor's id must match the
+     * skeleton's affiliate_professional_id AND the actor must not be a brand type.
+     */
+    public function viewOwnPayouts(Professional $pro, CommissionPayout $skeleton): bool
+    {
+        // Brands use manageWallet / /brand/payouts instead.
+        if (($pro->professional_type ?? null) === 'brand') {
+            return false;
+        }
+
         return (string) $pro->id === (string) $skeleton->affiliate_professional_id;
     }
 
