@@ -125,6 +125,7 @@ class StripeConnectWebhookController extends Controller
             'account.application.deauthorized' => $this->handleAccountDeauthorized((string) ($event->account ?? '')),
             'checkout.session.completed' => $this->handleCheckoutSessionCompleted($event->data->object, (string) ($event->account ?? '')),
             'transfer.created' => $this->handleTransferCreated($event->data->object),
+            'transfer.paid' => $this->handleTransferPaid($event->data->object),
             'transfer.failed' => $this->handleTransferFailed($event->data->object),
             'transfer.reversed' => $this->handleTransferReversed($event->data->object),
             'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object, (string) ($event->account ?? '')),
@@ -135,12 +136,38 @@ class StripeConnectWebhookController extends Controller
         return response()->json(['received' => true]);
     }
 
-    private function handleCheckoutSessionCompleted(object $checkoutSession, string $connectedAccountId): void
+    private function handleCheckoutSessionCompleted(object $session, string $connectedAccountId): void
     {
-        Log::debug('Stripe checkout session completed (no-op in V2)', [
-            'checkout_session_id' => $checkoutSession->id ?? null,
-            'connected_account_id' => $connectedAccountId,
-        ]);
+        $professionalId = $session->metadata?->professional_id ?? null;
+
+        if (! $professionalId) {
+            Log::warning('stripe.checkout_completed.missing_professional_id', [
+                'session_id' => $session->id ?? null,
+                'mode'       => $session->mode ?? null,
+            ]);
+
+            return;
+        }
+
+        $service = app(StripeConnectService::class);
+
+        match ($session->mode ?? null) {
+            'setup' => $service->syncPaymentMethodFromCheckoutSession(
+                Professional::find($professionalId),
+                $session->id
+            ),
+            // 'payment' arm wired in Phase A3.1; stub log here to avoid 500 errors on early delivery.
+            'payment' => method_exists($service, 'creditWalletFromCheckoutSession')
+                ? $service->creditWalletFromCheckoutSession($professionalId, $session)
+                : Log::info('stripe.checkout_completed.payment_deferred', [
+                    'session_id' => $session->id ?? null,
+                    'phase'      => 'A2 stub; implementation lands in A3.1',
+                ]),
+            default => Log::warning('stripe.checkout_completed.unknown_mode', [
+                'session_id' => $session->id ?? null,
+                'mode'       => $session->mode ?? null,
+            ]),
+        };
     }
 
     /**
@@ -239,6 +266,69 @@ class StripeConnectWebhookController extends Controller
         ]);
     }
 
+    /**
+     * Handle transfer.paid — Stripe confirms funds have settled to the connected account.
+     * Marks the payout 'completed', stamps transfer_completed_at, clears any prior error fields,
+     * and bumps the analytics cache for both sides of the transaction.
+     *
+     * Idempotent: already-completed payouts are skipped. Payouts in a terminal failure state
+     * (failed / cancelled / reversed) are logged and skipped — they should not be re-opened.
+     */
+    private function handleTransferPaid(object $transfer): void
+    {
+        $payoutId = $transfer->metadata?->sidest_payout_id ?? null;
+
+        if (! $payoutId) {
+            Log::warning('stripe.transfer_paid.missing_payout_metadata', ['transfer_id' => $transfer->id]);
+
+            return;
+        }
+
+        $payout = CommissionPayout::find($payoutId);
+
+        if (! $payout) {
+            Log::warning('stripe.transfer_paid.payout_not_found', [
+                'transfer_id' => $transfer->id,
+                'payout_id'   => $payoutId,
+            ]);
+
+            return;
+        }
+
+        if ($payout->status === 'completed') {
+            return; // idempotent
+        }
+
+        if (in_array($payout->status, ['failed', 'cancelled', 'reversed'], true)) {
+            Log::warning('stripe.transfer_paid.unexpected_status', [
+                'payout_id' => $payoutId,
+                'status'    => $payout->status,
+            ]);
+
+            return;
+        }
+
+        $payout->forceFill([
+            'status'                => 'completed',
+            'transfer_completed_at' => now(),
+            'failure_code'          => null,
+            'failure_reason'        => null,
+            'failure_category'      => null,
+            'stripe_error_code'     => null,
+            'stripe_error_message'  => null,
+        ])->save();
+
+        $analytics = app(\App\Services\Cache\AnalyticsCacheService::class);
+        if ($payout->affiliate_professional_id) {
+            $analytics->bumpAnalyticsVersion($payout->affiliate_professional_id);
+        }
+        if ($payout->brand_professional_id) {
+            $analytics->bumpAnalyticsVersion($payout->brand_professional_id);
+        }
+
+        Log::info('stripe.transfer_paid', ['transfer_id' => $transfer->id, 'payout_id' => $payoutId]);
+    }
+
     private function handleTransferFailed(object $transfer): void
     {
         $payoutId = $transfer->metadata?->sidest_payout_id ?? null;
@@ -248,17 +338,32 @@ class StripeConnectWebhookController extends Controller
         }
 
         $payout = CommissionPayout::find($payoutId);
-        if ($payout && ! in_array($payout->status, ['failed', 'completed', 'cancelled'], true)) {
-            $payout->forceFill([
-                'status' => 'failed',
-                'failure_code' => 'transfer_failed_webhook',
-                'failure_reason' => 'Transfer failed according to Stripe webhook',
-            ])->save();
+
+        if (! $payout) {
+            return;
+        }
+
+        if (in_array($payout->status, ['failed', 'completed', 'cancelled'], true)) {
+            return;
+        }
+
+        $payout->forceFill([
+            'status'               => 'failed',
+            'failure_code'         => 'transfer_failed_webhook',
+            'failure_reason'       => 'Transfer failed according to Stripe webhook',
+            'failure_category'     => 'affiliate_account',
+            'stripe_error_code'    => $transfer->failure_code ?? null,
+            'stripe_error_message' => $transfer->failure_message ?? null,
+        ])->save();
+
+        if ($payout->affiliate_professional_id) {
+            app(\App\Services\Cache\AnalyticsCacheService::class)
+                ->bumpAnalyticsVersion($payout->affiliate_professional_id);
         }
 
         Log::warning('Stripe transfer failed', [
             'transfer_id' => $transfer->id,
-            'payout_id' => $payoutId,
+            'payout_id'   => $payoutId,
         ]);
     }
 
@@ -301,15 +406,22 @@ class StripeConnectWebhookController extends Controller
         // real-world scenario (transfer confirmed → payout marked complete → Stripe later
         // reverses). Completed payouts must be updatable here, unlike handleTransferFailed.
         $payout->forceFill([
-            'status' => 'reversed',
-            'failure_code' => 'transfer_reversed',
-            'failure_reason' => 'Transfer reversed by Stripe after delivery — funds clawed back',
-            'needs_manual_refund' => true,
+            'status'               => 'reversed',
+            'failure_code'         => 'transfer_reversed',
+            'failure_reason'       => 'Transfer reversed by Stripe after delivery — funds clawed back',
+            'needs_manual_refund'  => true,
+            'stripe_error_code'    => $transfer->failure_code ?? null,
+            'stripe_error_message' => $transfer->failure_message ?? null,
         ])->save();
 
+        if ($payout->affiliate_professional_id) {
+            app(\App\Services\Cache\AnalyticsCacheService::class)
+                ->bumpAnalyticsVersion($payout->affiliate_professional_id);
+        }
+
         Log::warning('stripe.transfer_reversed', [
-            'transfer_id' => $transfer->id,
-            'payout_id' => $payoutId,
+            'transfer_id'     => $transfer->id,
+            'payout_id'       => $payoutId,
             'previous_status' => $previousStatus,
         ]);
     }

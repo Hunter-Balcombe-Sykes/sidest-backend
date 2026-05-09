@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
 use App\Services\Stripe\CommissionVoidService;
+use App\Services\Stripe\StripeConnectService;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -242,6 +243,10 @@ describe('transfer.reversed webhook', function () {
             currency_code TEXT NOT NULL DEFAULT \'AUD\',
             failure_reason TEXT,
             failure_code TEXT,
+            failure_category TEXT,
+            stripe_error_code TEXT,
+            stripe_error_message TEXT,
+            transfer_completed_at TEXT,
             needs_manual_refund INTEGER NOT NULL DEFAULT 0,
             ledger_entry_count INTEGER NOT NULL DEFAULT 0,
             wallet_debit_cents INTEGER DEFAULT 0,
@@ -377,5 +382,294 @@ describe('transfer.reversed webhook', function () {
         // completed payouts must NOT be touched by transfer.failed
         $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-fail-1')->first();
         expect($row->status)->toBe('completed');
+    });
+});
+
+// ============================================================
+// transfer.paid — settlement handler tests
+// ============================================================
+
+describe('transfer.paid webhook', function () {
+    beforeEach(function () {
+        DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
+            id TEXT PRIMARY KEY,
+            brand_professional_id TEXT,
+            affiliate_professional_id TEXT,
+            stripe_transfer_id TEXT,
+            status TEXT NOT NULL DEFAULT \'pending\',
+            gross_commission_cents INTEGER NOT NULL DEFAULT 0,
+            platform_fee_cents INTEGER NOT NULL DEFAULT 0,
+            net_payout_cents INTEGER NOT NULL DEFAULT 0,
+            currency_code TEXT NOT NULL DEFAULT \'AUD\',
+            failure_reason TEXT,
+            failure_code TEXT,
+            failure_category TEXT,
+            stripe_error_code TEXT,
+            stripe_error_message TEXT,
+            transfer_completed_at TEXT,
+            needs_manual_refund INTEGER NOT NULL DEFAULT 0,
+            ledger_entry_count INTEGER NOT NULL DEFAULT 0,
+            wallet_debit_cents INTEGER DEFAULT 0,
+            charge_cents INTEGER DEFAULT 0,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            void_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )');
+    });
+
+    // Helper: build a transfer.paid Stripe Event
+    function makeTransferPaidEvent(string $payoutId, string $transferId = 'tr_paid_test'): \Stripe\Event
+    {
+        return \Stripe\Event::constructFrom([
+            'id'          => 'evt_paid_'.Str::random(10),
+            'object'      => 'event',
+            'api_version' => '2024-04-10',
+            'created'     => time(),
+            'type'        => 'transfer.paid',
+            'data'        => [
+                'object' => [
+                    'id'       => $transferId,
+                    'object'   => 'transfer',
+                    'metadata' => ['sidest_payout_id' => $payoutId],
+                ],
+            ],
+            'livemode' => false,
+        ]);
+    }
+
+    it('flips a transferring payout to completed and stamps transfer_completed_at', function () {
+        insertWebhookPayout('payout-paid-1', 'transferring');
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent(makeTransferPaidEvent('payout-paid-1'));
+
+        $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-paid-1')->first();
+        expect($row->status)->toBe('completed');
+        expect($row->transfer_completed_at)->not->toBeNull();
+    });
+
+    it('is idempotent — duplicate transfer.paid on an already-completed payout is a no-op', function () {
+        insertWebhookPayout('payout-paid-2', 'completed');
+        // Pre-set a known transfer_completed_at to confirm it is NOT overwritten
+        DB::connection('pgsql')->table('commerce.commission_payouts')
+            ->where('id', 'payout-paid-2')
+            ->update(['transfer_completed_at' => '2024-01-01 00:00:00']);
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent(makeTransferPaidEvent('payout-paid-2'));
+
+        $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-paid-2')->first();
+        expect($row->status)->toBe('completed');
+        // timestamp must not be updated by the idempotent path
+        expect($row->transfer_completed_at)->toBe('2024-01-01 00:00:00');
+    });
+
+    it('skips a failed payout and logs a warning (does not re-open terminal status)', function () {
+        insertWebhookPayout('payout-paid-3', 'failed');
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent(makeTransferPaidEvent('payout-paid-3'));
+
+        $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-paid-3')->first();
+        expect($row->status)->toBe('failed');
+    });
+
+    it('bumps the analytics cache for both affiliate and brand on settlement', function () {
+        $affId  = (string) Str::uuid();
+        $brandId = (string) Str::uuid();
+
+        DB::connection('pgsql')->table('commerce.commission_payouts')->insert([
+            'id'                       => 'payout-paid-4',
+            'status'                   => 'transferring',
+            'affiliate_professional_id' => $affId,
+            'brand_professional_id'    => $brandId,
+            'gross_commission_cents'   => 5000,
+            'platform_fee_cents'       => 150,
+            'net_payout_cents'         => 4850,
+            'currency_code'            => 'AUD',
+            'created_at'               => now()->toDateTimeString(),
+            'updated_at'               => now()->toDateTimeString(),
+        ]);
+
+        $analytics = Mockery::mock(\App\Services\Cache\AnalyticsCacheService::class);
+        $analytics->shouldReceive('bumpAnalyticsVersion')->with($affId)->once();
+        $analytics->shouldReceive('bumpAnalyticsVersion')->with($brandId)->once();
+        app()->instance(\App\Services\Cache\AnalyticsCacheService::class, $analytics);
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent(makeTransferPaidEvent('payout-paid-4'));
+    });
+});
+
+// ============================================================
+// transfer.failed — verbatim Stripe error capture tests
+// ============================================================
+
+describe('transfer.failed verbatim error capture', function () {
+    beforeEach(function () {
+        DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
+            id TEXT PRIMARY KEY,
+            brand_professional_id TEXT,
+            affiliate_professional_id TEXT,
+            stripe_transfer_id TEXT,
+            status TEXT NOT NULL DEFAULT \'pending\',
+            gross_commission_cents INTEGER NOT NULL DEFAULT 0,
+            platform_fee_cents INTEGER NOT NULL DEFAULT 0,
+            net_payout_cents INTEGER NOT NULL DEFAULT 0,
+            currency_code TEXT NOT NULL DEFAULT \'AUD\',
+            failure_reason TEXT,
+            failure_code TEXT,
+            failure_category TEXT,
+            stripe_error_code TEXT,
+            stripe_error_message TEXT,
+            transfer_completed_at TEXT,
+            needs_manual_refund INTEGER NOT NULL DEFAULT 0,
+            ledger_entry_count INTEGER NOT NULL DEFAULT 0,
+            wallet_debit_cents INTEGER DEFAULT 0,
+            charge_cents INTEGER DEFAULT 0,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            void_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )');
+    });
+
+    it('captures stripe_error_code and stripe_error_message from the webhook payload', function () {
+        insertWebhookPayout('payout-ferr-1', 'transferring');
+
+        $event = \Stripe\Event::constructFrom([
+            'id'          => 'evt_ferr_'.Str::random(10),
+            'object'      => 'event',
+            'api_version' => '2024-04-10',
+            'created'     => time(),
+            'type'        => 'transfer.failed',
+            'data'        => [
+                'object' => [
+                    'id'              => 'tr_ferr_1',
+                    'object'          => 'transfer',
+                    'failure_code'    => 'account_closed',
+                    'failure_message' => 'The destination account has been closed.',
+                    'metadata'        => ['sidest_payout_id' => 'payout-ferr-1'],
+                ],
+            ],
+            'livemode' => false,
+        ]);
+
+        $controller = app(StripeConnectWebhookController::class);
+        $controller->handleParsedEvent($event);
+
+        $row = DB::connection('pgsql')->table('commerce.commission_payouts')->where('id', 'payout-ferr-1')->first();
+        expect($row->status)->toBe('failed');
+        expect($row->failure_code)->toBe('transfer_failed_webhook');
+        expect($row->failure_category)->toBe('affiliate_account');
+        expect($row->stripe_error_code)->toBe('account_closed');
+        expect($row->stripe_error_message)->toBe('The destination account has been closed.');
+    });
+});
+
+// ============================================================
+// checkout.session.completed — mode branching tests
+// ============================================================
+
+describe('checkout.session.completed webhook', function () {
+    it('mode=setup calls syncPaymentMethodFromCheckoutSession on the professional', function () {
+        $proId = (string) Str::uuid();
+        DB::table('core.professionals')->insert([
+            'id'                       => $proId,
+            'handle'                   => 'brand_checkout',
+            'professional_type'        => 'brand',
+            'status'                   => 'active',
+            'stripe_connect_account_id' => null,
+            'stripe_connect_status'    => 'active',
+            'created_at'               => now(),
+            'updated_at'               => now(),
+        ]);
+
+        $mockService = Mockery::mock(StripeConnectService::class);
+        $mockService->shouldReceive('syncPaymentMethodFromCheckoutSession')
+            ->once()
+            ->withArgs(function ($pro, $sessionId) use ($proId) {
+                return $pro->id === $proId && $sessionId === 'cs_test_session_1';
+            })
+            ->andReturn(['status' => 'ok']);
+        app()->instance(StripeConnectService::class, $mockService);
+
+        $event = \Stripe\Event::constructFrom([
+            'id'          => 'evt_checkout_'.Str::random(10),
+            'object'      => 'event',
+            'api_version' => '2024-04-10',
+            'created'     => time(),
+            'type'        => 'checkout.session.completed',
+            'data'        => [
+                'object' => [
+                    'id'       => 'cs_test_session_1',
+                    'object'   => 'checkout.session',
+                    'mode'     => 'setup',
+                    'metadata' => ['professional_id' => $proId],
+                ],
+            ],
+            'livemode' => false,
+        ]);
+
+        $controller = app(StripeConnectWebhookController::class);
+        $response = $controller->handleParsedEvent($event);
+        expect($response->getStatusCode())->toBe(200);
+    });
+
+    it('mode=payment logs a deferred stub when creditWalletFromCheckoutSession does not exist', function () {
+        $proId = (string) Str::uuid();
+
+        // Bind a partial mock that deliberately does NOT have creditWalletFromCheckoutSession,
+        // so method_exists() returns false and the handler falls through to the stub log.
+        $mockService = Mockery::mock(StripeConnectService::class)->makePartial();
+        app()->instance(StripeConnectService::class, $mockService);
+
+        // StripeConnectService does NOT have creditWalletFromCheckoutSession in this phase;
+        // the handler must log a stub and return 200 without throwing.
+        $event = \Stripe\Event::constructFrom([
+            'id'          => 'evt_checkout_pay_'.Str::random(10),
+            'object'      => 'event',
+            'api_version' => '2024-04-10',
+            'created'     => time(),
+            'type'        => 'checkout.session.completed',
+            'data'        => [
+                'object' => [
+                    'id'       => 'cs_test_payment_1',
+                    'object'   => 'checkout.session',
+                    'mode'     => 'payment',
+                    'metadata' => ['professional_id' => $proId],
+                ],
+            ],
+            'livemode' => false,
+        ]);
+
+        $controller = app(StripeConnectWebhookController::class);
+        $response = $controller->handleParsedEvent($event);
+        // Must not throw and must return 200 — the stub path is safe
+        expect($response->getStatusCode())->toBe(200);
+    });
+
+    it('missing professional_id logs a warning and returns 200', function () {
+        $event = \Stripe\Event::constructFrom([
+            'id'          => 'evt_checkout_noid_'.Str::random(10),
+            'object'      => 'event',
+            'api_version' => '2024-04-10',
+            'created'     => time(),
+            'type'        => 'checkout.session.completed',
+            'data'        => [
+                'object' => [
+                    'id'       => 'cs_test_noid',
+                    'object'   => 'checkout.session',
+                    'mode'     => 'setup',
+                    'metadata' => [],
+                ],
+            ],
+            'livemode' => false,
+        ]);
+
+        $controller = app(StripeConnectWebhookController::class);
+        $response = $controller->handleParsedEvent($event);
+        expect($response->getStatusCode())->toBe(200);
     });
 });
