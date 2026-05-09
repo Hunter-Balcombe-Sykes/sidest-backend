@@ -66,6 +66,14 @@ beforeEach(function () {
         retry_count INTEGER NOT NULL DEFAULT 0,
         needs_manual_refund INTEGER NOT NULL DEFAULT 0,
         void_at TEXT,
+        transfer_completed_at TEXT,
+        stripe_error_code TEXT,
+        stripe_error_message TEXT,
+        next_retry_at TEXT,
+        last_retry_at TEXT,
+        funding_failure_count INTEGER NOT NULL DEFAULT 0,
+        failure_category TEXT,
+        grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
         created_at TEXT,
         updated_at TEXT
     )');
@@ -104,10 +112,11 @@ function payoutSvc_seedOrder(
     ?\Illuminate\Support\Carbon $occurredAt = null,
     string $status = 'approved',
     int $refundCents = 0,
+    array $extraColumns = [],
 ): string {
     $orderId = (string) Str::uuid();
     $ts = ($occurredAt ?? now())->toDateTimeString();
-    DB::connection('pgsql')->table('commerce.orders')->insert([
+    DB::connection('pgsql')->table('commerce.orders')->insert(array_merge([
         'id' => $orderId,
         'shopify_order_id' => 'shop_order_'.substr($orderId, 0, 8),
         'shopify_shop_domain' => 'test.myshopify.com',
@@ -128,7 +137,7 @@ function payoutSvc_seedOrder(
         'occurred_at' => $ts,
         'created_at' => now()->toDateTimeString(),
         'updated_at' => now()->toDateTimeString(),
-    ]);
+    ], $extraColumns));
 
     return $orderId;
 }
@@ -376,7 +385,7 @@ it('does NOT flag currency mismatch when wallet balance is zero regardless of cu
     ]);
 
     $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test']);
+    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
 
     $publisher = Mockery::mock(NotificationPublisher::class);
     $publisher->shouldNotReceive('publish');
@@ -405,7 +414,7 @@ it('completes a card-only payout when brand wallet balance is zero', function ()
     ]);
 
     $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test']);
+    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
     $result = $service->processPayoutBatch($payout);
@@ -431,7 +440,7 @@ it('completes a wallet-only payout without creating a PaymentIntent', function (
     $piMock->shouldNotReceive('create');
 
     $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_wallet']);
+    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_wallet', 'status' => 'paid']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
     $result = $service->processPayoutBatch($payout);
@@ -459,7 +468,7 @@ it('completes a wallet-and-card payout when wallet partially covers the amount',
         ->andReturn((object) ['id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test']);
 
     $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test']);
+    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
     $result = $service->processPayoutBatch($payout);
@@ -496,7 +505,7 @@ it('does not re-debit the wallet when resuming from collecting status', function
     ]);
 
     $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test']);
+    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
     $result = $service->processPayoutBatch($payout);
@@ -529,7 +538,7 @@ it('skips PaymentIntent creation and retrieves the existing one when resuming fr
     $transferMock->shouldReceive('create')
         ->once()
         ->with(Mockery::on(fn ($p) => ($p['source_transaction'] ?? null) === 'ch_existing'), Mockery::any())
-        ->andReturn((object) ['id' => 'tr_test']);
+        ->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
     $result = $service->processPayoutBatch($payout);
@@ -554,7 +563,7 @@ it('skips wallet debit and card charge when resuming from transferring status', 
     $piMock->shouldNotReceive('retrieve');
 
     $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test']);
+    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
     $result = $service->processPayoutBatch($payout);
@@ -563,7 +572,7 @@ it('skips wallet debit and card charge when resuming from transferring status', 
     expect($payout->fresh()->stripe_transfer_id)->toBe('tr_test');
 });
 
-it('skips transfer creation and completes when stripe_transfer_id was already recorded', function () {
+it('skips transfer creation and leaves payout at transferring when stripe_transfer_id was already recorded', function () {
     // Simulates a crash between saving stripe_transfer_id and saving status=completed.
     // On resume the service must not create a second transfer.
     payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
@@ -585,7 +594,9 @@ it('skips transfer creation and completes when stripe_transfer_id was already re
 
     $fresh = $payout->fresh();
     expect($result)->toBeTrue();
-    expect($fresh->status)->toBe('completed');
+    // Guard path: stripe_transfer_id was already recorded, $newTransfer is null.
+    // We leave the payout at 'transferring' so the transfer.paid webhook completes it.
+    expect($fresh->status)->toBe('transferring');
     expect($fresh->stripe_transfer_id)->toBe('tr_already');
 });
 
@@ -748,7 +759,7 @@ it('increments retry_count on admin retry so a fresh PaymentIntent idempotency k
         'id' => 'pi_r3', 'status' => 'succeeded', 'latest_charge' => 'ch_r3',
     ]);
     $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->andReturn((object) ['id' => 'tr_r3']);
+    $transferMock->shouldReceive('create')->andReturn((object) ['id' => 'tr_r3', 'status' => 'paid']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
     $service->retryPayout($payout);
@@ -1156,7 +1167,7 @@ it('rebuilds batch amounts and completes when some linked orders are refunded be
     $transferMock->shouldReceive('create')
         ->once()
         ->with(Mockery::on(fn ($p) => $p['amount'] === 8000), Mockery::any())
-        ->andReturn((object) ['id' => 'tr_test']);
+        ->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
     $result = $service->processPayoutBatch($payout);
@@ -1174,6 +1185,115 @@ it('rebuilds batch amounts and completes when some linked orders are refunded be
     expect($refunded->payout_id)->toBeNull();
     $good = DB::connection('pgsql')->table('commerce.orders')->where('id', $goodId)->first();
     expect($good->payout_id)->toBe('p1');
+});
+
+// ============================================================
+// A3.2 — Card-on-file gate + rate_source='pending' exclusion
+// ============================================================
+
+it('does not create a payout batch for brands without stripe_payment_method_id', function () {
+    // Brand has no card on file — we must never attempt to create a payout batch for them.
+    payoutSvc_seedBrand('brand-1', ['stripe_payment_method_id' => null]);
+    payoutSvc_seedAffiliate('aff-1');
+
+    payoutSvc_seedOrder(
+        brandId: 'brand-1',
+        affiliateId: 'aff-1',
+        commissionCents: 5000,
+        occurredAt: now()->subDays(10),
+    );
+
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(0);
+});
+
+it('does not create a payout batch for brands without stripe_customer_id', function () {
+    payoutSvc_seedBrand('brand-1', ['stripe_customer_id' => null]);
+    payoutSvc_seedAffiliate('aff-1');
+
+    payoutSvc_seedOrder(
+        brandId: 'brand-1',
+        affiliateId: 'aff-1',
+        commissionCents: 5000,
+        occurredAt: now()->subDays(10),
+    );
+
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(0);
+});
+
+it('does not include rate_source=pending orders in the payout sweep', function () {
+    // Orders with rate_source='pending' have an out-of-bounds metafield rate and cannot be valued.
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1');
+
+    payoutSvc_seedOrder(
+        brandId: 'brand-1',
+        affiliateId: 'aff-1',
+        commissionCents: 5000,
+        occurredAt: now()->subDays(10),
+        extraColumns: ['rate_source' => 'pending'],
+    );
+
+    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
+    $stats = $service->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(0);
+});
+
+// ============================================================
+// A3.3 — Transfer.status check before flipping to completed
+// ============================================================
+
+it('leaves payout at transferring when Transfer.status is not paid', function () {
+    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
+    payoutSvc_seedAffiliate('aff-1');
+    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
+
+    $piMock = Mockery::mock();
+    $piMock->shouldReceive('create')->once()->andReturn((object) [
+        'id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test',
+    ]);
+
+    $transferMock = Mockery::mock();
+    // Stripe returns 'pending' when the Connect account is not fully onboarded.
+    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_pending', 'status' => 'pending']);
+
+    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
+    $result = $service->processPayoutBatch($payout);
+
+    $payout->refresh();
+    expect($result)->toBeTrue();
+    expect($payout->status)->toBe('transferring');
+    expect($payout->stripe_transfer_id)->toBe('tr_pending');
+    // transfer_completed_at must not be stamped until the webhook fires
+    expect($payout->transfer_completed_at)->toBeNull();
+});
+
+it('stamps transfer_completed_at when Transfer.status is paid immediately', function () {
+    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
+    payoutSvc_seedAffiliate('aff-1');
+    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
+
+    $piMock = Mockery::mock();
+    $piMock->shouldReceive('create')->once()->andReturn((object) [
+        'id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test',
+    ]);
+
+    $transferMock = Mockery::mock();
+    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_paid', 'status' => 'paid']);
+
+    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
+    $result = $service->processPayoutBatch($payout);
+
+    $payout->refresh();
+    expect($result)->toBeTrue();
+    expect($payout->status)->toBe('completed');
+    expect($payout->transfer_completed_at)->not->toBeNull();
 });
 
 it('fails with net_payout_zero when resuming from collecting with a zero net amount', function () {

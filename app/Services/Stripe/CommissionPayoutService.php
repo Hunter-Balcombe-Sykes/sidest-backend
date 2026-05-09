@@ -8,6 +8,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
+use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -23,6 +24,8 @@ class CommissionPayoutService
 
     private NotificationPublisher $publisher;
 
+    private AnalyticsCacheService $analyticsCache;
+
     private float $platformFeePercent;
 
     private int $systemHoldDays;
@@ -31,10 +34,11 @@ class CommissionPayoutService
 
     private int $gracePeriodDays;
 
-    public function __construct(?StripeClient $stripe = null, ?NotificationPublisher $publisher = null)
+    public function __construct(?StripeClient $stripe = null, ?NotificationPublisher $publisher = null, ?AnalyticsCacheService $analyticsCache = null)
     {
         $this->stripe = $stripe ?? new StripeClient(config('services.stripe.secret_key'));
         $this->publisher = $publisher ?? app(NotificationPublisher::class);
+        $this->analyticsCache = $analyticsCache ?? app(AnalyticsCacheService::class);
         $this->platformFeePercent = config('partna.store.platform_fee_percent', 3);
         $this->systemHoldDays = max(0, (int) config('partna.store.payout_hold_days', 7));
         $this->minHoldDays = (int) config('partna.store.min_payout_hold_days', 7);
@@ -80,13 +84,25 @@ class CommissionPayoutService
             $stats['batches_requeued']++;
         }
 
+        // Only consider brands that have a card on file — brands without payment details
+        // cannot be charged, so creating payout batches for them would immediately stall.
+        $eligibleBrandIds = Professional::query()
+            ->where('professional_type', 'brand')
+            ->whereNotNull('stripe_customer_id')
+            ->whereNotNull('stripe_payment_method_id')
+            ->pluck('id');
+
         // Find all brands with unpaid approved orders, then apply per-brand hold days
         // to determine which orders have cleared their hold window.
         // Phase 3.5: source of truth moves from commission_movements to commerce.orders.
+        // Exclude rate_source='pending' orders — these have an out-of-bounds metafield
+        // and cannot be valued until the brand corrects their rate configuration.
         $brandIds = Order::query()
             ->where('status', 'approved')
             ->whereNull('payout_id')
             ->where('refund_cents', 0)
+            ->where('rate_source', '!=', 'pending')
+            ->whereIn('brand_professional_id', $eligibleBrandIds)
             ->distinct()
             ->pluck('brand_professional_id');
 
@@ -548,6 +564,9 @@ class CommissionPayoutService
 
             // Guard: skip transfer creation if a prior run already recorded the ID
             // (e.g. the transfer was saved but the server crashed before marking complete).
+            // $newTransfer is only set when we actually call Stripe in this run; the guard
+            // path leaves it null and stays at 'transferring' for the webhook to complete.
+            $newTransfer = null;
             if (! $payout->stripe_transfer_id) {
                 $transferPayload = [
                     'amount' => $payout->net_payout_cents,
@@ -565,7 +584,7 @@ class CommissionPayoutService
                     $transferPayload['source_transaction'] = $latestChargeId;
                 }
 
-                $transfer = $this->stripe->transfers->create(
+                $newTransfer = $this->stripe->transfers->create(
                     $transferPayload,
                     // Stable key — no retry_count suffix. Stripe returns the same transfer
                     // on any retry (including admin retries that increment retry_count),
@@ -576,26 +595,46 @@ class CommissionPayoutService
 
                 // Persist stripe_transfer_id before the completion record. If the process
                 // crashes between these two saves, the guard above prevents re-creation.
-                $payout->forceFill(['stripe_transfer_id' => $transfer->id])->save();
+                $payout->forceFill(['stripe_transfer_id' => $newTransfer->id])->save();
             }
 
-            $payout->forceFill([
-                'status' => 'completed',
-                'processed_at' => now(),
-                'failure_code' => null,
-                'failure_reason' => null,
-            ])->save();
+            // Transfer.status='paid' means funds landed immediately (most cases).
+            // 'pending' means the Connect account is not yet fully onboarded; the
+            // transfer.paid webhook (A2.2) will flip status to completed once Stripe settles.
+            // Guard/resume path ($newTransfer=null) stays at 'transferring' — the webhook
+            // or ReconcileStuckTransferringPayoutsJob will complete it.
+            $transferStatus = $newTransfer?->status ?? 'pending';
 
-            Log::info('Commission payout completed', [
-                'payout_id' => $payout->id,
-                'gross_cents' => $payout->gross_commission_cents,
-                'wallet_debit_cents' => $walletDebitCents,
-                'charge_cents' => $chargeAmountCents,
-                'platform_fee_cents' => $payout->platform_fee_cents,
-                'net_cents' => $payout->net_payout_cents,
-                'funding_source' => $payout->funding_source,
-                'currency' => $payout->currency_code,
-            ]);
+            if ($transferStatus === 'paid') {
+                $payout->forceFill([
+                    'status' => 'completed',
+                    'processed_at' => now(),
+                    'transfer_completed_at' => now(),
+                    'failure_code' => null,
+                    'failure_reason' => null,
+                ])->save();
+
+                $this->analyticsCache->bumpAnalyticsVersion($brand->id);
+                $this->analyticsCache->bumpAnalyticsVersion($affiliate->id);
+
+                Log::info('Commission payout completed (transfer paid immediately)', [
+                    'payout_id' => $payout->id,
+                    'gross_cents' => $payout->gross_commission_cents,
+                    'wallet_debit_cents' => $walletDebitCents,
+                    'charge_cents' => $chargeAmountCents,
+                    'platform_fee_cents' => $payout->platform_fee_cents,
+                    'net_cents' => $payout->net_payout_cents,
+                    'funding_source' => $payout->funding_source,
+                    'currency' => $payout->currency_code,
+                ]);
+            } else {
+                // Leave status as 'transferring' — the transfer.paid webhook will complete it.
+                Log::info('Commission payout transfer pending Stripe settlement', [
+                    'payout_id' => $payout->id,
+                    'stripe_transfer_id' => $payout->stripe_transfer_id,
+                    'transfer_status' => $transferStatus,
+                ]);
+            }
 
             return true;
         } catch (ApiConnectionException|RateLimitException $e) {
