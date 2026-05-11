@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Internal;
 use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
+use App\Jobs\Shopify\CreateShopifyCollectionsJob;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
@@ -650,10 +651,17 @@ class EmbeddedSetupController extends ApiController
         // Dispatch jobs only on first provision OR when a previous provision appears
         // incomplete. Two incomplete signals:
         //   1. webhook state is 'queued' — all jobs likely failed (e.g. bad token)
-        //   2. collection handles are missing — metafields/collections jobs didn't finish
+        //   2. ANY required collection handle is missing — metafields/collections
+        //      jobs partially failed. Smart collections (active, high-commission)
+        //      depend on metafield definitions, so a race in the initial setup can
+        //      leave default + favourites created but active + high-commission
+        //      missing. Checking each handle individually catches that partial
+        //      state — the old `empty(active) && empty(default)` check missed it.
         $existingWebhookState = Arr::get($existingMetadata, 'webhook_registration_state', '');
         $collectionsIncomplete = empty(Arr::get($existingMetadata, 'active_collection_handle'))
-            && empty(Arr::get($existingMetadata, 'default_collection_handle'));
+            || empty(Arr::get($existingMetadata, 'default_collection_handle'))
+            || empty(Arr::get($existingMetadata, 'favourites_collection_handle'))
+            || empty(Arr::get($existingMetadata, 'high_commission_collection_handle'));
         $needsJobDispatch = empty($existing?->access_token)
             || $existingWebhookState === 'queued'
             || $collectionsIncomplete;
@@ -690,11 +698,18 @@ class EmbeddedSetupController extends ApiController
         // This endpoint fires on every embedded app load for token refreshes, so
         // guard carefully — successful setups must not re-queue jobs repeatedly.
         if ($needsJobDispatch) {
+            // CreateShopifyCollectionsJob is included explicitly (in addition to
+            // being chained from CreateShopifySalesChannelJob) so a re-provision
+            // where sales-channel is already registered still recreates any
+            // missing collections. The job is ShouldBeUnique + findOrCreate-by-
+            // title so the redundant trigger is a safe no-op when collections
+            // are already complete.
             $jobs = [
                 RegisterShopifyWebhooksJob::class,
                 CreateStorefrontAccessTokenJob::class,
                 CreateShopifyMetafieldsJob::class,
                 CreateShopifySalesChannelJob::class,
+                CreateShopifyCollectionsJob::class,
                 SyncShopifyBrandDesignJob::class,
             ];
 
