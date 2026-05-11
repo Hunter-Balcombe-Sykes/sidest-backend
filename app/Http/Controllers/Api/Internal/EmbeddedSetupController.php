@@ -648,16 +648,16 @@ class EmbeddedSetupController extends ApiController
             'connected_via' => 'embedded_wizard',
         ]);
 
-        // Clear disconnected_at — stamped by ShopifyAppUninstalledWebhookController
+        // Clear disconnected_* — stamped by ShopifyAppUninstalledWebhookController
         // on uninstall, never auto-cleared on reinstall. Without removal here,
         // BrandStatusService::determine() keeps returning Disconnected (its
         // first check), which traps the embedded app's wizard in a redirect
         // loop (app.tsx loader: brand_status === 'disconnected' → needsReconnect
-        // → /shopify-setup, repeat). Under managed installation the OAuth
-        // redirect callback never fires, so this provision-integration call is
-        // the only path that runs on reinstall — clearing the flag here closes
-        // the reinstall recovery gap.
+        // → /shopify-setup, repeat). Both keys must be cleared — the uninstall
+        // webhook writes both `disconnected_at` (timestamp) and `disconnected_reason`
+        // ('app_uninstalled'); clearing only one used to leave the brand stuck.
         unset($metadata['disconnected_at']);
+        unset($metadata['disconnected_reason']);
 
         // Dispatch jobs only on first provision OR when a previous provision appears
         // incomplete. Two incomplete signals:
@@ -685,6 +685,25 @@ class EmbeddedSetupController extends ApiController
         $isNoOpRefresh = ! $needsJobDispatch
             && $existing !== null
             && $existing->access_token === $data['access_token'];
+
+        // Validate-before-store: the embedded app re-posts session.accessToken on
+        // every load, and historically a bad token (rotated, revoked, scope mismatch)
+        // could overwrite a previously-working one — every async job afterwards 401s
+        // until the merchant reinstalls. Verify the candidate against Shopify Admin
+        // API before persisting. Skip on no-op refreshes (token unchanged) and skip
+        // on first install (no prior token to protect; refusal would block onboarding).
+        $tokenChanged = $existing !== null && $existing->access_token !== $data['access_token'];
+        if ($tokenChanged && ! $this->validateShopifyAccessToken($shopDomain, $data['access_token'])) {
+            Log::warning('Shopify provision-integration: token rejected by Shopify; refusing to overwrite existing token.', [
+                'professional_id' => $professionalId,
+                'shop_domain' => $shopDomain,
+            ]);
+
+            return $this->error(
+                'Shopify rejected the new access token. Uninstall and reinstall the Partna app from Shopify admin to issue a fresh credential.',
+                422,
+            );
+        }
 
         $integration = ProfessionalIntegration::updateOrCreate(
             [
@@ -790,6 +809,42 @@ class EmbeddedSetupController extends ApiController
             return 'unreachable';
         } catch (\Throwable) {
             return 'unreachable';
+        }
+    }
+
+    /**
+     * Verify a candidate Shopify access token works against Shopify Admin API
+     * before persisting it. Prevents the documented foot-gun where a bad token
+     * (rotated/revoked/scope-mismatch) overwrites a working one and silently
+     * breaks every async job until the merchant reinstalls.
+     *
+     * 200 → valid, return true.
+     * 401 → invalid, return false (caller must NOT overwrite existing token).
+     * Other (5xx, network error, timeout) → return true so we don't punish
+     * merchants for transient Shopify outages or local network blips.
+     */
+    private function validateShopifyAccessToken(string $shopDomain, string $accessToken): bool
+    {
+        if ($accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
+            return false;
+        }
+
+        $apiVersion = (string) config('services.shopify.api_version', '2025-01');
+        $url = "https://{$shopDomain}/admin/api/{$apiVersion}/shop.json";
+
+        try {
+            $response = Http::withHeaders(['X-Shopify-Access-Token' => $accessToken])
+                ->timeout(8)
+                ->get($url);
+
+            return $response->status() !== 401;
+        } catch (\Throwable $e) {
+            Log::warning('Shopify provision-integration: token validation request failed; allowing write.', [
+                'shop_domain' => $shopDomain,
+                'error' => $e->getMessage(),
+            ]);
+
+            return true;
         }
     }
 }
