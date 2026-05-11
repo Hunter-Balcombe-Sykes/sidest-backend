@@ -75,5 +75,48 @@ jobs:
 
           echo "No inline auth bypasses found."
 
+      - name: No raw Cache::* calls outside cache services (GS-1)
+        run: |
+          # GS-1: Cache keys must flow through CacheKeyGenerator and a *CacheService
+          # to preserve tenant-prefix discipline. A rogue Cache::put('user_count', $n)
+          # in a controller is one git push away from a cross-tenant data leak — this
+          # lint blocks that class of bug before it reaches review.
+          #
+          # Allowlisted by path:
+          #   - app/Services/Cache/                  — the canonical cache layer itself
+          #   - app/Http/Controllers/Api/Webhooks/   — Cache::add() for idempotency dedupe
+          #   - pre-existing legitimate callers      — file-level entries below.
+          # New code MUST route through a cache service. To add a new exception,
+          # justify it in PR review and append the path here.
+          set +e
+          BAD=$(git grep -n -E '\bCache::(put|remember|rememberForever|forget|add)\b' -- \
+            'app/' \
+            ':!app/Services/Cache/' \
+            ':!app/Http/Controllers/Api/Webhooks/' \
+            ':!app/Http/Controllers/Api/HealthController.php' \
+            ':!app/Http/Controllers/Api/Professional/ShopifyEmbeddedConnectionController.php' \
+            ':!app/Http/Controllers/Api/Professional/Notifications/NotificationController.php' \
+            ':!app/Http/Controllers/Api/Professional/Store/BrandStoreSettingsController.php' \
+            ':!app/Http/Controllers/Api/PublicSite/PublicShopifyStorefrontController.php' \
+            ':!app/Jobs/Shopify/ProcessShopifyShopUpdateJob.php' \
+            ':!app/Observers/Core/BrandProfileObserver.php' \
+            ':!app/Observers/Core/CustomerObserver.php' \
+            ':!app/Observers/Retail/BrandStoreSettingsObserver.php' \
+            ':!app/Services/Professional/BrandStatusService.php' \
+            ':!app/Services/Shopify/ShopifySetupTokenService.php' \
+            ':!app/Services/Store/BrandCatalogService.php' \
+            ':!app/Services/Stripe/CommissionPayoutRefundService.php' \
+            ':!app/Services/Stripe/StripeConnectService.php')
+          set -e
+          if [ -n "$BAD" ]; then
+            echo "::error::Found raw Cache::(put|remember|rememberForever|forget|add) call(s) outside the cache-services allowlist."
+            echo "$BAD"
+            echo ""
+            echo "Use a method on a *CacheService (or CacheLockService::rememberLocked) with CacheKeyGenerator for key construction."
+            echo "If this is a legitimate exception (webhook idempotency, internal token cache), add the file path to the allowlist in .github/workflows/ci.yml."
+            exit 1
+          fi
+          echo "No raw Cache:: calls outside the GS-1 allowlist."
+
       - name: Run tests
         run: composer test

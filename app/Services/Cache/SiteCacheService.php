@@ -10,14 +10,29 @@ use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Views\PublicSitePayload;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 // V2: Public site payload caching with single-flight locking (prevents thundering herd). Handles 95% of traffic. Simplified in V2 — no more product payload caching.
 class SiteCacheService
 {
     private const MISS_SENTINEL = '__MISS__';
+
+    /**
+     * Stale-extension multiplier — matches CacheLockService::STALE_TTL_MULTIPLIER.
+     * Primary TTL 15m → :stale TTL 150m (2.5h last-good window) on the public payload.
+     */
+    private const PAYLOAD_STALE_TTL_MULTIPLIER = 10;
+
+    /**
+     * Short negative-cache window for "no published site for this subdomain". 30s on the
+     * primary key keeps bot scans off the DB; the longer :stale window survives a primary
+     * eviction so a parallel bot-burst still hits cache, not the view.
+     */
+    private const MISS_PRIMARY_TTL_SECONDS = 30;
 
     /** @var array<string, array<string, string|null>|null> */
     private array $brandPartnerEnrichmentCache = [];
@@ -33,6 +48,7 @@ class SiteCacheService
      */
     protected function buildPayloadFromDb(string $subdomain, string $key): ?array
     {
+        $staleKey = $key.':stale';
         $row = PublicSitePayload::query()
             ->whereRaw('lower(subdomain) = ?', [$subdomain])
             ->first();
@@ -40,7 +56,10 @@ class SiteCacheService
         // View only contains published sites; if not found, treat as 404.
         if (! $row) {
             // Negative-cache briefly to reduce DB load from bot scans.
-            Cache::put($key, self::MISS_SENTINEL, now()->addSeconds(30));
+            // :stale gets a longer window so the next bot-burst still hits cache
+            // even if the primary just evicted.
+            Cache::put($key, self::MISS_SENTINEL, now()->addSeconds(self::MISS_PRIMARY_TTL_SECONDS));
+            Cache::put($staleKey, self::MISS_SENTINEL, now()->addSeconds(self::MISS_PRIMARY_TTL_SECONDS * self::PAYLOAD_STALE_TTL_MULTIPLIER));
 
             return null;
         }
@@ -88,9 +107,25 @@ class SiteCacheService
         $data = $this->safeWithStorePayload($data, (string) ($row->professional_id ?? ''), $subdomain);
         $data = $this->safeApplyBrandImageFallbacks($data, $subdomain);
 
-        Cache::put($key, $data, $this->jitteredPayloadTtl());
+        $this->writePayloadWithStale($key, $data);
 
         return $data;
+    }
+
+    /**
+     * Write the payload to both the primary (jittered TTL) and :stale (×10 window) keys.
+     *
+     * Mirrors CacheLockService::writeWithJitter's contract so a primary expiry inside
+     * the SWR fast path in getPublicSitePayload() can return last-good immediately while
+     * one worker recomputes. busts must clear both keys (see invalidateSite() — keys are
+     * routed through bustWithStale()).
+     */
+    private function writePayloadWithStale(string $key, mixed $value): void
+    {
+        $staleTtl = (int) config('partna.cache.ttls.public_payload') * self::PAYLOAD_STALE_TTL_MULTIPLIER;
+
+        Cache::put($key, $value, $this->jitteredPayloadTtl());
+        Cache::put($key.':stale', $value, $staleTtl);
     }
 
     /**
@@ -115,6 +150,7 @@ class SiteCacheService
         $subdomain = strtolower($subdomain);
 
         $key = CacheKeyGenerator::publicSitePayload($subdomain);
+        $staleKey = $key.':stale';
         $cached = Cache::get($key);
 
         if ($cached === self::MISS_SENTINEL) {
@@ -151,21 +187,52 @@ class SiteCacheService
                     );
                 }
 
-                Cache::put($key, $cached, $this->jitteredPayloadTtl());
+                $this->writePayloadWithStale($key, $cached);
 
                 return $cached;
             }
             Cache::forget($key);
+            Cache::forget($staleKey);
         }
 
-        // Cache miss — acquire a per-subdomain fill lock so only one process rebuilds
-        // the payload from the DB view while concurrent requests wait (single-flight).
+        // SWR fast path: primary expired but :stale still live — return last-good
+        // immediately while one worker (lock winner) recomputes silently.
+        $stale = Cache::get($staleKey);
+        if ($stale !== null) {
+            $fillLock = Cache::lock('site:fill:'.$subdomain, 10);
+            // Non-blocking attempt: if another worker is already recomputing, fall
+            // through and return the stale value — that's the whole point of SWR.
+            if ($fillLock->get()) {
+                try {
+                    // Re-check primary: another process may have filled it while we raced.
+                    $rechecked = Cache::get($key);
+                    if ($rechecked === self::MISS_SENTINEL) {
+                        return null;
+                    }
+                    if (is_array($rechecked) && array_key_exists('services', $rechecked)) {
+                        return $rechecked;
+                    }
+
+                    return $this->buildPayloadFromDb($subdomain, $key);
+                } finally {
+                    $this->releaseLockQuiet($fillLock);
+                }
+            }
+
+            // Another worker holds the fill lock — serve the last-good copy without
+            // blocking. Sentinel preserves the "no site found" 404 contract.
+            return $stale === self::MISS_SENTINEL ? null : (is_array($stale) ? $stale : null);
+        }
+
+        // Cold miss (no primary, no stale) — acquire a per-subdomain fill lock so
+        // only one process rebuilds the payload from the DB view while concurrent
+        // requests wait (single-flight).
         $fillLock = Cache::lock('site:fill:'.$subdomain, 10);
 
         try {
             // Block up to 5 s for the lock; raises LockTimeoutException if it can't.
             $fillLock->block(5);
-        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+        } catch (LockTimeoutException) {
             // Another process is (or was) filling the cache.
             $warm = Cache::get($key);
             if ($warm === self::MISS_SENTINEL) {
@@ -192,7 +259,21 @@ class SiteCacheService
 
             return $this->buildPayloadFromDb($subdomain, $key);
         } finally {
-            $fillLock->release();
+            $this->releaseLockQuiet($fillLock);
+        }
+    }
+
+    /**
+     * Release a lock without letting a double-release (or driver quirk) bubble up.
+     * Mirrors CacheLockService — the finally block must never throw on top of an
+     * earlier exception from the closure.
+     */
+    private function releaseLockQuiet(\Illuminate\Contracts\Cache\Lock $lock): void
+    {
+        try {
+            $lock->release();
+        } catch (Throwable) {
+            // ignore — lock may have auto-expired or been released elsewhere
         }
     }
 
@@ -782,7 +863,9 @@ class SiteCacheService
         $professionalId = (string) ($site->professional_id ?? '');
 
         $keys = [
-            CacheKeyGenerator::publicSitePayload($site->subdomain),
+            // busts: site:payload:{subdomain} + :stale (CACHE-2 — SWR fast path
+            // serves :stale on primary expiry, so invalidation must clear both)
+            ...self::bustWithStale(CacheKeyGenerator::publicSitePayload($site->subdomain)),
             ...self::bustWithStale(CacheKeyGenerator::siteBlocks($site->id, 'links')),
             ...self::bustWithStale(CacheKeyGenerator::siteBlocks($site->id, 'sections')),
             CacheKeyGenerator::siteImages($site->id),
@@ -811,7 +894,10 @@ class SiteCacheService
         if ($site->wasChanged('subdomain')) {
             $old = strtolower((string) $site->getOriginal('subdomain'));
             if ($old !== '') {
-                $keys[] = CacheKeyGenerator::publicSitePayload($old);
+                // busts: site:payload:{old} + :stale — same SWR contract as the new key.
+                foreach (self::bustWithStale(CacheKeyGenerator::publicSitePayload($old)) as $oldKey) {
+                    $keys[] = $oldKey;
+                }
             }
         }
 
@@ -822,7 +908,10 @@ class SiteCacheService
             ->all();
 
         foreach ($aliasSubdomains as $aliasSubdomain) {
-            $keys[] = CacheKeyGenerator::publicSitePayload(strtolower($aliasSubdomain));
+            // busts: site:payload:{alias} + :stale (CACHE-2 SWR symmetry)
+            foreach (self::bustWithStale(CacheKeyGenerator::publicSitePayload(strtolower($aliasSubdomain))) as $aliasKey) {
+                $keys[] = $aliasKey;
+            }
         }
 
         Cache::deleteMultiple(array_values(array_unique($keys)));
