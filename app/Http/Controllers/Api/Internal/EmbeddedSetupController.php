@@ -648,6 +648,17 @@ class EmbeddedSetupController extends ApiController
             'connected_via' => 'embedded_wizard',
         ]);
 
+        // Clear disconnected_at — stamped by ShopifyAppUninstalledWebhookController
+        // on uninstall, never auto-cleared on reinstall. Without removal here,
+        // BrandStatusService::determine() keeps returning Disconnected (its
+        // first check), which traps the embedded app's wizard in a redirect
+        // loop (app.tsx loader: brand_status === 'disconnected' → needsReconnect
+        // → /shopify-setup, repeat). Under managed installation the OAuth
+        // redirect callback never fires, so this provision-integration call is
+        // the only path that runs on reinstall — clearing the flag here closes
+        // the reinstall recovery gap.
+        unset($metadata['disconnected_at']);
+
         // Dispatch jobs only on first provision OR when a previous provision appears
         // incomplete. Two incomplete signals:
         //   1. webhook state is 'queued' — all jobs likely failed (e.g. bad token)
