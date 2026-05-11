@@ -286,7 +286,7 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
     {
         $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELD_DEFINITIONS_QUERY, [
             'ownerType' => $ownerType,
-            'namespace' => 'sidest',
+            'namespace' => 'partna',
             'first' => 50,
         ]);
 
@@ -319,7 +319,7 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
     private function createDefinition(string $shopDomain, string $accessToken, string $apiVersion, string $ownerType, array $def, bool $useAsCollectionCondition = false): void
     {
         $definition = [
-            'namespace' => 'sidest',
+            'namespace' => 'partna',
             'key' => $def['key'],
             'name' => $def['name'],
             'type' => $def['type'],

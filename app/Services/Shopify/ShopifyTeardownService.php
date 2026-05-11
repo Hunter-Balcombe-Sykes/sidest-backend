@@ -383,7 +383,7 @@ class ShopifyTeardownService
         ] as [$ownerType, $expectedKeys]) {
             $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELD_DEFINITIONS_QUERY, [
                 'ownerType' => $ownerType,
-                'namespace' => 'sidest',
+                'namespace' => 'partna',
                 'first' => 50,
             ]);
 

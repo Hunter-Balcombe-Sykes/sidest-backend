@@ -81,7 +81,7 @@ query collectionProducts($handle: String!, $first: Int!, $after: String) {
                 title
                 availableForSale
                 price
-                metafield(namespace: "sidest", key: "enabled") { value }
+                metafield(namespace: "partna", key: "enabled") { value }
               }
             }
           }
@@ -140,7 +140,7 @@ query allProducts($first: Int!, $after: String) {
               title
               availableForSale
               price
-              metafield(namespace: "sidest", key: "enabled") { value }
+              metafield(namespace: "partna", key: "enabled") { value }
             }
           }
         }
@@ -608,7 +608,7 @@ GRAPHQL;
         // null. ?: coerces null/empty to the default so we never send handle: null
         // to Shopify's String! GraphQL parameter, which would cause a validation
         // error that breaks the loop before the all-products fallback engages.
-        $collectionHandle = Arr::get($metadata, 'active_collection_handle') ?: 'sidest-active-products';
+        $collectionHandle = Arr::get($metadata, 'active_collection_handle') ?: 'partna-active-products';
         $apiVersion = config('services.shopify.api_version', '2025-01');
 
         if ($shopDomain === '' || $accessToken === '') {
