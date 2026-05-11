@@ -88,6 +88,24 @@ return [
             ],
         ],
 
+        // Legacy alias: media_variants rows uploaded when PARTNA_MEDIA_DISK='public_dev'
+        // reference this disk name. Mirrors the 'media' disk so those variant URLs
+        // resolve correctly without a data migration. Non-throwing so old media rows
+        // that can't be found don't surface as exceptions.
+        'public_dev' => [
+            'driver' => 's3',
+            'key' => env('MEDIA_DISK_KEY', env('AWS_ACCESS_KEY_ID')),
+            'secret' => env('MEDIA_DISK_SECRET', env('AWS_SECRET_ACCESS_KEY')),
+            'region' => env('MEDIA_DISK_REGION', env('AWS_DEFAULT_REGION', 'auto')),
+            'bucket' => env('MEDIA_DISK_BUCKET', env('AWS_BUCKET', 'sidest-media')),
+            'url' => env('MEDIA_DISK_URL', env('AWS_URL')),
+            'endpoint' => env('MEDIA_DISK_ENDPOINT', env('AWS_ENDPOINT')),
+            'use_path_style_endpoint' => env('MEDIA_DISK_PATH_STYLE', env('AWS_USE_PATH_STYLE_ENDPOINT', false)),
+            'throw' => false,
+            'report' => false,
+            'visibility' => 'public',
+        ],
+
     ],
 
     /*
