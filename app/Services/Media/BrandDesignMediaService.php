@@ -302,17 +302,17 @@ class BrandDesignMediaService
         $placeholders = [];
 
         foreach ($rows as $row) {
-            $url = $row->variantUrls()['optimized'] ?? null;
-            $ready = $row->processing_state === SiteMedia::PROCESSING_STATE_READY;
-
-            // Only skip failed rows (already excluded by query — defensive).
-            // Pending/processing rows appear in the dashboard with an empty url
-            // so the brand can see what's queued.
-            if ($ready && $url === null) {
-                continue;
-            }
+            $rawUrl = $row->variantUrls()['optimized'] ?? null;
+            // MediaVariant::getUrlAttribute returns '' on a fallback failure
+            // (disk not in config, Storage::disk() throws). Treat that the
+            // same as a missing variant — both mean "no usable URL".
+            $url = (is_string($rawUrl) && $rawUrl !== '') ? $rawUrl : null;
 
             if ($row->purpose === SiteMedia::PURPOSE_LOGO_FULL) {
+                // Logos are single-slot. If the URL didn't resolve (variant
+                // missing, disk misconfigured) leave the slot null so the
+                // dashboard renders the empty-state uploader instead of a
+                // broken image.
                 if ($url !== null) {
                     $logo['full_url'] = $url;
                 }
@@ -321,6 +321,20 @@ class BrandDesignMediaService
                     $logo['square_url'] = $url;
                 }
             } elseif ($row->purpose === SiteMedia::PURPOSE_PLACEHOLDER) {
+                // Placeholders are always returned — the count in addPlaceholder
+                // (PLACEHOLDER_MAX gate) counts every non-failed row, so the
+                // list MUST too or the user hits "limit reached" while seeing
+                // zero placeholders, with no UI affordance to clear the
+                // orphans. Rows without a resolvable URL render as empty
+                // cards with the remove control intact.
+                if ($url === null && $row->processing_state === SiteMedia::PROCESSING_STATE_READY) {
+                    Log::warning('BrandDesignMediaService: ready placeholder has no resolvable optimized URL.', [
+                        'site_id' => $siteId,
+                        'media_id' => $row->id,
+                        'disk_keys' => $row->mediaVariants->pluck('disk')->unique()->values()->all(),
+                        'variant_keys' => $row->mediaVariants->pluck('variant_key')->all(),
+                    ]);
+                }
                 $placeholders[] = [
                     'id' => $row->id,
                     'alt_text' => $row->alt_text,

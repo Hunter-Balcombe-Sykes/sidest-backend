@@ -6,6 +6,7 @@ use App\Models\BaseModel;
 use App\Models\Core\Site\SiteMedia;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -109,9 +110,29 @@ class MediaVariant extends BaseModel
             }
         }
 
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $adapter */
-        $adapter = Storage::disk($this->disk);
+        // Fallback: lazy adapter resolution. If the disk isn't configured
+        // (e.g. variants written under an old Laravel Cloud disk name that
+        // no longer matches LARAVEL_CLOUD_DISK_CONFIG, or a non-existent
+        // disk altogether) Storage::disk() throws InvalidArgumentException.
+        // Catching it here keeps a single broken variant from 500ing the
+        // whole /brand/design response — the controller surfaces the row
+        // with an empty URL and the dashboard renders an empty card.
+        try {
+            /** @var \Illuminate\Filesystem\FilesystemAdapter $adapter */
+            $adapter = Storage::disk($disk);
 
-        return $adapter->url($this->path);
+            return $adapter->url($this->path);
+        } catch (\Throwable $e) {
+            Log::warning('MediaVariant::getUrlAttribute failed to resolve disk URL.', [
+                'media_id' => $this->media_id,
+                'variant_id' => $this->id,
+                'variant_key' => $this->variant_key,
+                'disk' => $disk,
+                'path' => $this->path,
+                'error' => $e->getMessage(),
+            ]);
+
+            return '';
+        }
     }
 }
