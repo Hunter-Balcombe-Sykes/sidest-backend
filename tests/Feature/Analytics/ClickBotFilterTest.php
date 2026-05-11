@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\Analytics\LinkClick;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -10,13 +9,6 @@ beforeEach(function () {
     setupBlocksTable();
     setupLinkClicksTable();
     Queue::fake();
-
-    $ref = new ReflectionClass(LinkClick::class);
-    foreach (['blockForeignKeyResolved', 'blockForeignKeyColumn'] as $prop) {
-        $p = $ref->getProperty($prop);
-        $p->setAccessible(true);
-        $p->setValue(null, $prop === 'blockForeignKeyResolved' ? false : null);
-    }
 });
 
 it('silently discards clicks with a known bot user agent', function () {

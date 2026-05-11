@@ -281,7 +281,7 @@ class BrandStatusService
             && $this->hasStripeConnected($professional);
     }
 
-    private function hasMinimumImages(?Site $site): bool
+    public function hasMinimumImages(?Site $site): bool
     {
         if (! $site) {
             return false;
@@ -298,7 +298,7 @@ class BrandStatusService
         return $count >= 5;
     }
 
-    private function hasShopifyConnected(string $professionalId): bool
+    public function hasShopifyConnected(string $professionalId): bool
     {
         if (array_key_exists($professionalId, $this->shopifyConnectedCache)) {
             return $this->shopifyConnectedCache[$professionalId];
@@ -312,7 +312,7 @@ class BrandStatusService
             ->exists();
     }
 
-    private function hasStripeConnected(Professional $professional): bool
+    public function hasStripeConnected(Professional $professional): bool
     {
         return mb_strtolower(trim((string) $professional->stripe_connect_status)) === 'active';
     }

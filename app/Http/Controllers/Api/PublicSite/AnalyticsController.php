@@ -143,50 +143,39 @@ class AnalyticsController extends ApiController
         $rawReferrer = $data['referrer'] ?? $request->headers->get('referer');
         $referrer = ($rawReferrer !== null && filter_var($rawReferrer, FILTER_VALIDATE_URL)) ? $rawReferrer : null;
 
-        $click = LinkClick::runForBlockForeignKey(
-            function (string $blockColumn) use ($request, $data, $site, $block, $referrer) {
-                // Dedup: return existing click if same visitor/session hit this block within 3 seconds.
-                $hasIdentifier = ! empty($data['visitor_id']) || ! empty($data['session_id']);
-                if ($hasIdentifier) {
-                    $duplicate = LinkClick::where($blockColumn, $block->id)
-                        ->where(function ($q) use ($data) {
-                            if (! empty($data['visitor_id'])) {
-                                $q->orWhere('visitor_id', $data['visitor_id']);
-                            }
-                            if (! empty($data['session_id'])) {
-                                $q->orWhere('session_id', $data['session_id']);
-                            }
-                        })
-                        ->where('occurred_at', '>=', now()->subSeconds(3))
-                        ->first();
-
-                    if ($duplicate) {
-                        return $duplicate;
+        // Dedup: return existing click if same visitor/session hit this block within 3 seconds.
+        $hasIdentifier = ! empty($data['visitor_id']) || ! empty($data['session_id']);
+        $click = null;
+        if ($hasIdentifier) {
+            $click = LinkClick::where('link_block_id', $block->id)
+                ->where(function ($q) use ($data) {
+                    if (! empty($data['visitor_id'])) {
+                        $q->orWhere('visitor_id', $data['visitor_id']);
                     }
-                }
+                    if (! empty($data['session_id'])) {
+                        $q->orWhere('session_id', $data['session_id']);
+                    }
+                })
+                ->where('occurred_at', '>=', now()->subSeconds(3))
+                ->first();
+        }
 
-                $click = new LinkClick([
-                    'occurred_at' => now(),
-                    'session_id' => $data['session_id'] ?? null,
-                    'visitor_id' => $data['visitor_id'] ?? null,
-                    'ip_hash' => $this->hashIp($request->ip()),
-                    'user_agent' => $request->userAgent(),
-                    'referrer' => $referrer,
-                    'utm_source' => $data['utm_source'] ?? null,
-                    'utm_medium' => $data['utm_medium'] ?? null,
-                    'utm_campaign' => $data['utm_campaign'] ?? null,
-                ]);
-                $click->professional_id = $site->professional_id;
-                $click->site_id = $site->id;
-                $click->setAttribute($blockColumn, $block->id);
-                $click->save();
-
-                return $click;
-            }
-        );
-
-        if (! $click instanceof LinkClick) {
-            return $this->error('Unable to record click due to schema mismatch', 500);
+        if (! $click) {
+            $click = new LinkClick([
+                'occurred_at' => now(),
+                'session_id' => $data['session_id'] ?? null,
+                'visitor_id' => $data['visitor_id'] ?? null,
+                'ip_hash' => $this->hashIp($request->ip()),
+                'user_agent' => $request->userAgent(),
+                'referrer' => $referrer,
+                'utm_source' => $data['utm_source'] ?? null,
+                'utm_medium' => $data['utm_medium'] ?? null,
+                'utm_campaign' => $data['utm_campaign'] ?? null,
+            ]);
+            $click->professional_id = $site->professional_id;
+            $click->site_id = $site->id;
+            $click->link_block_id = $block->id;
+            $click->save();
         }
 
         try {

@@ -103,6 +103,8 @@ class CreateShopifySalesChannelJob implements ShouldBeUnique, ShouldQueue
                     'publication_id' => $existingPublicationId,
                 ]);
 
+                CreateShopifyCollectionsJob::dispatch($this->integrationId);
+
                 return;
             }
 
@@ -132,6 +134,8 @@ class CreateShopifySalesChannelJob implements ShouldBeUnique, ShouldQueue
                 'shop_domain' => $shopDomain,
                 'publication_id' => $publicationId,
             ]);
+
+            CreateShopifyCollectionsJob::dispatch($this->integrationId);
         } catch (\Throwable $e) {
             Log::error('Failed to create Shopify sales channel publication', [
                 'integration_id' => $this->integrationId,
@@ -167,10 +171,10 @@ class CreateShopifySalesChannelJob implements ShouldBeUnique, ShouldQueue
 
         $edges = $response->json('data.publications.edges', []);
 
-        // The app's own publication is automatically named after the app
+        // Match by name — check current brand name first, then legacy "side st"/"sidest" for backward compat.
         foreach ($edges as $edge) {
             $name = strtolower(trim((string) Arr::get($edge, 'node.name', '')));
-            if (str_contains($name, 'side st') || str_contains($name, 'sidest')) {
+            if (str_contains($name, 'partna') || str_contains($name, 'side st') || str_contains($name, 'sidest')) {
                 return (string) Arr::get($edge, 'node.id', '');
             }
         }

@@ -1150,7 +1150,7 @@ function setupLinkClicksTable(): void
         id TEXT PRIMARY KEY,
         professional_id TEXT NULL,
         site_id TEXT NULL,
-        block_id TEXT NULL,
+        link_block_id TEXT NULL,
         occurred_at TEXT NULL,
         session_id TEXT NULL,
         visitor_id TEXT NULL,
@@ -1259,10 +1259,10 @@ function mockStripeClient(array $services = []): \Mockery\MockInterface
 function stripeWebhookEvent(string $type, array $object): array
 {
     return [
-        'id'      => 'evt_'.\Illuminate\Support\Str::random(24),
-        'object'  => 'event',
-        'type'    => $type,
-        'data'    => ['object' => $object],
+        'id' => 'evt_'.\Illuminate\Support\Str::random(24),
+        'object' => 'event',
+        'type' => $type,
+        'data' => ['object' => $object],
         'account' => $object['id'] ?? 'acct_test',
         'created' => now()->timestamp,
         'livemode' => false,
@@ -1286,7 +1286,7 @@ function postStripeWebhook(array $event): \Illuminate\Testing\TestResponse
     $sig = buildTestStripeSignature($body, $secret);
 
     return test()->call('POST', '/api/webhooks/stripe-connect', [], [], [], [
-        'CONTENT_TYPE'       => 'application/json',
+        'CONTENT_TYPE' => 'application/json',
         'HTTP_STRIPE_SIGNATURE' => $sig,
     ], $body);
 }

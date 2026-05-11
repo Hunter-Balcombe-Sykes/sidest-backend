@@ -56,14 +56,14 @@
 
 - P0 Blockers: 0 of 0 complete
 - P1 High: 0 of 0 complete
-- P2 Medium: 0 of 1 complete
+- P2 Medium: 1 of 1 complete ✅
 - P3 Low: 1 of 3 complete
 
 ---
 
 ## P2 — Should fix
 
-- [ ] **#BLOT-1** · P2 — Duplicate readiness-gate queries split across `BrandOnboardingReadinessService` and `BrandStatusService`
+- [x] **#BLOT-1** · P2 — Duplicate readiness-gate queries split across `BrandOnboardingReadinessService` and `BrandStatusService`
     - **Where:** app/Services/Professional/BrandOnboardingReadinessService.php:78–117 (`checkSiteImages`, `checkShopifyConnected`, `checkStripeConnected`) and app/Services/Professional/BrandStatusService.php:258–280 (`hasMinimumImages`, `hasShopifyConnected`, `hasStripeConnected`)
     - **Affects:** Future maintainers of readiness gate logic — any threshold change (e.g., image minimum, Shopify detection criteria) must be applied in two independent places. Also causes duplicate database hits on every call to `getChecklist()`: the Shopify `EXISTS` query fires once via `checkShopifyConnected` and a second time inside `BrandStatusService::sync() → determine() → isOnboardingReady() → hasShopifyConnected()`.
     - **Effort:** M (~2–4h)

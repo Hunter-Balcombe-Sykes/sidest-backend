@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api\Staff\StaffSite;
 
 use App\Http\Controllers\Api\ApiController;
-use App\Models\Analytics\LinkClick;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -118,23 +117,18 @@ class StaffAnalyticsController extends ApiController
         }
 
         try {
-            $topLinks = LinkClick::runForBlockForeignKey(
-                function (string $clickBlockColumn) use ($professional, $from, $to) {
-                    // Top links
-                    return DB::table('analytics.link_clicks as lc')
-                        ->join('core.blocks as b', 'b.id', '=', "lc.{$clickBlockColumn}")
-                        ->where('lc.professional_id', $professional->id)
-                        ->whereBetween('lc.occurred_at', [$from, $to])
-                        ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
-                        ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
-                        ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
-                        ->groupBy('b.id', 'b.title', 'b.url')
-                        ->orderByDesc('clicks')
-                        ->limit(10)
-                        ->get();
-                },
-                collect()
-            );
+            // Top links
+            $topLinks = DB::table('analytics.link_clicks as lc')
+                ->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id')
+                ->where('lc.professional_id', $professional->id)
+                ->whereBetween('lc.occurred_at', [$from, $to])
+                ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
+                ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
+                ->selectRaw('b.id as block_id, b.title, b.url, COUNT(*) as clicks')
+                ->groupBy('b.id', 'b.title', 'b.url')
+                ->orderByDesc('clicks')
+                ->limit(10)
+                ->get();
         } catch (Throwable) {
             $topLinks = collect();
         }

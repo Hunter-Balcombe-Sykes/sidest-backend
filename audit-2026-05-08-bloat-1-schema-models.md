@@ -63,14 +63,14 @@
 
 - P0 Blockers: 0 of 0 complete
 - P1 High: 0 of 0 complete
-- P2 Medium: 0 of 1 complete
+- P2 Medium: 1 of 1 complete ✅
 - P3 Low: 2 of 2 complete ✅
 
 ---
 
 ## P2 — Should fix
 
-- [ ] **#BLOT-1** · P2 — LinkClick carries a live column-rename shim across 5+ production call sites
+- [x] **#BLOT-1** · P2 — LinkClick carries a live column-rename shim across 5+ production call sites
     - **Where:** app/Models/Analytics/LinkClick.php:49–122; also Block.php:61, ProfessionalAnalyticsController.php:299/329/547, AnalyticsCacheService.php:53, PublicSite/AnalyticsController.php:146, StaffAnalyticsController.php:121
     - **Affects:** Every analytics read path that counts or groups link clicks — the `information_schema` introspection fires once per PHP-FPM worker boot (not cached across workers) and the four-method shim is spread through six files, making the actual column name opaque to anyone reading any single call site.
     - **Effort:** M (~2–4h)

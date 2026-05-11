@@ -50,28 +50,15 @@ class AnalyticsCacheService
         );
 
         return $this->cacheLock->rememberLocked($cacheKey, (int) config('partna.cache.ttls.analytics_short'), function () use ($professionalId, $startDate, $endDate) {
-            return LinkClick::runForBlockForeignKey(
-                function (string $blockColumn) use ($professionalId, $startDate, $endDate) {
-                    return LinkClick::where('professional_id', $professionalId)
-                        ->whereBetween('occurred_at', [$startDate, $endDate])
-                        ->selectRaw("
-                            COUNT(*) as total_clicks,
-                            COUNT(DISTINCT visitor_id) as unique_clickers,
-                            COUNT(DISTINCT {$blockColumn}) as links_clicked
-                        ")
-                        ->first()
-                        ?->toArray() ?? [
-                            'total_clicks' => 0,
-                            'unique_clickers' => 0,
-                            'links_clicked' => 0,
-                        ];
-                },
-                [
+            return LinkClick::where('professional_id', $professionalId)
+                ->whereBetween('occurred_at', [$startDate, $endDate])
+                ->selectRaw('COUNT(*) as total_clicks, COUNT(DISTINCT visitor_id) as unique_clickers, COUNT(DISTINCT link_block_id) as links_clicked')
+                ->first()
+                ?->toArray() ?? [
                     'total_clicks' => 0,
                     'unique_clickers' => 0,
                     'links_clicked' => 0,
-                ]
-            );
+                ];
         });
     }
 

@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\Analytics\LinkClick;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -10,15 +9,6 @@ beforeEach(function () {
     setupBlocksTable();
     setupLinkClicksTable();
     Queue::fake();
-
-    // The static column cache persists across tests in the same process; reset it
-    // so each test starts with fresh column resolution against the SQLite schema.
-    $ref = new ReflectionClass(LinkClick::class);
-    foreach (['blockForeignKeyResolved', 'blockForeignKeyColumn'] as $prop) {
-        $p = $ref->getProperty($prop);
-        $p->setAccessible(true);
-        $p->setValue(null, $prop === 'blockForeignKeyResolved' ? false : null);
-    }
 });
 
 it('deduplicates rapid double-clicks from the same visitor on the same block', function () {
@@ -68,7 +58,7 @@ it('allows a second click after the 3-second dedup window has expired', function
         'id' => (string) Str::uuid(),
         'professional_id' => $tenant->id,
         'site_id' => $tenant->site->id,
-        'block_id' => $block->id,
+        'link_block_id' => $block->id,
         'visitor_id' => $visitorId,
         'occurred_at' => now()->subSeconds(4)->toDateTimeString(),
         'created_at' => now()->subSeconds(4)->toDateTimeString(),

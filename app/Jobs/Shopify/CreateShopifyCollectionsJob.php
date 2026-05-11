@@ -468,7 +468,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
             $name = strtolower(trim((string) Arr::get($edge, 'node.name', '')));
             $id = (string) Arr::get($edge, 'node.id', '');
 
-            if (str_contains($name, 'side st') || str_contains($name, 'sidest')) {
+            if (str_contains($name, 'partna') || str_contains($name, 'side st') || str_contains($name, 'sidest')) {
                 return $id;
             }
             if ($name === 'online store') {

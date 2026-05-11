@@ -36,9 +36,10 @@ use Illuminate\Support\Facades\Log;
  *
  * Dispatch order:
  *   ShopifyIntegrationController → CreateShopifyMetafieldsJob →
- *     CreateShopifyCollectionsJob →
- *       CreateShopifyAffiliateDiscountJob →
- *         BackfillBrandHasEnabledVariantsJob (this, last in the chain).
+ *     CreateShopifySalesChannelJob →
+ *       CreateShopifyCollectionsJob →
+ *         CreateShopifyAffiliateDiscountJob →
+ *           BackfillBrandHasEnabledVariantsJob (this, last in the chain).
  */
 class BackfillBrandHasEnabledVariantsJob implements ShouldBeUnique, ShouldQueue
 {

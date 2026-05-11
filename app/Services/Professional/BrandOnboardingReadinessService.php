@@ -5,21 +5,23 @@ namespace App\Services\Professional;
 use App\Enums\BrandStatus;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 
 // V2: Brand activation gate. Evaluates checklist (5+ images, Shopify connected, Stripe connected) and syncs brand_status accordingly.
 class BrandOnboardingReadinessService
 {
+    public function __construct(
+        private readonly BrandStatusService $brandStatus,
+    ) {}
+
     public function getChecklist(Professional $professional): array
     {
         $professionalId = (string) $professional->id;
         $site = $professional->site ?? Site::where('professional_id', $professionalId)->first();
-        $siteId = $site ? (string) $site->id : '';
 
         $checks = [
-            $this->checkSiteImages($siteId),
+            $this->checkSiteImages($site),
             $this->checkShopifyConnected($professionalId),
             $this->checkStripeConnected($professional),
         ];
@@ -27,7 +29,7 @@ class BrandOnboardingReadinessService
         $completedCount = collect($checks)->filter(fn (array $c): bool => $c['complete'])->count();
         $isComplete = $completedCount === count($checks);
 
-        $brandStatus = $this->syncBrandStatus($professional, $isComplete);
+        $brandStatus = $this->syncBrandStatus($professional);
 
         return [
             'complete' => $isComplete,
@@ -38,23 +40,21 @@ class BrandOnboardingReadinessService
         ];
     }
 
-    private function syncBrandStatus(Professional $professional, bool $onboardingComplete): string
+    private function syncBrandStatus(Professional $professional): string
     {
-        // Delegate to BrandStatusService — it evaluates the full lifecycle
-        // (building → preview → live) instead of just the binary active/deactivated
-        // that the readiness checklist previously set.
-        $statusService = app(BrandStatusService::class);
-        $newStatus = $statusService->sync($professional);
+        // Use the shared instance so its shopifyConnectedCache from checkShopifyConnected carries over,
+        // avoiding a duplicate EXISTS query on the same request.
+        $newStatus = $this->brandStatus->sync($professional);
 
         return $newStatus ?? BrandProfile::where('professional_id', $professional->id)
             ->value('brand_status') ?? BrandStatus::Onboarding->value;
     }
 
-    private function checkSiteImages(string $siteId): array
+    private function checkSiteImages(?Site $site): array
     {
-        $count = $siteId !== ''
+        $count = $site
             ? SiteMedia::query()
-                ->where('site_id', $siteId)
+                ->where('site_id', $site->id)
                 ->where('pool', SiteMedia::POOL_CONTENT)
                 ->where('media_type', SiteMedia::MEDIA_TYPE_IMAGE)
                 ->where('is_active', true)
@@ -73,28 +73,19 @@ class BrandOnboardingReadinessService
 
     private function checkShopifyConnected(string $professionalId): array
     {
-        $connected = ProfessionalIntegration::query()
-            ->where('professional_id', $professionalId)
-            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
-            ->whereNotNull('access_token')
-            ->whereNotNull('external_account_id')
-            ->exists();
-
         return [
             'key' => 'shopify_connected',
             'label' => 'Connect Shopify integration',
-            'complete' => $connected,
+            'complete' => $this->brandStatus->hasShopifyConnected($professionalId),
         ];
     }
 
     private function checkStripeConnected(Professional $professional): array
     {
-        $connected = mb_strtolower(trim((string) $professional->stripe_connect_status)) === 'active';
-
         return [
             'key' => 'stripe_connected',
             'label' => 'Connect Stripe integration',
-            'complete' => $connected,
+            'complete' => $this->brandStatus->hasStripeConnected($professional),
         ];
     }
 }

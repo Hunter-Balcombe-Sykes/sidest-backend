@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\Professional;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ResolveCurrentSite;
-use App\Models\Analytics\LinkClick;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use Illuminate\Database\QueryException;
@@ -296,74 +295,56 @@ class ProfessionalAnalyticsController extends ApiController
             ];
 
             try {
-                $topLinks = LinkClick::runForBlockForeignKey(
-                    function (string $clickBlockColumn) use ($professional, $from, $to) {
-                        // Top links (total clicks, not unique clickers).
-                        // platform is pulled from the JSON settings bag so the
-                        // dashboard can label rows by platform name (instagram,
-                        // fresha, etc.) rather than raw title/URL.
-                        return DB::table('analytics.link_clicks as lc')
-                            ->when(
-                                $clickBlockColumn === 'block_id',
-                                fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.block_id'),
-                                fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id'),
-                            )
-                            ->where('lc.professional_id', $professional->id)
-                            ->whereBetween('lc.occurred_at', [$from, $to])
-                            ->whereNull('b.deleted_at')
-                            ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
-                            ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
-                            ->selectRaw("b.id as block_id, b.title, b.url, b.settings->>'platform' as platform, b.settings->>'category' as category, COUNT(*) as clicks")
-                            ->groupByRaw("b.id, b.title, b.url, b.settings->>'platform', b.settings->>'category'")
-                            ->orderByDesc('clicks')
-                            ->limit(10)
-                            ->get();
-                    },
-                    collect()
-                );
+                // Top links (total clicks, not unique clickers).
+                // platform is pulled from the JSON settings bag so the
+                // dashboard can label rows by platform name (instagram,
+                // fresha, etc.) rather than raw title/URL.
+                $topLinks = DB::table('analytics.link_clicks as lc')
+                    ->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id')
+                    ->where('lc.professional_id', $professional->id)
+                    ->whereBetween('lc.occurred_at', [$from, $to])
+                    ->whereNull('b.deleted_at')
+                    ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'links'")
+                    ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'link'")
+                    ->selectRaw("b.id as block_id, b.title, b.url, b.settings->>'platform' as platform, b.settings->>'category' as category, COUNT(*) as clicks")
+                    ->groupByRaw("b.id, b.title, b.url, b.settings->>'platform', b.settings->>'category'")
+                    ->orderByDesc('clicks')
+                    ->limit(10)
+                    ->get();
             } catch (QueryException) {
                 $topLinks = collect();
             }
 
             try {
-                $topSections = LinkClick::runForBlockForeignKey(
-                    function (string $clickBlockColumn) use ($professional, $from, $to) {
-                        // Top sections (total opens)
-                        return DB::table('analytics.link_clicks as lc')
-                            ->when(
-                                $clickBlockColumn === 'block_id',
-                                fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.block_id'),
-                                fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id'),
-                            )
-                            ->where('lc.professional_id', $professional->id)
-                            ->whereBetween('lc.occurred_at', [$from, $to])
-                            ->whereNull('b.deleted_at')
-                            ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'sections'")
-                            ->whereRaw("LOWER(COALESCE(b.block_type, '')) IN ('gallery', 'services', 'shop', 'booking')")
-                            ->selectRaw("LOWER(COALESCE(b.block_type, '')) as section_key, COUNT(*) as clicks")
-                            ->groupByRaw("LOWER(COALESCE(b.block_type, ''))")
-                            ->orderByDesc('clicks')
-                            ->get()
-                            ->map(function ($entry) {
-                                $sectionKey = (string) $entry->section_key;
-                                $title = match ($sectionKey) {
-                                    'gallery' => 'Gallery of Work',
-                                    'services' => 'Services & Pricing',
-                                    'shop' => 'Shop',
-                                    'booking' => 'Booking',
-                                    default => ucfirst($sectionKey),
-                                };
+                // Top sections (total opens)
+                $topSections = DB::table('analytics.link_clicks as lc')
+                    ->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id')
+                    ->where('lc.professional_id', $professional->id)
+                    ->whereBetween('lc.occurred_at', [$from, $to])
+                    ->whereNull('b.deleted_at')
+                    ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'sections'")
+                    ->whereRaw("LOWER(COALESCE(b.block_type, '')) IN ('gallery', 'services', 'shop', 'booking')")
+                    ->selectRaw("LOWER(COALESCE(b.block_type, '')) as section_key, COUNT(*) as clicks")
+                    ->groupByRaw("LOWER(COALESCE(b.block_type, ''))")
+                    ->orderByDesc('clicks')
+                    ->get()
+                    ->map(function ($entry) {
+                        $sectionKey = (string) $entry->section_key;
+                        $title = match ($sectionKey) {
+                            'gallery' => 'Gallery of Work',
+                            'services' => 'Services & Pricing',
+                            'shop' => 'Shop',
+                            'booking' => 'Booking',
+                            default => ucfirst($sectionKey),
+                        };
 
-                                return [
-                                    'key' => $sectionKey,
-                                    'title' => $title,
-                                    'clicks' => (int) ($entry->clicks ?? 0),
-                                ];
-                            })
-                            ->values();
-                    },
-                    collect()
-                );
+                        return [
+                            'key' => $sectionKey,
+                            'title' => $title,
+                            'clicks' => (int) ($entry->clicks ?? 0),
+                        ];
+                    })
+                    ->values();
             } catch (QueryException) {
                 $topSections = collect();
             }
@@ -544,21 +525,12 @@ class ProfessionalAnalyticsController extends ApiController
                 ->count();
 
             // Shop opens: clicks on blocks with block_type = 'shop'
-            $shopOpens = (int) LinkClick::runForBlockForeignKey(
-                function (string $clickBlockColumn) use ($professional, $from, $to) {
-                    return DB::table('analytics.link_clicks as lc')
-                        ->when(
-                            $clickBlockColumn === 'block_id',
-                            fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.block_id'),
-                            fn ($q) => $q->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id'),
-                        )
-                        ->where('lc.professional_id', $professional->id)
-                        ->whereBetween('lc.occurred_at', [$from, $to])
-                        ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'shop'")
-                        ->count();
-                },
-                0
-            );
+            $shopOpens = (int) DB::table('analytics.link_clicks as lc')
+                ->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id')
+                ->where('lc.professional_id', $professional->id)
+                ->whereBetween('lc.occurred_at', [$from, $to])
+                ->whereRaw("LOWER(COALESCE(b.block_type, '')) = 'shop'")
+                ->count();
 
             $cartAdds = (int) DB::table('analytics.cart_events')
                 ->where('professional_id', $professional->id)

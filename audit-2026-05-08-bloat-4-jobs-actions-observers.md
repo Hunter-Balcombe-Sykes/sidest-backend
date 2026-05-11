@@ -76,14 +76,14 @@
 
 - P0 Blockers: 0 of 0 complete
 - P1 High: 0 of 0 complete
-- P2 Medium: 0 of 1 complete
+- P2 Medium: 1 of 1 complete ✅
 - P3 Low: 3 of 3 complete ✅
 
 ---
 
 ## P2 — Should fix
 
-- [ ] **#CHAIN-1** · P2 — `CreateShopifySalesChannelJob` never dispatched; publication-name matching stale post-rebrand
+- [x] **#CHAIN-1** · P2 — `CreateShopifySalesChannelJob` never dispatched; publication-name matching stale post-rebrand
     - **Where:** app/Jobs/Shopify/CreateShopifyCollectionsJob.php (`findPublicationId`); app/Jobs/Shopify/CreateShopifySalesChannelJob.php (`findExistingPublicationId`); app/Jobs/Shopify/BackfillBrandHasEnabledVariantsJob.php (chain docblock)
     - **Affects:** Every brand connecting Shopify — the app-owned sales channel publication is never created, so `findPublicationId` always falls back to Online Store and the intended per-channel collection publishing never fires. A second independent defect, introduced by commit `0fab068` (rebrand sidest → partna), means both name-matching helpers still search for `'side st'`/`'sidest'` and would silently miss a `'partna'`-named publication even if one were manually created.
     - **Effort:** S (~0.5–1h)

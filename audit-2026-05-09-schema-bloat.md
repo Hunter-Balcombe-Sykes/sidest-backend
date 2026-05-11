@@ -21,7 +21,7 @@
 
 - P0 Blockers: 0 of 0 complete
 - P1 High: 0 of 0 complete
-- P2 Medium: 1 of 5 complete
+- P2 Medium: 5 of 5 complete ✅
 - P3 Low: 0 of 0 complete
 
 ---
@@ -46,7 +46,7 @@
         CREATE INDEX site_visits_pro_date_range_idx ON analytics.site_visits (professional_id, occurred_at DESC) INCLUDE (country_code, device_type);
         ```
 
-- [ ] **#SCHEMA-2** · P2 — Duplicate index on `analytics.link_clicks (professional_id, occurred_at)`
+- [x] **#SCHEMA-2** · P2 — Duplicate index on `analytics.link_clicks (professional_id, occurred_at)`
     - **Where:** supabase/migrations/20260403000000_v2_baseline.sql:1173, 1176
     - **Affects:** Write throughput on `link_clicks` (the highest-volume analytics table). Same shape as #SCHEMA-1.
     - **Effort:** S (~0.5–1h)
@@ -63,7 +63,7 @@
         CREATE INDEX link_clicks_professional_time_idx ON analytics.link_clicks (professional_id, occurred_at);
         ```
 
-- [ ] **#SCHEMA-3** · P2 — `analytics.professional_customer_daily` orphaned by the Phase-4 cleanup
+- [x] **#SCHEMA-3** · P2 — `analytics.professional_customer_daily` orphaned by the Phase-4 cleanup
     - **Where:** supabase/migrations/20260403000000_v2_baseline.sql:1353-1365 (table + index), supabase/migrations/20260420200000_add_rls_to_remaining_tables.sql:538-551 (RLS policies)
     - **Affects:** Storage and maintenance for an aggregate table that no production code reads or writes. The RLS policy attached to it adds per-row evaluation overhead for any future query that does hit the table.
     - **Effort:** S (~0.5–1h)
@@ -93,7 +93,7 @@
         ```
         Grep result: zero `professional_customer_daily` references in `app/`.
 
-- [ ] **#SCHEMA-4** · P2 — Dead `headshot_*` and `icon_*` columns on `core.professionals`
+- [x] **#SCHEMA-4** · P2 — Dead `headshot_*` and `icon_*` columns on `core.professionals`
     - **Where:** supabase/migrations/20260403000000_v2_baseline.sql:212-235 (column definitions + CHECK constraints)
     - **Affects:** Schema clarity and storage. Four `text` columns with default values, two CHECK constraints that fire on every INSERT/UPDATE, and a database view (`core.public_site_payload` or similar — see `p.headshot_bucket AS professional_headshot_bucket` reference) that materializes them. New developers reading the Professional model see these in the schema and wonder where the read paths are.
     - **Effort:** S (~0.5–1h)
@@ -121,7 +121,7 @@
         ```
         Grep `icon_bucket\|icon_path\|headshot_bucket\|headshot_path` across `app/**/*.php`: zero matches.
 
-- [ ] **#SCHEMA-5** · P2 — Dead `banner_bucket` and `banner_path` columns on `site.sites`
+- [x] **#SCHEMA-5** · P2 — Dead `banner_bucket` and `banner_path` columns on `site.sites`
     - **Where:** supabase/migrations/20260403000000_v2_baseline.sql (column definitions + CHECK constraint)
     - **Affects:** Schema clarity. Same shape as #SCHEMA-4 — two columns plus a CHECK constraint that fire on every site INSERT/UPDATE.
     - **Effort:** S (~0.5–1h)

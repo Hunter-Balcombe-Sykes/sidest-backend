@@ -260,8 +260,8 @@ class CreateShopifyMetafieldsJob implements ShouldBeUnique, ShouldQueue
                 'shop_domain' => $shopDomain,
             ]);
 
-            // Collections depend on metafield definitions existing — dispatch after metafields are created
-            CreateShopifyCollectionsJob::dispatch($this->integrationId);
+            // Sales channel publication must exist before collections are published to it.
+            CreateShopifySalesChannelJob::dispatch($this->integrationId);
         } catch (\Throwable $e) {
             Log::error('Failed to create Shopify metafield definitions', [
                 'integration_id' => $this->integrationId,
