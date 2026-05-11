@@ -65,15 +65,15 @@ query allProducts($first: Int!, $after: String) {
               # here fails with "Selections can't be made on scalars". Currency
               # comes from the parent product's priceRange.minVariantPrice.
               price
-              metafield_enabled: metafield(namespace: "sidest", key: "enabled") { value }
+              metafield_enabled: metafield(namespace: "partna", key: "enabled") { value }
             }
           }
         }
-        metafield_active: metafield(namespace: "sidest", key: "active") { value }
-        metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
-        metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
-        metafield_custom_photos: metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
-        metafield_has_enabled_variants: metafield(namespace: "sidest", key: "has_enabled_variants") { value }
+        metafield_active: metafield(namespace: "partna", key: "active") { value }
+        metafield_commission: metafield(namespace: "partna", key: "commission_override") { value }
+        metafield_discount: metafield(namespace: "partna", key: "affiliate_discount_pct") { value }
+        metafield_custom_photos: metafield(namespace: "partna", key: "custom_photos_enabled") { value }
+        metafield_has_enabled_variants: metafield(namespace: "partna", key: "has_enabled_variants") { value }
       }
       cursor
     }
@@ -110,15 +110,15 @@ query products($first: Int!, $after: String) {
               # here fails with "Selections can't be made on scalars". Currency
               # comes from the parent product's priceRange.minVariantPrice.
               price
-              metafield_enabled: metafield(namespace: "sidest", key: "enabled") { value }
+              metafield_enabled: metafield(namespace: "partna", key: "enabled") { value }
             }
           }
         }
-        metafield_active: metafield(namespace: "sidest", key: "active") { value }
-        metafield_commission: metafield(namespace: "sidest", key: "commission_override") { value }
-        metafield_discount: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
-        metafield_custom_photos: metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
-        metafield_has_enabled_variants: metafield(namespace: "sidest", key: "has_enabled_variants") { value }
+        metafield_active: metafield(namespace: "partna", key: "active") { value }
+        metafield_commission: metafield(namespace: "partna", key: "commission_override") { value }
+        metafield_discount: metafield(namespace: "partna", key: "affiliate_discount_pct") { value }
+        metafield_custom_photos: metafield(namespace: "partna", key: "custom_photos_enabled") { value }
+        metafield_has_enabled_variants: metafield(namespace: "partna", key: "has_enabled_variants") { value }
       }
       cursor
     }
@@ -140,7 +140,7 @@ GRAPHQL;
     private const PRODUCT_CUSTOM_PHOTOS_QUERY = <<<'GRAPHQL'
 query productCustomPhotos($productId: ID!) {
   product(id: $productId) {
-    metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
+    metafield(namespace: "partna", key: "custom_photos_enabled") { value }
   }
 }
 GRAPHQL;
@@ -178,7 +178,7 @@ query commissionOverrides($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on Product {
       id
-      metafield(namespace: "sidest", key: "commission_override") { value }
+      metafield(namespace: "partna", key: "commission_override") { value }
     }
   }
 }
@@ -521,7 +521,7 @@ GRAPHQL;
               edges {
                 node {
                   id
-                  metafield_enabled: metafield(namespace: "sidest", key: "enabled") { value }
+                  metafield_enabled: metafield(namespace: "partna", key: "enabled") { value }
                 }
               }
             }
@@ -565,7 +565,7 @@ GRAPHQL;
 
         // Flip each previously-false sidest.enabled to true.
         $metafields = array_map(fn (string $variantGid) => [
-            'namespace' => 'sidest',
+            'namespace' => 'partna',
             'key' => 'enabled',
             'value' => 'true',
             'type' => 'boolean',
@@ -652,7 +652,7 @@ GRAPHQL;
         $resolved = $this->resolveCredentials($integration);
 
         $metafields = array_map(fn (string $variantGid) => [
-            'namespace' => 'sidest',
+            'namespace' => 'partna',
             'key' => 'enabled',
             'value' => isset($disabled[$variantGid]) ? 'false' : 'true',
             'type' => 'boolean',
@@ -695,7 +695,7 @@ GRAPHQL;
 
         $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::METAFIELDS_SET, [
             'metafields' => [[
-                'namespace' => 'sidest',
+                'namespace' => 'partna',
                 'key' => 'has_enabled_variants',
                 'value' => $value ? 'true' : 'false',
                 'type' => 'boolean',
@@ -727,7 +727,7 @@ GRAPHQL;
         $resolved = $this->resolveCredentials($integration);
 
         $metafieldsInput = array_map(fn (array $mf) => [
-            'namespace' => 'sidest',
+            'namespace' => 'partna',
             'key' => $mf['key'],
             'value' => (string) $mf['value'],
             'type' => $mf['type'],
@@ -760,7 +760,7 @@ GRAPHQL;
         // First get the metafield ID
         $idResponse = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::PRODUCT_METAFIELD_ID, [
             'productId' => $productGid,
-            'namespace' => 'sidest',
+            'namespace' => 'partna',
             'key' => $key,
         ]);
 
@@ -805,7 +805,7 @@ GRAPHQL;
         }
 
         $metafieldsInput = array_map(fn (array $mf) => [
-            'namespace' => 'sidest',
+            'namespace' => 'partna',
             'key' => $mf['key'],
             'value' => (string) $mf['value'],
             'type' => $mf['type'],

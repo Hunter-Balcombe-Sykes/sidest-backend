@@ -260,7 +260,7 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
             self::METAFIELDS_SET_MUTATION,
             [
                 'metafields' => [[
-                    'namespace' => 'sidest',
+                    'namespace' => 'partna',
                     'key' => 'brand_design',
                     'ownerId' => $shopGid,
                     'type' => 'json',

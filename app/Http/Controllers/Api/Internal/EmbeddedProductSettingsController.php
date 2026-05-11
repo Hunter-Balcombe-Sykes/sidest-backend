@@ -180,16 +180,16 @@ class EmbeddedProductSettingsController extends ApiController
         $query = <<<'GRAPHQL'
 query productMetafields($id: ID!) {
   product(id: $id) {
-    active: metafield(namespace: "sidest", key: "active") { value }
-    commissionOverride: metafield(namespace: "sidest", key: "commission_override") { value }
-    affiliateDiscountPct: metafield(namespace: "sidest", key: "affiliate_discount_pct") { value }
-    customPhotosEnabled: metafield(namespace: "sidest", key: "custom_photos_enabled") { value }
+    active: metafield(namespace: "partna", key: "active") { value }
+    commissionOverride: metafield(namespace: "partna", key: "commission_override") { value }
+    affiliateDiscountPct: metafield(namespace: "partna", key: "affiliate_discount_pct") { value }
+    customPhotosEnabled: metafield(namespace: "partna", key: "custom_photos_enabled") { value }
     variants(first: 50) {
       edges {
         node {
           id
           title
-          enabled: metafield(namespace: "sidest", key: "enabled") { value }
+          enabled: metafield(namespace: "partna", key: "enabled") { value }
         }
       }
     }
@@ -283,7 +283,7 @@ query productVariants($id: ID!) {
         node {
           id
           title
-          enabled: metafield(namespace: "sidest", key: "enabled") { value }
+          enabled: metafield(namespace: "partna", key: "enabled") { value }
         }
       }
     }
@@ -427,7 +427,7 @@ GRAPHQL;
                 'query' => $metafieldQuery,
                 'variables' => [
                     'ownerId' => $ownerId,
-                    'namespace' => 'sidest',
+                    'namespace' => 'partna',
                     'key' => $key,
                 ],
             ]);
@@ -486,7 +486,7 @@ GRAPHQL;
             $variables = ['input' => [
                 'id' => $ownerId,
                 'metafields' => [[
-                    'namespace' => 'sidest',
+                    'namespace' => 'partna',
                     'key' => $key,
                     'value' => $typedValue,
                     'type' => $type,
@@ -562,7 +562,7 @@ GRAPHQL;
                 'variables' => ['input' => [
                     'id' => $variantGid,
                     'metafields' => [[
-                        'namespace' => 'sidest',
+                        'namespace' => 'partna',
                         'key' => 'enabled',
                         'value' => $values,
                         'type' => 'boolean',

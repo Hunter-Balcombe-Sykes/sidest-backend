@@ -84,7 +84,7 @@ class HydrogenAffiliateProductsController extends ApiController
         return $this->success([
             'gids' => [],
             'source' => 'default_collection',
-            'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'sidest-default-products'),
+            'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'partna-default-products'),
         ]);
     }
 

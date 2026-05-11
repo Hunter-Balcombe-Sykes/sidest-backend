@@ -88,7 +88,7 @@ class PublicShopifyStorefrontController extends ApiController
         return $this->success([
             'shop_domain' => $shopDomain,
             'storefront_access_token' => $storefrontToken,
-            'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'sidest-default-products'),
+            'default_collection_handle' => Arr::get($metadata, 'default_collection_handle', 'partna-default-products'),
             'brand_status' => $brandProfile?->brand_status ?? BrandStatus::Onboarding->value,
             'business_website' => $brandProfile?->business_website,
         ]);

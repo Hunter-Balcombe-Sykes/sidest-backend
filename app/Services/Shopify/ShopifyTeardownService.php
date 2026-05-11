@@ -303,7 +303,7 @@ class ShopifyTeardownService
             if ((string) Arr::get($node, 'apiType', '') !== 'discount') {
                 continue;
             }
-            if ((string) Arr::get($node, 'title', '') === 'sidest-affiliate-discount') {
+            if ((string) Arr::get($node, 'title', '') === 'partna-affiliate-discount') {
                 return (string) Arr::get($node, 'id', '') ?: null;
             }
         }
@@ -383,7 +383,7 @@ class ShopifyTeardownService
         ] as [$ownerType, $expectedKeys]) {
             $response = $this->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELD_DEFINITIONS_QUERY, [
                 'ownerType' => $ownerType,
-                'namespace' => 'sidest',
+                'namespace' => 'partna',
                 'first' => 50,
             ]);
 

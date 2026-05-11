@@ -113,9 +113,9 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
     GRAPHQL;
 
     // Smart collections use `appliedDisjunctively: false` → rules are ANDed.
-    // Active + High Commission both include sidest.has_enabled_variants=true so a
+    // Active + High Commission both include partna.has_enabled_variants=true so a
     // product with every variant disabled falls out of affiliate-facing surfaces
-    // automatically, even if the brand never touched sidest.active.
+    // automatically, even if the brand never touched partna.active.
     //
     // Note on existing brands: findOrCreateCollection skips when a collection with
     // the target title already exists, so updating this array only affects newly
@@ -126,16 +126,9 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
             'title' => 'Partna — Active Products',
             'metafield_key' => 'active_collection_handle',
             'smart' => true,
-            // metafield_ref uses the `sidest` namespace because that's what
-            // CreateShopifyMetafieldsJob writes — see lines 289, 322 of that
-            // file. Previous `partna.*` refs here were a typo from an
-            // incomplete rename: the display titles were updated to "Partna"
-            // but the underlying namespace stayed `sidest`. Shopify rejected
-            // smart collection creation because `partna.active` was an
-            // undefined metafield definition.
             'rules' => [
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.has_enabled_variants'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'partna.active'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'partna.has_enabled_variants'],
             ],
         ],
         [
@@ -154,12 +147,10 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
             'title' => 'Partna — High Commission Products',
             'metafield_key' => 'high_commission_collection_handle',
             'smart' => true,
-            // Same `sidest` namespace fix as Active Products above — see that
-            // collection's rules comment for why.
             'rules' => [
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.active'],
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'sidest.has_enabled_variants'],
-                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'GREATER_THAN', 'condition' => '0', 'metafield_ref' => 'sidest.commission_override'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'partna.active'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'EQUALS', 'condition' => 'true', 'metafield_ref' => 'partna.has_enabled_variants'],
+                ['column' => 'PRODUCT_METAFIELD_DEFINITION', 'relation' => 'GREATER_THAN', 'condition' => '0', 'metafield_ref' => 'partna.commission_override'],
             ],
         ],
     ];
@@ -215,7 +206,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
 
                 if ($result !== null) {
                     $metafieldsToSet[] = [
-                        'namespace' => 'sidest',
+                        'namespace' => 'partna',
                         'key' => $collectionDef['metafield_key'],
                         'value' => $result['handle'],
                         'type' => 'single_line_text_field',

@@ -94,7 +94,7 @@ class SetShopifySetupCompleteJob implements ShouldBeUnique, ShouldQueue
             $this->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELDS_SET, [
                 'metafields' => [
                     [
-                        'namespace' => 'sidest',
+                        'namespace' => 'partna',
                         'key' => 'setup_complete',
                         'value' => 'true',
                         'type' => 'boolean',
