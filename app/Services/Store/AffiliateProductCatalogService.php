@@ -21,27 +21,41 @@ class AffiliateProductCatalogService
         private readonly BrandCatalogService $brandCatalogService
     ) {}
 
-    private const STOREFRONT_PRODUCTS_PER_PAGE = 50;
+    private const ADMIN_PRODUCTS_PER_PAGE = 50;
 
+    // Admin API queries (we switched from Storefront API because custom-app
+    // storefront tokens are scoped to Online Store publication only — they
+    // can't see products published only to Hydrogen sales channels, which is
+    // where every Partna brand publishes their catalog). Admin API uses the
+    // brand's regular `access_token` and can read every publication.
+    //
+    // Shape mirrors BrandCatalogService's proven Admin-API queries:
+    //   - Product.availableForSale is not in Admin API; we derive it from
+    //     variant availability in PHP (any variant available_for_sale = true).
+    //   - ProductVariant.price is a `Money` scalar (string like "29.99"),
+    //     not MoneyV2 — no subselection. Currency comes from the parent
+    //     product's priceRange.minVariantPrice.
+    //   - Field `collectionByHandle(handle:)` works in Admin API (still
+    //     supported as of 2025-01).
     private const COLLECTION_PRODUCTS_QUERY = <<<'GRAPHQL'
 query collectionProducts($handle: String!, $first: Int!, $after: String) {
-  collection(handle: $handle) {
+  collectionByHandle(handle: $handle) {
     products(first: $first, after: $after) {
       edges {
         node {
           id
           title
           handle
-          availableForSale
           description
+          status
           featuredImage {
             url
             altText
           }
           # Gallery for the affiliate detail modal — up to 5 images per
-          # product stays well under Storefront API's per-query complexity
-          # budget and covers every realistic product page. featuredImage
-          # stays separate because it's the only one rendered on the card.
+          # product stays well under per-query complexity budgets and covers
+          # every realistic product page. featuredImage stays separate
+          # because it's the only one rendered on the card.
           images(first: 5) {
             edges {
               node {
@@ -66,10 +80,7 @@ query collectionProducts($handle: String!, $first: Int!, $after: String) {
                 id
                 title
                 availableForSale
-                price {
-                  amount
-                  currencyCode
-                }
+                price
                 metafield(namespace: "sidest", key: "enabled") { value }
               }
             }
@@ -87,9 +98,9 @@ GRAPHQL;
 
     // All-products fallback query — used when the active collection doesn't exist
     // on Shopify (e.g. setup pipeline failed). Queries the products() root field
-    // instead of collection(handle: …), so it works without any smart collection.
-    // Response shape is identical to COLLECTION_PRODUCTS_QUERY except the path is
-    // data.products instead of data.collection.products.
+    // instead of collectionByHandle(handle: …), so it works without any smart
+    // collection. Response shape identical to COLLECTION_PRODUCTS_QUERY except
+    // the path is data.products instead of data.collectionByHandle.products.
     private const ALL_PRODUCTS_QUERY = <<<'GRAPHQL'
 query allProducts($first: Int!, $after: String) {
   products(first: $first, after: $after) {
@@ -98,8 +109,8 @@ query allProducts($first: Int!, $after: String) {
         id
         title
         handle
-        availableForSale
         description
+        status
         featuredImage {
           url
           altText
@@ -128,10 +139,7 @@ query allProducts($first: Int!, $after: String) {
               id
               title
               availableForSale
-              price {
-                amount
-                currencyCode
-              }
+              price
               metafield(namespace: "sidest", key: "enabled") { value }
             }
           }
@@ -172,8 +180,11 @@ GRAPHQL;
             throw new \RuntimeException('Brand does not have a connected Shopify store.', 422);
         }
 
-        if (trim((string) ($integration->storefront_token ?? '')) === '') {
-            throw new \RuntimeException('Storefront is not yet configured. Please try again shortly.', 503);
+        // Admin-API switch: we now use access_token (not storefront_token) so the
+        // catalog read can see products published to any sales channel, not just
+        // Online Store. See queryAdminCatalog() for full rationale.
+        if (trim((string) ($integration->access_token ?? '')) === '') {
+            throw new \RuntimeException('Shopify integration is not yet configured. Please try again shortly.', 503);
         }
 
         return [
@@ -183,7 +194,12 @@ GRAPHQL;
     }
 
     /**
-     * Fetch the brand's active product catalog from Shopify Storefront API (cached).
+     * Fetch the brand's active product catalog from Shopify Admin API (cached).
+     *
+     * Uses Admin API (not Storefront API) because custom-app storefront tokens
+     * are scoped to the Online Store publication only, so they can't see
+     * products that brands publish to Hydrogen sales channels — which is where
+     * every Partna brand's catalog actually lives.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -192,7 +208,7 @@ GRAPHQL;
         return Cache::memo()->remember(
             CacheKeyGenerator::brandActiveCatalog($brandProfessionalId),
             now()->addMinutes(5),
-            fn () => $this->queryStorefrontCatalog($brandProfessionalId),
+            fn () => $this->queryAdminCatalog($brandProfessionalId),
         );
     }
 
@@ -560,15 +576,20 @@ GRAPHQL;
     }
 
     /**
-     * Query the Shopify Storefront API to fetch all products from the active collection.
+     * Query the Shopify Admin API to fetch all products from the active collection.
      *
      * If the active collection doesn't exist on Shopify (e.g. setup pipeline failed),
      * falls back to querying all products via the products() root field so the
      * affiliate still sees a catalog instead of an empty state.
      *
+     * Uses Admin API (access_token) rather than Storefront API because custom-app
+     * storefront tokens are scoped to the Online Store publication only — they
+     * can't read products published exclusively to Hydrogen sales channels,
+     * which is where every Partna brand publishes their catalog.
+     *
      * @return array<int, array<string, mixed>>
      */
-    private function queryStorefrontCatalog(string $brandProfessionalId): array
+    private function queryAdminCatalog(string $brandProfessionalId): array
     {
         $integration = ProfessionalIntegration::query()
             ->where('professional_id', $brandProfessionalId)
@@ -581,7 +602,7 @@ GRAPHQL;
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
-        $storefrontToken = trim((string) ($integration->storefront_token ?? ''));
+        $accessToken = trim((string) ($integration->access_token ?? ''));
         // Arr::get's third argument is only used when the key is missing — when the
         // key exists with a null value (e.g. failed collection setup), it returns
         // null. ?: coerces null/empty to the default so we never send handle: null
@@ -590,19 +611,23 @@ GRAPHQL;
         $collectionHandle = Arr::get($metadata, 'active_collection_handle') ?: 'sidest-active-products';
         $apiVersion = config('services.shopify.api_version', '2025-01');
 
-        if ($shopDomain === '' || $storefrontToken === '') {
+        if ($shopDomain === '' || $accessToken === '') {
             return [];
         }
 
-        $url = "https://{$shopDomain}/api/{$apiVersion}/graphql.json";
+        $url = "https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json";
         $products = [];
         $cursor = null;
         $fallback = false;  // true once we switch to ALL_PRODUCTS_QUERY
+        // Seed truthy so the fallback `continue` path (which skips the pageInfo
+        // assignment) doesn't terminate the loop prematurely on the first
+        // iteration before ALL_PRODUCTS_QUERY ever runs.
+        $hasNextPage = true;
 
         do {
             if ($fallback) {
                 $query = self::ALL_PRODUCTS_QUERY;
-                $variables = ['first' => self::STOREFRONT_PRODUCTS_PER_PAGE];
+                $variables = ['first' => self::ADMIN_PRODUCTS_PER_PAGE];
                 if ($cursor !== null) {
                     $variables['after'] = $cursor;
                 }
@@ -610,7 +635,7 @@ GRAPHQL;
                 $query = self::COLLECTION_PRODUCTS_QUERY;
                 $variables = [
                     'handle' => $collectionHandle,
-                    'first' => self::STOREFRONT_PRODUCTS_PER_PAGE,
+                    'first' => self::ADMIN_PRODUCTS_PER_PAGE,
                 ];
                 if ($cursor !== null) {
                     $variables['after'] = $cursor;
@@ -621,7 +646,7 @@ GRAPHQL;
                 $response = Http::timeout(20)
                     ->acceptJson()
                     ->withHeaders([
-                        'X-Shopify-Storefront-Access-Token' => $storefrontToken,
+                        'X-Shopify-Access-Token' => $accessToken,
                     ])
                     ->post($url, [
                         'query' => $query,
@@ -629,7 +654,7 @@ GRAPHQL;
                     ]);
 
                 if (! $response->successful()) {
-                    Log::warning('Storefront API request failed.', [
+                    Log::warning('Shopify Admin API request failed.', [
                         'brand_professional_id' => $brandProfessionalId,
                         'status' => $response->status(),
                     ]);
@@ -640,18 +665,18 @@ GRAPHQL;
                 $errors = Arr::get($data, 'errors', []);
 
                 if (! empty($errors)) {
-                    Log::warning('Storefront API returned errors.', [
+                    Log::warning('Shopify Admin API returned errors.', [
                         'brand_professional_id' => $brandProfessionalId,
                         'errors' => $errors,
                     ]);
                     break;
                 }
 
-                // If the collection doesn't exist, data.collection is null and we
-                // get no edges. Switch to the all-products fallback for this and
-                // subsequent pages.
-                if (! $fallback && Arr::get($data, 'data.collection') === null) {
-                    Log::info('Storefront collection not found, falling back to all products.', [
+                // If the collection doesn't exist, data.collectionByHandle is null
+                // and we get no edges. Switch to the all-products fallback for
+                // this and subsequent pages.
+                if (! $fallback && Arr::get($data, 'data.collectionByHandle') === null) {
+                    Log::info('Shopify Admin collection not found, falling back to all products.', [
                         'brand_professional_id' => $brandProfessionalId,
                         'collection_handle' => $collectionHandle,
                     ]);
@@ -663,8 +688,8 @@ GRAPHQL;
                     continue;
                 }
 
-                $edgesPath = $fallback ? 'data.products.edges' : 'data.collection.products.edges';
-                $pageInfoPath = $fallback ? 'data.products.pageInfo' : 'data.collection.products.pageInfo';
+                $edgesPath = $fallback ? 'data.products.edges' : 'data.collectionByHandle.products.edges';
+                $pageInfoPath = $fallback ? 'data.products.pageInfo' : 'data.collectionByHandle.products.pageInfo';
 
                 $edges = Arr::get($data, $edgesPath, []);
 
@@ -676,15 +701,28 @@ GRAPHQL;
                     $node = $edge['node'] ?? [];
                     $cursor = $edge['cursor'] ?? null;
 
+                    // Admin API's variant.price is a Money scalar (string), while
+                    // our downstream shape (and the frontend) expect a {amount,
+                    // currencyCode} object. Borrow currency from the product's
+                    // priceRange so the object shape stays intact — mirrors
+                    // BrandCatalogService's Admin-API parsing.
+                    $productCurrency = (string) Arr::get($node, 'priceRange.minVariantPrice.currencyCode', 'AUD');
+
                     $variants = [];
+                    $anyVariantAvailable = false;
                     foreach (Arr::get($node, 'variants.edges', []) as $variantEdge) {
                         $v = $variantEdge['node'] ?? [];
                         $enabledVal = Arr::get($v, 'metafield.value');
+                        $available = (bool) ($v['availableForSale'] ?? false);
+                        $anyVariantAvailable = $anyVariantAvailable || $available;
+                        $priceAmount = $v['price'] ?? null;
                         $variants[] = [
                             'gid' => $v['id'] ?? '',
                             'title' => $v['title'] ?? '',
-                            'available_for_sale' => $v['availableForSale'] ?? false,
-                            'price' => $v['price'] ?? null,
+                            'available_for_sale' => $available,
+                            'price' => $priceAmount !== null
+                                ? ['amount' => (string) $priceAmount, 'currencyCode' => $productCurrency]
+                                : null,
                             'enabled' => $enabledVal !== null ? filter_var($enabledVal, FILTER_VALIDATE_BOOLEAN) : null,
                         ];
                     }
@@ -697,12 +735,19 @@ GRAPHQL;
                         Arr::get($node, 'images.edges', [])
                     )));
 
+                    // Admin API doesn't expose Product.availableForSale (that's a
+                    // Storefront-API-only field), so derive it: ACTIVE status AND
+                    // at least one variant is purchasable. Matches the semantic
+                    // the affiliate UI uses to grey out unavailable cards.
+                    $isActive = strtoupper((string) ($node['status'] ?? '')) === 'ACTIVE';
+                    $productAvailable = $isActive && $anyVariantAvailable;
+
                     $products[] = [
                         'gid' => $node['id'] ?? '',
                         'title' => $node['title'] ?? '',
                         'handle' => $node['handle'] ?? '',
                         'description' => $node['description'] ?? '',
-                        'available_for_sale' => $node['availableForSale'] ?? false,
+                        'available_for_sale' => $productAvailable,
                         'featured_image' => $node['featuredImage'] ?? null,
                         'images' => $images,
                         'price_range' => [
@@ -715,7 +760,7 @@ GRAPHQL;
 
                 $hasNextPage = Arr::get($data, $pageInfoPath.'.hasNextPage', false);
             } catch (\Throwable $e) {
-                Log::error('Storefront API exception.', [
+                Log::error('Shopify Admin API exception.', [
                     'brand_professional_id' => $brandProfessionalId,
                     'error' => $e->getMessage(),
                 ]);
