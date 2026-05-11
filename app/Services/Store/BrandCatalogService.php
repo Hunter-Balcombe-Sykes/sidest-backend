@@ -16,7 +16,6 @@ class BrandCatalogService
         private readonly ShopifyAdminClient $client,
     ) {}
 
-
     private const PRODUCTS_PER_PAGE = 50;
 
     // --- GraphQL Queries & Mutations ---
@@ -85,7 +84,7 @@ GRAPHQL;
 
     private const PRODUCTS_WITH_METAFIELDS = <<<'GRAPHQL'
 query products($first: Int!, $after: String) {
-  products(first: $first, after: $after) {
+  products(first: $first, after: $after, query: "status:active") {
     edges {
       node {
         id
