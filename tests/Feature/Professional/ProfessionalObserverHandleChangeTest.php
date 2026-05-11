@@ -15,7 +15,7 @@ beforeEach(function () {
     mock(ProfessionalCacheService::class)->shouldIgnoreMissing();
 });
 
-it('dispatches SyncSubdomainToKvJob and RetireSubdomainFromKvJob when handle changes', function () {
+it('dispatches SyncSubdomainToKvJob when handle changes', function () {
     Queue::fake();
 
     $id = (string) Str::uuid();
@@ -27,8 +27,13 @@ it('dispatches SyncSubdomainToKvJob and RetireSubdomainFromKvJob when handle cha
 
     app(ProfessionalObserver::class)->updated($pro);
 
+    // SyncSubdomainToKvJob now writes KV for the current handle AND every
+    // historical alias (UpdateSiteAction inserts the old handle into the
+    // alias table inside the same transaction), so a separate retirement
+    // dispatch is no longer needed — the old subdomain keeps resolving via
+    // its alias entry.
     Queue::assertPushed(SyncSubdomainToKvJob::class, fn ($job) => $job->professionalId === $id);
-    Queue::assertPushed(RetireSubdomainFromKvJob::class, fn ($job) => $job->handle === 'old-handle');
+    Queue::assertNotPushed(RetireSubdomainFromKvJob::class);
 });
 
 it('does not dispatch retirement job when handle does not change', function () {

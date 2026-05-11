@@ -2,7 +2,6 @@
 
 namespace App\Observers\Professional;
 
-use App\Jobs\Cloudflare\RetireSubdomainFromKvJob;
 use App\Jobs\Cloudflare\SyncSubdomainToKvJob;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\ProfessionalCacheService;
@@ -29,11 +28,13 @@ class ProfessionalObserver
             ]);
         }
 
-        // Handle change → the KV routing entry key changes; write the new entry
-        // and delete the old key so stale routing entries don't persist.
+        // Handle change → KV needs to re-sync. SyncSubdomainToKvJob now writes
+        // entries for the current handle AND every alias (the old handle gets
+        // added to professional_handle_aliases by UpdateSiteAction), so a
+        // separate RetireSubdomainFromKvJob is no longer needed here — the old
+        // subdomain keeps resolving via its alias entry. Retire is still
+        // available for explicit single-handle deletions elsewhere.
         if ($professional->wasChanged('handle')) {
-            $oldHandle = (string) $professional->getOriginal('handle');
-
             try {
                 SyncSubdomainToKvJob::dispatch((string) $professional->id);
             } catch (\Throwable $e) {
@@ -41,18 +42,6 @@ class ProfessionalObserver
                     'professional_id' => $professional->id,
                     'message' => $e->getMessage(),
                 ]);
-            }
-
-            if ($oldHandle !== '') {
-                try {
-                    RetireSubdomainFromKvJob::dispatch($oldHandle);
-                } catch (\Throwable $e) {
-                    Log::warning('ProfessionalObserver: KV retirement dispatch failed on handle change', [
-                        'professional_id' => $professional->id,
-                        'old_handle' => $oldHandle,
-                        'message' => $e->getMessage(),
-                    ]);
-                }
             }
         }
     }
