@@ -79,10 +79,17 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
     }
     GRAPHQL;
 
+    // Note: `publishable { publishedOnCurrentPublication }` was removed from the
+    // selection because that field resolves against the CALLING APP's publication
+    // (the one owned by the Partna admin app installation). Partna isn't a sales
+    // channel app — it has no channel-config extension — so it has no publication.
+    // Shopify rejected the field selection with "Your app doesn't have a publication
+    // for this shop" (NOT_FOUND), even though the publish itself succeeded against
+    // the explicit publicationId in `input`. Dropping the field means we rely on
+    // userErrors alone to detect mutation failure, which is the right gate anyway.
     private const PUBLISHABLE_PUBLISH = <<<'GRAPHQL'
     mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
       publishablePublish(id: $id, input: $input) {
-        publishable { publishedOnCurrentPublication }
         userErrors { field message }
       }
     }
