@@ -3,6 +3,7 @@
 namespace App\Actions\Site;
 
 use App\Models\Core\Professional\Professional;
+use App\Models\Core\Site\ProfessionalHandleAlias;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Core\Site\Theme;
@@ -97,6 +98,33 @@ class UpdateSiteAction
                             // Ignore duplicate alias writes; uniqueness is enforced in the DB.
                         }
                     }
+
+                    // Keep the canonical handle on the professional in sync with
+                    // the subdomain. HydrogenAffiliateController + the public site
+                    // resolver both look up by handle_lc, so a desync here means
+                    // the affiliate URL stops working immediately after a rename.
+                    // Mirror the old handle into professional_handle_aliases so
+                    // links shared on the old URL still resolve.
+                    $oldHandle = $professional->handle;
+                    if (! empty($oldHandle) && strtolower($oldHandle) !== $incoming) {
+                        try {
+                            ProfessionalHandleAlias::query()->create([
+                                'professional_id' => $professional->id,
+                                'handle' => $oldHandle,
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ]);
+                        } catch (QueryException $e) {
+                            if ($e->getCode() !== '23505') {
+                                throw $e;
+                            }
+                            // Ignore duplicate alias writes; uniqueness is enforced in the DB.
+                        }
+                    }
+                    $professional->forceFill([
+                        'handle' => $incoming,
+                        'handle_lc' => $incoming,
+                    ])->save();
 
                     $data['subdomain'] = $incoming;
                     $site->subdomain_changed_at = now();
