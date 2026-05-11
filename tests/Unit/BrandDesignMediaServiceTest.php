@@ -263,3 +263,28 @@ it('lists design media in the shape readers expect', function () {
     expect($payload['placeholders'])->toHaveCount(2);
     expect($payload['placeholders'][0])->toHaveKeys(['id', 'alt_text', 'url', 'sort_order']);
 });
+
+it('still returns ready placeholders whose optimized URL did not resolve', function () {
+    // Regression: previously listDesignMedia skipped ready rows with a null
+    // URL while addPlaceholder counted them toward PLACEHOLDER_MAX. That
+    // mismatch let the dashboard hit "Placeholder image limit reached" while
+    // displaying zero cards — and with no UI affordance to clear the orphans.
+    // The list must surface every non-failed row so count == visible.
+    $site = makeBrandSite();
+    $service = makeServiceWithFakeImageVariant();
+
+    $service->addPlaceholder($site, $site->professional_id, makeFakeUpload('orphan.png'));
+
+    SiteMedia::query()->where('site_id', $site->id)->update([
+        'processing_state' => SiteMedia::PROCESSING_STATE_READY,
+    ]);
+    // Intentionally do NOT seed media_variants — the row is ready but its
+    // optimized URL won't resolve, mirroring rows whose disk reference no
+    // longer exists in filesystems config.
+
+    $payload = $service->listDesignMedia($site->id);
+
+    expect($payload['placeholders'])->toHaveCount(1);
+    expect($payload['placeholders'][0]['url'])->toBe('');
+    expect($payload['placeholders'][0]['processing_state'])->toBe(SiteMedia::PROCESSING_STATE_READY);
+});
