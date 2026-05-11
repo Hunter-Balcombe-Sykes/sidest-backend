@@ -57,7 +57,7 @@
 - P0 Blockers: 0 of 0 complete
 - P1 High: 0 of 0 complete
 - P2 Medium: 0 of 1 complete
-- P3 Low: 0 of 3 complete
+- P3 Low: 1 of 3 complete
 
 ---
 

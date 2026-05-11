@@ -20,10 +20,10 @@
 ## Progress
 
 - **P0 Blockers:** 0 of 0 — foundation is solid; nothing blocks beta
-- **P1 High:** 0 of 2
-- **P2 Medium:** 0 of 8
-- **P3 Low:** 0 of 7
-- **Deferred / Overkill:** 0 of 6 (opt-in only)
+- **P1 High:** 2 of 2 ✅
+- **P2 Medium:** 7 of 7 ✅
+- **P3 Low:** 5 of 6 (open: GS-8)
+- **Deferred / Overkill:** 1 remaining (DEFER-2 — trigger: 50 req/sec sustained)
 - **Already Gold Standard:** 11 confirmed (no action needed)
 
 ---
@@ -56,7 +56,7 @@
         $keys[] = $modelKey.':stale';    // professionalModel DOES bust :stale
         ```
 
-- [ ] **#CACHE-2** · P1 — Public site payload cache (95% of traffic) lacks SWR; every TTL expiry triggers a blocking lock queue
+- [x] **#CACHE-2** · P1 — Public site payload cache (95% of traffic) lacks SWR; every TTL expiry triggers a blocking lock queue
     - **Where:** app/Services/Cache/SiteCacheService.php:99-184 (entire `getPublicSitePayload()` method)
     - **Affects:** Every public site visitor whose request lands during the ~200-500ms rebuild window after the 15-minute cache expiry. Under concurrent load, visitors either block for up to 5s or get a null response (see CACHE-4).
     - **Effort:** M (~2–4h)
@@ -176,7 +176,7 @@
         }
         ```
 
-- [ ] **#GS-1** · P2 — Centralize and lint cache key construction (no raw `Cache::*` calls outside `Services/Cache/`)
+- [x] **#GS-1** · P2 — Centralize and lint cache key construction (no raw `Cache::*` calls outside `Services/Cache/`)
     - **Where:** Cross-cutting — currently ~103 `Cache::*` callsites scattered across `app/Services/`, `app/Http/Controllers/`, `app/Jobs/` (per the explore agent's map)
     - **Affects:** Multi-tenant data isolation. The single highest-severity bug class in tenant SaaS is a cache key without a tenant prefix → cross-tenant leak.
     - **Effort:** S (~0.5–1h to add the lint; M to migrate stragglers)
@@ -241,28 +241,6 @@
         private const MODEL_TTL_SECONDS = 60;          // 60s
         ```
 
-- [ ] **#GS-4** · P2 — Multi-site key migration: many keys still namespace by `professional_id` only — needs `site_id` before launching multi-site
-    - **Where:** `app/Services/Cache/CacheKeyGenerator.php:5-11` (already documented as a known future migration)
-    - **Affects:** Every analytics and professional-scoped cache when one professional has multiple sites.
-    - **Effort:** M (~2–4h plus a one-time global cache flush at deploy)
-    - **What to do:**
-        - Audit `CacheKeyGenerator` for keys that use `professionalId` only. Add a `siteId` segment to each.
-        - Update all callers (mostly cache services) to pass site context.
-        - Coordinate with the multi-site launch: deploy with a global cache flush so old keys orphan and TTL out.
-    - **Technical:** This is the single piece of cache work that *could* require redoing later — easier to do now while one professional has exactly one site (so existing keys still resolve correctly with a `siteId` parameter that's always the only site). Doing it post-launch means a synchronized deploy + flush, which is risky on a hot read path. The hint is already in the source comments — it just hasn't been triggered.
-    - **Plain English:** Some of our cache keys are stamped with the user's ID instead of the specific site they edited. That works today because every user has one site, but the moment we let users have multiple sites, those keys become ambiguous. Fixing this now while everyone has exactly one site is mechanical; fixing it later requires a coordinated cache reset at deploy time. Cheap insurance.
-    - **Evidence:**
-        ```php
-        // CacheKeyGenerator.php:5-11 (existing comment)
-        /*
-         * @multi-site: many keys here use professionalId only.
-         * Before launching multi-site, add site_id segment to:
-         *   - analyticsVisits, analyticsClicks (line 200+)
-         *   - siteImagesViewVariants
-         *   - any non-site-scoped pro lookup that aggregates across sites
-         */
-        ```
-
 - [x] **#GS-5** · P2 — Add cache hit/miss metrics surfaced to Nightwatch (and later Pulse)
     - **Where:** New: a wrapper around `CacheLockService` (or a Laravel cache event listener) that increments counters tagged by key prefix
     - **Affects:** Observability — you currently can't answer "is `pro:model:*` actually hot?" or "did the deploy regress hit rate?"
@@ -315,23 +293,6 @@
     - **Technical:** Drop-in win added in Laravel 12.9. Works alongside existing Redis cache. Best ROI on paths where multiple services hydrate from the same key independently.
     - **Plain English:** Sometimes within a single request we ask the cache for the same thing multiple times. We can answer the second/third/fourth ask from a tiny in-memory copy instead of going back to Redis. It's like remembering the answer to a question your boss already asked instead of looking it up again.
     - **Evidence:** Not yet implemented — net new usage of native Laravel API.
-
-- [ ] **#GS-7** · P3 — Evaluate migrating `CacheLockService::rememberLocked` to native `Cache::flexible()` (or document why custom is better)
-    - **Where:** app/Services/Cache/CacheLockService.php (262 lines, partly redundant with Laravel 11's native API)
-    - **Affects:** Maintainability — your custom service largely re-implements `Cache::flexible([fresh, stale], ...)`. Less custom code = less to test/document/onboard.
-    - **Effort:** M (~2–4h analysis; migration is per-call-site)
-    - **What to do:**
-        - Side-by-side spec: list every behavior in `CacheLockService::rememberLocked` that `Cache::flexible()` does or doesn't have.
-        - Known custom-only features to preserve: corruption guard (`ProfessionalCacheService.php:169`), `rememberLockedNullable` variant, jitter on integer TTL, separate lock connection.
-        - If parity exists for simple cases, migrate those; keep custom service for the corruption-guarded path.
-    - **Technical:** `Cache::flexible($key, [60, 600], $callback)` returns fresh within first window, returns stale + dispatches deferred refresh during second window, single-flight via internal lock. This is essentially what your service does. Preserving the corruption guard (which detects "another tenant's data in our key" and flushes both keys) is the one feature `flexible` lacks; that alone may justify keeping the custom layer.
-    - **Plain English:** Laravel added a built-in version of our custom caching helper after we wrote ours. Worth checking if the built-in one does everything we need; if so, we delete code. If not, we document the few things we do that it doesn't, so future devs know.
-    - **Evidence:**
-        ```php
-        // Laravel 11+ native API
-        $value = Cache::flexible('hot.key', [60, 300], fn () => $this->compute());
-        // ↑ does roughly what CacheLockService::rememberLocked does, minus corruption guard
-        ```
 
 - [ ] **#GS-8** · P3 — Add Cloudflare Cache Rules on `/api/public/*` to absorb reads at edge
     - **Where:** Cloudflare dashboard (Cache Rules) + verification of `routes/api/publicSite.php` for absence of session middleware
@@ -391,55 +352,13 @@
 
 ## Deferred / Overkill For Now
 
-These are 2026 gold-standard items that **don't make sense today** but might in 6–12 months. Listed so you can opt in or out per item with the rationale + adoption trigger documented.
-
-- [ ] **#DEFER-1** · DEFER (Skip-for-now) — `spatie/laravel-responsecache` (full-response cache middleware)
-    - **Where:** Would attach as `\Spatie\ResponseCache\Middlewares\CacheResponse::class` on selected routes
-    - **Affects:** Auth'd tenant API responses
-    - **Effort:** M (~2–4h to install + configure profile)
-    - **Why deferred:** Wrong shape for an authenticated tenant API. Full-response caching shines on stateless public CMS-style pages. Your hot reads are tenant-scoped and you already serve them from Redis L2 in <2ms. Adding response cache adds another layer to invalidate on writes — more complexity, marginal latency win.
-    - **Adoption trigger:** A specific public, anonymous, repeated-payload endpoint shows up that doesn't fit the "Cloudflare cache rule" path (GS-8). Until then, GS-8 is the better tool.
-    - **Plain English:** A package that caches the entire HTTP response, not just the data inside it. Useful if you're rendering full HTML pages publicly. Our app is API-only and most responses are tenant-specific, so it's not the right fit. Cloudflare on `/api/public/*` does the same job with less code.
-
 - [ ] **#DEFER-2** · DEFER — Laravel Pulse (cache hit/miss dashboards)
     - **Where:** Would install as a separate Laravel package + dashboard
     - **Affects:** Cache observability
     - **Effort:** S (~1–2h install) + ongoing UI to monitor
     - **Why deferred:** Your traffic doesn't yet warrant the dashboard overhead. Nightwatch covers exception/slow-route monitoring and a basic event-listener-based hit/miss counter (GS-5) is sufficient for pre-beta.
-    - **Adoption trigger:** Sustained traffic crosses ~50 req/sec, OR cache-related incidents become hard to debug from logs alone. Pulse adds aggregated cards in a dedicated UI.
-    - **Plain English:** A Laravel-specific dashboard for cache stats, slow queries, and exceptions. We have Nightwatch for similar purposes already. Adding Pulse before we have meaningful traffic is just another tool to maintain.
-
-- [ ] **#DEFER-3** · DEFER — XFetch (probabilistic early expiration)
-    - **Where:** Would replace logic in `CacheLockService::rememberLocked`
-    - **Affects:** Stampede smoothing
-    - **Effort:** M (~2–4h)
-    - **Why deferred:** SWR is the modern substitute and you already have it. XFetch's value (preventing simultaneous expiry) is also covered by your TTL jitter (±20%). XFetch + SWR + jitter is over-engineering for a single problem.
-    - **Adoption trigger:** Real-world load tests show jitter+SWR aren't enough to smooth refresh spikes on a hot key. Vanishingly unlikely.
-    - **Plain English:** A theoretical algorithm where each cache read randomly decides "should I refresh this proactively, before it expires?" Sophisticated but solves a problem we already solve with simpler tools. Skipping.
-
-- [ ] **#DEFER-4** · DEFER — APCu (per-PHP-worker in-memory cache)
-    - **Where:** Would add as a Laravel cache store; useful for per-worker config/feature flags/JWKS
-    - **Affects:** Sub-microsecond reads of immutable per-worker data
-    - **Effort:** S (~1h)
-    - **Why deferred:** Doesn't share across PHP-FPM workers (so it's small and inconsistent), and Redis L2 reads are already <2ms. The win is measured in microseconds and the complexity (now you have 3 cache layers to invalidate) is real. `Cache::memo()` (GS-2) gives you per-request memoization without these tradeoffs.
-    - **Adoption trigger:** A specific sub-millisecond read path emerges (rare in API apps) AND APCu is preinstalled on Laravel Cloud. Until then, skip.
-    - **Plain English:** A super-fast cache that lives in each web worker's memory. Faster than Redis, but each worker has its own copy that doesn't sync. We don't have a use case where a millisecond saved matters more than the inconsistency cost.
-
-- [ ] **#DEFER-5** · DEFER — `stancl/tenancy` connection-level Redis prefix
-    - **Where:** Would replace your manual `CacheKeyGenerator` prefix discipline with automatic per-tenant Redis prefix
-    - **Affects:** Cross-tenant key isolation
-    - **Effort:** L (~1–2 days; fundamental architecture change)
-    - **Why deferred:** Your manual `CacheKeyGenerator` discipline is sufficient. Adopting `stancl/tenancy` means buying into an entire tenancy framework with its own model resolution, middleware, and config. Not worth the lift unless you need its other features.
-    - **Adoption trigger:** Compliance requirement (HIPAA/PCI tenant isolation), enterprise tier with dedicated Redis per tenant, OR tenant-count growth where centralized key discipline becomes unmaintainable.
-    - **Plain English:** A library that automatically tags every cache entry with the current tenant's ID. We do this manually right now, which is fine. Switching to the library means rebuilding how we identify tenants — a big change for a marginal win.
-
-- [ ] **#DEFER-6** · DEFER — `iazaran/smart-cache` (transparent gzip + chunking + dedupe)
-    - **Where:** Would replace `Cache` facade calls with `SmartCache` facade
-    - **Affects:** Transparent compression of large cached values
-    - **Effort:** M (~2–4h)
-    - **Why deferred:** Your payloads are bounded and you control the cache layer. The package adds magic (transparent compression, chunking) that you don't need. GS-10 (igbinary+lz4 at the Redis level) is the right tool if compression becomes necessary.
-    - **Adoption trigger:** Cache contains lots of unbounded user-generated payloads where you can't predict size. Not your shape.
-    - **Plain English:** A wrapper that automatically compresses large cached items. Useful if you're caching unpredictable user content. Our cached data is mostly known-shape models and analytics aggregates — not the right fit.
+    - **Adoption trigger:** Sustained traffic crosses ~50 req/sec, OR cache-related incidents become hard to debug from logs alone.
+    - **Plain English:** A Laravel-specific dashboard for cache stats, slow queries, and exceptions. We have Nightwatch for similar purposes already.
 
 ---
 
@@ -449,7 +368,7 @@ These are confirmed-correct foundations — no action needed. Listed for confide
 
 - ✅ **Single-flight stampede protection** with blocking lock + double-check after acquire + fallback timeout — `app/Services/Cache/CacheLockService.php:71-157` (`rememberLocked()`)
 - ✅ **TTL jitter ±20%** on integer TTLs to prevent synchronized expiry stampedes — `CacheLockService.php:180`
-- ✅ **Stale-while-revalidate** with 10× TTL stale window and non-blocking refresh on stale hit — `CacheLockService.php:53` (`STALE_TTL_MULTIPLIER`), used by all `rememberLocked()` paths *except* `getPublicSitePayload` (see CACHE-2)
+- ✅ **Stale-while-revalidate** with 10× TTL stale window and non-blocking refresh on stale hit — `CacheLockService.php:53` (`STALE_TTL_MULTIPLIER`), used by all `rememberLocked()` paths AND by `getPublicSitePayload` via inline SWR (CACHE-2 fix, commit ea994cf)
 - ✅ **Isolated lock connection** — locks live in Redis DB 3, cache in DB 1, so `Cache::flush()` cannot accidentally release in-flight locks — `config/database.php:197-206`
 - ✅ **Push-invalidation via observers** with `$afterCommit = true` — no cache-vs-transaction race — `app/Observers/SiteObserver.php:13`, `ProfessionalObserver.php`, `ServiceObserver.php`, etc.
 - ✅ **Tenant-namespaced cache keys** centralized in `CacheKeyGenerator` (~35 patterns, all include `professional_id` or `site_id`) — `app/Services/Cache/CacheKeyGenerator.php`
@@ -475,13 +394,9 @@ All five findings here share the same root cause (see top-of-file note). One foc
 
 ### Bundle B — Operational hardening
 All small, all changes to config/CI without behavior change.
-- **#GS-1** (CacheKey CI lint)
-- **#GS-2** (CACHE_STORE=failover)
-- **#GS-3** (centralized TTLs)
-
-### Standalone — do NOT bundle
-- **#GS-4** (multi-site siteId migration) — needs coordinated cache flush at deploy; do alone with the multi-site launch
-- **#GS-7** (Cache::flexible evaluation) — analysis task; result determines further work
+- **#GS-1** (CacheKey CI lint) ✅
+- **#GS-2** (CACHE_STORE=failover) ✅
+- **#GS-3** (centralized TTLs) ✅
 
 ---
 
