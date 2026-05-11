@@ -275,6 +275,15 @@ class StripeConnectController extends Controller
         $pro = $request->attributes->get('professional');
         $role = $request->input('role');
 
+        // Gate first — CommissionPolicy::viewOwnPayouts rejects cross-role calls
+        // (affiliate using ?role=brand, or vice versa) with a clean 403 instead of
+        // leaking an empty 200. The skeleton carries the role-appropriate id only.
+        $skeleton = new CommissionPayout;
+        $skeleton->forceFill($role === 'brand'
+            ? ['brand_professional_id' => $pro->id]
+            : ['affiliate_professional_id' => $pro->id]);
+        Gate::forUser($pro)->authorize('viewOwnPayouts', $skeleton);
+
         $query = CommissionPayout::query()
             ->with(['brandProfessional:id,display_name,handle', 'affiliateProfessional:id,display_name,handle']);
 

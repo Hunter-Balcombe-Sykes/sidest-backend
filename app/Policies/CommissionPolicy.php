@@ -70,21 +70,35 @@ class CommissionPolicy extends BasePolicy
     }
 
     /**
-     * Authorizes an affiliate to view their own payout list.
+     * Authorizes a professional to view their own payout list — role-aware.
      *
-     * Brands have a symmetric endpoint (/brand/payouts, guarded by manageWallet).
-     * This gate guards the affiliate-facing route — only non-brand professionals
-     * can access it, and only their own rows. The actor's id must match the
-     * skeleton's affiliate_professional_id AND the actor must not be a brand type.
+     * Two callsites:
+     *   - GET /affiliate/payouts (AffiliatePayoutsController): seeds skeleton
+     *     with affiliate_professional_id only. Brand callers fail the type check.
+     *   - GET /stripe/payouts?role=brand|affiliate (StripeConnectController):
+     *     seeds the role-appropriate id. Type check enforces brands use role=brand
+     *     and non-brands use role=affiliate, so an affiliate can't request a brand
+     *     view (or vice versa) and silently get an empty 200.
+     *
+     * The actor must (a) match the populated id on the skeleton, and (b) be the
+     * role type that matches the populated side.
      */
     public function viewOwnPayouts(Professional $pro, CommissionPayout $skeleton): bool
     {
-        // Brands use manageWallet / /brand/payouts instead.
-        if (($pro->professional_type ?? null) === 'brand') {
-            return false;
+        $actorId = (string) $pro->id;
+        $isBrand = ($pro->professional_type ?? null) === 'brand';
+        $brandId = (string) ($skeleton->brand_professional_id ?? '');
+        $affiliateId = (string) ($skeleton->affiliate_professional_id ?? '');
+
+        if ($brandId !== '' && $actorId === $brandId) {
+            return $isBrand;
         }
 
-        return (string) $pro->id === (string) $skeleton->affiliate_professional_id;
+        if ($affiliateId !== '' && $actorId === $affiliateId) {
+            return ! $isBrand;
+        }
+
+        return false;
     }
 
     public function update(Professional $actor, Model $record): bool|Response

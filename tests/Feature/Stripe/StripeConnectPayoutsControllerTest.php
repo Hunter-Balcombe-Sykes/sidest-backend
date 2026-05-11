@@ -46,7 +46,7 @@ beforeEach(function () {
     )');
 });
 
-function seedPayoutProfessional(string $id, string $handle, string $name): void
+function seedPayoutProfessional(string $id, string $handle, string $name, string $type = 'brand'): void
 {
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('core.professionals')->insert([
@@ -54,7 +54,9 @@ function seedPayoutProfessional(string $id, string $handle, string $name): void
         'handle' => $handle,
         'handle_lc' => $handle,
         'display_name' => $name,
-        'professional_type' => 'brand',
+        // 'brand' for brand-side rows, 'influencer' for affiliates. CommissionPolicy::viewOwnPayouts
+        // gates on type (brands → role=brand only, non-brands → role=affiliate only).
+        'professional_type' => $type,
         'status' => 'active',
         'created_at' => $now,
         'updated_at' => $now,
@@ -95,7 +97,7 @@ function makePayoutsRequest(Professional $pro, array $query = []): PayoutsReques
 it('lists payouts where the professional is the affiliate by default', function () {
     seedPayoutProfessional('pro-brand-1', 'brandone', 'Brand One');
     seedPayoutProfessional('pro-brand-2', 'brandtwo', 'Brand Two');
-    seedPayoutProfessional('pro-aff-1', 'affone', 'Affiliate One');
+    seedPayoutProfessional('pro-aff-1', 'affone', 'Affiliate One', 'influencer');
 
     // Two payouts where this user is the affiliate, one where they're
     // (improbably) the brand-side — the affiliate filter must return only
@@ -152,8 +154,8 @@ it('lists payouts where the professional is the affiliate by default', function 
 
 it('lists payouts where the professional is the brand when role=brand', function () {
     seedPayoutProfessional('pro-brand-1', 'brandone', 'Brand One');
-    seedPayoutProfessional('pro-aff-1', 'affone', 'Affiliate One');
-    seedPayoutProfessional('pro-aff-2', 'afftwo', 'Affiliate Two');
+    seedPayoutProfessional('pro-aff-1', 'affone', 'Affiliate One', 'influencer');
+    seedPayoutProfessional('pro-aff-2', 'afftwo', 'Affiliate Two', 'influencer');
 
     seedCommissionPayoutRow([
         'id' => 'pay-b-1',
@@ -192,7 +194,7 @@ it('lists payouts where the professional is the brand when role=brand', function
 });
 
 it('returns an empty payout list but still includes the summary when there are no payouts', function () {
-    seedPayoutProfessional('pro-empty-1', 'emptybrand', 'Empty Brand');
+    seedPayoutProfessional('pro-empty-1', 'emptyaff', 'Empty Affiliate', 'influencer');
 
     $summary = Mockery::mock(CommissionPayoutService::class);
     $summary->shouldReceive('getPayoutSummary')->andReturn([
@@ -211,4 +213,34 @@ it('returns an empty payout list but still includes the summary when there are n
         'total_earned_cents' => 0,
         'pending_cents' => 0,
     ]);
+});
+
+// #STRIPE-1 — CommissionPolicy::viewOwnPayouts replaces inline role-scoping.
+// Cross-role calls (affiliate using ?role=brand, or vice versa) now return 403
+// instead of an empty 200, surfacing the rule in one testable place.
+
+it('denies a brand calling /stripe/payouts with role=affiliate (cross-role)', function () {
+    seedPayoutProfessional('pro-brand-x', 'brandx', 'Brand X', 'brand');
+
+    $summary = Mockery::mock(CommissionPayoutService::class);
+    $summary->shouldNotReceive('getPayoutSummary');
+
+    $brand = Professional::query()->find('pro-brand-x');
+
+    expect(fn () => makePayoutsController($summary)->payouts(
+        makePayoutsRequest($brand, ['role' => 'affiliate'])
+    ))->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
+});
+
+it('denies an affiliate calling /stripe/payouts with role=brand (cross-role)', function () {
+    seedPayoutProfessional('pro-aff-x', 'affx', 'Affiliate X', 'influencer');
+
+    $summary = Mockery::mock(CommissionPayoutService::class);
+    $summary->shouldNotReceive('getPayoutSummary');
+
+    $aff = Professional::query()->find('pro-aff-x');
+
+    expect(fn () => makePayoutsController($summary)->payouts(
+        makePayoutsRequest($aff, ['role' => 'brand'])
+    ))->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
 });
