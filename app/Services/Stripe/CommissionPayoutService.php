@@ -782,19 +782,24 @@ class CommissionPayoutService
     private function markPendingFunding(CommissionPayout $payout, string $code, string $reason): void
     {
         $payout->forceFill([
-            'status'                => 'pending_funds',
-            'failure_code'          => $code,
-            'failure_reason'        => $reason,
-            'processed_at'          => null,
+            'status' => 'pending_funds',
+            'failure_code' => $code,
+            'failure_reason' => $reason,
+            'processed_at' => null,
             // Increment so RetryPendingFundsPayoutsJob can enforce the 7-attempt cap.
             'funding_failure_count' => ($payout->funding_failure_count ?? 0) + 1,
             // Schedule the next retry attempt. RetryPendingFundsPayoutsJob queries
             // WHERE next_retry_at <= now() — NULL never satisfies this in PostgreSQL.
-            'next_retry_at'         => now()->addDay(),
+            'next_retry_at' => now()->addDay(),
             // Reset expiry each time we park the payout — without this, the void clock
             // counts from original creation while the payout loops in pending_funds,
             // causing VoidExpiredPayoutsJob to silently erase the affiliate's commission.
-            'void_at'               => now()->addDays($this->gracePeriodDays),
+            'void_at' => now()->addDays($this->gracePeriodDays),
+            // Stamp warning-clock anchor on FIRST funding failure only. ?? is load-bearing:
+            // resetting on every retry would push T-30/T-7/T-1 windows out forever, the
+            // exact bug void_at-as-anchor caused before #STRIPE-4. fireGraceWarnings keys
+            // off this column, not void_at.
+            'grace_started_at' => $payout->grace_started_at ?? now(),
         ])->save();
 
         Log::notice('Commission payout pending funding', [

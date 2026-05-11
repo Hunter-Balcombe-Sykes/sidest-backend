@@ -74,6 +74,7 @@ beforeEach(function () {
         funding_failure_count INTEGER NOT NULL DEFAULT 0,
         failure_category TEXT,
         grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
+        grace_started_at TEXT,
         created_at TEXT,
         updated_at TEXT
     )');
@@ -272,6 +273,56 @@ it('marks affiliate_not_connected when affiliate has no active Stripe account', 
     $fresh = $payout->fresh();
     expect($fresh->status)->toBe('pending_funds');
     expect($fresh->failure_code)->toBe('affiliate_not_connected');
+});
+
+// #STRIPE-4 — grace_started_at must be stamped exactly once across multiple
+// markPendingFunding calls. void_at can keep resetting; the warning clock cannot.
+
+it('markPendingFunding stamps grace_started_at on first failure', function () {
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1', [
+        'stripe_connect_account_id' => null,
+        'stripe_connect_status' => 'not_connected',
+    ]);
+    $payout = payoutSvc_seedPayout('p1');
+
+    expect($payout->grace_started_at)->toBeNull();
+
+    (new CommissionPayoutService(Mockery::mock(StripeClient::class)))
+        ->processPayoutBatch($payout);
+
+    $fresh = $payout->fresh();
+    expect($fresh->grace_started_at)->not->toBeNull();
+    expect($fresh->grace_started_at->isCurrentMinute())->toBeTrue();
+});
+
+it('markPendingFunding does NOT reset grace_started_at on subsequent failures', function () {
+    // The whole point of #STRIPE-4: even though void_at gets bumped to now()+60d
+    // every retry, grace_started_at stays at the original first-failure timestamp.
+    // Without this, T-30/T-7/T-1 windows would slide forward forever.
+    payoutSvc_seedBrand('brand-1');
+    payoutSvc_seedAffiliate('aff-1', [
+        'stripe_connect_account_id' => null,
+        'stripe_connect_status' => 'not_connected',
+    ]);
+
+    $originalGraceStart = now()->subDays(40);
+    $payout = payoutSvc_seedPayout('p1', [
+        'status' => 'pending_funds',
+        'failure_code' => 'affiliate_not_connected',
+        'funding_failure_count' => 40,
+        'grace_started_at' => $originalGraceStart->toDateTimeString(),
+        'void_at' => now()->addDays(60)->toDateTimeString(),
+    ]);
+
+    (new CommissionPayoutService(Mockery::mock(StripeClient::class)))
+        ->processPayoutBatch($payout);
+
+    $fresh = $payout->fresh();
+    // grace_started_at must equal the original timestamp — within a second to account for parsing.
+    expect($fresh->grace_started_at->diffInSeconds($originalGraceStart))->toBeLessThan(2);
+    // void_at should have moved (proving the retry path actually ran).
+    expect($fresh->void_at->isAfter(now()->addDays(55)))->toBeTrue();
 });
 
 it('fails with brand_missing when brand professional does not exist', function () {

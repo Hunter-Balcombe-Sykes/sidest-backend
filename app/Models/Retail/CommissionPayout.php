@@ -45,6 +45,10 @@ class CommissionPayout extends BaseModel
         'last_retry_at' => 'datetime',
         'funding_failure_count' => 'integer',
         'grace_notifications_sent' => 'array',
+
+        // #STRIPE-4: warning-clock anchor, stamped once on first markPendingFunding.
+        // Decoupled from void_at (which resets every retry for retry-safety).
+        'grace_started_at' => 'datetime',
     ];
 
     public function brandProfessional(): BelongsTo

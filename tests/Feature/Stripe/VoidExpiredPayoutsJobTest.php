@@ -83,6 +83,8 @@ beforeEach(function () {
         'transfer_completed_at TEXT',
         'funding_failure_count INTEGER NOT NULL DEFAULT 0',
         'failure_category TEXT',
+        // #STRIPE-4 — warning-clock anchor (separate from void_at).
+        'grace_started_at TEXT',
     ] as $col) {
         try {
             $conn->statement("ALTER TABLE commerce.commission_payouts ADD COLUMN {$col}");
@@ -401,12 +403,16 @@ it('publishes notification only once when the same expired payout is processed o
 // #VEP-8 — Grace warning notifications (T-30 / T-7 / T-1)
 // ============================================================
 
-it('fires a T-30 grace warning notification to an affiliate whose void_at is 30 days away', function () {
+it('fires a T-30 grace warning when grace_started_at is 30 days into a 60-day window', function () {
+    // #STRIPE-4: warnings now anchor on grace_started_at (stamped once on first
+    // markPendingFunding). With 60-day grace, T-30 fires when grace_started_at
+    // = now() - 30d (i.e. 30 days remaining out of 60).
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
 
-    // void_at exactly 30 days from now falls inside the startOfDay..endOfDay window.
-    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString());
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
+        'grace_started_at' => now()->subDays(30)->toDateTimeString(),
+    ]);
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
@@ -417,7 +423,6 @@ it('fires a T-30 grace warning notification to an affiliate whose void_at is 30 
         fn ($n) => $n->daysRemaining === 30
     );
 
-    // grace_notifications_sent should now contain 'T-30'
     $payout = \App\Models\Retail\CommissionPayout::find('p1');
     expect($payout->grace_notifications_sent)->toContain('T-30');
 });
@@ -425,7 +430,8 @@ it('fires a T-30 grace warning notification to an affiliate whose void_at is 30 
 it('does not re-fire a grace warning if T-30 already recorded in grace_notifications_sent', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
-    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString(), overrides: [
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
+        'grace_started_at' => now()->subDays(30)->toDateTimeString(),
         'grace_notifications_sent' => '["T-30"]',
     ]);
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
@@ -441,10 +447,85 @@ it('does not re-fire a grace warning if T-30 already recorded in grace_notificat
 it('does not send a grace warning when affiliate already has active Stripe Connect', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'active'); // already connected
-    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString());
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
+        'grace_started_at' => now()->subDays(30)->toDateTimeString(),
+    ]);
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
 
     Notification::assertNothingSent();
+});
+
+// #STRIPE-4 — warning-clock anchored on grace_started_at, not void_at.
+
+it('does not send a grace warning when grace_started_at is NULL (payout never failed)', function () {
+    // Pure 'pending' payouts that haven't reached pending_funds have NULL
+    // grace_started_at — markPendingFunding hasn't been called yet. No warnings
+    // until they actually fail funding; otherwise we'd warn about payouts that
+    // are simply waiting for their hold window to close.
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString(), status: 'pending');
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+
+    Notification::assertNothingSent();
+});
+
+it('still fires T-30 when retries reset void_at to +60d (the original #STRIPE-4 bug case)', function () {
+    // Reproduces the bug: an affiliate-not-connected payout has been bouncing
+    // through markPendingFunding for 30 days. void_at always reads as +60d
+    // because it gets reset on every retry. Pre-fix the warning never fired;
+    // post-fix it correctly fires off grace_started_at.
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
+        'grace_started_at' => now()->subDays(30)->toDateTimeString(),
+        'funding_failure_count' => 25, // ~25 retries deep
+    ]);
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+
+    Notification::assertSentTo(
+        \App\Models\Core\Professional\Professional::find('aff-1'),
+        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class,
+        fn ($n) => $n->daysRemaining === 30
+    );
+});
+
+it('fires T-7 when grace_started_at is 53 days into a 60-day window', function () {
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
+        'grace_started_at' => now()->subDays(53)->toDateTimeString(),
+    ]);
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+
+    Notification::assertSentTo(
+        \App\Models\Core\Professional\Professional::find('aff-1'),
+        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class,
+        fn ($n) => $n->daysRemaining === 7
+    );
+});
+
+it('fires T-1 when grace_started_at is 59 days into a 60-day window', function () {
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
+        'grace_started_at' => now()->subDays(59)->toDateTimeString(),
+    ]);
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+
+    Notification::assertSentTo(
+        \App\Models\Core\Professional\Professional::find('aff-1'),
+        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class,
+        fn ($n) => $n->daysRemaining === 1
+    );
 });

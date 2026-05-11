@@ -60,20 +60,31 @@ class VoidExpiredPayoutsJob implements ShouldQueue
 
     /**
      * Send T-30/T-7/T-1 grace warnings to affiliates who haven't connected Stripe.
-     * Tags are written to grace_notifications_sent JSONB to prevent duplicate sends.
+     *
+     * Anchors on grace_started_at (stamped once on the first markPendingFunding call)
+     * rather than void_at (which resets every retry for retry-safety). #STRIPE-4 fix:
+     * keying off void_at meant warning windows never matched while retries were active,
+     * so an affiliate could go 50+ days without a single warning.
+     *
+     * Math: with grace_period_days = 60 and N days remaining (N ∈ {30, 7, 1}),
+     * the warning fires when grace_started_at = now() - (60 - N) days. Tags are
+     * written to grace_notifications_sent JSONB to prevent duplicate sends.
      */
     private function fireGraceWarnings(): void
     {
+        $gracePeriodDays = (int) config('partna.store.grace_period_days', 60);
+
         foreach ([30, 7, 1] as $daysOut) {
-            $tag = 'T-' . $daysOut;
-            $windowStart = now()->addDays($daysOut)->startOfDay();
-            $windowEnd = now()->addDays($daysOut)->endOfDay();
+            $tag = 'T-'.$daysOut;
+            $anchor = now()->subDays($gracePeriodDays - $daysOut);
+            $windowStart = $anchor->copy()->startOfDay();
+            $windowEnd = $anchor->copy()->endOfDay();
 
             $candidates = CommissionPayout::query()
                 ->whereIn('status', ['pending', 'pending_funds'])
-                ->whereBetween('void_at', [$windowStart, $windowEnd])
-                ->whereDoesntHave('affiliateProfessional', fn ($q) =>
-                    $q->where('stripe_connect_status', 'active'))
+                ->whereNotNull('grace_started_at')
+                ->whereBetween('grace_started_at', [$windowStart, $windowEnd])
+                ->whereDoesntHave('affiliateProfessional', fn ($q) => $q->where('stripe_connect_status', 'active'))
                 ->get()
                 ->filter(fn ($p) => ! in_array($tag, $p->grace_notifications_sent ?? [], true));
 
