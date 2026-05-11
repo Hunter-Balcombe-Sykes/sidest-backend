@@ -16,11 +16,11 @@ use Illuminate\Support\Facades\Log;
 /**
  * Installs the Partna Price automatic discount on the brand's Shopify store.
  *
- * The discount is backed by the `sidest-affiliate-discount` Shopify Function
+ * The discount is backed by the `partna-affiliate-discount` Shopify Function
  * bundled in the Partna app extension. Activating it via
  * `discountAutomaticAppCreate` tells Shopify to run our function on every
  * checkout — the function itself gates on the cart attribute
- * `_sidest_affiliate_id` so brand-direct customers never see the discount.
+ * `_partna_affiliate_id` so brand-direct customers never see the discount.
  *
  * Idempotent: queries existing automatic app discounts for one backed by this
  * app's function_id and skips creation if present. Safe to re-run after
@@ -55,9 +55,9 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
     // brand-neutral because it surfaces on every brand's order confirmation.
     private const DISCOUNT_TITLE = 'Partna Price';
 
-    // Matches the extension handle in Sidest-Embedded/extensions/sidest-affiliate-discount/
+    // Matches the extension handle in Partna-Shopify-App/extensions/partna-affiliate-discount/
     // shopify.extension.toml. Shopify exposes this as `shopifyFunctions.edges.node.title`.
-    private const FUNCTION_APP_HANDLE = 'sidest-affiliate-discount';
+    private const FUNCTION_APP_HANDLE = 'partna-affiliate-discount';
 
     // Look up the function GID for the connected app. Shopify returns all
     // functions installed on the store by the app; we filter by apiType
@@ -137,7 +137,7 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
         if ($shopDomain === '' || $accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
-            $integration->mergeProviderMetadata(['sidest_discount_state' => 'failed']);
+            $integration->mergeProviderMetadata(['partna_discount_state' => 'failed']);
 
             return;
         }
@@ -149,17 +149,17 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
                 // predates the function, or the Shopify app hasn't been upgraded
                 // on their store yet. Keep state as 'pending' (not failed) so a
                 // retry after deploy succeeds cleanly.
-                $integration->mergeProviderMetadata(['sidest_discount_state' => 'pending']);
-                Log::info('sidest-affiliate-discount function not found on store — leaving pending for retry', [
+                $integration->mergeProviderMetadata(['partna_discount_state' => 'pending']);
+                Log::info('partna-affiliate-discount function not found on store — leaving pending for retry', [
                     'integration_id' => $this->integrationId,
                     'shop_domain' => $shopDomain,
                 ]);
             } elseif ($this->automaticDiscountAlreadyInstalled($shopDomain, $accessToken, $apiVersion, $functionId)) {
-                $integration->mergeProviderMetadata(['sidest_discount_state' => 'registered']);
+                $integration->mergeProviderMetadata(['partna_discount_state' => 'registered']);
             } else {
                 $this->createAutomaticDiscount($shopDomain, $accessToken, $apiVersion, $functionId);
 
-                $integration->mergeProviderMetadata(['sidest_discount_state' => 'registered']);
+                $integration->mergeProviderMetadata(['partna_discount_state' => 'registered']);
 
                 Log::info('Partna Price automatic discount installed', [
                     'integration_id' => $this->integrationId,
@@ -178,7 +178,7 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
             //   - registered (new or already installed) → same reason
             BackfillBrandHasEnabledVariantsJob::dispatch($this->integrationId);
         } catch (\Throwable $e) {
-            $integration->mergeProviderMetadata(['sidest_discount_state' => 'failed']);
+            $integration->mergeProviderMetadata(['partna_discount_state' => 'failed']);
 
             Log::error('Failed to install Partna Price automatic discount', [
                 'integration_id' => $this->integrationId,
@@ -193,11 +193,11 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
     public function failed(\Throwable $e): void
     {
         $integration = ProfessionalIntegration::find($this->integrationId);
-        $integration?->mergeProviderMetadata(['sidest_discount_state' => 'failed']);
+        $integration?->mergeProviderMetadata(['partna_discount_state' => 'failed']);
     }
 
     /**
-     * Resolve the `sidest-affiliate-discount` function's Shopify GID on this
+     * Resolve the `partna-affiliate-discount` function's Shopify GID on this
      * store. Returns null when the app version on the store doesn't include
      * the function yet — the caller keeps state as 'pending' for retry.
      */
