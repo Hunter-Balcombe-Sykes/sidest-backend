@@ -12,6 +12,7 @@ use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
@@ -54,10 +55,7 @@ class HydrogenAffiliateController extends ApiController
             return $this->error('Brand not found.', 404);
         }
 
-        $affiliate = Professional::query()
-            ->where('handle_lc', $slug)
-            ->whereNull('deleted_at')
-            ->first();
+        $affiliate = $this->findAffiliateBySlug($slug);
 
         if (! $affiliate || $affiliate->status !== 'active') {
             return $this->error('Affiliate not found.', 404);
@@ -139,10 +137,7 @@ class HydrogenAffiliateController extends ApiController
             return $this->error('Brand not found.', 404);
         }
 
-        $affiliate = Professional::query()
-            ->where('handle_lc', $slug)
-            ->whereNull('deleted_at')
-            ->first();
+        $affiliate = $this->findAffiliateBySlug($slug);
 
         if (! $affiliate || $affiliate->status !== 'active') {
             return $this->error('Affiliate not found.', 404);
@@ -623,6 +618,33 @@ class HydrogenAffiliateController extends ApiController
             'manual_booking_url' => $manualBookingUrl !== '' ? $manualBookingUrl : null,
             'services' => $services,
         ];
+    }
+
+    // ── Affiliate slug lookup (alias-aware) ──────────────────────────────────
+
+    /**
+     * Resolves an affiliate by current handle OR historical handle alias.
+     *
+     * Without alias fallback, renaming an affiliate's handle/subdomain would
+     * immediately break every shared `<brand>.partna.au/<old-handle>` link
+     * (Hydrogen would 404 → redirect to brand's Shopify store). The aliases
+     * row is created by UpdateSiteAction on rename so old URLs keep resolving
+     * to the same person under their new identity.
+     */
+    private function findAffiliateBySlug(string $slug): ?Professional
+    {
+        return Professional::query()
+            ->where(function ($q) use ($slug) {
+                $q->where('handle_lc', $slug)
+                    ->orWhereExists(function ($sub) use ($slug) {
+                        $sub->select(DB::raw(1))
+                            ->from('site.professional_handle_aliases')
+                            ->whereColumn('site.professional_handle_aliases.professional_id', 'core.professionals.id')
+                            ->whereRaw('lower(handle) = ?', [$slug]);
+                    });
+            })
+            ->whereNull('deleted_at')
+            ->first();
     }
 
     // ── Booking ──────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ use Illuminate\Validation\ValidationException;
 beforeEach(function () {
     setupCoreSchema();
 
+    DB::table('site.professional_handle_aliases')->delete();
     DB::table('site.site_subdomain_aliases')->delete();
     DB::table('site.public_site_payload')->delete();
     DB::table('site.sites')->delete();
@@ -78,6 +79,44 @@ it('stores old subdomain as alias after a valid change', function () {
 
     expect($alias)->not->toBeNull();
     expect($alias->subdomain)->toBe('old');
+});
+
+it('syncs professional.handle + handle_lc and writes a handle alias on subdomain change', function () {
+    Carbon::setTestNow('2025-01-15');
+
+    $proId = (string) Str::uuid();
+    $siteId = (string) Str::uuid();
+
+    DB::table('core.professionals')->insert([
+        'id' => $proId,
+        'display_name' => 'Test Pro',
+        'handle' => 'old',
+        'handle_lc' => 'old',
+    ]);
+
+    DB::table('site.sites')->insert([
+        'id' => $siteId,
+        'professional_id' => $proId,
+        'subdomain' => 'old',
+        'subdomain_changed_at' => Carbon::now()->subDays(31)->toDateTimeString(),
+    ]);
+
+    $professional = Professional::findOrFail($proId);
+    $action = app(UpdateSiteAction::class);
+
+    $action->execute($professional, ['subdomain' => 'new']);
+
+    // Site, professional, and alias rows must all reflect the new handle.
+    $proRow = DB::table('core.professionals')->where('id', $proId)->first();
+    expect($proRow->handle)->toBe('new');
+    expect($proRow->handle_lc)->toBe('new');
+
+    $handleAlias = DB::table('site.professional_handle_aliases')
+        ->where('professional_id', $proId)
+        ->first();
+
+    expect($handleAlias)->not->toBeNull();
+    expect($handleAlias->handle)->toBe('old');
 });
 
 it('redirects old subdomain to new site host', function () {
@@ -180,6 +219,18 @@ function setupCoreSchema(): void
             site_id TEXT NOT NULL,
             subdomain TEXT NOT NULL,
             created_at TEXT NOT NULL
+        )');
+
+        // professional_handle_aliases — historical handle row written when a
+        // professional's subdomain changes (the canonical handle changes too,
+        // so the old handle becomes an alias for HydrogenAffiliateController
+        // lookups to keep resolving).
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.professional_handle_aliases (
+            id TEXT PRIMARY KEY,
+            professional_id TEXT NOT NULL,
+            handle TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )');
 
         // The PublicSitePayload view lives under the 'site' schema in production;
