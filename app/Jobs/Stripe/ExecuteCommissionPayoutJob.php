@@ -60,12 +60,23 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
         $durationMs = (int) round((microtime(true) - $start) * 1000);
 
         if ($result === null) {
-            // Transfer is in flight — the transfer.paid webhook or ReconcileStuckTransferringPayoutsJob
-            // will flip the payout to completed. Return cleanly so Horizon does not retry.
-            Log::info('ExecuteCommissionPayoutJob parked at transferring — awaiting webhook', [
-                'payout_id' => $this->payoutId,
-                'duration_ms' => $durationMs,
-            ]);
+            // Two distinct null cases: (a) transfer in-flight — webhook or
+            // ReconcileStuckTransferringPayoutsJob will complete it; (b) batch cancelled by
+            // revalidatePayoutOrders because all linked orders became ineligible — terminal,
+            // no webhook will ever arrive. Re-read status so the operations log distinguishes
+            // them; otherwise a cancelled payout looks "stuck in transferring" indefinitely.
+            $current = CommissionPayout::find($this->payoutId);
+            if ($current && $current->status === 'cancelled') {
+                Log::info('ExecuteCommissionPayoutJob cancelled by order revalidation', [
+                    'payout_id' => $this->payoutId,
+                    'duration_ms' => $durationMs,
+                ]);
+            } else {
+                Log::info('ExecuteCommissionPayoutJob parked at transferring — awaiting webhook', [
+                    'payout_id' => $this->payoutId,
+                    'duration_ms' => $durationMs,
+                ]);
+            }
 
             return;
         }

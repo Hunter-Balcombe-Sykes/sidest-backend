@@ -5,9 +5,8 @@ namespace App\Services\Stripe;
 use App\Models\Commerce\WalletMovement;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
-use App\Models\Core\Professional\WalletCurrencySwitchAudit;
-use App\Models\Retail\BrandCommissionTopup;
 use App\Services\Cache\CacheLockService;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -403,7 +402,7 @@ class StripeConnectService
         $pm = $this->stripe->paymentMethods->retrieve($paymentMethodId);
 
         $brand->update([
-            'stripe_payment_method_id'    => $paymentMethodId,
+            'stripe_payment_method_id' => $paymentMethodId,
             'stripe_payment_method_brand' => $pm->card?->brand ?? null,
             'stripe_payment_method_last4' => $pm->card?->last4 ?? null,
         ]);
@@ -515,10 +514,10 @@ class StripeConnectService
                 ],
             ]],
             'metadata' => [
-                'purpose'                => 'brand_commission_topup',
-                'professional_id'        => $brand->id,   // read by webhook handler
+                'purpose' => 'brand_commission_topup',
+                'professional_id' => $brand->id,   // read by webhook handler
                 'sidest_professional_id' => $brand->id,   // kept for backward compat
-                'currency'               => $currency,
+                'currency' => $currency,
             ],
         ]);
 
@@ -571,10 +570,10 @@ class StripeConnectService
             $walletCurrency = strtoupper($brand->stripe_manual_balance_currency ?? 'AUD');
             if ($walletCurrency !== $currency) {
                 Log::error('stripe.topup.currency_mismatch', [
-                    'professional_id'  => $professionalId,
-                    'wallet_currency'  => $walletCurrency,
+                    'professional_id' => $professionalId,
+                    'wallet_currency' => $walletCurrency,
                     'session_currency' => $currency,
-                    'amount_cents'     => $amountCents,
+                    'amount_cents' => $amountCents,
                 ]);
 
                 if (! empty($session->payment_intent)) {
@@ -584,9 +583,9 @@ class StripeConnectService
                                 'payment_intent' => is_string($session->payment_intent)
                                     ? $session->payment_intent
                                     : ($session->payment_intent->id ?? null),
-                                'reason'   => 'requested_by_customer',
+                                'reason' => 'requested_by_customer',
                                 'metadata' => [
-                                    'sidest_reason'   => 'currency_mismatch',
+                                    'sidest_reason' => 'currency_mismatch',
                                     'professional_id' => $professionalId,
                                 ],
                             ],
@@ -595,7 +594,7 @@ class StripeConnectService
                     } catch (ApiErrorException $e) {
                         Log::critical('stripe.topup.currency_mismatch_refund_failed', [
                             'session_id' => $sessionId,
-                            'error'      => $e->getMessage(),
+                            'error' => $e->getMessage(),
                         ]);
                         report($e);
                     }
@@ -607,39 +606,35 @@ class StripeConnectService
             $idempotencyKey = 'topup:'.$sessionId;
             $actor = $actorOverride ?? [
                 'type' => 'webhook',
-                'id'   => $stripeEventId ?? ('checkout.session.completed:'.$sessionId),
+                'id' => $stripeEventId ?? ('checkout.session.completed:'.$sessionId),
             ];
 
             // UNIQUE(idempotency_key) provides idempotency — a duplicate delivery throws
-            // QueryException which we catch and swallow; the balance is already correct.
+            // UniqueConstraintViolationException which we catch and swallow; the balance is
+            // already correct. Same pattern as ProcessShopifyOrderUpdatedWebhookJob::insertEventIfNew.
             // WalletMovement uses $guarded = ['*'] so we must use forceFill() on an instance.
             try {
                 (new WalletMovement)->forceFill([
-                    'professional_id'    => $brand->id,
-                    'direction'          => 'credit',
-                    'amount_cents'       => $amountCents,
-                    'currency_code'      => $currency,
-                    'reason'             => 'top_up',
-                    'actor_type'         => $actor['type'],
-                    'actor_id'           => $actor['id'],
+                    'professional_id' => $brand->id,
+                    'direction' => 'credit',
+                    'amount_cents' => $amountCents,
+                    'currency_code' => $currency,
+                    'reason' => 'top_up',
+                    'actor_type' => $actor['type'],
+                    'actor_id' => $actor['id'],
                     'related_session_id' => $sessionId,
-                    'idempotency_key'    => $idempotencyKey,
-                    'metadata'           => [
-                        'session_id'             => $sessionId,
+                    'idempotency_key' => $idempotencyKey,
+                    'metadata' => [
+                        'session_id' => $sessionId,
                         'session_payment_intent' => is_string($session->payment_intent ?? null)
                             ? $session->payment_intent
                             : null,
                     ],
                 ])->save();
-            } catch (\Illuminate\Database\QueryException $e) {
-                // Unique constraint violation — duplicate delivery, already credited.
-                if (str_contains($e->getMessage(), 'idempotency_key') || str_contains($e->getMessage(), 'UNIQUE')) {
-                    Log::info('stripe.topup.duplicate_session', ['session_id' => $sessionId]);
+            } catch (UniqueConstraintViolationException) {
+                Log::info('stripe.topup.duplicate_session', ['session_id' => $sessionId]);
 
-                    return;
-                }
-
-                throw $e;
+                return;
             }
 
             // Apply to balance atomically; row is locked above via lockForUpdate.
@@ -650,8 +645,8 @@ class StripeConnectService
 
             Log::info('stripe.topup.credited', [
                 'professional_id' => $brand->id,
-                'session_id'      => $sessionId,
-                'amount_cents'    => $amountCents,
+                'session_id' => $sessionId,
+                'amount_cents' => $amountCents,
             ]);
         });
     }
@@ -697,10 +692,10 @@ class StripeConnectService
         $brand->refresh();
 
         return [
-            'session_id'    => $sessionId,
-            'amount_cents'  => (int) ($session->amount_total ?? 0),
+            'session_id' => $sessionId,
+            'amount_cents' => (int) ($session->amount_total ?? 0),
             'balance_cents' => (int) ($brand->stripe_manual_balance_cents ?? 0),
-            'status'        => 'credited',
+            'status' => 'credited',
         ];
     }
 

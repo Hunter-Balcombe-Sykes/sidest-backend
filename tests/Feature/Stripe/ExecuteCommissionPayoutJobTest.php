@@ -4,6 +4,7 @@ use App\Jobs\Stripe\ExecuteCommissionPayoutJob;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 // Tests for ExecuteCommissionPayoutJob: handle(), failed(), and the retryPayout()
 // double-debit fix (wallet_debit_cents > 0 resumes from 'collecting', not 'pending').
@@ -111,11 +112,43 @@ it('handle() returns cleanly when processPayoutBatch returns null (transfer in-f
         ->once()
         ->andReturn(null);
 
+    Log::spy();
+
     $job = new ExecuteCommissionPayoutJob('p1');
     $job->handle($service); // must not throw
 
     // Payout status unchanged — webhook handles the final transition.
     expect(CommissionPayout::find('p1')->status)->toBe('transferring');
+
+    // Logs the awaiting-webhook message, NOT the cancelled message.
+    Log::shouldHaveReceived('info')
+        ->withArgs(fn ($msg) => str_contains($msg, 'parked at transferring'))
+        ->once();
+});
+
+it('handle() logs cancelled-by-revalidation (not awaiting-webhook) when processPayoutBatch returns null on a cancelled payout', function () {
+    // Both the in-flight transfer case and the revalidation-cancelled case return null from
+    // processPayoutBatch. The handler must distinguish them so a cancelled payout is not
+    // logged as "stuck in transferring" and chased by ReconcileStuckTransferringPayoutsJob.
+    execJob_seedPayout('p1', ['status' => 'cancelled']);
+
+    $service = Mockery::mock(CommissionPayoutService::class);
+    $service->shouldReceive('processPayoutBatch')
+        ->once()
+        ->andReturn(null);
+
+    Log::spy();
+
+    $job = new ExecuteCommissionPayoutJob('p1');
+    $job->handle($service);
+
+    Log::shouldHaveReceived('info')
+        ->withArgs(fn ($msg) => str_contains($msg, 'cancelled by order revalidation'))
+        ->once();
+    Log::shouldNotHaveReceived('info', [
+        Mockery::on(fn ($msg) => str_contains($msg, 'parked at transferring')),
+        Mockery::any(),
+    ]);
 });
 
 // ─── failed() ────────────────────────────────────────────────────────────────
