@@ -170,3 +170,18 @@ Schedule::command('partna:reconcile-shopify-orders')
     ->onFailure(function (): void {
         \Log::error('partna:reconcile-shopify-orders schedule failure');
     });
+
+// Cloudflare KV subdomain routing backstop. The observer keeps KV in sync
+// on legitimate handle changes, but anything that bypasses Eloquent (raw
+// SQL data fixes, Supabase migrations, manual ops) leaves KV stale. Weekly
+// resync is cheap (dispatches one SyncSubdomainToKvJob per pro via the
+// queue) and idempotent — each job writes the current state regardless of
+// what's already in KV.
+Schedule::command('partna:backfill-subdomain-kv', ['--all', '--queue'])
+    ->weeklyOn(0, '04:00') // Sunday 04:00 UTC — off-peak for AU/NZ
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->description('Weekly resync of Cloudflare KV subdomain routing entries')
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: backfill-subdomain-kv');
+    });
