@@ -324,11 +324,16 @@ GRAPHQL;
             // variant picker can show current state. Null = no override (default-all).
             $product['selected_variant_gids'] = $selection?->selected_variant_gids;
 
-            // Merge metafield data from Admin API
+            // Merge metafield data from Admin API. All three use `?? null` because
+            // $metafieldMap can be empty (fetchBrandMetafieldMap returns [] on
+            // failure or when no metafields are set), and accessing an undefined
+            // key on $meta = [] raises a PHP warning that Laravel's production
+            // error handler converts to an ErrorException → /api/affiliate/products
+            // returns 502 with no diagnostic in the nginx log.
             $meta = $metafieldMap[$gid] ?? [];
             $product['commission_override'] = $meta['commission_override'] ?? null;
             $product['affiliate_discount_pct'] = $meta['affiliate_discount_pct'] ?? null;
-            $product['custom_photos_enabled'] = $meta['custom_photos_enabled'];
+            $product['custom_photos_enabled'] = $meta['custom_photos_enabled'] ?? null;
 
             // Two-layer variant filter, in order:
             //   1. Brand-side: variants with sidest.enabled=false are hidden. Missing
