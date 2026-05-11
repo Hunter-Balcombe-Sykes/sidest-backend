@@ -22,7 +22,7 @@ class BrandCatalogService
 
     private const ALL_PRODUCTS = <<<'GRAPHQL'
 query allProducts($first: Int!, $after: String) {
-  products(first: $first, after: $after) {
+  products(first: $first, after: $after, query: "status:active") {
     edges {
       node {
         id
