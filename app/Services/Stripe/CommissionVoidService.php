@@ -91,6 +91,62 @@ class CommissionVoidService
     }
 
     /**
+     * Void orders that are stuck because the brand has no payment method on file.
+     * Mirrors processVoidableCommissions but keyed on brand state instead of affiliate state —
+     * processEligiblePayouts filters brands without a card, so their orders never get batched
+     * and would otherwise sit forever (the affiliate-side void only fires for inactive affiliates).
+     *
+     * Reason code: brand_no_payment_method.
+     *
+     * @return array{voided_count: int, voided_cents: int}
+     */
+    public function processBrandUnfundedCommissions(): array
+    {
+        $cutoff = now()->utc()->subDays($this->voidWindowDays);
+        $stats = ['voided_count' => 0, 'voided_cents' => 0];
+
+        $unfundedBrandIds = Professional::query()
+            ->where('professional_type', 'brand')
+            ->where(function ($q) {
+                $q->whereNull('stripe_customer_id')
+                    ->orWhereNull('stripe_payment_method_id');
+            })
+            ->pluck('id')
+            ->all();
+
+        if ($unfundedBrandIds === []) {
+            return $stats;
+        }
+
+        Order::query()
+            ->where('status', 'approved')
+            ->whereNull('payout_id')
+            ->where('occurred_at', '<=', $cutoff)
+            ->whereIn('brand_professional_id', $unfundedBrandIds)
+            ->chunkById(500, function ($orders) use (&$stats) {
+                foreach ($orders as $order) {
+                    try {
+                        if ($this->voidOrder($order, 'brand_no_payment_method')) {
+                            $stats['voided_count']++;
+                            $stats['voided_cents'] += (int) $order->commission_cents;
+                        }
+                    } catch (\Throwable $e) {
+                        Log::error('Failed to void brand-unfunded commission order', [
+                            'order_id' => (string) $order->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            });
+
+        if ($stats['voided_count'] > 0) {
+            Log::info('Brand-unfunded commission void processing complete', $stats);
+        }
+
+        return $stats;
+    }
+
+    /**
      * Void a single approved order. Uses an optimistic lock guarded by
      * status='approved' so a concurrent terminal-state transition (refund/cancel)
      * can't be overwritten.
