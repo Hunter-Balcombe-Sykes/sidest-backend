@@ -11,13 +11,13 @@ use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
 use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
 use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
+use App\Models\Commerce\Order;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
-use App\Models\Retail\CommissionMovement;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use App\Services\Cache\ProfessionalCacheService;
@@ -28,7 +28,9 @@ use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -319,50 +321,75 @@ class EmbeddedSetupController extends ApiController
 
         $affiliateCount = BrandPartnerLink::where('brand_professional_id', $professionalId)->count();
 
-        // Sum pending + approved commissions (not yet reversed).
-        $commissionQuery = CommissionMovement::where('brand_professional_id', $professionalId)
-            ->whereIn('status', ['pending', 'approved']);
-
-        $totalCommissionCents = (int) $commissionQuery->sum('amount_cents');
-        $firstEntry = $commissionQuery->select('currency_code')->first();
-        $currencyCode = $firstEntry ? (string) $firstEntry->currency_code : 'AUD';
-
         $thirtyDaysAgo = now()->subDays(30);
 
-        // Commissions earned in the last 30 days (pending + approved).
-        $commission30dCents = (int) CommissionMovement::where('brand_professional_id', $professionalId)
-            ->whereIn('status', ['pending', 'approved'])
-            ->where('occurred_at', '>=', $thirtyDaysAgo)
-            ->sum('amount_cents');
-
-        // Revenue generated through affiliates in the last 30 days.
-        // Derived from amount_cents / commission_rate so it works on entries
-        // that pre-date the calculation_metadata.line_price_post_discount field.
-        // commission_rate is stored as a percentage (e.g. 10 for 10%), and
-        // amount_cents = lineTotal_dollars * commission_rate, so
-        // revenue_cents = amount_cents * 100 / commission_rate.
-        $revenue30dCents = (int) round((float) CommissionMovement::where('brand_professional_id', $professionalId)
-            ->whereIn('status', ['pending', 'approved'])
-            ->where('occurred_at', '>=', $thirtyDaysAgo)
-            ->where('commission_rate', '>', 0)
-            ->selectRaw('COALESCE(SUM(amount_cents * 100.0 / commission_rate), 0) as revenue_cents')
-            ->value('revenue_cents'));
-
-        // Last 5 sales with affiliate display name from related Professional record.
-        $recentSales = CommissionMovement::with('affiliateProfessional:id,display_name')
+        // All-time commission earned (approved less reversed) and dominant currency.
+        // Phase-4: read commerce.orders directly. commission_movements no longer
+        // stores accrual rows — only money movements (payouts/clawbacks/adjustments).
+        $allTimeRow = DB::table('commerce.orders')
             ->where('brand_professional_id', $professionalId)
-            ->whereIn('status', ['pending', 'approved'])
-            ->orderByDesc('occurred_at')
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
+            ->selectRaw('COALESCE(SUM(commission_cents), 0) AS commission_cents')
+            ->first();
+        $totalCommissionCents = (int) ($allTimeRow->commission_cents ?? 0);
+
+        $reversedAllTimeRow = DB::table('commerce.brand_affiliate_rollup')
+            ->where('brand_professional_id', $professionalId)
+            ->selectRaw('COALESCE(SUM(reversed_commission_cents), 0) AS reversed_cents')
+            ->first();
+        $totalCommissionCents = max(0, $totalCommissionCents - (int) ($reversedAllTimeRow->reversed_cents ?? 0));
+
+        // Dominant currency in the brand's order history; falls back to AUD when there are no orders yet.
+        $currencyRow = DB::table('commerce.orders')
+            ->where('brand_professional_id', $professionalId)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
+            ->selectRaw('currency_code, COUNT(*) AS cnt')
+            ->groupBy('currency_code')
+            ->orderByDesc('cnt')
+            ->first();
+        $currencyCode = strtoupper((string) ($currencyRow->currency_code ?? 'AUD'));
+
+        // 30-day commission + revenue from commerce.orders.
+        $window30dRow = DB::table('commerce.orders')
+            ->where('brand_professional_id', $professionalId)
+            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
+            ->where('occurred_at', '>=', $thirtyDaysAgo)
+            ->selectRaw('
+                COALESCE(SUM(commission_cents), 0) AS commission_cents,
+                COALESCE(SUM(gross_cents), 0) AS revenue_cents
+            ')
+            ->first();
+        $commission30dCents = (int) ($window30dRow->commission_cents ?? 0);
+        $revenue30dCents = (int) ($window30dRow->revenue_cents ?? 0);
+
+        // Last 5 sales — join core.professionals for the affiliate display name.
+        $recentSalesRows = DB::table('commerce.orders as o')
+            ->leftJoin('core.professionals as aff', 'aff.id', '=', 'o.affiliate_professional_id')
+            ->where('o.brand_professional_id', $professionalId)
+            ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES)
+            ->orderByDesc('o.occurred_at')
             ->limit(5)
-            ->get()
-            ->map(fn ($entry) => [
-                'affiliate_name' => (string) ($entry->affiliateProfessional?->display_name ?? 'Unknown'),
-                // Format as decimal string (cents → dollars) with currency suffix.
-                'commission' => number_format($entry->amount_cents / 100, 2).' '.($entry->currency_code ?? ''),
-                'occurred_at' => $entry->occurred_at?->toIso8601String(),
+            ->select([
+                'o.commission_cents',
+                'o.currency_code',
+                'o.occurred_at',
+                'aff.display_name AS affiliate_display_name',
+                'aff.handle AS affiliate_handle',
             ])
-            ->values()
-            ->all();
+            ->get();
+
+        $recentSales = $recentSalesRows->map(fn ($row) => [
+            'affiliate_name' => (string) ($row->affiliate_display_name
+                ?? $row->affiliate_handle
+                ?? 'Unknown'),
+            // Format as decimal string (cents → dollars) with currency suffix —
+            // matches the existing app._index.tsx RecentSale.commission contract.
+            'commission' => number_format((int) $row->commission_cents / 100, 2)
+                .' '.strtoupper((string) ($row->currency_code ?? '')),
+            'occurred_at' => $row->occurred_at
+                ? Carbon::parse($row->occurred_at)->toIso8601String()
+                : null,
+        ])->values()->all();
 
         return $this->success([
             'affiliate_count' => $affiliateCount,

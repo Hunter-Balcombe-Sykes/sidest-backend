@@ -54,8 +54,10 @@ class BrandCommerceAnalyticsController extends ApiController
             // ── Timeseries from commerce.orders ──────────────────────────────
             $timeseries = $this->queryOrderTimeseries($professionalId, $filters, $granularity, filterBrand: true);
 
-            // ── Brand page-views from analytics.site_visits ──────────────────
-            // The brand professional_id IS the professional_id for the brand's own pages.
+            // ── Page-views across all of the brand's affiliates ──────────────
+            // Site visits are recorded against each affiliate's professional_id
+            // (one visit row per page view on {brand}.partna.au/{affiliate}). The
+            // brand-level total is the sum across every linked affiliate.
             [$totalPageviews, $totalUniqueVisitors] = $this->querySiteVisitTotals($professionalId, $filters);
 
             $totals['page_views'] = $totalPageviews;
@@ -65,6 +67,16 @@ class BrandCommerceAnalyticsController extends ApiController
             [$totalCartAdds, $totalCheckouts] = $this->queryCartEventCounts($professionalId, $filters);
             $totals['cart_adds'] = $totalCartAdds;
             $totals['checkouts'] = $totalCheckouts;
+
+            // Brand-wide averages — used by the renamed "Average Visitor Conversion"
+            // and "Average Abandoned Cart Rate" cards. Both clamp at 0 when the
+            // denominator is 0 so the UI never has to handle NaN / Infinity.
+            $totals['avg_visitor_conversion_rate'] = $totalUniqueVisitors > 0
+                ? round(((int) ($totals['orders_count'] ?? 0) / $totalUniqueVisitors) * 100, 2)
+                : 0.0;
+            $totals['avg_abandoned_cart_rate'] = $totalCartAdds > 0
+                ? round((max(0, $totalCartAdds - (int) ($totals['orders_count'] ?? 0)) / $totalCartAdds) * 100, 2)
+                : 0.0;
 
             // ── Per-affiliate breakdown from commerce.brand_affiliate_rollup ─
             $affiliates = $this->buildAffiliateBreakdown($professionalId, $filters, $currencyCode);
@@ -184,13 +196,26 @@ class BrandCommerceAnalyticsController extends ApiController
     }
 
     /**
-     * Total page views + unique visitors for the brand's own site in the window.
+     * Total page views + unique visitors across every affiliate linked to this brand.
+     * Site visits are stored against the affiliate's professional_id (each affiliate
+     * has their own sitepage URL), so a brand-wide total requires summing across all
+     * affiliates the brand has linked through brand.brand_partner_links.
+     *
      * Returns [$pageViews, $uniqueVisitors].
      */
-    private function querySiteVisitTotals(string $professionalId, array $filters): array
+    private function querySiteVisitTotals(string $brandProfessionalId, array $filters): array
     {
+        $affiliateIds = DB::table('brand.brand_partner_links')
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->pluck('affiliate_professional_id')
+            ->toArray();
+
+        if (empty($affiliateIds)) {
+            return [0, 0];
+        }
+
         $row = DB::table('analytics.site_visits')
-            ->where('professional_id', $professionalId)
+            ->whereIn('professional_id', $affiliateIds)
             ->where('occurred_at', '>=', $filters['from'])
             ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
             ->selectRaw('COUNT(*) AS page_views, COUNT(DISTINCT visitor_id) AS unique_visitors')
@@ -332,6 +357,7 @@ class BrandCommerceAnalyticsController extends ApiController
     /**
      * Commission summary derived from live tables:
      *   approved_cents  = SUM(commission_cents) on non-excluded orders
+     *   earned_cents    = approved - reversed (what the brand owes overall before payout)
      *   paid_cents      = SUM(commission_cents) WHERE payout_id IS NOT NULL
      *   reversed_cents  = SUM(reversed_commission_cents) from rollup
      *   pending_cents   = clamp(approved - paid - reversed, 0, ∞)
@@ -374,10 +400,16 @@ class BrandCommerceAnalyticsController extends ApiController
         $reversedCents = (int) ($reversedRow->reversed_cents ?? 0);
         // pending = approved minus what's already paid or reversed; clamp to >= 0
         $pendingCents = max(0, $approvedCents - $paidCents - $reversedCents);
+        // earned = total commission accrued less anything reversed.
+        // Front-end card "Commissions Earned" reads this — it's intentionally
+        // separate from paid_cents (settled) and pending_cents (still owed) so
+        // the top summary reflects all-in earnings regardless of payout status.
+        $earnedCents = max(0, $approvedCents - $reversedCents);
 
         return [
             'pending_cents' => $pendingCents,
             'approved_cents' => $approvedCents,
+            'earned_cents' => $earnedCents,
             'paid_cents' => $paidCents,
             'reversed_cents' => $reversedCents,
             'currency_code' => strtoupper($currencyCode),
