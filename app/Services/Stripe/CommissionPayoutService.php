@@ -615,6 +615,21 @@ class CommissionPayoutService
             // (e.g. the transfer was saved but the server crashed before marking complete).
             // $newTransfer is only set when we actually call Stripe in this run; the guard
             // path leaves it null and stays at 'transferring' for the webhook to complete.
+            //
+            // source_transaction semantics (per Stripe docs on separate-charges-and-transfers):
+            //   - source_transaction is a *funding dependency*, not a 1:1 amount link.
+            //     Stripe waits for the source charge to settle before executing the transfer.
+            //   - The transfer amount may exceed the source charge amount. In Partna's case
+            //     a wallet+card combo payout has transfer.amount = wallet_debit + card_charge,
+            //     while source_transaction = card charge only. The excess pulls from the
+            //     platform balance — which IS where the wallet balance lives, so funds are
+            //     available. The result is correct: the affiliate gets the full net payout.
+            //   - When fully wallet-funded (no card charge), $latestChargeId is null and
+            //     source_transaction is omitted. The transfer pulls entirely from platform
+            //     balance, which again is where the wallet money lives. Correct by construction.
+            //   - Stripe's docs: "refunding a charge doesn't affect any associated transfers.
+            //     It's your platform's responsibility to reconcile any amount owed back."
+            //     We honor that via CommissionPayoutRefundService::clawbackCompletedPayout.
             $newTransfer = null;
             if (! $payout->stripe_transfer_id) {
                 $transferPayload = [
