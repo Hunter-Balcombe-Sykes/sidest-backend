@@ -54,6 +54,16 @@ class BrandCommerceAnalyticsController extends ApiController
             // ── Timeseries from commerce.orders ──────────────────────────────
             $timeseries = $this->queryOrderTimeseries($professionalId, $filters, $granularity, filterBrand: true);
 
+            // Merge per-bucket page views (across all affiliates) into the
+            // same timeseries so the chart's Revenue ↔ Views toggle has both
+            // metrics aligned on the same x-axis.
+            $pageViewsByBucket = $this->queryPageViewsByBucket($professionalId, $filters, $granularity);
+            $timeseries = array_map(function (array $entry) use ($pageViewsByBucket): array {
+                $entry['page_views'] = $pageViewsByBucket[$entry['bucket']] ?? 0;
+
+                return $entry;
+            }, $timeseries);
+
             // ── Page-views across all of the brand's affiliates ──────────────
             // Site visits are recorded against each affiliate's professional_id
             // (one visit row per page view on {brand}.partna.au/{affiliate}). The
@@ -193,6 +203,57 @@ class BrandCommerceAnalyticsController extends ApiController
 
             return $entry;
         })->values()->all();
+    }
+
+    /**
+     * Per-bucket page-view counts across every affiliate linked to the brand.
+     * Returned as ['<bucket-string>' => count] so the caller can merge by key
+     * with the orders timeseries.
+     *
+     * @return array<string, int>
+     */
+    private function queryPageViewsByBucket(string $brandProfessionalId, array $filters, string $granularity): array
+    {
+        $affiliateIds = DB::table('brand.brand_partner_links')
+            ->where('brand_professional_id', $brandProfessionalId)
+            ->pluck('affiliate_professional_id')
+            ->toArray();
+
+        if (empty($affiliateIds)) {
+            return [];
+        }
+
+        $conn = DB::connection('pgsql');
+        $driver = $conn->getDriverName();
+
+        // DATE_TRUNC for Postgres; strftime fallback for the SQLite test suite.
+        if ($driver === 'sqlite') {
+            $fmtMap = ['hour' => '%Y-%m-%d %H:00:00', 'day' => '%Y-%m-%d'];
+            $fmt = $fmtMap[$granularity] ?? '%Y-%m-%d';
+            $bucketExpr = "strftime('{$fmt}', occurred_at)";
+        } else {
+            $bucketExpr = "DATE_TRUNC('{$granularity}', occurred_at)";
+        }
+
+        $rows = DB::table('analytics.site_visits')
+            ->whereIn('professional_id', $affiliateIds)
+            ->where('occurred_at', '>=', $filters['from'])
+            ->where('occurred_at', '<=', Carbon::parse($filters['to'])->endOfDay())
+            ->selectRaw("{$bucketExpr} AS bucket, COUNT(*) AS page_views")
+            ->groupByRaw($bucketExpr)
+            ->get();
+
+        $byKey = [];
+        foreach ($rows as $row) {
+            // Match the bucket-key format the orders timeseries uses so the
+            // merge in overview() lines up exactly.
+            $key = $granularity === 'hour'
+                ? Carbon::parse($row->bucket)->toIso8601String()
+                : (string) $row->bucket;
+            $byKey[$key] = (int) $row->page_views;
+        }
+
+        return $byKey;
     }
 
     /**

@@ -234,13 +234,13 @@ class CacheKeyGenerator
     // @multi-site: needs site_id — commerce traffic is tied to a site storefront
     public static function brandCommerceAnalytics(string $professionalId, string $from, string $to): string
     {
-        // v5: response shape gained commission_summary.earned_cents +
-        // totals.avg_visitor_conversion_rate + totals.avg_abandoned_cart_rate
-        // and page_views now sums across affiliates instead of brand-only.
+        // v6: timeseries entries gain page_views per bucket (powers the chart's
+        // Revenue ↔ Views toggle on /account/commerce?section=analytics).
+        // v5 added earned_cents + avg_visitor_conversion_rate + avg_abandoned_cart_rate.
         // v4 added the version token; v3 was unversioned.
         $version = \Illuminate\Support\Facades\Cache::get(self::analyticsSummaryVersion($professionalId), 0);
 
-        return "analytics:commerce:brand:v5:{$professionalId}:{$version}:{$from}:{$to}";
+        return "analytics:commerce:brand:v6:{$professionalId}:{$version}:{$from}:{$to}";
     }
 
     public static function brandActiveCatalog(string $brandProfessionalId): string
