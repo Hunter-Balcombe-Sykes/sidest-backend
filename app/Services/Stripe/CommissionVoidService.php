@@ -268,6 +268,24 @@ class CommissionVoidService
         $cancelled = false;
 
         DB::transaction(function () use ($payout, &$stats, &$cancelled): void {
+            // Re-check the affiliate's Stripe Connect status inside the transaction.
+            // The pre-fetched inactiveAffiliateIds in processExpiredPayouts can be many
+            // minutes stale by the time chunkById reaches the last batch — an affiliate
+            // who completed onboarding mid-job shouldn't lose their payout.
+            $affiliate = Professional::query()
+                ->where('id', $payout->affiliate_professional_id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($affiliate && $affiliate->stripe_connect_status === 'active') {
+                Log::info('payout.expired_cancel.affiliate_now_active', [
+                    'payout_id' => $payout->id,
+                    'affiliate_id' => $affiliate->id,
+                ]);
+
+                return;
+            }
+
             $updated = CommissionPayout::query()
                 ->where('id', $payout->id)
                 ->whereIn('status', ['pending', 'pending_funds'])
@@ -275,6 +293,7 @@ class CommissionVoidService
                     'status' => 'cancelled',
                     'failure_code' => 'grace_period_expired',
                     'failure_reason' => 'Affiliate did not connect Stripe Connect within the grace period.',
+                    'processed_at' => now(),
                     'updated_at' => now(),
                 ]);
 
