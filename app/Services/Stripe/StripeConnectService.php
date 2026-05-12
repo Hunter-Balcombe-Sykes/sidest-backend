@@ -515,30 +515,45 @@ class StripeConnectService
             $customerId = $this->createCustomer($brand);
         }
 
-        $session = $this->stripe->checkout->sessions->create([
-            'mode' => 'payment',
-            'customer' => $customerId,
-            'payment_method_types' => ['card'],
-            'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_topup_session_id'),
-            'cancel_url' => $cancelUrl,
-            'line_items' => [[
-                'quantity' => 1,
-                'price_data' => [
-                    'currency' => strtolower($currency),
-                    'unit_amount' => $amountCents,
-                    'product_data' => [
-                        'name' => 'Commission Wallet Top-up',
-                        'description' => 'Manual funding for commission payouts',
+        // Hour-bucketed idempotency: rapid double-clicks within the same hour
+        // return the same Checkout session URL. Different amounts on the same
+        // hour bucket get different keys (so a $50 then $100 top-up both work).
+        // Stripe idempotency keys are 24h TTL so we deliberately bucket smaller.
+        $idempotencyKey = sprintf(
+            'topup_%s_%s_%d_%s',
+            $brand->id,
+            strtolower($currency),
+            $amountCents,
+            now()->format('Y-m-d-H'),
+        );
+
+        $session = $this->stripe->checkout->sessions->create(
+            [
+                'mode' => 'payment',
+                'customer' => $customerId,
+                'payment_method_types' => ['card'],
+                'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_topup_session_id'),
+                'cancel_url' => $cancelUrl,
+                'line_items' => [[
+                    'quantity' => 1,
+                    'price_data' => [
+                        'currency' => strtolower($currency),
+                        'unit_amount' => $amountCents,
+                        'product_data' => [
+                            'name' => 'Commission Wallet Top-up',
+                            'description' => 'Manual funding for commission payouts',
+                        ],
                     ],
+                ]],
+                'metadata' => [
+                    'purpose' => 'brand_commission_topup',
+                    'professional_id' => $brand->id,   // read by webhook handler
+                    'sidest_professional_id' => $brand->id,   // kept for backward compat
+                    'currency' => $currency,
                 ],
-            ]],
-            'metadata' => [
-                'purpose' => 'brand_commission_topup',
-                'professional_id' => $brand->id,   // read by webhook handler
-                'sidest_professional_id' => $brand->id,   // kept for backward compat
-                'currency' => $currency,
             ],
-        ]);
+            ['idempotency_key' => $idempotencyKey],
+        );
 
         return [
             'checkout_url' => $session->url,
@@ -777,12 +792,32 @@ class StripeConnectService
         return ($currency && is_string($currency)) ? strtoupper(trim($currency)) : null;
     }
 
+    /**
+     * Stripe Connect supported countries as of 2026. Source:
+     * https://docs.stripe.com/connect/cross-border-payouts#supported-countries-and-currencies
+     * Update when Stripe expands the list.
+     *
+     * @var array<int, string>
+     */
+    private const STRIPE_CONNECT_SUPPORTED_COUNTRIES = [
+        'AE', 'AT', 'AU', 'BE', 'BG', 'BR', 'CA', 'CH', 'CI', 'CR', 'CY', 'CZ', 'DE', 'DK', 'EE',
+        'ES', 'FI', 'FR', 'GB', 'GH', 'GI', 'GR', 'HK', 'HR', 'HU', 'ID', 'IE', 'IN', 'IT', 'JP',
+        'KE', 'KR', 'LI', 'LT', 'LU', 'LV', 'MT', 'MX', 'MY', 'NG', 'NL', 'NO', 'NZ', 'PE', 'PH',
+        'PL', 'PT', 'RO', 'SA', 'SE', 'SG', 'SI', 'SK', 'TH', 'TR', 'US', 'UY', 'ZA',
+    ];
+
     private function mapCountryCode(?string $code): string
     {
-        if (! $code) {
-            return 'AU';
+        $upper = strtoupper(trim((string) $code));
+
+        if ($upper === '') {
+            abort(422, 'A country is required for Stripe Connect onboarding. Please set your country on your profile before connecting.');
         }
 
-        return strtoupper($code);
+        if (! in_array($upper, self::STRIPE_CONNECT_SUPPORTED_COUNTRIES, true)) {
+            abort(422, "Country '{$upper}' is not supported by Stripe Connect. Please contact support.");
+        }
+
+        return $upper;
     }
 }

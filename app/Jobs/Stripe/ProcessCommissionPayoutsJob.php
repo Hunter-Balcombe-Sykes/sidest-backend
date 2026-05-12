@@ -3,7 +3,6 @@
 namespace App\Jobs\Stripe;
 
 use App\Services\Stripe\CommissionPayoutService;
-use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -47,7 +46,7 @@ class ProcessCommissionPayoutsJob implements ShouldQueue
         return [60, 180];
     }
 
-    public function handle(CommissionPayoutService $payoutService, CommissionVoidService $voidService): void
+    public function handle(CommissionPayoutService $payoutService): void
     {
         Log::info('Starting commission payout processing', [
             'attempt' => $this->attempts(),
@@ -71,27 +70,8 @@ class ProcessCommissionPayoutsJob implements ShouldQueue
 
         Log::info('Commission payout processing complete', $payoutStats);
 
-        // Void commissions past their window for unconnected affiliates
-        $voidStats = $voidService->processVoidableCommissions();
-
-        // Void commissions past their window for brands with no payment method on file
-        // (these would otherwise sit forever — processEligiblePayouts filters them out and
-        // the affiliate-side void only fires for inactive affiliates).
-        $brandVoidStats = $voidService->processBrandUnfundedCommissions();
-
-        // Send warning notifications to affiliates approaching deadlines
-        $warningStats = $voidService->sendGracePeriodWarnings();
-
-        if ($voidStats['voided_count'] > 0
-            || $brandVoidStats['voided_count'] > 0
-            || $warningStats['warnings_sent'] > 0
-        ) {
-            Log::info('Commission void/warning processing complete', [
-                'affiliate_void' => $voidStats,
-                'brand_void' => $brandVoidStats,
-                'warnings' => $warningStats,
-            ]);
-        }
+        // Void/warning operations moved to the daily VoidableCommissionsAndWarningsJob.
+        // They operate on 30-day windows, so hourly cadence was wasted load.
     }
 
     public function failed(\Throwable $e): void
