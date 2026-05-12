@@ -129,6 +129,28 @@ class StripeWebhookController extends Controller
         }
 
         DB::transaction(function () use ($professional, $plan, $subscription, $event, $period) {
+            // Upsert-safe: if a local row already exists for this stripe_subscription_id
+            // (the updated→created delegation path, or a re-delivered .created event after
+            // the webhook idempotency window expired), update it in place rather than
+            // creating a duplicate.
+            $existing = Subscription::query()
+                ->where('stripe_subscription_id', (string) $subscription->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($existing) {
+                $existing->forceFill([
+                    'plan_id' => $plan->id,
+                    'status' => $this->mapStripeStatus($subscription->status),
+                    'current_period_start' => $period['start'],
+                    'current_period_end' => $period['end'],
+                    'cancel_at_period_end' => $subscription->cancel_at_period_end ?? false,
+                    'provider_payload' => json_decode(json_encode($event), true),
+                ])->save();
+
+                return;
+            }
+
             // End any existing active subscription (lockForUpdate prevents deadlocks)
             Subscription::query()
                 ->where('professional_id', $professional->id)
@@ -165,9 +187,15 @@ class StripeWebhookController extends Controller
         $localSub = Subscription::where('stripe_subscription_id', $subscription->id)->first();
 
         if (! $localSub) {
-            Log::debug('Stripe subscription.updated for unknown subscription', [
+            // Race: customer.subscription.updated arrived before customer.subscription.created
+            // committed (or .created was missed entirely). Promote to the created path which
+            // is upsert-safe — losing the update silently was the previous behavior and meant
+            // Stripe-side changes never reached the local row.
+            Log::info('Stripe subscription.updated had no local row, delegating to created handler', [
                 'stripe_subscription_id' => $subscription->id,
             ]);
+
+            $this->handleSubscriptionCreated($subscription, $event);
 
             return;
         }
