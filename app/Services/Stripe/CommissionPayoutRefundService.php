@@ -99,17 +99,29 @@ class CommissionPayoutRefundService
                 // includes order_id so multiple orders refunded on the same payout
                 // each surface as their own alert. Daily digest job picks up the
                 // ops-side surfacing.
+                //
+                // Wrap in try/catch — the flag itself is the load-bearing side
+                // effect; the notification is a courtesy. If notifications backend
+                // is briefly down, don't block the flag commit.
                 if (! $wasFlagged) {
-                    app(NotificationPublisher::class)->publish(
-                        professionalId: (string) $payout->brand_professional_id,
-                        frontendType: 'Warning',
-                        category: 'commissions',
-                        title: 'Refund flagged for manual review',
-                        body: 'A refund arrived while a commission payout was being processed. Our team will reconcile the amounts and follow up.',
-                        dedupeKey: "needs_manual_refund.{$payout->id}.{$order->id}",
-                        ctaUrl: '/account/commerce/payouts',
-                        retentionConfigKey: 'payout',
-                    );
+                    try {
+                        app(NotificationPublisher::class)->publish(
+                            professionalId: (string) $payout->brand_professional_id,
+                            frontendType: 'Warning',
+                            category: 'commissions',
+                            title: 'Refund flagged for manual review',
+                            body: 'A refund arrived while a commission payout was being processed. Our team will reconcile the amounts and follow up.',
+                            dedupeKey: "needs_manual_refund.{$payout->id}.{$order->id}",
+                            ctaUrl: '/account/commerce/payouts',
+                            retentionConfigKey: 'payout',
+                        );
+                    } catch (\Throwable $notifyEx) {
+                        Log::warning('payout.refund.mid_flight_notify_failed', [
+                            'payout_id' => $payout->id,
+                            'order_id' => $order->id,
+                            'error' => $notifyEx->getMessage(),
+                        ]);
+                    }
                 }
 
                 Log::error('payout.refund.mid_flight', [
