@@ -336,7 +336,13 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
         $shopifyData = $this->buildSafeShopifyData($this->payload);
         $lineItems = Arr::get($this->payload, 'line_items', []);
         $grossCents = $this->calculateGrossCents($lineItems);
-        $refundCents = $this->calculateTotalRefundCentsFromPayload();
+
+        // Race 2 (refund-before-paid) leaves a stub with refund_cents > 0 from the earlier
+        // refunds/create event. When orders/paid finally arrives and wins LWW, its payload may
+        // not yet list that refund in refunds[] — naively writing the computed value would
+        // erase the recorded refund. Take max() so we never reduce refund_cents.
+        $payloadRefundCents = $this->calculateTotalRefundCentsFromPayload();
+        $refundCents = max((int) $order->refund_cents, $payloadRefundCents);
 
         // LWW: only update if incoming shopify_updated_at is strictly newer than the stored value.
         // Eloquent where('<', ...) provides the guard without PG-specific SQL.
