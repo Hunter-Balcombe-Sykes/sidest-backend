@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\DedupesShopifyWebhookEvent;
 use App\Http\Controllers\Concerns\ValidatesShopifyWebhookHmac;
 use App\Jobs\Shopify\ProcessShopifyOrderUpdatedWebhookJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 // X-Shopify-Webhook-Id, then passes topic + X-Shopify-Event-Id into the job.
 class ShopifyOrdersUpdatedWebhookController extends ApiController
 {
+    use DedupesShopifyWebhookEvent;
     use ValidatesShopifyWebhookHmac;
 
     public function __invoke(Request $request): JsonResponse
@@ -39,6 +41,10 @@ class ShopifyOrdersUpdatedWebhookController extends ApiController
         }
 
         if ($dedupeKey && ! Cache::add($dedupeKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
+            return $this->success(['received' => true, 'duplicate' => true]);
+        }
+
+        if (! $this->claimShopifyWebhookEvent($webhookId, 'orders/updated')) {
             return $this->success(['received' => true, 'duplicate' => true]);
         }
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\DedupesShopifyWebhookEvent;
 use App\Http\Controllers\Concerns\ValidatesShopifyWebhookHmac;
 use App\Jobs\Shopify\ProcessShopifyOrderUpdatedWebhookJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 // the trg_rollup_clawback trigger handles the brand_affiliate_rollup delta automatically.
 class ShopifyRefundsCreateWebhookController extends ApiController
 {
+    use DedupesShopifyWebhookEvent;
     use ValidatesShopifyWebhookHmac;
 
     public function __invoke(Request $request): JsonResponse
@@ -39,6 +41,12 @@ class ShopifyRefundsCreateWebhookController extends ApiController
         }
 
         if ($dedupeKey && ! Cache::add($dedupeKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
+            return $this->success(['received' => true, 'duplicate' => true]);
+        }
+
+        // Durable DB-backed dedup beneath the cache fast-path. Survives Redis
+        // flush and Shopify retries beyond the 24h cache TTL.
+        if (! $this->claimShopifyWebhookEvent($webhookId, 'refunds/create')) {
             return $this->success(['received' => true, 'duplicate' => true]);
         }
 
