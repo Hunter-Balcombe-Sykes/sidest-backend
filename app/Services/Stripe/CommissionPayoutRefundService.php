@@ -107,6 +107,20 @@ class CommissionPayoutRefundService
             'platform_fee_cents' => $newFee,
             'net_payout_cents' => $newNet,
         ])->save();
+
+        // If the shrink drove totals to zero/negative (over-refund edge case),
+        // cancel the payout cleanly. Otherwise the transfer step would call
+        // Stripe with amount=0 which rejects as amount_too_small and leaves
+        // the payout in a stuck state.
+        if ($newNet <= 0 || $newGross <= 0) {
+            $payout->forceFill([
+                'status' => 'cancelled',
+                'failure_code' => 'refunded_to_zero',
+                'failure_reason' => 'All commission refunded — payout cancelled',
+                'failure_category' => 'order_refunded',
+                'processed_at' => now(),
+            ])->save();
+        }
     }
 
     private function removeItem(CommissionPayout $payout, Order $order): void
