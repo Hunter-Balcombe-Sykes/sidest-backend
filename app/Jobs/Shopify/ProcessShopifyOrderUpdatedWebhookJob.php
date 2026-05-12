@@ -281,7 +281,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
             // Update refund_cents (cumulative sum) and derive new status, then adjust any
             // linked payout — both in a single transaction so a crash between them cannot
             // leave refund_cents committed without the payout being recomputed.
-            DB::transaction(function () use ($order, $refundSubtotal, $shopDomain, $shopifyOrderId) {
+            DB::transaction(function () use ($order, $refundSubtotal, $shopDomain, $shopifyOrderId, $refundId) {
                 // gross_cents is the authoritative order total; refund_cents tracks cumulative refunds.
                 // Using raw SQL because Eloquent has no built-in increment for a subset of records.
                 // Standard (non-PG-specific) syntax — compatible with SQLite for tests.
@@ -299,8 +299,12 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
                 // Recompute the linked payout in the same transaction — the inner
                 // DB::transaction inside handleOrderRefund nests as a savepoint on pgsql.
+                // Pass the per-event subtotal so post-payout clawbacks claw back only
+                // this refund's share, not the cumulative refund_cents. shopify_refund_id
+                // is the durable dedup key for the clawback ledger.
                 if (in_array($order->status, ['refunded', 'partially_refunded'], true)) {
-                    app(CommissionPayoutRefundService::class)->handleOrderRefund($order);
+                    app(CommissionPayoutRefundService::class)
+                        ->handleOrderRefund($order, $refundSubtotal, $refundId !== '' ? $refundId : null);
                 }
             });
         }
