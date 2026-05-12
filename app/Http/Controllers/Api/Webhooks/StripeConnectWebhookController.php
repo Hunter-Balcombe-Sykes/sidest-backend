@@ -141,7 +141,7 @@ class StripeConnectWebhookController extends Controller
         if (! $professionalId) {
             Log::warning('stripe.checkout_completed.missing_professional_id', [
                 'session_id' => $session->id ?? null,
-                'mode'       => $session->mode ?? null,
+                'mode' => $session->mode ?? null,
             ]);
 
             return;
@@ -151,7 +151,7 @@ class StripeConnectWebhookController extends Controller
 
         if (! $professional) {
             Log::warning('stripe.checkout_completed.professional_not_found', [
-                'session_id'      => $session->id ?? null,
+                'session_id' => $session->id ?? null,
                 'professional_id' => $professionalId,
             ]);
 
@@ -170,11 +170,11 @@ class StripeConnectWebhookController extends Controller
                 ? $service->creditWalletFromCheckoutSession($professionalId, $session)
                 : Log::info('stripe.checkout_completed.payment_deferred', [
                     'session_id' => $session->id ?? null,
-                    'phase'      => 'A2 stub; implementation lands in A3.1',
+                    'phase' => 'A2 stub; implementation lands in A3.1',
                 ]),
             default => Log::warning('stripe.checkout_completed.unknown_mode', [
                 'session_id' => $session->id ?? null,
-                'mode'       => $session->mode ?? null,
+                'mode' => $session->mode ?? null,
             ]),
         };
     }
@@ -295,7 +295,7 @@ class StripeConnectWebhookController extends Controller
         if (! $payout) {
             Log::warning('stripe.transfer_paid.payout_not_found', [
                 'transfer_id' => $transfer->id,
-                'payout_id'   => $payoutId,
+                'payout_id' => $payoutId,
             ]);
 
             return;
@@ -308,21 +308,21 @@ class StripeConnectWebhookController extends Controller
         if (in_array($payout->status, ['failed', 'cancelled', 'reversed'], true)) {
             Log::warning('stripe.transfer_paid.unexpected_status', [
                 'payout_id' => $payoutId,
-                'status'    => $payout->status,
+                'status' => $payout->status,
             ]);
 
             return;
         }
 
         $payout->forceFill([
-            'status'                => 'completed',
+            'status' => 'completed',
             'transfer_completed_at' => now(),
-            'processed_at'          => now(),
-            'failure_code'          => null,
-            'failure_reason'        => null,
-            'failure_category'      => null,
-            'stripe_error_code'     => null,
-            'stripe_error_message'  => null,
+            'processed_at' => now(),
+            'failure_code' => null,
+            'failure_reason' => null,
+            'failure_category' => null,
+            'stripe_error_code' => null,
+            'stripe_error_message' => null,
         ])->save();
 
         $analytics = app(\App\Services\Cache\AnalyticsCacheService::class);
@@ -355,11 +355,11 @@ class StripeConnectWebhookController extends Controller
         }
 
         $payout->forceFill([
-            'status'               => 'failed',
-            'failure_code'         => 'transfer_failed_webhook',
-            'failure_reason'       => 'Transfer failed according to Stripe webhook',
-            'failure_category'     => 'affiliate_account',
-            'stripe_error_code'    => $transfer->failure_code ?? null,
+            'status' => 'failed',
+            'failure_code' => 'transfer_failed_webhook',
+            'failure_reason' => 'Transfer failed according to Stripe webhook',
+            'failure_category' => 'affiliate_account',
+            'stripe_error_code' => $transfer->failure_code ?? null,
             'stripe_error_message' => $transfer->failure_message ?? null,
         ])->save();
 
@@ -370,7 +370,7 @@ class StripeConnectWebhookController extends Controller
 
         Log::warning('Stripe transfer failed', [
             'transfer_id' => $transfer->id,
-            'payout_id'   => $payoutId,
+            'payout_id' => $payoutId,
         ]);
     }
 
@@ -413,11 +413,11 @@ class StripeConnectWebhookController extends Controller
         // real-world scenario (transfer confirmed → payout marked complete → Stripe later
         // reverses). Completed payouts must be updatable here, unlike handleTransferFailed.
         $payout->forceFill([
-            'status'               => 'reversed',
-            'failure_code'         => 'transfer_reversed',
-            'failure_reason'       => 'Transfer reversed by Stripe after delivery — funds clawed back',
-            'needs_manual_refund'  => true,
-            'stripe_error_code'    => $transfer->failure_code ?? null,
+            'status' => 'reversed',
+            'failure_code' => 'transfer_reversed',
+            'failure_reason' => 'Transfer reversed by Stripe after delivery — funds clawed back',
+            'needs_manual_refund' => true,
+            'stripe_error_code' => $transfer->failure_code ?? null,
             'stripe_error_message' => $transfer->failure_message ?? null,
         ])->save();
 
@@ -427,8 +427,8 @@ class StripeConnectWebhookController extends Controller
         }
 
         Log::warning('stripe.transfer_reversed', [
-            'transfer_id'     => $transfer->id,
-            'payout_id'       => $payoutId,
+            'transfer_id' => $transfer->id,
+            'payout_id' => $payoutId,
             'previous_status' => $previousStatus,
         ]);
     }
@@ -456,17 +456,35 @@ class StripeConnectWebhookController extends Controller
         }
 
         $payout = CommissionPayout::find($payoutId);
-        if ($payout && ! in_array($payout->status, ['failed', 'completed'])) {
-            $payout->forceFill([
-                'status' => 'failed',
-                'failure_code' => 'payment_failed_webhook',
-                'failure_reason' => $paymentIntent->last_payment_error?->message ?? 'Payment failed',
-            ])->save();
+        if (! $payout || in_array($payout->status, ['failed', 'completed'], true)) {
+            return;
         }
+
+        // Reverse any wallet debit that was already taken. The sync path at
+        // CommissionPayoutService::processPayoutBatch's card-charge catch does this
+        // for synchronous failures; this webhook arm handles the async case
+        // (delayed bank reject, off-session retry exhausting). Without this credit,
+        // the brand's wallet stays drained while the payout is marked failed.
+        $walletDebitCents = (int) ($payout->wallet_debit_cents ?? 0);
+        if ($walletDebitCents > 0) {
+            app(\App\Services\Stripe\CommissionPayoutService::class)->creditBrandManualBalance(
+                (string) $payout->brand_professional_id,
+                $walletDebitCents,
+                strtoupper((string) $payout->currency_code),
+            );
+        }
+
+        $payout->forceFill([
+            'status' => 'failed',
+            'failure_code' => 'payment_failed_webhook',
+            'failure_reason' => $paymentIntent->last_payment_error?->message ?? 'Payment failed',
+            'wallet_debit_cents' => 0,
+        ])->save();
 
         Log::warning('Stripe payment intent failed for payout', [
             'payment_intent_id' => $paymentIntent->id,
             'payout_id' => $payoutId,
+            'wallet_reversed_cents' => $walletDebitCents,
         ]);
     }
 }
