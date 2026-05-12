@@ -278,21 +278,31 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                 return;
             }
         } else {
-            // Update refund_cents (cumulative sum) and derive new status.
-            // gross_cents is the authoritative order total; refund_cents tracks cumulative refunds.
-            // Using raw SQL here because Eloquent has no built-in increment for a subset of records.
-            // This SQL uses standard (non-PG-specific) syntax — compatible with SQLite for tests.
-            DB::connection('pgsql')->statement(
-                'UPDATE commerce.orders
-                SET refund_cents = refund_cents + ?,
-                    status = CASE
-                        WHEN (refund_cents + ?) >= gross_cents THEN ? ELSE ? END,
-                    updated_at = ?
-                WHERE shopify_shop_domain = ? AND shopify_order_id = ?',
-                [$refundSubtotal, $refundSubtotal, 'refunded', 'partially_refunded', now()->toDateTimeString(), $shopDomain, $shopifyOrderId],
-            );
+            // Update refund_cents (cumulative sum) and derive new status, then adjust any
+            // linked payout — both in a single transaction so a crash between them cannot
+            // leave refund_cents committed without the payout being recomputed.
+            DB::transaction(function () use ($order, $refundSubtotal, $shopDomain, $shopifyOrderId) {
+                // gross_cents is the authoritative order total; refund_cents tracks cumulative refunds.
+                // Using raw SQL because Eloquent has no built-in increment for a subset of records.
+                // Standard (non-PG-specific) syntax — compatible with SQLite for tests.
+                DB::connection('pgsql')->statement(
+                    'UPDATE commerce.orders
+                    SET refund_cents = refund_cents + ?,
+                        status = CASE
+                            WHEN (refund_cents + ?) >= gross_cents THEN ? ELSE ? END,
+                        updated_at = ?
+                    WHERE shopify_shop_domain = ? AND shopify_order_id = ?',
+                    [$refundSubtotal, $refundSubtotal, 'refunded', 'partially_refunded', now()->toDateTimeString(), $shopDomain, $shopifyOrderId],
+                );
 
-            $order->refresh();
+                $order->refresh();
+
+                // Recompute the linked payout in the same transaction — the inner
+                // DB::transaction inside handleOrderRefund nests as a savepoint on pgsql.
+                if (in_array($order->status, ['refunded', 'partially_refunded'], true)) {
+                    app(CommissionPayoutRefundService::class)->handleOrderRefund($order);
+                }
+            });
         }
 
         $affiliateId = (string) $order->affiliate_professional_id;
@@ -308,13 +318,9 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
             'refund_subtotal_cents' => $refundSubtotal,
         ]);
 
+        // Event insertion + cache invalidation outside the transaction — both idempotent and
+        // shouldn't block the financial state commit.
         $this->insertEventIfNew($order->id, $refundEventType, $this->shopifyEventId, $metadata, $refundCreatedAt);
-
-        // If the order is linked to a pending/in-flight payout, recompute or void the
-        // payout batch to reflect the refund. Terminal-state payouts are skipped by the service.
-        if (in_array($order->status, ['refunded', 'partially_refunded'], true)) {
-            app(CommissionPayoutRefundService::class)->handleOrderRefund($order->fresh());
-        }
 
         $analyticsCache->invalidateAnalytics($this->professionalId);
         $analyticsCache->invalidateAnalytics($affiliateId);
