@@ -855,6 +855,7 @@ class CommissionPayoutService
             'status' => 'failed',
             'failure_code' => $code,
             'failure_reason' => $reason,
+            'processed_at' => now(),
         ])->save();
 
         Log::warning('Commission payout failed', [

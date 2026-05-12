@@ -11,6 +11,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 // V2: Core. Tracks payout lifecycle (pending → processing → completed/failed). Links brand, affiliate, Stripe transfer, and funding details.
+//
+// Terminal-state invariant: every transition to completed, failed, cancelled, or reversed
+// MUST stamp processed_at = now(). processEligiblePayouts filters in-flight rows via
+// whereNull('processed_at'), so a missing stamp causes a terminal payout to be re-dispatched
+// forever. Search the codebase for status transitions before adding new terminal paths.
 class CommissionPayout extends BaseModel
 {
     use HasFactory, HasUuids;

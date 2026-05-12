@@ -361,6 +361,7 @@ class StripeConnectWebhookController extends Controller
             'failure_category' => 'affiliate_account',
             'stripe_error_code' => $transfer->failure_code ?? null,
             'stripe_error_message' => $transfer->failure_message ?? null,
+            'processed_at' => now(),
         ])->save();
 
         if ($payout->affiliate_professional_id) {
@@ -419,6 +420,7 @@ class StripeConnectWebhookController extends Controller
             'needs_manual_refund' => true,
             'stripe_error_code' => $transfer->failure_code ?? null,
             'stripe_error_message' => $transfer->failure_message ?? null,
+            'processed_at' => now(),
         ])->save();
 
         if ($payout->affiliate_professional_id) {

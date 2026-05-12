@@ -57,21 +57,21 @@ class ReconcileStuckTransferringPayoutsJob implements ShouldQueue
             $transfer = $stripe->transfers->retrieve($payout->stripe_transfer_id);
         } catch (\Stripe\Exception\ApiErrorException $e) {
             Log::warning('payout.reconcile.stripe_error', [
-                'payout_id'   => $payout->id,
+                'payout_id' => $payout->id,
                 'transfer_id' => $payout->stripe_transfer_id,
-                'error'       => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
 
             return;
         }
 
         match ($transfer->status ?? null) {
-            'paid'    => $this->markCompleted($payout, $analytics),
-            'failed'  => $this->markFailed($payout, $transfer, $analytics),
+            'paid' => $this->markCompleted($payout, $analytics),
+            'failed' => $this->markFailed($payout, $transfer, $analytics),
             // 'pending' = still in-flight; leave it for the next daily run.
             'pending' => null,
-            default   => Log::warning('payout.reconcile.unknown_status', [
-                'payout_id'       => $payout->id,
+            default => Log::warning('payout.reconcile.unknown_status', [
+                'payout_id' => $payout->id,
                 'transfer_status' => $transfer->status ?? null,
             ]),
         };
@@ -80,9 +80,9 @@ class ReconcileStuckTransferringPayoutsJob implements ShouldQueue
     private function markCompleted(CommissionPayout $payout, AnalyticsCacheService $analytics): void
     {
         $payout->forceFill([
-            'status'                => 'completed',
+            'status' => 'completed',
             'transfer_completed_at' => now(),
-            'processed_at'          => now(),
+            'processed_at' => now(),
         ])->save();
 
         // Bump analytics cache for both parties so dashboards reflect the settled payout.
@@ -105,12 +105,13 @@ class ReconcileStuckTransferringPayoutsJob implements ShouldQueue
     private function markFailed(CommissionPayout $payout, object $transfer, AnalyticsCacheService $analytics): void
     {
         $payout->forceFill([
-            'status'               => 'failed',
-            'failure_code'         => 'transfer_failed_reconciliation',
-            'failure_reason'       => 'Stripe Transfer failed; detected by reconciliation job',
-            'failure_category'     => 'affiliate_account',
-            'stripe_error_code'    => $transfer->failure_code ?? null,
+            'status' => 'failed',
+            'failure_code' => 'transfer_failed_reconciliation',
+            'failure_reason' => 'Stripe Transfer failed; detected by reconciliation job',
+            'failure_category' => 'affiliate_account',
+            'stripe_error_code' => $transfer->failure_code ?? null,
             'stripe_error_message' => $transfer->failure_message ?? null,
+            'processed_at' => now(),
         ])->save();
 
         if ($payout->affiliate_professional_id) {
