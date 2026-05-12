@@ -47,7 +47,12 @@ class CommissionPayoutService
         $this->systemHoldDays = max(0, (int) config('partna.store.payout_hold_days', 7));
         $this->minHoldDays = (int) config('partna.store.min_payout_hold_days', 7);
         // Clamp to [1, 365] — values outside this range produce nonsensical void_at timestamps.
-        $this->gracePeriodDays = max(1, min(365, (int) config('partna.store.grace_period_days', 60)));
+        // Falls back to the legacy 'grace_period_days' key for backward compat during the
+        // config split rollout; new code should set payout_grace_period_days directly.
+        $this->gracePeriodDays = max(1, min(365, (int) config(
+            'partna.store.payout_grace_period_days',
+            (int) config('partna.store.grace_period_days', 60),
+        )));
     }
 
     /**

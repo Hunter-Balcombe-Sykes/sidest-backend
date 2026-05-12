@@ -30,12 +30,9 @@ class CommissionVoidService
 {
     private int $voidWindowDays;
 
-    private int $gracePeriodDays;
-
     public function __construct(private readonly NotificationPublisher $publisher)
     {
         $this->voidWindowDays = (int) config('partna.store.commission_void_window_days', 30);
-        $this->gracePeriodDays = (int) config('partna.store.grace_period_days', 30);
     }
 
     /**

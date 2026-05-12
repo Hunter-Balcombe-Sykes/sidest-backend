@@ -72,7 +72,11 @@ class VoidExpiredPayoutsJob implements ShouldQueue
      */
     private function fireGraceWarnings(): void
     {
-        $gracePeriodDays = (int) config('partna.store.grace_period_days', 60);
+        // Falls back to legacy 'grace_period_days' for back-compat during the config split rollout.
+        $gracePeriodDays = (int) config(
+            'partna.store.payout_grace_period_days',
+            (int) config('partna.store.grace_period_days', 60),
+        );
 
         foreach ([30, 7, 1] as $daysOut) {
             $tag = 'T-'.$daysOut;

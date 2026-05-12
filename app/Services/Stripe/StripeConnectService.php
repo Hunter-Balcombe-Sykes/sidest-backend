@@ -104,7 +104,7 @@ class StripeConnectService
             'stripe_connect_account_id' => $account->id,
             'stripe_connect_status' => 'onboarding',
             'stripe_grace_period_ends_at' => $professional->stripe_grace_period_ends_at
-                ?? now()->addDays((int) config('partna.store.grace_period_days', 30)),
+                ?? now()->addDays((int) config('partna.store.signup_grace_period_days', 30)),
         ];
 
         // Seed wallet currency from Shopify's shop_currency so brands with
