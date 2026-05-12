@@ -87,11 +87,17 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             return;
         }
 
-        // Resolve affiliate from note_attributes. Preserves the same extraction
-        // logic as the previous job — the cart attribute key is 'affiliate'.
-        $affiliateSlug = $this->extractCartAttribute($noteAttributes, 'affiliate');
+        // Resolve affiliate from note_attributes. The cart attribute key is
+        // `_partna_affiliate_id` and the value is the affiliate's professional UUID
+        // (Hydrogen's `app/routes/$affiliateSlug.tsx` action sets
+        // `[{key: '_partna_affiliate_id', value: affiliate.id}]` on cartCreate).
+        // The legacy `'affiliate'` key + handle-based lookup was a sidest-era
+        // pattern that the partna rename missed; resolving by UUID is the new
+        // canonical path and is consistent with the partna-affiliate-discount
+        // Shopify Function which also keys on this attribute.
+        $affiliateId = $this->extractCartAttribute($noteAttributes, '_partna_affiliate_id');
 
-        if ($affiliateSlug === '') {
+        if ($affiliateId === '') {
             Log::info('ProcessShopifyOrderWebhookJob: no affiliate attribute, skipping', [
                 'order_id' => $orderId,
                 'brand_professional_id' => $this->brandProfessionalId,
@@ -101,13 +107,13 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
         }
 
         $affiliate = Professional::query()
-            ->where('handle_lc', strtolower($affiliateSlug))
+            ->where('id', $affiliateId)
             ->first();
 
         if (! $affiliate) {
             Log::warning('ProcessShopifyOrderWebhookJob: affiliate not found', [
                 'order_id' => $orderId,
-                'affiliate_slug' => $affiliateSlug,
+                'affiliate_id' => $affiliateId,
             ]);
 
             return;
@@ -505,14 +511,14 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
     }
 
     /**
-     * Parse the `sidest_marketing_opt_in` cart attribute into explicit tri-state.
+     * Parse the `partna_marketing_opt_in` cart attribute into explicit tri-state.
      * true=explicit opt-in, false=explicit opt-out, null=missing or unrecognized.
      *
      * @param  array<int, array<string, mixed>>|mixed  $noteAttributes
      */
     private function parseMarketingOptInAttribute(mixed $noteAttributes): ?bool
     {
-        $raw = strtolower($this->extractCartAttribute($noteAttributes, 'sidest_marketing_opt_in'));
+        $raw = strtolower($this->extractCartAttribute($noteAttributes, 'partna_marketing_opt_in'));
         if ($raw === '') {
             return null;
         }
@@ -572,6 +578,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
                 'value' => $rate,
             ]);
             $fallbackRate = (float) ($brandSettings?->default_commission_rate ?? $platformDefault);
+
             return [$fallbackRate, 'pending'];
         }
 
