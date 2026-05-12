@@ -803,6 +803,31 @@ class CommissionPayoutService
         });
     }
 
+    /**
+     * Map a Stripe Transfer failure_code to an internal failure_category so ops
+     * triage isn't misled by a hardcoded "affiliate_account" tag on every failure.
+     * Categories drive notification routing (brand vs affiliate) and surfacing.
+     *
+     * Stripe's documented Transfer failure codes:
+     *   insufficient_funds       → platform's Stripe balance was too low (platform fault)
+     *   account_closed, account_frozen, bank_account_restricted, no_account
+     *                            → affiliate's Stripe account or bank issue
+     *   declined                 → bank declined the deposit (affiliate-side)
+     *   currency_not_supported   → currency mismatch (config/platform fault)
+     *
+     * Anything else falls through to 'other' so it's visible in reports.
+     */
+    public static function categorizeTransferFailure(?string $stripeFailureCode): string
+    {
+        return match ($stripeFailureCode) {
+            'insufficient_funds' => 'platform_balance',
+            'account_closed', 'account_frozen', 'bank_account_restricted', 'no_account', 'declined' => 'affiliate_account',
+            'currency_not_supported' => 'currency',
+            null, '' => 'unknown',
+            default => 'other',
+        };
+    }
+
     private function extractLatestChargeId(object $paymentIntent): ?string
     {
         if (is_string($paymentIntent->latest_charge ?? null) && $paymentIntent->latest_charge !== '') {

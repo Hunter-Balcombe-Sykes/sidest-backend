@@ -354,12 +354,13 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
+        $stripeFailureCode = $transfer->failure_code ?? null;
         $payout->forceFill([
             'status' => 'failed',
             'failure_code' => 'transfer_failed_webhook',
             'failure_reason' => 'Transfer failed according to Stripe webhook',
-            'failure_category' => 'affiliate_account',
-            'stripe_error_code' => $transfer->failure_code ?? null,
+            'failure_category' => \App\Services\Stripe\CommissionPayoutService::categorizeTransferFailure($stripeFailureCode),
+            'stripe_error_code' => $stripeFailureCode,
             'stripe_error_message' => $transfer->failure_message ?? null,
             'processed_at' => now(),
         ])->save();
@@ -372,6 +373,7 @@ class StripeConnectWebhookController extends Controller
         Log::warning('Stripe transfer failed', [
             'transfer_id' => $transfer->id,
             'payout_id' => $payoutId,
+            'stripe_failure_code' => $stripeFailureCode,
         ]);
     }
 

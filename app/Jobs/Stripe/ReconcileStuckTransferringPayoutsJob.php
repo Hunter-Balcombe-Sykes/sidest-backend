@@ -4,6 +4,7 @@ namespace App\Jobs\Stripe;
 
 use App\Models\Retail\CommissionPayout;
 use App\Services\Cache\AnalyticsCacheService;
+use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -99,17 +100,21 @@ class ReconcileStuckTransferringPayoutsJob implements ShouldQueue
 
     /**
      * Mark a payout failed after the Stripe Transfer is confirmed failed.
-     * failure_category='affiliate_account' because Transfer failures are
-     * always affiliate-side (closed account, debit blocked, etc.).
+     * failure_category is derived from Stripe's failure_code via
+     * CommissionPayoutService::categorizeTransferFailure — Transfer failures can
+     * be platform-side (insufficient_funds), affiliate-side (account_closed),
+     * or config-side (currency_not_supported); hardcoding one category misled
+     * ops triage.
      */
     private function markFailed(CommissionPayout $payout, object $transfer, AnalyticsCacheService $analytics): void
     {
+        $stripeFailureCode = $transfer->failure_code ?? null;
         $payout->forceFill([
             'status' => 'failed',
             'failure_code' => 'transfer_failed_reconciliation',
             'failure_reason' => 'Stripe Transfer failed; detected by reconciliation job',
-            'failure_category' => 'affiliate_account',
-            'stripe_error_code' => $transfer->failure_code ?? null,
+            'failure_category' => CommissionPayoutService::categorizeTransferFailure($stripeFailureCode),
+            'stripe_error_code' => $stripeFailureCode,
             'stripe_error_message' => $transfer->failure_message ?? null,
             'processed_at' => now(),
         ])->save();
