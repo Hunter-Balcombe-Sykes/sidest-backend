@@ -3,13 +3,18 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
-use App\Models\Retail\CommissionMovement;
+use App\Models\Commerce\Order;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 // Backs the affiliate-order-block Shopify admin UI extension.
 // Returns the affiliate + per-line-item commission breakdown for a single
 // Shopify order, scoped to the brand resolved by the auth middleware.
+//
+// Source of truth (post-Phase-4): commerce.orders + commerce.order_items.
+// commission_movements is narrowed to money movements (payouts/clawbacks/
+// adjustments) and no longer holds per-line accrual rows, so we derive
+// everything from the order aggregate.
 //
 // Auth: any middleware that attaches `embedded_professional_id` (the embedded
 // API key middleware for server-to-server, or the Shopify session-token
@@ -35,16 +40,19 @@ class EmbeddedOrderAnalyticsController extends ApiController
     {
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
 
-        // Strip the GID prefix if Shopify hands us one — ledger stores numeric IDs.
+        // Strip the GID prefix if Shopify hands us one — orders table stores numeric IDs.
         $orderId = (string) preg_replace('#^gid://shopify/Order/#', '', $shopifyOrderId);
 
-        $entries = CommissionMovement::with('affiliateProfessional:id,display_name')
+        $order = Order::query()
+            ->with([
+                'items',
+                'affiliateProfessional:id,display_name,handle',
+            ])
             ->where('brand_professional_id', $professionalId)
             ->where('shopify_order_id', $orderId)
-            ->orderBy('id')
-            ->get();
+            ->first();
 
-        if ($entries->isEmpty()) {
+        if (! $order || ! $order->affiliate_professional_id) {
             return $this->success([
                 'order_id' => $orderId,
                 'has_affiliate' => false,
@@ -57,58 +65,70 @@ class EmbeddedOrderAnalyticsController extends ApiController
             ]);
         }
 
-        // Every entry on a single order shares the same affiliate by construction
-        // (the order is attributed once at checkout). Pull from the first row.
-        $first = $entries->first();
-        $affiliate = $first->affiliateProfessional;
-        $affiliateSlug = (string) ($first->calculation_metadata['affiliate_slug'] ?? '');
+        $affiliate = $order->affiliateProfessional;
+        $lineStatus = $this->deriveLineStatus($order);
 
-        $totalCommission = 0;
-        $totalRevenue = 0;
         $statusSummary = $this->emptyStatusSummary();
         $lineItems = [];
+        $totalCommission = 0;
+        $totalRevenue = 0;
 
-        foreach ($entries as $entry) {
-            $meta = is_array($entry->calculation_metadata) ? $entry->calculation_metadata : [];
-            $rate = (float) $entry->commission_rate;
-            $linePost = (float) ($meta['line_price_post_discount'] ?? 0);
-            $revenueCents = (int) round($linePost * 100);
+        foreach ($order->items as $item) {
+            $revenueCents = (int) $item->line_total_cents;
+            $commissionCents = (int) $item->commission_cents;
 
-            $totalCommission += $entry->amount_cents;
             $totalRevenue += $revenueCents;
-
-            $status = (string) $entry->status;
-            if (isset($statusSummary[$status])) {
-                $statusSummary[$status]++;
-            }
+            $totalCommission += $commissionCents;
+            $statusSummary[$lineStatus]++;
 
             $lineItems[] = [
-                'line_item_id' => (string) ($meta['line_item_id'] ?? ''),
-                'product_id' => (string) ($meta['product_id'] ?? ''),
-                'product_title' => (string) ($meta['product_title'] ?? ''),
-                'variant_title' => (string) ($meta['variant_title'] ?? ''),
-                'quantity' => (int) ($meta['quantity'] ?? 0),
+                'line_item_id' => (string) $item->shopify_line_item_id,
+                'product_id' => (string) $item->shopify_product_id,
+                'product_title' => (string) $item->title,
+                // order_items doesn't store variant_title — the UI gracefully omits when empty.
+                'variant_title' => '',
+                'quantity' => (int) $item->quantity,
                 'revenue_cents' => $revenueCents,
-                'commission_rate' => $rate,
-                'commission_cents' => (int) $entry->amount_cents,
-                'status' => $status,
+                'commission_rate' => (float) $item->commission_rate,
+                'commission_cents' => $commissionCents,
+                'status' => $lineStatus,
             ];
         }
 
         return $this->success([
             'order_id' => $orderId,
             'has_affiliate' => true,
-            'affiliate' => $affiliate ? [
+            'affiliate' => [
                 'id' => (string) $affiliate->id,
                 'display_name' => (string) $affiliate->display_name,
-                'slug' => $affiliateSlug,
-            ] : null,
-            'currency_code' => (string) ($first->currency_code ?? 'AUD'),
+                'slug' => (string) ($affiliate->handle ?? ''),
+            ],
+            'currency_code' => (string) ($order->currency_code ?? 'AUD'),
             'total_commission_cents' => $totalCommission,
             'total_revenue_cents' => $totalRevenue,
             'status_summary' => $statusSummary,
             'line_items' => $lineItems,
         ]);
+    }
+
+    /**
+     * Map order aggregate state → the four ledger-flavoured statuses the UI
+     * block already renders. Every line item on an order shares this status
+     * (Shopify orders settle as a unit; per-line accrual rows no longer exist).
+     */
+    private function deriveLineStatus(Order $order): string
+    {
+        if (in_array($order->status, ['cancelled', 'voided', 'refunded'], true)) {
+            return 'reversed';
+        }
+        if ((int) $order->refund_cents >= (int) $order->net_cents && (int) $order->net_cents > 0) {
+            return 'reversed';
+        }
+        if (! empty($order->payout_id)) {
+            return 'paid';
+        }
+
+        return 'pending';
     }
 
     /**
