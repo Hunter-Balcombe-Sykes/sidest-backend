@@ -118,7 +118,17 @@ class StripeWebhookController extends Controller
             return;
         }
 
-        DB::transaction(function () use ($professional, $plan, $subscription, $event) {
+        $period = self::resolveSubscriptionPeriod($subscription);
+        if ($period === null) {
+            Log::error('Stripe subscription.created missing period fields on both items[0] and top-level — skipping local create', [
+                'subscription_id' => $subscription->id,
+                'professional_id' => $professional->id,
+            ]);
+
+            return;
+        }
+
+        DB::transaction(function () use ($professional, $plan, $subscription, $event, $period) {
             // End any existing active subscription (lockForUpdate prevents deadlocks)
             Subscription::query()
                 ->where('professional_id', $professional->id)
@@ -133,8 +143,8 @@ class StripeWebhookController extends Controller
                 'plan_id' => $plan->id,
                 'provider' => 'stripe',
                 'status' => $this->mapStripeStatus($subscription->status),
-                'current_period_start' => Carbon::createFromTimestamp($subscription->current_period_start),
-                'current_period_end' => Carbon::createFromTimestamp($subscription->current_period_end),
+                'current_period_start' => $period['start'],
+                'current_period_end' => $period['end'],
                 'cancel_at_period_end' => $subscription->cancel_at_period_end ?? false,
                 'provider_payload' => json_decode(json_encode($event), true),
             ]);
@@ -164,11 +174,21 @@ class StripeWebhookController extends Controller
 
         $updates = [
             'status' => $this->mapStripeStatus($subscription->status),
-            'current_period_start' => Carbon::createFromTimestamp($subscription->current_period_start),
-            'current_period_end' => Carbon::createFromTimestamp($subscription->current_period_end),
             'cancel_at_period_end' => $subscription->cancel_at_period_end ?? false,
             'provider_payload' => json_decode(json_encode($event), true),
         ];
+
+        // Basil (2025-03-31) moved period fields onto items[]. Skip period sync when
+        // both shapes are missing — Stripe will re-send the next .updated event with valid data.
+        $period = self::resolveSubscriptionPeriod($subscription);
+        if ($period !== null) {
+            $updates['current_period_start'] = $period['start'];
+            $updates['current_period_end'] = $period['end'];
+        } else {
+            Log::warning('Stripe subscription.updated missing period fields on both items[0] and top-level', [
+                'subscription_id' => $subscription->id,
+            ]);
+        }
 
         // Only sync plan_id when Stripe confirms the subscription is payment-healthy.
         // If the upgrade payment failed (past_due, incomplete, etc.) keep the old plan
@@ -321,6 +341,43 @@ class StripeWebhookController extends Controller
             'brand_id' => $brand->id,
             'pm_id' => $pmId,
         ]);
+    }
+
+    /**
+     * Resolve a Subscription's current period (start, end) across pre-Basil and post-Basil API versions.
+     *
+     * Stripe Basil (API 2025-03-31) removed `current_period_start`/`current_period_end` from the
+     * Subscription resource and moved them to `items.data[].current_period_*`. We read items first
+     * (post-Basil) and fall back to top-level (pre-Basil) so handlers work on both shapes.
+     * Stripe provides no dual-shape helper — defensive read-with-fallback is the canonical migration.
+     *
+     * @return array{start: Carbon, end: Carbon}|null
+     *
+     * @see https://docs.stripe.com/changelog/basil/2025-03-31/deprecate-subscription-current-period-start-and-end
+     */
+    private static function resolveSubscriptionPeriod(object $subscription): ?array
+    {
+        $itemStart = $subscription->items->data[0]->current_period_start ?? null;
+        $itemEnd = $subscription->items->data[0]->current_period_end ?? null;
+
+        if (is_int($itemStart) && is_int($itemEnd)) {
+            return [
+                'start' => Carbon::createFromTimestamp($itemStart),
+                'end' => Carbon::createFromTimestamp($itemEnd),
+            ];
+        }
+
+        $start = $subscription->current_period_start ?? null;
+        $end = $subscription->current_period_end ?? null;
+
+        if (is_int($start) && is_int($end)) {
+            return [
+                'start' => Carbon::createFromTimestamp($start),
+                'end' => Carbon::createFromTimestamp($end),
+            ];
+        }
+
+        return null;
     }
 
     private function mapStripeStatus(string $stripeStatus): string
