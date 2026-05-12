@@ -84,6 +84,7 @@ class AffiliateOrdersController extends ApiController
 
         $payload = $this->mapRow($row);
         $payload['line_items'] = $this->extractLineItems($row);
+        $payload['expected_payout_at'] = $this->deriveExpectedPayoutAt($row);
 
         return $this->success($payload);
     }
@@ -178,14 +179,33 @@ class AffiliateOrdersController extends ApiController
     }
 
     /**
-     * Map Shopify webhook line_items to the modal's display shape. See
-     * BrandOrdersController::extractLineItems for the dollar→cents conversion
-     * rationale (webhook delivers `price` as a dollar STRING).
+     * Build the modal's line-items array. Mirrors
+     * BrandOrdersController::extractLineItems — primary source is the
+     * commerce.order_items normalized table; falls back to parsing
+     * shopify_data.line_items JSONB only when the trigger-mirrored rows
+     * aren't present (older orders).
      *
      * @return array<int, array<string, mixed>>
      */
     private function extractLineItems(object $row): array
     {
+        $items = DB::table('commerce.order_items')
+            ->where('order_id', $row->id)
+            ->orderBy('shopify_line_item_id')
+            ->get();
+
+        if ($items->isNotEmpty()) {
+            return $items->map(fn ($item) => [
+                'id' => (string) $item->id,
+                'title' => (string) $item->title,
+                'variant_title' => null,
+                'sku' => $item->sku !== null && $item->sku !== '' ? (string) $item->sku : null,
+                'quantity' => (int) $item->quantity,
+                'price_cents' => (int) $item->unit_price_cents,
+                'total_cents' => (int) $item->line_total_cents,
+            ])->values()->all();
+        }
+
         $shopifyData = is_string($row->shopify_data ?? null)
             ? json_decode($row->shopify_data, true)
             : ($row->shopify_data ?? []);
@@ -209,6 +229,44 @@ class AffiliateOrdersController extends ApiController
                 'total_cents' => (int) round($price * $quantity * 100),
             ];
         })->values()->all();
+    }
+
+    /**
+     * Mirror of BrandOrdersController::deriveExpectedPayoutAt — same semantics:
+     * paid orders return the linked payout's processed_at (or created_at fallback),
+     * pending orders estimate occurred_at + grace_period_days, reversed orders
+     * return null (no payout will happen).
+     */
+    private function deriveExpectedPayoutAt(object $row): ?string
+    {
+        if (! empty($row->payout_id)) {
+            $payout = DB::table('commerce.commission_payouts')
+                ->where('id', $row->payout_id)
+                ->select(['processed_at', 'created_at'])
+                ->first();
+
+            if (! $payout) {
+                return null;
+            }
+
+            $at = $payout->processed_at ?? $payout->created_at;
+
+            return $at ? \Carbon\Carbon::parse($at)->toIso8601String() : null;
+        }
+
+        if ((int) $row->refund_cents >= (int) $row->net_cents && (int) $row->net_cents > 0) {
+            return null;
+        }
+
+        if (! $row->occurred_at) {
+            return null;
+        }
+
+        $gracePeriodDays = (int) config('partna.store.grace_period_days', 60);
+
+        return \Carbon\Carbon::parse($row->occurred_at)
+            ->addDays($gracePeriodDays)
+            ->toIso8601String();
     }
 
     private function resolveCustomerName(object $row): string
