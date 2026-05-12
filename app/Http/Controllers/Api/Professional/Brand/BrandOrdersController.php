@@ -88,6 +88,7 @@ class BrandOrdersController extends ApiController
 
         $payload = $this->mapRow($row);
         $payload['line_items'] = $this->extractLineItems($row);
+        $payload['expected_payout_at'] = $this->deriveExpectedPayoutAt($row);
 
         return $this->success($payload);
     }
@@ -191,15 +192,34 @@ class BrandOrdersController extends ApiController
     }
 
     /**
-     * Map Shopify webhook line_items to the modal's display shape. Shopify
-     * delivers `price` as a dollar STRING (e.g. "36.00") in webhook payloads,
-     * so multiply by 100 to get cents — unlike ProductVariant.price from the
-     * Admin GraphQL API. Title falls back to `name` for older webhook shapes.
+     * Build the modal's line-items array. Primary source is commerce.order_items —
+     * the normalized table maintained by the trg_order_items_diff trigger from the
+     * line_items JSONB on commerce.orders. Falls back to parsing shopify_data
+     * directly only when the normalized table has no rows for the order (older
+     * orders that landed before the trigger was installed), in which case the
+     * JSONB shape uses dollar STRING prices that need ×100 to reach cents.
      *
      * @return array<int, array<string, mixed>>
      */
     private function extractLineItems(object $row): array
     {
+        $items = DB::table('commerce.order_items')
+            ->where('order_id', $row->id)
+            ->orderBy('shopify_line_item_id')
+            ->get();
+
+        if ($items->isNotEmpty()) {
+            return $items->map(fn ($item) => [
+                'id' => (string) $item->id,
+                'title' => (string) $item->title,
+                'variant_title' => null,
+                'sku' => $item->sku !== null && $item->sku !== '' ? (string) $item->sku : null,
+                'quantity' => (int) $item->quantity,
+                'price_cents' => (int) $item->unit_price_cents,
+                'total_cents' => (int) $item->line_total_cents,
+            ])->values()->all();
+        }
+
         $shopifyData = is_string($row->shopify_data ?? null)
             ? json_decode($row->shopify_data, true)
             : ($row->shopify_data ?? []);
@@ -223,6 +243,49 @@ class BrandOrdersController extends ApiController
                 'total_cents' => (int) round($price * $quantity * 100),
             ];
         })->values()->all();
+    }
+
+    /**
+     * Best-effort estimate of when the affiliate's commission for this order
+     * actually settles (the "grace period ends + payment sent" moment).
+     *
+     *  - Paid out (payout_id set) → the linked payout's processed_at
+     *    (fallback to created_at if processed_at hasn't been stamped yet).
+     *  - Reversed → null (no payout will ever happen).
+     *  - Pending → occurred_at + partna.store.grace_period_days. This is the
+     *    CommissionPayoutService eligibility cutoff: once the order ages past
+     *    the grace window, the next payout sweep picks it up.
+     */
+    private function deriveExpectedPayoutAt(object $row): ?string
+    {
+        if (! empty($row->payout_id)) {
+            $payout = DB::table('commerce.commission_payouts')
+                ->where('id', $row->payout_id)
+                ->select(['processed_at', 'created_at'])
+                ->first();
+
+            if (! $payout) {
+                return null;
+            }
+
+            $at = $payout->processed_at ?? $payout->created_at;
+
+            return $at ? \Carbon\Carbon::parse($at)->toIso8601String() : null;
+        }
+
+        if ((int) $row->refund_cents >= (int) $row->net_cents && (int) $row->net_cents > 0) {
+            return null;
+        }
+
+        if (! $row->occurred_at) {
+            return null;
+        }
+
+        $gracePeriodDays = (int) config('partna.store.grace_period_days', 60);
+
+        return \Carbon\Carbon::parse($row->occurred_at)
+            ->addDays($gracePeriodDays)
+            ->toIso8601String();
     }
 
     /**
