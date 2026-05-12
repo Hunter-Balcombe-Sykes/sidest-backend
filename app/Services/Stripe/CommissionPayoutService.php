@@ -517,14 +517,56 @@ class CommissionPayoutService
                     ],
                 ], ['idempotency_key' => 'pi_'.$payout->id.$retryKey]);
 
+                // Record the PI ID immediately so a crash between create and the
+                // success-path forceFill doesn't lose it. Cleared further down on
+                // the requires_action path so retries get a fresh PI cleanly.
+                $payout->forceFill(['stripe_payment_intent_id' => $paymentIntent->id])->save();
+
                 if ($paymentIntent->status !== 'succeeded') {
                     // SCA required — cancel the PI so the idempotency key is freed for the next
                     // attempt. Without cancellation the same key returns this stuck PI for 24h.
+                    // Race window: the customer may complete SCA out-of-band between our
+                    // confirm() returning requires_action and our cancel() call. If cancel()
+                    // throws, re-fetch the PI; if it succeeded, refund it immediately to
+                    // prevent a double-charge on the next retry attempt.
+                    $cancelled = false;
                     try {
                         $this->stripe->paymentIntents->cancel($paymentIntent->id);
+                        $cancelled = true;
                     } catch (\Throwable) {
-                        // Non-critical: PI may already be in a terminal state
+                        // PI may have already transitioned to a terminal state.
                     }
+
+                    if (! $cancelled) {
+                        try {
+                            $finalPi = $this->stripe->paymentIntents->retrieve($paymentIntent->id);
+                            if (($finalPi->status ?? null) === 'succeeded') {
+                                // Customer beat us through SCA. Refund the stray charge so the
+                                // retry's fresh PI doesn't double-bill the brand.
+                                $this->stripe->refunds->create(
+                                    ['payment_intent' => $finalPi->id],
+                                    ['idempotency_key' => "rf_sca_race_{$payout->id}_{$finalPi->id}"],
+                                );
+                                Log::warning('SCA race: PI succeeded after cancel attempt, auto-refunded stray charge', [
+                                    'payout_id' => $payout->id,
+                                    'payment_intent_id' => $finalPi->id,
+                                ]);
+                            }
+                        } catch (\Throwable $raceEx) {
+                            Log::error('SCA race recovery failed — possible orphan PI', [
+                                'payout_id' => $payout->id,
+                                'payment_intent_id' => $paymentIntent->id,
+                                'error' => $raceEx instanceof ApiErrorException
+                                    ? ($raceEx->getStripeCode() ?? 'stripe_error')
+                                    : get_class($raceEx),
+                            ]);
+                        }
+                    }
+
+                    // Clear the recorded PI ID so the next attempt (admin retry bumps
+                    // retry_count → fresh idempotency key) starts cleanly.
+                    $payout->forceFill(['stripe_payment_intent_id' => null])->save();
+
                     if ($walletDebitCents > 0) {
                         $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
                     }
@@ -535,10 +577,8 @@ class CommissionPayoutService
 
                 $latestChargeId = $this->extractLatestChargeId($paymentIntent);
 
-                $payout->forceFill([
-                    'stripe_payment_intent_id' => $paymentIntent->id,
-                    'status' => 'collected',
-                ])->save();
+                // PI ID already recorded above; just advance status.
+                $payout->forceFill(['status' => 'collected'])->save();
             } catch (ApiConnectionException|RateLimitException $e) {
                 // Transient error — re-throw so Horizon retries with backoff.
                 // Wallet debit is already committed in 'collecting' status; the
