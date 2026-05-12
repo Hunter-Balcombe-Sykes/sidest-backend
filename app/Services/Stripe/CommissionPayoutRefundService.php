@@ -8,6 +8,7 @@ use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -90,10 +91,31 @@ class CommissionPayoutRefundService
             }
 
             if (in_array($payout->status, ['collecting', 'transferring'], true)) {
+                $wasFlagged = (bool) $payout->needs_manual_refund;
                 $payout->forceFill(['needs_manual_refund' => true])->save();
-                Log::warning('payout.refund.mid_flight', [
+
+                // Notify the brand on first flag so they know their refund
+                // couldn't be cleanly applied to the in-flight payout. Dedupe key
+                // includes order_id so multiple orders refunded on the same payout
+                // each surface as their own alert. Daily digest job picks up the
+                // ops-side surfacing.
+                if (! $wasFlagged) {
+                    app(NotificationPublisher::class)->publish(
+                        professionalId: (string) $payout->brand_professional_id,
+                        frontendType: 'Warning',
+                        category: 'commissions',
+                        title: 'Refund flagged for manual review',
+                        body: 'A refund arrived while a commission payout was being processed. Our team will reconcile the amounts and follow up.',
+                        dedupeKey: "needs_manual_refund.{$payout->id}.{$order->id}",
+                        ctaUrl: '/account/commerce/payouts',
+                        retentionConfigKey: 'payout',
+                    );
+                }
+
+                Log::error('payout.refund.mid_flight', [
                     'order_id' => $order->id,
                     'payout_id' => $payout->id,
+                    'status' => $payout->status,
                 ]);
 
                 return;

@@ -160,6 +160,18 @@ Schedule::job(new \App\Jobs\Stripe\ReconcileStuckTransferringPayoutsJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: reconcile-stuck-transferring-payouts');
     });
 
+// Daily digest of CommissionPayouts with needs_manual_refund=true (mid-flight
+// refund + post-payout clawback failure cases). Emits one Log::warning per run
+// listing open payouts so ops can triage via Nightwatch alerts.
+Schedule::job(new \App\Jobs\Stripe\MonitorManualRefundQueueJob)
+    ->dailyAt('08:00')
+    ->timezone('UTC')
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: monitor-manual-refund-queue');
+    });
+
 // Phase 3 backstop reconciler. Cron expression is env-overridable: set
 // PARTNA_RECONCILER_SCHEDULE='0 * * * *' for the first 60 days post-launch,
 // then revert to the default daily-at-3am value.
