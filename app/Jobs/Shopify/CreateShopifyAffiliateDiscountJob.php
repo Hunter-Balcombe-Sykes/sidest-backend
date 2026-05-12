@@ -218,9 +218,15 @@ class CreateShopifyAffiliateDiscountJob implements ShouldBeUnique, ShouldQueue
             $title = (string) Arr::get($node, 'title', '');
 
             // Shopify surfaces the extension handle as the function title.
-            // Exact match on handle AND apiType=discount avoids collisions if
-            // another app ever ships a function with a similar name.
-            if ($apiType === 'discount' && $title === self::FUNCTION_APP_HANDLE) {
+            // The apiType for a product-discount-target function is reported as
+            // "product_discounts" (verified against live Shopify response May 12,
+            // 2026 — `apiType` was previously documented as "discount" but the
+            // actual returned value is plural). Accept both for forward/back
+            // compatibility — match the extension handle plus any discount-like
+            // apiType to avoid collisions if another app ever ships a function
+            // with the same handle (unlikely — handle is globally unique per app).
+            $isDiscountApi = $apiType === 'product_discounts' || $apiType === 'discount';
+            if ($isDiscountApi && $title === self::FUNCTION_APP_HANDLE) {
                 return (string) Arr::get($node, 'id', '') ?: null;
             }
         }
