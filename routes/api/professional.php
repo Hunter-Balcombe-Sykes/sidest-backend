@@ -176,8 +176,12 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::get('/affiliate/commerce-analytics', [AffiliateCommerceAnalyticsController::class, 'overview']);
         Route::get('/affiliate/projections', [AffiliateProjectionsController::class, 'show'])->name('professional.affiliate.projections');
         Route::get('/affiliate/orders', [AffiliateOrdersController::class, 'index']);
+        Route::get('/affiliate/orders/{order}', [AffiliateOrdersController::class, 'show'])
+            ->whereUuid('order');
         Route::get('/brand/commerce-analytics', [BrandCommerceAnalyticsController::class, 'overview']);
         Route::get('/brand/orders', [BrandOrdersController::class, 'index']);
+        Route::get('/brand/orders/{order}', [BrandOrdersController::class, 'show'])
+            ->whereUuid('order');
 
         // View Analytics
         Route::get('/analytics', [ProfessionalAnalyticsController::class, 'summary']);
