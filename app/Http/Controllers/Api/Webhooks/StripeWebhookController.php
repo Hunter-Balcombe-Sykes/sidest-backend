@@ -105,7 +105,17 @@ class StripeWebhookController extends Controller
             return;
         }
 
-        $priceId = $subscription->items->data[0]->price->id ?? null;
+        $items = $subscription->items->data ?? [];
+        if (count($items) !== 1) {
+            // Partna currently sells single-item plans. A multi-item subscription
+            // means the dashboard added an add-on or the schema is changing — log
+            // loudly so we notice before plan resolution silently picks items[0].
+            Log::error('Stripe subscription with unexpected item count', [
+                'subscription_id' => $subscription->id,
+                'item_count' => count($items),
+            ]);
+        }
+        $priceId = $items[0]->price->id ?? null;
         $plan = Plan::where('stripe_price_id', $priceId)->where('is_active', true)->first();
 
         if (! $plan) {
@@ -222,8 +232,15 @@ class StripeWebhookController extends Controller
         // If the upgrade payment failed (past_due, incomplete, etc.) keep the old plan
         // so entitlements are not granted prematurely. A later subscription.updated
         // with status=active (successful retry) will promote the plan at that point.
-        $priceId = $subscription->items->data[0]->price->id ?? null;
-        if ($priceId && in_array($subscription->status, ['active', 'trialing'], true)) {
+        $items = $subscription->items->data ?? [];
+        if (count($items) !== 1) {
+            Log::error('Stripe subscription.updated with unexpected item count', [
+                'subscription_id' => $subscription->id,
+                'item_count' => count($items),
+            ]);
+        }
+        $priceId = $items[0]->price->id ?? null;
+        if ($priceId && $subscription->status === 'active') {
             $plan = Plan::where('stripe_price_id', $priceId)->where('is_active', true)->first();
             if ($plan && $plan->id !== $localSub->plan_id) {
                 $updates['plan_id'] = $plan->id;
@@ -417,7 +434,14 @@ class StripeWebhookController extends Controller
             'canceled' => Subscription::STATUS_CANCELED,
             'incomplete' => Subscription::STATUS_INCOMPLETE,
             'incomplete_expired' => Subscription::STATUS_INCOMPLETE_EXPIRED,
-            'trialing' => Subscription::STATUS_ACTIVE, // we don't use trials — map to active
+            // Partna does not use trials. If Stripe sends 'trialing' it's a
+            // misconfigured subscription in the dashboard — fail loud rather than
+            // silently granting active entitlements to a non-paying customer.
+            // Throwing here returns 500 → Stripe retries → Nightwatch alerts ops.
+            'trialing' => throw new \LogicException(
+                'Received trialing subscription status but Partna does not use trials. '
+                .'Check the Stripe Dashboard for a misconfigured subscription.'
+            ),
             'paused' => Subscription::STATUS_PAUSED,
             default => $stripeStatus,
         };

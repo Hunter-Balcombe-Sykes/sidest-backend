@@ -830,20 +830,15 @@ class CommissionPayoutService
 
     private function extractLatestChargeId(object $paymentIntent): ?string
     {
+        // PaymentIntent.latest_charge replaced the charges[] array in Stripe API
+        // version 2022-08-01. Modern API versions don't return charges->data by
+        // default — we only support latest_charge (string ID or expanded object).
         if (is_string($paymentIntent->latest_charge ?? null) && $paymentIntent->latest_charge !== '') {
             return $paymentIntent->latest_charge;
         }
 
         if (is_object($paymentIntent->latest_charge ?? null) && is_string($paymentIntent->latest_charge->id ?? null)) {
             return $paymentIntent->latest_charge->id;
-        }
-
-        if (is_object($paymentIntent->charges ?? null) && is_array($paymentIntent->charges->data ?? null)) {
-            foreach ($paymentIntent->charges->data as $charge) {
-                if (is_object($charge) && is_string($charge->id ?? null) && $charge->id !== '') {
-                    return $charge->id;
-                }
-            }
         }
 
         return null;

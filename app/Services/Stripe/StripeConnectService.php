@@ -95,8 +95,13 @@ class StripeConnectService
                 'professional_type' => $professional->professional_type,
             ],
             'capabilities' => [
+                // Affiliates only RECEIVE transfers from Partna — they don't process
+                // customer payments themselves (Shopify does that, on the brand's
+                // merchant account). Requesting card_payments here triggers heavier
+                // KYC requirements for a capability we never use. Stripe docs:
+                // "only request the capabilities that your accounts need."
+                // See https://docs.stripe.com/connect/account-capabilities
                 'transfers' => ['requested' => true],
-                'card_payments' => ['requested' => true],
             ],
         ], ['idempotency_key' => "acct_{$professional->id}"]);
 
@@ -240,7 +245,12 @@ class StripeConnectService
     {
         $accountId = $professional->stripe_connect_account_id;
 
-        if (! $accountId || $professional->stripe_connect_status !== 'active') {
+        // Allow restricted accounts to access their dashboard so they can resolve
+        // KYC issues themselves. Previously this was 'active'-only which locked
+        // out the exact users who most needed the dashboard. Disconnected/onboarding
+        // accounts still return null — the frontend routes them to the onboarding
+        // link instead.
+        if (! $accountId || ! in_array($professional->stripe_connect_status, ['active', 'restricted'], true)) {
             return null;
         }
 
@@ -488,7 +498,16 @@ class StripeConnectService
 
         $currency = strtoupper(trim($currency));
         if ($currency === '') {
-            $currency = strtoupper((string) ($brand->stripe_manual_balance_currency ?: 'AUD'));
+            // Don't silently fall back to AUD — a brand whose wallet hasn't been
+            // seeded with a currency yet should explicitly set one before topping up.
+            // Otherwise a USD-first brand could accidentally accumulate AUD balance.
+            if (! $brand->stripe_manual_balance_currency) {
+                throw new \InvalidArgumentException(
+                    'Top-up requires a currency: brand wallet has no currency set yet. '
+                    .'Set the wallet currency in brand settings before initiating a top-up.'
+                );
+            }
+            $currency = strtoupper((string) $brand->stripe_manual_balance_currency);
         }
 
         $customerId = $brand->stripe_customer_id;
@@ -550,7 +569,19 @@ class StripeConnectService
         }
 
         $sessionId = $session->id;
-        $currency = strtoupper($session->currency ?? 'AUD');
+        // Stripe Checkout Sessions always carry currency when payment_status='paid'
+        // (already asserted above). If it's missing, something upstream is broken
+        // and a silent default would corrupt the wallet.
+        $sessionCurrency = $session->currency ?? null;
+        if (! is_string($sessionCurrency) || $sessionCurrency === '') {
+            Log::critical('stripe.topup.missing_currency', [
+                'session_id' => $sessionId,
+                'professional_id' => $professionalId,
+            ]);
+
+            return;
+        }
+        $currency = strtoupper($sessionCurrency);
         $stripeEventId = $session->_stripe_event_id ?? null;
         $actorOverride = $session->_actor_override ?? null;
 
@@ -566,8 +597,11 @@ class StripeConnectService
                 return;
             }
 
-            // Currency mismatch → auto-refund + alert (do not credit the wallet).
-            $walletCurrency = strtoupper($brand->stripe_manual_balance_currency ?? 'AUD');
+            // First top-up: seed wallet currency from the session. Subsequent top-ups
+            // must match the established wallet currency.
+            $walletCurrency = $brand->stripe_manual_balance_currency
+                ? strtoupper((string) $brand->stripe_manual_balance_currency)
+                : $currency;
             if ($walletCurrency !== $currency) {
                 Log::error('stripe.topup.currency_mismatch', [
                     'professional_id' => $professionalId,
