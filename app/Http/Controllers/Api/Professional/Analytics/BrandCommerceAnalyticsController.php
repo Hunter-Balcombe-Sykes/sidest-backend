@@ -52,7 +52,9 @@ class BrandCommerceAnalyticsController extends ApiController
             ];
 
             // ── Timeseries from commerce.orders ──────────────────────────────
-            $timeseries = $this->queryOrderTimeseries($professionalId, $filters, $granularity, filterBrand: true);
+            // includeCommission so the chart's Revenue ↔ Commissions toggle has
+            // both metrics aligned on the same x-axis.
+            $timeseries = $this->queryOrderTimeseries($professionalId, $filters, $granularity, filterBrand: true, includeCommission: true);
 
             // Merge per-bucket page views (across all affiliates) into the
             // same timeseries so the chart's Revenue ↔ Views toggle has both
