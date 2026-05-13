@@ -119,7 +119,7 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
         $walletDebitCents = (int) ($payout->wallet_debit_cents ?? 0);
         $failureReason = 'Payout job exhausted all Horizon retries after transient errors. '
             .$e->getMessage();
-        $updates = ['status' => 'failed', 'failure_code' => 'job_exhausted'];
+        $updates = ['status' => 'failed', 'failure_code' => 'job_exhausted', 'processed_at' => now()];
 
         // If retries exhausted while still in 'collecting', the PaymentIntent was never
         // successfully created — there is no charge to match the wallet debit. Reverse it

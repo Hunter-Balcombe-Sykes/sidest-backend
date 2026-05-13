@@ -9,36 +9,56 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Artisan::command('partna:normalize-professional-types {--dry-run : Show count only without updating}', function () {
-    $allowed = ['professional', 'influencer', 'brand'];
+Artisan::command(
+    'partna:normalize-professional-types '.
+    '{--dry-run : Show count only without updating} '.
+    '{--confirm-large : Acknowledge a count > 1000 and proceed}',
+    function () {
+        $allowed = ['professional', 'influencer', 'brand'];
 
-    $query = DB::table('professionals')->where(function ($builder) use ($allowed): void {
-        $builder
-            ->whereNull('professional_type')
-            ->orWhereRaw('LOWER(TRIM(professional_type)) NOT IN (?, ?, ?)', $allowed);
-    });
+        $query = DB::table('professionals')->where(function ($builder) use ($allowed): void {
+            $builder
+                ->whereNull('professional_type')
+                ->orWhereRaw('LOWER(TRIM(professional_type)) NOT IN (?, ?, ?)', $allowed);
+        });
 
-    $count = (clone $query)->count();
+        $count = (clone $query)->count();
 
-    if ((bool) $this->option('dry-run')) {
-        $this->info("Would normalize {$count} professional record(s) to professional_type=professional.");
+        if ((bool) $this->option('dry-run')) {
+            $this->info("Would normalize {$count} professional record(s) to professional_type=professional.");
 
-        return;
+            return 0;
+        }
+
+        if ($count === 0) {
+            $this->info('No professional records required normalization.');
+
+            return 0;
+        }
+
+        // Safety guard: a future schema change that adds a new professional_type
+        // value would be silently squashed here without this guard. Require an
+        // explicit ack when the count exceeds expectations.
+        if ($count > 1000 && ! (bool) $this->option('confirm-large')) {
+            $this->error(
+                "Refusing to normalize {$count} records — that's more than expected. ".
+                'Investigate: a new professional_type may have been added to the schema. '.
+                'Re-run with --confirm-large to proceed if this is intentional.'
+            );
+
+            return 1;
+        }
+
+        $updated = $query->update([
+            'professional_type' => 'professional',
+            'updated_at' => now(),
+        ]);
+
+        $this->info("Normalized {$updated} professional record(s) to professional_type=professional.");
+
+        return 0;
     }
-
-    if ($count === 0) {
-        $this->info('No professional records required normalization.');
-
-        return;
-    }
-
-    $updated = $query->update([
-        'professional_type' => 'professional',
-        'updated_at' => now(),
-    ]);
-
-    $this->info("Normalized {$updated} professional record(s) to professional_type=professional.");
-})->purpose('Normalize legacy professional_type values to professional.');
+)->purpose('Normalize legacy professional_type values to professional.');
 
 Schedule::command('partna:purge-soft-deletes')
     ->dailyAt('03:20')
@@ -61,6 +81,18 @@ Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob)
     ->withoutOverlapping()
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: process-commission-payouts');
+    });
+
+// Daily at 06:00 UTC. Voids stale commissions (affiliate-side and brand-side)
+// and emits grace-period warnings. Operates on 30-day windows, so hourly cadence
+// was wasted load — once a day is the right granularity.
+Schedule::job(new \App\Jobs\Stripe\VoidableCommissionsAndWarningsJob)
+    ->dailyAt('06:00')
+    ->timezone('UTC')
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: voidable-commissions-and-warnings');
     });
 
 // Closes #CR-003: enforces the 60-day payout grace window the UI promises.
@@ -158,6 +190,18 @@ Schedule::job(new \App\Jobs\Stripe\ReconcileStuckTransferringPayoutsJob)
     ->withoutOverlapping()
     ->onFailure(function (): void {
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: reconcile-stuck-transferring-payouts');
+    });
+
+// Daily digest of CommissionPayouts with needs_manual_refund=true (mid-flight
+// refund + post-payout clawback failure cases). Emits one Log::warning per run
+// listing open payouts so ops can triage via Nightwatch alerts.
+Schedule::job(new \App\Jobs\Stripe\MonitorManualRefundQueueJob)
+    ->dailyAt('08:00')
+    ->timezone('UTC')
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: monitor-manual-refund-queue');
     });
 
 // Phase 3 backstop reconciler. Cron expression is env-overridable: set

@@ -4,6 +4,7 @@ namespace App\Jobs\Stripe;
 
 use App\Models\Retail\CommissionPayout;
 use App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification;
+use App\Notifications\Brand\BrandPayoutFundingGraceWarningNotification;
 use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -72,7 +73,18 @@ class VoidExpiredPayoutsJob implements ShouldQueue
      */
     private function fireGraceWarnings(): void
     {
-        $gracePeriodDays = (int) config('partna.store.grace_period_days', 60);
+        // Falls back to legacy 'grace_period_days' for back-compat during the config split rollout.
+        $gracePeriodDays = (int) config(
+            'partna.store.payout_grace_period_days',
+            (int) config('partna.store.grace_period_days', 60),
+        );
+
+        // Brand-side failure codes mean the affiliate cannot fix the issue —
+        // route those warnings to the brand instead. The pre-existing query
+        // already excludes payouts where the affiliate IS active, which
+        // covered the affiliate-side cases; brand-side blockers may have an
+        // active affiliate too, so we evaluate routing per-payout.
+        $brandSideCodes = ['brand_payment_method_missing', 'wallet_currency_mismatch'];
 
         foreach ([30, 7, 1] as $daysOut) {
             $tag = 'T-'.$daysOut;
@@ -84,14 +96,25 @@ class VoidExpiredPayoutsJob implements ShouldQueue
                 ->whereIn('status', ['pending', 'pending_funds'])
                 ->whereNotNull('grace_started_at')
                 ->whereBetween('grace_started_at', [$windowStart, $windowEnd])
-                ->whereDoesntHave('affiliateProfessional', fn ($q) => $q->where('stripe_connect_status', 'active'))
+                ->where(function ($q) use ($brandSideCodes) {
+                    // Either: brand-side blocker (notify brand regardless of affiliate state)
+                    // Or: affiliate-side issue with affiliate not yet active
+                    $q->whereIn('failure_code', $brandSideCodes)
+                        ->orWhereDoesntHave('affiliateProfessional', fn ($a) => $a->where('stripe_connect_status', 'active'));
+                })
                 ->get()
                 ->filter(fn ($p) => ! in_array($tag, $p->grace_notifications_sent ?? [], true));
 
             foreach ($candidates as $payout) {
-                $payout->affiliateProfessional?->notify(
-                    new AffiliatePayoutGraceWarningNotification($payout, $daysOut)
-                );
+                if (in_array($payout->failure_code, $brandSideCodes, true)) {
+                    $payout->brandProfessional?->notify(
+                        new BrandPayoutFundingGraceWarningNotification($payout, $daysOut)
+                    );
+                } else {
+                    $payout->affiliateProfessional?->notify(
+                        new AffiliatePayoutGraceWarningNotification($payout, $daysOut)
+                    );
+                }
 
                 $sent = $payout->grace_notifications_sent ?? [];
                 $sent[] = $tag;

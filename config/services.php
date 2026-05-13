@@ -63,7 +63,13 @@ return [
         'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
         'connect_webhook_secret' => env('STRIPE_CONNECT_WEBHOOK_SECRET'),
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
-        'api_version' => env('STRIPE_API_VERSION'), // null falls back to SDK-pinned default
+        // Pinned to the last pre-Basil version. Basil (2025-03-31) removed
+        // subscription.current_period_start/end from the Subscription resource
+        // and moved them to items.data[]. The webhook handler reads items[] first
+        // with a top-level fallback so forward upgrades are safe, but we pin
+        // explicitly to keep deploys reproducible across SDK upgrades.
+        // Bump to 2026-04-22.dahlia (current Stripe default) after E2E test pass.
+        'api_version' => env('STRIPE_API_VERSION', '2025-02-24.acacia'),
     ],
 
     'hydrogen' => [

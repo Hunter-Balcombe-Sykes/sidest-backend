@@ -78,18 +78,45 @@ function something()
  */
 function actingAsProfessional(\App\Models\Core\Professional\Professional $professional): \Pest\Support\HigherOrderTapProxy
 {
-    // Replace both auth middleware with no-ops that inject the professional.
-    test()->withoutMiddleware([
-        \App\Http\Middleware\Auth\VerifySupabaseJwt::class,
-        \App\Http\Middleware\Context\LoadCurrentProfessional::class,
-    ]);
+    $supabaseUid = $professional->auth_user_id ?? (string) \Illuminate\Support\Str::uuid();
 
-    // Bind a request macro that fires before every route action: injects the
-    // professional into request attributes so controllers/policies can read it
-    // via $request->attributes->get('professional').
-    app()->resolving(\Illuminate\Http\Request::class, function ($request) use ($professional) {
-        $request->attributes->set('professional', $professional);
-        $request->attributes->set('supabase_uid', $professional->auth_user_id ?? (string) \Illuminate\Support\Str::uuid());
+    // Replace both auth middleware with stubs that set the request attributes.
+    // We can't use withoutMiddleware() because some route action callbacks
+    // (registered in AppServiceProvider::boot) read supabase_uid and throw if
+    // missing — those callbacks fire AFTER the middleware pipeline, so the
+    // attributes have to be set by something in the pipeline. Container
+    // rebinding is the cleanest way to swap the production middleware out
+    // without changing route definitions.
+    //
+    // app()->resolving(Request::class, ...) doesn't help here: Laravel's HTTP
+    // testing layer creates the Request via createFromBase, not via container
+    // resolution, so resolving() callbacks never fire.
+    app()->bind(\App\Http\Middleware\Auth\VerifySupabaseJwt::class, function () use ($supabaseUid) {
+        return new class($supabaseUid)
+        {
+            public function __construct(private readonly string $uid) {}
+
+            public function handle(\Illuminate\Http\Request $request, \Closure $next)
+            {
+                $request->attributes->set('supabase_uid', $this->uid);
+
+                return $next($request);
+            }
+        };
+    });
+
+    app()->bind(\App\Http\Middleware\Context\LoadCurrentProfessional::class, function () use ($professional) {
+        return new class($professional)
+        {
+            public function __construct(private readonly \App\Models\Core\Professional\Professional $pro) {}
+
+            public function handle(\Illuminate\Http\Request $request, \Closure $next)
+            {
+                $request->attributes->set('professional', $this->pro);
+
+                return $next($request);
+            }
+        };
     });
 
     return test();

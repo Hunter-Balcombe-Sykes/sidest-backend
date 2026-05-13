@@ -914,12 +914,25 @@ return [
         'payout_hold_days' => (int) env('PARTNA_STORE_PAYOUT_HOLD_DAYS', env('SIDEST_STORE_PAYOUT_HOLD_DAYS', 7)),
         'min_payout_hold_days' => 7,
         'platform_fee_percent' => (float) env('PARTNA_STORE_PLATFORM_FEE_PERCENT', env('SIDEST_STORE_PLATFORM_FEE_PERCENT', 20)),
+        // Signup grace deadline. New affiliates get this many days after Stripe
+        // Connect onboarding starts before their commissions begin voiding.
+        // Used by StripeConnectService::createConnectAccount to set
+        // professionals.stripe_grace_period_ends_at.
+        'signup_grace_period_days' => (int) env('PARTNA_STORE_SIGNUP_GRACE_PERIOD_DAYS', env('SIDEST_STORE_SIGNUP_GRACE_PERIOD_DAYS', 30)),
+
         // Per-payout grace deadline. Each commission_payouts row's
         // void_at is set to created_at + this many days. After that,
         // if the affiliate's Stripe Connect isn't 'active', the
         // VoidExpiredPayoutsJob cancels the payout (brand keeps the
         // money — never charged).
+        'payout_grace_period_days' => (int) env('PARTNA_STORE_PAYOUT_GRACE_PERIOD_DAYS', env('SIDEST_STORE_PAYOUT_GRACE_PERIOD_DAYS', 60)),
+
+        // DEPRECATED — fallback for code that hasn't migrated to the split keys above.
+        // Previously conflated "signup grace" (30d) and "payout grace" (60d) under one key,
+        // which silently misconfigured one of the two whenever ops tuned the value.
+        // Removed callers: StripeConnectService, CommissionPayoutService, VoidExpiredPayoutsJob.
         'grace_period_days' => (int) env('PARTNA_STORE_GRACE_PERIOD_DAYS', env('SIDEST_STORE_GRACE_PERIOD_DAYS', 60)),
+
         'commission_void_window_days' => (int) env('PARTNA_STORE_COMMISSION_VOID_WINDOW_DAYS', env('SIDEST_STORE_COMMISSION_VOID_WINDOW_DAYS', 30)),
     ],
 

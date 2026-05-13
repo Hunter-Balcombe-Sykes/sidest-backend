@@ -30,6 +30,7 @@ class WebhookEvent extends BaseModel
     }
 
     protected $fillable = [
+        'provider',
         'stripe_event_id',
         'event_type',
         'processed_at',

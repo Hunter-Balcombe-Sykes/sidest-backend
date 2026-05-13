@@ -95,8 +95,13 @@ class StripeConnectService
                 'professional_type' => $professional->professional_type,
             ],
             'capabilities' => [
+                // Affiliates only RECEIVE transfers from Partna — they don't process
+                // customer payments themselves (Shopify does that, on the brand's
+                // merchant account). Requesting card_payments here triggers heavier
+                // KYC requirements for a capability we never use. Stripe docs:
+                // "only request the capabilities that your accounts need."
+                // See https://docs.stripe.com/connect/account-capabilities
                 'transfers' => ['requested' => true],
-                'card_payments' => ['requested' => true],
             ],
         ], ['idempotency_key' => "acct_{$professional->id}"]);
 
@@ -104,7 +109,7 @@ class StripeConnectService
             'stripe_connect_account_id' => $account->id,
             'stripe_connect_status' => 'onboarding',
             'stripe_grace_period_ends_at' => $professional->stripe_grace_period_ends_at
-                ?? now()->addDays((int) config('partna.store.grace_period_days', 30)),
+                ?? now()->addDays((int) config('partna.store.signup_grace_period_days', 30)),
         ];
 
         // Seed wallet currency from Shopify's shop_currency so brands with
@@ -240,7 +245,12 @@ class StripeConnectService
     {
         $accountId = $professional->stripe_connect_account_id;
 
-        if (! $accountId || $professional->stripe_connect_status !== 'active') {
+        // Allow restricted accounts to access their dashboard so they can resolve
+        // KYC issues themselves. Previously this was 'active'-only which locked
+        // out the exact users who most needed the dashboard. Disconnected/onboarding
+        // accounts still return null — the frontend routes them to the onboarding
+        // link instead.
+        if (! $accountId || ! in_array($professional->stripe_connect_status, ['active', 'restricted'], true)) {
             return null;
         }
 
@@ -488,7 +498,16 @@ class StripeConnectService
 
         $currency = strtoupper(trim($currency));
         if ($currency === '') {
-            $currency = strtoupper((string) ($brand->stripe_manual_balance_currency ?: 'AUD'));
+            // Don't silently fall back to AUD — a brand whose wallet hasn't been
+            // seeded with a currency yet should explicitly set one before topping up.
+            // Otherwise a USD-first brand could accidentally accumulate AUD balance.
+            if (! $brand->stripe_manual_balance_currency) {
+                throw new \InvalidArgumentException(
+                    'Top-up requires a currency: brand wallet has no currency set yet. '
+                    .'Set the wallet currency in brand settings before initiating a top-up.'
+                );
+            }
+            $currency = strtoupper((string) $brand->stripe_manual_balance_currency);
         }
 
         $customerId = $brand->stripe_customer_id;
@@ -496,30 +515,45 @@ class StripeConnectService
             $customerId = $this->createCustomer($brand);
         }
 
-        $session = $this->stripe->checkout->sessions->create([
-            'mode' => 'payment',
-            'customer' => $customerId,
-            'payment_method_types' => ['card'],
-            'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_topup_session_id'),
-            'cancel_url' => $cancelUrl,
-            'line_items' => [[
-                'quantity' => 1,
-                'price_data' => [
-                    'currency' => strtolower($currency),
-                    'unit_amount' => $amountCents,
-                    'product_data' => [
-                        'name' => 'Commission Wallet Top-up',
-                        'description' => 'Manual funding for commission payouts',
+        // Hour-bucketed idempotency: rapid double-clicks within the same hour
+        // return the same Checkout session URL. Different amounts on the same
+        // hour bucket get different keys (so a $50 then $100 top-up both work).
+        // Stripe idempotency keys are 24h TTL so we deliberately bucket smaller.
+        $idempotencyKey = sprintf(
+            'topup_%s_%s_%d_%s',
+            $brand->id,
+            strtolower($currency),
+            $amountCents,
+            now()->format('Y-m-d-H'),
+        );
+
+        $session = $this->stripe->checkout->sessions->create(
+            [
+                'mode' => 'payment',
+                'customer' => $customerId,
+                'payment_method_types' => ['card'],
+                'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_topup_session_id'),
+                'cancel_url' => $cancelUrl,
+                'line_items' => [[
+                    'quantity' => 1,
+                    'price_data' => [
+                        'currency' => strtolower($currency),
+                        'unit_amount' => $amountCents,
+                        'product_data' => [
+                            'name' => 'Commission Wallet Top-up',
+                            'description' => 'Manual funding for commission payouts',
+                        ],
                     ],
+                ]],
+                'metadata' => [
+                    'purpose' => 'brand_commission_topup',
+                    'professional_id' => $brand->id,   // read by webhook handler
+                    'sidest_professional_id' => $brand->id,   // kept for backward compat
+                    'currency' => $currency,
                 ],
-            ]],
-            'metadata' => [
-                'purpose' => 'brand_commission_topup',
-                'professional_id' => $brand->id,   // read by webhook handler
-                'sidest_professional_id' => $brand->id,   // kept for backward compat
-                'currency' => $currency,
             ],
-        ]);
+            ['idempotency_key' => $idempotencyKey],
+        );
 
         return [
             'checkout_url' => $session->url,
@@ -550,7 +584,19 @@ class StripeConnectService
         }
 
         $sessionId = $session->id;
-        $currency = strtoupper($session->currency ?? 'AUD');
+        // Stripe Checkout Sessions always carry currency when payment_status='paid'
+        // (already asserted above). If it's missing, something upstream is broken
+        // and a silent default would corrupt the wallet.
+        $sessionCurrency = $session->currency ?? null;
+        if (! is_string($sessionCurrency) || $sessionCurrency === '') {
+            Log::critical('stripe.topup.missing_currency', [
+                'session_id' => $sessionId,
+                'professional_id' => $professionalId,
+            ]);
+
+            return;
+        }
+        $currency = strtoupper($sessionCurrency);
         $stripeEventId = $session->_stripe_event_id ?? null;
         $actorOverride = $session->_actor_override ?? null;
 
@@ -566,8 +612,11 @@ class StripeConnectService
                 return;
             }
 
-            // Currency mismatch → auto-refund + alert (do not credit the wallet).
-            $walletCurrency = strtoupper($brand->stripe_manual_balance_currency ?? 'AUD');
+            // First top-up: seed wallet currency from the session. Subsequent top-ups
+            // must match the established wallet currency.
+            $walletCurrency = $brand->stripe_manual_balance_currency
+                ? strtoupper((string) $brand->stripe_manual_balance_currency)
+                : $currency;
             if ($walletCurrency !== $currency) {
                 Log::error('stripe.topup.currency_mismatch', [
                     'professional_id' => $professionalId,
@@ -743,12 +792,32 @@ class StripeConnectService
         return ($currency && is_string($currency)) ? strtoupper(trim($currency)) : null;
     }
 
+    /**
+     * Stripe Connect supported countries as of 2026. Source:
+     * https://docs.stripe.com/connect/cross-border-payouts#supported-countries-and-currencies
+     * Update when Stripe expands the list.
+     *
+     * @var array<int, string>
+     */
+    private const STRIPE_CONNECT_SUPPORTED_COUNTRIES = [
+        'AE', 'AT', 'AU', 'BE', 'BG', 'BR', 'CA', 'CH', 'CI', 'CR', 'CY', 'CZ', 'DE', 'DK', 'EE',
+        'ES', 'FI', 'FR', 'GB', 'GH', 'GI', 'GR', 'HK', 'HR', 'HU', 'ID', 'IE', 'IN', 'IT', 'JP',
+        'KE', 'KR', 'LI', 'LT', 'LU', 'LV', 'MT', 'MX', 'MY', 'NG', 'NL', 'NO', 'NZ', 'PE', 'PH',
+        'PL', 'PT', 'RO', 'SA', 'SE', 'SG', 'SI', 'SK', 'TH', 'TR', 'US', 'UY', 'ZA',
+    ];
+
     private function mapCountryCode(?string $code): string
     {
-        if (! $code) {
-            return 'AU';
+        $upper = strtoupper(trim((string) $code));
+
+        if ($upper === '') {
+            abort(422, 'A country is required for Stripe Connect onboarding. Please set your country on your profile before connecting.');
         }
 
-        return strtoupper($code);
+        if (! in_array($upper, self::STRIPE_CONNECT_SUPPORTED_COUNTRIES, true)) {
+            abort(422, "Country '{$upper}' is not supported by Stripe Connect. Please contact support.");
+        }
+
+        return $upper;
     }
 }

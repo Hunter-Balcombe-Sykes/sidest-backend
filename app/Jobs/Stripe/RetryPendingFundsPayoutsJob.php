@@ -93,8 +93,9 @@ class RetryPendingFundsPayoutsJob implements ShouldQueue
             $payout->forceFill([
                 'status' => 'failed',
                 'failure_code' => 'brand_funding_exhausted',
-                'failure_reason' => 'Card declined ' . self::MAX_ATTEMPTS . ' times; wallet credited back',
+                'failure_reason' => 'Card declined '.self::MAX_ATTEMPTS.' times; wallet credited back',
                 'failure_category' => 'brand_funding',
+                'processed_at' => now(),
             ])->save();
 
             // Credit the wallet back so the brand isn't out-of-pocket.
@@ -108,7 +109,7 @@ class RetryPendingFundsPayoutsJob implements ShouldQueue
                     'actor_type' => 'job',
                     'actor_id' => self::class,
                     'related_payout_id' => $payout->id,
-                    'idempotency_key' => 'retry_refund:' . $payout->id,
+                    'idempotency_key' => 'retry_refund:'.$payout->id,
                 ])->save();
 
                 Professional::where('id', $brand->id)
