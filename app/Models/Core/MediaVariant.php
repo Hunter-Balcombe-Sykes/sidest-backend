@@ -127,6 +127,7 @@ class MediaVariant extends BaseModel
 
             return $adapter->url($this->path);
         } catch (\Throwable $e) {
+            report($e);
             Log::warning('MediaVariant::getUrlAttribute failed to resolve disk URL.', [
                 'media_id' => $this->media_id,
                 'variant_id' => $this->id,

@@ -64,6 +64,7 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
                         $metrics = $metricsByPro->get($professional->id);
                         $this->notifyProfessional($publisher, $professional, $metrics, $yearWeek);
                     } catch (\Throwable $e) {
+                        report($e);
                         Log::warning('Weekly analytics notification failed', [
                             'professional_id' => $professional->id,
                             'message' => $e->getMessage(),

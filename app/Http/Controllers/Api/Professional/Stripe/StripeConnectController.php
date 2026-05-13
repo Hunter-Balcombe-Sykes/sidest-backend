@@ -14,6 +14,7 @@ use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 
 // V2: Stripe Connect Express onboarding, brand payment method, and payout history. Required for the brand-as-merchant-of-record commission flow.
 class StripeConnectController extends Controller
@@ -124,7 +125,13 @@ class StripeConnectController extends Controller
             );
 
             return response()->json($result);
-        } catch (\RuntimeException $e) {
+        } catch (\Stripe\Exception\ApiErrorException|\RuntimeException $e) {
+            report($e);
+            Log::error('Stripe payment method setup session creation failed', [
+                'brand_professional_id' => $pro->id,
+                'error' => $e->getMessage(),
+            ]);
+
             return response()->json(['error' => $e->getMessage()], 422);
         }
     }
@@ -143,7 +150,14 @@ class StripeConnectController extends Controller
             $this->connectService->saveBrandConnectPaymentMethod($pro, $request->input('payment_method_id'));
 
             return response()->json(['status' => 'saved']);
-        } catch (\RuntimeException $e) {
+        } catch (\Stripe\Exception\ApiErrorException|\RuntimeException $e) {
+            report($e);
+            Log::error('Stripe payment method confirm failed', [
+                'brand_professional_id' => $pro->id,
+                'payment_method_id' => $request->input('payment_method_id'),
+                'error' => $e->getMessage(),
+            ]);
+
             return response()->json(['error' => $e->getMessage()], 422);
         }
     }
@@ -168,7 +182,14 @@ class StripeConnectController extends Controller
                 'status' => 'saved',
                 ...$result,
             ]);
-        } catch (\RuntimeException $e) {
+        } catch (\Stripe\Exception\ApiErrorException|\RuntimeException $e) {
+            report($e);
+            Log::error('Stripe payment method sync failed', [
+                'brand_professional_id' => $pro->id,
+                'session_id' => $request->input('session_id'),
+                'error' => $e->getMessage(),
+            ]);
+
             return response()->json(['error' => $e->getMessage()], 422);
         }
     }

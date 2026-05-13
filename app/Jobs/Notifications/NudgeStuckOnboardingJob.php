@@ -117,6 +117,7 @@ class NudgeStuckOnboardingJob implements ShouldQueue
                             retentionConfigKey: 'profile_task',
                         );
                     } catch (\Throwable $e) {
+                        report($e);
                         Log::warning('NudgeStuckOnboardingJob failed for professional', [
                             'professional_id' => $row->id ?? null,
                             'day' => $day,

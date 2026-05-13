@@ -4,7 +4,9 @@ namespace App\Http\Requests\Api\Professional\Site;
 
 use App\Http\Requests\BaseFormRequest;
 use App\Models\Core\Site\Site;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 // V2: Validates site updates — settings (design, colors, typography, media), subdomain uniqueness, theme, and publish readiness checks.
@@ -190,7 +192,9 @@ class UpdateSiteRequest extends BaseFormRequest
                             ->whereRaw('LOWER(handle) = LOWER(?)', [$value])
                             ->where('professional_id', '!=', $currentProfessionalId)
                             ->exists();
-                    } catch (\Exception) {
+                    } catch (QueryException $e) {
+                        report($e);
+                        Log::warning('Professional alias check failed in UpdateSiteRequest', ['error' => $e->getMessage()]);
                         $existsInProfessionalAliases = false;
                     }
 

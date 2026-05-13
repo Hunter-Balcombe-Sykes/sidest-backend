@@ -6,7 +6,9 @@ use App\Http\Controllers\Concerns\DetectsClientInfo;
 use App\Http\Requests\BaseFormRequest;
 use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use App\Models\Core\Professional\Professional;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 // V2: Validates professional onboarding/bootstrap — display name, email, phone, handle generation, and professional type normalization.
@@ -87,8 +89,10 @@ class BootstrapRequest extends BaseFormRequest
                         if ($taken) {
                             $fail('This handle has already been taken.');
                         }
-                    } catch (\Exception) {
+                    } catch (QueryException $e) {
                         // Alias table unavailable — skip the check rather than blocking signup.
+                        report($e);
+                        Log::warning('Handle alias check failed in BootstrapRequest', ['error' => $e->getMessage()]);
                     }
                 },
             ],

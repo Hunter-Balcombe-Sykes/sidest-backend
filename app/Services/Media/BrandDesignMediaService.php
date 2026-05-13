@@ -452,6 +452,7 @@ class BrandDesignMediaService
                     basePath: $basePath,
                 );
             } catch (Throwable $e) {
+                report($e);
                 Log::error('BrandDesignMediaService: inline variant processing failed.', [
                     'image_id' => $imageId,
                     'error' => $e->getMessage(),
@@ -468,6 +469,7 @@ class BrandDesignMediaService
                 basePath: $basePath,
             );
         } catch (Throwable $e) {
+            report($e);
             Log::error('BrandDesignMediaService: queue dispatch failed; falling back to sync.', [
                 'image_id' => $imageId,
                 'error' => $e->getMessage(),
@@ -479,6 +481,7 @@ class BrandDesignMediaService
                     basePath: $basePath,
                 );
             } catch (Throwable $sync) {
+                report($sync);
                 Log::error('BrandDesignMediaService: sync fallback also failed.', [
                     'image_id' => $imageId,
                     'error' => $sync->getMessage(),
@@ -497,6 +500,7 @@ class BrandDesignMediaService
             // inside its 5s staleWhileRevalidate window.
             $siteCache->forgetBrandDesign((string) $site->id);
         } catch (Throwable $e) {
+            report($e);
             Log::warning('BrandDesignMediaService: cache invalidation failed.', [
                 'site_id' => $site->id,
                 'error' => $e->getMessage(),

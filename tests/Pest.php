@@ -1157,6 +1157,7 @@ function setupSiteVisitsTable(): void
         visitor_id TEXT NULL,
         session_id TEXT NULL,
         ip_hash TEXT NULL,
+        user_agent TEXT NULL,
         device_type TEXT NULL,
         country_code TEXT NULL,
         referrer TEXT NULL,
@@ -1215,6 +1216,25 @@ function setupEmailSubscriptionsTable(): void
         qr_slug TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
+    )');
+}
+
+/**
+ * billing.webhook_events — durable dedup store shared by Shopify and Stripe webhooks.
+ * Tests that exercise DB-level dedup (claimShopifyWebhookEvent / claimStripeWebhookEvent)
+ * must call this in beforeEach.
+ */
+function setupWebhookEventsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS billing.webhook_events (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL DEFAULT \'stripe\',
+        stripe_event_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        payload TEXT,
+        processed_at TEXT NOT NULL DEFAULT (datetime(\'now\')),
+        UNIQUE (provider, stripe_event_id)
     )');
 }
 
