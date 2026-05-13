@@ -90,12 +90,20 @@ class CommissionPayoutService
             $stats['batches_requeued']++;
         }
 
-        // Only consider brands that have a card on file — brands without payment details
-        // cannot be charged, so creating payout batches for them would immediately stall.
+        // Brand must have an ACTIVE Connect Express account AND a card saved on
+        // THAT Connect account before they can be charged. The commission charge
+        // is a direct charge on the brand's Connect (brand = merchant of record),
+        // so all four conditions are required:
+        //   - stripe_connect_account_id     (account exists)
+        //   - stripe_connect_status='active' (KYC + capabilities verified)
+        //   - stripe_connect_customer_id    (customer on brand's own account)
+        //   - stripe_connect_payment_method_id (PM on brand's own account)
         $eligibleBrandIds = Professional::query()
             ->where('professional_type', 'brand')
-            ->whereNotNull('stripe_customer_id')
-            ->whereNotNull('stripe_payment_method_id')
+            ->whereNotNull('stripe_connect_account_id')
+            ->where('stripe_connect_status', 'active')
+            ->whereNotNull('stripe_connect_customer_id')
+            ->whereNotNull('stripe_connect_payment_method_id')
             ->pluck('id');
 
         // Find all brands with unpaid approved orders, then apply per-brand hold days
@@ -390,15 +398,22 @@ class CommissionPayoutService
             return false;
         }
 
-        if (! $brand->stripe_customer_id || ! $brand->stripe_payment_method_id) {
+        if (
+            ! $brand->stripe_connect_account_id
+            || $brand->stripe_connect_status !== 'active'
+            || ! $brand->stripe_connect_customer_id
+            || ! $brand->stripe_connect_payment_method_id
+        ) {
             $this->markPendingFunding(
                 $payout,
                 'brand_payment_method_missing',
-                'No payment method on file. Please add a card in your Stripe settings.',
+                'Brand has not completed Connect onboarding and card setup. Please finish setup in Stripe settings.',
             );
 
             return null;
         }
+
+        $brandStripeAccountOption = ['stripe_account' => $brand->stripe_connect_account_id];
 
         $currencyUpper = strtoupper($payout->currency_code);
         $currencyLower = strtolower($currencyUpper);
@@ -495,29 +510,60 @@ class CommissionPayoutService
         // Step 2: Charge brand's card for the shortfall (if any)
         $latestChargeId = null;
 
+        // Net deposited into the brand's balance after the direct charge
+        // settles — i.e. amount - stripe_fee - application_fee. This is the
+        // amount the Transfer to the affiliate will be sized at, because it's
+        // exactly what's available on the brand's Connect balance from this
+        // charge.
+        $brandChargeNetCents = null;
+
         if (in_array($payout->status, ['collected', 'transferring'], true)) {
-            // PaymentIntent already succeeded in a previous run.
-            // Retrieve the charge ID so we can use source_transaction on the transfer.
+            // PaymentIntent already succeeded in a previous run on the brand's
+            // Connect account. Retrieve the charge ID + balance_transaction so
+            // we can use source_transaction on the transfer (which also runs
+            // on brand's account, so both calls must use stripe_account=brand).
             if ($payout->stripe_payment_intent_id && $chargeAmountCents > 0) {
-                $pi = $this->stripe->paymentIntents->retrieve($payout->stripe_payment_intent_id);
+                $pi = $this->stripe->paymentIntents->retrieve(
+                    $payout->stripe_payment_intent_id,
+                    ['expand' => ['latest_charge.balance_transaction']],
+                    $brandStripeAccountOption,
+                );
                 $latestChargeId = $this->extractLatestChargeId($pi);
+                $brandChargeNetCents = $this->extractBalanceTransactionNet($pi);
             }
         } elseif ($chargeAmountCents > 0) {
             try {
-                $paymentIntent = $this->stripe->paymentIntents->create([
-                    'amount' => $chargeAmountCents,
-                    'currency' => $currencyLower,
-                    'customer' => $brand->stripe_customer_id,
-                    'payment_method' => $brand->stripe_payment_method_id,
-                    'confirm' => true,
-                    'off_session' => true,
-                    'description' => "Commission payout #{$payout->id}",
-                    'metadata' => [
-                        'sidest_payout_id' => $payout->id,
-                        'brand_id' => $brand->id,
-                        'affiliate_id' => $affiliate->id,
+                // Direct charge on the BRAND'S Connect account, NOT Partna's
+                // platform. stripe_account option makes the brand the merchant
+                // of record on the customer-facing statement, and
+                // application_fee_amount routes Partna's cut to the platform
+                // balance in one call (no separate fee Transfer needed).
+                //
+                // Expand latest_charge.balance_transaction so we get the post-
+                // fee net amount in the same response — that's the value the
+                // subsequent brand→affiliate Transfer is sized at.
+                $paymentIntent = $this->stripe->paymentIntents->create(
+                    [
+                        'amount' => $chargeAmountCents,
+                        'currency' => $currencyLower,
+                        'customer' => $brand->stripe_connect_customer_id,
+                        'payment_method' => $brand->stripe_connect_payment_method_id,
+                        'confirm' => true,
+                        'off_session' => true,
+                        'application_fee_amount' => $payout->platform_fee_cents,
+                        'description' => "Commission payout #{$payout->id}",
+                        'expand' => ['latest_charge.balance_transaction'],
+                        'metadata' => [
+                            'sidest_payout_id' => $payout->id,
+                            'brand_id' => $brand->id,
+                            'affiliate_id' => $affiliate->id,
+                        ],
                     ],
-                ], ['idempotency_key' => 'pi_'.$payout->id.$retryKey]);
+                    [
+                        'stripe_account' => $brand->stripe_connect_account_id,
+                        'idempotency_key' => 'pi_'.$payout->id.$retryKey,
+                    ],
+                );
 
                 // Record the PI ID immediately so a crash between create and the
                 // success-path forceFill doesn't lose it. Cleared further down on
@@ -533,7 +579,11 @@ class CommissionPayoutService
                     // prevent a double-charge on the next retry attempt.
                     $cancelled = false;
                     try {
-                        $this->stripe->paymentIntents->cancel($paymentIntent->id);
+                        $this->stripe->paymentIntents->cancel(
+                            $paymentIntent->id,
+                            [],
+                            $brandStripeAccountOption,
+                        );
                         $cancelled = true;
                     } catch (\Throwable) {
                         // PI may have already transitioned to a terminal state.
@@ -541,13 +591,21 @@ class CommissionPayoutService
 
                     if (! $cancelled) {
                         try {
-                            $finalPi = $this->stripe->paymentIntents->retrieve($paymentIntent->id);
+                            $finalPi = $this->stripe->paymentIntents->retrieve(
+                                $paymentIntent->id,
+                                null,
+                                $brandStripeAccountOption,
+                            );
                             if (($finalPi->status ?? null) === 'succeeded') {
                                 // Customer beat us through SCA. Refund the stray charge so the
-                                // retry's fresh PI doesn't double-bill the brand.
+                                // retry's fresh PI doesn't double-bill the brand. Refund runs
+                                // on the brand's account because that's where the charge lives.
                                 $this->stripe->refunds->create(
                                     ['payment_intent' => $finalPi->id],
-                                    ['idempotency_key' => "rf_sca_race_{$payout->id}_{$finalPi->id}"],
+                                    [
+                                        'stripe_account' => $brand->stripe_connect_account_id,
+                                        'idempotency_key' => "rf_sca_race_{$payout->id}_{$finalPi->id}",
+                                    ],
                                 );
                                 Log::warning('SCA race: PI succeeded after cancel attempt, auto-refunded stray charge', [
                                     'payout_id' => $payout->id,
@@ -578,6 +636,7 @@ class CommissionPayoutService
                 }
 
                 $latestChargeId = $this->extractLatestChargeId($paymentIntent);
+                $brandChargeNetCents = $this->extractBalanceTransactionNet($paymentIntent);
 
                 // PI ID already recorded above; just advance status.
                 $payout->forceFill(['status' => 'collected'])->save();
@@ -629,8 +688,18 @@ class CommissionPayoutService
             //     We honor that via CommissionPayoutRefundService::clawbackCompletedPayout.
             $newTransfer = null;
             if (! $payout->stripe_transfer_id) {
+                // Transfer amount = exactly what landed in the brand's balance
+                // from the direct charge. application_fee already routed
+                // Partna's cut to the platform balance, and Stripe's processing
+                // fee comes off the brand's slice on direct charges (Stripe
+                // default). brand_charge_net therefore equals everything left
+                // for the affiliate. Fall back to payout.net_payout_cents only
+                // if balance_transaction lookup failed (shouldn't happen for
+                // confirmed card payments, but is a safe last-resort default).
+                $transferAmountCents = $brandChargeNetCents ?? $payout->net_payout_cents;
+
                 $transferPayload = [
-                    'amount' => $payout->net_payout_cents,
+                    'amount' => $transferAmountCents,
                     'currency' => $currencyLower,
                     'destination' => $affiliate->stripe_connect_account_id,
                     'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
@@ -645,13 +714,20 @@ class CommissionPayoutService
                     $transferPayload['source_transaction'] = $latestChargeId;
                 }
 
+                // stripe_account=brand → the transfer originates from the
+                // BRAND'S Connect balance (where the charge net just landed),
+                // not from Partna's platform balance. destination=affiliate's
+                // Connect account routes the funds on to them.
                 $newTransfer = $this->stripe->transfers->create(
                     $transferPayload,
-                    // Stable key — no retry_count suffix. Stripe returns the same transfer
-                    // on any retry (including admin retries that increment retry_count),
-                    // preventing a duplicate payout when the transfer succeeded but the
-                    // response was lost before stripe_transfer_id could be recorded.
-                    ['idempotency_key' => 'tr_'.$payout->id]
+                    [
+                        'stripe_account' => $brand->stripe_connect_account_id,
+                        // Stable key — no retry_count suffix. Stripe returns the same transfer
+                        // on any retry (including admin retries that increment retry_count),
+                        // preventing a duplicate payout when the transfer succeeded but the
+                        // response was lost before stripe_transfer_id could be recorded.
+                        'idempotency_key' => 'tr_'.$payout->id,
+                    ],
                 );
 
                 // Persist stripe_transfer_id before the completion record. If the process
@@ -714,9 +790,16 @@ class CommissionPayoutService
 
             if ($payout->stripe_payment_intent_id && $chargeAmountCents > 0) {
                 try {
-                    $this->stripe->refunds->create([
-                        'payment_intent' => $payout->stripe_payment_intent_id,
-                    ], ['idempotency_key' => "rf_{$payout->id}_{$payout->stripe_payment_intent_id}"]);
+                    // The original charge lives on the brand's Connect account
+                    // (it was a direct charge there), so the refund must also
+                    // be scoped to that account via stripe_account.
+                    $this->stripe->refunds->create(
+                        ['payment_intent' => $payout->stripe_payment_intent_id],
+                        [
+                            'stripe_account' => $brand->stripe_connect_account_id,
+                            'idempotency_key' => "rf_{$payout->id}_{$payout->stripe_payment_intent_id}",
+                        ],
+                    );
                     $failureCode = 'transfer_failed_refunded';
                     // Clear PI ID so an admin retry can create a fresh PaymentIntent
                     // (same idempotency key within 24h would return the now-refunded PI).
@@ -854,6 +937,28 @@ class CommissionPayoutService
         }
 
         return null;
+    }
+
+    /**
+     * Extract balance_transaction.net from a PaymentIntent whose latest_charge
+     * was retrieved/created with `expand: ['latest_charge.balance_transaction']`.
+     * Returns the net amount in minor units (cents) that landed in the
+     * connected account's balance after Stripe + application fees, or null
+     * when the BT isn't available in the response (caller should fall back).
+     */
+    private function extractBalanceTransactionNet(object $paymentIntent): ?int
+    {
+        $latestCharge = $paymentIntent->latest_charge ?? null;
+        if (! is_object($latestCharge)) {
+            return null;
+        }
+
+        $bt = $latestCharge->balance_transaction ?? null;
+        if (! is_object($bt) || ! isset($bt->net)) {
+            return null;
+        }
+
+        return (int) $bt->net;
     }
 
     private function markPendingFunding(CommissionPayout $payout, string $code, string $reason): void
