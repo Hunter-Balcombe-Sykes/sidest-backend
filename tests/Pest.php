@@ -1403,3 +1403,4 @@ function createEnquiryFor(Professional $pro, array $overrides = []): \App\Models
 
     return \App\Models\Core\Site\Enquiry::withTrashed()->findOrFail($id);
 }
+

@@ -3,9 +3,12 @@
 use App\Jobs\Fresha\SyncFreshaCatalogDeltaJob;
 use App\Jobs\Shopify\ProcessShopifyOrderWebhookJob;
 use App\Jobs\Square\SyncSquareCatalogDeltaJob;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 beforeEach(function () {
     Bus::fake();
@@ -21,7 +24,18 @@ beforeEach(function () {
     Config::set('partna.features.square_sync', true);
 });
 
-it('shopify orders/paid — empty body with valid HMAC for empty body returns 200 and dispatches nothing', function () {
+it('shopify orders/paid — empty body with valid HMAC returns 422 so Shopify retries', function () {
+    $proId = (string) Str::uuid();
+    DB::table('core.professional_integrations')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $proId,
+        'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+        'shopify_shop_domain' => 'brand-a.myshopify.com',
+        'access_token' => 'shpat_token',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
     $body = '';
     $sig = signShopifyBody($body, 'shop-secret');
 
@@ -30,12 +44,23 @@ it('shopify orders/paid — empty body with valid HMAC for empty body returns 20
         'HTTP_X_SHOPIFY_HMAC_SHA256' => $sig,
         'HTTP_X_SHOPIFY_SHOP_DOMAIN' => 'brand-a.myshopify.com',
         'HTTP_X_SHOPIFY_WEBHOOK_ID' => 'wh-empty-1',
-    ], $body)->assertOk();
+    ], $body)->assertStatus(422);
 
     Bus::assertNotDispatched(ProcessShopifyOrderWebhookJob::class);
 });
 
-it('shopify orders/paid — malformed JSON with valid HMAC returns 200 and dispatches nothing', function () {
+it('shopify orders/paid — malformed JSON with valid HMAC returns 422 so Shopify retries', function () {
+    $proId = (string) Str::uuid();
+    DB::table('core.professional_integrations')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $proId,
+        'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+        'shopify_shop_domain' => 'brand-a.myshopify.com',
+        'access_token' => 'shpat_token',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
     $body = '{not valid json';
     $sig = signShopifyBody($body, 'shop-secret');
 
@@ -44,7 +69,7 @@ it('shopify orders/paid — malformed JSON with valid HMAC returns 200 and dispa
         'HTTP_X_SHOPIFY_HMAC_SHA256' => $sig,
         'HTTP_X_SHOPIFY_SHOP_DOMAIN' => 'brand-a.myshopify.com',
         'HTTP_X_SHOPIFY_WEBHOOK_ID' => 'wh-malformed-1',
-    ], $body)->assertOk();
+    ], $body)->assertStatus(422);
 
     Bus::assertNotDispatched(ProcessShopifyOrderWebhookJob::class);
 });

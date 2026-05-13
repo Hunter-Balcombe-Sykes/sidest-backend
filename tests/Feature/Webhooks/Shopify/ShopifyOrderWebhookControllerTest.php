@@ -135,7 +135,7 @@ it('orders/paid — accepts a body signed with the fallback secret during rotati
     Bus::assertDispatched(ProcessShopifyOrderWebhookJob::class);
 });
 
-it('orders/paid — already-seen webhook ID deduplicates before HMAC check', function () {
+it('orders/paid — bad HMAC is always rejected even for a previously-seen webhook ID', function () {
     $proId = (string) Str::uuid();
     insertShopifyIntegration($proId, 'brand-a.myshopify.com');
 
@@ -150,12 +150,12 @@ it('orders/paid — already-seen webhook ID deduplicates before HMAC check', fun
         'X-Shopify-Webhook-Id' => $webhookId,
     ])->assertOk();
 
-    // Second delivery: same ID but bad HMAC — dedup fires before HMAC, returns duplicate.
+    // Second delivery: same ID but bad HMAC — HMAC now comes first, always rejected.
     $this->postJson('/api/webhooks/shopify/orders-paid', $payload, [
         'X-Shopify-Hmac-SHA256' => 'bad-hmac',
         'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
         'X-Shopify-Webhook-Id' => $webhookId,
-    ])->assertOk()->assertJson(['received' => true, 'duplicate' => true]);
+    ])->assertStatus(401);
 
     Bus::assertDispatchedTimes(ProcessShopifyOrderWebhookJob::class, 1);
 });
