@@ -1,71 +1,76 @@
-# Stripe Accounts v2 + 3-step direct-charge chain + Partna Treasury Connect account — full implementation plan
+# Stripe Accounts v2 + 3-step direct-charge chain — final implementation plan (4th iteration)
 
 ## Context
 
-Replace the post-PR-#38 brand-as-merchant direct-charge implementation with a clean **v2 Accounts + 3-step direct-charge chain** model. This solves the accounting intent (brand's card → brand's Stripe balance → affiliate's Stripe balance → Partna Treasury Connect account) AND clears every bug from the audit (refund_application_fee missing, order status derivation broken, payout_id not released, webhook URLs dead, error context destroyed, legacy stuck payouts, PI ID nulled, etc.). Dev test data is wiped — only one test brand and one test affiliate, no real money at stake.
+Replace the post-PR-#38 brand-as-merchant direct-charge implementation with a clean **v2 Accounts + 3-step direct-charge chain** model. The brand's card is charged on the brand's v2 Account → gross commission transfers brand→affiliate → platform fee transfers affiliate→Partna Treasury v2 Account. Partna absorbs Stripe processing fees via `defaults.responsibilities.fees_collector='application'` on the brand's v2 Account. **No `application_fee_amount`, no `destination` charges, no `on_behalf_of`.**
 
-### Architecture decision (user-confirmed)
+Branch `claude/stripe-v2-overhaul` is already 1 commit in (`0b976703`):
+- ✅ Schema migration `20260513400000_stripe_v2_account_columns.sql` applied (dropped legacy customer/PM/wallet/grace columns, added `stripe_payment_method_id|brand|last4`, tightened `pro_stripe_connect_status_check` to `{not_connected, onboarding, active, restricted}`).
+- ✅ `config/services.php` has `connect_webhook_secret` + `platform_webhook_secret` + `api_version=2026-02-25.clover`.
+- ❌ `config/services.php` still missing `partna_treasury_account_id` — plan said it was added; it's not.
+- ❌ `StripeConnectService`, `CommissionPayoutService`, `CommissionPayoutRefundService`, `StripeConnectWebhookController` still on the old v1 / direct-charge-with-app-fee model. They reference dropped columns (`stripe_connect_customer_id`, `stripe_connect_payment_method_id`, `stripe_manual_balance_currency`, `stripe_grace_period_ends_at`) and the now-forbidden `stripe_connect_status='disconnected'`. **The codebase will fail at any DB write involving those columns** until Phase 3–6 ship together.
 
-For each commission event, money flows through three Stripe API calls in sequence:
+This plan closes:
+1. The v2-migration rewrite (Phases 0–9 of original plan, refined).
+2. **Every** May 13 bug: missing `refund_application_fee`, `payout_id` stuck after failed payout, legacy `'transferring'` payouts crashing the eligibility sweep, generic `stripe_error` failure reasons, PI ID nulled on auto-refund.
+3. Dangling `'disconnected'` references in service/controller that the migration's CHECK constraint now rejects.
 
-1. **Direct charge on brand's Connect account** — brand's saved card debited the full gross commission. Settlement merchant on cardholder statement = brand. Stripe processing fee absorbed by Partna's platform balance (we set `fees_collector='application'` on the brand's v2 Account). Funds land in the brand's Connect balance.
-2. **Cross-account transfer brand → affiliate** — full gross commission moves from brand's balance to affiliate's balance, pinned to the charge via `source_transaction`. Brand's balance ends at $0.
-3. **Cross-account transfer affiliate → Partna Treasury** — the platform fee portion moves from affiliate's balance to a dedicated "Partna Treasury" Connect account that we own. Affiliate keeps the net (gross − platform fee).
+## API-surface confidence audit (resolved before code starts)
 
-End state per $6 commission with $1.20 platform fee:
-- Brand card debited $6.00, statement reads "Side St"
-- Brand's Stripe books: $6 in (charge), $6 out (transfer to affiliate), net $0
-- Affiliate's Stripe books: $6 in (transfer from Side St), $1.20 out (transfer to Partna Platform Fees), net $4.80
-- Partna Treasury balance: +$1.20
-- Partna platform balance: −$0.30 (Stripe processing fee absorbed)
-- **Brand's accounting docs never mention Partna as a counterparty.** The brand sees a self-charge then a transfer to the affiliate. Clean.
+Findings from re-reading Stripe v2 + clover-2025-12-15 changelog docs:
 
-### Why this model
+| # | Question | Resolution | Confidence | Action |
+|---|---|---|---|---|
+| 1 | Can `PaymentIntent.create` accept a v2 Account ID via `customer` when `stripe_account` is set? | **No.** Per the [`2025-12-15.preview` changelog](https://docs.stripe.com/changelog/clover/2025-12-15/accounts-v2-v1-api-support), v1 APIs gained a new `customer_account` field that accepts an `acct_…` ID. The `customer` field continues to take `cus_…` only. v3 of original plan had `'customer' => $brand->stripe_connect_account_id` — that will fail with a type error. | 95% | Use `customer_account` everywhere a v2 Account stands in for a v1 Customer (PaymentIntent, SetupIntent, Checkout, Subscriptions). |
+| 2 | Cross-account Transfer with `stripe_account=affiliate` → `destination=Treasury` — documented? | Documented in spirit: Stripe-Account header sets the *source* account; `destination` accepts any `acct_…` in the same platform. The `stripe_balance.stripe_transfers` capability is what enables a connected account to **receive** transfers from "the platform or another connected account" — that explicitly endorses the pattern. v1 Transfers API accepts `acct_…` regardless of v1/v2 origin (per migration guide). | 85% | Implement as-planned; first integration test catches edge cases. Affiliate doesn't need a special "send" capability — the platform's secret key is what authorises the operation; the connected account just hosts the source balance. |
+| 3 | Step-3 (affiliate → Treasury) needs step-2 settlement first? `source_transaction` chainable to step-2's transfer? | `source_transaction` only accepts a **charge** ID. Cannot reference step-2 (a Transfer). Transferred funds land in affiliate's *pending* balance and become *available* on AU domestic settlement (T+2 typically; instant if both accounts are Stripe-on-Stripe and Express). | 90% | Execute step-3 synchronously immediately after step-2. If step-3 fails with `balance_insufficient`, treat as retryable (Horizon re-throw) and re-try via `transfer.paid` webhook on step-2; otherwise compensate (reverse step-2, refund step-1). New job `RetryStep3Job` triggered from `transfer.paid` webhook handler closes the async window. |
+| 4 | Refund chain order when clawing back a completed payout (Shopify refund or step-3 failure)? | **Step-3 reversal → Step-2 reversal → Step-1 refund.** Bottom-up. Rationale: each reversal needs the prior layer to still hold funds. If step-3 reversal fails (Treasury balance issue), abort entirely — leave step-2 + step-1 intact and flag `needs_manual_refund=true`. If step-3 succeeds but step-2 fails, again abort and flag — funds are now stuck in affiliate's balance (recoverable manually); brand's card is still charged but not yet refunded. Only refund step-1 once steps 3+2 both succeeded. | 90% | Codify in `CommissionPayoutRefundService::clawbackCompletedPayout` with each step inside try/catch + early-return on first failure. |
+| 5 | Webhook event scoping — what fires on **Your account** vs **Connected accounts**? | Verified via [Connect webhooks doc](https://docs.stripe.com/connect/webhooks) + [event types ref](https://docs.stripe.com/api/events/types): <br>• `v2.core.account.*` thin events → platform (Your account) scope.<br>• `account.updated` (v1 snapshot mirror) → Connected accounts scope.<br>• `payment_intent.*`, `charge.refunded`, `charge.dispute.created` for **direct charges on connected accounts** → **Connected accounts** scope (the dispute lives in the connected account's books). Original plan put `charge.dispute.created` on the platform destination — **that's wrong**.<br>• `transfer.*` events for transfers initiated under `stripe_account=acct_…` → Connected accounts scope.<br>• `checkout.session.completed` for Setup sessions created with `stripe_account=brand` → Connected accounts scope (not platform). | 90% | Move `charge.dispute.created` + `checkout.session.completed` to Destination B (Connected accounts). Destination A (Platform) keeps only `v2.core.*` events and any `charge.refunded` we initiate explicitly on the platform (none in this design, so we can drop `charge.refunded` from Destination A entirely). |
+| 6 | Refunds — do `refund_application_fee` and `reverse_transfer` apply to our chain? | **No, neither apply.** Both only apply to refunds against destination charges or charges with `transfer_data`. Our model has neither: step-1 is a plain direct charge on brand's account, with no app fee. We reverse transfers manually via `transfers.createReversal`. Pass neither flag on `refunds.create`. | 95% | Codify in service: refund call carries only `payment_intent` + `metadata`. |
+| 7 | Does v2 Account creation accept `defaults.currency` + `configuration.merchant.capabilities.card_payments.requested` + `configuration.recipient.capabilities.stripe_balance.stripe_transfers.requested` simultaneously? | The v2 schema (per [v2 accounts create ref](https://docs.stripe.com/api/v2/core/accounts/create)) does support all three nested fields. Affiliate doesn't need a merchant config (we never charge them as merchant). Brand doesn't need a recipient config (we never transfer *to* the brand — we only let the brand transfer *from* their balance, which platform-side credentials enable). | 80% | Build payloads as planned (brand: merchant+customer; affiliate: recipient). Verify Treasury config: `recipient` only with `stripe_balance.stripe_transfers` + `payouts`. |
 
-The user explicitly chose this over the destination-charge-with-on_behalf_of alternative because:
-- Money must visibly flow through the brand's Stripe balance (their books show "money in → money out to affiliate" cleanly).
-- Affiliate must see Partna as the fee taker on their dashboard (visible as a Transfer-out to "Partna Platform Fees" — a Connect account whose display name communicates the purpose).
-- Partna absorbs the Stripe processing fee so it doesn't muddy the brand's or affiliate's books with a deduction line.
+**Unresolved before implementation** (must be confirmed against live Stripe in dev before merging):
+- Whether `stripe.checkout.sessions.create([..., 'customer_account' => $brand->stripe_connect_account_id], ['stripe_account' => $brand->stripe_connect_account_id])` works for setup mode. Docs imply yes (Checkout supports `customer_account`); if Stripe rejects, fallback: create a v1 sub-Customer on the brand's account once via `customers.create(['stripe_account' => brand])`, persist its `cus_…` ID on `professionals.stripe_brand_subcustomer_id` (new column), and use that as `customer`. That fallback would require a follow-up migration; flag this risk to the operator.
+- Whether the v2 SDK in `stripe/stripe-php` ^17 (or whatever is locked) exposes `$stripe->v2->core->accounts` + `$stripe->v2->core->accountLinks`. Should check `composer.json` lock; bump if needed.
 
-### Stripe docs verified
+## High-level architecture (the chain visualised)
 
-- **v2 Accounts GA for Connect users.** No early-access toggle. Source: https://docs.stripe.com/connect/accounts-v2
-- **No enablement step required.** Source: https://docs.stripe.com/connect/accounts-v2/migrate-integration — "you can immediately use the Accounts v2 API with your existing v1 Accounts without making any changes to them."
-- **Direct charge fundamentals:** "The payment appears in the connected account's balance, not in your platform's balance." Source: https://docs.stripe.com/connect/charges
-- **`card_payments` capability required for direct charges.** v1 docs require it together with `transfers`; v2 merchant configuration handles this via `configuration.merchant.capabilities.card_payments`.
-- **Platform absorbs Stripe processing fee** when `defaults.responsibilities.fees_collector='application'`. Verified at https://docs.stripe.com/connect/direct-charges-fee-payer-behavior — "Platform absorbs all payment processing fees... the brand does NOT see Stripe fees deducted."
-- **Cross-account transfer capability:** `stripe_balance.stripe_transfers` capability "enables this Account to receive /v1/transfers into their Stripe Balance" — confirmed from the platform OR from another connected account. Source: https://docs.stripe.com/api/v2/core/accounts/create
-- **`source_transaction` on transfers** ensures the transfer waits for the source charge to settle. Used on the brand→affiliate transfer (step 2). Source: https://docs.stripe.com/connect/separate-charges-and-transfers
-- **No source_transaction chaining** — step 3 (affiliate→Treasury) cannot reference step 2 as its source. Must wait synchronously for step 2 to return success OR retry asynchronously via webhook. Built into the state machine.
-- **v2 Account creation parameters** verified at https://docs.stripe.com/api/v2/core/accounts/create:
-  - `identity.entity_type`: `company` | `government_entity` | `individual` | `non_profit`
-  - `defaults.responsibilities.fees_collector`: `application` | `application_custom` | `application_express` | `stripe`
-  - `defaults.responsibilities.losses_collector`: `application` | `stripe`
-  - `dashboard`: `express` | `full` | `none`
-- **Refunds** support `refund_application_fee: true` AND `reverse_transfer: true` together on a single `/v1/refunds` call; both work proportionally on partial refunds. Source: https://docs.stripe.com/api/refunds/create
+```mermaid
+sequenceDiagram
+    participant Job as ExecuteCommissionPayoutJob
+    participant Plat as Partna Platform Balance
+    participant Brand as Brand v2 Account
+    participant Aff as Affiliate v2 Account
+    participant Tres as Partna Treasury v2
 
-### What we use the Treasury Connect account for
+    Note over Job,Tres: Forward chain (commission payout, $6 gross, $1.20 fee)
+    Job->>Brand: 1) paymentIntents.create<br/>stripe_account=brand<br/>customer_account=brand<br/>payment_method=brand_pm<br/>amount=6.00
+    Brand-->>Plat: −$0.30 Stripe processing fee<br/>(fees_collector='application')
+    Brand-->>Job: pi.succeeded, latest_charge=ch_X<br/>brand balance: +$6.00
+    Job->>Brand: 2) transfers.create<br/>stripe_account=brand<br/>destination=affiliate<br/>amount=6.00<br/>source_transaction=ch_X
+    Brand-->>Aff: $6.00 lands (brand balance now $0)
+    Job->>Aff: 3) transfers.create<br/>stripe_account=affiliate<br/>destination=treasury<br/>amount=1.20<br/>(no source_transaction)
+    Aff-->>Tres: $1.20 lands (affiliate balance $4.80)
 
-- One v2 Account we onboard ONCE with Partna's own business details (ABN, address, operating bank account for payouts).
-- Configuration: `recipient` only (receives transfers, pays out to Partna's bank).
-- Display name: "Partna Platform Fees" — this is what affiliates see on their dashboard when the affiliate→Treasury transfer is recorded.
-- Stripe payout schedule on the Treasury → daily to Partna's actual operating bank account.
+    Note over Job,Tres: Reversal chain (failure compensation OR Shopify refund clawback)
+    Job->>Aff: 3') transfers.createReversal(tr3)<br/>stripe_account=affiliate
+    Tres-->>Aff: $1.20 returned
+    Job->>Brand: 2') transfers.createReversal(tr2)<br/>stripe_account=brand
+    Aff-->>Brand: $6.00 returned
+    Job->>Brand: 1') refunds.create(pi=stripe_pi_id)<br/>stripe_account=brand<br/>(no refund_application_fee, no reverse_transfer)
+    Brand-->>Job: cardholder refunded $6.00<br/>Plat absorbs the −$0.30 processing fee
+```
 
----
+## Phase 0 — Manual prerequisites (done outside this plan)
 
-## Phase 0 — Manual setup steps (you do these BEFORE I touch code)
-
-### 0.1 Wipe legacy test data in dev Supabase
-
-Run in Supabase SQL Editor (project ref `glncumufgaqcmqhzwrxm`):
+### 0.1 Wipe legacy dev data (operator runs in Supabase SQL)
 
 ```sql
-DELETE FROM commerce.commission_payout_items WHERE payout_id IN (
-    SELECT id FROM commerce.commission_payouts
-);
+DELETE FROM commerce.commission_payout_items WHERE payout_id IN (SELECT id FROM commerce.commission_payouts);
 DELETE FROM commerce.commission_payouts;
 UPDATE commerce.orders SET payout_id = NULL;
 
+-- The migration already dropped legacy columns; reset connect state on the test brand + affiliate.
 UPDATE core.professionals SET
     stripe_connect_account_id = NULL,
     stripe_connect_status = 'not_connected',
@@ -78,134 +83,95 @@ WHERE id IN (
 );
 ```
 
-Tell me when done.
+### 0.2 Create the Partna Treasury v2 Account (one-time, via Stripe Dashboard)
 
-### 0.2 Create the Partna Treasury v2 Account (one-time setup)
+Onboard a Standard or Express v2 Account named **"Partna Platform Fees"** (display name visible to affiliates on their Stripe dashboard). Configuration: recipient only, capabilities `stripe_balance.stripe_transfers` + `stripe_balance.payouts`. Link Partna's operating bank, daily payout schedule. Copy the `acct_…` ID for step 0.3.
 
-The Treasury holds Partna's platform fee earnings before they're paid out to Partna's operating bank. Onboard it once via Stripe Dashboard's manual Connect account creation:
-
-1. Stripe Dashboard → Connect → Accounts → **Create account**
-2. **Account configuration**:
-   - Type: Standard or Express (Standard recommended so we can fully control + see the dashboard)
-   - Country: Australia
-3. **Business details**:
-   - Type: Company
-   - Legal business name: **Partna** (or your registered Partna entity name)
-   - ABN: [your real Partna ABN]
-   - Business website: https://partna.au
-   - Business email: ops@partna.au or wherever fee notifications should land
-4. **Dashboard display name**: **`Partna Platform Fees`** — this is what affiliates see on their Stripe dashboard when the affiliate→Treasury transfer is recorded. Choose this carefully; the affiliate will read this label.
-5. **Capabilities to request**:
-   - `stripe_balance.stripe_transfers` (receive transfers from affiliates)
-   - `stripe_balance.payouts` (pay out from Treasury to Partna's operating bank)
-6. **Add bank account**: link Partna's operating bank account (where Treasury funds payout to).
-7. **Payout schedule**: daily, no delay.
-8. Complete the onboarding flow as Partna's representative. Verify the account becomes `active`.
-9. Copy the resulting Account ID (`acct_...`). Save it for step 0.4.
-
-### 0.3 Update Laravel Cloud env vars
-
-Laravel Cloud → development → Environment Variables. **Add**:
+### 0.3 Laravel Cloud env vars (add)
 
 ```
-STRIPE_PARTNA_TREASURY_ACCOUNT_ID=acct_xxxxxxxxxxxxx   # from step 0.2
-STRIPE_PLATFORM_WEBHOOK_SECRET=                         # filled after step 0.4
-STRIPE_CONNECT_WEBHOOK_SECRET=                          # already there, will be re-issued after step 0.4
+STRIPE_PARTNA_TREASURY_ACCOUNT_ID=acct_xxxxxxxxxxxxx
+STRIPE_PLATFORM_WEBHOOK_SECRET=whsec_... (created in 0.4)
+STRIPE_CONNECT_WEBHOOK_SECRET=whsec_... (re-issued in 0.4)
 ```
 
-**Delete**:
-```
-STRIPE_WEBHOOK_SECRET    # legacy single-secret variable, no longer used
-```
+Delete: `STRIPE_WEBHOOK_SECRET` (the legacy combined-purpose variable).
 
-Verify already set:
-- `STRIPE_SECRET_KEY` (sk_test_...)
-- `STRIPE_API_VERSION=2026-02-25.clover`
+### 0.4 Recreate the two Stripe webhook destinations (delete the existing broken pair first)
 
-Don't deploy yet — finish step 0.4 first.
-
-### 0.4 Create TWO Stripe webhook destinations (delete the broken old ones first)
-
-In Stripe Dashboard → Developers → Webhooks → **delete**:
-- "One Link Connected Accounts" (`we_1TEb4MAEAFPm2LjX5iWG49ie`)
-- "One Link Platform Events" (`we_1TEk1MAEAFPm2LjXhiZ7CnbE`)
-
-Then create two new destinations.
-
-**Destination A: "Partna Dev — Platform Events"**
-- Endpoint URL: `https://dev-api.partna.au/api/webhooks/stripe-platform`
-- Events from: **Your account** (selected during destination creation flow)
-- API version: `2026-02-25.clover`
-- Subscribed events:
-  - v2 thin events on platform's v2 Accounts (which represent our connected brands/affiliates/treasury):
-    - `v2.core.account.updated`
-    - `v2.core.account[identity].updated`
-    - `v2.core.account[configuration.merchant].updated`
-    - `v2.core.account[configuration.customer].updated`
-    - `v2.core.account[configuration.recipient].updated`
-    - `v2.core.account[requirements].updated`
-    - `v2.core.account.closed`
-  - v1 events that fire on the platform during the 3-step chain:
-    - `payment_intent.succeeded` (commission charge succeeded on brand's Connect account — note: this also fires on Connected accounts destination; subscribe here for the platform observability copy)
-    - `payment_intent.payment_failed`
-    - `charge.refunded` (refunds we issue)
-    - `charge.dispute.created`
-    - `checkout.session.completed` (brand card setup completion)
-
-**Destination B: "Partna Dev — Connected Accounts"**
-- Endpoint URL: `https://dev-api.partna.au/api/webhooks/stripe-connect`
-- Events from: **Connected accounts** (selected during destination creation flow)
-- API version: `2026-02-25.clover`
-- Subscribed events:
-  - `account.updated` (v1 snapshot fired when v2 Account configs change)
-  - `account.application.deauthorized`
-  - `payment_intent.succeeded` (commission charge succeeded — fires on the brand's Connect account scope)
-  - `payment_intent.payment_failed`
-  - `transfer.created` (brand→affiliate, affiliate→Treasury)
-  - `transfer.paid` (brand→affiliate, affiliate→Treasury)
-  - `transfer.failed`
-  - `transfer.reversed`
-  - `payment_method.attached` (PM saved on brand's account via Checkout Setup)
-  - `payment_method.detached`
-
-After creating each, reveal the `whsec_...` signing secret:
-- Destination A's secret → set as `STRIPE_PLATFORM_WEBHOOK_SECRET` in Laravel Cloud
-- Destination B's secret → set as `STRIPE_CONNECT_WEBHOOK_SECRET` in Laravel Cloud
-
-Save env vars. Trigger redeploy if Laravel Cloud doesn't auto-redeploy. Wait for status `active`.
-
-### 0.5 Verify webhook reachability
-
-Once deployed, click "Send test event" on each destination:
-- Destination A → `account.updated` → expect 200 OK
-- Destination B → `account.updated` → expect 200 OK
-
-If both return 200, manual setup is done. Tell me; I start the code.
-
-If non-2xx, paste me the response body — we diagnose before continuing.
-
----
-
-## Phase 1 — Schema migrations (mostly already applied)
-
-Migration `20260513400000_stripe_v2_account_columns.sql` was applied earlier (dropped legacy columns, added stripe_payment_method_* card display fields, removed 'disconnected' from status check). Final shape on `core.professionals` for the new model:
+**Destination A — "Partna Dev — Platform Events"**, URL `https://dev-api.partna.au/api/webhooks/stripe-platform`, scope **Your account**, API version `2026-02-25.clover`, events:
 
 ```
-stripe_connect_account_id       TEXT       -- v2 Account ID (acct_...) for brand/affiliate
-stripe_connect_status           TEXT       -- not_connected | onboarding | active | restricted
-stripe_payment_method_id        TEXT       -- PaymentMethod ID attached to brand's v2 Account (NULL for affiliates)
-stripe_payment_method_brand     TEXT       -- 'visa' / 'mastercard' for UI display
-stripe_payment_method_last4     TEXT       -- '4242' for UI display
-country_code                    TEXT       -- ISO 3166-1 alpha-2
+v2.core.account.updated
+v2.core.account[identity].updated
+v2.core.account[configuration.merchant].updated
+v2.core.account[configuration.customer].updated
+v2.core.account[configuration.recipient].updated
+v2.core.account[requirements].updated
+v2.core.account.closed
 ```
 
-No further migration needed — the Treasury account ID lives in env var, not DB.
+**Destination B — "Partna Dev — Connected Accounts"**, URL `https://dev-api.partna.au/api/webhooks/stripe-connect`, scope **Connected accounts**, API version `2026-02-25.clover`, events:
 
----
+```
+account.updated
+account.application.deauthorized
+payment_intent.succeeded
+payment_intent.payment_failed
+charge.refunded
+charge.dispute.created             # MOVED: was on platform in v3 of plan; belongs on Connected for direct charges
+transfer.created
+transfer.paid
+transfer.failed
+transfer.reversed
+payment_method.attached
+payment_method.detached
+checkout.session.completed         # MOVED: belongs on Connected because the session runs with stripe_account=brand
+```
 
-## Phase 2 — Config (partially applied)
+Set the resulting `whsec_…` secrets in Laravel Cloud per 0.3. Trigger "Send test event" → expect 200 on both URLs (once Phase 6 ships).
 
-`config/services.php` was updated in earlier work. Final shape:
+## Phase 1 — Schema (one additional migration)
+
+Existing migration `20260513400000_stripe_v2_account_columns.sql` is correct and applied. **One new migration** to add the step-3 transfer ID column:
+
+**`supabase/migrations/20260513500000_add_fee_transfer_id_to_commission_payouts.sql`**
+```sql
+ALTER TABLE commerce.commission_payouts
+    ADD COLUMN IF NOT EXISTS stripe_fee_transfer_id TEXT;
+
+COMMENT ON COLUMN commerce.commission_payouts.stripe_fee_transfer_id IS
+    'Step-3 transfer ID (affiliate → Partna Treasury). NULL until step 3 succeeds. Used as reversal target on clawback.';
+```
+
+**Also: legacy-data cleanup migration** to mark dev-leftover `'transferring'` payouts from the pre-cutover model so the resume sweep doesn't trip on them. This was a May-13 crash root cause.
+
+**`supabase/migrations/20260513600000_quarantine_pre_v2_transferring_payouts.sql`**
+```sql
+-- Any payout still in pending/collecting/transferring with a stripe_payment_intent_id that
+-- references a PI on a v1 Express account from the pre-v2 model has no path to resume:
+-- its source-account context no longer exists. Mark them failed for ops review.
+UPDATE commerce.commission_payouts
+   SET status = 'failed',
+       failure_code = 'pre_v2_quarantine',
+       failure_reason = 'Quarantined during v2 cutover — manual review required',
+       processed_at = now()
+ WHERE status IN ('pending', 'pending_funds', 'collecting', 'transferring')
+   AND created_at < '2026-05-13 00:00:00+00';
+
+-- Release any orders still pinned to the quarantined payouts.
+UPDATE commerce.orders o
+   SET payout_id = NULL
+  FROM commerce.commission_payouts p
+ WHERE o.payout_id = p.id
+   AND p.failure_code = 'pre_v2_quarantine';
+```
+
+No other schema changes. `stripe_error_code`, `stripe_error_message`, `failure_category`, `needs_manual_refund`, `stripe_payment_intent_id`, `stripe_transfer_id` already exist on `commission_payouts`.
+
+## Phase 2 — Config
+
+**File:** `config/services.php` — append one line to the `stripe` array.
 
 ```php
 'stripe' => [
@@ -213,510 +179,167 @@ No further migration needed — the Treasury account ID lives in env var, not DB
     'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
     'connect_webhook_secret' => env('STRIPE_CONNECT_WEBHOOK_SECRET'),
     'platform_webhook_secret' => env('STRIPE_PLATFORM_WEBHOOK_SECRET'),
-    'partna_treasury_account_id' => env('STRIPE_PARTNA_TREASURY_ACCOUNT_ID'),
+    'partna_treasury_account_id' => env('STRIPE_PARTNA_TREASURY_ACCOUNT_ID'),  // ← NEW
     'api_version' => env('STRIPE_API_VERSION', '2026-02-25.clover'),
 ],
 ```
 
-Add the `partna_treasury_account_id` line to the existing config.
+## Phase 3 — Rewrite `app/Services/Stripe/StripeConnectService.php` (full file)
 
----
+Delete every method that reads/writes a now-dropped column. Add v2 Account flows. **Eliminate every `'disconnected'` reference** — the CHECK constraint rejects it.
 
-## Phase 3 — Rewrite `StripeConnectService`
+Public API of the new service:
 
-**File:** `app/Services/Stripe/StripeConnectService.php` — full rewrite. New public methods:
+| Method | Purpose |
+|---|---|
+| `createConnectAccount(Professional $pro): string` | Dispatcher → calls brand- or affiliate-specific creator |
+| `createBrandConnectAccount(Professional $brand): string` | v2 Account, `identity.entity_type='company'`, `configuration.merchant.capabilities.card_payments.requested=true`, `configuration.customer={}`, `defaults.responsibilities.fees_collector='application'`, `defaults.responsibilities.losses_collector='application'`, `defaults.currency = resolveShopCurrency() ?? 'aud'`, `dashboard='express'`, metadata.sidest_professional_id, idempotency_key `acct_{$brand->id}` |
+| `createAffiliateConnectAccount(Professional $aff): string` | v2 Account, `identity.entity_type='individual'`, `configuration.recipient.capabilities.stripe_balance.stripe_transfers.requested=true`, `configuration.recipient.capabilities.stripe_balance.payouts.requested=true`, `defaults.currency='aud'`, fees_collector/losses_collector=application, `dashboard='express'`, metadata, idempotency_key |
+| `createOnboardingLink(Professional $pro, string $returnUrl, string $refreshUrl): string` | `$this->stripe->v2->core->accountLinks->create(['account' => $id, 'use_case' => ['type' => 'account_onboarding', 'account_onboarding' => ['configurations' => $pro->isBrand() ? ['merchant', 'customer'] : ['recipient'], 'return_url' => $returnUrlWithFresh, 'refresh_url' => $refreshUrl]]])` — append `?fresh=1` to return URL like today's code does |
+| `createDashboardLink(Professional $pro): ?string` | `$this->stripe->v2->core->accountLinks->create(['account' => $id, 'use_case' => ['type' => 'account_management', 'account_management' => []]])`; null if `stripe_connect_status` ∉ `{active, restricted}` |
+| `createBrandPaymentMethodSetupSession(Professional $brand, string $successUrl, string $cancelUrl): array` | `$this->stripe->checkout->sessions->create(['mode' => 'setup', 'customer_account' => $brand->stripe_connect_account_id, 'payment_method_types' => ['card'], 'success_url' => ..., 'cancel_url' => ..., 'metadata' => ['sidest_professional_id' => $brand->id, 'purpose' => 'brand_commission_payment_method']], ['stripe_account' => $brand->stripe_connect_account_id])` — returns `['url' => $session->url, 'session_id' => $session->id]` |
+| `syncBrandPaymentMethodFromCheckoutSession(Professional $brand, string $sessionId): array` | retrieve session w/ expand `['setup_intent.payment_method']` + `stripe_account=brand`; validate `mode='setup'`, `status='complete'`, `setup_intent.status='succeeded'`; persist `stripe_payment_method_id|brand|last4`; **also** call `customers.update` on the v2 Account's customer config via `$this->stripe->v2->core->accounts->update($id, ['configuration' => ['customer' => ['default_payment_method' => $pm->id]]])` if the Stripe SDK supports — else skip and rely on the single PM on file. Returns `['payment_method_id', 'brand', 'last4']`. |
+| `removeBrandPaymentMethod(Professional $brand): void` | `$this->stripe->paymentMethods->detach($brand->stripe_payment_method_id, null, ['stripe_account' => $brand->stripe_connect_account_id])` then null out `stripe_payment_method_id|brand|last4`. Tolerate Stripe 404 (PM already gone). |
+| `disconnectAccount(Professional $pro): void` | Set `stripe_connect_status='not_connected'`, null out `stripe_connect_account_id` + `stripe_payment_method_*`. **No more 'disconnected' status.** Onboarding link creation will create a fresh v2 Account on next attempt. |
+| `syncAccountStatus(Professional $pro): array` | `cacheLock->rememberLocked(...)` wrapping `fetchAndSyncAccountStatus`. Returns `['status', 'charges_enabled', 'transfers_enabled', 'details_submitted', 'requirements']`. |
+| `fetchAndSyncAccountStatus(Professional $pro, string $accountId): array` (private) | `$this->stripe->v2->core->accounts->retrieve($id, ['include' => ['identity', 'configuration.merchant', 'configuration.customer', 'configuration.recipient', 'requirements']])`; derive status via `determineAccountStatus($account, $pro)`; persist; return shape above. |
+| `determineAccountStatus(object $account, Professional $pro): string` (public static) | Brand: read `configuration.merchant.capabilities.card_payments.status` → `'active'` if active, `'restricted'` if restricted, `'onboarding'` otherwise. Affiliate: read `configuration.recipient.capabilities.stripe_balance.stripe_transfers.status` similarly. Treasury accounts can't reach this code path (no Professional row). |
+| `statusCacheKey(string $accountId): string` (static) — keep verbatim |
+| `forgetStatusCache(string $accountId): void` (static) — keep verbatim |
+| `brandHasPaymentMethod(Professional $brand): bool` | `! empty($brand->stripe_payment_method_id)` |
+| `mapCountryCode(?string): string` + `mapCountryCodeOrNull(?string): ?string` + `resolveShopCurrency(Professional): ?string` + `e164PhoneOrNull` + `stringOrNull` + `STRIPE_CONNECT_SUPPORTED_COUNTRIES` constant — keep verbatim from current file. |
 
-### 3a. Brand v2 onboarding (merchant + customer configs)
+**Delete** (all reference dropped columns or the forbidden 'disconnected' status):
+`createBrandConnectCustomer`, `createBrandConnectPaymentMethodSetupSession`, `syncBrandConnectPaymentMethodFromCheckoutSession`, `saveBrandConnectPaymentMethod`, `listPaymentMethods`, `removeBrandPaymentSetup`, the `stripe_grace_period_ends_at` write in `createConnectAccount`, the `stripe_manual_balance_currency` write in `createConnectAccount`, the `business_type` patch loop in `createOnboardingLink`, the `'disconnected'` early-return in `syncAccountStatus`.
+
+## Phase 4 — Rewrite `app/Services/Stripe/CommissionPayoutService.php`
+
+The state machine narrows: `pending → collecting → transferring → completed` (or `→ failed`). Drop `pending_funds`, `collected` (the wallet step is gone), and stop writing `funding_source`, `wallet_debit_cents`.
+
+### 4a. Eligibility (`processEligiblePayouts`)
 
 ```php
-public function createBrandConnectAccount(Professional $brand): string
-{
-    $account = $this->stripe->v2->core->accounts->create([
-        'contact_email' => $brand->primary_email,
-        'display_name' => $brand->display_name,
-        'identity' => [
-            'country' => $this->mapCountryCode($brand->country_code),
-            'entity_type' => 'company',
-            'business_details' => [
-                'registered_name' => $brand->display_name,
-            ],
-        ],
-        'defaults' => [
-            'currency' => $this->resolveShopCurrency($brand) ?? 'aud',
-            'responsibilities' => [
-                'fees_collector' => 'application',   // Partna absorbs Stripe processing fees
-                'losses_collector' => 'application', // Partna liable for negative balances
-            ],
-            'profile' => [
-                'business_url' => $brand->partna_url,
-            ],
-        ],
-        'configuration' => [
-            'merchant' => [
-                'capabilities' => [
-                    'card_payments' => ['requested' => true],
-                ],
-                'mcc' => '8641',
-            ],
-            'customer' => [
-                // Enables PaymentMethod attachment so brand's saved card lives here
-            ],
-        ],
-        'dashboard' => 'express',
-        'metadata' => [
-            'sidest_professional_id' => $brand->id,
-            'professional_type' => 'brand',
-        ],
-        'include' => ['identity', 'configuration.merchant', 'configuration.customer', 'requirements'],
-    ]);
-
-    $brand->update([
-        'stripe_connect_account_id' => $account->id,
-        'stripe_connect_status' => 'onboarding',
-    ]);
-
-    return $account->id;
-}
+$eligibleBrandIds = Professional::query()
+    ->where('professional_type', 'brand')
+    ->whereNotNull('stripe_connect_account_id')
+    ->where('stripe_connect_status', 'active')
+    ->whereNotNull('stripe_payment_method_id')        // ← new column
+    ->pluck('id');
 ```
 
-### 3b. Affiliate v2 onboarding (recipient config)
-
+Resume filter for in-flight batches drops `'pending_funds'`:
 ```php
-public function createAffiliateConnectAccount(Professional $affiliate): string
-{
-    $account = $this->stripe->v2->core->accounts->create([
-        'contact_email' => $affiliate->primary_email,
-        'display_name' => $affiliate->display_name,
-        'identity' => [
-            'country' => $this->mapCountryCode($affiliate->country_code),
-            'entity_type' => 'individual',
-            'individual' => [
-                'given_name' => $affiliate->first_name,
-                'surname' => $affiliate->last_name,
-            ],
-        ],
-        'defaults' => [
-            'currency' => 'aud',
-            'responsibilities' => [
-                'fees_collector' => 'application',
-                'losses_collector' => 'application',
-            ],
-            'profile' => [
-                'business_url' => $affiliate->partna_url,
-            ],
-        ],
-        'configuration' => [
-            'recipient' => [
-                'capabilities' => [
-                    'stripe_balance' => [
-                        'stripe_transfers' => ['requested' => true],   // Receive from brand's account
-                        'payouts' => ['requested' => true],            // Pay out to affiliate's bank
-                    ],
-                ],
-            ],
-        ],
-        'dashboard' => 'express',
-        'metadata' => [
-            'sidest_professional_id' => $affiliate->id,
-            'professional_type' => 'affiliate',
-        ],
-        'include' => ['identity', 'configuration.recipient', 'requirements'],
-    ]);
-
-    $affiliate->update([
-        'stripe_connect_account_id' => $account->id,
-        'stripe_connect_status' => 'onboarding',
-    ]);
-
-    return $account->id;
-}
+->whereIn('status', ['pending', 'collecting', 'transferring'])
 ```
 
-### 3c. Single dispatcher
+The new `transferring` state survives across job runs only as a resume hint for step-3 (set after step-2 succeeds, cleared on step-3 success). Quarantine migration in Phase 1 ensures no legacy `'transferring'` rows are in scope.
+
+### 4b. `processPayoutBatch(CommissionPayout $payout): ?bool`
+
+Skeleton (preserving existing `revalidatePayoutOrders` and the 3-state contract `true/null/false`):
 
 ```php
-public function createConnectAccount(Professional $professional): string
-{
-    return $professional->isBrand()
-        ? $this->createBrandConnectAccount($professional)
-        : $this->createAffiliateConnectAccount($professional);
-}
-```
+if ($payout->status === 'completed') { return true; }
 
-### 3d. AccountLink for onboarding (v2)
-
-```php
-public function createOnboardingLink(Professional $pro, string $returnUrl, string $refreshUrl): string
-{
-    $accountId = $pro->stripe_connect_account_id ?: $this->createConnectAccount($pro);
-
-    $link = $this->stripe->v2->core->accountLinks->create([
-        'account' => $accountId,
-        'use_case' => [
-            'type' => 'account_onboarding',
-            'account_onboarding' => [
-                'configurations' => $pro->isBrand()
-                    ? ['merchant', 'customer']
-                    : ['recipient'],
-                'return_url' => $returnUrl.(str_contains($returnUrl, '?') ? '&' : '?').'fresh=1',
-                'refresh_url' => $refreshUrl,
-            ],
-        ],
-    ]);
-
-    return $link->url;
-}
-```
-
-### 3e. Brand card setup — Checkout Session attaches PM to brand's v2 Account
-
-```php
-public function createBrandPaymentMethodSetupSession(Professional $brand, string $successUrl, string $cancelUrl): array
-{
-    if (! $brand->stripe_connect_account_id || $brand->stripe_connect_status !== 'active') {
-        throw new \RuntimeException('Brand must finish Stripe onboarding before adding a card.');
-    }
-
-    $session = $this->stripe->checkout->sessions->create(
-        [
-            'mode' => 'setup',
-            'customer' => $brand->stripe_connect_account_id,   // v2 Account acts as customer
-            'payment_method_types' => ['card'],
-            'success_url' => $successUrl.(str_contains($successUrl, '?') ? '&' : '?').'stripe_pm_session_id={CHECKOUT_SESSION_ID}',
-            'cancel_url' => $cancelUrl,
-            'metadata' => [
-                'sidest_professional_id' => $brand->id,
-                'purpose' => 'brand_commission_payment_method',
-            ],
-        ],
-        [
-            'stripe_account' => $brand->stripe_connect_account_id,   // Checkout session lives on brand's account
-        ],
-    );
-
-    return ['url' => $session->url, 'id' => $session->id];
-}
-```
-
-### 3f. Sync the saved PM after Checkout return
-
-```php
-public function syncBrandPaymentMethodFromCheckoutSession(Professional $brand, string $sessionId): array
-{
-    $session = $this->stripe->checkout->sessions->retrieve(
-        $sessionId,
-        ['expand' => ['setup_intent.payment_method']],
-        ['stripe_account' => $brand->stripe_connect_account_id],
-    );
-
-    if ($session->mode !== 'setup') {
-        throw new \RuntimeException('Checkout session is not a setup session.');
-    }
-    if ($session->status !== 'complete') {
-        throw new \RuntimeException('Setup session is not complete yet.');
-    }
-
-    $setupIntent = $session->setup_intent;
-    if (! $setupIntent || $setupIntent->status !== 'succeeded') {
-        throw new \RuntimeException('Setup intent has not succeeded.');
-    }
-
-    $pm = $setupIntent->payment_method;
-    if (! is_object($pm)) {
-        throw new \RuntimeException('No payment method found on setup intent.');
-    }
-
-    $card = $pm->card ?? null;
-    $brand->update([
-        'stripe_payment_method_id' => $pm->id,
-        'stripe_payment_method_brand' => $card?->brand,
-        'stripe_payment_method_last4' => $card?->last4,
-    ]);
-
-    return [
-        'payment_method_id' => $pm->id,
-        'brand' => $card?->brand,
-        'last4' => $card?->last4,
-    ];
-}
-```
-
-### 3g. Disconnect
-
-```php
-public function disconnectAccount(Professional $pro): void
-{
-    $pro->update([
-        'stripe_connect_status' => 'not_connected',
-        'stripe_connect_account_id' => null,
-        'stripe_payment_method_id' => null,
-        'stripe_payment_method_brand' => null,
-        'stripe_payment_method_last4' => null,
-    ]);
-}
-```
-
-### 3h. Status sync (v2 capability inspection)
-
-```php
-public function syncAccountStatus(Professional $pro): array
-{
-    if (! $pro->stripe_connect_account_id) {
-        return [
-            'status' => 'not_connected',
-            'charges_enabled' => false,
-            'transfers_enabled' => false,
-            'details_submitted' => false,
-            'requirements' => [],
-        ];
-    }
-
-    return $this->cacheLock->rememberLocked(
-        self::statusCacheKey($pro->stripe_connect_account_id),
-        self::STATUS_CACHE_TTL,
-        fn () => $this->fetchAndSyncAccountStatus($pro, $pro->stripe_connect_account_id),
-    );
+if ($payout->status === 'pending') {
+    $payout = $this->revalidatePayoutOrders($payout);
+    if ($payout === null) { return null; }
 }
 
-private function fetchAndSyncAccountStatus(Professional $pro, string $accountId): array
-{
-    $account = $this->stripe->v2->core->accounts->retrieve($accountId, [
-        'include' => ['identity', 'configuration.merchant', 'configuration.customer', 'configuration.recipient', 'requirements'],
-    ]);
+$brand = Professional::find($payout->brand_professional_id);
+$affiliate = Professional::find($payout->affiliate_professional_id);
+$treasuryAccountId = config('services.stripe.partna_treasury_account_id');
 
-    $status = self::determineAccountStatus($account, $pro);
-
-    if ($pro->stripe_connect_status !== $status) {
-        $pro->update(['stripe_connect_status' => $status]);
-    }
-
-    return [
-        'status' => $status,
-        'charges_enabled' => $this->capabilityIsActive($account, 'merchant', 'card_payments'),
-        'transfers_enabled' => $this->capabilityIsActive($account, 'recipient', 'stripe_balance.stripe_transfers'),
-        'details_submitted' => ! empty($account->requirements?->summary?->minimum_deadline?->status),
-        'requirements' => $this->summarizeRequirements($account),
-    ];
+if (! $brand || ! $affiliate || ! $treasuryAccountId) {
+    $this->failPayout($payout, 'config_error', 'Brand, affiliate, or Treasury config missing');
+    return false;
 }
 
-public static function determineAccountStatus(object $account, Professional $pro): string
-{
-    if ($pro->isBrand()) {
-        $cardPayments = $account->configuration?->merchant?->capabilities?->card_payments?->status ?? 'unsupported';
-        return match ($cardPayments) {
-            'active' => 'active',
-            'restricted' => 'restricted',
-            default => 'onboarding',
-        };
-    }
-
-    $transfers = $account->configuration?->recipient?->capabilities?->stripe_balance?->stripe_transfers?->status ?? 'unsupported';
-    return match ($transfers) {
-        'active' => 'active',
-        'restricted' => 'restricted',
-        default => 'onboarding',
-    };
+if (! $this->stillEligible($brand, $affiliate)) {
+    // Brand lost active/PM, or affiliate lost active — release back to next sweep, NOT failed.
+    Order::where('payout_id', $payout->id)->update(['payout_id' => null]);
+    CommissionPayoutItem::where('payout_id', $payout->id)->delete();
+    $payout->forceFill(['status' => 'cancelled', 'failure_code' => 'no_longer_eligible', 'failure_reason' => '...', 'processed_at' => now()])->save();
+    return null;
 }
 
-private function capabilityIsActive(object $account, string $configKey, string $capabilityPath): bool
-{
-    $config = $account->configuration?->{$configKey} ?? null;
-    if (! $config) {
-        return false;
-    }
-
-    $parts = explode('.', $capabilityPath);
-    $current = $config->capabilities ?? null;
-    foreach ($parts as $part) {
-        $current = $current?->{$part} ?? null;
-        if (! $current) {
-            return false;
-        }
-    }
-    return ($current->status ?? null) === 'active';
-}
-
-private function summarizeRequirements(object $account): array
-{
-    $entries = $account->requirements?->entries ?? [];
-    return array_values(array_filter(array_map(
-        fn ($e) => $e->path ?? null,
-        is_array($entries) ? $entries : [],
-    )));
-}
-```
-
-### 3i. Dashboard login link (v2)
-
-```php
-public function createDashboardLink(Professional $pro): ?string
-{
-    if (! $pro->stripe_connect_account_id || $pro->stripe_connect_status !== 'active') {
-        return null;
-    }
-
-    $link = $this->stripe->v2->core->accountLinks->create([
-        'account' => $pro->stripe_connect_account_id,
-        'use_case' => [
-            'type' => 'account_management',
-            'account_management' => [],
-        ],
-    ]);
-
-    return $link->url;
-}
-```
-
-### 3j. Helpers — keep these from current implementation
-
-- `mapCountryCode(?string $code): string` — verify country is in supported list, abort 422 if not
-- `mapCountryCodeOrNull(?string $code): ?string` — tolerant variant for prefill
-- `resolveShopCurrency(Professional $pro): ?string` — read from Shopify integration
-- `stringOrNull` / `e164PhoneOrNull` — string helpers
-- `STRIPE_CONNECT_SUPPORTED_COUNTRIES` constant
-- `statusCacheKey($accountId): string` + `forgetStatusCache($accountId): void` — cache helpers
-- `brandHasPaymentMethod(Professional $brand): bool` — reads `stripe_payment_method_id`
-
-### 3k. Delete from current implementation
-
-These methods served the old PR-#38 model and the v1 customer flow:
-- `createBrandConnectCustomer` — no separate customer object in v2; brand's v2 Account IS the customer
-- `createBrandConnectPaymentMethodSetupSession` → renamed to `createBrandPaymentMethodSetupSession`
-- `syncBrandConnectPaymentMethodFromCheckoutSession` → renamed to `syncBrandPaymentMethodFromCheckoutSession`
-- `saveBrandConnectPaymentMethod` — folded into the sync method
-- `listPaymentMethods` — simplified or removed (just expose the stored brand fields)
-- `removeBrandPaymentSetup` — replaced by `disconnectAccount` + a separate "remove card" endpoint that detaches the PM
-
----
-
-## Phase 4 — Rewrite `CommissionPayoutService` for the 3-step chain
-
-**File:** `app/Services/Stripe/CommissionPayoutService.php`
-
-### 4a. Eligibility filter
-
-```php
-private function findEligibleBrands(): array
-{
-    return Professional::query()
-        ->where('professional_type', 'brand')
-        ->whereNotNull('stripe_connect_account_id')
-        ->where('stripe_connect_status', 'active')
-        ->whereNotNull('stripe_payment_method_id')
-        ->pluck('id')
-        ->all();
-}
-
-private function findEligibleAffiliateIds(): array
-{
-    return Professional::query()
-        ->whereNotNull('stripe_connect_account_id')
-        ->where('stripe_connect_status', 'active')
-        ->pluck('id')
-        ->all();
-}
-```
-
-`processEligiblePayouts` joins eligible brands × eligible affiliates × orders with `status='approved' AND refund_cents=0 AND payout_id IS NULL AND rate_source<>'pending' AND occurred_at <= cutoff_by_hold_days`. Same shape as today; just the column requirements change.
-
-Drop `'transferring'` from the resume filter (since we no longer have a "park at transferring" state — the chain either completes or fails atomically).
-
-### 4b. The 3-step chain in `processPayoutBatch`
-
-```php
-public function processPayoutBatch(CommissionPayout $payout): ?bool
-{
-    $brand = Professional::find($payout->brand_professional_id);
-    $affiliate = Professional::find($payout->affiliate_professional_id);
-    $treasuryAccountId = config('services.stripe.partna_treasury_account_id');
-
-    if (! $brand || ! $affiliate || ! $treasuryAccountId) {
-        $this->failPayout($payout, 'config_error', 'Brand, affiliate, or Treasury config missing');
-        return false;
-    }
-
-    // Re-validate eligibility (brand still active, has PM, etc.)
-    if (! $this->stillEligible($brand, $affiliate)) {
-        $this->failPayout($payout, 'no_longer_eligible', 'Brand or affiliate no longer eligible at execution time');
-        return false;
-    }
-
+// === STEP 1 ===
+if (! in_array($payout->status, ['transferring'], true)) {
     $payout->forceFill(['status' => 'collecting'])->save();
-
-    // === STEP 1: Direct charge on brand's Connect account ===
     try {
-        $paymentIntent = $this->createBrandCharge($payout, $brand);
-        $payout->forceFill([
-            'stripe_payment_intent_id' => $paymentIntent->id,
-            'charge_cents' => $payout->gross_commission_cents,
-        ])->save();
-
-        if ($paymentIntent->status !== 'succeeded') {
-            // SCA or async — webhook completes it
-            $payout->forceFill(['status' => 'collecting'])->save();
+        $pi = $this->createBrandCharge($payout, $brand);
+        $payout->forceFill(['stripe_payment_intent_id' => $pi->id, 'charge_cents' => $payout->gross_commission_cents])->save();
+        if ($pi->status !== 'succeeded') {
+            // SCA / async — leave at 'collecting', cancel idempotency-friendly, let webhook + admin retry handle it
+            $this->handleStep1NotSucceeded($payout, $brand, $pi);
             return null;
         }
-
-        $latestChargeId = $this->extractLatestChargeId($paymentIntent);
-    } catch (ApiConnectionException|RateLimitException $e) {
-        throw $e;  // Horizon retries — no money moved
-    } catch (ApiErrorException $e) {
-        $this->failPayout($payout, 'charge_failed', $this->formatStripeError($e));
-        return false;
-    }
-
-    $payout->forceFill(['status' => 'transferring'])->save();
-
-    // === STEP 2: Transfer brand → affiliate (full gross) ===
-    try {
-        $brandToAffiliate = $this->createBrandToAffiliateTransfer($payout, $brand, $affiliate, $latestChargeId);
-        $payout->forceFill(['stripe_transfer_id' => $brandToAffiliate->id])->save();
+        $latestChargeId = $this->extractLatestChargeId($pi);
     } catch (ApiConnectionException|RateLimitException $e) {
         throw $e;
     } catch (ApiErrorException $e) {
+        $this->failPayout($payout, 'charge_failed', $this->formatStripeError($e), $e);
+        Order::where('payout_id', $payout->id)->update(['payout_id' => null]);    // ← release: this was the May 13 bug
+        CommissionPayoutItem::where('payout_id', $payout->id)->delete();
+        return false;
+    }
+} else {
+    // Resume path: PI already succeeded in a prior run, retrieve the latest_charge for source_transaction.
+    $latestChargeId = $this->resumeStep1ChargeId($payout, $brand);
+}
+
+$payout->forceFill(['status' => 'transferring'])->save();
+
+// === STEP 2 ===
+if (! $payout->stripe_transfer_id) {
+    try {
+        $tr2 = $this->createBrandToAffiliateTransfer($payout, $brand, $affiliate, $latestChargeId);
+        $payout->forceFill(['stripe_transfer_id' => $tr2->id])->save();
+    } catch (ApiConnectionException|RateLimitException $e) { throw $e; }
+    catch (ApiErrorException $e) {
         $this->autoRefundChargeOnly($payout, $brand, 'brand_to_affiliate_failed', $e);
         return false;
     }
-
-    // === STEP 3: Transfer affiliate → Partna Treasury (the fee) ===
-    if ($payout->platform_fee_cents > 0) {
-        try {
-            $affiliateToTreasury = $this->createAffiliateToTreasuryTransfer($payout, $affiliate, $treasuryAccountId);
-            $payout->forceFill(['stripe_fee_transfer_id' => $affiliateToTreasury->id])->save();
-        } catch (ApiConnectionException|RateLimitException $e) {
-            // Step 3 is retryable — leave state as 'transferring', let webhook/Horizon retry
-            throw $e;
-        } catch (ApiErrorException $e) {
-            // Step 3 failed terminally: reverse step 2 + refund step 1
-            $this->reverseBrandToAffiliateAndRefundCharge($payout, $brand, $affiliate, 'fee_transfer_failed', $e);
-            return false;
-        }
-    }
-
-    // All three steps succeeded
-    $payout->forceFill([
-        'status' => 'completed',
-        'processed_at' => now(),
-        'transfer_completed_at' => now(),
-        'failure_code' => null,
-        'failure_reason' => null,
-    ])->save();
-
-    $this->analyticsCache->bumpAnalyticsVersion($brand->id);
-    $this->analyticsCache->bumpAnalyticsVersion($affiliate->id);
-
-    Log::info('Commission payout completed (3-step chain)', [
-        'payout_id' => $payout->id,
-        'gross_cents' => $payout->gross_commission_cents,
-        'platform_fee_cents' => $payout->platform_fee_cents,
-        'net_to_affiliate_cents' => $payout->gross_commission_cents - $payout->platform_fee_cents,
-    ]);
-
-    return true;
 }
+
+// === STEP 3 ===
+if ($payout->platform_fee_cents > 0 && ! $payout->stripe_fee_transfer_id) {
+    try {
+        $tr3 = $this->createAffiliateToTreasuryTransfer($payout, $affiliate, $treasuryAccountId);
+        $payout->forceFill(['stripe_fee_transfer_id' => $tr3->id])->save();
+    } catch (ApiConnectionException|RateLimitException $e) { throw $e; }
+    catch (ApiErrorException $e) {
+        // 'balance_insufficient' is the most likely cause for new affiliate accounts whose
+        // step-2 funds are still in pending balance. Decision tree:
+        //  - if error code is 'balance_insufficient' AND we have a stripe_transfer_id → leave at
+        //    'transferring', schedule RetryStep3Job via delay(15min). Job rechecks then retries.
+        //  - otherwise → reverse step 2, refund step 1, fail.
+        if (($e->getStripeCode() ?? '') === 'balance_insufficient') {
+            RetryStep3Job::dispatch($payout->id)->delay(now()->addMinutes(15));
+            Log::info('Step 3 deferred — affiliate balance pending', ['payout_id' => $payout->id]);
+            return null;
+        }
+        $this->reverseBrandToAffiliateAndRefundCharge($payout, $brand, $affiliate, 'fee_transfer_failed', $e);
+        return false;
+    }
+}
+
+$payout->forceFill([
+    'status' => 'completed',
+    'processed_at' => now(),
+    'transfer_completed_at' => now(),
+    'failure_code' => null,
+    'failure_reason' => null,
+    'stripe_error_code' => null,
+    'stripe_error_message' => null,
+    'failure_category' => null,
+])->save();
+$this->analyticsCache->bumpAnalyticsVersion($brand->id);
+$this->analyticsCache->bumpAnalyticsVersion($affiliate->id);
+return true;
 ```
 
-### 4c. The three step helpers
+### 4c. The three step helpers (exact payloads — these are the Stripe-correctness-critical bits)
 
 ```php
 private function createBrandCharge(CommissionPayout $payout, Professional $brand): object
@@ -724,7 +347,7 @@ private function createBrandCharge(CommissionPayout $payout, Professional $brand
     return $this->stripe->paymentIntents->create([
         'amount' => $payout->gross_commission_cents,
         'currency' => strtolower($payout->currency_code),
-        'customer' => $brand->stripe_connect_account_id,        // v2 Account = customer
+        'customer_account' => $brand->stripe_connect_account_id,   // ← NOT 'customer'. v2 Account ID via the new clover field.
         'payment_method' => $brand->stripe_payment_method_id,
         'confirm' => true,
         'off_session' => true,
@@ -734,58 +357,40 @@ private function createBrandCharge(CommissionPayout $payout, Professional $brand
             'brand_id' => $brand->id,
             'step' => '1_brand_charge',
         ],
+        // NO application_fee_amount. NO on_behalf_of. NO transfer_data.
     ], [
-        'stripe_account' => $brand->stripe_connect_account_id,  // Direct charge on brand
+        'stripe_account' => $brand->stripe_connect_account_id,
         'idempotency_key' => 'pi_'.$payout->id.($payout->retry_count > 0 ? '_r'.$payout->retry_count : ''),
     ]);
 }
 
-private function createBrandToAffiliateTransfer(
-    CommissionPayout $payout,
-    Professional $brand,
-    Professional $affiliate,
-    ?string $latestChargeId,
-): object {
+private function createBrandToAffiliateTransfer(CommissionPayout $payout, Professional $brand, Professional $affiliate, ?string $latestChargeId): object
+{
     $payload = [
-        'amount' => $payout->gross_commission_cents,            // FULL gross
+        'amount' => $payout->gross_commission_cents,
         'currency' => strtolower($payout->currency_code),
         'destination' => $affiliate->stripe_connect_account_id,
         'description' => "Commission to {$affiliate->display_name} for #{$payout->id}",
-        'metadata' => [
-            'sidest_payout_id' => $payout->id,
-            'brand_id' => $brand->id,
-            'affiliate_id' => $affiliate->id,
-            'step' => '2_brand_to_affiliate',
-        ],
+        'metadata' => ['sidest_payout_id' => $payout->id, 'brand_id' => $brand->id, 'affiliate_id' => $affiliate->id, 'step' => '2_brand_to_affiliate'],
     ];
-
-    if ($latestChargeId) {
-        $payload['source_transaction'] = $latestChargeId;  // Pin to settled charge
-    }
-
+    if ($latestChargeId) { $payload['source_transaction'] = $latestChargeId; }
     return $this->stripe->transfers->create($payload, [
-        'stripe_account' => $brand->stripe_connect_account_id,  // Transfer originates from brand's balance
-        'idempotency_key' => 'tr2_'.$payout->id,
+        'stripe_account' => $brand->stripe_connect_account_id,
+        'idempotency_key' => 'tr2_'.$payout->id,            // ← stable (no _r suffix): resume returns same transfer
     ]);
 }
 
-private function createAffiliateToTreasuryTransfer(
-    CommissionPayout $payout,
-    Professional $affiliate,
-    string $treasuryAccountId,
-): object {
+private function createAffiliateToTreasuryTransfer(CommissionPayout $payout, Professional $affiliate, string $treasuryAccountId): object
+{
     return $this->stripe->transfers->create([
         'amount' => $payout->platform_fee_cents,
         'currency' => strtolower($payout->currency_code),
         'destination' => $treasuryAccountId,
-        'description' => "Partna platform fee for #{$payout->id}",
-        'metadata' => [
-            'sidest_payout_id' => $payout->id,
-            'affiliate_id' => $affiliate->id,
-            'step' => '3_affiliate_to_treasury',
-        ],
+        'description' => "Partna platform fee for payout #{$payout->id}",
+        'metadata' => ['sidest_payout_id' => $payout->id, 'affiliate_id' => $affiliate->id, 'step' => '3_affiliate_to_treasury'],
+        // No source_transaction — Transfers API only accepts a charge ID, and we can't chain to step 2's transfer.
     ], [
-        'stripe_account' => $affiliate->stripe_connect_account_id,  // Transfer originates from affiliate's balance
+        'stripe_account' => $affiliate->stripe_connect_account_id,
         'idempotency_key' => 'tr3_'.$payout->id,
     ]);
 }
@@ -794,46 +399,31 @@ private function createAffiliateToTreasuryTransfer(
 ### 4d. Failure compensations
 
 ```php
-private function autoRefundChargeOnly(
-    CommissionPayout $payout,
-    Professional $brand,
-    string $failureCode,
-    ApiErrorException $e,
-): void {
-    // Step 2 failed — money is still in brand's balance. Refund the charge.
+private function autoRefundChargeOnly(CommissionPayout $payout, Professional $brand, string $failureCode, ApiErrorException $e): void
+{
+    $finalCode = $failureCode;
     try {
         $this->stripe->refunds->create([
             'payment_intent' => $payout->stripe_payment_intent_id,
             'metadata' => ['sidest_payout_id' => $payout->id, 'reason' => 'auto_refund_step2_failed'],
+            // NO refund_application_fee (no app_fee in our chain). NO reverse_transfer (no destination charge).
         ], [
             'stripe_account' => $brand->stripe_connect_account_id,
-            'idempotency_key' => "rf_{$payout->id}_step2_failed",
+            'idempotency_key' => "rf_{$payout->id}_step2",
         ]);
         $finalCode = $failureCode.'_refunded';
     } catch (\Throwable $refundEx) {
         $finalCode = $failureCode.'_refund_failed';
         $payout->forceFill(['needs_manual_refund' => true])->save();
-        Log::error('Step 1 refund after step 2 failure failed', [
-            'payout_id' => $payout->id,
-            'transfer_error' => $this->formatStripeError($e),
-            'refund_error' => $refundEx->getMessage(),
-        ]);
     }
-    $this->failPayout($payout, $finalCode, $this->formatStripeError($e));
+    $this->failPayout($payout, $finalCode, $this->formatStripeError($e), $e);
+    // PRESERVE stripe_payment_intent_id for the audit trail — DO NOT null it out. (May 13 bug fix.)
 }
 
-private function reverseBrandToAffiliateAndRefundCharge(
-    CommissionPayout $payout,
-    Professional $brand,
-    Professional $affiliate,
-    string $failureCode,
-    ApiErrorException $e,
-): void {
-    // Step 3 failed — money is in affiliate's balance via step 2. We need to:
-    //   a) Reverse step 2 (affiliate → back to brand via transfer reversal)
-    //   b) Refund step 1 (charge to brand's card)
+private function reverseBrandToAffiliateAndRefundCharge(CommissionPayout $payout, Professional $brand, Professional $affiliate, string $failureCode, ApiErrorException $e): void
+{
     $finalCode = $failureCode;
-
+    $reverseOk = true;
     if ($payout->stripe_transfer_id) {
         try {
             $this->stripe->transfers->createReversal($payout->stripe_transfer_id, [
@@ -843,39 +433,32 @@ private function reverseBrandToAffiliateAndRefundCharge(
                 'idempotency_key' => "rev2_{$payout->id}",
             ]);
         } catch (\Throwable $revEx) {
+            $reverseOk = false;
             $finalCode = $failureCode.'_reverse_failed';
             $payout->forceFill(['needs_manual_refund' => true])->save();
-            Log::error('Step 2 reversal after step 3 failure failed', [
-                'payout_id' => $payout->id,
-                'reverse_error' => $revEx->getMessage(),
-            ]);
         }
     }
-
-    // Then refund the charge regardless of reversal outcome — brand should not be out of pocket.
-    if ($payout->stripe_payment_intent_id) {
+    if ($reverseOk && $payout->stripe_payment_intent_id) {
         try {
             $this->stripe->refunds->create([
                 'payment_intent' => $payout->stripe_payment_intent_id,
                 'metadata' => ['sidest_payout_id' => $payout->id, 'reason' => 'step3_failed_refund_charge'],
             ], [
                 'stripe_account' => $brand->stripe_connect_account_id,
-                'idempotency_key' => "rf_{$payout->id}_step3_failed",
+                'idempotency_key' => "rf_{$payout->id}_step3",
             ]);
-        } catch (\Throwable $refEx) {
+        } catch (\Throwable) {
             $finalCode .= '_refund_failed';
             $payout->forceFill(['needs_manual_refund' => true])->save();
         }
     }
-
-    $this->failPayout($payout, $finalCode, $this->formatStripeError($e));
+    $this->failPayout($payout, $finalCode, $this->formatStripeError($e), $e);
 }
 
 private function formatStripeError(\Throwable $e): string
 {
     if ($e instanceof ApiErrorException) {
-        return sprintf(
-            '[%s] %s (request_id=%s, type=%s)',
+        return sprintf('[%s] %s (request_id=%s, type=%s)',
             $e->getStripeCode() ?? 'unknown_code',
             $e->getMessage(),
             $e->getRequestId() ?? 'n/a',
@@ -885,600 +468,468 @@ private function formatStripeError(\Throwable $e): string
     return get_class($e).': '.($e->getMessage() ?: 'unknown_error');
 }
 
-private function failPayout(CommissionPayout $payout, string $code, string $reason): void
+private function failPayout(CommissionPayout $payout, string $code, string $reason, ?\Throwable $e = null): void
 {
     $payout->forceFill([
         'status' => 'failed',
         'failure_code' => $code,
         'failure_reason' => $reason,
+        // Persist Stripe context to dedicated columns so ops can grep + so support can quote request_id.
+        'stripe_error_code' => $e instanceof ApiErrorException ? $e->getStripeCode() : null,
+        'stripe_error_message' => $e instanceof ApiErrorException ? $e->getMessage() : null,
+        'failure_category' => $e instanceof ApiErrorException
+            ? CommissionPayoutService::categorizeTransferFailure($e->getStripeCode())
+            : 'unknown',
         'processed_at' => now(),
     ])->save();
 
-    // Release orders unless a manual refund is pending (in which case ops review first)
-    $terminalCodes = ['fee_transfer_failed_refund_failed', 'fee_transfer_failed_reverse_failed', 'brand_to_affiliate_failed_refund_failed'];
-    if (! in_array($code, $terminalCodes, true)) {
-        Order::where('payout_id', $payout->id)->update(['payout_id' => null]);
+    // Release orders UNLESS the failure left funds dangling (manual ops review first).
+    $danglingCodes = ['brand_to_affiliate_failed_refund_failed', 'fee_transfer_failed_reverse_failed', 'fee_transfer_failed_refund_failed'];
+    if (! in_array($code, $danglingCodes, true)) {
+        Order::where('payout_id', $payout->id)->update(['payout_id' => null]);     // ← May 13 fix
         CommissionPayoutItem::where('payout_id', $payout->id)->delete();
     }
-
-    Log::warning('Commission payout failed', [
-        'payout_id' => $payout->id,
-        'code' => $code,
-        'reason' => $reason,
-        'orders_released' => ! in_array($code, $terminalCodes, true),
-    ]);
 }
 ```
 
-### 4e. Stale schema artifacts to keep
-
-`commerce.commission_payouts` table needs a new column for the step-3 fee transfer ID. Add via new migration:
-
-```sql
-ALTER TABLE commerce.commission_payouts
-    ADD COLUMN IF NOT EXISTS stripe_fee_transfer_id TEXT;
-
-COMMENT ON COLUMN commerce.commission_payouts.stripe_fee_transfer_id IS
-    'Transfer ID for step 3 of the chain (affiliate → Partna Treasury). NULL until step 3 succeeds.';
-```
-
-File: `supabase/migrations/20260513500000_add_fee_transfer_id_to_commission_payouts.sql`.
-
-### 4f. Delete from `CommissionPayoutService`
-
-- `extractBalanceTransactionNet` — no app_fee_amount on charge anymore, transfer amount is always full gross
-- `markPendingFunding` (wallet leftover, gone)
-- Any reference to `stripe_connect_customer_id` / `stripe_connect_payment_method_id`
-- Two-step transfer logic that did app_fee on charge
-- Wallet pre-debit / SCA cancel race code (already removed in earlier work, verify)
-
----
-
-## Phase 5 — Rewrite `CommissionPayoutRefundService` (Shopify-refund clawbacks)
-
-**File:** `app/Services/Stripe/CommissionPayoutRefundService.php`
-
-When a Shopify order linked to a completed payout is refunded, we have to claw back proportionally across all 3 steps:
-
-### 5a. Full payout clawback (all orders refunded)
+### 4e. New job: `app/Jobs/Stripe/RetryStep3Job.php`
 
 ```php
-public function clawbackCompletedPayout(CommissionPayout $payout, string $reason): void
+class RetryStep3Job implements ShouldQueue
 {
-    $brand = Professional::find($payout->brand_professional_id);
-    $affiliate = Professional::find($payout->affiliate_professional_id);
-
-    // Reverse step 3: affiliate → Treasury transfer reversal
-    if ($payout->stripe_fee_transfer_id) {
-        $this->stripe->transfers->createReversal($payout->stripe_fee_transfer_id, [
-            'metadata' => ['sidest_payout_id' => $payout->id, 'reason' => $reason],
-        ], [
-            'stripe_account' => $affiliate->stripe_connect_account_id,
-            'idempotency_key' => "rev3_{$payout->id}_clawback",
-        ]);
-    }
-
-    // Reverse step 2: brand → affiliate transfer reversal
-    if ($payout->stripe_transfer_id) {
-        $this->stripe->transfers->createReversal($payout->stripe_transfer_id, [
-            'metadata' => ['sidest_payout_id' => $payout->id, 'reason' => $reason],
-        ], [
-            'stripe_account' => $brand->stripe_connect_account_id,
-            'idempotency_key' => "rev2_{$payout->id}_clawback",
-        ]);
-    }
-
-    // Refund step 1: charge refund on brand's account
-    if ($payout->stripe_payment_intent_id) {
-        $this->stripe->refunds->create([
-            'payment_intent' => $payout->stripe_payment_intent_id,
-            'metadata' => ['sidest_payout_id' => $payout->id, 'reason' => $reason],
-        ], [
-            'stripe_account' => $brand->stripe_connect_account_id,
-            'idempotency_key' => "rf_{$payout->id}_clawback",
-        ]);
-    }
-
-    $payout->forceFill([
-        'status' => 'reversed',
-        'failure_code' => 'clawback_full',
-        'failure_reason' => $reason,
-    ])->save();
-}
-```
-
-### 5b. Partial payout clawback (one order in a multi-order payout refunded)
-
-Math: if order's commission was X cents and payout's gross was G cents, refund ratio = X/G.
-
-```php
-public function clawbackPartialPayout(CommissionPayout $payout, Order $order, string $reason): void
-{
-    $clawbackGrossCents = $order->commission_cents;
-    $proportionalFee = (int) round(
-        $payout->platform_fee_cents * ($clawbackGrossCents / $payout->gross_commission_cents),
-    );
-
-    $brand = Professional::find($payout->brand_professional_id);
-    $affiliate = Professional::find($payout->affiliate_professional_id);
-
-    // Partial reverse of step 3 (affiliate → Treasury fee transfer): proportional amount
-    if ($payout->stripe_fee_transfer_id && $proportionalFee > 0) {
-        $this->stripe->transfers->createReversal($payout->stripe_fee_transfer_id, [
-            'amount' => $proportionalFee,
-            'metadata' => ['sidest_payout_id' => $payout->id, 'order_id' => $order->id, 'reason' => $reason],
-        ], [
-            'stripe_account' => $affiliate->stripe_connect_account_id,
-            'idempotency_key' => "rev3_{$payout->id}_{$order->id}",
-        ]);
-    }
-
-    // Partial reverse of step 2 (brand → affiliate transfer): proportional gross
-    if ($payout->stripe_transfer_id) {
-        $this->stripe->transfers->createReversal($payout->stripe_transfer_id, [
-            'amount' => $clawbackGrossCents,
-            'metadata' => ['sidest_payout_id' => $payout->id, 'order_id' => $order->id, 'reason' => $reason],
-        ], [
-            'stripe_account' => $brand->stripe_connect_account_id,
-            'idempotency_key' => "rev2_{$payout->id}_{$order->id}",
-        ]);
-    }
-
-    // Partial refund of step 1 charge: proportional gross
-    if ($payout->stripe_payment_intent_id) {
-        $this->stripe->refunds->create([
-            'payment_intent' => $payout->stripe_payment_intent_id,
-            'amount' => $clawbackGrossCents,
-            'metadata' => ['sidest_payout_id' => $payout->id, 'order_id' => $order->id, 'reason' => $reason],
-        ], [
-            'stripe_account' => $brand->stripe_connect_account_id,
-            'idempotency_key' => "rf_{$payout->id}_{$order->id}",
-        ]);
-    }
-
-    // Update the order's row + the payout's running totals
-    $order->forceFill(['refund_cents' => $order->refund_cents + $clawbackGrossCents])->save();
-    $payout->forceFill([
-        'reversed_commission_cents' => $payout->reversed_commission_cents + $clawbackGrossCents,
-    ])->save();
-}
-```
-
-### 5c. Delete from current `CommissionPayoutRefundService`
-
-- Old single-step Stripe Transfer reversal code (we still use createReversal but now in a 3-step pattern, not the 1-step destination-charge pattern)
-- `refund_application_fee: true` flag — no app_fee in our model, so don't pass it
-- `reverse_transfer: true` flag — we explicitly reverse transfers ourselves in the right order
-
----
-
-## Phase 6 — Split webhook controllers
-
-### 6a. NEW: `app/Http/Controllers/Api/Webhooks/StripePlatformWebhookController.php`
-
-```php
-namespace App\Http\Controllers\Api\Webhooks;
-
-use App\Models\Core\Professional\Professional;
-use App\Services\Stripe\CommissionPayoutService;
-use App\Services\Stripe\StripeConnectService;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
-use Stripe\Webhook;
-
-class StripePlatformWebhookController extends Controller
-{
-    public function __invoke(Request $request): JsonResponse
+    public function __construct(public string $payoutId) {}
+    public int $tries = 5;
+    public function backoff(): array { return [60*15, 60*30, 60*60, 60*120, 60*240]; }
+    public function handle(CommissionPayoutService $service): void
     {
-        $payload = $request->getContent();
-        $sigHeader = $request->header('Stripe-Signature', '');
-        $secret = config('services.stripe.platform_webhook_secret');
+        $payout = CommissionPayout::find($this->payoutId);
+        if (! $payout || $payout->status !== 'transferring' || $payout->stripe_fee_transfer_id) { return; }
+        $service->processPayoutBatch($payout);   // ← reentrant: step 1+2 idempotency keys return existing, step 3 retries
+    }
+}
+```
 
+Wire from `transfer.paid` webhook in Phase 6 (when step-2 transfer settles, dispatch a `RetryStep3Job` for the payout immediately if status='transferring' && fee_transfer_id is null).
+
+### 4f. Code to delete in this service
+
+- `extractBalanceTransactionNet()` and all callers — no `application_fee_amount` means no fee deduction to recompute; step-2 transfers full gross.
+- `markPendingFunding()` and the `pending_funds` enum entirely — wallet path is gone.
+- All references to `funding_source`, `wallet_debit_cents`, `next_retry_at`, `funding_failure_count`, `grace_started_at` writes (column reads stay for now; void/retry job stays; new failure path doesn't park).
+- The `requires_action` cancel+race-recover branch in step 1 — the new model defers SCA cleanly via the `handleStep1NotSucceeded` helper, leaving the PI alive and the payout at `collecting` for webhook completion.
+- The `'collected'` enum state (unused in new model — go straight `collecting → transferring`).
+
+## Phase 5 — Rewrite `app/Services/Stripe/CommissionPayoutRefundService.php`
+
+`handleOrderRefund` keeps its current branching (`pending/pending_funds/collecting/transferring/completed/failed/cancelled/reversed`), but drop `pending_funds`. Replace `clawbackCompletedPayout` with the **bottom-up reversal chain**:
+
+```php
+private function clawbackCompletedPayout(CommissionPayout $payout, Order $order, ?int $incrementalRefundCents, ?string $shopifyRefundId): void
+{
+    // ... existing exists() dedup + math (proportional ratios) — unchanged ...
+    $clawbackGrossCents = $proportionalGross;     // share of step-1 charge to refund
+    $clawbackFeeCents   = $proportionalFee;       // share of step-3 fee transfer to reverse
+    $brand = Professional::find($payout->brand_professional_id);
+    $affiliate = Professional::find($payout->affiliate_professional_id);
+
+    $step3Ok = $step2Ok = false;
+
+    // === Step 3 reversal first (affiliate → Treasury fee transfer) ===
+    if ($payout->stripe_fee_transfer_id && $clawbackFeeCents > 0) {
         try {
-            $event = Webhook::constructEvent($payload, $sigHeader, $secret);
-        } catch (\Throwable $e) {
-            return response()->json(['error' => 'invalid_signature'], 400);
+            $this->stripe->transfers->createReversal($payout->stripe_fee_transfer_id, [
+                'amount' => $clawbackFeeCents,
+                'metadata' => ['sidest_payout_id' => $payout->id, 'order_id' => $order->id, 'reason' => 'clawback', 'shopify_refund_id' => $shopifyRefundId ?? ''],
+            ], [
+                'stripe_account' => $affiliate->stripe_connect_account_id,
+                'idempotency_key' => "rev3_{$payout->id}_{$order->id}_".substr(md5($shopifyRefundId ?? 'manual'), 0, 16),
+            ]);
+            $step3Ok = true;
+        } catch (ApiErrorException $e) {
+            $this->insertClawbackRow($payout, $order, $shopifyRefundId, ['status' => 'reversal_failed', 'failure_reason' => 'step3_'.$e->getStripeCode(), 'amount_cents' => $clawbackGrossCents]);
+            $payout->forceFill(['needs_manual_refund' => true])->save();
+            return; // bail: don't unwind step-2 + step-1 while step-3 is still on the books
         }
+    } else { $step3Ok = true; }     // no fee transfer ever (platform_fee_cents was 0)
 
-        return $this->handleParsedEvent($event);
-    }
-
-    public function handleParsedEvent(\Stripe\Event $event): JsonResponse
-    {
-        match (true) {
-            str_starts_with($event->type, 'v2.core.account.') => $this->handleV2AccountEvent($event),
-            $event->type === 'payment_intent.succeeded' => $this->handlePlatformPISucceeded($event->data->object),
-            $event->type === 'payment_intent.payment_failed' => $this->handlePlatformPIFailed($event->data->object),
-            $event->type === 'charge.refunded' => $this->handleChargeRefunded($event->data->object),
-            $event->type === 'charge.dispute.created' => $this->handleDisputeCreated($event->data->object),
-            $event->type === 'checkout.session.completed' => $this->handleCheckoutSessionCompleted($event->data->object),
-            default => Log::debug('Unhandled platform event', ['type' => $event->type]),
-        };
-
-        return response()->json(['received' => true]);
-    }
-
-    private function handleV2AccountEvent(\Stripe\Event $event): void
-    {
-        $accountId = $event->data->object->id ?? null;
-        if (! $accountId) {
+    // === Step 2 reversal (brand → affiliate gross) ===
+    if ($payout->stripe_transfer_id) {
+        try {
+            $this->stripe->transfers->createReversal($payout->stripe_transfer_id, [
+                'amount' => $clawbackGrossCents,
+                'metadata' => ['sidest_payout_id' => $payout->id, 'order_id' => $order->id, 'reason' => 'clawback'],
+            ], [
+                'stripe_account' => $brand->stripe_connect_account_id,
+                'idempotency_key' => "rev2_{$payout->id}_{$order->id}_".substr(md5($shopifyRefundId ?? 'manual'), 0, 16),
+            ]);
+            $step2Ok = true;
+        } catch (ApiErrorException $e) {
+            $this->insertClawbackRow($payout, $order, $shopifyRefundId, ['status' => 'reversal_failed', 'failure_reason' => 'step2_'.$e->getStripeCode(), 'amount_cents' => $clawbackGrossCents]);
+            $payout->forceFill(['needs_manual_refund' => true])->save();
             return;
         }
-
-        $pro = Professional::where('stripe_connect_account_id', $accountId)->first();
-        if (! $pro) {
-            Log::debug('v2.core.account.* event for unknown account', ['account_id' => $accountId, 'type' => $event->type]);
-            return;
-        }
-
-        // Bust cache, then re-fetch + sync via the service
-        StripeConnectService::forgetStatusCache($accountId);
-        app(StripeConnectService::class)->syncAccountStatus($pro);
     }
 
-    // ... handlePlatformPISucceeded (find payout by metadata.sidest_payout_id, mark step 1 complete)
-    // ... handlePlatformPIFailed (autoRefundChargeOnly via service)
-    // ... handleChargeRefunded (idempotency check)
-    // ... handleCheckoutSessionCompleted (find brand, call syncBrandPaymentMethodFromCheckoutSession)
+    // === Step 1 charge refund — only if both reversals succeeded ===
+    if ($step2Ok && $step3Ok && $payout->stripe_payment_intent_id) {
+        try {
+            $refund = $this->stripe->refunds->create([
+                'payment_intent' => $payout->stripe_payment_intent_id,
+                'amount' => $clawbackGrossCents,
+                'metadata' => ['sidest_payout_id' => $payout->id, 'order_id' => $order->id, 'reason' => 'clawback'],
+                // NO refund_application_fee. NO reverse_transfer. (Already manually reversed.)
+            ], [
+                'stripe_account' => $brand->stripe_connect_account_id,
+                'idempotency_key' => "rf_{$payout->id}_{$order->id}_".substr(md5($shopifyRefundId ?? 'manual'), 0, 16),
+            ]);
+            $this->insertClawbackRow($payout, $order, $shopifyRefundId, [
+                'stripe_reversal_id' => $refund->id, 'amount_cents' => $clawbackGrossCents, 'status' => 'reversed',
+                'metadata' => ['refund_share_cents' => $incrementalRefundCents],
+            ]);
+        } catch (ApiErrorException $e) {
+            // Reversals already executed; refund failed — flag for manual cardholder refund.
+            $this->insertClawbackRow($payout, $order, $shopifyRefundId, ['status' => 'reversal_failed', 'failure_reason' => 'step1_'.$e->getStripeCode(), 'amount_cents' => $clawbackGrossCents]);
+            $payout->forceFill(['needs_manual_refund' => true])->save();
+        }
+    }
 }
 ```
 
-### 6b. Trim `StripeConnectWebhookController` to v1 events from connected accounts
+Full-payout clawback (when status='completed' and all linked orders go to refunded) is the same chain with full amounts.
 
-Keep:
-- `account.updated` (v1 snapshot from v2 Account config changes — sync status)
-- `account.application.deauthorized`
-- `payment_intent.succeeded` / `payment_intent.payment_failed` on connected accounts (step 1 of the chain — verify match by metadata.sidest_payout_id)
-- `transfer.created` / `transfer.paid` / `transfer.failed` / `transfer.reversed` (step 2 + step 3 transfers)
-- `payment_method.attached` / `payment_method.detached`
+Delete from this service: the old single-step reversal path (`refund_application_fee: true`, `reverse_transfer: true` flag handling) — neither flag applies anymore.
 
-Remove handlers that referenced the old destination-charge / wallet code paths.
+## Phase 6 — Webhook controllers + routes
 
-### 6c. Routes update — `routes/api.php`
+### 6a. New: `app/Http/Controllers/Api/Webhooks/StripePlatformWebhookController.php`
+
+Skeleton:
+```php
+public function __invoke(Request $request): JsonResponse
+{
+    $payload = $request->getContent();
+    $sigHeader = $request->header('Stripe-Signature', '');
+    $secret = config('services.stripe.platform_webhook_secret');
+    try { $event = Webhook::constructEvent($payload, $sigHeader, $secret); }
+    catch (\Throwable) { return response()->json(['error' => 'invalid_signature'], 400); }
+
+    // Idempotency via WebhookEvent firstOrCreate, like the existing controller
+    $we = WebhookEvent::firstOrCreate(['stripe_event_id' => $event->id], ['event_type' => $event->type, 'processed_at' => now()]);
+    if (! $we->wasRecentlyCreated) { return response()->json(['received' => true]); }
+    $we->forceFill(['payload' => json_decode($payload, true)])->save();
+
+    return $this->handleParsedEvent($event);
+}
+
+public function handleParsedEvent(\Stripe\Event $event): JsonResponse
+{
+    match (true) {
+        str_starts_with($event->type, 'v2.core.account.') => $this->handleV2AccountEvent($event),
+        default => Log::debug('Unhandled platform event', ['type' => $event->type]),
+    };
+    return response()->json(['received' => true]);
+}
+
+private function handleV2AccountEvent(\Stripe\Event $event): void
+{
+    // Thin events: data.object may not carry full account state. Resolve our local mapping via:
+    //   - $event->data->object->id when present, OR
+    //   - $event->related_object->id (per v2 thin-event shape)
+    $accountId = $event->data->object->id ?? ($event->related_object->id ?? null);
+    if (! $accountId) { return; }
+    $pro = Professional::where('stripe_connect_account_id', $accountId)->first();
+    if (! $pro) { Log::debug('v2.core.account.* for unknown account', ['id' => $accountId, 'type' => $event->type]); return; }
+    StripeConnectService::forgetStatusCache($accountId);
+    app(StripeConnectService::class)->syncAccountStatus($pro);   // ← does a v2 retrieve and persists status
+}
+```
+
+### 6b. Refactor: `app/Http/Controllers/Api/Webhooks/StripeConnectWebhookController.php`
+
+Keep most of the existing structure (HMAC verify, WebhookEvent dedup, account-mismatch guard). Changes:
+
+1. **Drop multi-secret fallback** — verify against `connect_webhook_secret` only (platform secret is for the other endpoint).
+2. **Drop the `'disconnected'` skip** in `handleAccountUpdated` — that status no longer exists locally. Replace with: if status check fails (deauthorized branch sets `not_connected`), the deauth handler clears the account id; the regular `account.updated` always proceeds.
+3. **Rewrite `handleAccountDeauthorized`** to set `stripe_connect_status='not_connected'` (was `'disconnected'`) + null `stripe_connect_account_id` + null PM columns. This matches the new `disconnectAccount` service method.
+4. **`handleCheckoutSessionCompleted`** — change call to `syncBrandPaymentMethodFromCheckoutSession` (renamed method).
+5. **`handleAccountUpdated`** — change call to `StripeConnectService::determineAccountStatus($account, $pro)` (now takes `$pro` to branch brand vs affiliate). Note: this handler receives a v1-snapshot `account` object; the v1 account shape doesn't carry the v2 `configuration.merchant.capabilities.card_payments.status` field. **Decision: have v1 `account.updated` handler simply bust the cache + dispatch a fresh `syncAccountStatus()` call** (which does a v2 retrieve). Don't attempt to derive status from the v1 snapshot — it won't carry v2 capability state.
+6. **Add new handler `handleTransferPaid` step-2 detection** — if `$transfer->metadata->step === '2_brand_to_affiliate'` AND payout status is `transferring` AND `stripe_fee_transfer_id` is null AND `platform_fee_cents > 0` → dispatch `RetryStep3Job` so step-3 retries against now-available affiliate balance.
+7. **Keep existing handlers** for `payment_intent.succeeded/failed`, `transfer.created/failed/reversed`, `payment_method.attached/detached` — but verify they don't write the dropped `'disconnected'` status anywhere.
+
+### 6c. Routes — `routes/api.php`
 
 ```php
 Route::post('/webhooks/stripe-connect', StripeConnectWebhookController::class);
 Route::post('/webhooks/stripe-platform', StripePlatformWebhookController::class);
-// Remove: Route::post('/webhooks/stripe', StripeWebhookController::class);   // legacy SaaS-billing controller — DELETE
+// REMOVE: Route::post('/webhooks/stripe', StripeWebhookController::class);
 ```
 
-Delete `StripeWebhookController.php` and any tests referencing it.
+Delete file `app/Http/Controllers/Api/Webhooks/StripeWebhookController.php` (449 lines of legacy SaaS-billing path). It's not referenced anywhere except this route and a test file that we'll delete in Phase 10.
 
----
-
-## Phase 7 — Order status derivation fix
+## Phase 7 — Order-status derivation
 
 **Files:**
 - `app/Http/Controllers/Api/Professional/Brand/BrandOrdersController.php`
 - `app/Http/Controllers/Api/Professional/Affiliate/AffiliateOrdersController.php`
 
-Both controllers JOIN `commerce.commission_payouts cp ON cp.id = o.payout_id`. Add `cp.status as payout_status` to selects. Replace `deriveLifecycleStatus`:
+Add a JOIN on `commission_payouts cp ON cp.id = o.payout_id` (LEFT JOIN; the `whereNull('o.payout_id')` filter still works on the joined row). Add `cp.status as payout_status` to `rowColumns()` in both. Replace `deriveLifecycleStatus`:
 
 ```php
 private function deriveLifecycleStatus(object $row): string
 {
-    if (in_array($row->order_status, ['cancelled', 'voided', 'refunded'], true)) {
-        return 'reversed';
-    }
-    if ((int) $row->refund_cents >= (int) $row->net_cents && (int) $row->net_cents > 0) {
-        return 'reversed';
-    }
-    if (empty($row->payout_id)) {
-        return 'pending';
-    }
-    if (in_array($row->payout_status, ['failed', 'cancelled', 'reversed'], true)) {
-        return 'pending';   // payout failed/reversed → order back in queue (defensive; Phase 4 also releases payout_id)
-    }
-    if ($row->payout_status === 'completed') {
-        return 'paid';
-    }
-    return 'processing';   // collecting / transferring / pending
+    if (in_array($row->order_status, ['cancelled', 'voided', 'refunded'], true)) { return 'reversed'; }
+    if ((int) $row->refund_cents >= (int) $row->net_cents && (int) $row->net_cents > 0) { return 'reversed'; }
+    if (empty($row->payout_id)) { return 'pending'; }
+    // Payout failed or cancelled in flight — order should be back in queue (defensive; Phase 4 also releases payout_id).
+    if (in_array($row->payout_status, ['failed', 'cancelled', 'reversed'], true)) { return 'pending'; }
+    if ($row->payout_status === 'completed') { return 'paid'; }
+    return 'processing';     // collecting / transferring / pending
 }
 ```
 
-Update `applyStatusFilter` to use `cp.status='completed'` for the `paid` filter and exclude failed/reversed from `paid`.
+Update `applyStatusFilter`:
+```php
+'paid'    => $query->whereRaw("NOT ({$reversed})")->whereNotNull('o.payout_id')->where('cp.status', 'completed'),
+'pending' => $query->whereRaw("NOT ({$reversed})")->where(function($q) {
+    $q->whereNull('o.payout_id')->orWhereIn('cp.status', ['failed', 'cancelled', 'reversed']);
+}),
+'reversed' => $query->whereRaw($reversed),
+```
 
----
+Update `parseStatusFilter` if `'processing'` becomes a filter value (optional; can also keep 4 states client-side and 3 filter values for now).
+
+The `resolveSettlementDate` private method (line 250-266 of BrandOrdersController) reads `payouts.processed_at` for `paid` status; the new logic keeps that working since `paid` still requires `cp.status='completed'`. No change.
 
 ## Phase 8 — `StripeConnectController` updates
 
 **File:** `app/Http/Controllers/Api/Professional/Stripe/StripeConnectController.php`
 
-Endpoint changes:
+- `GET /stripe/status`: drop `stripe_customer_id` from response (dropped column). Return shape becomes `{ connect, has_payment_method, masked_card }` where `masked_card = { brand, last4 }` from `stripe_payment_method_brand|last4` if set, null otherwise.
+- `POST /stripe/payment-method/setup-checkout`: call renamed `createBrandPaymentMethodSetupSession` (no `Connect` in name).
+- `POST /stripe/payment-method/sync-session`: call renamed `syncBrandPaymentMethodFromCheckoutSession`.
+- `POST /stripe/payment-method/confirm`: delete the endpoint and Form Request entirely — the `saveBrandConnectPaymentMethod` method is gone; the sync-session path is the only attach path now.
+- `GET /stripe/payment-methods`: delete the endpoint — the `listPaymentMethods` service method is gone; the masked_card on `/status` is enough.
+- `DELETE /stripe/payment-method`: call new `removeBrandPaymentMethod` (detach + null DB fields).
+- Authorize via `authorizeForUser($pro, 'managePaymentMethod', $pro)` — keep existing pattern.
+- Routes file `routes/api/professional.php` (or wherever these endpoints live — verify) needs the deleted endpoints removed.
 
-### 8a. `GET /stripe/status`
+## Phase 9 — Frontend (`hunterbalcombesykes/partna-frontend`, branch `main`)
 
-```php
-public function status(Request $request): JsonResponse
-{
-    $pro = $request->attributes->get('professional');
+**Cloud-only constraint:** This planning session is on the backend repo; the frontend repo is not mounted here. The implementation phase will need to clone partna-frontend locally before editing. Flag this to the operator.
 
-    if (! $pro->stripe_connect_account_id) {
-        return response()->json([
-            'connect' => ['status' => 'not_connected'],
-            'has_payment_method' => false,
-            'masked_card' => null,
-        ]);
-    }
-
-    $accountStatus = $this->connectService->syncAccountStatus($pro);
-
-    return response()->json([
-        'connect' => $accountStatus,
-        'has_payment_method' => $pro->isBrand() && ! empty($pro->stripe_payment_method_id),
-        'masked_card' => $pro->isBrand() && $pro->stripe_payment_method_brand
-            ? ['brand' => $pro->stripe_payment_method_brand, 'last4' => $pro->stripe_payment_method_last4]
-            : null,
-    ]);
-}
-```
-
-### 8b. `POST /stripe/connect/onboard` — unchanged signature, calls renamed service method
-### 8c. `POST /stripe/connect/dashboard` — unchanged, calls renamed service method
-### 8d. `POST /stripe/connect/disconnect` — calls `disconnectAccount` which now also clears PM fields
-### 8e. `POST /stripe/payment-method/setup-checkout` — calls `createBrandPaymentMethodSetupSession`
-### 8f. `POST /stripe/payment-method/sync-checkout` — calls `syncBrandPaymentMethodFromCheckoutSession`
-### 8g. `POST /stripe/payment-method/remove` — detach PM from brand's v2 Account + clear fields
-
----
-
-## Phase 9 — Frontend overhaul
-
-### 9a. Types — `Partna-Frontend/lib/stripe-connect.ts`
+### 9a. `lib/stripe-connect.ts` — types
 
 ```ts
 export type StripeConnectStatus = {
-    connect: {
-        status: 'not_connected' | 'onboarding' | 'active' | 'restricted'
-        charges_enabled?: boolean
-        transfers_enabled?: boolean
-        details_submitted?: boolean
-        requirements?: string[]
-    }
-    has_payment_method: boolean
-    masked_card: { brand: string; last4: string } | null
+  connect: {
+    status: 'not_connected' | 'onboarding' | 'active' | 'restricted'
+    charges_enabled?: boolean
+    transfers_enabled?: boolean
+    details_submitted?: boolean
+    requirements?: string[]
+  }
+  has_payment_method: boolean
+  masked_card: { brand: string; last4: string } | null
 }
 ```
 
-Delete from this file (legacy):
-- `StripeFundingMode` type
-- `BrandTopupRecord` type
-- Wallet fields on `BrandBillingSummary`
-- `updateFundingMode`, `createTopupCheckoutSession`, `confirmTopupSession` functions
-- Any `stripe_customer_id` / `stripe_connect_customer_id` references
+Delete every legacy export: `StripeFundingMode`, `BrandTopupRecord`, `updateFundingMode`, `createTopupCheckoutSession`, `confirmTopupSession`, wallet fields on `BrandBillingSummary`, `stripe_customer_id`/`stripe_connect_customer_id` references, `'disconnected'` union member.
 
-### 9b. Stripe Connect Section UI — `features/integrations/components/stripe-connect-section.tsx`
+### 9b. `features/integrations/components/stripe-connect-section.tsx`
 
-Three flow branches:
+Restructure to 4-state UI per professional type. Brand branch:
 
-**Brand branch:**
-```
-Step 1 — Connect Stripe (when status='not_connected'):
-   Button: "Connect Stripe" → POST /stripe/connect/onboard → redirect to Stripe v2 onboarding (merchant + customer configs)
+| `status` | `has_payment_method` | UI |
+|---|---|---|
+| `not_connected` | – | "Connect Stripe" CTA → POST /stripe/connect/onboard |
+| `onboarding` | – | "Continue onboarding" → same endpoint |
+| `active` | false | "Add card" CTA → POST /stripe/payment-method/setup-checkout |
+| `active` | true | masked_card pill + "Remove card" + "Open Stripe Dashboard" |
+| `restricted` | – | Yellow warning + "Resolve issues" → POST /stripe/connect/dashboard |
 
-Step 2 — Add card (when status='active' && !has_payment_method):
-   Button: "Add card" → POST /stripe/payment-method/setup-checkout → redirect to Checkout setup session
+Affiliate branch:
 
-Step 3 — Active (when status='active' && has_payment_method):
-   Card details: "Visa ending 4242"
-   Button: "Remove card" → POST /stripe/payment-method/remove
-   Status pill: "Active — commission payouts run automatically when orders are eligible"
-   Link: "Open Stripe Dashboard" → POST /stripe/connect/dashboard
+| `status` | UI |
+|---|---|
+| `not_connected` | "Connect Stripe" CTA |
+| `onboarding` | "Continue onboarding" |
+| `active` | "Connected — payouts deliver to your Stripe balance" + "Open Stripe Dashboard" |
+| `restricted` | Yellow warning + dashboard link |
 
-Restricted: Yellow warning + "Resolve Stripe issues" button → opens v2 dashboard link
-Onboarding: "Continuing onboarding…" + Continue button → onboarding link
-```
+### 9c. Payouts list + `OrderHistoryTable`
 
-**Affiliate branch:**
-```
-Step 1 — Connect Stripe (when status='not_connected'):
-   Button: "Connect Stripe" → POST /stripe/connect/onboard → redirect to v2 onboarding (recipient config only)
+Replace the 3-state pill mapper with 4 states: `pending | processing | paid | reversed`. Style `processing` (collecting/transferring) as muted gray pill so failed-mid-chain payouts don't read as "completed".
 
-Active: "Connected — you'll receive commission payouts directly to your Stripe account"
-   Link: "Open Stripe Dashboard"
+### 9d. `lib/payout-fixtures.ts`
 
-Restricted: Yellow warning + dashboard link
-```
+Add a `processing` and a `pre_v2_quarantine` failure_code fixture so storybook covers the new states.
 
-### 9c. Payouts page — order status pill
+### 9e. Drop `BrandBillingSummary` wallet fields (if any survived previous PR)
 
-Update `OrderHistoryTable` and `lib/payout-fixtures.ts` to handle 4 states: pending, processing, paid, reversed.
-
-### 9d. Brand Billing Summary type — `Partna-Frontend/lib/`
-
-Drop wallet fields. Already done in earlier PR; verify no leakage.
-
----
+Sweep for `manual_balance_cents`, `funding_mode`, `topup`, `grace_period`. Delete any callsites.
 
 ## Phase 10 — Tests
 
-Test files to update / replace:
-
-**Update / rewrite:**
-- `tests/Feature/Stripe/BrandConnectOnboardingTest.php` — v2 Account creation payload assertions (merchant + customer configs)
-- `tests/Feature/Stripe/BrandPaymentMethodSetupTest.php` — Checkout setup on brand's v2 Account
-- `tests/Feature/Stripe/EligibilityFilterTest.php` — `stripe_payment_method_id` required (not customer_id / connect_customer_id)
-- `tests/Feature/Stripe/CommissionPayoutServiceTest.php` — full rewrite for 3-step chain (mock all 3 Stripe calls, assert correct stripe_account header on each, source_transaction on step 2, idempotency keys)
-- `tests/Feature/Stripe/StripeIdempotencyKeysTest.php` — new idempotency keys: `pi_<id>`, `tr2_<id>`, `tr3_<id>`, `rf_<id>_*`, `rev2_<id>_*`, `rev3_<id>_*`
-- `tests/Feature/Stripe/PostPayoutClawbackTest.php` — clawback now does 3 reversals (step 3 → step 2 → step 1)
-- `tests/Feature/Webhooks/Stripe/StripeConnectWebhookControllerEndToEndTest.php` — trim to v1 events from connected accounts
+**Update:**
+- `tests/Feature/Stripe/BrandConnectOnboardingTest.php` — assert v2 payload: `configuration.merchant.capabilities.card_payments.requested=true`, `configuration.customer={}`, `defaults.responsibilities.fees_collector='application'`.
+- `tests/Feature/Stripe/BrandPaymentMethodSetupTest.php` — assert Checkout payload carries `customer_account` (not `customer`) and the `stripe_account` request option.
+- `tests/Feature/Stripe/EligibilityFilterTest.php` — eligibility now keys off `stripe_payment_method_id` (not `stripe_connect_customer_id` + `stripe_connect_payment_method_id`).
+- `tests/Feature/Stripe/CommissionPayoutServiceTest.php` — full rewrite for 3-step chain. Mock 3 sequential Stripe calls; assert idempotency keys `pi_<id>`, `tr2_<id>`, `tr3_<id>`; assert `stripe_account` header on each is the right account (brand for steps 1+2, affiliate for step 3); assert `source_transaction` is set on step 2 only; assert no `application_fee_amount` on the PI; assert step-1 `customer_account` (not `customer`).
+- `tests/Feature/Stripe/StripeIdempotencyKeysTest.php` — new key inventory: `pi_<id>[_r<n>]`, `tr2_<id>`, `tr3_<id>`, `rf_<id>_{step2,step3}`, `rev2_<id>[_<order>_<hash>]`, `rev3_<id>[_<order>_<hash>]`.
+- `tests/Feature/Stripe/PostPayoutClawbackTest.php` — clawback now executes 3 reversals in `step3 → step2 → step1` order. Test each abort condition (step3 fail → don't touch step2/step1; step2 fail → don't refund; step1 refund fail → flag `needs_manual_refund`).
+- `tests/Feature/Webhooks/Stripe/StripeConnectWebhookControllerEndToEndTest.php` — trim to v1-on-Connected events; remove `v2.core.*` cases (those move to platform controller test); add `transfer.paid` step-2 → `RetryStep3Job` dispatch assertion.
 
 **New:**
-- `tests/Feature/Stripe/PartnaTreasuryTransferTest.php` — step 3 happy path + step 3 failure compensation (reverse step 2 + refund step 1)
-- `tests/Feature/Webhooks/Stripe/StripePlatformWebhookControllerTest.php` — v2 account events + platform PI events
-- `tests/Feature/Commerce/OrderStatusDerivationTest.php` — status derivation across both Brand + Affiliate controllers; 4 states tested
+- `tests/Feature/Stripe/PartnaTreasuryTransferTest.php` — step 3 happy path + step 3 failure compensation (reverse step 2, refund step 1, audit-trail `stripe_payment_intent_id` preserved, `failure_reason` carries Stripe error context).
+- `tests/Feature/Stripe/Step3DeferredRetryTest.php` — `balance_insufficient` on step 3 schedules `RetryStep3Job` and leaves payout in `transferring`; retry job is idempotent.
+- `tests/Feature/Webhooks/Stripe/StripePlatformWebhookControllerTest.php` — `v2.core.account.*` events resolve account → bust cache → call syncAccountStatus; ignore-unknown-account path; signature validation.
+- `tests/Feature/Commerce/OrderStatusDerivationTest.php` — JOIN-based derivation across Brand + Affiliate controllers; 4 states tested (pending, processing, paid, reversed); failed payout shows pending; cancelled payout shows pending; reversed payout shows reversed only if order.refund_cents >= net_cents.
+- `tests/Feature/Stripe/LegacyTransferringQuarantineTest.php` — assert the Phase-1 quarantine migration marks pre-2026-05-13 in-flight payouts as failed and releases their orders.
 
 **Delete:**
-- `tests/Feature/Stripe/TransferToAffiliateTest.php` — replaced by full chain test
-- `tests/Feature/Stripe/DirectChargePayoutTest.php` — replaced
-- `tests/Feature/Stripe/ClawbackOnBrandAccountTest.php` — replaced by PostPayoutClawbackTest with 3-step coverage
+- `tests/Feature/Stripe/TransferToAffiliateTest.php` (replaced).
+- `tests/Feature/Stripe/DirectChargePayoutTest.php` (replaced).
+- `tests/Feature/Stripe/ClawbackOnBrandAccountTest.php` (replaced).
+- Any tests of `StripeWebhookController` (controller deleted).
+- Tests touching `pending_funds`, `funding_source`, `wallet_debit_cents`, `BrandTopup*` — those flows are gone.
 
----
+## Phase 11 — Legacy code sweep
 
-## Phase 11 — Delete legacy code
+Grep + delete every reference to dropped columns and gone code paths. Hit list:
 
-Files to fully delete:
-- `app/Http/Controllers/Api/Webhooks/StripeWebhookController.php` (legacy SaaS path)
-- Any controller / service / job reference to:
-  - `stripe_connect_customer_id`
-  - `stripe_connect_payment_method_id`
-  - `stripe_customer_id`
-  - `stripe_manual_balance_cents` / `_currency` (wallet)
-  - `stripe_grace_period_ends_at`
-  - `stripe_payment_method_id` references that pointed at the old platform-side PM (now refers to brand's-Connect-side PM only)
-  - `funding_mode` / `topup` anywhere
-  - `application_fee_amount` on payment intents (we don't use app_fee in the new model)
-  - `transfer_data.destination` on payment intents (we don't use destination charges)
-  - `on_behalf_of` on payment intents (we use direct charge, not destination)
+```
+stripe_connect_customer_id
+stripe_connect_payment_method_id
+stripe_customer_id            # only in code; column gone
+stripe_manual_balance_cents
+stripe_manual_balance_currency
+stripe_grace_period_ends_at
+'disconnected'                # status string — replaced everywhere by 'not_connected' or full account-id null
+funding_mode
+funding_source
+wallet_debit_cents            # column read only; safe to remove from $fillable + service writes
+pending_funds                 # enum value — remove from $casts + controller filters + tests
+application_fee_amount        # PI param
+on_behalf_of                  # PI param
+transfer_data                 # PI param
+refund_application_fee        # refund param
+reverse_transfer              # refund param
+extractBalanceTransactionNet  # method
+markPendingFunding            # method
+brand_topup                   # frontend
+BrandTopupRecord              # frontend
+StripeFundingMode             # frontend
+```
 
-Env vars to remove:
-- `STRIPE_WEBHOOK_SECRET` (replaced by `_PLATFORM_` and `_CONNECT_` variants)
+Files known to reference these (incomplete; sweep with grep):
+- `app/Services/Stripe/StripeConnectService.php` (line 124, 132, 156, 208, 212-218, 238, 296-300, 308-335, 346-378, 390-462, 469-491, 499+)
+- `app/Services/Stripe/CommissionPayoutService.php` (line 98-105, 396-410, 472-491, 497-517, 738-748, 805-829, 831-859, 877-913)
+- `app/Http/Controllers/Api/Webhooks/StripeConnectWebhookController.php` (line 32-35, 122-132, 192-214, 226-260)
+- `app/Http/Controllers/Api/Webhooks/StripeWebhookController.php` (delete entire file, 449 lines)
+- `app/Http/Controllers/Api/Professional/Stripe/StripeConnectController.php` (line 49-52 + the deleted-endpoint methods)
+- `app/Models/Retail/CommissionPayout.php` — remove `pending_funds`/`collected` from any enum cast/comment; drop `funding_source` from `$fillable`.
+- `app/Models/Core/Professional/Professional.php` — remove dropped columns from `$fillable` (if present).
+- `tests/Feature/Stripe/*.php` (per Phase 10).
+- `routes/api.php` line 65 (delete legacy `/webhooks/stripe`).
+- `config/services.php` already clean.
 
-Schema artifacts: the dropped columns are already gone via the Phase 1 migration applied earlier.
-
-Tests for any of the above: delete or rewrite to match new model.
-
----
-
-## Phase 12 — Pint + tests + commit + PR
+## Phase 12 — Verification, formatting, PR
 
 ```bash
-cd /Users/tobiasbalcombeehrlich/Developer/Comet-Backend
 vendor/bin/pint --dirty
-php artisan test --compact tests/Feature/Stripe/ tests/Feature/Brand/ tests/Feature/Commerce/ tests/Feature/Webhooks/ tests/Feature/Professional/
+php artisan test --compact tests/Feature/Stripe/ tests/Feature/Webhooks/ tests/Feature/Commerce/OrderStatusDerivationTest.php tests/Feature/Brand/ tests/Feature/Professional/
+```
 
-cd /Users/tobiasbalcombeehrlich/Developer/Partna-Frontend
+In partna-frontend:
+```bash
 npm run typecheck && npm run lint
 ```
 
-Iterate until clean. Single coordinated commit (or 3-4 logical commits) on `claude/stripe-v2-chain-overhaul`, PR into `development`, merge.
+Iterate to green. Commit on `claude/stripe-v2-overhaul` as a small number of logical commits (suggested: `feat(stripe): v2 onboarding service`, `feat(stripe): 3-step payout chain + Treasury`, `feat(stripe): split webhook controllers`, `fix(stripe): close May 13 bugs`, `feat(frontend): v2 stripe-connect UI`). PR into `development`.
 
----
+## End-to-end verification checklist
 
-## Verification (end-to-end after merge)
-
-1. **Endpoint reachability:**
+1. Endpoint reachability:
    ```
-   curl -X POST https://dev-api.partna.au/api/webhooks/stripe-platform   # → 400 (signature missing, endpoint up)
-   curl -X POST https://dev-api.partna.au/api/webhooks/stripe-connect    # → 400
+   curl -X POST https://dev-api.partna.au/api/webhooks/stripe-platform     # → 400 invalid_signature
+   curl -X POST https://dev-api.partna.au/api/webhooks/stripe-connect      # → 400 Missing signature
+   curl -X POST https://dev-api.partna.au/api/webhooks/stripe              # → 404
    ```
+2. Stripe Dashboard → both destinations → "Send test event" → 200 OK.
+3. Brand (Side St) onboarding → DB row `stripe_connect_account_id` populated, `stripe_connect_status` reaches `active`. `v2.core.account[configuration.merchant].updated` lands on Destination A, 200 OK.
+4. Brand adds card → DB has `stripe_payment_method_id|brand|last4`. `checkout.session.completed` lands on Destination B (Connected), 200 OK.
+5. Affiliate (vintage-boutqiu) onboarding → `stripe_connect_status='active'`. `v2.core.account[configuration.recipient].updated` lands on Destination A.
+6. Place Shopify order → backend job chain runs to completion. Single log line "Commission payout completed (3-step chain)". DB row has all three of `stripe_payment_intent_id`, `stripe_transfer_id`, `stripe_fee_transfer_id` populated.
+7. Stripe Dashboard cross-check:
+   - Platform Payments view: empty (we're not settlement merchant).
+   - Brand's Express dashboard: $6 charge + $6 transfer to affiliate, balance $0.
+   - Affiliate's Express dashboard: $6 in from Side St, $1.20 out to "Partna Platform Fees", balance $4.80.
+   - Treasury dashboard: +$1.20.
+8. UI: brand + affiliate payouts both show "Paid".
+9. Negative — card decline (swap PM to `4000000000000259`): step-1 fails, payout status `failed`, `failure_code='charge_failed'`, `failure_reason` contains `[card_declined] Your card was declined. (request_id=req_..., type=card_error)`. Orders released back to pending. `stripe_payment_intent_id` PRESERVED on row. No step-2 or step-3 events at Stripe.
+10. Negative — step-3 forced failure (revoke Treasury bank link briefly): steps 1+2 succeed, step 3 fails terminal → service reverses step 2 + refunds step 1. Net: $0 everywhere except a Stripe processing fee absorbed by platform balance. Payout status `failed` with `failure_code='fee_transfer_failed'`.
+11. Shopify refund clawback: refund order → `clawbackCompletedPayout` runs the 3-reversal chain in order. All three reversal entries visible in respective Stripe dashboards. `commission_clawbacks` table has a row with `status='reversed'`. UI shows order as "Reversed".
+12. Legacy quarantine: `SELECT id, status, failure_code FROM commerce.commission_payouts WHERE failure_code='pre_v2_quarantine'` returns the pre-2026-05-13 in-flight rows; their orders have `payout_id=NULL`.
 
-2. **Webhook delivery test:** Stripe Dashboard → both destinations → "Send test event" → expect 200 OK.
+## Shopify-rebuild crossover risks
 
-3. **Brand onboards (Side St):**
-   - Settings → Payments → "Connect Stripe" → v2 onboarding (company, ABN, address, bank)
-   - DB: `stripe_connect_account_id` populated, `stripe_connect_status='active'` (or 'onboarding')
-   - Webhook: `v2.core.account[configuration.merchant].updated` lands at platform endpoint, 200 OK
+Two collision points with the in-flight Shopify embedded-auth rebuild (`~/.claude/plans/we-spent-a-long-humming-phoenix.md`, not in repo):
 
-4. **Brand adds card:**
-   - "Add card" → Checkout setup → `4242 4242 4242 4242` → return
-   - DB: `stripe_payment_method_id`, `stripe_payment_method_brand='visa'`, `stripe_payment_method_last4='4242'`
-   - Webhook: `checkout.session.completed` lands at platform endpoint, 200 OK
+1. **`resolveShopCurrency(Professional $pro)`** in `StripeConnectService` reads `professional_integrations.provider_metadata->shop_currency`. The Shopify rebuild touches that JSON object's structure for tenant-resolution. **Decision: keep the `shop_currency` key untouched; both plans must agree it's a stable contract.** Add a fallback to `'aud'` if missing (already in plan).
+2. **`ProcessShopifyOrderWebhookJob`** is the entry point from `orders/paid` webhook → eventually dispatches `ProcessCommissionPayoutsJob`. The Shopify rebuild changes `/internal/embedded/*` auth but **does not change** the public webhook receiver at `/api/webhooks/shopify/orders-paid`. **No collision** — different surfaces.
 
-5. **Affiliate onboards (vintage-boutqiu):**
-   - Settings → Payments → "Connect Stripe" → v2 onboarding (individual, basic info, bank)
-   - DB: `stripe_connect_status='active'`
+No code in this v2 plan touches `/internal/embedded/*` or the new `shopify.session` middleware.
 
-6. **Place test Shopify order → instant payout fires:**
-   - Watch backend logs for `ProcessShopifyOrderWebhookJob` → `ProcessCommissionPayoutsJob` → `ExecuteCommissionPayoutJob`
-   - Watch logs: "Commission payout completed (3-step chain)"
+## Cloud-only execution constraints (flag for the operator)
 
-7. **Stripe Dashboard verification:**
-   - Platform's Payments view: no entries (we're not settlement merchant)
-   - Brand's Connect Express dashboard: charge of $X + transfer of $X to vintage-boutqiu (net $0)
-   - Affiliate's Connect Express dashboard: transfer received from Side St $X + transfer sent to Partna Platform Fees $Y (net $X-Y)
-   - Partna Treasury's dashboard: transfer received from vintage-boutqiu $Y, balance +$Y
+- Implementation phase must clone `hunterbalcombesykes/partna-frontend` locally before Phase 9 — frontend code isn't mounted in this remote planning session.
+- Phase 0 (Treasury Stripe Account creation + env var wiring + webhook destination recreation) requires Stripe Dashboard access + Laravel Cloud env access. **Must be done by the operator outside Claude.** The plan won't progress past Phase 2 without `STRIPE_PARTNA_TREASURY_ACCOUNT_ID` being set in Laravel Cloud.
+- Treasury account onboarding needs real Partna business details (ABN, operating bank). One-time, irreversible-ish (you can leave a stale account behind but the display name is what affiliates see).
+- After Phase 1 migration push, app pods need a redeploy with the new code OR the dropped-column code paths will throw on any DB write touching `stripe_connect_customer_id` etc. **Phases 1–11 must ship in a single deploy.** Don't push the migration to prod without the code.
 
-8. **DB row verification:**
-   ```sql
-   SELECT status, failure_code, stripe_payment_intent_id, stripe_transfer_id, stripe_fee_transfer_id
-     FROM commerce.commission_payouts ORDER BY created_at DESC LIMIT 1;
-   ```
-   All three Stripe IDs populated, status='completed'.
+## Risk inventory (flagged for operator decision before merge)
 
-9. **UI verification:**
-   - Brand Payouts tab: order shows "Paid"
-   - Affiliate Payouts tab: order shows "Paid"
-
-10. **Negative path — trigger a step-1 failure:**
-   - Swap brand's saved card to `4000000000000259` (fraudulent decline)
-   - Place order → step 1 PI fails
-   - DB: status='failed', failure_code='charge_failed', failure_reason has full Stripe error context
-   - No transfer events fired (chain stopped at step 1)
-   - Order released back to pending in both UIs
-
-11. **Negative path — step-3 failure compensation:**
-   - Briefly delete the Treasury account's bank link in Stripe Dashboard (simulates step 3 capability issue)
-   - Place order → step 1 + step 2 succeed, step 3 fails
-   - Service compensation runs: step 2 reversed (affiliate→brand), step 1 charge refunded
-   - DB: status='failed', failure_code='fee_transfer_failed' or similar
-   - Net effect: $0 in all accounts
-
-12. **Shopify refund clawback:**
-   - Refund the order in Shopify → `ProcessShopifyOrderRefundJob` → `clawbackPartialPayout` or `clawbackCompletedPayout`
-   - Stripe Dashboard: all 3 reversals visible (step 3 reverse, step 2 reverse, step 1 refund)
-   - DB: order.refund_cents incremented, payout.reversed_commission_cents updated
-   - UI: order shows "Reversed"
-
----
-
-## Files touched (estimate)
-
-| Layer | Files | Lines (rough) |
+| Risk | Likelihood | Mitigation |
 |---|---|---|
-| Backend migrations | 1 new (fee_transfer_id column) | 5 |
-| Backend services | 3 rewrites (StripeConnectService, CommissionPayoutService, CommissionPayoutRefundService) | -1100 / +900 |
-| Backend controllers | 1 new (StripePlatformWebhookController) + 1 trimmed (StripeConnectWebhookController) + 1 updated (StripeConnectController) + 2 updated (Brand/AffiliateOrdersController) | +500 / -200 |
-| Routes + config | 2 files | +10 / -5 |
-| Backend models | 1 (CommissionPayout: add stripe_fee_transfer_id to fillable + comment) | +5 |
-| Tests | ~12 files updated, 3 new, 3 deleted | +800 / -500 |
-| Frontend types | 1 (lib/stripe-connect.ts) | +30 / -60 |
-| Frontend UI | 1 main (stripe-connect-section.tsx) + 1 payouts table | +200 / -150 |
-| Frontend fixtures | 1 (payout-fixtures.ts) | +20 / -10 |
+| Checkout setup mode rejects `customer_account` parameter | Low | Fallback: create a v1 sub-Customer on brand's account once, store its `cus_…` ID on a new `professionals.stripe_brand_subcustomer_id` column. Adds 1 migration + 1 service helper. Decide on first failing test. |
+| v2 SDK calls (`$stripe->v2->core->...`) not present in installed `stripe/stripe-php` version | Low | `composer show stripe/stripe-php` — confirm `>= 17.x` which has the v2 namespace. Bump if needed. |
+| Step-3 deferred retry job loops indefinitely on a permanent affiliate capability issue | Medium | `RetryStep3Job` has `$tries=5` and exponential backoff capped at 4h. After exhaustion, dispatches the same compensation logic as a synchronous step-3 terminal failure (reverse step-2, refund step-1, `failure_code='fee_transfer_failed_after_retries'`). |
+| `charge.dispute.created` fires on Connected-accounts scope but our controller doesn't handle it yet | Low | Decision: log the event for now (no automated dispute handling). Webhook destination subscription is there so we have a paper trail; add a real handler in a follow-up. |
+| `STRIPE_PARTNA_TREASURY_ACCOUNT_ID` env var missing in prod or staging when v2 rolls out | Medium | `processPayoutBatch` fails fast with `config_error` and releases orders. The eligibility filter also short-circuits if config is missing. Document the env var in `.env.example`. |
+| Brand or affiliate in a country not in `STRIPE_CONNECT_SUPPORTED_COUNTRIES` | Existing | `mapCountryCode` aborts 422 — unchanged. |
+| Brand's `defaults.currency` mismatches order's `currency_code` (e.g. AU brand, USD order) | Existing | Eligibility filter checks `currency_code` match in `processEligiblePayouts` — unchanged. |
+| Stripe's `customer_account` field requires API version ≥ `2025-12-15.preview` | Resolved | API version is pinned to `2026-02-25.clover` (post-preview, GA-style). Verified. |
 
-Total estimate: ~1800 lines net change.
+## Files touched (final)
 
----
+| Layer | Files | Net lines (est) |
+|---|---|---|
+| Migrations | 2 new (fee_transfer_id column, pre-v2 quarantine) | +35 |
+| Config | `config/services.php` (1 line) | +1 |
+| Services | `StripeConnectService` (full rewrite ~500 lines), `CommissionPayoutService` (rewrite ~600 lines), `CommissionPayoutRefundService` (rewrite ~300 lines) | -1300 / +1000 |
+| Jobs | `RetryStep3Job` (new) | +50 |
+| Controllers | `StripePlatformWebhookController` (new, ~200), `StripeConnectWebhookController` (trim+rewrite ~400), `StripeWebhookController` (delete ~450), `StripeConnectController` (slim ~50 lines net), `BrandOrdersController` + `AffiliateOrdersController` (status derivation) | +200 / -550 |
+| Routes | `routes/api.php` (1 add, 1 delete) | +1 / -1 |
+| Models | `CommissionPayout` ($fillable add + comment), `Professional` ($fillable cleanup) | +5 / -10 |
+| Tests | 7 rewrites + 4 new + 5 deletes | +900 / -700 |
+| Frontend | `lib/stripe-connect.ts`, `features/integrations/components/stripe-connect-section.tsx`, payouts table, `lib/payout-fixtures.ts` | +250 / -200 |
+| **Total** | | ~**+2700 / −2750**, net slight contraction |
 
-## Risks + mitigations
+## Rollback path
 
-| Risk | Mitigation |
-|---|---|
-| Cross-account Transfer (affiliate → Treasury) may not be a publicly-documented use case in current Stripe docs; the docs page focuses on platform→connected only | Capabilities doc explicitly confirms `stripe_balance.stripe_transfers` accepts transfers "from the platform or connected accounts". The pattern works via the `stripe_account` header on the Transfer create call. First implementation test catches any rejection. |
-| Step 3 can't be source_transaction-pinned to step 2 — affiliate's balance might be in pending state for new accounts | State machine handles synchronously when balance is available; falls back to async retry via `transfer.paid` webhook on step 2 + scheduled retry job. Documented in Phase 4. For first-payout-from-new-affiliate, step 3 may complete asynchronously up to 2-7 days after step 1-2; this is acceptable for non-real-money dev testing. |
-| v2 PHP SDK call shapes may differ from cURL docs | SDK v19.4.1 has full `$stripe->v2->core->{accounts,accountLinks}` services. Each method's first invocation surfaces any shape rejection clearly. Adjust + retest. |
-| `customer = $brand->stripe_connect_account_id` on PaymentIntent.create may not accept a v2 Account ID directly | Per Stripe v2 docs, v2 Accounts can be referenced as v1 Customers via the same ID. If rejected, fallback: also create a v1 Customer on the brand's account during onboarding, store its ID, and use that as the PaymentIntent customer. |
-| Treasury account onboarding requires real Partna business details (ABN, bank) | One-time manual step in Phase 0.2. User onboards as Partna's authorized representative. |
-| Stripe processing fee absorbed by platform (~$0.30 per payout) reduces Partna's net margin from $1.20 → ~$0.90 | Documented and accepted per user choice. |
-| Treasury's payout schedule may delay actual settlement of fees to Partna's operating bank | Default daily payout from Treasury → bank. Configurable. Document for ops. |
-| Step 3 reversal during clawback requires affiliate → Treasury direction (clawback should reverse the fee back to affiliate so they're whole again? Or to brand?) | Step 3 reversal moves $1.20 from Treasury back to affiliate. Then step 2 reversal moves $X from affiliate back to brand. Then step 1 refund moves $X from brand to cardholder. Net: all parties whole, Treasury -$1.20. |
-| Webhook event ordering not guaranteed — step 3's `transfer.created` might land before step 2's `transfer.paid` | Each webhook handler is idempotent — checks current DB state + acts only on transitions it understands. No assumed ordering. |
-| Stripe Connect "Same region" requirement may block AU→AU→AU transfers if not configured correctly | All three accounts (brand, affiliate, Treasury) are AU. Same region. No cross-border. Confirmed safe. |
-| Connect account "settlement currency" mismatch (e.g. brand in AU charging in USD) | Eligibility filter enforces matching `currency_code` on the order vs the brand's default currency. For multi-currency, separate plan. |
+This is a single-PR all-or-nothing migration. To rollback:
 
-## Rollback
+1. `git revert` the merge commit on `development`.
+2. Reverse migrations `20260513500000` (drop `stripe_fee_transfer_id` column) and `20260513600000` (un-quarantine — but the rows are now lost to manual review, no automated un-quarantine).
+3. The original `20260513400000` migration (dropped columns) is harder to reverse without data loss — but since the dev DB is wiped clean per Phase 0.1, there's no production data risk on this branch.
+4. The Partna Treasury Stripe Account is left in place at Stripe — harmless idle account.
 
-This is a single-PR all-or-nothing migration. Rollback path:
-- `git revert` the merge commit
-- Re-apply equivalent reverse-migration SQL if any new columns added (Phase 4e: drop `stripe_fee_transfer_id`)
-- The Treasury Connect account stays on Stripe (it's an account; doesn't get destroyed by code rollback). Just leave it; we'll use it when we re-implement.
+## Out of scope (deferred)
 
-Lower-risk fallback if v2 SDK calls fail during implementation:
-- Pause the PR
-- Reimplement with v1 Express accounts (current architecture pre-this-PR), keeping the 3-step chain logic
-- v1 Express accounts support direct charges + cross-account transfers + saved cards (the building blocks we need)
-- We lose v2's "single Account = customer + merchant" elegance but the user-visible behavior is identical
-
----
-
-## Out of scope (deferred to future PRs)
-
-- Production Stripe Dashboard configuration (this plan covers dev only)
-- Migrating prod brands/affiliates (no prod commerce yet)
-- Multi-currency support (assume AUD throughout)
-- Affiliate cash-out flow (Stripe Express handles)
-- Custom-domain branding on Stripe Express
-- Cross-border payouts
-- SaaS subscription billing on brand accounts (would use the existing `customer` configuration we already enabled)
-- Tax calculation / invoicing (Stripe Tax / Stripe Invoices) on the Partna platform fee
+- Prod environment Stripe Dashboard configuration (this plan covers dev only).
+- Migrating any prod brand/affiliate Stripe Accounts (no prod commerce yet).
+- Multi-currency support (assume AUD only).
+- Custom domain branding on Stripe Express dashboards.
+- Cross-border payouts.
+- Tax/invoicing on Partna's platform fee.
+- Automated dispute response on `charge.dispute.created`.
