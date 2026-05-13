@@ -9,8 +9,8 @@ class CreatePaymentMethodSetupRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'success_url' => ['required', 'url'],
-            'cancel_url'  => ['required', 'url'],
+            'success_url' => ['required', 'url', $this->allowedRedirectRule()],
+            'cancel_url' => ['required', 'url', $this->allowedRedirectRule()],
         ];
     }
 }

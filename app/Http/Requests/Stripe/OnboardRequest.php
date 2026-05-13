@@ -9,8 +9,8 @@ class OnboardRequest extends BaseFormRequest
     public function rules(): array
     {
         return [
-            'return_url' => ['required', 'url'],
-            'refresh_url' => ['required', 'url'],
+            'return_url' => ['required', 'url', $this->allowedRedirectRule()],
+            'refresh_url' => ['required', 'url', $this->allowedRedirectRule()],
         ];
     }
 }

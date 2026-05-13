@@ -26,23 +26,4 @@ class StorePlanSubscriptionRequest extends BaseFormRequest
             return Plan::where('plan_key', 'free')->value('id') ?? '';
         });
     }
-
-    private function allowedRedirectRule(): \Closure
-    {
-        return function (string $attribute, mixed $value, \Closure $fail) {
-            if (! $value) {
-                return;
-            }
-
-            $host = parse_url($value, PHP_URL_HOST);
-            $frontendHost = parse_url(config('app.frontend_url', ''), PHP_URL_HOST);
-            $appHost = parse_url(config('app.url', ''), PHP_URL_HOST);
-
-            $allowed = array_filter([$frontendHost, $appHost, 'localhost', '127.0.0.1']);
-
-            if (! $host || ! in_array($host, $allowed, true)) {
-                $fail('The redirect URL domain is not allowed.');
-            }
-        };
-    }
 }
