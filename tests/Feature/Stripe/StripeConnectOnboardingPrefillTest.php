@@ -36,7 +36,7 @@ beforeEach(function () {
     )');
 });
 
-function makeProfessional(array $overrides = []): Professional
+function makeConnectPrefillProfessional(array $overrides = []): Professional
 {
     $id = (string) Str::uuid();
     $now = now()->toDateTimeString();
@@ -106,7 +106,7 @@ it('prefills business_profile and individual blocks from a fully-filled professi
     // Add the partna_url column so the helper can read it (test schema omits it by default).
     DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
 
-    $pro = makeProfessional([
+    $pro = makeConnectPrefillProfessional([
         'partna_url' => 'https://test-affiliate.partna.au',
         'phone' => '+61412345678',
         'bio' => 'A bio that should not be sent when URL is present',
@@ -144,7 +144,7 @@ it('prefills business_profile and individual blocks from a fully-filled professi
 it('sends product_description as a fallback when partna_url is missing', function () {
     DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
 
-    $pro = makeProfessional([
+    $pro = makeConnectPrefillProfessional([
         'partna_url' => null,
         'bio' => 'I sell handmade soap',
     ]);
@@ -160,7 +160,7 @@ it('sends product_description as a fallback when partna_url is missing', functio
 it('drops non-E.164 phone numbers and omits address when country is missing', function () {
     DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
 
-    $pro = makeProfessional([
+    $pro = makeConnectPrefillProfessional([
         'phone' => '0412345678',                     // missing leading '+'
         'location_street_address' => '123 Test St',
         'location_country' => null,                  // address skipped without country
@@ -180,7 +180,7 @@ it('skips address when location_country is a free-form value Stripe cannot map',
     // should silently drop the address block and let onboarding proceed.
     DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
 
-    $pro = makeProfessional([
+    $pro = makeConnectPrefillProfessional([
         'location_street_address' => '37 Hardiman Street',
         'location_city' => 'Kensington',
         'location_state' => 'Victoria',
@@ -198,7 +198,7 @@ it('skips address when location_country is a free-form value Stripe cannot map',
 it('omits the prefill blocks entirely when the professional has no prefillable fields', function () {
     DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
 
-    $pro = makeProfessional([
+    $pro = makeConnectPrefillProfessional([
         'display_name' => null,
         'first_name' => null,
         'last_name' => null,

@@ -14,7 +14,7 @@ beforeEach(function () {
     Mail::fake();
 });
 
-function makeProfessional(array $overrides = []): Professional
+function makeDeletionTestProfessional(array $overrides = []): Professional
 {
     $id = (string) Str::uuid();
     $data = array_merge([
@@ -34,7 +34,7 @@ function makeProfessional(array $overrides = []): Professional
 }
 
 it('rejects request when professional has pending commission payouts', function () {
-    $pro = makeProfessional();
+    $pro = makeDeletionTestProfessional();
 
     DB::connection('pgsql')->table('commerce.commission_payouts')->insert([
         'id' => (string) Str::uuid(),
@@ -55,7 +55,7 @@ it('rejects request when professional has pending commission payouts', function 
 });
 
 it('stores hashed token, sets requested_at, and sends confirmation mail', function () {
-    $pro = makeProfessional();
+    $pro = makeDeletionTestProfessional();
 
     $service = new AccountDeletionService;
     $request = Request::create('/', 'POST');
@@ -77,7 +77,7 @@ it('stores hashed token, sets requested_at, and sends confirmation mail', functi
 });
 
 it('writes a requested audit entry on successful request', function () {
-    $pro = makeProfessional();
+    $pro = makeDeletionTestProfessional();
     $service = new AccountDeletionService;
     $request = Request::create('/', 'POST', [], [], [], ['REMOTE_ADDR' => '1.2.3.4', 'HTTP_USER_AGENT' => 'TestAgent']);
 
@@ -97,7 +97,7 @@ it('writes a requested audit entry on successful request', function () {
 });
 
 it('rolls back token storage if mail send throws', function () {
-    $pro = makeProfessional();
+    $pro = makeDeletionTestProfessional();
 
     Mail::shouldReceive('to')->andThrow(new \RuntimeException('SMTP down'));
 

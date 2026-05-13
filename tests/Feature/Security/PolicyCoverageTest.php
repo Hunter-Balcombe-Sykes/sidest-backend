@@ -40,6 +40,19 @@ const POLICY_EXEMPT = [
     // Nested under Commerce\Order — append-only audit log; access flows through
     // the parent Order's CommissionPolicy. Mirrors the CommissionPayoutItem pattern.
     \App\Models\Commerce\OrderEvent::class,
+
+    // Nested under CommissionPayout — append-only Stripe-reversal log written
+    // server-side by CommissionPayoutRefundService. No user-facing CRUD; reads
+    // are gated by the parent CommissionPayout's CommissionPolicy (and at the
+    // DB layer by RLS policy `clawbacks_party_select` in
+    // 20260512200000_commission_clawbacks_enable_rls.sql).
+    \App\Models\Commerce\CommissionClawback::class,
+
+    // Handle-rename redirect lookup. Read by HydrogenAffiliateController for
+    // public Hydrogen storefront resolution (anon API-key path); no tenant
+    // CRUD endpoints. Rows are written as side-effects of handle renames,
+    // never directly by professionals.
+    \App\Models\Core\Site\ProfessionalHandleAlias::class,
 ];
 
 it('every tenant-owned model has a registered policy', function () {
