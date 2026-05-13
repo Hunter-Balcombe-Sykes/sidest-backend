@@ -83,7 +83,7 @@ class StripeConnectService
             );
         }
 
-        $account = $this->stripe->accounts->create([
+        $accountPayload = array_merge([
             'type' => 'express',
             'country' => $this->mapCountryCode($professional->country_code),
             'email' => $professional->primary_email,
@@ -103,7 +103,12 @@ class StripeConnectService
                 // See https://docs.stripe.com/connect/account-capabilities
                 'transfers' => ['requested' => true],
             ],
-        ], ['idempotency_key' => "acct_{$professional->id}"]);
+        ], $this->buildAccountPrefillPayload($professional));
+
+        $account = $this->stripe->accounts->create(
+            $accountPayload,
+            ['idempotency_key' => "acct_{$professional->id}"],
+        );
 
         $update = [
             'stripe_connect_account_id' => $account->id,
@@ -819,5 +824,110 @@ class StripeConnectService
         }
 
         return $upper;
+    }
+
+    /**
+     * Build the Stripe Account prefill block from a Professional row.
+     *
+     * Stripe pre-populates the Express onboarding form from any business_profile
+     * and individual fields we pass on create. Missing fields are silently
+     * dropped (via array_filter) so partial data is safe. Fields stay editable
+     * for the user; we're saving them keystrokes, not locking values.
+     *
+     * Notes:
+     * - business_profile.product_description is only sent when there's no URL.
+     *   Stripe asks for one or the other; sending both is noisy.
+     * - individual.phone is only sent when it looks like E.164 (starts with '+').
+     *   Free-form phone numbers cause Stripe to reject the entire create call.
+     * - Address is only sent when line1 AND country are both present. Stripe
+     *   rejects partial addresses without those two fields together.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildAccountPrefillPayload(Professional $professional): array
+    {
+        $payload = [];
+
+        $url = is_string($professional->partna_url ?? null) && trim($professional->partna_url) !== ''
+            ? $professional->partna_url
+            : null;
+
+        $businessProfile = array_filter([
+            'name' => $this->stringOrNull($professional->display_name),
+            'url' => $url,
+            // Only fall back to description when no URL is set (Stripe asks for one).
+            'product_description' => $url === null ? $this->stringOrNull($professional->bio) : null,
+            'support_email' => $this->stringOrNull($professional->primary_email),
+        ]);
+
+        if ($businessProfile !== []) {
+            $payload['business_profile'] = $businessProfile;
+        }
+
+        $individual = array_filter([
+            'first_name' => $this->stringOrNull($professional->first_name),
+            'last_name' => $this->stringOrNull($professional->last_name),
+            'email' => $this->stringOrNull($professional->primary_email),
+            'phone' => $this->e164PhoneOrNull($professional->phone),
+        ]);
+
+        $address = $this->buildAddressOrNull($professional);
+        if ($address !== null) {
+            $individual['address'] = $address;
+        }
+
+        if ($individual !== []) {
+            $payload['individual'] = $individual;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Build a Stripe address block from location_* fields, or null when the
+     * required minimum (line1 + country) isn't present.
+     *
+     * @return array<string, string>|null
+     */
+    private function buildAddressOrNull(Professional $professional): ?array
+    {
+        $line1 = $this->stringOrNull($professional->location_street_address);
+        $country = $this->stringOrNull($professional->location_country);
+
+        if ($line1 === null || $country === null) {
+            return null;
+        }
+
+        return array_filter([
+            'line1' => $line1,
+            'city' => $this->stringOrNull($professional->location_city),
+            'state' => $this->stringOrNull($professional->location_state),
+            'postal_code' => $this->stringOrNull($professional->location_postcode),
+            'country' => $this->mapCountryCode($country),
+        ]);
+    }
+
+    private function stringOrNull(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
+    }
+
+    /**
+     * Stripe rejects the entire account create when phone isn't E.164. Drop
+     * anything that doesn't start with '+' rather than risk a 400.
+     */
+    private function e164PhoneOrNull(mixed $value): ?string
+    {
+        $value = $this->stringOrNull($value);
+        if ($value === null) {
+            return null;
+        }
+
+        return str_starts_with($value, '+') ? $value : null;
     }
 }
