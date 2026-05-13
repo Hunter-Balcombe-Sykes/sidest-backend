@@ -157,12 +157,13 @@ class CommissionPolicy extends BasePolicy
     }
 
     /**
-     * Only non-brand professionals (affiliates/influencers) start Stripe Connect onboarding.
-     * Brands fund payouts but receive via bank, not Connect Express.
+     * Every professional type can onboard with Stripe Connect Express.
+     * Affiliates onboard to RECEIVE transfers; brands onboard so commission
+     * charges run as direct charges on the brand's own Connect account
+     * (brand = merchant of record on the customer-facing statement).
      */
     public function startConnect(Professional $actor, Professional $pro): bool
     {
-        return $actor->id === $pro->id
-            && ($actor->professional_type ?? null) !== 'brand';
+        return $actor->id === $pro->id;
     }
 }

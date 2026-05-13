@@ -48,7 +48,11 @@ class StripeConnectController extends Controller
         return response()->json([
             'connect' => $connectStatus,
             'has_payment_method' => $hasPaymentMethod,
-            'stripe_customer_id' => $pro->stripe_customer_id,
+            // Surface the brand-Connect-scoped customer id (used by the
+            // frontend to gate the "add card" CTA). The platform-scoped
+            // stripe_customer_id is intentionally NOT exposed here — it
+            // belongs to the SaaS-billing path.
+            'stripe_customer_id' => $pro->stripe_connect_customer_id,
             'funding_mode' => $pro->stripe_commission_funding_mode ?? 'auto_charge',
             'manual_balance' => [
                 'cents' => (int) ($pro->stripe_manual_balance_cents ?? 0),
@@ -111,39 +115,52 @@ class StripeConnectController extends Controller
 
     /**
      * POST /stripe/payment-method/setup-checkout
-     * Creates a hosted Stripe Checkout setup session for brand payment method setup.
+     * Creates a hosted Stripe Checkout setup session scoped to the brand's
+     * OWN Connect account — the saved card lives on the brand's account so
+     * the commission direct charge can later read it. Brand must already
+     * have completed Connect onboarding (have a stripe_connect_account_id).
      */
     public function createPaymentMethodCheckoutSession(CreatePaymentMethodSetupRequest $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
         Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
-        $result = $this->connectService->createPaymentMethodSetupCheckoutSession(
-            $pro,
-            $request->input('success_url'),
-            $request->input('cancel_url'),
-        );
+        try {
+            $result = $this->connectService->createBrandConnectPaymentMethodSetupSession(
+                $pro,
+                $request->input('success_url'),
+                $request->input('cancel_url'),
+            );
 
-        return response()->json($result);
+            return response()->json($result);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 
     /**
      * POST /stripe/payment-method/confirm
-     * Saves the payment method after the brand confirms the SetupIntent.
+     * Saves the payment method after the brand confirms the SetupIntent on
+     * their own Connect account.
      */
     public function confirmPaymentMethod(ConfirmPaymentMethodRequest $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
         Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
-        $this->connectService->savePaymentMethod($pro, $request->input('payment_method_id'));
+        try {
+            $this->connectService->saveBrandConnectPaymentMethod($pro, $request->input('payment_method_id'));
 
-        return response()->json(['status' => 'saved']);
+            return response()->json(['status' => 'saved']);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 
     /**
      * POST /stripe/payment-method/sync-session
-     * Syncs the default payment method from a completed Checkout setup session.
+     * Syncs the default payment method from a completed brand-scoped Checkout
+     * setup session.
      */
     public function syncPaymentMethodSession(SyncPaymentMethodSessionRequest $request): JsonResponse
     {
@@ -151,7 +168,7 @@ class StripeConnectController extends Controller
         Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         try {
-            $result = $this->connectService->syncPaymentMethodFromCheckoutSession(
+            $result = $this->connectService->syncBrandConnectPaymentMethodFromCheckoutSession(
                 $pro,
                 $request->input('session_id'),
             );

@@ -304,7 +304,12 @@ class StripeConnectService
     }
 
     /**
-     * Create a Stripe Customer for a brand so we can charge them for commissions.
+     * Create a Stripe Customer for a brand on Partna's PLATFORM Stripe account.
+     * Kept for SaaS-billing subscriptions (the customer must live on the
+     * platform for subscription invoicing).
+     *
+     * The commission-payout path no longer uses this — see
+     * createBrandConnectCustomer for the brand-Connect-scoped equivalent.
      */
     public function createCustomer(Professional $brand): string
     {
@@ -325,7 +330,44 @@ class StripeConnectService
     }
 
     /**
-     * Stripe Checkout hosted setup flow for collecting a reusable payment method.
+     * Create a Stripe Customer scoped to the BRAND'S OWN Connect account so the
+     * saved card lives on the same account that will later run the commission
+     * direct charge. Brand must already be onboarded — Stripe rejects customer
+     * creates on accounts that don't have card_payments capability.
+     */
+    public function createBrandConnectCustomer(Professional $brand): string
+    {
+        if (! $brand->stripe_connect_account_id) {
+            throw new \RuntimeException('Brand must complete Stripe Connect onboarding before adding a payment method.');
+        }
+
+        $customer = $this->stripe->customers->create(
+            [
+                'email' => $brand->primary_email,
+                'name' => $brand->display_name,
+                'metadata' => [
+                    'sidest_professional_id' => $brand->id,
+                    'professional_type' => $brand->professional_type,
+                    'purpose' => 'brand_commission_funding',
+                ],
+            ],
+            [
+                'stripe_account' => $brand->stripe_connect_account_id,
+                'idempotency_key' => "brand_connect_customer_{$brand->id}",
+            ],
+        );
+
+        $brand->update([
+            'stripe_connect_customer_id' => $customer->id,
+        ]);
+
+        return $customer->id;
+    }
+
+    /**
+     * Stripe Checkout hosted setup flow on PARTNA'S PLATFORM Stripe account.
+     * Kept for any flow that still saves a PM on the platform; the brand
+     * commission path now uses createBrandConnectPaymentMethodSetupSession.
      */
     public function createPaymentMethodSetupCheckoutSession(
         Professional $brand,
@@ -349,6 +391,50 @@ class StripeConnectService
                 'sidest_professional_id' => $brand->id,
             ],
         ]);
+
+        return [
+            'checkout_url' => $session->url,
+            'session_id' => $session->id,
+        ];
+    }
+
+    /**
+     * Stripe Checkout hosted setup flow scoped to the BRAND'S OWN Connect
+     * account. The resulting Customer + PaymentMethod live on the brand's
+     * account, where the commission direct charge will later read them.
+     *
+     * The `stripe_account` request option (SDK form of the `Stripe-Account`
+     * HTTP header) is what makes Stripe create the session on the brand's
+     * account instead of Partna's platform.
+     */
+    public function createBrandConnectPaymentMethodSetupSession(
+        Professional $brand,
+        string $successUrl,
+        string $cancelUrl,
+    ): array {
+        if (! $brand->stripe_connect_account_id) {
+            throw new \RuntimeException('Brand must complete Stripe Connect onboarding before adding a payment method.');
+        }
+
+        $customerId = $brand->stripe_connect_customer_id;
+        if (! $customerId) {
+            $customerId = $this->createBrandConnectCustomer($brand);
+        }
+
+        $session = $this->stripe->checkout->sessions->create(
+            [
+                'mode' => 'setup',
+                'customer' => $customerId,
+                'payment_method_types' => ['card'],
+                'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_pm_session_id'),
+                'cancel_url' => $cancelUrl,
+                'metadata' => [
+                    'purpose' => 'brand_commission_payment_method',
+                    'sidest_professional_id' => $brand->id,
+                ],
+            ],
+            ['stripe_account' => $brand->stripe_connect_account_id],
+        );
 
         return [
             'checkout_url' => $session->url,
@@ -424,7 +510,92 @@ class StripeConnectService
     }
 
     /**
-     * Save the brand's default payment method.
+     * Sync the brand's saved card from a completed Checkout setup session that
+     * ran on the BRAND'S OWN Connect account. Mirrors
+     * syncPaymentMethodFromCheckoutSession but every Stripe API call carries
+     * `stripe_account = brand_connect_account_id` so the lookups hit the right
+     * account, and the IDs land in the brand-Connect-scoped columns.
+     *
+     * @return array{payment_method_id: string, setup_intent_id: string}
+     */
+    public function syncBrandConnectPaymentMethodFromCheckoutSession(Professional $brand, string $sessionId): array
+    {
+        if (! $brand->stripe_connect_account_id) {
+            throw new \RuntimeException('Brand has no Stripe Connect account.');
+        }
+
+        $stripeAccountOption = ['stripe_account' => $brand->stripe_connect_account_id];
+
+        $session = $this->stripe->checkout->sessions->retrieve(
+            $sessionId,
+            ['expand' => ['setup_intent']],
+            $stripeAccountOption,
+        );
+
+        if (($session->mode ?? null) !== 'setup') {
+            throw new \RuntimeException('Checkout session is not a setup session.');
+        }
+
+        if (($session->status ?? null) !== 'complete') {
+            throw new \RuntimeException('Setup session is not complete yet.');
+        }
+
+        $metadataProId = $session->metadata?->sidest_professional_id ?? null;
+        if ($metadataProId && $metadataProId !== $brand->id) {
+            throw new \RuntimeException('Setup session does not belong to this account.');
+        }
+
+        $sessionCustomerId = is_string($session->customer)
+            ? $session->customer
+            : ($session->customer->id ?? null);
+
+        if ($brand->stripe_connect_customer_id && $sessionCustomerId && $brand->stripe_connect_customer_id !== $sessionCustomerId) {
+            throw new \RuntimeException('Setup session customer does not match account customer.');
+        }
+
+        if (! $brand->stripe_connect_customer_id && $sessionCustomerId) {
+            $brand->update(['stripe_connect_customer_id' => $sessionCustomerId]);
+            $brand->refresh();
+        }
+
+        $setupIntentId = is_string($session->setup_intent)
+            ? $session->setup_intent
+            : ($session->setup_intent->id ?? null);
+
+        if (! $setupIntentId) {
+            throw new \RuntimeException('Setup session missing setup intent.');
+        }
+
+        $setupIntent = $this->stripe->setupIntents->retrieve(
+            $setupIntentId,
+            ['expand' => ['payment_method']],
+            $stripeAccountOption,
+        );
+
+        if (($setupIntent->status ?? null) !== 'succeeded') {
+            throw new \RuntimeException('Setup intent has not succeeded.');
+        }
+
+        $paymentMethodId = is_string($setupIntent->payment_method)
+            ? $setupIntent->payment_method
+            : ($setupIntent->payment_method->id ?? null);
+
+        if (! $paymentMethodId) {
+            throw new \RuntimeException('No payment method found on setup intent.');
+        }
+
+        $this->saveBrandConnectPaymentMethod($brand, $paymentMethodId);
+
+        return [
+            'payment_method_id' => $paymentMethodId,
+            'setup_intent_id' => $setupIntentId,
+        ];
+    }
+
+    /**
+     * Save the brand's default payment method on PARTNA'S PLATFORM Stripe
+     * account. Legacy SaaS-billing path; the commission flow uses
+     * saveBrandConnectPaymentMethod.
      */
     public function savePaymentMethod(Professional $brand, string $paymentMethodId): void
     {
@@ -446,27 +617,62 @@ class StripeConnectService
     }
 
     /**
-     * Check if a brand has a valid payment method for commission charges.
+     * Save the brand's default payment method on the BRAND'S OWN Connect
+     * account. Reads the PM with `stripe_account = brand_connect_id` and
+     * persists the IDs to the brand-Connect-scoped columns.
      */
-    public function brandHasPaymentMethod(Professional $brand): bool
+    public function saveBrandConnectPaymentMethod(Professional $brand, string $paymentMethodId): void
     {
-        return $brand->stripe_customer_id !== null
-            && $brand->stripe_payment_method_id !== null;
+        if (! $brand->stripe_connect_account_id) {
+            throw new \RuntimeException('Brand has no Stripe Connect account.');
+        }
+
+        $stripeAccountOption = ['stripe_account' => $brand->stripe_connect_account_id];
+
+        $pm = $this->stripe->paymentMethods->retrieve($paymentMethodId, null, $stripeAccountOption);
+
+        $brand->update([
+            'stripe_connect_payment_method_id' => $paymentMethodId,
+            'stripe_payment_method_brand' => $pm->card?->brand ?? null,
+            'stripe_payment_method_last4' => $pm->card?->last4 ?? null,
+        ]);
+
+        if ($brand->stripe_connect_customer_id) {
+            $this->stripe->customers->update(
+                $brand->stripe_connect_customer_id,
+                ['invoice_settings' => ['default_payment_method' => $paymentMethodId]],
+                $stripeAccountOption,
+            );
+        }
     }
 
     /**
-     * Get the payment methods for a brand's customer.
+     * Check if a brand has a valid payment method for commission direct charges.
+     * Reads the brand-Connect-scoped columns (the platform-scoped columns are
+     * for SaaS billing, not commissions).
+     */
+    public function brandHasPaymentMethod(Professional $brand): bool
+    {
+        return $brand->stripe_connect_customer_id !== null
+            && $brand->stripe_connect_payment_method_id !== null;
+    }
+
+    /**
+     * List a brand's saved payment methods on their Connect account.
      */
     public function listPaymentMethods(Professional $brand): array
     {
-        if (! $brand->stripe_customer_id) {
+        if (! $brand->stripe_connect_account_id || ! $brand->stripe_connect_customer_id) {
             return [];
         }
 
-        $methods = $this->stripe->paymentMethods->all([
-            'customer' => $brand->stripe_customer_id,
-            'type' => 'card',
-        ]);
+        $methods = $this->stripe->paymentMethods->all(
+            [
+                'customer' => $brand->stripe_connect_customer_id,
+                'type' => 'card',
+            ],
+            ['stripe_account' => $brand->stripe_connect_account_id],
+        );
 
         return array_map(fn ($m) => [
             'id' => $m->id,
@@ -474,18 +680,22 @@ class StripeConnectService
             'last4' => $m->card?->last4,
             'exp_month' => $m->card?->exp_month,
             'exp_year' => $m->card?->exp_year,
-            'is_default' => $m->id === $brand->stripe_payment_method_id,
+            'is_default' => $m->id === $brand->stripe_connect_payment_method_id,
         ], $methods->data);
     }
 
     /**
-     * Remove a brand's payment method and customer linkage.
+     * Remove a brand's commission-payment setup. Clears the brand-Connect-scoped
+     * columns only — the platform-scoped columns belong to SaaS billing and are
+     * managed separately.
      */
     public function removeBrandPaymentSetup(Professional $brand): void
     {
         $brand->update([
-            'stripe_customer_id' => null,
-            'stripe_payment_method_id' => null,
+            'stripe_connect_customer_id' => null,
+            'stripe_connect_payment_method_id' => null,
+            'stripe_payment_method_brand' => null,
+            'stripe_payment_method_last4' => null,
         ]);
     }
 
