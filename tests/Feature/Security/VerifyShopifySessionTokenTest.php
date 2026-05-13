@@ -209,6 +209,49 @@ it('passes through on a valid token and stashes embedded_* attributes', function
         ]);
 });
 
+it(':lenient mode passes through an unlinked shop without 404', function () {
+    Route::middleware('shopify.session:lenient')
+        ->get('/__test/shopify-session-lenient', fn (\Illuminate\Http\Request $r) => response()->json([
+            'ok' => true,
+            'professional_id' => $r->attributes->get('embedded_professional_id'),
+            'shop' => $r->attributes->get('embedded_shop_domain'),
+        ]));
+
+    // Use a shop that the resolver returns null for — would 404 in default mode.
+    $token = makeSessionToken([
+        'dest' => 'https://unlinked-shop.myshopify.com',
+        'iss' => 'https://unlinked-shop.myshopify.com/admin',
+    ]);
+
+    getJson('/__test/shopify-session-lenient', ['Authorization' => "Bearer {$token}"])
+        ->assertOk()
+        ->assertExactJson([
+            'ok' => true,
+            'professional_id' => null,
+            'shop' => 'unlinked-shop.myshopify.com',
+        ]);
+});
+
+it(':lenient mode still rejects on JWT validation errors (bad signature → 401)', function () {
+    Route::middleware('shopify.session:lenient')
+        ->get('/__test/shopify-session-lenient-2', fn () => response()->json(['ok' => true]));
+
+    $now = time();
+    $bad = JWT::encode([
+        'iss' => 'https://'.TEST_SHOP.'/admin',
+        'dest' => 'https://'.TEST_SHOP,
+        'aud' => TEST_CLIENT_ID,
+        'sub' => 's',
+        'exp' => $now + 60,
+        'nbf' => $now,
+        'jti' => 'jti-bad-lenient',
+    ], 'wrong-secret-of-sufficient-length-bytes', 'HS256');
+
+    getJson('/__test/shopify-session-lenient-2', ['Authorization' => "Bearer {$bad}"])
+        ->assertStatus(401)
+        ->assertExactJson(['message' => 'auth_sig_invalid']);
+});
+
 it('throws when SHOPIFY_API_SECRET and SHOPIFY_API_KEY are unset (deploy bug, not auth failure)', function () {
     config()->set('services.shopify.api_secret', '');
     config()->set('services.shopify.api_key', '');

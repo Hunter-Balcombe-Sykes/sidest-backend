@@ -33,7 +33,15 @@ use Symfony\Component\HttpFoundation\Response;
 //   6. jti_missing         — no jti claim
 //   7. cache_unavailable   — Cache::add threw (503 fail-closed)
 //   8. jti_replay          — jti already cached within the 120s window
-//   9. shop_unlinked       — no professional linked to this shop
+//   9. shop_unlinked       — no professional linked to this shop (lenient mode SKIPS this)
+//
+// Modes:
+//   default     — runs every step. Use on routes that operate on a linked shop.
+//   `:lenient`  — runs steps 1-8, skips step 9 (shop resolution). Use on routes
+//                 that intentionally operate before the shop is linked, e.g.
+//                 the connect-account endpoint that performs the linking itself.
+//                 Sets embedded_shop_domain on the request but NOT
+//                 embedded_professional_id (caller resolves another way).
 //
 // Docs: https://shopify.dev/docs/apps/build/authentication-authorization/session-tokens
 class VerifyShopifySessionToken
@@ -52,11 +60,15 @@ class VerifyShopifySessionToken
     ) {}
 
     /**
-     * @return Response 401 on auth failure, 404 on unknown shop, 503 on cache
-     *                  unavailable, otherwise delegates to $next. Sets `embedded_professional_id`,
-     *                  `embedded_shop_domain`, and `embedded_shopify_user_id` on the request.
+     * @param  ?string  $mode  null (default) for full validation including shop
+     *                         resolution; 'lenient' to skip the resolver step
+     *                         (used by routes that link the shop themselves).
+     * @return Response 401 on auth failure, 404 on unknown shop (default mode
+     *                  only), 503 on cache unavailable, otherwise delegates to
+     *                  $next. Sets `embedded_shop_domain` + `embedded_shopify_user_id`
+     *                  always; sets `embedded_professional_id` only in default mode.
      */
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next, ?string $mode = null): Response
     {
         $startedAt = microtime(true);
         $secret = (string) config('services.shopify.api_secret');
@@ -136,6 +148,19 @@ class VerifyShopifySessionToken
             ]);
         }
 
+        $request->attributes->set('embedded_shop_domain', $destHost);
+        $request->attributes->set('embedded_shopify_user_id', (string) ($claims['sub'] ?? ''));
+
+        if ($mode === 'lenient') {
+            Log::info('shopify.session.ok', [
+                'shop' => $destHost,
+                'mode' => 'lenient',
+                'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+            ]);
+
+            return $next($request);
+        }
+
         $professionalId = $this->resolver->resolveProfessionalId($destHost);
         if ($professionalId === null) {
             return $this->reject($request, 'shop_unlinked', 404, $startedAt, [
@@ -144,8 +169,6 @@ class VerifyShopifySessionToken
         }
 
         $request->attributes->set('embedded_professional_id', $professionalId);
-        $request->attributes->set('embedded_shop_domain', $destHost);
-        $request->attributes->set('embedded_shopify_user_id', (string) ($claims['sub'] ?? ''));
 
         Log::info('shopify.session.ok', [
             'shop' => $destHost,

@@ -8,34 +8,30 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
-// Handles connecting a Shopify shop to an existing Partna brand account.
-// Called by the Sidest-Embedded app when a brand installs the Shopify app
-// but their shop domain is not yet linked to a professional record.
-// Auth: validates the PARTNA_EMBEDDED_API_KEY Bearer token manually (the
-// shop can't be resolved yet, so we can't use the embedded.key middleware).
+// Connect a Shopify shop to an existing Partna brand account.
+//
+// Called from the embedded setup wizard step 1 — the shop has just installed
+// the Partna app but is NOT yet linked to a professional. The route uses
+// `shopify.session:lenient`: VerifyShopifySessionToken validates the JWT
+// signature + claims but SKIPS the shop-resolution step (since the whole
+// point of this endpoint is to perform that linking).
+//
+// shop_domain comes from the JWT's `dest` claim (cryptographically bound to
+// the App Bridge token), stashed on the request as `embedded_shop_domain`.
+// professional_id comes from the connection code the brand generated in the
+// Partna dashboard (Redis-stored with 30-min TTL).
 class EmbeddedConnectController extends ApiController
 {
     /**
      * Connect a Shopify shop to a Partna account via a time-limited connection code.
-     *
-     * The code is generated in the Partna dashboard and stored in Redis for 30 minutes.
-     * On success, the professional_integrations row is created or updated so that the
-     * generated shopify_shop_domain column resolves to the shop.
      */
     public function connect(Request $request): JsonResponse
     {
-        // Validate the embedded API key — same check as VerifyEmbeddedApiKey middleware.
-        $expected = (string) config('services.embedded.api_key');
-        if ($expected !== '') {
-            $provided = (string) str_replace('Bearer ', '', $request->header('Authorization', ''));
-            if ($provided === '' || ! hash_equals($expected, $provided)) {
-                return $this->error('Invalid or missing embedded API key.', 403);
-            }
-        }
-
-        $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop', '')));
+        $shopDomain = (string) $request->attributes->get('embedded_shop_domain');
         if ($shopDomain === '') {
-            return $this->error('Missing X-Shopify-Shop header.', 400);
+            // shopify.session middleware guarantees this attribute is set;
+            // missing it means the middleware was misconfigured or skipped.
+            return $this->error('Embedded session did not resolve a shop domain.', 500);
         }
 
         $code = trim((string) $request->input('code', ''));
