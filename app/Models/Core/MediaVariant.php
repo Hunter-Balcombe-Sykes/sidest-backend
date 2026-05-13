@@ -39,6 +39,10 @@ use Illuminate\Support\Facades\Storage;
  * @property array|null $metadata
  */
 // V2: Processed media artifact (WebP image, MP4 video, HLS playlist, poster). Each SiteMedia can have multiple variants at different quality tiers.
+//
+// Lifecycle: wholly owned by parent SiteMedia. SiteMedia::booted() forceDeleting hook collects
+// variant paths and deletes storage files before the DB CASCADE removes these rows.
+// Do not call MediaVariant::delete() or forceDelete() directly — always delete via the parent.
 class MediaVariant extends BaseModel
 {
     use HasUuids;

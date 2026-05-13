@@ -88,6 +88,54 @@ it('writes cancelled audit event', function () {
         ->and($audit->actor_type)->toBe(ProfessionalDeletionAuditEntry::ACTOR_TYPE_PROFESSIONAL);
 });
 
+it('re-publishes the site when cancelling a deletion that had programmatically unpublished it', function () {
+    $pro = seedPendingDeletionProfessional();
+
+    $siteId = (string) Str::uuid();
+    DB::connection('pgsql')->table('site.sites')->insert([
+        'id' => $siteId,
+        'professional_id' => $pro->id,
+        'subdomain' => 'pro-'.$pro->id,
+        'is_published' => 0,
+        'unpublished_at' => now()->toIso8601String(),
+        'created_at' => now()->toIso8601String(),
+        'updated_at' => now()->toIso8601String(),
+    ]);
+
+    $pro = Professional::query()->with('site')->find($pro->id);
+
+    $service = app(AccountDeletionService::class);
+    $service->cancel($pro, Request::create('/', 'POST'));
+
+    $site = DB::connection('pgsql')->table('site.sites')->where('id', $siteId)->first();
+    expect((bool) $site->is_published)->toBeTrue()
+        ->and($site->unpublished_at)->toBeNull();
+});
+
+it('does not re-publish a site that was manually unpublished before deletion was cancelled', function () {
+    $pro = seedPendingDeletionProfessional();
+
+    $siteId = (string) Str::uuid();
+    DB::connection('pgsql')->table('site.sites')->insert([
+        'id' => $siteId,
+        'professional_id' => $pro->id,
+        'subdomain' => 'pro-'.$pro->id,
+        'is_published' => 0,
+        'unpublished_at' => null, // manual unpublish — no unpublished_at set
+        'created_at' => now()->toIso8601String(),
+        'updated_at' => now()->toIso8601String(),
+    ]);
+
+    $pro = Professional::query()->with('site')->find($pro->id);
+
+    $service = app(AccountDeletionService::class);
+    $service->cancel($pro, Request::create('/', 'POST'));
+
+    $site = DB::connection('pgsql')->table('site.sites')->where('id', $siteId)->first();
+    // Site stays offline — we don't own manually-unpublished state.
+    expect((bool) $site->is_published)->toBeFalse();
+});
+
 it('cancel path calls Stripe resume with the correct subscription ID from findStripeSubscription', function () {
     $pro = seedPendingDeletionProfessional();
 
