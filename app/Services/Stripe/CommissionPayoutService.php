@@ -10,7 +10,6 @@ use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Notifications\NotificationPublisher;
-use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiConnectionException;
@@ -427,11 +426,12 @@ class CommissionPayoutService
         // but the HTTP response was lost before the ID could be recorded.
         $retryKey = '_r'.$payout->retry_count;
 
-        // Step 1: Wallet debit — or resume from recorded state
-        //
-        // The debit and the status update are wrapped in a single DB::transaction
-        // so a process crash between them can't leave the wallet reduced but the
-        // payout record still showing 'pending' (which would cause a double-debit on retry).
+        // Step 1: Funding source — the brand pays the full gross via direct
+        // charge on their own Connect account. The wallet pre-debit branch is
+        // bypassed in this flow because wallet balance lives on Partna's
+        // platform and doesn't compose with direct-on-brand charges (the
+        // brand's own Connect balance is what funds the subsequent Transfer
+        // to the affiliate).
         $walletDebitCents = 0;
         $chargeAmountCents = $amountToCollect;
 
@@ -445,66 +445,18 @@ class CommissionPayoutService
                 return false;
             }
 
-            // Wallet debit already committed in a previous run — read from DB, don't re-debit.
-            $walletDebitCents = (int) ($payout->wallet_debit_cents ?? 0);
+            // Resume — re-read previously persisted amounts; same fields as
+            // first-run path (wallet=0, charge=gross).
             $chargeAmountCents = (int) ($payout->charge_cents ?? $amountToCollect);
         } else {
-            // READ COMMITTED (PG default) — the payout status update and wallet debit
-            // are atomic here; lockForUpdate() inside debitBrandManualBalancePartial
-            // guards against concurrent debits on the wallet row itself.
-            $hasCurrencyMismatch = false;
-            DB::transaction(function () use ($payout, $brand, $amountToCollect, $currencyUpper, &$walletDebitCents, &$chargeAmountCents, &$hasCurrencyMismatch): void {
-                $walletDebitCents = $this->debitBrandManualBalancePartial($brand->id, $amountToCollect, $currencyUpper, $hasCurrencyMismatch);
-
-                // Wallet has balance but in the wrong currency — abort without charging card.
-                // markPendingFunding and notification happen outside the transaction below.
-                if ($hasCurrencyMismatch) {
-                    return;
-                }
-
-                $chargeAmountCents = $amountToCollect - $walletDebitCents;
-
-                $fundingSource = 'card';
-                if ($walletDebitCents > 0 && $chargeAmountCents > 0) {
-                    $fundingSource = 'wallet_and_card';
-                } elseif ($walletDebitCents > 0) {
-                    $fundingSource = 'wallet';
-                }
-
-                $payout->forceFill([
-                    'status' => 'collecting',
-                    'funding_source' => $fundingSource,
-                    'wallet_debit_cents' => $walletDebitCents,
-                    'charge_cents' => $chargeAmountCents,
-                    'failure_code' => null,
-                    'failure_reason' => null,
-                ])->save();
-            });
-
-            if ($hasCurrencyMismatch) {
-                $walletCurrency = strtoupper((string) ($brand->stripe_manual_balance_currency ?? 'unknown'));
-                $this->markPendingFunding(
-                    $payout,
-                    'wallet_currency_mismatch',
-                    "Wallet balance is in {$walletCurrency} but payout requires {$currencyUpper}. Please contact support to resolve.",
-                );
-
-                $this->publisher->publish(
-                    professionalId: $payout->brand_professional_id,
-                    frontendType: 'Warning',
-                    category: 'commissions',
-                    title: 'Commission payout on hold',
-                    body: sprintf(
-                        'A commission payout of %s could not be processed because your wallet balance is in %s. Please contact support to resolve the currency mismatch.',
-                        Money::format($payout->gross_commission_cents, $payout->currency_code),
-                        $walletCurrency,
-                    ),
-                    dedupeKey: "wallet_currency_mismatch.{$payout->id}",
-                    ctaUrl: '/account/settings?section=wallet',
-                );
-
-                return null;
-            }
+            $payout->forceFill([
+                'status' => 'collecting',
+                'funding_source' => 'card',
+                'wallet_debit_cents' => 0,
+                'charge_cents' => $chargeAmountCents,
+                'failure_code' => null,
+                'failure_reason' => null,
+            ])->save();
         }
 
         // Step 2: Charge brand's card for the shortfall (if any)
@@ -627,9 +579,6 @@ class CommissionPayoutService
                     // retry_count → fresh idempotency key) starts cleanly.
                     $payout->forceFill(['stripe_payment_intent_id' => null])->save();
 
-                    if ($walletDebitCents > 0) {
-                        $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
-                    }
                     $this->markPendingFunding($payout, 'charge_requires_action', 'Card charge requires authentication.');
 
                     return null;
@@ -647,9 +596,6 @@ class CommissionPayoutService
                 throw $e;
             } catch (ApiErrorException $e) {
                 // Terminal card failure (declined, invalid PM, SCA permanently blocked, etc.)
-                if ($walletDebitCents > 0) {
-                    $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
-                }
                 $this->markPendingFunding($payout, 'charge_failed', $e->getStripeCode() ?? 'stripe_error');
 
                 return null;
@@ -781,11 +727,7 @@ class CommissionPayoutService
             // is created if the original request succeeded but the response was lost.
             throw $e;
         } catch (ApiErrorException $e) {
-            // Terminal transfer failure — credit wallet back, then attempt to auto-refund.
-            if ($walletDebitCents > 0) {
-                $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
-            }
-
+            // Terminal transfer failure — attempt to auto-refund the brand's card.
             $failureCode = 'transfer_failed';
 
             if ($payout->stripe_payment_intent_id && $chargeAmountCents > 0) {
