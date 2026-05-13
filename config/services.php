@@ -106,6 +106,11 @@ return [
     'shopify' => [
         'api_key' => env('SHOPIFY_API_KEY'),
         'api_secret' => env('SHOPIFY_API_SECRET'),
+        // Max times a single JTI may be used within the 120s replay-cache window.
+        // Default 25: covers Remix SSR fan-out (root + route loaders each making
+        // 1–3 backend calls with the same JWT) while blocking brute-force replay.
+        // Override to 1 in tests to keep strict one-time-use assertions.
+        'jti_max_uses' => (int) env('SHOPIFY_JTI_MAX_USES', 25),
         // 2026-04 (April 26) is the current stable Admin API release as of
         // May 2026. Bumped from 2025-01 alongside Partna-Shopify-App's
         // ApiVersion.April26 — the two MUST move together to keep the

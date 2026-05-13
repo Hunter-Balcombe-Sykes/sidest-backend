@@ -19,10 +19,17 @@ use Symfony\Component\HttpFoundation\Response;
 // professional on the request. There is no shared static key, no trusted
 // X-Shopify-Shop header — `dest` is the sole source of tenant identity.
 //
-// Replay protection: 120s Redis-backed JTI cache. FAIL-CLOSED — if the cache
+// Replay protection: 120s Redis-backed JTI counter. FAIL-CLOSED — if the cache
 // backend is unreachable we return 503, not 200, because a multi-pod deploy
 // with a non-clustered cache would otherwise let an attacker replay any
 // captured token against a different pod.
+//
+// Each JTI is allowed up to services.shopify.jti_max_uses (default: 25) uses
+// within the TTL. Remix SSR runs multiple loaders in parallel — and each loader
+// may make multiple backend calls — all sharing one JWT, so strict one-time-use
+// would reject legitimate traffic on every page load. 25 uses still blocks
+// brute-force replay (rate-limited at 60 req/min per shop) while covering the
+// realistic SSR fan-out (≤6 calls per page load).
 //
 // Validation order (every reject is a distinct reason code for observability):
 //   1. token_missing       — no Authorization header
@@ -32,7 +39,7 @@ use Symfony\Component\HttpFoundation\Response;
 //   5. iss_mismatch        — iss host != dest host
 //   6. jti_missing         — no jti claim
 //   7. cache_unavailable   — Cache::add threw (503 fail-closed)
-//   8. jti_replay          — jti already cached within the 120s window
+//   8. jti_replay          — jti use-count exceeded jti_max_uses within the 120s window
 //   9. shop_unlinked       — no professional linked to this shop (lenient mode SKIPS this)
 //
 // Modes:
@@ -49,6 +56,10 @@ class VerifyShopifySessionToken
     private const JTI_CACHE_TTL_SECONDS = 120;
 
     private const JTI_CACHE_KEY_PREFIX = 'partna:shopify-jti:';
+
+    // Default max uses per JTI within the TTL. Configurable so tests can set it
+    // to 1 and keep the existing one-time-use assertion (via jti_max_uses config).
+    private const JTI_MAX_USES_DEFAULT = 25;
 
     // Clock skew tolerance for exp/nbf checks. Shopify-signed tokens are short
     // (60s exp) so this is generous; tighter would cause spurious 401s on
@@ -124,12 +135,15 @@ class VerifyShopifySessionToken
             ]);
         }
 
+        $jtiKey = self::JTI_CACHE_KEY_PREFIX.$jti;
+
         try {
-            $jtiAdded = Cache::add(
-                self::JTI_CACHE_KEY_PREFIX.$jti,
-                1,
-                self::JTI_CACHE_TTL_SECONDS,
-            );
+            // Initialise the counter on first use (NX — only if absent, with TTL).
+            // Concurrent first-use calls: only one wins the NX set; others see
+            // the key already exists. Both then increment atomically. The TTL is
+            // set on creation and not reset by subsequent increments.
+            Cache::add($jtiKey, 0, self::JTI_CACHE_TTL_SECONDS);
+            $uses = Cache::increment($jtiKey);
         } catch (\Throwable $e) {
             Log::error('shopify.session.cache_unavailable', [
                 'error_class' => class_basename($e),
@@ -141,7 +155,7 @@ class VerifyShopifySessionToken
             ]);
         }
 
-        if (! $jtiAdded) {
+        if ($uses > $this->jtiMaxUses()) {
             return $this->reject($request, 'jti_replay', 401, $startedAt, [
                 'shop' => $destHost,
                 'jti_hash' => hash('sha256', $jti),
@@ -176,6 +190,15 @@ class VerifyShopifySessionToken
         ]);
 
         return $next($request);
+    }
+
+    /**
+     * Maximum JTI uses allowed within the cache TTL.
+     * Reads from services.shopify.jti_max_uses so tests can override to 1.
+     */
+    private function jtiMaxUses(): int
+    {
+        return (int) config('services.shopify.jti_max_uses', self::JTI_MAX_USES_DEFAULT);
     }
 
     /**
