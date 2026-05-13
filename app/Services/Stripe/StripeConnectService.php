@@ -73,6 +73,18 @@ class StripeConnectService
      * account would silently default to 'AU' and Stripe would later reject
      * the KYC form for non-AU users. Fail fast instead so the frontend can
      * prompt for country before onboarding.
+     *
+     * Brands and affiliates take different paths:
+     *   - Affiliate → business_type=individual, transfers capability only.
+     *     Affiliates only RECEIVE transfers — they never process customer
+     *     payments themselves.
+     *   - Brand → business_type=company, BOTH transfers AND card_payments
+     *     capabilities. Brands need card_payments so we can run the
+     *     commission charge as a direct charge on their account (brand =
+     *     merchant of record on the customer's statement), and transfers so
+     *     the funds can flow on from brand → affiliate. Stripe forces these
+     *     two capabilities together — see
+     *     https://docs.stripe.com/connect/account-capabilities.
      */
     public function createConnectAccount(Professional $professional): string
     {
@@ -83,26 +95,26 @@ class StripeConnectService
             );
         }
 
+        $isBrand = $professional->isBrand();
+
+        $capabilities = ['transfers' => ['requested' => true]];
+        if ($isBrand) {
+            // Direct-charge commission payouts require the connected account to
+            // accept card payments. Without card_payments the PaymentIntent
+            // with stripe_account=brand option would 400 immediately.
+            $capabilities['card_payments'] = ['requested' => true];
+        }
+
         $accountPayload = array_merge([
             'type' => 'express',
             'country' => $this->mapCountryCode($professional->country_code),
             'email' => $professional->primary_email,
-            // Affiliates are individuals/sole traders — pre-selects the individual
-            // KYC path so Stripe doesn't prompt with a business-type selector.
-            'business_type' => 'individual',
+            'business_type' => $isBrand ? 'company' : 'individual',
             'metadata' => [
                 'sidest_professional_id' => $professional->id,
                 'professional_type' => $professional->professional_type,
             ],
-            'capabilities' => [
-                // Affiliates only RECEIVE transfers from Partna — they don't process
-                // customer payments themselves (Shopify does that, on the brand's
-                // merchant account). Requesting card_payments here triggers heavier
-                // KYC requirements for a capability we never use. Stripe docs:
-                // "only request the capabilities that your accounts need."
-                // See https://docs.stripe.com/connect/account-capabilities
-                'transfers' => ['requested' => true],
-            ],
+            'capabilities' => $capabilities,
         ], $this->buildAccountPrefillPayload($professional));
 
         $account = $this->stripe->accounts->create(
@@ -149,13 +161,15 @@ class StripeConnectService
                 $professional->update(['stripe_connect_status' => 'onboarding']);
             }
 
-            // Patch business_type to 'individual' on any existing account that
-            // hasn't finished onboarding yet. Stripe permits this update while
-            // details_submitted is false — once submitted it's locked in.
+            // Patch business_type on any existing account that hasn't finished
+            // onboarding yet — brands get 'company', everyone else 'individual'.
+            // Stripe permits this update while details_submitted is false; once
+            // submitted it's locked in.
+            $desiredBusinessType = $professional->isBrand() ? 'company' : 'individual';
             try {
                 $existing = $this->stripe->accounts->retrieve($accountId);
-                if (! $existing->details_submitted && $existing->business_type !== 'individual') {
-                    $this->stripe->accounts->update($accountId, ['business_type' => 'individual']);
+                if (! $existing->details_submitted && $existing->business_type !== $desiredBusinessType) {
+                    $this->stripe->accounts->update($accountId, ['business_type' => $desiredBusinessType]);
                 }
             } catch (ApiErrorException) {
                 // Non-fatal — continue with existing account as-is.
@@ -830,17 +844,19 @@ class StripeConnectService
      * Build the Stripe Account prefill block from a Professional row.
      *
      * Stripe pre-populates the Express onboarding form from any business_profile
-     * and individual fields we pass on create. Missing fields are silently
+     * and individual/company fields we pass on create. Missing fields are silently
      * dropped (via array_filter) so partial data is safe. Fields stay editable
      * for the user; we're saving them keystrokes, not locking values.
      *
      * Notes:
      * - business_profile.product_description is only sent when there's no URL.
      *   Stripe asks for one or the other; sending both is noisy.
-     * - individual.phone is only sent when it looks like E.164 (starts with '+').
+     * - phone is only sent when it looks like E.164 (starts with '+').
      *   Free-form phone numbers cause Stripe to reject the entire create call.
      * - Address is only sent when line1 AND country are both present. Stripe
      *   rejects partial addresses without those two fields together.
+     * - For brands we emit `company` (display_name, phone, address); for
+     *   affiliates we emit `individual` (first/last name, email, phone, address).
      *
      * @return array<string, mixed>
      */
@@ -864,6 +880,23 @@ class StripeConnectService
             $payload['business_profile'] = $businessProfile;
         }
 
+        $address = $this->buildAddressOrNull($professional);
+
+        if ($professional->isBrand()) {
+            $company = array_filter([
+                'name' => $this->stringOrNull($professional->display_name),
+                'phone' => $this->e164PhoneOrNull($professional->phone),
+            ]);
+            if ($address !== null) {
+                $company['address'] = $address;
+            }
+            if ($company !== []) {
+                $payload['company'] = $company;
+            }
+
+            return $payload;
+        }
+
         $individual = array_filter([
             'first_name' => $this->stringOrNull($professional->first_name),
             'last_name' => $this->stringOrNull($professional->last_name),
@@ -871,7 +904,6 @@ class StripeConnectService
             'phone' => $this->e164PhoneOrNull($professional->phone),
         ]);
 
-        $address = $this->buildAddressOrNull($professional);
         if ($address !== null) {
             $individual['address'] = $address;
         }
