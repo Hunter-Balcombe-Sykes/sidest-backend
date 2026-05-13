@@ -42,6 +42,7 @@ class SiteMediaObserver
             return;
         }
 
+        $site = null;
         try {
             $site = $media->site;
             if (! $site || ! $site->professional_id) {
@@ -57,7 +58,7 @@ class SiteMediaObserver
             Log::warning('Section visibility reevaluation failed on SiteMedia event', $this->logContext(__METHOD__, [
                 'site_media_id' => $media->id,
                 'site_id' => $media->site_id,
-                'professional_id' => $site->professional_id,
+                'professional_id' => $site?->professional_id,
                 'pool' => $media->pool,
                 'block_type' => $blockType,
                 'message' => $e->getMessage(),
