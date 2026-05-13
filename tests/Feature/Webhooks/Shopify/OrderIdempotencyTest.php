@@ -18,6 +18,7 @@ beforeEach(function () {
     setupProfessionalsTable();
     setupBrandLinkTables();
     setupCommerceOrdersTables();
+    setupWebhookEventsTable();
     Config::set('services.shopify.webhook_secret', 'test-shop-secret');
 });
 
