@@ -911,8 +911,11 @@ return [
         'default_commission_rate' => (float) env('PARTNA_STORE_DEFAULT_COMMISSION', env('SIDEST_STORE_DEFAULT_COMMISSION', 15)),
         'max_featured_products' => (int) env('PARTNA_STORE_MAX_FEATURED', env('SIDEST_STORE_MAX_FEATURED', 10)),
         'checkout_session_ttl_minutes' => (int) env('PARTNA_STORE_CHECKOUT_SESSION_TTL_MINUTES', env('SIDEST_STORE_CHECKOUT_SESSION_TTL_MINUTES', 120)),
+        // System default applied when a brand hasn't picked a hold period yet.
+        // Brands can explicitly choose 0 (instant), 7, 14, or 28 — the allowed values
+        // are enforced in UpdateBrandStoreSettingsRequest. There is no longer a
+        // server-side min-floor; the dropdown enumerates the only valid options.
         'payout_hold_days' => (int) env('PARTNA_STORE_PAYOUT_HOLD_DAYS', env('SIDEST_STORE_PAYOUT_HOLD_DAYS', 7)),
-        'min_payout_hold_days' => 7,
         'platform_fee_percent' => (float) env('PARTNA_STORE_PLATFORM_FEE_PERCENT', env('SIDEST_STORE_PLATFORM_FEE_PERCENT', 20)),
         // Signup grace deadline. New affiliates get this many days after Stripe
         // Connect onboarding starts before their commissions begin voiding.
@@ -934,12 +937,6 @@ return [
         'grace_period_days' => (int) env('PARTNA_STORE_GRACE_PERIOD_DAYS', env('SIDEST_STORE_GRACE_PERIOD_DAYS', 60)),
 
         'commission_void_window_days' => (int) env('PARTNA_STORE_COMMISSION_VOID_WINDOW_DAYS', env('SIDEST_STORE_COMMISSION_VOID_WINDOW_DAYS', 30)),
-
-        // TESTING ONLY: when true, brands can save payout_hold_days=0 and the
-        // payout service bypasses the min_payout_hold_days floor so orders flow
-        // to payout immediately. Leave OFF in prod. Used to let QA validate the
-        // Stripe Connect end-to-end without waiting 7+ days per test order.
-        'allow_instant_payout_for_testing' => (bool) env('PARTNA_STORE_ALLOW_INSTANT_PAYOUT_FOR_TESTING', false),
     ],
 
     'form_timing' => [

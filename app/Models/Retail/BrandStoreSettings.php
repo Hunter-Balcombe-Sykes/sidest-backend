@@ -45,20 +45,15 @@ class BrandStoreSettings extends BaseModel
     ];
 
     /**
-     * Effective hold days for this brand, respecting the system minimum.
+     * Effective hold days for this brand. Brands can explicitly choose 0 (instant),
+     * 7, 14, or 28 days via the Commerce settings dropdown. Falls back to the
+     * system default when no brand-level choice is recorded.
      */
     public function getEffectivePayoutHoldDaysAttribute(): int
     {
-        $min = (int) config('partna.store.min_payout_hold_days', 7);
         $systemDefault = (int) config('partna.store.payout_hold_days', 7);
 
-        $brandDays = $this->payout_hold_days;
-
-        if ($brandDays === null) {
-            return max($min, $systemDefault);
-        }
-
-        return max($min, $brandDays);
+        return max(0, $this->payout_hold_days ?? $systemDefault);
     }
 
     /**

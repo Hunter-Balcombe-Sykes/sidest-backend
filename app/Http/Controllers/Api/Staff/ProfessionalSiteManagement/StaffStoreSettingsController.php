@@ -15,15 +15,13 @@ class StaffStoreSettingsController extends ApiController
     /**
      * PATCH /api/staff/professionals/{professional}/store-settings
      *
-     * Updatable: default_commission_rate (0–100), payout_hold_days (>= system minimum)
+     * Updatable: default_commission_rate (0–100), payout_hold_days (0/7/14/28).
      */
     public function update(Request $request, Professional $professional): JsonResponse
     {
-        $minHoldDays = (int) config('partna.store.min_payout_hold_days', 7);
-
         $data = $request->validate([
             'default_commission_rate' => ['sometimes', 'numeric', 'min:0', 'max:100'],
-            'payout_hold_days' => ['sometimes', 'integer', "min:{$minHoldDays}"],
+            'payout_hold_days' => ['sometimes', 'integer', 'in:0,7,14,28'],
         ]);
 
         if (empty($data)) {
