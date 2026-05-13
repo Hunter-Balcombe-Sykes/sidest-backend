@@ -4,6 +4,7 @@ namespace App\Services\Stripe;
 
 use App\Models\Commerce\CommissionClawback;
 use App\Models\Commerce\Order;
+use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Cache\AnalyticsCacheService;
@@ -151,14 +152,18 @@ class CommissionPayoutRefundService
     /**
      * Issue a Stripe Transfer Reversal for the affiliate's share of a post-payout refund.
      *
-     * For Partna's separate-charges-and-transfers model, Stripe's docs are explicit:
-     * "refunding a charge doesn't affect any associated transfers. It's your platform's
-     * responsibility to reconcile any amount owed back by reducing subsequent transfer
-     * amounts or by reversing transfers." We use Transfer Reversals because Partna doesn't
-     * use application_fee_amount (the platform fee is deducted by reducing the transfer
-     * amount, not collected as a separate Stripe object).
+     * In the brand-as-Connect-account model, the original transfer ran from the
+     * BRAND'S Connect account → affiliate's Connect account, so the reversal
+     * must also be scoped to the brand's account via `stripe_account`.
      *
-     * Clawback math: proportional to this refund's share of the order's gross.
+     * Stripe's docs are explicit: "refunding a charge doesn't affect any
+     * associated transfers. It's your platform's responsibility to reconcile
+     * any amount owed back by reducing subsequent transfer amounts or by
+     * reversing transfers." We use Transfer Reversals here.
+     *
+     * Clawback math (unchanged from the pre-direct-charge era — slight over-
+     * clawback because Stripe's processing fee also came out of the affiliate's
+     * slice in the new flow, but the magnitude is small and conservative):
      *   item_net      = item.amount_cents * (1 - platform_fee / payout.gross)
      *   refund_share  = incremental_refund_cents / order.gross_cents
      *   clawback_net  = item_net * refund_share
@@ -179,6 +184,20 @@ class CommissionPayoutRefundService
                 'payout_id' => $payout->id,
                 'order_id' => $order->id,
             ]);
+
+            return;
+        }
+
+        $brand = Professional::find($payout->brand_professional_id);
+        if (! $brand || ! $brand->stripe_connect_account_id) {
+            Log::error('payout.clawback.brand_connect_account_missing', [
+                'payout_id' => $payout->id,
+                'order_id' => $order->id,
+                'brand_id' => $payout->brand_professional_id,
+            ]);
+            // Flag for manual recovery — without the brand's Connect account ID
+            // we can't address the reversal to the right Stripe account.
+            $payout->forceFill(['needs_manual_refund' => true])->save();
 
             return;
         }
@@ -267,7 +286,12 @@ class CommissionPayoutRefundService
                         'sidest_shopify_refund_id' => $shopifyRefundId ?? '',
                     ],
                 ],
-                ['idempotency_key' => $idempotencyKey],
+                [
+                    // The transfer being reversed was created on the brand's
+                    // Connect account; the reversal must address the same.
+                    'stripe_account' => $brand->stripe_connect_account_id,
+                    'idempotency_key' => $idempotencyKey,
+                ],
             );
 
             $this->insertClawbackRow($payout, $order, $shopifyRefundId, [
