@@ -61,15 +61,18 @@ return [
     'stripe' => [
         'secret_key' => env('STRIPE_SECRET_KEY'),
         'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
+        // Two scoped webhook secrets — one per Stripe destination:
+        //   - connect_webhook_secret: events from connected accounts (v1 names: account.updated,
+        //     transfer.*, payment_method.detached, etc.)
+        //   - platform_webhook_secret: events on the platform (v2.core.account.* + v1
+        //     payment_intent.*/charge.refunded fired by destination charges)
+        // The legacy single 'webhook_secret' is removed; controllers select the right secret
+        // by endpoint, not by trial validation.
         'connect_webhook_secret' => env('STRIPE_CONNECT_WEBHOOK_SECRET'),
-        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
-        // Pinned to the last pre-Basil version. Basil (2025-03-31) removed
-        // subscription.current_period_start/end from the Subscription resource
-        // and moved them to items.data[]. The webhook handler reads items[] first
-        // with a top-level fallback so forward upgrades are safe, but we pin
-        // explicitly to keep deploys reproducible across SDK upgrades.
-        // Bump to 2026-04-22.dahlia (current Stripe default) after E2E test pass.
-        'api_version' => env('STRIPE_API_VERSION', '2025-02-24.acacia'),
+        'platform_webhook_secret' => env('STRIPE_PLATFORM_WEBHOOK_SECRET'),
+        // 2026-02-25.clover ships v2 Accounts GA. Required for v2.core.accounts.*
+        // operations used by the destination-charge flow.
+        'api_version' => env('STRIPE_API_VERSION', '2026-02-25.clover'),
     ],
 
     'hydrogen' => [
@@ -91,12 +94,6 @@ return [
         'secret_key' => env('CLOUDFLARE_TURNSTILE_SECRET_KEY'),
     ],
 
-    // Shared key for Sidest-Embedded Shopify app → backend calls.
-    // Set in both .env (Laravel) and PARTNA_EMBEDDED_API_KEY env var in the Remix app.
-    'embedded' => [
-        'api_key' => env('PARTNA_EMBEDDED_API_KEY', env('SIDEST_EMBEDDED_API_KEY')),
-    ],
-
     'twitch' => [
         'client_id' => env('TWITCH_CLIENT_ID'),
         'client_secret' => env('TWITCH_CLIENT_SECRET'),
@@ -109,7 +106,13 @@ return [
     'shopify' => [
         'api_key' => env('SHOPIFY_API_KEY'),
         'api_secret' => env('SHOPIFY_API_SECRET'),
-        'api_version' => env('SHOPIFY_API_VERSION', '2025-01'),
+        // 2026-04 (April 26) is the current stable Admin API release as of
+        // May 2026. Bumped from 2025-01 alongside Partna-Shopify-App's
+        // ApiVersion.April26 — the two MUST move together to keep the
+        // EmbeddedSetupController validator (validateShopifyAccessToken) and
+        // the Remix-side Admin API client on the same version.
+        // 2026-07 is still RC until July 1 — do not pin RC versions.
+        'api_version' => env('SHOPIFY_API_VERSION', '2026-04'),
         'app_scopes' => env('SHOPIFY_APP_SCOPES', ''),
         'webhook_secret' => env('SHOPIFY_WEBHOOK_SECRET', env('SHOPIFY_API_SECRET')),
         'fallback_secret' => env('SHOPIFY_FALLBACK_SECRET'),
