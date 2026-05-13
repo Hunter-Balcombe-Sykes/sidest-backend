@@ -6,7 +6,6 @@ use App\Notifications\Brand\BrandPayoutFundingFailedNotification;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
-use Illuminate\Support\Str;
 
 beforeEach(function () {
     attachTestSchemas();
@@ -63,23 +62,6 @@ beforeEach(function () {
         deleted_at TEXT
     )');
 
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.wallet_movements (
-        id TEXT PRIMARY KEY,
-        professional_id TEXT,
-        direction TEXT,
-        amount_cents INTEGER,
-        currency_code TEXT DEFAULT \'AUD\',
-        reason TEXT,
-        actor_type TEXT,
-        actor_id TEXT,
-        related_payout_id TEXT,
-        related_session_id TEXT,
-        idempotency_key TEXT UNIQUE,
-        metadata TEXT DEFAULT \'{}\',
-        occurred_at TEXT,
-        created_at TEXT,
-        updated_at TEXT
-    )');
 });
 
 function retryJob_seedBrand(string $id, array $overrides = []): void
@@ -183,14 +165,13 @@ it('calls retryPayout (not processPayoutBatch) to ensure PI idempotency key rota
 
 // ─── Terminal failure ────────────────────────────────────────────────────────
 
-it('marks payout as terminally failed after MAX_ATTEMPTS and credits wallet back', function () {
+it('marks payout as terminally failed after MAX_ATTEMPTS', function () {
     Notification::fake();
-    retryJob_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
+    retryJob_seedBrand('brand-1');
 
     $payout = retryJob_seedPayout('p1', [
         'funding_failure_count' => RetryPendingFundsPayoutsJob::MAX_ATTEMPTS,
         'next_retry_at' => now()->subHour()->toDateTimeString(),
-        'wallet_debit_cents' => 5000,
     ]);
 
     $service = Mockery::mock(CommissionPayoutService::class);
@@ -203,21 +184,6 @@ it('marks payout as terminally failed after MAX_ATTEMPTS and credits wallet back
     expect($payout->status)->toBe('failed');
     expect($payout->failure_category)->toBe('brand_funding');
     expect($payout->failure_code)->toBe('brand_funding_exhausted');
-
-    // Wallet should be credited back.
-    $balance = DB::connection('pgsql')
-        ->table('core.professionals')
-        ->where('id', 'brand-1')
-        ->value('stripe_manual_balance_cents');
-    expect((int) $balance)->toBe(5000);
-
-    // wallet_movements row created for audit trail.
-    $movement = DB::connection('pgsql')
-        ->table('commerce.wallet_movements')
-        ->where('related_payout_id', 'p1')
-        ->first();
-    expect($movement)->not->toBeNull();
-    expect($movement->reason)->toBe('retry_refund');
 });
 
 it('sends terminal BrandPayoutFundingFailedNotification after exhausting attempts', function () {
@@ -242,16 +208,15 @@ it('sends terminal BrandPayoutFundingFailedNotification after exhausting attempt
     );
 });
 
-it('does not double-credit wallet if payout already in failed status (concurrent guard)', function () {
+it('does not re-process a payout already in failed status (concurrent guard)', function () {
     Notification::fake();
-    retryJob_seedBrand('brand-1', ['stripe_manual_balance_cents' => 5000]);
+    retryJob_seedBrand('brand-1');
 
     // Payout already failed (concurrent job beat us).
-    retryJob_seedPayout('p1', [
+    $payout = retryJob_seedPayout('p1', [
         'status' => 'failed',
         'funding_failure_count' => RetryPendingFundsPayoutsJob::MAX_ATTEMPTS,
         'next_retry_at' => now()->subHour()->toDateTimeString(),
-        'wallet_debit_cents' => 5000,
     ]);
 
     $service = Mockery::mock(CommissionPayoutService::class);
@@ -259,10 +224,6 @@ it('does not double-credit wallet if payout already in failed status (concurrent
 
     (new RetryPendingFundsPayoutsJob)->handle($service);
 
-    // Balance must not increase further.
-    $balance = DB::connection('pgsql')
-        ->table('core.professionals')
-        ->where('id', 'brand-1')
-        ->value('stripe_manual_balance_cents');
-    expect((int) $balance)->toBe(5000);
+    // Notifications should NOT fire on a guard-skipped iteration.
+    Notification::assertNothingSent();
 });

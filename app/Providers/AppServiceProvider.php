@@ -52,7 +52,6 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Commerce\Order::class, \App\Policies\CommissionPolicy::class);
         Gate::policy(\App\Models\Commerce\OrderItem::class, \App\Policies\CommissionPolicy::class);
         Gate::policy(\App\Models\Commerce\BrandAffiliateRollup::class, \App\Policies\CommissionPolicy::class);
-        Gate::policy(\App\Models\Retail\BrandCommissionTopup::class, \App\Policies\CommissionPolicy::class);
         Gate::policy(\App\Models\Core\Professional\BrandPartnerLink::class, \App\Policies\BrandPartnerLinkPolicy::class);
         Gate::policy(\App\Models\Core\Professional\BrandPartnerLinkEvent::class, \App\Policies\BrandPartnerLinkPolicy::class);
         Gate::policy(\App\Models\Core\Professional\BrandAffiliateInvite::class, \App\Policies\BrandPartnerLinkPolicy::class);
@@ -74,13 +73,11 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Gdpr\GdprRequest::class, \App\Policies\GdprPolicy::class);
         Gate::policy(\App\Models\Core\Gdpr\DataExportAudit::class, \App\Policies\GdprPolicy::class);
         Gate::policy(\App\Models\Commerce\AffiliateProductSelection::class, \App\Policies\AffiliateProductPolicy::class);
-        Gate::policy(\App\Models\Commerce\WalletMovement::class, \App\Policies\WalletMovementPolicy::class);
 
-        // Stripe wallet/payment-method abilities — bypasses model-class dispatch so
+        // Stripe payment-method abilities — bypasses model-class dispatch so
         // CommissionPolicy methods are reachable without overriding the Professional→
         // ProfessionalSelfPolicy registration. The $brand arg is always the acting
         // professional (self-operation), so $actor->id === $brand->id is the primary guard.
-        Gate::define('topUp', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $brand) => app(\App\Policies\CommissionPolicy::class)->topUp($actor, $brand));
         Gate::define('managePaymentMethod', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $brand) => app(\App\Policies\CommissionPolicy::class)->managePaymentMethod($actor, $brand));
         Gate::define('manageWallet', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $brand) => app(\App\Policies\CommissionPolicy::class)->manageWallet($actor, $brand));
         Gate::define('startConnect', fn (\App\Models\Core\Professional\Professional $actor, \App\Models\Core\Professional\Professional $pro) => app(\App\Policies\CommissionPolicy::class)->startConnect($actor, $pro));

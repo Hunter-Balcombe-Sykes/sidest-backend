@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\Commerce\Order;
-use App\Models\Commerce\WalletMovement;
 use App\Models\Retail\CommissionMovement;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
@@ -18,11 +17,6 @@ it('CommissionPayout has no SoftDeletes trait', function () {
 
 it('Order has no SoftDeletes trait', function () {
     $uses = class_uses_recursive(Order::class);
-    expect($uses)->not->toHaveKey(\Illuminate\Database\Eloquent\SoftDeletes::class);
-});
-
-it('WalletMovement has no SoftDeletes trait', function () {
-    $uses = class_uses_recursive(WalletMovement::class);
     expect($uses)->not->toHaveKey(\Illuminate\Database\Eloquent\SoftDeletes::class);
 });
 

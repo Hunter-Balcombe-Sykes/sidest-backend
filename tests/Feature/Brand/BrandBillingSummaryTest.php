@@ -18,8 +18,7 @@ beforeEach(function () {
     $this->mock(StripeConnectService::class);
     $this->mock(CommissionPayoutService::class);
 
-    // Controller queries commerce.orders (blocked-order count) and
-    // commerce.wallet_movements (recent top-ups). Both must exist in SQLite.
+    // Controller queries commerce.orders for blocked-order count.
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.orders (
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT NULL,
@@ -31,16 +30,6 @@ beforeEach(function () {
         rate_source TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
-    )');
-
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.wallet_movements (
-        id TEXT PRIMARY KEY,
-        professional_id TEXT NULL,
-        amount_cents INTEGER NULL,
-        currency_code TEXT NULL,
-        reason TEXT NULL,
-        occurred_at TEXT NULL,
-        created_at TEXT NULL
     )');
 });
 
@@ -56,17 +45,14 @@ function makeBillingSummaryRequest(Professional $pro): Request
     return $request;
 }
 
-it('returns billing summary with masked card and wallet balance for a brand with a card', function () {
+it('returns billing summary with masked card for a brand with a card on their Connect account', function () {
     $brand = createBrandTenant('billing-brand-card');
 
-    // Add Stripe columns to the minimal SQLite test table and seed values.
     $conn = DB::connection('pgsql');
     foreach ([
-        'stripe_payment_method_id TEXT NULL',
+        'stripe_connect_payment_method_id TEXT NULL',
         'stripe_payment_method_brand TEXT NULL',
         'stripe_payment_method_last4 TEXT NULL',
-        'stripe_manual_balance_cents INTEGER NULL',
-        'stripe_manual_balance_currency TEXT NULL',
     ] as $col) {
         try {
             $conn->statement("ALTER TABLE \"core\".\"professionals\" ADD COLUMN {$col}");
@@ -78,45 +64,39 @@ it('returns billing summary with masked card and wallet balance for a brand with
     $conn->table('core.professionals')
         ->where('id', $brand->id)
         ->update([
-            'stripe_payment_method_id'       => 'pm_test_4242',
-            'stripe_payment_method_brand'    => 'visa',
-            'stripe_payment_method_last4'    => '4242',
-            'stripe_manual_balance_cents'    => 25000,
-            'stripe_manual_balance_currency' => 'AUD',
+            'stripe_connect_payment_method_id' => 'pm_on_brand_4242',
+            'stripe_payment_method_brand' => 'visa',
+            'stripe_payment_method_last4' => '4242',
         ]);
     $brand->refresh();
 
     $controller = app(BrandBillingSummaryController::class);
-    $response   = $controller->show(makeBillingSummaryRequest($brand));
-    $body       = json_decode($response->getContent(), true);
+    $response = $controller->show(makeBillingSummaryRequest($brand));
+    $body = json_decode($response->getContent(), true);
 
     expect($response->getStatusCode())->toBe(200);
     expect($body)->toHaveKeys([
-        'has_card', 'masked_card', 'wallet_balance_cents', 'currency',
-        'blocked_orders_count', 'blocked_pending_cents', 'recent_topups',
+        'has_card', 'masked_card', 'blocked_orders_count', 'blocked_pending_cents', 'currency',
     ]);
     expect($body['has_card'])->toBeTrue();
     expect($body['masked_card']['brand'])->toBe('visa');
     expect($body['masked_card']['last4'])->toBe('4242');
-    expect($body['wallet_balance_cents'])->toBe(25000);
-    expect($body['currency'])->toBe('AUD');
-    // No blocked orders when card is on file.
     expect($body['blocked_orders_count'])->toBe(0);
     expect($body['blocked_pending_cents'])->toBe(0);
+    expect($body['currency'])->toBe('AUD');
 });
 
-it('returns null masked_card and zero wallet when brand has no payment method', function () {
+it('returns null masked_card when brand has no payment method', function () {
     $brand = createBrandTenant('billing-brand-nocard');
 
     $controller = app(BrandBillingSummaryController::class);
-    $response   = $controller->show(makeBillingSummaryRequest($brand));
-    $body       = json_decode($response->getContent(), true);
+    $response = $controller->show(makeBillingSummaryRequest($brand));
+    $body = json_decode($response->getContent(), true);
 
     expect($response->getStatusCode())->toBe(200);
     expect($body['has_card'])->toBeFalse();
     expect($body['masked_card'])->toBeNull();
-    expect($body['wallet_balance_cents'])->toBe(0);
-    expect($body['recent_topups'])->toBe([]);
+    expect($body['blocked_orders_count'])->toBe(0);
 });
 
 it('throws AuthorizationException when non-brand professional calls the controller', function () {

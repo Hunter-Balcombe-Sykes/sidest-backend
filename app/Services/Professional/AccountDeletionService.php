@@ -435,10 +435,6 @@ class AccountDeletionService
     {
         $reasons = [];
 
-        if ((int) ($professional->stripe_manual_balance_cents ?? 0) > 0) {
-            $reasons[] = 'unpaid_balance';
-        }
-
         $hasPendingPayouts = DB::connection('pgsql')
             ->table('commerce.commission_payouts')
             ->where(function ($q) use ($professional) {
@@ -450,16 +446,6 @@ class AccountDeletionService
 
         if ($hasPendingPayouts) {
             $reasons[] = 'pending_payouts';
-        }
-
-        $hasPendingTopups = DB::connection('pgsql')
-            ->table('commerce.brand_commission_topups')
-            ->where('brand_professional_id', $professional->id)
-            ->where('status', '!=', 'completed')
-            ->exists();
-
-        if ($hasPendingTopups) {
-            $reasons[] = 'pending_topups';
         }
 
         return $reasons;

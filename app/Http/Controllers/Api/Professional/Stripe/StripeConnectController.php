@@ -5,12 +5,9 @@ namespace App\Http\Controllers\Api\Professional\Stripe;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
 use App\Http\Requests\Stripe\ConfirmPaymentMethodRequest;
-use App\Http\Requests\Stripe\ConfirmTopUpCheckoutRequest;
 use App\Http\Requests\Stripe\CreatePaymentMethodSetupRequest;
-use App\Http\Requests\Stripe\CreateTopUpCheckoutRequest;
 use App\Http\Requests\Stripe\OnboardRequest;
 use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
-use App\Http\Requests\Stripe\UpdateFundingModeRequest;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
@@ -18,7 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
-// V2: Stripe Connect Express onboarding, payment methods, commission wallet top-ups, and payout history. Required for the 80/20 affiliate payout split.
+// V2: Stripe Connect Express onboarding, brand payment method, and payout history. Required for the brand-as-merchant-of-record commission flow.
 class StripeConnectController extends Controller
 {
     public function __construct(
@@ -48,16 +45,10 @@ class StripeConnectController extends Controller
         return response()->json([
             'connect' => $connectStatus,
             'has_payment_method' => $hasPaymentMethod,
-            // Surface the brand-Connect-scoped customer id (used by the
-            // frontend to gate the "add card" CTA). The platform-scoped
-            // stripe_customer_id is intentionally NOT exposed here — it
-            // belongs to the SaaS-billing path.
+            // Brand's Customer ID on their OWN Connect account — used by the
+            // frontend to gate the "Add Card" CTA. NOT the platform-scoped
+            // stripe_customer_id (which belongs to the SaaS-billing path).
             'stripe_customer_id' => $pro->stripe_connect_customer_id,
-            'funding_mode' => $pro->stripe_commission_funding_mode ?? 'auto_charge',
-            'manual_balance' => [
-                'cents' => (int) ($pro->stripe_manual_balance_cents ?? 0),
-                'currency_code' => strtoupper((string) ($pro->stripe_manual_balance_currency ?: 'AUD')),
-            ],
         ]);
     }
 
@@ -208,66 +199,6 @@ class StripeConnectController extends Controller
         $this->connectService->removeBrandPaymentSetup($pro);
 
         return response()->json(['status' => 'removed']);
-    }
-
-    /**
-     * PATCH /stripe/funding-mode
-     * Set brand commission funding mode: auto_charge or manual_topup.
-     */
-    public function updateFundingMode(UpdateFundingModeRequest $request): JsonResponse
-    {
-        $pro = $request->attributes->get('professional');
-        Gate::forUser($pro)->authorize('manageWallet', $pro);
-
-        $mode = $request->input('mode');
-
-        $this->connectService->setCommissionFundingMode($pro, $mode);
-
-        return response()->json([
-            'status' => 'updated',
-            'mode' => $mode,
-        ]);
-    }
-
-    /**
-     * POST /stripe/topups/checkout
-     * Creates hosted Stripe Checkout session to manually top up commission wallet.
-     */
-    public function createTopUpCheckoutSession(CreateTopUpCheckoutRequest $request): JsonResponse
-    {
-        $pro = $request->attributes->get('professional');
-        Gate::forUser($pro)->authorize('topUp', $pro);
-
-        $result = $this->connectService->createManualTopUpCheckoutSession(
-            $pro,
-            (int) $request->input('amount_cents'),
-            strtoupper((string) $request->input('currency_code', 'AUD')),
-            $request->input('success_url'),
-            $request->input('cancel_url'),
-        );
-
-        return response()->json($result);
-    }
-
-    /**
-     * POST /stripe/topups/confirm
-     * Confirms a completed top-up Checkout session and credits the wallet.
-     */
-    public function confirmTopUpCheckoutSession(ConfirmTopUpCheckoutRequest $request): JsonResponse
-    {
-        $pro = $request->attributes->get('professional');
-        Gate::forUser($pro)->authorize('topUp', $pro);
-
-        try {
-            $result = $this->connectService->confirmManualTopUpCheckoutSession(
-                $pro,
-                $request->input('session_id'),
-            );
-
-            return response()->json($result);
-        } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
-        }
     }
 
     /**

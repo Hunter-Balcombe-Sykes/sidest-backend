@@ -362,73 +362,6 @@ it('marks brand_payment_method_missing when brand has no card on file', function
     expect($fresh->failure_code)->toBe('brand_payment_method_missing');
 });
 
-it('marks wallet_currency_mismatch and notifies brand when wallet currency differs from payout currency', function () {
-    // Brand has EUR wallet balance but payout is in AUD — must not charge card.
-    payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents' => 15000,
-        'stripe_manual_balance_currency' => 'EUR',
-    ]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['currency_code' => 'AUD', 'gross_commission_cents' => 10000]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldNotReceive('create');
-
-    $publisher = Mockery::mock(NotificationPublisher::class);
-    $publisher->shouldReceive('publish')
-        ->once()
-        ->with(
-            'brand-1',                         // professionalId
-            'Warning',                         // frontendType
-            'commissions',                     // category
-            Mockery::any(),                    // title
-            Mockery::any(),                    // body
-            'wallet_currency_mismatch.p1',     // dedupeKey
-            Mockery::any(),                    // ctaUrl
-        );
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock]), $publisher);
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeNull();
-    $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('pending_funds');
-    expect($fresh->failure_code)->toBe('wallet_currency_mismatch');
-    // Wallet must remain untouched — no debit occurred.
-    $brandRow = DB::connection('pgsql')->table('core.professionals')->where('id', 'brand-1')->first();
-    expect($brandRow->stripe_manual_balance_cents)->toBe(15000);
-})->skip('wallet pre-debit removed in direct-charge flow — see DirectChargePayoutTest');
-
-it('resets void_at on wallet_currency_mismatch so the grace window counts from the latest hold, not creation', function () {
-    // Payout was created 50 days ago — without the void_at reset, VoidExpiredPayoutsJob
-    // would void it in 10 days even though the brand might still be resolving the mismatch.
-    $pastVoidAt = now()->subDays(50)->addDays(60); // original void_at = creation + 60 days
-
-    payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents' => 15000,
-        'stripe_manual_balance_currency' => 'EUR',
-    ]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'currency_code' => 'AUD',
-        'gross_commission_cents' => 10000,
-        'void_at' => $pastVoidAt->toDateTimeString(),
-    ]);
-
-    $publisher = Mockery::mock(NotificationPublisher::class);
-    $publisher->shouldReceive('publish')->once();
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(), $publisher);
-    $service->processPayoutBatch($payout);
-
-    $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('pending_funds');
-    expect($fresh->failure_code)->toBe('wallet_currency_mismatch');
-    // void_at should now be approximately now() + 60 days, not the original stale value.
-    $newVoidAt = \Illuminate\Support\Carbon::parse($fresh->void_at);
-    expect($newVoidAt->isAfter(now()->addDays(55)))->toBeTrue();
-})->skip('wallet pre-debit removed in direct-charge flow');
-
 it('does NOT flag currency mismatch when wallet balance is zero regardless of currency', function () {
     // Zero balance with wrong currency code should proceed to card charge, not halt.
     payoutSvc_seedBrand('brand-1', [
@@ -489,60 +422,8 @@ it('completes a card-only payout when brand wallet balance is zero', function ()
     expect($payout->funding_source)->toBe('card');
 });
 
-it('completes a wallet-only payout without creating a PaymentIntent', function () {
-    payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents' => 20000,
-        'stripe_manual_balance_currency' => 'AUD',
-    ]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldNotReceive('create');
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_wallet', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $payout->refresh();
-    expect($result)->toBeTrue();
-    expect($payout->status)->toBe('completed');
-    expect($payout->wallet_debit_cents)->toBe(10000);
-    expect($payout->charge_cents)->toBe(0);
-    expect($payout->funding_source)->toBe('wallet');
-})->skip('wallet pre-debit removed in direct-charge flow');
-
-it('completes a wallet-and-card payout when wallet partially covers the amount', function () {
-    payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents' => 3000,
-        'stripe_manual_balance_currency' => 'AUD',
-    ]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')
-        ->once()
-        ->with(Mockery::on(fn ($p) => $p['amount'] === 7000), Mockery::any())
-        ->andReturn((object) ['id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test']);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $payout->refresh();
-    expect($result)->toBeTrue();
-    expect($payout->wallet_debit_cents)->toBe(3000);
-    expect($payout->charge_cents)->toBe(7000);
-    expect($payout->funding_source)->toBe('wallet_and_card');
-})->skip('wallet pre-debit removed in direct-charge flow');
-
 // ============================================================
-// Gap 1 — Idempotent resume (no double-debit / no double-charge)
+// Gap 1 — Idempotent resume (no double-charge)
 // ============================================================
 
 it('does not re-debit the wallet when resuming from collecting status', function () {
