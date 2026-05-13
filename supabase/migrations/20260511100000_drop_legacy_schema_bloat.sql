@@ -18,9 +18,15 @@ DROP TABLE IF EXISTS analytics.professional_customer_daily;
 -- #SCHEMA-4: drop dead headshot_* and icon_* columns on core.professionals
 -- These were replaced by the site.site_media pool=design / BrandDesignMediaService pattern.
 
--- Step 1: recreate site.all_site_data view without the four dead column aliases
--- (must happen before column drop to avoid FK/view dependency errors)
-CREATE OR REPLACE VIEW site.all_site_data AS
+-- Step 1: rebuild site.all_site_data view without the four dead column aliases.
+-- CREATE OR REPLACE VIEW cannot remove columns from an existing view — Postgres
+-- treats the column list as a stable schema contract and rejects with
+-- SQLSTATE 42P16 (cannot drop columns from view). DROP ... CASCADE first lets
+-- us re-shape it; CASCADE handles any downstream dependents (none currently
+-- exist, but the clause is safe and future-proof).
+DROP VIEW IF EXISTS site.all_site_data CASCADE;
+
+CREATE VIEW site.all_site_data AS
 SELECT
     s.id AS site_id,
     s.subdomain,
