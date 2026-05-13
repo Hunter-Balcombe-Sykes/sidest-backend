@@ -714,16 +714,18 @@ class EmbeddedSetupController extends ApiController
             && $existing->access_token === $data['access_token'];
 
         // Validate-before-store: the embedded app re-posts session.accessToken on
-        // every load, and historically a bad token (rotated, revoked, scope mismatch)
-        // could overwrite a previously-working one — every async job afterwards 401s
-        // until the merchant reinstalls. Verify the candidate against Shopify Admin
-        // API before persisting. Skip on no-op refreshes (token unchanged) and skip
-        // on first install (no prior token to protect; refusal would block onboarding).
-        $tokenChanged = $existing !== null && $existing->access_token !== $data['access_token'];
-        if ($tokenChanged && ! $this->validateShopifyAccessToken($shopDomain, $data['access_token'])) {
+        // every load. Validate every persist against Shopify Admin API — invalid
+        // tokens (rotated, revoked, scope-mismatch) and cross-shop mixups (shop A
+        // submitting shop B's access token) get rejected before they overwrite a
+        // working credential. Transient Shopify outages return valid=true so we
+        // don't punish merchants for backend hiccups; only definitive 401 or
+        // shop-domain-mismatch refuse.
+        $validation = $this->validateShopifyAccessToken($shopDomain, $data['access_token']);
+        if (! $validation['valid']) {
             Log::warning('Shopify provision-integration: token rejected by Shopify; refusing to overwrite existing token.', [
                 'professional_id' => $professionalId,
                 'shop_domain' => $shopDomain,
+                'reason' => $validation['reason'],
             ]);
 
             return $this->error(
@@ -841,37 +843,75 @@ class EmbeddedSetupController extends ApiController
 
     /**
      * Verify a candidate Shopify access token works against Shopify Admin API
-     * before persisting it. Prevents the documented foot-gun where a bad token
-     * (rotated/revoked/scope-mismatch) overwrites a working one and silently
-     * breaks every async job until the merchant reinstalls.
+     * before persisting it. Asserts both that the token is accepted (200) and
+     * that the shop it returns matches the requesting shop — guards against
+     * the cross-shop bug where shop A submits shop B's access token.
      *
-     * 200 → valid, return true.
-     * 401 → invalid, return false (caller must NOT overwrite existing token).
-     * Other (5xx, network error, timeout) → return true so we don't punish
-     * merchants for transient Shopify outages or local network blips.
+     * Outcomes:
+     *   200 + matching domain   → ['valid' => true,  'reason' => null]
+     *   200 + domain mismatch   → ['valid' => false, 'reason' => 'shop_domain_mismatch']
+     *   401                     → ['valid' => false, 'reason' => 'invalid_token']
+     *   5xx / network error     → ['valid' => true,  'reason' => 'transient_outage']
+     *                             (don't punish merchants for Shopify hiccups)
+     *   anything else           → ['valid' => false, 'reason' => 'unexpected_status_<code>']
+     *
+     * @return array{valid: bool, reason: ?string}
      */
-    private function validateShopifyAccessToken(string $shopDomain, string $accessToken): bool
+    private function validateShopifyAccessToken(string $shopDomain, string $accessToken): array
     {
+        $shopDomain = strtolower(trim($shopDomain, ' /'));
+
         if ($accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
-            return false;
+            return ['valid' => false, 'reason' => 'malformed_input'];
         }
 
-        $apiVersion = (string) config('services.shopify.api_version', '2025-01');
+        $apiVersion = (string) config('services.shopify.api_version', '2026-04');
         $url = "https://{$shopDomain}/admin/api/{$apiVersion}/shop.json";
 
         try {
-            $response = Http::withHeaders(['X-Shopify-Access-Token' => $accessToken])
-                ->timeout(8)
-                ->get($url);
-
-            return $response->status() !== 401;
+            $response = Http::withHeaders([
+                'X-Shopify-Access-Token' => $accessToken,
+                'Accept' => 'application/json',
+            ])->timeout(10)->get($url);
         } catch (\Throwable $e) {
-            Log::warning('Shopify provision-integration: token validation request failed; allowing write.', [
+            // Class name only — message can contain URLs / tokens.
+            Log::warning('shopify_access_token_validation_network_error', [
                 'shop_domain' => $shopDomain,
-                'error' => $e->getMessage(),
+                'error_class' => class_basename($e),
             ]);
 
-            return true;
+            return ['valid' => true, 'reason' => 'transient_outage'];
         }
+
+        if ($response->status() === 401) {
+            return ['valid' => false, 'reason' => 'invalid_token'];
+        }
+
+        if ($response->status() >= 500) {
+            Log::warning('shopify_access_token_validation_5xx', [
+                'shop_domain' => $shopDomain,
+                'status' => $response->status(),
+            ]);
+
+            return ['valid' => true, 'reason' => 'transient_outage'];
+        }
+
+        if (! $response->successful()) {
+            return ['valid' => false, 'reason' => 'unexpected_status_'.$response->status()];
+        }
+
+        $body = $response->json();
+        $responseDomain = strtolower(trim((string) ($body['shop']['myshopify_domain'] ?? ''), ' /'));
+
+        if ($responseDomain === '' || $responseDomain !== $shopDomain) {
+            Log::warning('shopify_access_token_domain_mismatch', [
+                'expected_shop_domain' => $shopDomain,
+                'response_shop_domain' => $responseDomain,
+            ]);
+
+            return ['valid' => false, 'reason' => 'shop_domain_mismatch'];
+        }
+
+        return ['valid' => true, 'reason' => null];
     }
 }

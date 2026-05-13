@@ -7,76 +7,167 @@ use Closure;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
-// Verifies a Shopify session token (JWT) sent by an admin UI extension.
+// Verifies a Shopify-signed session JWT and binds the request to a tenant.
 //
-// Shopify-issued session tokens are HS256-signed with the app's API secret.
-// They embed the destination shop in the `dest` claim, the app's client ID
-// in the `aud` claim, and short expiry (~60s) in `exp`. We verify all three
-// before resolving the brand professional from the shop domain — same shape
-// the embedded-key middleware exposes downstream so controllers can be auth-
-// agnostic.
+// Tenant identity is bound to the JWT signature end-to-end: App Bridge signs
+// the token with SHOPIFY_API_SECRET, the Remix SDK forwards it verbatim, and
+// this middleware decodes + validates every claim before stashing the resolved
+// professional on the request. There is no shared static key, no trusted
+// X-Shopify-Shop header — `dest` is the sole source of tenant identity.
+//
+// Replay protection: 120s Redis-backed JTI cache. FAIL-CLOSED — if the cache
+// backend is unreachable we return 503, not 200, because a multi-pod deploy
+// with a non-clustered cache would otherwise let an attacker replay any
+// captured token against a different pod.
+//
+// Validation order (every reject is a distinct reason code for observability):
+//   1. token_missing       — no Authorization header
+//   2. sig_invalid         — JWT::decode threw (covers signature, exp, nbf)
+//   3. aud_mismatch        — aud != SHOPIFY_API_KEY
+//   4. dest_invalid        — dest host does not end .myshopify.com
+//   5. iss_mismatch        — iss host != dest host
+//   6. jti_missing         — no jti claim
+//   7. cache_unavailable   — Cache::add threw (503 fail-closed)
+//   8. jti_replay          — jti already cached within the 120s window
+//   9. shop_unlinked       — no professional linked to this shop
 //
 // Docs: https://shopify.dev/docs/apps/build/authentication-authorization/session-tokens
 class VerifyShopifySessionToken
 {
+    private const JTI_CACHE_TTL_SECONDS = 120;
+
+    private const JTI_CACHE_KEY_PREFIX = 'partna:shopify-jti:';
+
+    // Clock skew tolerance for exp/nbf checks. Shopify-signed tokens are short
+    // (60s exp) so this is generous; tighter would cause spurious 401s on
+    // pods whose NTP has drifted by a few seconds.
+    private const CLOCK_LEEWAY_SECONDS = 10;
+
     public function __construct(
         private readonly ShopifyShopResolver $resolver,
     ) {}
 
+    /**
+     * @return Response 401 on auth failure, 404 on unknown shop, 503 on cache
+     *                  unavailable, otherwise delegates to $next. Sets `embedded_professional_id`,
+     *                  `embedded_shop_domain`, and `embedded_shopify_user_id` on the request.
+     */
     public function handle(Request $request, Closure $next): Response
     {
+        $startedAt = microtime(true);
         $secret = (string) config('services.shopify.api_secret');
         $expectedAud = (string) config('services.shopify.api_key');
 
         if ($secret === '' || $expectedAud === '') {
-            return response()->json([
-                'message' => 'Shopify session-token verification is not configured on this server.',
-            ], 500);
+            // Misconfiguration is a deploy bug, not a request error. Surface as
+            // an exception so it shows up in Nightwatch as a 500 (deployment
+            // health), not a 401 (auth health). A silent 401 would mask the
+            // root cause behind "unauthenticated requests".
+            throw new \RuntimeException(
+                'Shopify session token middleware misconfigured: SHOPIFY_API_KEY and SHOPIFY_API_SECRET are required.'
+            );
         }
 
         $token = (string) str_replace('Bearer ', '', $request->header('Authorization', ''));
-
         if ($token === '') {
-            return response()->json(['message' => 'Missing session token.'], 401);
+            return $this->reject($request, 'token_missing', 401, $startedAt);
         }
 
         try {
+            JWT::$leeway = self::CLOCK_LEEWAY_SECONDS;
             $claims = (array) JWT::decode($token, new Key($secret, 'HS256'));
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Invalid session token.'], 401);
+            return $this->reject($request, 'sig_invalid', 401, $startedAt, [
+                'error_class' => class_basename($e),
+            ]);
         }
 
-        // Audience must match this app's client ID — guards against tokens
-        // issued for a different Shopify app being replayed against ours.
         $aud = (string) ($claims['aud'] ?? '');
         if (! hash_equals($expectedAud, $aud)) {
-            return response()->json(['message' => 'Session token audience mismatch.'], 401);
+            return $this->reject($request, 'aud_mismatch', 401, $startedAt);
         }
 
-        // Pull the shop domain out of the `dest` claim and normalise.
-        // Shape: https://{shop}.myshopify.com (no path).
         $dest = (string) ($claims['dest'] ?? '');
-        $shopDomain = strtolower(parse_url($dest, PHP_URL_HOST) ?? '');
-
-        if ($shopDomain === '' || ! str_ends_with($shopDomain, '.myshopify.com')) {
-            return response()->json(['message' => 'Invalid session token destination.'], 401);
+        $destHost = strtolower((string) parse_url($dest, PHP_URL_HOST));
+        if ($destHost === '' || ! str_ends_with($destHost, '.myshopify.com')) {
+            return $this->reject($request, 'dest_invalid', 401, $startedAt);
         }
 
-        $professionalId = $this->resolver->resolveProfessionalId($shopDomain);
+        $iss = (string) ($claims['iss'] ?? '');
+        $issHost = strtolower((string) parse_url($iss, PHP_URL_HOST));
+        if ($issHost === '' || $issHost !== $destHost) {
+            return $this->reject($request, 'iss_mismatch', 401, $startedAt, [
+                'shop' => $destHost,
+            ]);
+        }
 
+        $jti = (string) ($claims['jti'] ?? '');
+        if ($jti === '') {
+            return $this->reject($request, 'jti_missing', 401, $startedAt, [
+                'shop' => $destHost,
+            ]);
+        }
+
+        try {
+            $jtiAdded = Cache::add(
+                self::JTI_CACHE_KEY_PREFIX.$jti,
+                1,
+                self::JTI_CACHE_TTL_SECONDS,
+            );
+        } catch (\Throwable $e) {
+            Log::error('shopify.session.cache_unavailable', [
+                'error_class' => class_basename($e),
+                'shop' => $destHost,
+            ]);
+
+            return $this->reject($request, 'cache_unavailable', 503, $startedAt, [
+                'shop' => $destHost,
+            ]);
+        }
+
+        if (! $jtiAdded) {
+            return $this->reject($request, 'jti_replay', 401, $startedAt, [
+                'shop' => $destHost,
+                'jti_hash' => hash('sha256', $jti),
+            ]);
+        }
+
+        $professionalId = $this->resolver->resolveProfessionalId($destHost);
         if ($professionalId === null) {
-            return response()->json([
-                'error' => 'shop_not_connected',
-                'message' => 'No Partna account is linked to this Shopify store.',
-            ], 404);
+            return $this->reject($request, 'shop_unlinked', 404, $startedAt, [
+                'shop' => $destHost,
+            ]);
         }
 
-        // Match the attribute name used by VerifyEmbeddedApiKey so controllers
-        // can be reused regardless of which auth path got them here.
         $request->attributes->set('embedded_professional_id', $professionalId);
+        $request->attributes->set('embedded_shop_domain', $destHost);
+        $request->attributes->set('embedded_shopify_user_id', (string) ($claims['sub'] ?? ''));
+
+        Log::info('shopify.session.ok', [
+            'shop' => $destHost,
+            'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+        ]);
 
         return $next($request);
+    }
+
+    /**
+     * Emit a structured warning log and return a JSON response.
+     *
+     * @param  array<string, mixed>  $extra
+     */
+    private function reject(Request $request, string $reason, int $status, float $startedAt, array $extra = []): Response
+    {
+        Log::warning('shopify.session.failed', array_merge([
+            'reason' => $reason,
+            'path' => $request->path(),
+            'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+        ], $extra));
+
+        return response()->json(['message' => "auth_{$reason}"], $status);
     }
 }

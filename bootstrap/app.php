@@ -12,9 +12,9 @@ use App\Http\Middleware\BrandFundingGate;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\FeatureGate;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
-use App\Http\Middleware\VerifyTurnstileCaptcha;
 use App\Http\Middleware\RequirePlan;
 use App\Http\Middleware\SecureHeaders;
+use App\Http\Middleware\VerifyTurnstileCaptcha;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -64,6 +64,17 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->prependToPriorityList(
             \Illuminate\Routing\Middleware\ThrottleRequests::class,
             VerifySupabaseJwt::class,
+        );
+
+        // Same priority pin for the embedded-app session-token verifier. The
+        // `embedded-by-shop` rate limiter reads `embedded_shop_domain` from the
+        // request attributes, which VerifyShopifySessionToken sets after decoding
+        // the JWT. Without this, ThrottleRequests fires before the JWT is parsed
+        // and the per-shop limiter collapses to per-IP (or whatever fallback
+        // the limiter uses).
+        $middleware->prependToPriorityList(
+            \Illuminate\Routing\Middleware\ThrottleRequests::class,
+            VerifyShopifySessionToken::class,
         );
 
         $middleware->alias([

@@ -196,7 +196,10 @@ Route::middleware(['embedded.key', 'throttle:60,1'])->prefix('internal/embedded'
 // Auth via session-token JWT (signed with the app's API secret) — extensions
 // can't ship the embedded API key, so each request brings a freshly minted
 // token from App Bridge that we verify against the shared client secret.
-Route::middleware(['shopify.session', 'throttle:60,1'])->prefix('internal/embedded')->group(function () {
+// Throttle keyed by shop domain (`dest` claim) — see embedded-by-shop in
+// AppServiceProvider. Anticipates Phase 5b state where the embedded.key
+// group above also migrates to shopify.session+embedded-by-shop.
+Route::middleware(['shopify.session', 'throttle:embedded-by-shop'])->prefix('internal/embedded')->group(function () {
     Route::get('/orders/{shopify_order_id}', [EmbeddedOrderAnalyticsController::class, 'show'])
         ->where('shopify_order_id', '[A-Za-z0-9_/.:-]+');
     Route::get('/products/{shopify_product_id}/analytics', [EmbeddedProductAnalyticsController::class, 'show'])

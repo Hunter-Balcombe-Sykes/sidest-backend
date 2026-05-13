@@ -432,6 +432,27 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        // Embedded Shopify app — keyed by the resolved shop domain from the
+        // JWT (`dest` claim). VerifyShopifySessionToken is pinned ahead of
+        // ThrottleRequests in bootstrap/app.php so the attribute is set before
+        // this callback fires. IP fallback is just defense-in-depth; under
+        // normal flow it should never be hit.
+        RateLimiter::for('embedded-by-shop', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            $shop = $request->attributes->get('embedded_shop_domain') ?? $request->ip();
+
+            return Limit::perMinute(60)
+                ->by('embedded-shop:'.$shop)
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many embedded app requests. Please wait a moment and try again.',
+                    ], 429);
+                });
+        });
+
         // Public plans listing
         RateLimiter::for('plans', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {
