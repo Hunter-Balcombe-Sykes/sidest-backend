@@ -15,11 +15,12 @@ use Illuminate\Support\Facades\Log;
 //   3. Optional DB-level dedup (override claimWebhookEvent)
 //   4. Shop domain lookup (200 if unknown)
 //   5. JSON decode — 422 so Shopify retries; prevents silent event loss
-//   6. dispatchWebhookJob
+//   6. dispatchWebhookJob — cache key released on failure so Shopify can retry
 //
-// Two bugs this fixes in earlier controllers:
+// Bugs fixed vs earlier controllers:
 //   • Cache::has before HMAC → webhook-ID enumeration without a valid signature
 //   • json_decode failure returning 200 → Shopify stops retrying, event lost permanently
+//   • Uncaught dispatch exception left cache slot claimed → retries deduped, event lost
 trait HandlesShopifyWebhook
 {
     use DedupesShopifyWebhookEvent;
@@ -74,6 +75,7 @@ trait HandlesShopifyWebhook
 
         // 2. Atomic cache claim — Cache::add returns false if the key exists,
         //    deduplicating without a separate Cache::has probe.
+        $cacheKey = null;
         if ($webhookId !== '') {
             $cacheKey = "{$this->dedupCachePrefix()}:{$webhookId}";
             if (! Cache::add($cacheKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
@@ -111,8 +113,17 @@ trait HandlesShopifyWebhook
             return $this->error('malformed payload', 422);
         }
 
-        // 6. Dispatch.
-        $this->dispatchWebhookJob($integration, $payload, $eventId);
+        // 6. Dispatch — release the cache slot on failure so Shopify can retry.
+        //    Without this, an uncaught exception would leave the slot claimed and
+        //    subsequent retries would be deduped, permanently losing the event.
+        try {
+            $this->dispatchWebhookJob($integration, $payload, $eventId);
+        } catch (\Throwable $e) {
+            if ($cacheKey !== null) {
+                Cache::forget($cacheKey);
+            }
+            throw $e;
+        }
 
         return $this->success(['received' => true]);
     }

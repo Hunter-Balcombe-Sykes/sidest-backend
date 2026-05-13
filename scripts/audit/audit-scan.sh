@@ -135,12 +135,18 @@ jq -n \
             {role: "system", content: $sys},
             {role: "user",   content: $usr}
         ],
-        temperature: 0.2,
-        max_tokens: 320000
+        max_tokens: 393216,
+        thinking: {
+            type: "enabled",
+            reasoning_effort: "max"
+        }
     }' > "$PAYLOAD"
+# Note: temperature/top_p/penalty params are silently ignored by DeepSeek when
+# thinking mode is enabled, so we omit them. reasoning_effort: "max" enables
+# Think Max (deepest CoT, same per-token price as Non-think / Think High).
 
 PAYLOAD_BYTES=$(wc -c < "$PAYLOAD")
-echo "→ Firing $MODEL — payload ${PAYLOAD_BYTES} bytes (~$((PAYLOAD_BYTES / 4)) tokens)" >&2
+echo "→ Firing $MODEL (thinking: max) — payload ${PAYLOAD_BYTES} bytes (~$((PAYLOAD_BYTES / 4)) tokens)" >&2
 
 # --- Fire ---
 RESPONSE="$TMP/response.json"
