@@ -75,12 +75,14 @@ class ProfessionalUploadController extends ApiController
         ]);
 
         // Pool limit is shared across media types (images + videos count toward the same cap).
+        // Failed rows are terminal — they never stored a file and occupy no usable slot.
         $maxItems = (int) config("partna.image_pools.{$pool}.max", 5);
 
         $activeCount = SiteMedia::query()
             ->where('site_id', $site->id)
             ->where('pool', $pool)
             ->where('is_active', true)
+            ->where('processing_state', '!=', SiteMedia::PROCESSING_STATE_FAILED)
             ->count();
 
         if ($activeCount >= $maxItems) {
@@ -110,11 +112,12 @@ class ProfessionalUploadController extends ApiController
             $siteImages = SiteMedia::query()
                 ->where('site_id', $site->id)
                 ->lockForUpdate()
-                ->get(['id', 'pool', 'sort_order', 'is_active']);
+                ->get(['id', 'pool', 'sort_order', 'is_active', 'processing_state']);
 
             $activeCount = $siteImages
                 ->where('pool', $pool)
                 ->where('is_active', true)
+                ->where('processing_state', '!=', SiteMedia::PROCESSING_STATE_FAILED)
                 ->count();
 
             if ($activeCount >= $maxItems) {

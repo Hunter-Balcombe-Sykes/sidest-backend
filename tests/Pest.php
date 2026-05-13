@@ -1327,3 +1327,58 @@ function buildTestStripeSignature(string $body, string $secret, ?int $timestamp 
 {
     return signStripeBody($body, $secret, $timestamp);
 }
+
+/**
+ * site.enquiries — visitor PII from contact-form submissions.
+ */
+function setupEnquiriesTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS site.enquiries (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        site_id TEXT NULL,
+        name TEXT NULL,
+        email TEXT NULL,
+        phone TEXT NULL,
+        subject TEXT NULL,
+        message TEXT NULL,
+        ip_hash TEXT NULL,
+        user_agent TEXT NULL,
+        read_at TEXT NULL,
+        deleted_at TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
+ * Insert an Enquiry row for $pro's site and return the Eloquent model.
+ *
+ * @param  array<string, mixed>  $overrides
+ */
+function createEnquiryFor(Professional $pro, array $overrides = []): \App\Models\Core\Site\Enquiry
+{
+    setupEnquiriesTable();
+    setupSitesTable();
+
+    $site = $pro->relationLoaded('site') ? $pro->site : $pro->load('site')->site;
+    $id = (string) \Illuminate\Support\Str::uuid();
+    $now = now()->toDateTimeString();
+
+    $row = array_merge([
+        'id' => $id,
+        'professional_id' => $pro->id,
+        'site_id' => $site->id,
+        'name' => 'Test Visitor',
+        'email' => 'visitor@example.test',
+        'subject' => 'Test enquiry',
+        'message' => 'Hello from a test visitor.',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ], $overrides);
+
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.enquiries')->insert($row);
+
+    return \App\Models\Core\Site\Enquiry::withTrashed()->findOrFail($id);
+}

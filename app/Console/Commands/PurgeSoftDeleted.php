@@ -5,6 +5,8 @@ namespace App\Console\Commands;
 use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
+use App\Models\Core\Professional\ServiceCategory;
+use App\Models\Core\Site\Enquiry;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Professional\AccountDeletionService;
 use Illuminate\Console\Command;
@@ -31,8 +33,12 @@ class PurgeSoftDeleted extends Command
         $total += $this->purgeModel(Customer::class, $cutoff);
         $total += $this->purgeModel(Service::class, $cutoff);
         $total += $this->purgeModel(SiteMedia::class, $cutoff);
+        $total += $this->purgeModel(Enquiry::class, $cutoff);
+        $total += $this->purgeModel(ServiceCategory::class, $cutoff);
 
         $this->info("Done with soft deletes. Force-deleted {$total} rows.");
+
+        $this->purgeFailedMedia();
 
         // Pending-deletion professionals past grace period
         $this->purgePendingDeletionProfessionals($cutoff, $deletionService);
@@ -63,6 +69,38 @@ class PurgeSoftDeleted extends Command
         $this->line(class_basename($modelClass).": {$count} purged, {$failed} failed.");
 
         return $count;
+    }
+
+    /**
+     * Hard-delete SiteMedia rows stuck in a terminal 'failed' state for more than 7 days.
+     * Failed rows are never soft-deleted — they hold deleted_at = NULL — so the standard
+     * purgeModel pass does not reach them. A shorter 7-day window is used because a failed
+     * upload is irrecoverable: the file was never stored, there is nothing for the user to
+     * recover, and each failed row occupies a gallery slot count in the upload controller.
+     */
+    private function purgeFailedMedia(): void
+    {
+        $failedCutoff = now()->subDays(7);
+        $count = 0;
+        $failed = 0;
+
+        SiteMedia::query()
+            ->where('processing_state', SiteMedia::PROCESSING_STATE_FAILED)
+            ->where('created_at', '<', $failedCutoff)
+            ->orderBy('created_at')
+            ->chunk(500, function ($rows) use (&$count, &$failed) {
+                foreach ($rows as $row) {
+                    try {
+                        $row->forceDelete();
+                        $count++;
+                    } catch (\Throwable $e) {
+                        $failed++;
+                        report($e);
+                    }
+                }
+            });
+
+        $this->line("SiteMedia (failed): {$count} purged, {$failed} failed.");
     }
 
     /**
