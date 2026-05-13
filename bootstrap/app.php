@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\AddETagHeaders;
 use App\Http\Middleware\AddPublicCacheHeaders;
+use App\Http\Middleware\Auth\EmbeddedDualAuth;
 use App\Http\Middleware\Auth\EnsurePartnaAdmin;
 use App\Http\Middleware\Auth\EnsurePartnaStaff;
 use App\Http\Middleware\Auth\VerifyEmbeddedApiKey;
@@ -86,6 +87,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'plan' => RequirePlan::class,
             'hydrogen.key' => VerifyHydrogenApiKey::class,
             'embedded.key' => VerifyEmbeddedApiKey::class,
+            'embedded.dual' => EmbeddedDualAuth::class,
             'shopify.session' => VerifyShopifySessionToken::class,
             'feature' => FeatureGate::class,
             'captcha' => VerifyTurnstileCaptcha::class,

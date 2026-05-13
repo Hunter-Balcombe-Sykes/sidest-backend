@@ -174,8 +174,12 @@ Route::post('/public/enquiry', [PublicEnquiryController::class, 'submit'])
 Route::post('/internal/embedded/connect-account', [EmbeddedConnectController::class, 'connect'])
     ->middleware('throttle:10,1');
 
-// Internal Shopify embedded app endpoints — consumed by Sidest-Embedded setup wizard
-Route::middleware(['embedded.key', 'throttle:60,1'])->prefix('internal/embedded')->group(function () {
+// Internal Shopify embedded app endpoints — consumed by Sidest-Embedded setup wizard.
+// `embedded.dual` is the cutover-window dispatcher: routes 3-segment Bearer
+// (JWT) to VerifyShopifySessionToken; everything else to VerifyEmbeddedApiKey.
+// Once the Remix side fully migrates to session-token forwarding, this group
+// drops `embedded.dual` and joins the shopify.session group above (Phase 5b).
+Route::middleware(['embedded.dual', 'throttle:60,1'])->prefix('internal/embedded')->group(function () {
     Route::get('/brand-profile', [EmbeddedSetupController::class, 'brandProfile']);
     Route::post('/brand-identity', [EmbeddedSetupController::class, 'saveIdentity']);
     Route::post('/brand-details', [EmbeddedSetupController::class, 'saveBusinessDetails']);
