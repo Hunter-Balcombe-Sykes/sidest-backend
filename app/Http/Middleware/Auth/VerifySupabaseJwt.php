@@ -73,6 +73,8 @@ class VerifySupabaseJwt
             // Log every JWKS failure before falling back — repeated infra-level failures
             // (e.g. network blocking JWKS fetches) are security-relevant and must be visible.
             Log::warning('JWT JWKS verification failed, falling back to auth server', [
+                'request_id' => $request->header('X-Request-Id', (string) str()->uuid()),
+                'operation' => 'VerifySupabaseJwt',
                 'reason' => $e->getMessage(),
                 'ip' => $request->ip(),
             ]);
@@ -97,6 +99,8 @@ class VerifySupabaseJwt
                 return $next($request);
             } catch (\Throwable $e2) {
                 Log::warning('JWT verification failed', [
+                    'request_id' => $request->header('X-Request-Id', (string) str()->uuid()),
+                    'operation' => 'VerifySupabaseJwt',
                     'reason' => $e2->getMessage(),
                     'ip' => $request->ip(),
                 ]);

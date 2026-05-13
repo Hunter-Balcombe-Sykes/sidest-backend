@@ -3,6 +3,7 @@
 namespace App\Observers\Core;
 
 use App\Models\Core\Site\SiteMedia;
+use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
 
@@ -11,6 +12,8 @@ use Illuminate\Support\Facades\Log;
 // block type; mapping is defined in poolToBlockType().
 class SiteMediaObserver
 {
+    use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function __construct(
@@ -51,13 +54,14 @@ class SiteMediaObserver
                 $blockType
             );
         } catch (\Throwable $e) {
-            Log::warning('Section visibility reevaluation failed on SiteMedia event', [
+            Log::warning('Section visibility reevaluation failed on SiteMedia event', $this->logContext(__METHOD__, [
                 'site_media_id' => $media->id,
                 'site_id' => $media->site_id,
+                'professional_id' => $site->professional_id,
                 'pool' => $media->pool,
                 'block_type' => $blockType,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 

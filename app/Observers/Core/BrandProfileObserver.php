@@ -5,6 +5,7 @@ namespace App\Observers\Core;
 use App\Enums\BrandStatus;
 use App\Jobs\Notifications\FanOutBrandStatusNotificationJob;
 use App\Models\Core\Professional\BrandProfile;
+use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -13,6 +14,8 @@ use Illuminate\Support\Facades\Log;
 // building, or systems_down (meaningful affiliate-facing transitions).
 class BrandProfileObserver
 {
+    use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function updated(BrandProfile $brandProfile): void
@@ -34,10 +37,10 @@ class BrandProfileObserver
             try {
                 Cache::forget(CacheKeyGenerator::brandPartnerStatus($brandProfessionalId));
             } catch (\Throwable $e) {
-                Log::warning('brand-partner-status cache invalidation failed', [
+                Log::warning('brand-partner-status cache invalidation failed', $this->logContext(__METHOD__, [
                     'brand_professional_id' => $brandProfessionalId,
                     'message' => $e->getMessage(),
-                ]);
+                ]));
             }
 
             $newStatus = $brandProfile->brand_status;
@@ -52,10 +55,11 @@ class BrandProfileObserver
 
             FanOutBrandStatusNotificationJob::dispatch($brandProfessionalId, $newStatus);
         } catch (\Throwable $e) {
-            Log::warning('BrandProfile updated notification dispatch failed', [
+            Log::warning('BrandProfile updated notification dispatch failed', $this->logContext(__METHOD__, [
                 'brand_profile_id' => $brandProfile->id,
+                'brand_professional_id' => $brandProfessionalId,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 }

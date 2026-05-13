@@ -3,12 +3,15 @@
 namespace App\Observers\Core;
 
 use App\Models\Core\Site\Block;
+use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\Log;
 
 // V2: Invalidates site cache when any block (link, section) is created, updated, or deleted.
 class BlockObserver
 {
+    use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function __construct(
@@ -21,11 +24,11 @@ class BlockObserver
             try {
                 $this->siteCache->invalidateSite($block->site);
             } catch (\Throwable $e) {
-                Log::warning('Site cache invalidation failed on block create', [
+                Log::warning('Site cache invalidation failed on block create', $this->logContext(__METHOD__, [
                     'block_id' => $block->id,
                     'site_id' => $block->site->id,
                     'message' => $e->getMessage(),
-                ]);
+                ]));
             }
         }
     }
@@ -36,11 +39,11 @@ class BlockObserver
             try {
                 $this->siteCache->invalidateSite($block->site);
             } catch (\Throwable $e) {
-                Log::warning('Site cache invalidation failed on block update', [
+                Log::warning('Site cache invalidation failed on block update', $this->logContext(__METHOD__, [
                     'block_id' => $block->id,
                     'site_id' => $block->site->id,
                     'message' => $e->getMessage(),
-                ]);
+                ]));
             }
         }
     }
@@ -51,11 +54,11 @@ class BlockObserver
             try {
                 $this->siteCache->invalidateSite($block->site);
             } catch (\Throwable $e) {
-                Log::warning('Site cache invalidation failed on block delete', [
+                Log::warning('Site cache invalidation failed on block delete', $this->logContext(__METHOD__, [
                     'block_id' => $block->id,
                     'site_id' => $block->site->id,
                     'message' => $e->getMessage(),
-                ]);
+                ]));
             }
         }
     }

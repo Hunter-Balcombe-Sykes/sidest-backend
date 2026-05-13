@@ -4,6 +4,7 @@ namespace App\Observers\Core;
 
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Professional\SectionVisibilityService;
 use Illuminate\Support\Facades\Log;
@@ -11,6 +12,8 @@ use Illuminate\Support\Facades\Log;
 // V2: Publishes integration connect/disconnect notifications and re-evaluates booking section visibility.
 class ProfessionalIntegrationObserver
 {
+    use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function __construct(
@@ -39,10 +42,11 @@ class ProfessionalIntegrationObserver
                 retentionConfigKey: 'integration',
             );
         } catch (\Throwable $e) {
-            Log::warning('ProfessionalIntegration created notification failed', [
+            Log::warning('ProfessionalIntegration created notification failed', $this->logContext(__METHOD__, [
                 'integration_id' => $integration->id,
+                'professional_id' => $integration->professional_id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
 
         $this->reevaluateBooking($integration);
@@ -69,10 +73,11 @@ class ProfessionalIntegrationObserver
                 retentionConfigKey: 'integration',
             );
         } catch (\Throwable $e) {
-            Log::warning('ProfessionalIntegration deleted notification failed', [
+            Log::warning('ProfessionalIntegration deleted notification failed', $this->logContext(__METHOD__, [
                 'integration_id' => $integration->id,
+                'professional_id' => $integration->professional_id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
 
         $this->reevaluateBooking($integration);
@@ -93,11 +98,11 @@ class ProfessionalIntegrationObserver
                 'booking'
             );
         } catch (\Throwable $e) {
-            Log::warning('Booking section visibility reevaluation failed on integration change', [
+            Log::warning('Booking section visibility reevaluation failed on integration change', $this->logContext(__METHOD__, [
                 'integration_id' => $integration->id,
                 'professional_id' => $integration->professional_id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 }

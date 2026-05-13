@@ -47,6 +47,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
             default => Log::warning('ProcessShopifyOrderUpdatedWebhookJob: unknown topic', [
                 'topic' => $this->topic,
                 'professional_id' => $this->professionalId,
+                'shopify_event_id' => $this->shopifyEventId,
             ]),
         };
     }
@@ -125,6 +126,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                 Log::warning('ProcessShopifyOrderUpdatedWebhookJob: orders/edited first-seen, affiliate not resolvable — skipping stub', [
                     'shopify_order_id' => $shopifyOrderId,
                     'professional_id' => $this->professionalId,
+                    'shopify_event_id' => $this->shopifyEventId,
                 ]);
 
                 return;
@@ -182,6 +184,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                 Log::warning('ProcessShopifyOrderUpdatedWebhookJob: orders/cancelled first-seen, affiliate not resolvable — skipping stub', [
                     'shopify_order_id' => $shopifyOrderId,
                     'professional_id' => $this->professionalId,
+                    'shopify_event_id' => $this->shopifyEventId,
                 ]);
 
                 return;
@@ -256,6 +259,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
                 Log::warning('ProcessShopifyOrderUpdatedWebhookJob: refunds/create first-seen, affiliate not resolvable — skipping stub', [
                     'shopify_order_id' => $shopifyOrderId,
                     'professional_id' => $this->professionalId,
+                    'shopify_event_id' => $this->shopifyEventId,
                 ]);
 
                 return;
@@ -392,6 +396,8 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
         } catch (\Throwable $e) {
             Log::warning('ProcessShopifyOrderUpdatedWebhookJob: stub insert failed', [
                 'shopify_order_id' => $shopifyOrderId,
+                'shopify_event_id' => $this->shopifyEventId,
+                'professional_id' => $this->professionalId,
                 'error' => $e->getMessage(),
             ]);
 
@@ -425,6 +431,8 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
         } catch (\Throwable $e) {
             Log::warning('ProcessShopifyOrderUpdatedWebhookJob: stub-with-refund insert failed', [
                 'shopify_order_id' => $shopifyOrderId,
+                'shopify_event_id' => $this->shopifyEventId,
+                'professional_id' => $this->professionalId,
                 'error' => $e->getMessage(),
             ]);
 

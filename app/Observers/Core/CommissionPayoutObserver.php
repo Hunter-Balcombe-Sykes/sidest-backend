@@ -3,6 +3,7 @@
 namespace App\Observers\Core;
 
 use App\Models\Retail\CommissionPayout;
+use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;
 
@@ -12,6 +13,8 @@ use Illuminate\Support\Facades\Log;
 // immediately. Runs after commit so rolled-back transactions don't emit.
 class CommissionPayoutObserver
 {
+    use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function __construct(private readonly NotificationPublisher $publisher) {}
@@ -51,10 +54,12 @@ class CommissionPayoutObserver
                 return;
             }
         } catch (\Throwable $e) {
-            Log::warning('CommissionPayout updated notification failed', [
+            Log::warning('CommissionPayout updated notification failed', $this->logContext(__METHOD__, [
                 'payout_id' => $payout->id,
+                'brand_professional_id' => $payout->brand_professional_id,
+                'affiliate_professional_id' => $payout->affiliate_professional_id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 
