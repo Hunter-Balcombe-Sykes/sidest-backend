@@ -175,8 +175,9 @@ Every reject path logs `shopify.session.failed { reason, path, duration_ms, ... 
 ### Forbidden patterns
 
 - `embedded.key` middleware — DEPRECATED. Deleted in Phase 8 of the rebuild plan.
-- `VerifyEmbeddedApiKey` — DEPRECATED. The class still exists during the dual-auth cutover window (Phase 5a/5b) wrapped behind `EmbeddedDualAuth`, but no new route should reference it directly.
-- `EMBEDDED_API_KEY` env var read on `/internal/embedded/*` paths — DEPRECATED.
+- `VerifyEmbeddedApiKey` — DELETED. The class no longer exists; the only auth on `/internal/embedded/*` is `shopify.session` (JWT).
+- `embedded.dual` / `EmbeddedDualAuth` — DELETED. The cutover-window dispatcher was removed once the Remix side moved to JWT-only.
+- `PARTNA_EMBEDDED_API_KEY` env var — DELETED from `.env.example` and `config/services.php`. Remove from Laravel Cloud envs too.
 - `if ($expected !== '')` inline auth checks (the historic fail-open pattern in `EmbeddedConnectController`) — replaced by middleware + `$request->attributes->get('embedded_*')`.
 - Trusting `X-Shopify-Shop` for tenant identity — the `dest` claim is the sole source. The header may still appear during the dual-auth window for backward compatibility but it is not authoritative.
 
