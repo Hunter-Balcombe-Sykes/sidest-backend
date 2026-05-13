@@ -133,9 +133,11 @@ class BrandStatusService
             ['brand_status' => $newStatusValue],
         );
 
-        // Audit trail
+        // Audit trail — handle snapshot survives the professional's hard-delete
+        // (FK is ON DELETE SET NULL; see 20260513200000_harden_audit_tables.sql).
         DB::table('core.brand_status_history')->insert([
             'professional_id' => $professional->id,
+            'professional_handle_snapshot' => $professional->handle,
             'from_status' => $currentStatusValue,
             'to_status' => $newStatusValue,
             'reason' => 'auto',
