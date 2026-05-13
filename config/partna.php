@@ -934,6 +934,12 @@ return [
         'grace_period_days' => (int) env('PARTNA_STORE_GRACE_PERIOD_DAYS', env('SIDEST_STORE_GRACE_PERIOD_DAYS', 60)),
 
         'commission_void_window_days' => (int) env('PARTNA_STORE_COMMISSION_VOID_WINDOW_DAYS', env('SIDEST_STORE_COMMISSION_VOID_WINDOW_DAYS', 30)),
+
+        // TESTING ONLY: when true, brands can save payout_hold_days=0 and the
+        // payout service bypasses the min_payout_hold_days floor so orders flow
+        // to payout immediately. Leave OFF in prod. Used to let QA validate the
+        // Stripe Connect end-to-end without waiting 7+ days per test order.
+        'allow_instant_payout_for_testing' => (bool) env('PARTNA_STORE_ALLOW_INSTANT_PAYOUT_FOR_TESTING', false),
     ],
 
     'form_timing' => [

@@ -174,10 +174,19 @@ class CommissionPayoutService
     /**
      * Resolve the effective hold days for a brand.
      * Uses brand override if set, otherwise system default. Always >= system minimum.
+     *
+     * Testing escape hatch: when partna.store.allow_instant_payout_for_testing is
+     * true AND the brand has explicitly chosen 0, the floor is bypassed so the
+     * payout sweep picks orders up immediately. The env flag is off in prod so
+     * this branch never fires there.
      */
     private function resolveHoldDays(?int $brandPayoutHoldDays): int
     {
         $days = $brandPayoutHoldDays ?? $this->systemHoldDays;
+
+        if ($days === 0 && config('partna.store.allow_instant_payout_for_testing', false)) {
+            return 0;
+        }
 
         return max($this->minHoldDays, $days);
     }
