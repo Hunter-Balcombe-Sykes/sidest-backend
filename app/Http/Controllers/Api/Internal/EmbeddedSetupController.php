@@ -647,8 +647,12 @@ class EmbeddedSetupController extends ApiController
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
+        // Shop domain comes from the JWT `dest` claim, stashed by VerifyShopifySessionToken.
+        // The legacy X-Shopify-Shop header was removed when the static-key auth path
+        // was deleted — trusting it would re-introduce the cross-tenant compromise risk
+        // that motivated the JWT migration in the first place.
         $shopDomain = $this->normalizeShopDomain(
-            strtolower(trim((string) $request->header('X-Shopify-Shop', '')))
+            (string) $request->attributes->get('embedded_shop_domain', '')
         );
 
         $existing = ProfessionalIntegration::query()
