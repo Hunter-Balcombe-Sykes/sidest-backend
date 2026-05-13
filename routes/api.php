@@ -168,18 +168,16 @@ Route::post('/public/customers', [PublicCustomerLeadController::class, 'store'])
 Route::post('/public/enquiry', [PublicEnquiryController::class, 'submit'])
     ->middleware(['lead.log', 'throttle:leads', 'captcha']);
 
-// Account-linking endpoint — called before a shop is associated with any brand,
-// so it cannot use the embedded.key middleware (which requires the shop to exist).
-// Validates the API key manually and consumes a Redis-backed connection code.
+// Account-linking endpoint — called before a shop is linked to a professional,
+// so it uses shopify.session:lenient (JWT validated, shop resolution skipped).
+// The controller consumes the brand-side connection code to perform the link.
 Route::post('/internal/embedded/connect-account', [EmbeddedConnectController::class, 'connect'])
-    ->middleware('throttle:10,1');
+    ->middleware(['shopify.session:lenient', 'throttle:embedded-by-shop']);
 
-// Internal Shopify embedded app endpoints — consumed by Sidest-Embedded setup wizard.
-// `embedded.dual` is the cutover-window dispatcher: routes 3-segment Bearer
-// (JWT) to VerifyShopifySessionToken; everything else to VerifyEmbeddedApiKey.
-// Once the Remix side fully migrates to session-token forwarding, this group
-// drops `embedded.dual` and joins the shopify.session group above (Phase 5b).
-Route::middleware(['embedded.dual', 'throttle:60,1'])->prefix('internal/embedded')->group(function () {
+// Internal Shopify embedded app endpoints — consumed by the Partna embedded
+// setup wizard. JWT-validated end-to-end via shopify.session middleware;
+// throttle keyed by the resolved shop domain (`dest` claim).
+Route::middleware(['shopify.session', 'throttle:embedded-by-shop'])->prefix('internal/embedded')->group(function () {
     Route::get('/brand-profile', [EmbeddedSetupController::class, 'brandProfile']);
     Route::post('/brand-identity', [EmbeddedSetupController::class, 'saveIdentity']);
     Route::post('/brand-details', [EmbeddedSetupController::class, 'saveBusinessDetails']);
@@ -197,12 +195,8 @@ Route::middleware(['embedded.dual', 'throttle:60,1'])->prefix('internal/embedded
 });
 
 // Shopify admin UI extensions (block extensions on order/product pages).
-// Auth via session-token JWT (signed with the app's API secret) — extensions
-// can't ship the embedded API key, so each request brings a freshly minted
-// token from App Bridge that we verify against the shared client secret.
-// Throttle keyed by shop domain (`dest` claim) — see embedded-by-shop in
-// AppServiceProvider. Anticipates Phase 5b state where the embedded.key
-// group above also migrates to shopify.session+embedded-by-shop.
+// Same shopify.session + throttle:embedded-by-shop as the wizard group above,
+// kept separate only so the route set can be reasoned about independently.
 Route::middleware(['shopify.session', 'throttle:embedded-by-shop'])->prefix('internal/embedded')->group(function () {
     Route::get('/orders/{shopify_order_id}', [EmbeddedOrderAnalyticsController::class, 'show'])
         ->where('shopify_order_id', '[A-Za-z0-9_/.:-]+');
