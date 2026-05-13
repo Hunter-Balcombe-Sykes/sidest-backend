@@ -174,6 +174,27 @@ it('drops non-E.164 phone numbers and omits address when country is missing', fu
         ->and($individual)->not->toHaveKey('address');
 });
 
+it('skips address when location_country is a free-form value Stripe cannot map', function () {
+    // Side St had location_country = "Australia" (full name) while country_code = "AU".
+    // The unmapped value used to abort the whole onboarding with 422; now it
+    // should silently drop the address block and let onboarding proceed.
+    DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
+
+    $pro = makeProfessional([
+        'location_street_address' => '37 Hardiman Street',
+        'location_city' => 'Kensington',
+        'location_state' => 'Victoria',
+        'location_postcode' => '3031',
+        'location_country' => 'Australia', // free-form, not an ISO code
+    ]);
+
+    [$stripe, $captured] = captureCreatePayload();
+    makeService($stripe)->createConnectAccount($pro);
+
+    $individual = $captured['payload']['individual'] ?? [];
+    expect($individual)->not->toHaveKey('address');
+});
+
 it('omits the prefill blocks entirely when the professional has no prefillable fields', function () {
     DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
 

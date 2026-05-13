@@ -696,14 +696,24 @@ class StripeConnectService
      * Build a Stripe address block from location_* fields, or null when the
      * required minimum (line1 + country) isn't present.
      *
+     * The address is optional prefill — Stripe accepts the create call without
+     * it. If location_country is a free-form value ("Australia", "USA") that
+     * doesn't resolve to a Stripe-supported ISO code, skip the address block
+     * entirely rather than aborting the whole onboarding.
+     *
      * @return array<string, string>|null
      */
     private function buildAddressOrNull(Professional $professional): ?array
     {
         $line1 = $this->stringOrNull($professional->location_street_address);
-        $country = $this->stringOrNull($professional->location_country);
+        $rawCountry = $this->stringOrNull($professional->location_country);
 
-        if ($line1 === null || $country === null) {
+        if ($line1 === null || $rawCountry === null) {
+            return null;
+        }
+
+        $country = $this->mapCountryCodeOrNull($rawCountry);
+        if ($country === null) {
             return null;
         }
 
@@ -712,8 +722,25 @@ class StripeConnectService
             'city' => $this->stringOrNull($professional->location_city),
             'state' => $this->stringOrNull($professional->location_state),
             'postal_code' => $this->stringOrNull($professional->location_postcode),
-            'country' => $this->mapCountryCode($country),
+            'country' => $country,
         ]);
+    }
+
+    /**
+     * Tolerant variant of mapCountryCode — returns null instead of aborting
+     * when the value isn't a Stripe-supported ISO code. For optional
+     * prefill fields where an invalid country should drop the block, not
+     * blow up the request.
+     */
+    private function mapCountryCodeOrNull(?string $code): ?string
+    {
+        $upper = strtoupper(trim((string) $code));
+
+        if ($upper === '' || ! in_array($upper, self::STRIPE_CONNECT_SUPPORTED_COUNTRIES, true)) {
+            return null;
+        }
+
+        return $upper;
     }
 
     private function stringOrNull(mixed $value): ?string
