@@ -52,6 +52,10 @@ class VerifySupabaseJwt
             return response()->json(['message' => 'Missing Bearer token'], 401);
         }
 
+        // Resolved once so both JWKS-fail and auth-server-fail logs in the same
+        // request share the same value — critical for Nightwatch trace correlation.
+        $requestId = $request->header('X-Request-Id', (string) str()->uuid());
+
         // 1) Try verify via JWKS (asymmetric signing)
         try {
             $claims = $this->verifyWithJwks($token);
@@ -73,6 +77,8 @@ class VerifySupabaseJwt
             // Log every JWKS failure before falling back — repeated infra-level failures
             // (e.g. network blocking JWKS fetches) are security-relevant and must be visible.
             Log::warning('JWT JWKS verification failed, falling back to auth server', [
+                'request_id' => $requestId,
+                'operation' => __METHOD__,
                 'reason' => $e->getMessage(),
                 'ip' => $request->ip(),
             ]);
@@ -97,6 +103,8 @@ class VerifySupabaseJwt
                 return $next($request);
             } catch (\Throwable $e2) {
                 Log::warning('JWT verification failed', [
+                    'request_id' => $requestId,
+                    'operation' => __METHOD__,
                     'reason' => $e2->getMessage(),
                     'ip' => $request->ip(),
                 ]);

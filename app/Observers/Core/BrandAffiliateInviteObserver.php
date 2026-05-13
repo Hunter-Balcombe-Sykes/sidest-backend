@@ -3,12 +3,14 @@
 namespace App\Observers\Core;
 
 use App\Models\Core\Professional\BrandAffiliateInvite;
+use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;
 
 // V2: Publishes invite notifications — "invited" to affiliate, "accepted"/"declined" to brand.
 class BrandAffiliateInviteObserver
 {
+    use LogsWithRequestContext;
     public bool $afterCommit = true;
 
     // Memoize brand names within the request to avoid N+1 on bulk CSV imports.
@@ -37,10 +39,11 @@ class BrandAffiliateInviteObserver
                 retentionConfigKey: 'invite',
             );
         } catch (\Throwable $e) {
-            Log::warning('BrandAffiliateInvite created notification failed', [
+            Log::warning('BrandAffiliateInvite created notification failed', $this->logContext(__METHOD__, [
                 'invite_id' => $invite->id,
+                'brand_professional_id' => $invite->brand_professional_id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 
@@ -82,10 +85,11 @@ class BrandAffiliateInviteObserver
                 );
             }
         } catch (\Throwable $e) {
-            Log::warning('BrandAffiliateInvite updated notification failed', [
+            Log::warning('BrandAffiliateInvite updated notification failed', $this->logContext(__METHOD__, [
                 'invite_id' => $invite->id,
+                'brand_professional_id' => $invite->brand_professional_id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 

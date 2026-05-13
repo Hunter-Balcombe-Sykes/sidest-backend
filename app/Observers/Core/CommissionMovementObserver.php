@@ -3,6 +3,7 @@
 namespace App\Observers\Core;
 
 use App\Models\Retail\CommissionMovement;
+use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Notifications\NotificationPublisher;
 use App\Support\Money;
 use Illuminate\Support\Facades\Log;
@@ -10,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 // V2: Core. Publishes commission earned/reversed notifications to affiliates when ledger entries are created or status changes.
 class CommissionMovementObserver
 {
+    use LogsWithRequestContext;
     public bool $afterCommit = true;
 
     public function __construct(private readonly NotificationPublisher $publisher) {}
@@ -24,10 +26,12 @@ class CommissionMovementObserver
             $this->notifyEarned($entry);
             $this->notifyBrandSale($entry);
         } catch (\Throwable $e) {
-            Log::warning('CommissionMovement created notification failed', [
+            Log::warning('CommissionMovement created notification failed', $this->logContext(__METHOD__, [
                 'entry_id' => $entry->id,
+                'brand_professional_id' => $entry->brand_professional_id,
+                'affiliate_professional_id' => $entry->affiliate_professional_id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 
@@ -54,10 +58,12 @@ class CommissionMovementObserver
                 $this->notifyVoided($entry);
             }
         } catch (\Throwable $e) {
-            Log::warning('CommissionMovement updated notification failed', [
+            Log::warning('CommissionMovement updated notification failed', $this->logContext(__METHOD__, [
                 'entry_id' => $entry->id,
+                'brand_professional_id' => $entry->brand_professional_id,
+                'affiliate_professional_id' => $entry->affiliate_professional_id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 

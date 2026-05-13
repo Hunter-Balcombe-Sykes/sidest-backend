@@ -43,6 +43,7 @@ class ImageVariantService
         string $originalTmpPath,
         string $imageId,
         string $basePath,
+        string $siteId = '',
     ): array {
         // Ensure GD extension is available with WebP support
         if (! extension_loaded('gd')) {
@@ -137,6 +138,7 @@ class ImageVariantService
                     if ($targetBytes !== null && $fileBytes > $targetBytes) {
                         Log::warning('Image variant exceeded target size at min quality.', [
                             'image_id' => $imageId,
+                            'site_id' => $siteId,
                             'variant' => $variantName,
                             'target_kb' => $targetKb,
                             'actual_kb' => (int) round($fileBytes / 1024),
