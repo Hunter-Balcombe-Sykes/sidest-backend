@@ -17,9 +17,24 @@ use function Pest\Laravel\mock;
 // Stripe Transfer Reversal and record a commerce.commission_clawbacks row.
 
 beforeEach(function () {
+    // Brand-as-Connect-account: clawbackCompletedPayout now loads the brand
+    // Professional to read stripe_connect_account_id for the reversal call.
+    // Provide a stub professionals table + the brand-Connect column so the
+    // factory-created brand can be retrieved with a valid Connect account.
+    setupProfessionalsTable();
     setupCommerceOrdersTables();
 
     $conn = DB::connection('pgsql');
+
+    foreach ([
+        'stripe_connect_account_id TEXT',
+        'stripe_connect_status TEXT',
+    ] as $col) {
+        try {
+            $conn->statement("ALTER TABLE core.professionals ADD COLUMN {$col}");
+        } catch (\Throwable) {
+        }
+    }
 
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
         id TEXT PRIMARY KEY,
@@ -87,6 +102,28 @@ function clawbackStripeMock(): StripeClient
     })->makePartial();
 }
 
+/**
+ * Seed a minimal brand professional row with a Connect account ID, so that
+ * the refund-clawback path can read stripe_connect_account_id for the
+ * brand-scoped Transfer Reversal.
+ */
+function clawbackSeedBrand(string $id): void
+{
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => $id,
+        'handle' => "brand-{$id}",
+        'handle_lc' => "brand-{$id}",
+        'display_name' => "Brand {$id}",
+        'professional_type' => 'brand',
+        'status' => 'active',
+        'stripe_connect_account_id' => 'acct_brand_test',
+        'stripe_connect_status' => 'active',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+}
+
 it('issues a proportional Transfer Reversal when refund arrives on a completed payout', function () {
     $payout = CommissionPayout::factory()->create([
         'status' => 'completed',
@@ -97,6 +134,8 @@ it('issues a proportional Transfer Reversal when refund arrives on a completed p
         'stripe_transfer_id' => 'tr_test_completed',
         'processed_at' => now(),
     ]);
+
+    clawbackSeedBrand($payout->brand_professional_id);
 
     $order = Order::factory()->create([
         'payout_id' => $payout->id,
@@ -127,7 +166,8 @@ it('issues a proportional Transfer Reversal when refund arrives on a completed p
         ->with(
             'tr_test_completed',
             Mockery::on(fn ($payload) => $payload['amount'] === 2000),
-            Mockery::on(fn ($opts) => str_starts_with($opts['idempotency_key'], 'rev_'.$payout->id))
+            Mockery::on(fn ($opts) => str_starts_with($opts['idempotency_key'], 'rev_'.$payout->id)
+                && $opts['stripe_account'] === 'acct_brand_test')
         )
         ->andReturn((object) ['id' => 'trr_abc_123']);
 
@@ -164,6 +204,8 @@ it('flags the payout for manual refund when the Transfer Reversal fails', functi
         'processed_at' => now(),
         'needs_manual_refund' => false,
     ]);
+
+    clawbackSeedBrand($payout->brand_professional_id);
 
     $order = Order::factory()->create([
         'payout_id' => $payout->id,

@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
-use App\Services\Stripe\CommissionVoidService;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
@@ -374,15 +373,15 @@ describe('transfer.paid webhook', function () {
     function makeTransferPaidEvent(string $payoutId, string $transferId = 'tr_paid_test'): \Stripe\Event
     {
         return \Stripe\Event::constructFrom([
-            'id'          => 'evt_paid_'.Str::random(10),
-            'object'      => 'event',
+            'id' => 'evt_paid_'.Str::random(10),
+            'object' => 'event',
             'api_version' => '2024-04-10',
-            'created'     => time(),
-            'type'        => 'transfer.paid',
-            'data'        => [
+            'created' => time(),
+            'type' => 'transfer.paid',
+            'data' => [
                 'object' => [
-                    'id'       => $transferId,
-                    'object'   => 'transfer',
+                    'id' => $transferId,
+                    'object' => 'transfer',
                     'metadata' => ['sidest_payout_id' => $payoutId],
                 ],
             ],
@@ -428,20 +427,20 @@ describe('transfer.paid webhook', function () {
     });
 
     it('bumps the analytics cache for both affiliate and brand on settlement', function () {
-        $affId  = (string) Str::uuid();
+        $affId = (string) Str::uuid();
         $brandId = (string) Str::uuid();
 
         DB::connection('pgsql')->table('commerce.commission_payouts')->insert([
-            'id'                       => 'payout-paid-4',
-            'status'                   => 'transferring',
+            'id' => 'payout-paid-4',
+            'status' => 'transferring',
             'affiliate_professional_id' => $affId,
-            'brand_professional_id'    => $brandId,
-            'gross_commission_cents'   => 5000,
-            'platform_fee_cents'       => 150,
-            'net_payout_cents'         => 4850,
-            'currency_code'            => 'AUD',
-            'created_at'               => now()->toDateTimeString(),
-            'updated_at'               => now()->toDateTimeString(),
+            'brand_professional_id' => $brandId,
+            'gross_commission_cents' => 5000,
+            'platform_fee_cents' => 150,
+            'net_payout_cents' => 4850,
+            'currency_code' => 'AUD',
+            'created_at' => now()->toDateTimeString(),
+            'updated_at' => now()->toDateTimeString(),
         ]);
 
         $analytics = Mockery::mock(\App\Services\Cache\AnalyticsCacheService::class);
@@ -492,18 +491,18 @@ describe('transfer.failed verbatim error capture', function () {
         insertWebhookPayout('payout-ferr-1', 'transferring');
 
         $event = \Stripe\Event::constructFrom([
-            'id'          => 'evt_ferr_'.Str::random(10),
-            'object'      => 'event',
+            'id' => 'evt_ferr_'.Str::random(10),
+            'object' => 'event',
             'api_version' => '2024-04-10',
-            'created'     => time(),
-            'type'        => 'transfer.failed',
-            'data'        => [
+            'created' => time(),
+            'type' => 'transfer.failed',
+            'data' => [
                 'object' => [
-                    'id'              => 'tr_ferr_1',
-                    'object'          => 'transfer',
-                    'failure_code'    => 'account_closed',
+                    'id' => 'tr_ferr_1',
+                    'object' => 'transfer',
+                    'failure_code' => 'account_closed',
                     'failure_message' => 'The destination account has been closed.',
-                    'metadata'        => ['sidest_payout_id' => 'payout-ferr-1'],
+                    'metadata' => ['sidest_payout_id' => 'payout-ferr-1'],
                 ],
             ],
             'livemode' => false,
@@ -526,40 +525,40 @@ describe('transfer.failed verbatim error capture', function () {
 // ============================================================
 
 describe('checkout.session.completed webhook', function () {
-    it('mode=setup calls syncPaymentMethodFromCheckoutSession on the professional', function () {
+    it('mode=setup routes to syncBrandConnectPaymentMethodFromCheckoutSession', function () {
         $proId = (string) Str::uuid();
         DB::table('core.professionals')->insert([
-            'id'                       => $proId,
-            'handle'                   => 'brand_checkout',
-            'professional_type'        => 'brand',
-            'status'                   => 'active',
-            'stripe_connect_account_id' => null,
-            'stripe_connect_status'    => 'active',
-            'created_at'               => now(),
-            'updated_at'               => now(),
+            'id' => $proId,
+            'handle' => 'brand_checkout',
+            'professional_type' => 'brand',
+            'status' => 'active',
+            'stripe_connect_account_id' => 'acct_brand_test',
+            'stripe_connect_status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
 
         $mockService = Mockery::mock(StripeConnectService::class);
-        $mockService->shouldReceive('syncPaymentMethodFromCheckoutSession')
+        $mockService->shouldReceive('syncBrandConnectPaymentMethodFromCheckoutSession')
             ->once()
             ->withArgs(function ($pro, $sessionId) use ($proId) {
                 return $pro->id === $proId && $sessionId === 'cs_test_session_1';
             })
-            ->andReturn(['status' => 'ok']);
+            ->andReturn(['payment_method_id' => 'pm_ok', 'setup_intent_id' => 'seti_ok']);
         app()->instance(StripeConnectService::class, $mockService);
 
         $event = \Stripe\Event::constructFrom([
-            'id'          => 'evt_checkout_'.Str::random(10),
-            'object'      => 'event',
+            'id' => 'evt_checkout_'.Str::random(10),
+            'object' => 'event',
             'api_version' => '2024-04-10',
-            'created'     => time(),
-            'type'        => 'checkout.session.completed',
-            'data'        => [
+            'created' => time(),
+            'type' => 'checkout.session.completed',
+            'data' => [
                 'object' => [
-                    'id'       => 'cs_test_session_1',
-                    'object'   => 'checkout.session',
-                    'mode'     => 'setup',
-                    'metadata' => ['professional_id' => $proId],
+                    'id' => 'cs_test_session_1',
+                    'object' => 'checkout.session',
+                    'mode' => 'setup',
+                    'metadata' => ['sidest_professional_id' => $proId],
                 ],
             ],
             'livemode' => false,
@@ -570,27 +569,34 @@ describe('checkout.session.completed webhook', function () {
         expect($response->getStatusCode())->toBe(200);
     });
 
-    it('mode=payment logs a deferred stub when creditWalletFromCheckoutSession does not exist', function () {
+    it('mode=payment is ignored (top-ups removed) without throwing', function () {
         $proId = (string) Str::uuid();
+        DB::table('core.professionals')->insert([
+            'id' => $proId,
+            'handle' => 'brand_topup_legacy',
+            'professional_type' => 'brand',
+            'status' => 'active',
+            'stripe_connect_status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
-        // Bind a partial mock that deliberately does NOT have creditWalletFromCheckoutSession,
-        // so method_exists() returns false and the handler falls through to the stub log.
-        $mockService = Mockery::mock(StripeConnectService::class)->makePartial();
+        // No service interaction expected — the payment-mode arm is now a logged no-op.
+        $mockService = Mockery::mock(StripeConnectService::class);
+        $mockService->shouldNotReceive('syncBrandConnectPaymentMethodFromCheckoutSession');
         app()->instance(StripeConnectService::class, $mockService);
 
-        // StripeConnectService does NOT have creditWalletFromCheckoutSession in this phase;
-        // the handler must log a stub and return 200 without throwing.
         $event = \Stripe\Event::constructFrom([
-            'id'          => 'evt_checkout_pay_'.Str::random(10),
-            'object'      => 'event',
+            'id' => 'evt_checkout_pay_'.Str::random(10),
+            'object' => 'event',
             'api_version' => '2024-04-10',
-            'created'     => time(),
-            'type'        => 'checkout.session.completed',
-            'data'        => [
+            'created' => time(),
+            'type' => 'checkout.session.completed',
+            'data' => [
                 'object' => [
-                    'id'       => 'cs_test_payment_1',
-                    'object'   => 'checkout.session',
-                    'mode'     => 'payment',
+                    'id' => 'cs_test_payment_1',
+                    'object' => 'checkout.session',
+                    'mode' => 'payment',
                     'metadata' => ['professional_id' => $proId],
                 ],
             ],
@@ -599,22 +605,21 @@ describe('checkout.session.completed webhook', function () {
 
         $controller = app(StripeConnectWebhookController::class);
         $response = $controller->handleParsedEvent($event);
-        // Must not throw and must return 200 — the stub path is safe
         expect($response->getStatusCode())->toBe(200);
     });
 
     it('missing professional_id logs a warning and returns 200', function () {
         $event = \Stripe\Event::constructFrom([
-            'id'          => 'evt_checkout_noid_'.Str::random(10),
-            'object'      => 'event',
+            'id' => 'evt_checkout_noid_'.Str::random(10),
+            'object' => 'event',
             'api_version' => '2024-04-10',
-            'created'     => time(),
-            'type'        => 'checkout.session.completed',
-            'data'        => [
+            'created' => time(),
+            'type' => 'checkout.session.completed',
+            'data' => [
                 'object' => [
-                    'id'       => 'cs_test_noid',
-                    'object'   => 'checkout.session',
-                    'mode'     => 'setup',
+                    'id' => 'cs_test_noid',
+                    'object' => 'checkout.session',
+                    'mode' => 'setup',
                     'metadata' => [],
                 ],
             ],

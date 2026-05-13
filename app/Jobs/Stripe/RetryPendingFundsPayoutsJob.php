@@ -2,7 +2,6 @@
 
 namespace App\Jobs\Stripe;
 
-use App\Models\Commerce\WalletMovement;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
 use App\Notifications\Brand\BrandPayoutFundingFailedNotification;
@@ -93,33 +92,10 @@ class RetryPendingFundsPayoutsJob implements ShouldQueue
             $payout->forceFill([
                 'status' => 'failed',
                 'failure_code' => 'brand_funding_exhausted',
-                'failure_reason' => 'Card declined '.self::MAX_ATTEMPTS.' times; wallet credited back',
+                'failure_reason' => 'Card declined '.self::MAX_ATTEMPTS.' times — terminal.',
                 'failure_category' => 'brand_funding',
                 'processed_at' => now(),
             ])->save();
-
-            // Credit the wallet back so the brand isn't out-of-pocket.
-            if ($payout->wallet_debit_cents > 0 && $brand) {
-                (new WalletMovement)->forceFill([
-                    'professional_id' => $brand->id,
-                    'direction' => 'credit',
-                    'amount_cents' => $payout->wallet_debit_cents,
-                    'currency_code' => $payout->currency_code,
-                    'reason' => 'retry_refund',
-                    'actor_type' => 'job',
-                    'actor_id' => self::class,
-                    'related_payout_id' => $payout->id,
-                    'idempotency_key' => 'retry_refund:'.$payout->id,
-                ])->save();
-
-                Professional::where('id', $brand->id)
-                    ->increment('stripe_manual_balance_cents', $payout->wallet_debit_cents);
-
-                Log::notice('RetryPendingFundsPayoutsJob reversed wallet debit on terminal failure', [
-                    'payout_id' => $payout->id,
-                    'reversed_cents' => $payout->wallet_debit_cents,
-                ]);
-            }
 
             $brand?->notify(new BrandPayoutFundingFailedNotification($payout, isTerminal: true));
         });

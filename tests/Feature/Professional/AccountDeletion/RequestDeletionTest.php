@@ -33,19 +33,6 @@ function makeProfessional(array $overrides = []): Professional
     return Professional::query()->where('id', $id)->first();
 }
 
-it('rejects request when professional has unpaid balance', function () {
-    $pro = makeProfessional(['stripe_manual_balance_cents' => 1000]);
-
-    $service = new AccountDeletionService;
-    $request = Request::create('/', 'POST');
-
-    $result = $service->request($pro, $request);
-
-    expect($result['success'])->toBeFalse()
-        ->and($result['code'])->toBe(422)
-        ->and($result['reasons'])->toContain('unpaid_balance');
-});
-
 it('rejects request when professional has pending commission payouts', function () {
     $pro = makeProfessional();
 
@@ -125,24 +112,4 @@ it('rolls back token storage if mail send throws', function () {
     $pro->refresh();
     expect($pro->deletion_token_hash)->toBeNull()
         ->and($pro->deletion_requested_at)->toBeNull();
-});
-
-it('rejects request when brand has pending topups', function () {
-    $pro = makeProfessional();
-
-    DB::connection('pgsql')->table('commerce.brand_commission_topups')->insert([
-        'id' => (string) Str::uuid(),
-        'brand_professional_id' => $pro->id,
-        'status' => 'pending',
-        'amount_cents' => 5000,
-        'created_at' => now()->toIso8601String(),
-    ]);
-
-    $service = new AccountDeletionService;
-    $request = Request::create('/', 'POST');
-
-    $result = $service->request($pro, $request);
-
-    expect($result['success'])->toBeFalse()
-        ->and($result['reasons'])->toContain('pending_topups');
 });

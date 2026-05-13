@@ -2,15 +2,11 @@
 
 namespace App\Services\Stripe;
 
-use App\Models\Commerce\WalletMovement;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\CacheLockService;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
 
@@ -73,6 +69,18 @@ class StripeConnectService
      * account would silently default to 'AU' and Stripe would later reject
      * the KYC form for non-AU users. Fail fast instead so the frontend can
      * prompt for country before onboarding.
+     *
+     * Brands and affiliates take different paths:
+     *   - Affiliate → business_type=individual, transfers capability only.
+     *     Affiliates only RECEIVE transfers — they never process customer
+     *     payments themselves.
+     *   - Brand → business_type=company, BOTH transfers AND card_payments
+     *     capabilities. Brands need card_payments so we can run the
+     *     commission charge as a direct charge on their account (brand =
+     *     merchant of record on the customer's statement), and transfers so
+     *     the funds can flow on from brand → affiliate. Stripe forces these
+     *     two capabilities together — see
+     *     https://docs.stripe.com/connect/account-capabilities.
      */
     public function createConnectAccount(Professional $professional): string
     {
@@ -83,26 +91,26 @@ class StripeConnectService
             );
         }
 
+        $isBrand = $professional->isBrand();
+
+        $capabilities = ['transfers' => ['requested' => true]];
+        if ($isBrand) {
+            // Direct-charge commission payouts require the connected account to
+            // accept card payments. Without card_payments the PaymentIntent
+            // with stripe_account=brand option would 400 immediately.
+            $capabilities['card_payments'] = ['requested' => true];
+        }
+
         $accountPayload = array_merge([
             'type' => 'express',
             'country' => $this->mapCountryCode($professional->country_code),
             'email' => $professional->primary_email,
-            // Affiliates are individuals/sole traders — pre-selects the individual
-            // KYC path so Stripe doesn't prompt with a business-type selector.
-            'business_type' => 'individual',
+            'business_type' => $isBrand ? 'company' : 'individual',
             'metadata' => [
                 'sidest_professional_id' => $professional->id,
                 'professional_type' => $professional->professional_type,
             ],
-            'capabilities' => [
-                // Affiliates only RECEIVE transfers from Partna — they don't process
-                // customer payments themselves (Shopify does that, on the brand's
-                // merchant account). Requesting card_payments here triggers heavier
-                // KYC requirements for a capability we never use. Stripe docs:
-                // "only request the capabilities that your accounts need."
-                // See https://docs.stripe.com/connect/account-capabilities
-                'transfers' => ['requested' => true],
-            ],
+            'capabilities' => $capabilities,
         ], $this->buildAccountPrefillPayload($professional));
 
         $account = $this->stripe->accounts->create(
@@ -149,13 +157,15 @@ class StripeConnectService
                 $professional->update(['stripe_connect_status' => 'onboarding']);
             }
 
-            // Patch business_type to 'individual' on any existing account that
-            // hasn't finished onboarding yet. Stripe permits this update while
-            // details_submitted is false — once submitted it's locked in.
+            // Patch business_type on any existing account that hasn't finished
+            // onboarding yet — brands get 'company', everyone else 'individual'.
+            // Stripe permits this update while details_submitted is false; once
+            // submitted it's locked in.
+            $desiredBusinessType = $professional->isBrand() ? 'company' : 'individual';
             try {
                 $existing = $this->stripe->accounts->retrieve($accountId);
-                if (! $existing->details_submitted && $existing->business_type !== 'individual') {
-                    $this->stripe->accounts->update($accountId, ['business_type' => 'individual']);
+                if (! $existing->details_submitted && $existing->business_type !== $desiredBusinessType) {
+                    $this->stripe->accounts->update($accountId, ['business_type' => $desiredBusinessType]);
                 }
             } catch (ApiErrorException) {
                 // Non-fatal — continue with existing account as-is.
@@ -290,51 +300,77 @@ class StripeConnectService
     }
 
     /**
-     * Create a Stripe Customer for a brand so we can charge them for commissions.
+     * Create a Stripe Customer scoped to the BRAND'S OWN Connect account so the
+     * saved card lives on the same account that will later run the commission
+     * direct charge. Brand must already be onboarded — Stripe rejects customer
+     * creates on accounts that don't have card_payments capability.
      */
-    public function createCustomer(Professional $brand): string
+    public function createBrandConnectCustomer(Professional $brand): string
     {
-        $customer = $this->stripe->customers->create([
-            'email' => $brand->primary_email,
-            'name' => $brand->display_name,
-            'metadata' => [
-                'sidest_professional_id' => $brand->id,
-                'professional_type' => $brand->professional_type,
+        if (! $brand->stripe_connect_account_id) {
+            throw new \RuntimeException('Brand must complete Stripe Connect onboarding before adding a payment method.');
+        }
+
+        $customer = $this->stripe->customers->create(
+            [
+                'email' => $brand->primary_email,
+                'name' => $brand->display_name,
+                'metadata' => [
+                    'sidest_professional_id' => $brand->id,
+                    'professional_type' => $brand->professional_type,
+                    'purpose' => 'brand_commission_funding',
+                ],
             ],
-        ], ['idempotency_key' => "customer_{$brand->id}"]);
+            [
+                'stripe_account' => $brand->stripe_connect_account_id,
+                'idempotency_key' => "brand_connect_customer_{$brand->id}",
+            ],
+        );
 
         $brand->update([
-            'stripe_customer_id' => $customer->id,
+            'stripe_connect_customer_id' => $customer->id,
         ]);
 
         return $customer->id;
     }
 
     /**
-     * Stripe Checkout hosted setup flow for collecting a reusable payment method.
+     * Stripe Checkout hosted setup flow scoped to the BRAND'S OWN Connect
+     * account. The resulting Customer + PaymentMethod live on the brand's
+     * account, where the commission direct charge will later read them.
+     *
+     * The `stripe_account` request option (SDK form of the `Stripe-Account`
+     * HTTP header) is what makes Stripe create the session on the brand's
+     * account instead of Partna's platform.
      */
-    public function createPaymentMethodSetupCheckoutSession(
+    public function createBrandConnectPaymentMethodSetupSession(
         Professional $brand,
         string $successUrl,
         string $cancelUrl,
     ): array {
-        $customerId = $brand->stripe_customer_id;
-
-        if (! $customerId) {
-            $customerId = $this->createCustomer($brand);
+        if (! $brand->stripe_connect_account_id) {
+            throw new \RuntimeException('Brand must complete Stripe Connect onboarding before adding a payment method.');
         }
 
-        $session = $this->stripe->checkout->sessions->create([
-            'mode' => 'setup',
-            'customer' => $customerId,
-            'payment_method_types' => ['card'],
-            'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_pm_session_id'),
-            'cancel_url' => $cancelUrl,
-            'metadata' => [
-                'purpose' => 'brand_commission_payment_method',
-                'sidest_professional_id' => $brand->id,
+        $customerId = $brand->stripe_connect_customer_id;
+        if (! $customerId) {
+            $customerId = $this->createBrandConnectCustomer($brand);
+        }
+
+        $session = $this->stripe->checkout->sessions->create(
+            [
+                'mode' => 'setup',
+                'customer' => $customerId,
+                'payment_method_types' => ['card'],
+                'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_pm_session_id'),
+                'cancel_url' => $cancelUrl,
+                'metadata' => [
+                    'purpose' => 'brand_commission_payment_method',
+                    'sidest_professional_id' => $brand->id,
+                ],
             ],
-        ]);
+            ['stripe_account' => $brand->stripe_connect_account_id],
+        );
 
         return [
             'checkout_url' => $session->url,
@@ -343,13 +379,27 @@ class StripeConnectService
     }
 
     /**
-     * Sync payment method from a completed hosted setup session.
+     * Sync the brand's saved card from a completed Checkout setup session that
+     * ran on the BRAND'S OWN Connect account. Mirrors
+     * syncPaymentMethodFromCheckoutSession but every Stripe API call carries
+     * `stripe_account = brand_connect_account_id` so the lookups hit the right
+     * account, and the IDs land in the brand-Connect-scoped columns.
+     *
+     * @return array{payment_method_id: string, setup_intent_id: string}
      */
-    public function syncPaymentMethodFromCheckoutSession(Professional $brand, string $sessionId): array
+    public function syncBrandConnectPaymentMethodFromCheckoutSession(Professional $brand, string $sessionId): array
     {
-        $session = $this->stripe->checkout->sessions->retrieve($sessionId, [
-            'expand' => ['setup_intent'],
-        ]);
+        if (! $brand->stripe_connect_account_id) {
+            throw new \RuntimeException('Brand has no Stripe Connect account.');
+        }
+
+        $stripeAccountOption = ['stripe_account' => $brand->stripe_connect_account_id];
+
+        $session = $this->stripe->checkout->sessions->retrieve(
+            $sessionId,
+            ['expand' => ['setup_intent']],
+            $stripeAccountOption,
+        );
 
         if (($session->mode ?? null) !== 'setup') {
             throw new \RuntimeException('Checkout session is not a setup session.');
@@ -368,12 +418,12 @@ class StripeConnectService
             ? $session->customer
             : ($session->customer->id ?? null);
 
-        if ($brand->stripe_customer_id && $sessionCustomerId && $brand->stripe_customer_id !== $sessionCustomerId) {
+        if ($brand->stripe_connect_customer_id && $sessionCustomerId && $brand->stripe_connect_customer_id !== $sessionCustomerId) {
             throw new \RuntimeException('Setup session customer does not match account customer.');
         }
 
-        if (! $brand->stripe_customer_id && $sessionCustomerId) {
-            $brand->update(['stripe_customer_id' => $sessionCustomerId]);
+        if (! $brand->stripe_connect_customer_id && $sessionCustomerId) {
+            $brand->update(['stripe_connect_customer_id' => $sessionCustomerId]);
             $brand->refresh();
         }
 
@@ -385,9 +435,11 @@ class StripeConnectService
             throw new \RuntimeException('Setup session missing setup intent.');
         }
 
-        $setupIntent = $this->stripe->setupIntents->retrieve($setupIntentId, [
-            'expand' => ['payment_method'],
-        ]);
+        $setupIntent = $this->stripe->setupIntents->retrieve(
+            $setupIntentId,
+            ['expand' => ['payment_method']],
+            $stripeAccountOption,
+        );
 
         if (($setupIntent->status ?? null) !== 'succeeded') {
             throw new \RuntimeException('Setup intent has not succeeded.');
@@ -401,7 +453,7 @@ class StripeConnectService
             throw new \RuntimeException('No payment method found on setup intent.');
         }
 
-        $this->savePaymentMethod($brand, $paymentMethodId);
+        $this->saveBrandConnectPaymentMethod($brand, $paymentMethodId);
 
         return [
             'payment_method_id' => $paymentMethodId,
@@ -410,49 +462,62 @@ class StripeConnectService
     }
 
     /**
-     * Save the brand's default payment method.
+     * Save the brand's default payment method on the BRAND'S OWN Connect
+     * account. Reads the PM with `stripe_account = brand_connect_id` and
+     * persists the IDs to the brand-Connect-scoped columns.
      */
-    public function savePaymentMethod(Professional $brand, string $paymentMethodId): void
+    public function saveBrandConnectPaymentMethod(Professional $brand, string $paymentMethodId): void
     {
-        $pm = $this->stripe->paymentMethods->retrieve($paymentMethodId);
+        if (! $brand->stripe_connect_account_id) {
+            throw new \RuntimeException('Brand has no Stripe Connect account.');
+        }
+
+        $stripeAccountOption = ['stripe_account' => $brand->stripe_connect_account_id];
+
+        $pm = $this->stripe->paymentMethods->retrieve($paymentMethodId, null, $stripeAccountOption);
 
         $brand->update([
-            'stripe_payment_method_id' => $paymentMethodId,
+            'stripe_connect_payment_method_id' => $paymentMethodId,
             'stripe_payment_method_brand' => $pm->card?->brand ?? null,
             'stripe_payment_method_last4' => $pm->card?->last4 ?? null,
         ]);
 
-        if ($brand->stripe_customer_id) {
-            $this->stripe->customers->update($brand->stripe_customer_id, [
-                'invoice_settings' => [
-                    'default_payment_method' => $paymentMethodId,
-                ],
-            ]);
+        if ($brand->stripe_connect_customer_id) {
+            $this->stripe->customers->update(
+                $brand->stripe_connect_customer_id,
+                ['invoice_settings' => ['default_payment_method' => $paymentMethodId]],
+                $stripeAccountOption,
+            );
         }
     }
 
     /**
-     * Check if a brand has a valid payment method for commission charges.
+     * Check if a brand has a valid payment method for commission direct charges.
+     * Reads the brand-Connect-scoped columns (the platform-scoped columns are
+     * for SaaS billing, not commissions).
      */
     public function brandHasPaymentMethod(Professional $brand): bool
     {
-        return $brand->stripe_customer_id !== null
-            && $brand->stripe_payment_method_id !== null;
+        return $brand->stripe_connect_customer_id !== null
+            && $brand->stripe_connect_payment_method_id !== null;
     }
 
     /**
-     * Get the payment methods for a brand's customer.
+     * List a brand's saved payment methods on their Connect account.
      */
     public function listPaymentMethods(Professional $brand): array
     {
-        if (! $brand->stripe_customer_id) {
+        if (! $brand->stripe_connect_account_id || ! $brand->stripe_connect_customer_id) {
             return [];
         }
 
-        $methods = $this->stripe->paymentMethods->all([
-            'customer' => $brand->stripe_customer_id,
-            'type' => 'card',
-        ]);
+        $methods = $this->stripe->paymentMethods->all(
+            [
+                'customer' => $brand->stripe_connect_customer_id,
+                'type' => 'card',
+            ],
+            ['stripe_account' => $brand->stripe_connect_account_id],
+        );
 
         return array_map(fn ($m) => [
             'id' => $m->id,
@@ -460,297 +525,23 @@ class StripeConnectService
             'last4' => $m->card?->last4,
             'exp_month' => $m->card?->exp_month,
             'exp_year' => $m->card?->exp_year,
-            'is_default' => $m->id === $brand->stripe_payment_method_id,
+            'is_default' => $m->id === $brand->stripe_connect_payment_method_id,
         ], $methods->data);
     }
 
     /**
-     * Remove a brand's payment method and customer linkage.
+     * Remove a brand's commission-payment setup. Clears the brand-Connect-scoped
+     * columns only — the platform-scoped columns belong to SaaS billing and are
+     * managed separately.
      */
     public function removeBrandPaymentSetup(Professional $brand): void
     {
         $brand->update([
-            'stripe_customer_id' => null,
-            'stripe_payment_method_id' => null,
+            'stripe_connect_customer_id' => null,
+            'stripe_connect_payment_method_id' => null,
+            'stripe_payment_method_brand' => null,
+            'stripe_payment_method_last4' => null,
         ]);
-    }
-
-    /**
-     * Set commission funding mode for a brand.
-     */
-    public function setCommissionFundingMode(Professional $brand, string $mode): void
-    {
-        $mode = in_array($mode, ['auto_charge', 'manual_topup'], true) ? $mode : 'auto_charge';
-
-        $brand->update([
-            'stripe_commission_funding_mode' => $mode,
-        ]);
-    }
-
-    /**
-     * Create a hosted Checkout payment session for manual brand top-up.
-     */
-    public function createManualTopUpCheckoutSession(
-        Professional $brand,
-        int $amountCents,
-        string $currency,
-        string $successUrl,
-        string $cancelUrl,
-    ): array {
-        if ($amountCents <= 0) {
-            throw new \InvalidArgumentException('Top-up amount must be greater than zero.');
-        }
-
-        $currency = strtoupper(trim($currency));
-        if ($currency === '') {
-            // Don't silently fall back to AUD — a brand whose wallet hasn't been
-            // seeded with a currency yet should explicitly set one before topping up.
-            // Otherwise a USD-first brand could accidentally accumulate AUD balance.
-            if (! $brand->stripe_manual_balance_currency) {
-                throw new \InvalidArgumentException(
-                    'Top-up requires a currency: brand wallet has no currency set yet. '
-                    .'Set the wallet currency in brand settings before initiating a top-up.'
-                );
-            }
-            $currency = strtoupper((string) $brand->stripe_manual_balance_currency);
-        }
-
-        $customerId = $brand->stripe_customer_id;
-        if (! $customerId) {
-            $customerId = $this->createCustomer($brand);
-        }
-
-        // Hour-bucketed idempotency: rapid double-clicks within the same hour
-        // return the same Checkout session URL. Different amounts on the same
-        // hour bucket get different keys (so a $50 then $100 top-up both work).
-        // Stripe idempotency keys are 24h TTL so we deliberately bucket smaller.
-        $idempotencyKey = sprintf(
-            'topup_%s_%s_%d_%s',
-            $brand->id,
-            strtolower($currency),
-            $amountCents,
-            now()->format('Y-m-d-H'),
-        );
-
-        $session = $this->stripe->checkout->sessions->create(
-            [
-                'mode' => 'payment',
-                'customer' => $customerId,
-                'payment_method_types' => ['card'],
-                'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_topup_session_id'),
-                'cancel_url' => $cancelUrl,
-                'line_items' => [[
-                    'quantity' => 1,
-                    'price_data' => [
-                        'currency' => strtolower($currency),
-                        'unit_amount' => $amountCents,
-                        'product_data' => [
-                            'name' => 'Commission Wallet Top-up',
-                            'description' => 'Manual funding for commission payouts',
-                        ],
-                    ],
-                ]],
-                'metadata' => [
-                    'purpose' => 'brand_commission_topup',
-                    'professional_id' => $brand->id,   // read by webhook handler
-                    'sidest_professional_id' => $brand->id,   // kept for backward compat
-                    'currency' => $currency,
-                ],
-            ],
-            ['idempotency_key' => $idempotencyKey],
-        );
-
-        return [
-            'checkout_url' => $session->url,
-            'session_id' => $session->id,
-        ];
-    }
-
-    /**
-     * Credit the brand's wallet from a completed Stripe Checkout session.
-     * Race-safe (lockForUpdate), idempotent (UNIQUE idempotency_key), AUSTRAC-tagged.
-     *
-     * Called from: (1) confirmManualTopUpCheckoutSession (user hits success URL),
-     *              (2) handleCheckoutSessionCompleted webhook handler.
-     * Pass _actor_override on the session object to tag the WalletMovement actor_type
-     * as 'professional' instead of the default 'webhook'.
-     */
-    public function creditWalletFromCheckoutSession(string $professionalId, object $session): void
-    {
-        if (($session->payment_status ?? null) !== 'paid') {
-            Log::warning('stripe.topup.unpaid_session', ['session_id' => $session->id ?? null]);
-
-            return;
-        }
-
-        $amountCents = (int) ($session->amount_total ?? 0);
-        if ($amountCents <= 0) {
-            return;
-        }
-
-        $sessionId = $session->id;
-        // Stripe Checkout Sessions always carry currency when payment_status='paid'
-        // (already asserted above). If it's missing, something upstream is broken
-        // and a silent default would corrupt the wallet.
-        $sessionCurrency = $session->currency ?? null;
-        if (! is_string($sessionCurrency) || $sessionCurrency === '') {
-            Log::critical('stripe.topup.missing_currency', [
-                'session_id' => $sessionId,
-                'professional_id' => $professionalId,
-            ]);
-
-            return;
-        }
-        $currency = strtoupper($sessionCurrency);
-        $stripeEventId = $session->_stripe_event_id ?? null;
-        $actorOverride = $session->_actor_override ?? null;
-
-        DB::transaction(function () use ($professionalId, $session, $sessionId, $amountCents, $currency, $stripeEventId, $actorOverride) {
-            $brand = Professional::query()
-                ->where('id', $professionalId)
-                ->lockForUpdate()
-                ->first();
-
-            if (! $brand) {
-                Log::warning('stripe.topup.brand_not_found', ['professional_id' => $professionalId]);
-
-                return;
-            }
-
-            // First top-up: seed wallet currency from the session. Subsequent top-ups
-            // must match the established wallet currency.
-            $walletCurrency = $brand->stripe_manual_balance_currency
-                ? strtoupper((string) $brand->stripe_manual_balance_currency)
-                : $currency;
-            if ($walletCurrency !== $currency) {
-                Log::error('stripe.topup.currency_mismatch', [
-                    'professional_id' => $professionalId,
-                    'wallet_currency' => $walletCurrency,
-                    'session_currency' => $currency,
-                    'amount_cents' => $amountCents,
-                ]);
-
-                if (! empty($session->payment_intent)) {
-                    try {
-                        $this->stripe->refunds->create(
-                            [
-                                'payment_intent' => is_string($session->payment_intent)
-                                    ? $session->payment_intent
-                                    : ($session->payment_intent->id ?? null),
-                                'reason' => 'requested_by_customer',
-                                'metadata' => [
-                                    'sidest_reason' => 'currency_mismatch',
-                                    'professional_id' => $professionalId,
-                                ],
-                            ],
-                            ['idempotency_key' => 'currency_mismatch_refund:'.$sessionId],
-                        );
-                    } catch (ApiErrorException $e) {
-                        Log::critical('stripe.topup.currency_mismatch_refund_failed', [
-                            'session_id' => $sessionId,
-                            'error' => $e->getMessage(),
-                        ]);
-                        report($e);
-                    }
-                }
-
-                return;
-            }
-
-            $idempotencyKey = 'topup:'.$sessionId;
-            $actor = $actorOverride ?? [
-                'type' => 'webhook',
-                'id' => $stripeEventId ?? ('checkout.session.completed:'.$sessionId),
-            ];
-
-            // UNIQUE(idempotency_key) provides idempotency — a duplicate delivery throws
-            // UniqueConstraintViolationException which we catch and swallow; the balance is
-            // already correct. Same pattern as ProcessShopifyOrderUpdatedWebhookJob::insertEventIfNew.
-            // WalletMovement uses $guarded = ['*'] so we must use forceFill() on an instance.
-            try {
-                (new WalletMovement)->forceFill([
-                    'professional_id' => $brand->id,
-                    'direction' => 'credit',
-                    'amount_cents' => $amountCents,
-                    'currency_code' => $currency,
-                    'reason' => 'top_up',
-                    'actor_type' => $actor['type'],
-                    'actor_id' => $actor['id'],
-                    'related_session_id' => $sessionId,
-                    'idempotency_key' => $idempotencyKey,
-                    'metadata' => [
-                        'session_id' => $sessionId,
-                        'session_payment_intent' => is_string($session->payment_intent ?? null)
-                            ? $session->payment_intent
-                            : null,
-                    ],
-                ])->save();
-            } catch (UniqueConstraintViolationException) {
-                Log::info('stripe.topup.duplicate_session', ['session_id' => $sessionId]);
-
-                return;
-            }
-
-            // Apply to balance atomically; row is locked above via lockForUpdate.
-            Professional::where('id', $brand->id)
-                ->update(['stripe_manual_balance_currency' => $currency]);
-            Professional::where('id', $brand->id)
-                ->increment('stripe_manual_balance_cents', $amountCents);
-
-            Log::info('stripe.topup.credited', [
-                'professional_id' => $brand->id,
-                'session_id' => $sessionId,
-                'amount_cents' => $amountCents,
-            ]);
-        });
-    }
-
-    /**
-     * Confirm a completed top-up Checkout session and credit the brand balance.
-     * Delegates to creditWalletFromCheckoutSession — idempotent via wallet_movements UNIQUE key.
-     */
-    public function confirmManualTopUpCheckoutSession(Professional $brand, string $sessionId): array
-    {
-        $session = $this->stripe->checkout->sessions->retrieve($sessionId, ['expand' => ['payment_intent']]);
-
-        if (($session->mode ?? null) !== 'payment') {
-            throw new \RuntimeException('Checkout session is not a top-up payment session.');
-        }
-
-        if (($session->payment_status ?? null) !== 'paid') {
-            throw new \RuntimeException('Top-up payment is not completed yet.');
-        }
-
-        // Check ownership via both metadata keys for backward compat with sessions
-        // created before the professional_id key was added.
-        $metaProId = $session->metadata?->professional_id
-            ?? $session->metadata?->sidest_professional_id
-            ?? null;
-        if ($metaProId && $metaProId !== $brand->id) {
-            throw new \RuntimeException('Top-up session does not belong to this account.');
-        }
-
-        $purpose = $session->metadata?->purpose ?? null;
-        if ($purpose !== 'brand_commission_topup') {
-            throw new \RuntimeException('Invalid top-up session purpose.');
-        }
-
-        // Tag this code path so the WalletMovement records actor_type='professional'
-        // (user hitting success URL) rather than 'webhook' (Stripe firing the event).
-        $session->_actor_override = ['type' => 'professional', 'id' => (string) $brand->id];
-
-        // Idempotent — if the webhook already fired, the UNIQUE idempotency_key
-        // constraint absorbs the duplicate and the balance is unchanged.
-        $this->creditWalletFromCheckoutSession((string) $brand->id, $session);
-
-        $brand->refresh();
-
-        return [
-            'session_id' => $sessionId,
-            'amount_cents' => (int) ($session->amount_total ?? 0),
-            'balance_cents' => (int) ($brand->stripe_manual_balance_cents ?? 0),
-            'status' => 'credited',
-        ];
     }
 
     private function appendCheckoutSessionParam(string $url, string $param): string
@@ -830,17 +621,19 @@ class StripeConnectService
      * Build the Stripe Account prefill block from a Professional row.
      *
      * Stripe pre-populates the Express onboarding form from any business_profile
-     * and individual fields we pass on create. Missing fields are silently
+     * and individual/company fields we pass on create. Missing fields are silently
      * dropped (via array_filter) so partial data is safe. Fields stay editable
      * for the user; we're saving them keystrokes, not locking values.
      *
      * Notes:
      * - business_profile.product_description is only sent when there's no URL.
      *   Stripe asks for one or the other; sending both is noisy.
-     * - individual.phone is only sent when it looks like E.164 (starts with '+').
+     * - phone is only sent when it looks like E.164 (starts with '+').
      *   Free-form phone numbers cause Stripe to reject the entire create call.
      * - Address is only sent when line1 AND country are both present. Stripe
      *   rejects partial addresses without those two fields together.
+     * - For brands we emit `company` (display_name, phone, address); for
+     *   affiliates we emit `individual` (first/last name, email, phone, address).
      *
      * @return array<string, mixed>
      */
@@ -864,6 +657,23 @@ class StripeConnectService
             $payload['business_profile'] = $businessProfile;
         }
 
+        $address = $this->buildAddressOrNull($professional);
+
+        if ($professional->isBrand()) {
+            $company = array_filter([
+                'name' => $this->stringOrNull($professional->display_name),
+                'phone' => $this->e164PhoneOrNull($professional->phone),
+            ]);
+            if ($address !== null) {
+                $company['address'] = $address;
+            }
+            if ($company !== []) {
+                $payload['company'] = $company;
+            }
+
+            return $payload;
+        }
+
         $individual = array_filter([
             'first_name' => $this->stringOrNull($professional->first_name),
             'last_name' => $this->stringOrNull($professional->last_name),
@@ -871,7 +681,6 @@ class StripeConnectService
             'phone' => $this->e164PhoneOrNull($professional->phone),
         ]);
 
-        $address = $this->buildAddressOrNull($professional);
         if ($address !== null) {
             $individual['address'] = $address;
         }

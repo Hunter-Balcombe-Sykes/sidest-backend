@@ -127,7 +127,7 @@ class StripeConnectWebhookController extends Controller
             'transfer.failed' => $this->handleTransferFailed($event->data->object),
             'transfer.reversed' => $this->handleTransferReversed($event->data->object),
             'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object, (string) ($event->account ?? '')),
-            'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object),
+            'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object, (string) ($event->account ?? '')),
             default => Log::debug('Unhandled Stripe Connect event', ['type' => $event->type]),
         };
 
@@ -136,7 +136,9 @@ class StripeConnectWebhookController extends Controller
 
     private function handleCheckoutSessionCompleted(object $session, string $connectedAccountId): void
     {
-        $professionalId = $session->metadata?->professional_id ?? null;
+        $professionalId = $session->metadata?->sidest_professional_id
+            ?? $session->metadata?->professional_id
+            ?? null;
 
         if (! $professionalId) {
             Log::warning('stripe.checkout_completed.missing_professional_id', [
@@ -158,25 +160,24 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
-        $service = app(StripeConnectService::class);
-
-        match ($session->mode ?? null) {
-            'setup' => $service->syncPaymentMethodFromCheckoutSession(
-                $professional,
-                $session->id
-            ),
-            // 'payment' arm wired in Phase A3.1; stub log here to avoid 500 errors on early delivery.
-            'payment' => method_exists($service, 'creditWalletFromCheckoutSession')
-                ? $service->creditWalletFromCheckoutSession($professionalId, $session)
-                : Log::info('stripe.checkout_completed.payment_deferred', [
-                    'session_id' => $session->id ?? null,
-                    'phase' => 'A2 stub; implementation lands in A3.1',
-                ]),
-            default => Log::warning('stripe.checkout_completed.unknown_mode', [
+        // Only `setup` sessions are produced by Partna now (brand card-on-file
+        // flow scoped to the brand's own Connect account). The `payment` mode
+        // arm previously handled wallet top-ups; those endpoints have been
+        // removed along with the wallet model. Any stray `payment` deliveries
+        // for in-flight legacy top-ups are logged and dropped.
+        if (($session->mode ?? null) !== 'setup') {
+            Log::info('stripe.checkout_completed.ignored_mode', [
                 'session_id' => $session->id ?? null,
                 'mode' => $session->mode ?? null,
-            ]),
-        };
+            ]);
+
+            return;
+        }
+
+        app(StripeConnectService::class)->syncBrandConnectPaymentMethodFromCheckoutSession(
+            $professional,
+            $session->id,
+        );
     }
 
     /**
@@ -439,7 +440,9 @@ class StripeConnectWebhookController extends Controller
 
     private function handlePaymentIntentSucceeded(object $paymentIntent, string $connectedAccountId = ''): void
     {
-        // Commission payout payment intent
+        // Commission payout payment intent. In the brand-as-Connect-account
+        // model these fire on the BRAND'S Connect account, so connectedAccountId
+        // will be the brand's Stripe account ID (logged for traceability).
         $payoutId = $paymentIntent->metadata?->sidest_payout_id ?? null;
         if (! $payoutId) {
             return;
@@ -448,10 +451,11 @@ class StripeConnectWebhookController extends Controller
         Log::info('Stripe payment intent succeeded for payout', [
             'payment_intent_id' => $paymentIntent->id,
             'payout_id' => $payoutId,
+            'connected_account_id' => $connectedAccountId ?: null,
         ]);
     }
 
-    private function handlePaymentIntentFailed(object $paymentIntent): void
+    private function handlePaymentIntentFailed(object $paymentIntent, string $connectedAccountId = ''): void
     {
         $payoutId = $paymentIntent->metadata?->sidest_payout_id ?? null;
 
@@ -464,31 +468,16 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
-        // Reverse any wallet debit that was already taken. The sync path at
-        // CommissionPayoutService::processPayoutBatch's card-charge catch does this
-        // for synchronous failures; this webhook arm handles the async case
-        // (delayed bank reject, off-session retry exhausting). Without this credit,
-        // the brand's wallet stays drained while the payout is marked failed.
-        $walletDebitCents = (int) ($payout->wallet_debit_cents ?? 0);
-        if ($walletDebitCents > 0) {
-            app(\App\Services\Stripe\CommissionPayoutService::class)->creditBrandManualBalance(
-                (string) $payout->brand_professional_id,
-                $walletDebitCents,
-                strtoupper((string) $payout->currency_code),
-            );
-        }
-
         $payout->forceFill([
             'status' => 'failed',
             'failure_code' => 'payment_failed_webhook',
             'failure_reason' => $paymentIntent->last_payment_error?->message ?? 'Payment failed',
-            'wallet_debit_cents' => 0,
         ])->save();
 
         Log::warning('Stripe payment intent failed for payout', [
             'payment_intent_id' => $paymentIntent->id,
             'payout_id' => $payoutId,
-            'wallet_reversed_cents' => $walletDebitCents,
+            'connected_account_id' => $connectedAccountId ?: null,
         ]);
     }
 }

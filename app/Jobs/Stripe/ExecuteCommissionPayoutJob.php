@@ -116,33 +116,11 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $walletDebitCents = (int) ($payout->wallet_debit_cents ?? 0);
-        $failureReason = 'Payout job exhausted all Horizon retries after transient errors. '
-            .$e->getMessage();
-        $updates = ['status' => 'failed', 'failure_code' => 'job_exhausted', 'processed_at' => now()];
-
-        // If retries exhausted while still in 'collecting', the PaymentIntent was never
-        // successfully created — there is no charge to match the wallet debit. Reverse it
-        // automatically so the brand's balance is correct without manual intervention.
-        // Also clear wallet_debit_cents so retryPayout() starts a fresh debit rather than
-        // resuming from 'collecting' (which would skip the debit against a restored balance).
-        if ($payout->status === 'collecting' && $walletDebitCents > 0) {
-            app(CommissionPayoutService::class)->creditBrandManualBalance(
-                (string) $payout->brand_professional_id,
-                $walletDebitCents,
-                strtoupper((string) $payout->currency_code)
-            );
-            $updates['wallet_debit_cents'] = 0;
-            $failureReason = 'Payout job exhausted all retries — wallet debit of '
-                .$walletDebitCents.' cents reversed automatically. '
-                .$e->getMessage();
-
-            Log::notice('ExecuteCommissionPayoutJob reversed wallet debit after retry exhaustion', [
-                'payout_id' => $this->payoutId,
-                'reversed_cents' => $walletDebitCents,
-            ]);
-        }
-
-        $payout->forceFill(array_merge($updates, ['failure_reason' => $failureReason]))->save();
+        $payout->forceFill([
+            'status' => 'failed',
+            'failure_code' => 'job_exhausted',
+            'failure_reason' => 'Payout job exhausted all Horizon retries after transient errors. '.$e->getMessage(),
+            'processed_at' => now(),
+        ])->save();
     }
 }

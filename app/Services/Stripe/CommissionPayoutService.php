@@ -10,7 +10,6 @@ use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Notifications\NotificationPublisher;
-use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiConnectionException;
@@ -90,12 +89,20 @@ class CommissionPayoutService
             $stats['batches_requeued']++;
         }
 
-        // Only consider brands that have a card on file — brands without payment details
-        // cannot be charged, so creating payout batches for them would immediately stall.
+        // Brand must have an ACTIVE Connect Express account AND a card saved on
+        // THAT Connect account before they can be charged. The commission charge
+        // is a direct charge on the brand's Connect (brand = merchant of record),
+        // so all four conditions are required:
+        //   - stripe_connect_account_id     (account exists)
+        //   - stripe_connect_status='active' (KYC + capabilities verified)
+        //   - stripe_connect_customer_id    (customer on brand's own account)
+        //   - stripe_connect_payment_method_id (PM on brand's own account)
         $eligibleBrandIds = Professional::query()
             ->where('professional_type', 'brand')
-            ->whereNotNull('stripe_customer_id')
-            ->whereNotNull('stripe_payment_method_id')
+            ->whereNotNull('stripe_connect_account_id')
+            ->where('stripe_connect_status', 'active')
+            ->whereNotNull('stripe_connect_customer_id')
+            ->whereNotNull('stripe_connect_payment_method_id')
             ->pluck('id');
 
         // Find all brands with unpaid approved orders, then apply per-brand hold days
@@ -390,15 +397,22 @@ class CommissionPayoutService
             return false;
         }
 
-        if (! $brand->stripe_customer_id || ! $brand->stripe_payment_method_id) {
+        if (
+            ! $brand->stripe_connect_account_id
+            || $brand->stripe_connect_status !== 'active'
+            || ! $brand->stripe_connect_customer_id
+            || ! $brand->stripe_connect_payment_method_id
+        ) {
             $this->markPendingFunding(
                 $payout,
                 'brand_payment_method_missing',
-                'No payment method on file. Please add a card in your Stripe settings.',
+                'Brand has not completed Connect onboarding and card setup. Please finish setup in Stripe settings.',
             );
 
             return null;
         }
+
+        $brandStripeAccountOption = ['stripe_account' => $brand->stripe_connect_account_id];
 
         $currencyUpper = strtoupper($payout->currency_code);
         $currencyLower = strtolower($currencyUpper);
@@ -412,11 +426,12 @@ class CommissionPayoutService
         // but the HTTP response was lost before the ID could be recorded.
         $retryKey = '_r'.$payout->retry_count;
 
-        // Step 1: Wallet debit — or resume from recorded state
-        //
-        // The debit and the status update are wrapped in a single DB::transaction
-        // so a process crash between them can't leave the wallet reduced but the
-        // payout record still showing 'pending' (which would cause a double-debit on retry).
+        // Step 1: Funding source — the brand pays the full gross via direct
+        // charge on their own Connect account. The wallet pre-debit branch is
+        // bypassed in this flow because wallet balance lives on Partna's
+        // platform and doesn't compose with direct-on-brand charges (the
+        // brand's own Connect balance is what funds the subsequent Transfer
+        // to the affiliate).
         $walletDebitCents = 0;
         $chargeAmountCents = $amountToCollect;
 
@@ -430,94 +445,77 @@ class CommissionPayoutService
                 return false;
             }
 
-            // Wallet debit already committed in a previous run — read from DB, don't re-debit.
-            $walletDebitCents = (int) ($payout->wallet_debit_cents ?? 0);
+            // Resume — re-read previously persisted amounts; same fields as
+            // first-run path (wallet=0, charge=gross).
             $chargeAmountCents = (int) ($payout->charge_cents ?? $amountToCollect);
         } else {
-            // READ COMMITTED (PG default) — the payout status update and wallet debit
-            // are atomic here; lockForUpdate() inside debitBrandManualBalancePartial
-            // guards against concurrent debits on the wallet row itself.
-            $hasCurrencyMismatch = false;
-            DB::transaction(function () use ($payout, $brand, $amountToCollect, $currencyUpper, &$walletDebitCents, &$chargeAmountCents, &$hasCurrencyMismatch): void {
-                $walletDebitCents = $this->debitBrandManualBalancePartial($brand->id, $amountToCollect, $currencyUpper, $hasCurrencyMismatch);
-
-                // Wallet has balance but in the wrong currency — abort without charging card.
-                // markPendingFunding and notification happen outside the transaction below.
-                if ($hasCurrencyMismatch) {
-                    return;
-                }
-
-                $chargeAmountCents = $amountToCollect - $walletDebitCents;
-
-                $fundingSource = 'card';
-                if ($walletDebitCents > 0 && $chargeAmountCents > 0) {
-                    $fundingSource = 'wallet_and_card';
-                } elseif ($walletDebitCents > 0) {
-                    $fundingSource = 'wallet';
-                }
-
-                $payout->forceFill([
-                    'status' => 'collecting',
-                    'funding_source' => $fundingSource,
-                    'wallet_debit_cents' => $walletDebitCents,
-                    'charge_cents' => $chargeAmountCents,
-                    'failure_code' => null,
-                    'failure_reason' => null,
-                ])->save();
-            });
-
-            if ($hasCurrencyMismatch) {
-                $walletCurrency = strtoupper((string) ($brand->stripe_manual_balance_currency ?? 'unknown'));
-                $this->markPendingFunding(
-                    $payout,
-                    'wallet_currency_mismatch',
-                    "Wallet balance is in {$walletCurrency} but payout requires {$currencyUpper}. Please contact support to resolve.",
-                );
-
-                $this->publisher->publish(
-                    professionalId: $payout->brand_professional_id,
-                    frontendType: 'Warning',
-                    category: 'commissions',
-                    title: 'Commission payout on hold',
-                    body: sprintf(
-                        'A commission payout of %s could not be processed because your wallet balance is in %s. Please contact support to resolve the currency mismatch.',
-                        Money::format($payout->gross_commission_cents, $payout->currency_code),
-                        $walletCurrency,
-                    ),
-                    dedupeKey: "wallet_currency_mismatch.{$payout->id}",
-                    ctaUrl: '/account/settings?section=wallet',
-                );
-
-                return null;
-            }
+            $payout->forceFill([
+                'status' => 'collecting',
+                'funding_source' => 'card',
+                'wallet_debit_cents' => 0,
+                'charge_cents' => $chargeAmountCents,
+                'failure_code' => null,
+                'failure_reason' => null,
+            ])->save();
         }
 
         // Step 2: Charge brand's card for the shortfall (if any)
         $latestChargeId = null;
 
+        // Net deposited into the brand's balance after the direct charge
+        // settles — i.e. amount - stripe_fee - application_fee. This is the
+        // amount the Transfer to the affiliate will be sized at, because it's
+        // exactly what's available on the brand's Connect balance from this
+        // charge.
+        $brandChargeNetCents = null;
+
         if (in_array($payout->status, ['collected', 'transferring'], true)) {
-            // PaymentIntent already succeeded in a previous run.
-            // Retrieve the charge ID so we can use source_transaction on the transfer.
+            // PaymentIntent already succeeded in a previous run on the brand's
+            // Connect account. Retrieve the charge ID + balance_transaction so
+            // we can use source_transaction on the transfer (which also runs
+            // on brand's account, so both calls must use stripe_account=brand).
             if ($payout->stripe_payment_intent_id && $chargeAmountCents > 0) {
-                $pi = $this->stripe->paymentIntents->retrieve($payout->stripe_payment_intent_id);
+                $pi = $this->stripe->paymentIntents->retrieve(
+                    $payout->stripe_payment_intent_id,
+                    ['expand' => ['latest_charge.balance_transaction']],
+                    $brandStripeAccountOption,
+                );
                 $latestChargeId = $this->extractLatestChargeId($pi);
+                $brandChargeNetCents = $this->extractBalanceTransactionNet($pi);
             }
         } elseif ($chargeAmountCents > 0) {
             try {
-                $paymentIntent = $this->stripe->paymentIntents->create([
-                    'amount' => $chargeAmountCents,
-                    'currency' => $currencyLower,
-                    'customer' => $brand->stripe_customer_id,
-                    'payment_method' => $brand->stripe_payment_method_id,
-                    'confirm' => true,
-                    'off_session' => true,
-                    'description' => "Commission payout #{$payout->id}",
-                    'metadata' => [
-                        'sidest_payout_id' => $payout->id,
-                        'brand_id' => $brand->id,
-                        'affiliate_id' => $affiliate->id,
+                // Direct charge on the BRAND'S Connect account, NOT Partna's
+                // platform. stripe_account option makes the brand the merchant
+                // of record on the customer-facing statement, and
+                // application_fee_amount routes Partna's cut to the platform
+                // balance in one call (no separate fee Transfer needed).
+                //
+                // Expand latest_charge.balance_transaction so we get the post-
+                // fee net amount in the same response — that's the value the
+                // subsequent brand→affiliate Transfer is sized at.
+                $paymentIntent = $this->stripe->paymentIntents->create(
+                    [
+                        'amount' => $chargeAmountCents,
+                        'currency' => $currencyLower,
+                        'customer' => $brand->stripe_connect_customer_id,
+                        'payment_method' => $brand->stripe_connect_payment_method_id,
+                        'confirm' => true,
+                        'off_session' => true,
+                        'application_fee_amount' => $payout->platform_fee_cents,
+                        'description' => "Commission payout #{$payout->id}",
+                        'expand' => ['latest_charge.balance_transaction'],
+                        'metadata' => [
+                            'sidest_payout_id' => $payout->id,
+                            'brand_id' => $brand->id,
+                            'affiliate_id' => $affiliate->id,
+                        ],
                     ],
-                ], ['idempotency_key' => 'pi_'.$payout->id.$retryKey]);
+                    [
+                        'stripe_account' => $brand->stripe_connect_account_id,
+                        'idempotency_key' => 'pi_'.$payout->id.$retryKey,
+                    ],
+                );
 
                 // Record the PI ID immediately so a crash between create and the
                 // success-path forceFill doesn't lose it. Cleared further down on
@@ -533,7 +531,11 @@ class CommissionPayoutService
                     // prevent a double-charge on the next retry attempt.
                     $cancelled = false;
                     try {
-                        $this->stripe->paymentIntents->cancel($paymentIntent->id);
+                        $this->stripe->paymentIntents->cancel(
+                            $paymentIntent->id,
+                            [],
+                            $brandStripeAccountOption,
+                        );
                         $cancelled = true;
                     } catch (\Throwable) {
                         // PI may have already transitioned to a terminal state.
@@ -541,13 +543,21 @@ class CommissionPayoutService
 
                     if (! $cancelled) {
                         try {
-                            $finalPi = $this->stripe->paymentIntents->retrieve($paymentIntent->id);
+                            $finalPi = $this->stripe->paymentIntents->retrieve(
+                                $paymentIntent->id,
+                                null,
+                                $brandStripeAccountOption,
+                            );
                             if (($finalPi->status ?? null) === 'succeeded') {
                                 // Customer beat us through SCA. Refund the stray charge so the
-                                // retry's fresh PI doesn't double-bill the brand.
+                                // retry's fresh PI doesn't double-bill the brand. Refund runs
+                                // on the brand's account because that's where the charge lives.
                                 $this->stripe->refunds->create(
                                     ['payment_intent' => $finalPi->id],
-                                    ['idempotency_key' => "rf_sca_race_{$payout->id}_{$finalPi->id}"],
+                                    [
+                                        'stripe_account' => $brand->stripe_connect_account_id,
+                                        'idempotency_key' => "rf_sca_race_{$payout->id}_{$finalPi->id}",
+                                    ],
                                 );
                                 Log::warning('SCA race: PI succeeded after cancel attempt, auto-refunded stray charge', [
                                     'payout_id' => $payout->id,
@@ -569,15 +579,13 @@ class CommissionPayoutService
                     // retry_count → fresh idempotency key) starts cleanly.
                     $payout->forceFill(['stripe_payment_intent_id' => null])->save();
 
-                    if ($walletDebitCents > 0) {
-                        $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
-                    }
                     $this->markPendingFunding($payout, 'charge_requires_action', 'Card charge requires authentication.');
 
                     return null;
                 }
 
                 $latestChargeId = $this->extractLatestChargeId($paymentIntent);
+                $brandChargeNetCents = $this->extractBalanceTransactionNet($paymentIntent);
 
                 // PI ID already recorded above; just advance status.
                 $payout->forceFill(['status' => 'collected'])->save();
@@ -588,9 +596,6 @@ class CommissionPayoutService
                 throw $e;
             } catch (ApiErrorException $e) {
                 // Terminal card failure (declined, invalid PM, SCA permanently blocked, etc.)
-                if ($walletDebitCents > 0) {
-                    $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
-                }
                 $this->markPendingFunding($payout, 'charge_failed', $e->getStripeCode() ?? 'stripe_error');
 
                 return null;
@@ -629,8 +634,18 @@ class CommissionPayoutService
             //     We honor that via CommissionPayoutRefundService::clawbackCompletedPayout.
             $newTransfer = null;
             if (! $payout->stripe_transfer_id) {
+                // Transfer amount = exactly what landed in the brand's balance
+                // from the direct charge. application_fee already routed
+                // Partna's cut to the platform balance, and Stripe's processing
+                // fee comes off the brand's slice on direct charges (Stripe
+                // default). brand_charge_net therefore equals everything left
+                // for the affiliate. Fall back to payout.net_payout_cents only
+                // if balance_transaction lookup failed (shouldn't happen for
+                // confirmed card payments, but is a safe last-resort default).
+                $transferAmountCents = $brandChargeNetCents ?? $payout->net_payout_cents;
+
                 $transferPayload = [
-                    'amount' => $payout->net_payout_cents,
+                    'amount' => $transferAmountCents,
                     'currency' => $currencyLower,
                     'destination' => $affiliate->stripe_connect_account_id,
                     'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
@@ -645,13 +660,20 @@ class CommissionPayoutService
                     $transferPayload['source_transaction'] = $latestChargeId;
                 }
 
+                // stripe_account=brand → the transfer originates from the
+                // BRAND'S Connect balance (where the charge net just landed),
+                // not from Partna's platform balance. destination=affiliate's
+                // Connect account routes the funds on to them.
                 $newTransfer = $this->stripe->transfers->create(
                     $transferPayload,
-                    // Stable key — no retry_count suffix. Stripe returns the same transfer
-                    // on any retry (including admin retries that increment retry_count),
-                    // preventing a duplicate payout when the transfer succeeded but the
-                    // response was lost before stripe_transfer_id could be recorded.
-                    ['idempotency_key' => 'tr_'.$payout->id]
+                    [
+                        'stripe_account' => $brand->stripe_connect_account_id,
+                        // Stable key — no retry_count suffix. Stripe returns the same transfer
+                        // on any retry (including admin retries that increment retry_count),
+                        // preventing a duplicate payout when the transfer succeeded but the
+                        // response was lost before stripe_transfer_id could be recorded.
+                        'idempotency_key' => 'tr_'.$payout->id,
+                    ],
                 );
 
                 // Persist stripe_transfer_id before the completion record. If the process
@@ -705,18 +727,21 @@ class CommissionPayoutService
             // is created if the original request succeeded but the response was lost.
             throw $e;
         } catch (ApiErrorException $e) {
-            // Terminal transfer failure — credit wallet back, then attempt to auto-refund.
-            if ($walletDebitCents > 0) {
-                $this->creditBrandManualBalance($brand->id, $walletDebitCents, $currencyUpper);
-            }
-
+            // Terminal transfer failure — attempt to auto-refund the brand's card.
             $failureCode = 'transfer_failed';
 
             if ($payout->stripe_payment_intent_id && $chargeAmountCents > 0) {
                 try {
-                    $this->stripe->refunds->create([
-                        'payment_intent' => $payout->stripe_payment_intent_id,
-                    ], ['idempotency_key' => "rf_{$payout->id}_{$payout->stripe_payment_intent_id}"]);
+                    // The original charge lives on the brand's Connect account
+                    // (it was a direct charge there), so the refund must also
+                    // be scoped to that account via stripe_account.
+                    $this->stripe->refunds->create(
+                        ['payment_intent' => $payout->stripe_payment_intent_id],
+                        [
+                            'stripe_account' => $brand->stripe_connect_account_id,
+                            'idempotency_key' => "rf_{$payout->id}_{$payout->stripe_payment_intent_id}",
+                        ],
+                    );
                     $failureCode = 'transfer_failed_refunded';
                     // Clear PI ID so an admin retry can create a fresh PaymentIntent
                     // (same idempotency key within 24h would return the now-refunded PI).
@@ -738,81 +763,6 @@ class CommissionPayoutService
 
             return false;
         }
-    }
-
-    /**
-     * Debit the brand's wallet balance, up to the requested amount (partial OK).
-     * Returns the actual amount debited (0 if no balance available).
-     *
-     * Sets $hasCurrencyMismatch=true when the wallet has a positive balance but in a
-     * different currency than $currencyCode — caller must treat this as a hard stop,
-     * not a zero-balance case, to avoid silently charging the full amount to the card.
-     */
-    private function debitBrandManualBalancePartial(string $brandId, int $requestedCents, string $currencyCode, bool &$hasCurrencyMismatch = false): int
-    {
-        if ($requestedCents <= 0) {
-            return 0;
-        }
-
-        // READ COMMITTED (PG default) — lockForUpdate() on the professional row
-        // serialises concurrent debits; no higher isolation level is required.
-        return DB::transaction(function () use ($brandId, $requestedCents, $currencyCode, &$hasCurrencyMismatch) {
-            $brand = Professional::query()
-                ->whereKey($brandId)
-                ->lockForUpdate()
-                ->first();
-
-            if (! $brand) {
-                return 0;
-            }
-
-            $balance = max(0, (int) ($brand->stripe_manual_balance_cents ?? 0));
-            $walletCurrency = strtoupper((string) ($brand->stripe_manual_balance_currency ?: $currencyCode));
-
-            if ($walletCurrency !== strtoupper($currencyCode)) {
-                // Only flag as a mismatch when there's actual balance in the wrong currency.
-                // An empty wallet with any currency is just "no funds" — not a mismatch.
-                if ($balance > 0) {
-                    $hasCurrencyMismatch = true;
-                }
-
-                return 0;
-            }
-
-            if ($balance <= 0) {
-                return 0;
-            }
-
-            $debit = min($balance, $requestedCents);
-            $brand->stripe_manual_balance_cents = $balance - $debit;
-            $brand->save();
-
-            return $debit;
-        });
-    }
-
-    public function creditBrandManualBalance(string $brandId, int $amountCents, string $currencyCode): void
-    {
-        if ($amountCents <= 0) {
-            return;
-        }
-
-        // READ COMMITTED (PG default) — lockForUpdate() serialises concurrent credits.
-        DB::transaction(function () use ($brandId, $amountCents, $currencyCode) {
-            $brand = Professional::query()
-                ->whereKey($brandId)
-                ->lockForUpdate()
-                ->first();
-
-            if (! $brand) {
-                return;
-            }
-
-            $balance = (int) ($brand->stripe_manual_balance_cents ?? 0);
-            $brand->stripe_manual_balance_cents = $balance + $amountCents;
-            $brand->stripe_manual_balance_currency = strtoupper((string) ($brand->stripe_manual_balance_currency ?: $currencyCode));
-            $brand->save();
-        });
     }
 
     /**
@@ -854,6 +804,28 @@ class CommissionPayoutService
         }
 
         return null;
+    }
+
+    /**
+     * Extract balance_transaction.net from a PaymentIntent whose latest_charge
+     * was retrieved/created with `expand: ['latest_charge.balance_transaction']`.
+     * Returns the net amount in minor units (cents) that landed in the
+     * connected account's balance after Stripe + application fees, or null
+     * when the BT isn't available in the response (caller should fall back).
+     */
+    private function extractBalanceTransactionNet(object $paymentIntent): ?int
+    {
+        $latestCharge = $paymentIntent->latest_charge ?? null;
+        if (! is_object($latestCharge)) {
+            return null;
+        }
+
+        $bt = $latestCharge->balance_transaction ?? null;
+        if (! is_object($bt) || ! isset($bt->net)) {
+            return null;
+        }
+
+        return (int) $bt->net;
     }
 
     private function markPendingFunding(CommissionPayout $payout, string $code, string $reason): void

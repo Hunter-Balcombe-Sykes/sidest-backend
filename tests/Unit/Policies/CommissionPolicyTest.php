@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\BrandCommissionTopup;
 use App\Models\Retail\CommissionPayout;
 use App\Policies\CommissionPolicy;
 use App\Services\Store\BrandAccessService;
@@ -120,36 +119,6 @@ it('denies update with 404 when actor has no claim', function () {
         ->andReturn(false);
 
     $result = $this->policy->update($actor, $payout);
-
-    expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
-    expect($result->denied())->toBeTrue();
-    expect($result->status())->toBe(404);
-});
-
-// ---------------------------------------------------------------------------
-// view — BrandCommissionTopup (no affiliate_professional_id)
-// ---------------------------------------------------------------------------
-
-it('allows view on a BrandCommissionTopup when actor is the brand owner', function () {
-    $actor = (new Professional)->forceFill(['id' => 'brand-9', 'status' => 'active', 'professional_type' => 'brand']);
-    $topup = new BrandCommissionTopup(['brand_professional_id' => 'brand-9']);
-
-    // No affiliate_professional_id on topups, so canReadBrandFinancialAnalytics
-    // is only reached if owner check fails
-    $this->brandAccess->shouldReceive('canReadBrandFinancialAnalytics')->never();
-
-    expect($this->policy->view($actor, $topup))->toBeTrue();
-});
-
-it('denies view on a BrandCommissionTopup with 404 when actor has no claim and lacks capability', function () {
-    $actor = (new Professional)->forceFill(['id' => 'nobody', 'status' => 'active', 'professional_type' => 'professional']);
-    $topup = new BrandCommissionTopup(['brand_professional_id' => 'brand-9']);
-
-    $this->brandAccess->shouldReceive('canReadBrandFinancialAnalytics')
-        ->with(Mockery::on(fn ($p) => $p->id === 'nobody'), 'brand-9')
-        ->andReturn(false);
-
-    $result = $this->policy->view($actor, $topup);
 
     expect($result)->toBeInstanceOf(\Illuminate\Auth\Access\Response::class);
     expect($result->denied())->toBeTrue();

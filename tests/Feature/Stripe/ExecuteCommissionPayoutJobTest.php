@@ -153,12 +153,8 @@ it('handle() logs cancelled-by-revalidation (not awaiting-webhook) when processP
 
 // ─── failed() ────────────────────────────────────────────────────────────────
 
-it('failed() transitions a collecting payout to failed with job_exhausted code and clears wallet_debit_cents', function () {
-    execJob_seedPayout('p1', ['status' => 'collecting', 'wallet_debit_cents' => 5000]);
-
-    $mockService = Mockery::mock(CommissionPayoutService::class);
-    $mockService->shouldReceive('creditBrandManualBalance');
-    app()->instance(CommissionPayoutService::class, $mockService);
+it('failed() transitions a collecting payout to failed with job_exhausted code', function () {
+    execJob_seedPayout('p1', ['status' => 'collecting']);
 
     $job = new ExecuteCommissionPayoutJob('p1');
     $job->failed(new \RuntimeException('Stripe network timeout'));
@@ -167,68 +163,6 @@ it('failed() transitions a collecting payout to failed with job_exhausted code a
     expect($payout->status)->toBe('failed');
     expect($payout->failure_code)->toBe('job_exhausted');
     expect($payout->failure_reason)->toContain('Stripe network timeout');
-    // wallet_debit_cents cleared so retryPayout() starts a fresh debit against the restored balance
-    expect($payout->wallet_debit_cents)->toBe(0);
-});
-
-it('failed() calls creditBrandManualBalance when stuck in collecting with a non-zero debit', function () {
-    execJob_seedPayout('p1', [
-        'status' => 'collecting',
-        'wallet_debit_cents' => 5000,
-        'brand_professional_id' => 'brand-1',
-        'currency_code' => 'AUD',
-    ]);
-
-    $mockService = Mockery::mock(CommissionPayoutService::class);
-    $mockService->shouldReceive('creditBrandManualBalance')
-        ->once()
-        ->with('brand-1', 5000, 'AUD');
-    app()->instance(CommissionPayoutService::class, $mockService);
-
-    $job = new ExecuteCommissionPayoutJob('p1');
-    $job->failed(new \RuntimeException('Stripe timeout'));
-
-    $payout = CommissionPayout::find('p1');
-    expect($payout->wallet_debit_cents)->toBe(0);
-    expect($payout->status)->toBe('failed');
-    expect($payout->failure_reason)->toContain('reversed automatically');
-});
-
-it('failed() does not credit wallet when stuck in transferring status', function () {
-    // Payout failed mid-transfer: PI succeeded (money collected) but Stripe transfer timed out.
-    // The wallet debit is load-bearing — reverting it would leave the brand's balance inflated
-    // while they were actually charged. Staff must handle via manual reconciliation.
-    execJob_seedPayout('p1', [
-        'status' => 'transferring',
-        'wallet_debit_cents' => 5000,
-        'stripe_payment_intent_id' => 'pi_abc',
-    ]);
-
-    $mockService = Mockery::mock(CommissionPayoutService::class);
-    $mockService->shouldNotReceive('creditBrandManualBalance');
-    app()->instance(CommissionPayoutService::class, $mockService);
-
-    $job = new ExecuteCommissionPayoutJob('p1');
-    $job->failed(new \RuntimeException('Transfer network timeout'));
-
-    $payout = CommissionPayout::find('p1');
-    // wallet_debit_cents must remain — clearing it would cause retryPayout() to re-debit
-    expect($payout->wallet_debit_cents)->toBe(5000);
-    expect($payout->status)->toBe('failed');
-});
-
-it('failed() does not credit wallet when wallet_debit_cents is zero', function () {
-    execJob_seedPayout('p1', ['status' => 'collecting', 'wallet_debit_cents' => 0]);
-
-    $mockService = Mockery::mock(CommissionPayoutService::class);
-    $mockService->shouldNotReceive('creditBrandManualBalance');
-    app()->instance(CommissionPayoutService::class, $mockService);
-
-    $job = new ExecuteCommissionPayoutJob('p1');
-    $job->failed(new \RuntimeException('Stripe timeout'));
-
-    $payout = CommissionPayout::find('p1');
-    expect($payout->status)->toBe('failed');
 });
 
 it('failed() does not overwrite a completed payout', function () {

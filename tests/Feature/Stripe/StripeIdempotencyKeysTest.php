@@ -27,6 +27,8 @@ beforeEach(function () {
         'stripe_grace_period_ends_at TEXT',
         'stripe_customer_id TEXT',
         'stripe_payment_method_id TEXT',
+        'stripe_connect_customer_id TEXT',
+        'stripe_connect_payment_method_id TEXT',
         'stripe_manual_balance_cents INTEGER DEFAULT 0',
         'stripe_manual_balance_currency TEXT',
         'country_code TEXT',
@@ -155,18 +157,22 @@ it('createConnectAccount passes deterministic idempotency_key to Stripe', functi
     expect($professional->fresh()->stripe_connect_account_id)->toBe('acct_fake_abc');
 });
 
-// ── Task 4: StripeConnectService::createCustomer (brand flow) ───────────────
+// ── Task 4: StripeConnectService::createBrandConnectCustomer ────────────────
 
-it('createCustomer (Connect/brand) passes deterministic idempotency_key to Stripe', function () {
+it('createBrandConnectCustomer passes deterministic idempotency_key + stripe_account to Stripe', function () {
     $brand = idempotencyTest_makeProfessional();
-    $brand->update(['professional_type' => 'brand']);
+    $brand->update([
+        'professional_type' => 'brand',
+        'stripe_connect_account_id' => 'acct_brand_test',
+    ]);
 
     $customersSpy = Mockery::mock();
     $customersSpy->shouldReceive('create')
         ->once()
         ->withArgs(function (array $params, array $opts = []) use ($brand) {
             expect($opts)->toHaveKey('idempotency_key');
-            expect($opts['idempotency_key'])->toBe("customer_{$brand->id}");
+            expect($opts['idempotency_key'])->toBe("brand_connect_customer_{$brand->id}");
+            expect($opts['stripe_account'])->toBe('acct_brand_test');
 
             return true;
         })
@@ -180,10 +186,10 @@ it('createCustomer (Connect/brand) passes deterministic idempotency_key to Strip
     $reflProp->setAccessible(true);
     $reflProp->setValue($service, $stripeClient);
 
-    $customerId = $service->createCustomer($brand);
+    $customerId = $service->createBrandConnectCustomer($brand);
 
     expect($customerId)->toBe('cus_brand_abc');
-    expect($brand->fresh()->stripe_customer_id)->toBe('cus_brand_abc');
+    expect($brand->fresh()->stripe_connect_customer_id)->toBe('cus_brand_abc');
 });
 
 // Task 5 (CommissionPayoutService refund) is covered behaviorally in

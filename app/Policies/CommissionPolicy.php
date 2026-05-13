@@ -12,18 +12,16 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * V2: Authorization for commission financial records.
  *
- * Covers: CommissionPayout, CommissionMovement, BrandCommissionTopup.
+ * Covers: CommissionPayout, CommissionMovement.
  *
  * Read access:
- *   - The affiliate (CommissionPayout/LedgerEntry where affiliate_professional_id matches)
+ *   - The affiliate (records where affiliate_professional_id matches)
  *   - The brand owner
  *   - Brand team members with canReadBrandFinancialAnalytics capability
  *
  * Write access:
  *   - Brand owner or team member with canManageBrand capability
  *   - NOT affiliates (read-only for them)
- *
- * BrandCommissionTopup has no affiliate_professional_id; affiliate check is skipped.
  */
 class CommissionPolicy extends BasePolicy
 {
@@ -131,15 +129,6 @@ class CommissionPolicy extends BasePolicy
     }
 
     /**
-     * Brand can only top up their own wallet, not another professional's.
-     */
-    public function topUp(Professional $actor, Professional $brand): bool
-    {
-        return $actor->id === $brand->id
-            && ($actor->professional_type ?? null) === 'brand';
-    }
-
-    /**
      * Brand can only manage their own payment method, not another professional's.
      */
     public function managePaymentMethod(Professional $actor, Professional $brand): bool
@@ -149,20 +138,23 @@ class CommissionPolicy extends BasePolicy
     }
 
     /**
-     * Wallet management follows the same rules as topping up.
+     * Brand commission-billing context (card on file, billing summary). Gated
+     * to brand-type self-actions; mirrors managePaymentMethod.
      */
     public function manageWallet(Professional $actor, Professional $brand): bool
     {
-        return $this->topUp($actor, $brand);
+        return $actor->id === $brand->id
+            && ($actor->professional_type ?? null) === 'brand';
     }
 
     /**
-     * Only non-brand professionals (affiliates/influencers) start Stripe Connect onboarding.
-     * Brands fund payouts but receive via bank, not Connect Express.
+     * Every professional type can onboard with Stripe Connect Express.
+     * Affiliates onboard to RECEIVE transfers; brands onboard so commission
+     * charges run as direct charges on the brand's own Connect account
+     * (brand = merchant of record on the customer-facing statement).
      */
     public function startConnect(Professional $actor, Professional $pro): bool
     {
-        return $actor->id === $pro->id
-            && ($actor->professional_type ?? null) !== 'brand';
+        return $actor->id === $pro->id;
     }
 }

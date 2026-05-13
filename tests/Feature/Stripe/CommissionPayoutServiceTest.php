@@ -35,6 +35,8 @@ beforeEach(function () {
         'stripe_connect_status TEXT DEFAULT \'not_connected\'',
         'stripe_customer_id TEXT',
         'stripe_payment_method_id TEXT',
+        'stripe_connect_customer_id TEXT',
+        'stripe_connect_payment_method_id TEXT',
         'stripe_manual_balance_cents INTEGER DEFAULT 0',
         'stripe_manual_balance_currency TEXT',
     ] as $col) {
@@ -146,6 +148,8 @@ function payoutSvc_seedOrder(
 function payoutSvc_seedBrand(string $id, array $overrides = []): void
 {
     $now = now()->toDateTimeString();
+    // Default to a brand that's fully set up for the new direct-charge flow.
+    // Tests that want to exercise the "not yet set up" path can override these.
     DB::connection('pgsql')->table('core.professionals')->insert(array_merge([
         'id' => $id,
         'handle' => "brand-{$id}",
@@ -153,7 +157,11 @@ function payoutSvc_seedBrand(string $id, array $overrides = []): void
         'display_name' => "Brand {$id}",
         'professional_type' => 'brand',
         'status' => 'active',
+        'stripe_connect_account_id' => 'acct_brand_test_'.$id,
         'stripe_connect_status' => 'active',
+        'stripe_connect_customer_id' => 'cus_on_brand_'.$id,
+        'stripe_connect_payment_method_id' => 'pm_on_brand_'.$id,
+        // Platform-scoped IDs kept for SaaS-billing tests that still reference them.
         'stripe_customer_id' => 'cus_test',
         'stripe_payment_method_id' => 'pm_test',
         'stripe_manual_balance_cents' => 0,
@@ -339,7 +347,9 @@ it('fails with brand_missing when brand professional does not exist', function (
 });
 
 it('marks brand_payment_method_missing when brand has no card on file', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_payment_method_id' => null]);
+    // In the direct-charge model, "no card" means the brand-Connect-scoped PM
+    // column is unset. Platform-scoped columns (SaaS billing) are NOT consulted.
+    payoutSvc_seedBrand('brand-1', ['stripe_connect_payment_method_id' => null]);
     payoutSvc_seedAffiliate('aff-1');
     $payout = payoutSvc_seedPayout('p1');
 
@@ -350,73 +360,6 @@ it('marks brand_payment_method_missing when brand has no card on file', function
     $fresh = $payout->fresh();
     expect($fresh->status)->toBe('pending_funds');
     expect($fresh->failure_code)->toBe('brand_payment_method_missing');
-});
-
-it('marks wallet_currency_mismatch and notifies brand when wallet currency differs from payout currency', function () {
-    // Brand has EUR wallet balance but payout is in AUD — must not charge card.
-    payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents' => 15000,
-        'stripe_manual_balance_currency' => 'EUR',
-    ]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['currency_code' => 'AUD', 'gross_commission_cents' => 10000]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldNotReceive('create');
-
-    $publisher = Mockery::mock(NotificationPublisher::class);
-    $publisher->shouldReceive('publish')
-        ->once()
-        ->with(
-            'brand-1',                         // professionalId
-            'Warning',                         // frontendType
-            'commissions',                     // category
-            Mockery::any(),                    // title
-            Mockery::any(),                    // body
-            'wallet_currency_mismatch.p1',     // dedupeKey
-            Mockery::any(),                    // ctaUrl
-        );
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock]), $publisher);
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeNull();
-    $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('pending_funds');
-    expect($fresh->failure_code)->toBe('wallet_currency_mismatch');
-    // Wallet must remain untouched — no debit occurred.
-    $brandRow = DB::connection('pgsql')->table('core.professionals')->where('id', 'brand-1')->first();
-    expect($brandRow->stripe_manual_balance_cents)->toBe(15000);
-});
-
-it('resets void_at on wallet_currency_mismatch so the grace window counts from the latest hold, not creation', function () {
-    // Payout was created 50 days ago — without the void_at reset, VoidExpiredPayoutsJob
-    // would void it in 10 days even though the brand might still be resolving the mismatch.
-    $pastVoidAt = now()->subDays(50)->addDays(60); // original void_at = creation + 60 days
-
-    payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents' => 15000,
-        'stripe_manual_balance_currency' => 'EUR',
-    ]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'currency_code' => 'AUD',
-        'gross_commission_cents' => 10000,
-        'void_at' => $pastVoidAt->toDateTimeString(),
-    ]);
-
-    $publisher = Mockery::mock(NotificationPublisher::class);
-    $publisher->shouldReceive('publish')->once();
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(), $publisher);
-    $service->processPayoutBatch($payout);
-
-    $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('pending_funds');
-    expect($fresh->failure_code)->toBe('wallet_currency_mismatch');
-    // void_at should now be approximately now() + 60 days, not the original stale value.
-    $newVoidAt = \Illuminate\Support\Carbon::parse($fresh->void_at);
-    expect($newVoidAt->isAfter(now()->addDays(55)))->toBeTrue();
 });
 
 it('does NOT flag currency mismatch when wallet balance is zero regardless of currency', function () {
@@ -479,60 +422,8 @@ it('completes a card-only payout when brand wallet balance is zero', function ()
     expect($payout->funding_source)->toBe('card');
 });
 
-it('completes a wallet-only payout without creating a PaymentIntent', function () {
-    payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents' => 20000,
-        'stripe_manual_balance_currency' => 'AUD',
-    ]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldNotReceive('create');
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_wallet', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $payout->refresh();
-    expect($result)->toBeTrue();
-    expect($payout->status)->toBe('completed');
-    expect($payout->wallet_debit_cents)->toBe(10000);
-    expect($payout->charge_cents)->toBe(0);
-    expect($payout->funding_source)->toBe('wallet');
-});
-
-it('completes a wallet-and-card payout when wallet partially covers the amount', function () {
-    payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents' => 3000,
-        'stripe_manual_balance_currency' => 'AUD',
-    ]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')
-        ->once()
-        ->with(Mockery::on(fn ($p) => $p['amount'] === 7000), Mockery::any())
-        ->andReturn((object) ['id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test']);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $payout->refresh();
-    expect($result)->toBeTrue();
-    expect($payout->wallet_debit_cents)->toBe(3000);
-    expect($payout->charge_cents)->toBe(7000);
-    expect($payout->funding_source)->toBe('wallet_and_card');
-});
-
 // ============================================================
-// Gap 1 — Idempotent resume (no double-debit / no double-charge)
+// Gap 1 — Idempotent resume (no double-charge)
 // ============================================================
 
 it('does not re-debit the wallet when resuming from collecting status', function () {
@@ -581,9 +472,23 @@ it('skips PaymentIntent creation and retrieves the existing one when resuming fr
 
     $piMock = Mockery::mock();
     $piMock->shouldNotReceive('create');
-    $piMock->shouldReceive('retrieve')->with('pi_existing')->once()->andReturn((object) [
-        'id' => 'pi_existing', 'status' => 'succeeded', 'latest_charge' => 'ch_existing',
-    ]);
+    // Retrieve now passes (id, expand-options, stripe-account-options) — match all three.
+    $piMock->shouldReceive('retrieve')
+        ->withArgs(function ($id, $args, $opts) {
+            expect($id)->toBe('pi_existing');
+            expect($opts['stripe_account'])->toBe('acct_brand_test_brand-1');
+
+            return true;
+        })
+        ->once()
+        ->andReturn((object) [
+            'id' => 'pi_existing',
+            'status' => 'succeeded',
+            'latest_charge' => (object) [
+                'id' => 'ch_existing',
+                'balance_transaction' => (object) ['net' => 9700],
+            ],
+        ]);
 
     $transferMock = Mockery::mock();
     $transferMock->shouldReceive('create')
@@ -655,14 +560,18 @@ it('skips transfer creation and leaves payout at transferring when stripe_transf
 // Gap 2 — Auto-refund on transfer failure
 // ============================================================
 
-it('credits wallet and auto-refunds card when transfer fails and refund succeeds', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
+it('auto-refunds the brand on the brand\'s Connect account when transfer fails', function () {
+    payoutSvc_seedBrand('brand-1');
     payoutSvc_seedAffiliate('aff-1');
     $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
 
     $piMock = Mockery::mock();
     $piMock->shouldReceive('create')->andReturn((object) [
-        'id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test',
+        'id' => 'pi_test', 'status' => 'succeeded',
+        'latest_charge' => (object) [
+            'id' => 'ch_test',
+            'balance_transaction' => (object) ['net' => 9300],
+        ],
     ]);
 
     $transferMock = Mockery::mock();
@@ -671,8 +580,15 @@ it('credits wallet and auto-refunds card when transfer fails and refund succeeds
     );
 
     $refundMock = Mockery::mock();
+    // Refund must address the brand's Connect account via stripe_account.
     $refundMock->shouldReceive('create')->once()
-        ->with(['payment_intent' => 'pi_test'], ['idempotency_key' => 'rf_p1_pi_test'])
+        ->withArgs(function ($payload, $opts) {
+            expect($payload['payment_intent'])->toBe('pi_test');
+            expect($opts['idempotency_key'])->toBe('rf_p1_pi_test');
+            expect($opts['stripe_account'])->toBe('acct_brand_test_brand-1');
+
+            return true;
+        })
         ->andReturn((object) ['id' => 're_test']);
 
     $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock, 'refund' => $refundMock]));
@@ -1242,9 +1158,9 @@ it('rebuilds batch amounts and completes when some linked orders are refunded be
 // A3.2 — Card-on-file gate + rate_source='pending' exclusion
 // ============================================================
 
-it('does not create a payout batch for brands without stripe_payment_method_id', function () {
-    // Brand has no card on file — we must never attempt to create a payout batch for them.
-    payoutSvc_seedBrand('brand-1', ['stripe_payment_method_id' => null]);
+it('does not create a payout batch for brands without stripe_connect_payment_method_id', function () {
+    // Brand-Connect-scoped PM column is what the new eligibility filter checks.
+    payoutSvc_seedBrand('brand-1', ['stripe_connect_payment_method_id' => null]);
     payoutSvc_seedAffiliate('aff-1');
 
     payoutSvc_seedOrder(
@@ -1260,8 +1176,8 @@ it('does not create a payout batch for brands without stripe_payment_method_id',
     expect($stats['batches_created'])->toBe(0);
 });
 
-it('does not create a payout batch for brands without stripe_customer_id', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_customer_id' => null]);
+it('does not create a payout batch for brands without stripe_connect_customer_id', function () {
+    payoutSvc_seedBrand('brand-1', ['stripe_connect_customer_id' => null]);
     payoutSvc_seedAffiliate('aff-1');
 
     payoutSvc_seedOrder(

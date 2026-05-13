@@ -413,14 +413,11 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/stripe/connect/onboard', [StripeConnectController::class, 'onboard']);
         Route::post('/stripe/connect/dashboard', [StripeConnectController::class, 'dashboard']);
         Route::post('/stripe/connect/disconnect', [StripeConnectController::class, 'disconnect']);
-        Route::patch('/stripe/funding-mode', [StripeConnectController::class, 'updateFundingMode']);
         Route::post('/stripe/payment-method/setup-checkout', [StripeConnectController::class, 'createPaymentMethodCheckoutSession']);
         Route::post('/stripe/payment-method/confirm', [StripeConnectController::class, 'confirmPaymentMethod']);
         Route::post('/stripe/payment-method/sync-session', [StripeConnectController::class, 'syncPaymentMethodSession']);
         Route::get('/stripe/payment-methods', [StripeConnectController::class, 'listPaymentMethods']);
         Route::delete('/stripe/payment-method', [StripeConnectController::class, 'removePaymentMethod']);
-        Route::post('/stripe/topups/checkout', [StripeConnectController::class, 'createTopUpCheckoutSession']);
-        Route::post('/stripe/topups/confirm', [StripeConnectController::class, 'confirmTopUpCheckoutSession']);
         Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
 
         // Brand billing & payout history (Lane B prerequisites — new role-scoped endpoints)
