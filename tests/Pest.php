@@ -140,6 +140,7 @@ function setupSitesTable(): void
         subdomain TEXT NULL,
         subdomain_changed_at TEXT NULL,
         is_published INTEGER NULL,
+        unpublished_at TEXT NULL,
         settings TEXT NULL,
         deleted_at TEXT NULL,
         created_at TEXT NULL,

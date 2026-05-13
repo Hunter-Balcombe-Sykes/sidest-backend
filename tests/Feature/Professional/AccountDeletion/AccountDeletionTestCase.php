@@ -127,6 +127,7 @@ class AccountDeletionTestCase
             professional_id TEXT,
             subdomain TEXT,
             is_published INTEGER,
+            unpublished_at TEXT,
             settings TEXT,
             deleted_at TEXT,
             created_at TEXT,

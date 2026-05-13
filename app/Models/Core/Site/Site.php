@@ -28,6 +28,7 @@ class Site extends BaseModel
         'subdomain',
         'theme_id',
         'is_published',
+        'unpublished_at',
         'settings',
     ];
 
@@ -35,6 +36,7 @@ class Site extends BaseModel
         'is_published' => 'boolean',
         'settings' => 'array',
         'subdomain_changed_at' => 'datetime',
+        'unpublished_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

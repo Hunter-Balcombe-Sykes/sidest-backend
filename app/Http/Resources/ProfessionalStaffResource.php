@@ -37,6 +37,9 @@ class ProfessionalStaffResource extends JsonResource
                 'stripe_connect_status' => $this->stripe_connect_status,
                 'created_at' => $this->created_at?->toIso8601String(),
                 'updated_at' => $this->updated_at?->toIso8601String(),
+                // Signals to staff UI that this professional is soft-deleted (deleted_at is set);
+                // distinct from status='pending_deletion' which is the 30-day grace period.
+                'parent_status' => $this->trashed() ? 'soft_deleted' : 'active',
         ];
     }
 }

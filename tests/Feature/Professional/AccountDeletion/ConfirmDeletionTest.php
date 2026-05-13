@@ -145,3 +145,32 @@ it('writes confirmed audit event', function () {
     expect($audit)->not->toBeNull()
         ->and($audit->actor_type)->toBe(ProfessionalDeletionAuditEntry::ACTOR_TYPE_PROFESSIONAL);
 });
+
+it('unpublishes the site immediately when deletion is confirmed', function () {
+    $rawToken = 'raw-token-'.Str::random(54);
+    $pro = seedRequestedProfessional($rawToken);
+
+    // Seed a published site for this professional.
+    $siteId = (string) Str::uuid();
+    DB::connection('pgsql')->table('site.sites')->insert([
+        'id' => $siteId,
+        'professional_id' => $pro->id,
+        'subdomain' => 'pro-'.$pro->id,
+        'is_published' => 1,
+        'unpublished_at' => null,
+        'created_at' => now()->toIso8601String(),
+        'updated_at' => now()->toIso8601String(),
+    ]);
+
+    // Reload with site relation.
+    $pro = Professional::query()->with('site')->find($pro->id);
+
+    $service = app(AccountDeletionService::class);
+    $result = $service->confirm($pro, $rawToken, Request::create('/', 'POST'));
+
+    expect($result['success'])->toBeTrue();
+
+    $site = DB::connection('pgsql')->table('site.sites')->where('id', $siteId)->first();
+    expect((bool) $site->is_published)->toBeFalse()
+        ->and($site->unpublished_at)->not->toBeNull();
+});
