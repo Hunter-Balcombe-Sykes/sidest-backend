@@ -94,12 +94,6 @@ return [
         'secret_key' => env('CLOUDFLARE_TURNSTILE_SECRET_KEY'),
     ],
 
-    // Shared key for Sidest-Embedded Shopify app → backend calls.
-    // Set in both .env (Laravel) and PARTNA_EMBEDDED_API_KEY env var in the Remix app.
-    'embedded' => [
-        'api_key' => env('PARTNA_EMBEDDED_API_KEY', env('SIDEST_EMBEDDED_API_KEY')),
-    ],
-
     'twitch' => [
         'client_id' => env('TWITCH_CLIENT_ID'),
         'client_secret' => env('TWITCH_CLIENT_SECRET'),

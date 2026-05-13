@@ -34,9 +34,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-// Internal endpoints consumed by the Sidest-Embedded Shopify app wizard.
-// Auth: VerifyEmbeddedApiKey middleware resolves the brand via X-Shopify-Shop
-// and attaches 'embedded_professional_id' to the request.
+// Internal endpoints consumed by the Partna embedded Shopify app wizard.
+// Auth: shopify.session middleware validates the App Bridge JWT and stashes
+// 'embedded_professional_id' + 'embedded_shop_domain' on the request.
 class EmbeddedSetupController extends ApiController
 {
     use NormalizesShopDomain;
