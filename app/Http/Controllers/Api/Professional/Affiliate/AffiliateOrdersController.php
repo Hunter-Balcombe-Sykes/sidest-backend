@@ -84,7 +84,7 @@ class AffiliateOrdersController extends ApiController
 
         $payload = $this->mapRow($row);
         $payload['line_items'] = $this->extractLineItems($row);
-        $payload['expected_payout_at'] = $this->deriveExpectedPayoutAt($row);
+        $payload['expected_payout_at'] = $this->deriveExpectedPayoutAt($row, (string) $row->brand_professional_id);
 
         return $this->success($payload);
     }
@@ -234,10 +234,13 @@ class AffiliateOrdersController extends ApiController
     /**
      * Mirror of BrandOrdersController::deriveExpectedPayoutAt — same semantics:
      * paid orders return the linked payout's processed_at (or created_at fallback),
-     * pending orders estimate occurred_at + grace_period_days, reversed orders
-     * return null (no payout will happen).
+     * pending orders estimate occurred_at + the brand's payout_hold_days, fully
+     * refunded orders return null.
+     *
+     * Reads the BRAND's hold setting (not the affiliate's) — payout cadence is
+     * determined by the brand whose commission is being paid.
      */
-    private function deriveExpectedPayoutAt(object $row): ?string
+    private function deriveExpectedPayoutAt(object $row, string $brandProfessionalId): ?string
     {
         if (! empty($row->payout_id)) {
             $payout = DB::table('commerce.commission_payouts')
@@ -262,11 +265,24 @@ class AffiliateOrdersController extends ApiController
             return null;
         }
 
-        $gracePeriodDays = (int) config('partna.store.grace_period_days', 60);
+        $holdDays = $this->resolveBrandHoldDays($brandProfessionalId);
 
         return \Carbon\Carbon::parse($row->occurred_at)
-            ->addDays($gracePeriodDays)
+            ->addDays($holdDays)
             ->toIso8601String();
+    }
+
+    /**
+     * Brand-level payout_hold_days (the brand whose commission is being paid),
+     * falling back to the system default when the brand has no row yet.
+     */
+    private function resolveBrandHoldDays(string $brandProfessionalId): int
+    {
+        $brandValue = DB::table('brand.brand_store_settings')
+            ->where('professional_id', $brandProfessionalId)
+            ->value('payout_hold_days');
+
+        return max(0, (int) ($brandValue ?? config('partna.store.payout_hold_days', 7)));
     }
 
     private function resolveCustomerName(object $row): string
