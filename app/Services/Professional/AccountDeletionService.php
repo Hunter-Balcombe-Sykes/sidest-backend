@@ -123,7 +123,11 @@ class AccountDeletionService
 
         $deletesAt = $this->executeConfirmation($professional);
 
+        // Order matters: audit row must capture the REAL primary_email before we
+        // pseudonymise. pseudonymiseAccountPii() is a one-way write that destroys
+        // the live PII, so it always runs after the audit snapshot is durable.
         $this->logAuditEvent($professional, ProfessionalDeletionAuditEntry::EVENT_CONFIRMED, $request);
+        $this->pseudonymiseAccountPii($professional);
 
         return [
             'success' => true,
@@ -136,13 +140,19 @@ class AccountDeletionService
      * Apply the confirmed deletion: snapshot status, flip to pending_deletion,
      * revoke integration credentials, schedule Stripe cancel-at-period-end,
      * send scheduled email. Shared by self-service confirm() and admin
-     * adminInitiate(). Returns the deletes_at timestamp.
+     * adminInitiate(). Returns the deletes_at timestamp. PII pseudonymisation
+     * is intentionally deferred to a separate call so the EVENT_CONFIRMED /
+     * EVENT_ADMIN_INITIATED audit row captures the real email first.
      */
     private function executeConfirmation(Professional $professional): Carbon
     {
         $retentionDays = (int) config('partna.soft_delete_retention_days', 30);
         $deletesAt = now()->addDays($retentionDays);
         $previousStatus = (string) ($professional->status ?? 'active');
+
+        // Snapshot the real email before any state change so the "deletion scheduled"
+        // mail still reaches the user even after we pseudonymise downstream.
+        $realEmail = (string) ($professional->primary_email ?? '');
 
         DB::transaction(function () use ($professional, $previousStatus) {
             $professional->update([
@@ -164,7 +174,7 @@ class AccountDeletionService
         $cancelUrl = rtrim((string) config('app.frontend_url'), '/').'/account/deletion/cancel';
 
         try {
-            Mail::to($professional->primary_email)->send(
+            Mail::to($realEmail)->send(
                 new AccountDeletionScheduledMail(
                     displayName: (string) ($professional->display_name ?? 'there'),
                     deletesAt: $deletesAt->toDayDateTimeString(),
@@ -181,6 +191,29 @@ class AccountDeletionService
         }
 
         return $deletesAt;
+    }
+
+    /**
+     * One-way pseudonymisation of live PII columns. Called immediately after the
+     * EVENT_CONFIRMED / EVENT_ADMIN_INITIATED audit row is written so the snapshot
+     * captures the real email. The 30-day grace period only needs handle, display_name,
+     * and auth_user_id to keep the "undo deletion" recovery path working; the original
+     * email is preserved in core.professional_deletion_audit.professional_email_snapshot
+     * so support can re-identify the user if they email to cancel.
+     */
+    private function pseudonymiseAccountPii(Professional $professional): void
+    {
+        $professional->forceFill([
+            'phone' => 'redacted',
+            'primary_email' => "deleted+{$professional->id}@partna.au",
+            'first_name' => 'Deleted',
+            'last_name' => null,
+            'location_street_address' => null,
+            'location_postcode' => null,
+            'location_city' => null,
+            'location_state' => null,
+            'location_country' => null,
+        ])->save();
     }
 
     /**
@@ -224,6 +257,7 @@ class AccountDeletionService
             ? ['obligations_overridden' => $obligations]
             : [];
 
+        // Same audit-before-pseudonymise order as the self-service confirm() path.
         $this->logAuditEvent(
             $professional,
             ProfessionalDeletionAuditEntry::EVENT_ADMIN_INITIATED,
@@ -234,6 +268,7 @@ class AccountDeletionService
             $staffActorHandle,
             $reason,
         );
+        $this->pseudonymiseAccountPii($professional);
 
         return [
             'success' => true,
@@ -263,6 +298,9 @@ class AccountDeletionService
         if (! is_string($previousStatus) || $previousStatus === '') {
             $previousStatus = 'active';
         }
+
+        // Recovery: same email-snapshot restore as the self-service cancel path.
+        $this->restoreEmailFromAuditSnapshot($professional);
 
         DB::transaction(function () use ($professional, $previousStatus) {
             $professional->update([
@@ -316,6 +354,12 @@ class AccountDeletionService
         if (! is_string($previousStatus) || $previousStatus === '') {
             $previousStatus = 'active';
         }
+
+        // Recovery: confirm() pseudonymises primary_email — restore the real one
+        // from the EVENT_CONFIRMED audit snapshot so the cancel mail reaches the
+        // user and downstream audit rows capture the real address. No-op if the
+        // user is cancelling before confirm (no snapshot row exists yet).
+        $this->restoreEmailFromAuditSnapshot($professional);
 
         DB::transaction(function () use ($professional, $previousStatus) {
             $professional->update([
@@ -617,6 +661,26 @@ class AccountDeletionService
         $disk = Storage::disk((string) config('partna.media_disk'));
         if ($disk->exists($media->path)) {
             $disk->delete($media->path);
+        }
+    }
+
+    /**
+     * Re-hydrate primary_email from the most recent EVENT_CONFIRMED audit row.
+     * Used by cancel() / adminCancel() to undo the pseudonymisation applied at
+     * confirm time. No-op when no confirmed snapshot exists (request → cancel
+     * before confirmation never overwrote the live row).
+     */
+    private function restoreEmailFromAuditSnapshot(Professional $professional): void
+    {
+        $snapshotEmail = DB::connection('pgsql')
+            ->table('core.professional_deletion_audit')
+            ->where('professional_id', $professional->id)
+            ->where('event', ProfessionalDeletionAuditEntry::EVENT_CONFIRMED)
+            ->orderByDesc('created_at')
+            ->value('professional_email_snapshot');
+
+        if (is_string($snapshotEmail) && $snapshotEmail !== '') {
+            $professional->forceFill(['primary_email' => $snapshotEmail])->save();
         }
     }
 

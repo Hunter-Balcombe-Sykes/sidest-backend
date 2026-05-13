@@ -32,6 +32,18 @@ class Enquiry extends BaseModel
         'read_at',
     ];
 
+    // Submitter PII + request telemetry hidden from default model serialization.
+    // ProfessionalEnquiryController surfaces these via EnquiryResource (direct attribute
+    // access, unaffected by $hidden); naked toArray() in jobs/logs/broadcasts is now safe.
+    protected $hidden = [
+        'name',
+        'email',
+        'phone',
+        'message',
+        'ip_hash',
+        'user_agent',
+    ];
+
     protected $casts = [
         'read_at' => 'datetime',
         'created_at' => 'datetime',

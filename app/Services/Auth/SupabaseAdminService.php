@@ -68,8 +68,13 @@ class SupabaseAdminService
             }
         }
 
+        // Privacy: never write raw email to logs. Retry storms (Supabase 5xx, network
+        // blips) compound — a single 10-retry burst would otherwise persist 10 emails
+        // into Nightwatch / log aggregator retention windows that GDPR erasure cannot
+        // reach. A SHA-256 fingerprint correlates retry attempts for the same address
+        // without storing the address itself.
         Log::error('Supabase admin: failed to create user', [
-            'email' => $email,
+            'email_fingerprint' => $this->emailFingerprint($email),
             'status' => $response->status(),
             'error_code' => $response->json('code'),
             'error_msg' => $response->json('msg'),
@@ -88,5 +93,15 @@ class SupabaseAdminService
             'apikey' => $this->serviceRoleKey,
             'Content-Type' => 'application/json',
         ];
+    }
+
+    /**
+     * Normalised SHA-256 fingerprint of an email address. Use anywhere an email
+     * would otherwise land in a log line so retry attempts for the same address
+     * remain correlatable without persisting the address itself.
+     */
+    private function emailFingerprint(string $email): string
+    {
+        return hash('sha256', strtolower(trim($email)));
     }
 }

@@ -2,6 +2,7 @@
 
 use App\Services\Auth\SupabaseAdminService;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 uses(TestCase::class)->in(__FILE__);
@@ -101,4 +102,28 @@ it('createUser throws on empty email', function () {
 
     expect(fn () => $service->createUser(''))
         ->toThrow(RuntimeException::class, 'Email is required');
+});
+
+it('logs an email_fingerprint instead of the raw email on createUser failure', function () {
+    Http::fake([
+        'https://test.supabase.co/auth/v1/admin/users' => Http::response(['msg' => 'server error'], 500),
+    ]);
+
+    Log::spy();
+
+    $service = new SupabaseAdminService;
+
+    expect(fn () => $service->createUser('  USER@Example.COM  '))
+        ->toThrow(RuntimeException::class);
+
+    $expectedFingerprint = hash('sha256', 'user@example.com');
+
+    Log::shouldHaveReceived('error')
+        ->once()
+        ->withArgs(function (string $message, array $context) use ($expectedFingerprint) {
+            // PII must be redacted: no raw email key, fingerprint present and matches normalised email.
+            return $message === 'Supabase admin: failed to create user'
+                && ! array_key_exists('email', $context)
+                && ($context['email_fingerprint'] ?? null) === $expectedFingerprint;
+        });
 });

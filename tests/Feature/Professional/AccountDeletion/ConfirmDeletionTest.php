@@ -130,6 +130,81 @@ it('rejects with 404 when no deletion request exists', function () {
         ->and($result['code'])->toBe(404);
 });
 
+it('pseudonymises PII columns at confirm time so live row is unreadable during grace window', function () {
+    $rawToken = 'raw-token-'.Str::random(54);
+    $pro = seedRequestedProfessional($rawToken, [
+        'phone' => '+61400000000',
+        'first_name' => 'Jane',
+        'last_name' => 'Doer',
+        'location_street_address' => '1 Test Lane',
+        'location_postcode' => '2000',
+        'location_city' => 'Sydney',
+        'location_state' => 'NSW',
+        'location_country' => 'AU',
+    ]);
+    $authUserId = (string) $pro->auth_user_id;
+    $handle = (string) $pro->handle;
+    $originalEmail = (string) $pro->primary_email;
+
+    $service = new AccountDeletionService;
+    $result = $service->confirm($pro, $rawToken, Request::create('/', 'POST'));
+
+    expect($result['success'])->toBeTrue();
+
+    $pro->refresh();
+
+    // PII redacted to non-identifiable placeholders.
+    expect($pro->phone)->toBe('redacted');
+    expect($pro->first_name)->toBe('Deleted');
+    expect($pro->last_name)->toBeNull();
+    expect($pro->location_street_address)->toBeNull();
+    expect($pro->location_postcode)->toBeNull();
+    expect($pro->location_city)->toBeNull();
+    expect($pro->location_state)->toBeNull();
+    expect($pro->location_country)->toBeNull();
+    // primary_email replaced with a deterministic placeholder so future Mail::to() calls
+    // would noisily fail rather than silently exfiltrate to a real address.
+    expect($pro->primary_email)
+        ->not->toBe($originalEmail)
+        ->toContain('@partna.au');
+
+    // Recovery-window invariants: handle + auth_user_id must survive so a user
+    // can cancel deletion within 30 days and resume their account.
+    expect($pro->handle)->toBe($handle);
+    expect((string) $pro->auth_user_id)->toBe($authUserId);
+
+    // Audit row preserves the original email so support can re-identify the user.
+    $audit = DB::connection('pgsql')->table('core.professional_deletion_audit')
+        ->where('professional_id', $pro->id)
+        ->where('event', 'confirmed')
+        ->first();
+    expect($audit->professional_email_snapshot)->toBe($originalEmail);
+});
+
+it('cancel after confirm restores primary_email from audit snapshot for the cancel mail', function () {
+    $rawToken = 'raw-token-'.Str::random(54);
+    $pro = seedRequestedProfessional($rawToken);
+    $originalEmail = (string) $pro->primary_email;
+
+    $service = new AccountDeletionService;
+    $service->confirm($pro, $rawToken, Request::create('/', 'POST'));
+
+    $pro->refresh();
+    expect($pro->primary_email)->not->toBe($originalEmail); // pseudonymised after confirm
+
+    $service->cancel($pro, Request::create('/', 'POST'));
+
+    $pro->refresh();
+    expect($pro->primary_email)->toBe($originalEmail); // restored from audit snapshot
+
+    // Cancel audit row carries the real email, not the placeholder.
+    $cancelAudit = DB::connection('pgsql')->table('core.professional_deletion_audit')
+        ->where('professional_id', $pro->id)
+        ->where('event', 'cancelled')
+        ->first();
+    expect($cancelAudit->professional_email_snapshot)->toBe($originalEmail);
+});
+
 it('writes confirmed audit event', function () {
     $rawToken = 'raw-token-'.Str::random(54);
     $pro = seedRequestedProfessional($rawToken);
