@@ -146,19 +146,25 @@ it('rejects missing jti with 401 auth_jti_missing', function () {
 });
 
 it('rejects jti replay with 401 auth_jti_replay on the second use of the same token', function () {
+    // Force one-time-use for this test. In production the default is 25 to
+    // allow Remix SSR loaders to share one JWT across multiple parallel calls.
+    config()->set('services.shopify.jti_max_uses', 1);
+
     $token = makeSessionToken();
 
     // First use: success.
     getJson('/__test/shopify-session', ['Authorization' => "Bearer {$token}"])
         ->assertOk();
 
-    // Replay within the 120s window: rejected.
+    // Replay within the 120s window: rejected (count=2 > max_uses=1).
     getJson('/__test/shopify-session', ['Authorization' => "Bearer {$token}"])
         ->assertStatus(401)
         ->assertExactJson(['message' => 'auth_jti_replay']);
 });
 
 it('returns 503 auth_cache_unavailable when the JTI cache backend throws', function () {
+    // The middleware calls Cache::add first (NX counter init); throwing here
+    // simulates a cache backend outage before the counter is written.
     Cache::shouldReceive('add')
         ->once()
         ->andThrow(new \RuntimeException('redis unreachable'));
