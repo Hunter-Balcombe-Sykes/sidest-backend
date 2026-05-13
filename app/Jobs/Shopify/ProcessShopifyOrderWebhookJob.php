@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Shopify;
 
+use App\Jobs\Stripe\ProcessCommissionPayoutsJob;
 use App\Models\Commerce\Order;
 use App\Models\Commerce\OrderEvent;
 use App\Models\Core\Professional\BrandPartnerLink;
@@ -218,6 +219,12 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             // Invalidate caches for both brand and affiliate so dashboards reflect this order.
             $analyticsCache->invalidateAnalytics($this->brandProfessionalId);
             $analyticsCache->invalidateAnalytics((string) $affiliate->id);
+
+            // Instant payout: when the brand has opted into hold_days=0 and all
+            // payout prerequisites are met, kick the payout sweep now instead of
+            // waiting up to an hour for the next scheduled cron. The sweep job
+            // uses lockForUpdate so a concurrent hourly run won't double-batch.
+            $this->dispatchInstantPayoutIfEligible($brandSettings, $affiliate);
         }
 
         // Capture the buyer as an affiliate contact — independent of commerce writes.
@@ -228,6 +235,48 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             'brand_professional_id' => $this->brandProfessionalId,
             'affiliate_id' => (string) $affiliate->id,
             'commission_cents' => $totalCommissionCents,
+        ]);
+    }
+
+    /**
+     * Dispatch the payout sweep immediately when a brand has opted into instant
+     * payouts AND all payout prerequisites are met. Without this, an Instant
+     * brand still waits up to 60 minutes for the next scheduled hourly sweep.
+     *
+     * Prerequisites checked here are the same set processEligiblePayouts uses:
+     *   - brand payout_hold_days = 0
+     *   - brand has stripe_customer_id AND stripe_payment_method_id
+     *   - affiliate has stripe_connect_status = 'active'
+     *
+     * The sweep job is idempotent (lockForUpdate when stamping payout_id) so a
+     * dispatch here racing with the next scheduled run won't double-batch.
+     */
+    private function dispatchInstantPayoutIfEligible(
+        ?BrandStoreSettings $brandSettings,
+        Professional $affiliate,
+    ): void {
+        $holdDays = $brandSettings?->payout_hold_days;
+        if ($holdDays !== 0) {
+            return;
+        }
+
+        if ($affiliate->stripe_connect_status !== 'active') {
+            return;
+        }
+
+        $brand = Professional::query()
+            ->whereKey($this->brandProfessionalId)
+            ->first(['stripe_customer_id', 'stripe_payment_method_id']);
+
+        if (! $brand || ! $brand->stripe_customer_id || ! $brand->stripe_payment_method_id) {
+            return;
+        }
+
+        ProcessCommissionPayoutsJob::dispatch();
+
+        Log::info('ProcessShopifyOrderWebhookJob: dispatched instant payout sweep', [
+            'brand_professional_id' => $this->brandProfessionalId,
+            'affiliate_id' => (string) $affiliate->id,
         ]);
     }
 

@@ -88,7 +88,7 @@ class BrandOrdersController extends ApiController
 
         $payload = $this->mapRow($row);
         $payload['line_items'] = $this->extractLineItems($row);
-        $payload['expected_payout_at'] = $this->deriveExpectedPayoutAt($row);
+        $payload['expected_payout_at'] = $this->deriveExpectedPayoutAt($row, $brandProfessionalId);
 
         return $this->success($payload);
     }
@@ -247,16 +247,21 @@ class BrandOrdersController extends ApiController
 
     /**
      * Best-effort estimate of when the affiliate's commission for this order
-     * actually settles (the "grace period ends + payment sent" moment).
+     * actually settles.
      *
      *  - Paid out (payout_id set) → the linked payout's processed_at
      *    (fallback to created_at if processed_at hasn't been stamped yet).
-     *  - Reversed → null (no payout will ever happen).
-     *  - Pending → occurred_at + partna.store.grace_period_days. This is the
-     *    CommissionPayoutService eligibility cutoff: once the order ages past
-     *    the grace window, the next payout sweep picks it up.
+     *  - Fully refunded → null (no payout will ever happen).
+     *  - Pending → occurred_at + the brand's payout_hold_days. This matches the
+     *    CommissionPayoutService eligibility cutoff: orders become eligible for
+     *    the next payout sweep once they age past hold_days. With hold=0 (Instant)
+     *    this returns the order's own timestamp — "due now, awaiting next sweep".
+     *
+     * The previous version used partna.store.grace_period_days (60d) which is the
+     * void-deadline (when the payout is cancelled if the affiliate never connects
+     * Stripe), not when a payout actually pays out. Wrong semantic + wrong number.
      */
-    private function deriveExpectedPayoutAt(object $row): ?string
+    private function deriveExpectedPayoutAt(object $row, string $brandProfessionalId): ?string
     {
         if (! empty($row->payout_id)) {
             $payout = DB::table('commerce.commission_payouts')
@@ -281,11 +286,25 @@ class BrandOrdersController extends ApiController
             return null;
         }
 
-        $gracePeriodDays = (int) config('partna.store.grace_period_days', 60);
+        $holdDays = $this->resolveBrandHoldDays($brandProfessionalId);
 
         return \Carbon\Carbon::parse($row->occurred_at)
-            ->addDays($gracePeriodDays)
+            ->addDays($holdDays)
             ->toIso8601String();
+    }
+
+    /**
+     * Brand-level payout_hold_days, falling back to the system default when the
+     * brand hasn't set one yet. Allowed values per UpdateBrandStoreSettingsRequest
+     * are 0/7/14/28; max(0, ...) guards against any legacy negative values.
+     */
+    private function resolveBrandHoldDays(string $brandProfessionalId): int
+    {
+        $brandValue = DB::table('brand.brand_store_settings')
+            ->where('professional_id', $brandProfessionalId)
+            ->value('payout_hold_days');
+
+        return max(0, (int) ($brandValue ?? config('partna.store.payout_hold_days', 7)));
     }
 
     /**
