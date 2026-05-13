@@ -31,8 +31,6 @@ class CommissionPayoutService
 
     private int $systemHoldDays;
 
-    private int $minHoldDays;
-
     private int $gracePeriodDays;
 
     public function __construct(?StripeClient $stripe = null, ?NotificationPublisher $publisher = null, ?AnalyticsCacheService $analyticsCache = null)
@@ -45,7 +43,6 @@ class CommissionPayoutService
         $this->analyticsCache = $analyticsCache ?? app(AnalyticsCacheService::class);
         $this->platformFeePercent = config('partna.store.platform_fee_percent', 3);
         $this->systemHoldDays = max(0, (int) config('partna.store.payout_hold_days', 7));
-        $this->minHoldDays = (int) config('partna.store.min_payout_hold_days', 7);
         // Clamp to [1, 365] — values outside this range produce nonsensical void_at timestamps.
         // Falls back to the legacy 'grace_period_days' key for backward compat during the
         // config split rollout; new code should set payout_grace_period_days directly.
@@ -173,22 +170,13 @@ class CommissionPayoutService
 
     /**
      * Resolve the effective hold days for a brand.
-     * Uses brand override if set, otherwise system default. Always >= system minimum.
-     *
-     * Testing escape hatch: when partna.store.allow_instant_payout_for_testing is
-     * true AND the brand has explicitly chosen 0, the floor is bypassed so the
-     * payout sweep picks orders up immediately. The env flag is off in prod so
-     * this branch never fires there.
+     * Uses brand override if set, otherwise system default. Honours 0 (instant)
+     * as a valid choice — UpdateBrandStoreSettingsRequest constrains brand input
+     * to 0/7/14/28, so there's no need for a server-side floor.
      */
     private function resolveHoldDays(?int $brandPayoutHoldDays): int
     {
-        $days = $brandPayoutHoldDays ?? $this->systemHoldDays;
-
-        if ($days === 0 && config('partna.store.allow_instant_payout_for_testing', false)) {
-            return 0;
-        }
-
-        return max($this->minHoldDays, $days);
+        return max(0, $brandPayoutHoldDays ?? $this->systemHoldDays);
     }
 
     /**
