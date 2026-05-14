@@ -14,7 +14,7 @@ Cross-project rules (git workflow, cost discipline, pre-agent gate) live in `../
 | Env | Git branch | Backend URL | Supabase project ref |
 |-----|------------|-------------|----------------------|
 | **Production** | `production` | `https://api.partna.au` | `edplucmvkcnokyygxqsb` |
-| **Development** | `development` | `https://api-dev.partna.au` | `glncumufgaqcmqhzwrxm` |
+| **Development** | `development` | `https://dev-api.partna.au` | `glncumufgaqcmqhzwrxm` |
 
 Feature branches off `development`. PR → merge into `development` → promote to `production` to deploy prod.
 
