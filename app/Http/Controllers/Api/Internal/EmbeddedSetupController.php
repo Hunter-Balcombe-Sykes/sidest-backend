@@ -5,6 +5,13 @@ namespace App\Http\Controllers\Api\Internal;
 use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
+use App\Http\Requests\Api\Internal\Embedded\ProvisionDomainTxtRequest;
+use App\Http\Requests\Api\Internal\Embedded\ProvisionShopifyIntegrationRequest;
+use App\Http\Requests\Api\Internal\Embedded\SaveBusinessDetailsRequest;
+use App\Http\Requests\Api\Internal\Embedded\SaveDeploymentTokenRequest;
+use App\Http\Requests\Api\Internal\Embedded\SaveIdentityRequest;
+use App\Http\Requests\Api\Internal\Embedded\SetupDomainRequest;
+use App\Http\Requests\Api\Internal\Embedded\UpdateSettingRequest;
 use App\Jobs\Shopify\CreateShopifyCollectionsJob;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
@@ -130,14 +137,9 @@ class EmbeddedSetupController extends ApiController
     /**
      * Save step 1 brand identity fields to the Professional record.
      */
-    public function saveIdentity(Request $request): JsonResponse
+    public function saveIdentity(SaveIdentityRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'name' => ['sometimes', 'string', 'max:255'],
-            'contact_email' => ['sometimes', 'email', 'max:255'],
-            'contact_number' => ['sometimes', 'string', 'max:50'],
-            'website_url' => ['sometimes', 'nullable', 'url', 'max:512'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -172,15 +174,9 @@ class EmbeddedSetupController extends ApiController
     /**
      * Save step 2 business detail fields to the BrandProfile record.
      */
-    public function saveBusinessDetails(Request $request): JsonResponse
+    public function saveBusinessDetails(SaveBusinessDetailsRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'legal_business_name' => ['required', 'string', 'max:255'],
-            'abn' => ['required', 'string', 'max:14'],
-            'business_type' => ['required', 'string', 'max:100'],
-            'industries' => ['required', 'array'],
-            'industries.*' => ['string', 'max:100'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -208,12 +204,9 @@ class EmbeddedSetupController extends ApiController
      *
      * Accepted keys: default_commission_rate, theme_id, setup_complete
      */
-    public function updateSetting(Request $request): JsonResponse
+    public function updateSetting(UpdateSettingRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'key' => ['required', 'string', 'in:default_commission_rate,theme_id,setup_complete'],
-            'value' => ['required', 'string'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -249,12 +242,9 @@ class EmbeddedSetupController extends ApiController
      * Store the Oxygen deployment token and optionally the storefront ID.
      * The token is encrypted at-rest via the model's encrypted cast.
      */
-    public function saveDeploymentToken(Request $request): JsonResponse
+    public function saveDeploymentToken(SaveDeploymentTokenRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'token' => ['required', 'string', 'max:512'],
-            'storefront_id' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -538,14 +528,11 @@ class EmbeddedSetupController extends ApiController
      *
      * @return JsonResponse { data: { domain: string } }
      */
-    public function setupDomain(Request $request): JsonResponse
+    public function setupDomain(SetupDomainRequest $request): JsonResponse
     {
-        $request->validate([
-            'oxygen_storefront_id' => ['required', 'string'],
-            // Subdomain input is validated but we use the brand's canonical site subdomain — not
-            // this input — for security. The field is accepted to match client expectations.
-            'subdomain' => ['required', 'string', 'regex:/^[a-z0-9][a-z0-9-]{0,62}$/'],
-        ]);
+        // Subdomain input is validated for format but we use the brand's canonical
+        // site subdomain — never the request input — for the CNAME hostname (see below).
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -568,7 +555,7 @@ class EmbeddedSetupController extends ApiController
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],
             [
-                'oxygen_storefront_id' => (string) $request->input('oxygen_storefront_id'),
+                'oxygen_storefront_id' => (string) $data['oxygen_storefront_id'],
             ],
         );
 
@@ -590,11 +577,9 @@ class EmbeddedSetupController extends ApiController
      *
      * @return JsonResponse { data: { record_name: string } }
      */
-    public function provisionDomainTxt(Request $request): JsonResponse
+    public function provisionDomainTxt(ProvisionDomainTxtRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'txt_value' => ['required', 'string', 'max:255'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -637,13 +622,9 @@ class EmbeddedSetupController extends ApiController
      *
      * @return JsonResponse { data: { provisioned: bool } }
      */
-    public function provisionShopifyIntegration(Request $request): JsonResponse
+    public function provisionShopifyIntegration(ProvisionShopifyIntegrationRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'access_token' => ['required', 'string', 'max:512'],
-            'shop_id' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'scopes' => ['sometimes', 'nullable', 'string', 'max:4096'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
