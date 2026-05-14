@@ -10,7 +10,7 @@
 - **167 unique findings** across 6 phases after cross-phase deduplication (168 within-phase unique − 1 cross-phase dup)
 - **Tier totals:** 4 P0 · 40 P1 · 97 P2 · 26 P3
 - **41 foundational patterns** close ~128 findings; **41 standalone fixes** cover the residual ~39 (a few standalone entries bundle 2-3 closely related findings)
-- **10 patterns shipped on origin/development as of 2026-05-14:** M1 (`012285c`), M2 (merge `e5bddb3b` + follow-ups `af2a0928`/`07888024`), M3 (`7919465a`), M4 (`d4b03ee`), M5 (`260ec1d`), M6 (`a90e1e7`), M7 (`05a13f1`), M9 (`1a040b27`), M10 (`6b335f4c`+`ae03598c`, merge `1e64e187`), M12 (`bf620b22` + `782907cf`/`ffc449c4`). **All 4 P0s now closed** — DATA-C1#DATA-1 by M1, SEC-A#1/SEC-F#2 + SEC-A#2/SEC-C#1 by M2, SEC-B#3/SEC-F#1 by M3. See Recommended Landing Order ✅ markers + Status Snapshot.
+- **11 patterns shipped on origin/development as of 2026-05-14:** M1 (`012285c`), M2 (merge `e5bddb3b` + follow-ups `af2a0928`/`07888024`), M3 (`7919465a`), M4 (`d4b03ee`), M5 (`260ec1d`), M6 (`a90e1e7`), M7 (`05a13f1`), M8 (pre-existing; all 6 steps confirmed shipped 2026-05-14), M9 (`1a040b27`), M10 (`6b335f4c`+`ae03598c`, merge `1e64e187`), M12 (`bf620b22` + `782907cf`/`ffc449c4`). **All 4 P0s now closed** — DATA-C1#DATA-1 by M1, SEC-A#1/SEC-F#2 + SEC-A#2/SEC-C#1 by M2, SEC-B#3/SEC-F#1 by M3. See Recommended Landing Order ✅ markers + Status Snapshot.
 - **Estimated remaining effort:** ~8–10 weeks of focused work (sum of per-phase estimates; minor savings from cross-phase dedup/absorption)
 - **P0 callouts:**
     - **DATA-C1#DATA-1** (Phase 6) — `stripe_connect_status` CHECK rejects `'disconnected'`; every Stripe disconnect raises 23514 on `core/professionals.go` → infinite webhook retries on pilot day one
@@ -168,7 +168,7 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
    - **Why this slot:** P1 visitor-PII retention gap closes with two lines added to `PurgeSoftDeleted`.
    - **Can parallelize with:** structural patterns.
 
-8. **Master Pattern 8 — Professional soft-delete cascade coherence** (Phase 6 Pattern 4)
+8. ✅ **Master Pattern 8 — Professional soft-delete cascade coherence** (Phase 6 Pattern 4) — **Done 2026-05-14** (pre-existing; all 6 steps confirmed shipped)
    - **Tier:** P1 (1 P1 + 1 P2) · **Effort:** ~3h · **Closes:** 2 findings
    - **Why this slot:** P1 public-site-still-live-after-deletion is legal/optics risk; Step 1 alone is one line.
 
@@ -461,7 +461,7 @@ Three independent audits flagged `VerifyEmbeddedApiKey`'s tenant-from-header pat
 
 ---
 
-## Master Pattern 3 — `ShopDomain` value object + kill OAuth Path B
+## ✅ Master Pattern 3 — `ShopDomain` value object + kill OAuth Path B
 
 **Original ID:** Phase 1 Pattern B
 **Closes:** SEC-B#3 (≡ SEC-F#1), SEC-C#3, SEC-C#5, SEC-F#3, SEC-F#5
@@ -838,12 +838,12 @@ P1 visitor-PII retention gap is the headline. The other two are P2/P3 quality-of
 
 ---
 
-## Master Pattern 8 — Professional soft-delete cascade coherence
+## ✅ Master Pattern 8 — Professional soft-delete cascade coherence
 
 **Original ID:** Phase 6 Pattern 4
 **Closes:** DATA-B#DATA-1, DATA-B#DATA-2
 **Tier:** P1 (1 P1 · 1 P2) · **Effort:** ~3h
-**Status:** Open
+**Status:** Done — 2026-05-14 (pre-existing; all 6 steps already shipped across `AccountDeletionService`, `SiteMedia::booted()`, `MediaVariant` docblock, `ProfessionalStaffResource`, `PublicSitePayload` view, and full test coverage in `ConfirmDeletionTest`, `CancelDeletionTest`, `SiteMediaForceDeleteTest`)
 **Depends on:** none
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -857,7 +857,7 @@ Two distinct soft-delete coherence gaps, both rooted in the same misalignment be
 
 ### What to do
 
-- [ ] **Step 1 — Unpublish the site on `pending_deletion` transition** (`app/Services/Professional/AccountDeletionService.php`).
+- [x] **Step 1 — Unpublish the site on `pending_deletion` transition** (`app/Services/Professional/AccountDeletionService.php`).
     - At the point in the state machine where `deletion_confirmed_at` is set (or `pending_deletion` is entered, whichever is the canonical lifecycle hook), explicitly write:
         ```php
         if ($professional->site) {
@@ -868,16 +868,16 @@ Two distinct soft-delete coherence gaps, both rooted in the same misalignment be
         }
         ```
     - This is the load-bearing fix — it removes public reachability immediately rather than waiting for soft-delete → hard-delete (30+ days later).
-- [ ] **Step 2 — Audit public-facing routes.** `rg "subdomain" app/Http/Controllers/Api/PublicSite/` — every controller that resolves a site by subdomain must either:
+- [x] **Step 2 — Audit public-facing routes.** `rg "subdomain" app/Http/Controllers/Api/PublicSite/` — every controller that resolves a site by subdomain must either:
     - Join `core.professionals` and filter `deleted_at IS NULL`, OR
     - Filter `Site::where('is_published', true)` (which Step 1 covers).
     Confirm both layers are present. The public-site payload view (`site.public_site_payload`) should also be audited — it likely already filters `is_published = true` but the join to `professionals.deleted_at` may be implicit-only.
-- [ ] **Step 3 — Staff-side warning banner for soft-deleted parents.** In every staff controller that loads child models for a professional (`StaffProfessionalController`, `StaffSubscriptionManagementController`, etc.), surface a flag in the response:
+- [x] **Step 3 — Staff-side warning banner for soft-deleted parents.** In every staff controller that loads child models for a professional (`StaffProfessionalController`, `StaffSubscriptionManagementController`, etc.), surface a flag in the response:
     ```php
     'parent_status' => $professional->trashed() ? 'soft_deleted' : 'active',
     ```
     Frontend renders a banner. Low priority but closes the "staff sees stale data with no signal" gap.
-- [ ] **Step 4 — Force-deleted observer on `SiteMedia`** (`app/Models/Core/Site/SiteMedia.php` or new `app/Observers/SiteMediaObserver.php`).
+- [x] **Step 4 — Force-deleted observer on `SiteMedia`** (`app/Models/Core/Site/SiteMedia.php` or new `app/Observers/SiteMediaObserver.php`).
     ```php
     protected static function booted(): void
     {
@@ -896,9 +896,9 @@ Two distinct soft-delete coherence gaps, both rooted in the same misalignment be
     }
     ```
     Use `forceDeleting` (before-event), not `forceDeleted` — variant rows are gone after the cascade. Pre-collect paths from the relation, then the cascade runs, then clean up storage.
-- [ ] **Step 5 — Document the contract on `MediaVariant`.**
+- [x] **Step 5 — Document the contract on `MediaVariant`.**
     Add a docblock to `app/Models/Core/MediaVariant.php` noting: "Wholly owned by parent `SiteMedia`. Lifecycle: parent's `forceDeleting` observer collects variant paths and deletes storage; DB CASCADE removes variant rows. Do not call `MediaVariant::delete()` directly."
-- [ ] **Step 6 — Test coverage.**
+- [x] **Step 6 — Test coverage.**
     - `tests/Feature/Professional/AccountDeletionTest.php` — assert that soft-deleting a `Professional` flips `Site::is_published` to false and sets `unpublished_at`. Assert public-site endpoint returns 404 for the subdomain after soft-delete (not 200 with cached data).
     - `tests/Feature/Site/SiteMediaForceDeleteTest.php` — use `Storage::fake()`. Create a `SiteMedia` with two `MediaVariant` rows pointing at faked storage paths. Call `forceDelete()`. Assert all variant files are removed from storage, and DB rows are gone.
 
@@ -3251,7 +3251,7 @@ Each source plan has a tail-end appendix listing problems discovered while draft
 - **Post-baseline delta (same-day, after PR #26–#30):** +4 new findings (#POST-1 P2, #POST-2 P2, #POST-3 P3, #POST-4 P3 watch) → **171 unique findings**
 - **Total master patterns:** 41 (1 absorption: Phase 2 Pattern C merged into Master Pattern 19)
 - **Total standalone fixes:** 41 original + 4 post-baseline (#POST-1 through #POST-4) = **45**
-- **Status:** 40 Open · 1 Partial · 0 fully Shipped
+- **Status:** 39 Open · 1 Partial · 0 fully Shipped (M8 confirmed pre-existing → moved to Done)
   - Master Pattern 11 is the only Partial: PR #27 + PR #28 closed both P1 silent-data halves; remaining work (caching wrap on `EmbeddedSetupController::overview()`) drops to P2.
   - PR #12–#25 introduced 3 partials, 2 regressions, 1 symptom-now-visible across other master patterns/standalones — all annotated inline.
   - PR #26–#30 closed 1 full P1 finding (SCALE-B#CACHE-4) and partially closed 1 P1 finding (SCALE-B#CACHE-3 data half).
