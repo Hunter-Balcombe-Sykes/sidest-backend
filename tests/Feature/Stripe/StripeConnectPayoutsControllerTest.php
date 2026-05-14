@@ -5,6 +5,7 @@ use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Stripe\StripeBalanceService;
 use App\Services\Stripe\StripeConnectService;
 use App\Services\Stripe\StripeTransactionFetcher;
 use Illuminate\Support\Facades\DB;
@@ -91,11 +92,13 @@ function makePayoutsController(CommissionPayoutService $payoutService): StripeCo
 {
     $connectStub = Mockery::mock(StripeConnectService::class);
     $fetcherStub = Mockery::mock(StripeTransactionFetcher::class);
+    $balanceStub = Mockery::mock(StripeBalanceService::class);
 
     return new StripeConnectController(
         $connectStub,
         $payoutService,
         $fetcherStub,
+        $balanceStub,
         app(CacheLockService::class),
     );
 }

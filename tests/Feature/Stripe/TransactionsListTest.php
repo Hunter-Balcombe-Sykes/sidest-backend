@@ -5,6 +5,7 @@ use App\Http\Requests\Api\Professional\Stripe\TransactionsRequest;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Stripe\StripeBalanceService;
 use App\Services\Stripe\StripeConnectService;
 use App\Services\Stripe\StripeTransactionFetcher;
 use Illuminate\Support\Facades\DB;
@@ -112,6 +113,7 @@ function txns_makeController(StripeClient $stripeMock): StripeConnectController
         Mockery::mock(StripeConnectService::class),
         Mockery::mock(CommissionPayoutService::class),
         new StripeTransactionFetcher($stripeMock),
+        Mockery::mock(StripeBalanceService::class),
         app(CacheLockService::class),
     );
 }
