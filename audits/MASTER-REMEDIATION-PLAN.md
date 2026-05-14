@@ -222,7 +222,7 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
     - **Tier:** P2 · **Effort:** ~0.5 day · **Closes:** 2 findings
     - **Why this slot:** institutional fix; must land before Masters 23/24/25 (Phase 6 DDL sweeps).
 
-21. **Master Pattern 21 — Email-send idempotency sentinel** (Phase 2 Pattern E)
+21. ~~**Master Pattern 21 — Email-send idempotency sentinel** (Phase 2 Pattern E)~~ ✓ Complete
     - **Tier:** P2 · **Effort:** ~2 days · **Closes:** 3 findings
     - **Why this slot:** migration + 3 job updates; lower-risk than Master 22's race-safety work.
 
@@ -1622,7 +1622,7 @@ Lowest-severity pattern (P2 only, no current customer impact at near-zero table 
 **Original ID:** Phase 2 Pattern E
 **Closes:** LIFE-E#4, LIFE-E#5, LIFE-E#6
 **Tier:** P2 (3 P2) · **Effort:** ~2 days
-**Status:** Open
+**Status:** Complete — merged to `development` 2026-05-14, pushed to Supabase dev
 **Depends on:** none
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -1636,7 +1636,7 @@ The mail-transport-accepts-then-process-crashes scenario is the canonical retry 
 
 A shared rule: **every email-send job must read a sentinel before sending and write the sentinel after sending; the sentinel lives on the source row that triggered the job.**
 
-- [ ] **Step 1 — Migration: add `email_sent_at` to three tables.** Single Supabase migration `<timestamp>_email_send_sentinels.sql`:
+- [x] **Step 1 — Migration: add `email_sent_at` to three tables.** Single Supabase migration `<timestamp>_email_send_sentinels.sql`:
     ```sql
     ALTER TABLE notifications.notifications     ADD COLUMN email_sent_at timestamptz;
     ALTER TABLE site.enquiries                  ADD COLUMN email_sent_at timestamptz;
@@ -1649,7 +1649,7 @@ A shared rule: **every email-send job must read a sentinel before sending and wr
     ```
     Three tables because the three jobs trigger off three different source-row types. `broadcast_email_receipts` is a separate table because the EmailSubscription rows are recipients, not notifications — they can't carry per-notification state.
 
-- [ ] **Step 2 — `SendTransactionalNotificationEmailJob` (LIFE-E#6).** Inside `handle()`, before the `Mail::to()->send()` call:
+- [x] **Step 2 — `SendTransactionalNotificationEmailJob` (LIFE-E#6).** Inside `handle()`, before the `Mail::to()->send()` call:
     ```php
     $notification = DB::transaction(function () {
         $n = Notification::query()->lockForUpdate()->find($this->notificationId);
@@ -1668,7 +1668,7 @@ A shared rule: **every email-send job must read a sentinel before sending and wr
     ```
     The `lockForUpdate` window is short (one row read + flag check), but eliminates the worker-vs-worker race.
 
-- [ ] **Step 3 — `SendEnquiryNotificationJob` (LIFE-E#5).** Mirror Step 2 against `site.enquiries`:
+- [x] **Step 3 — `SendEnquiryNotificationJob` (LIFE-E#5).** Mirror Step 2 against `site.enquiries`:
     ```php
     $enquiry = Enquiry::query()->find($this->enquiryId);
     if (! $enquiry || $enquiry->email_sent_at !== null) {
@@ -1678,7 +1678,7 @@ A shared rule: **every email-send job must read a sentinel before sending and wr
     $enquiry->forceFill(['email_sent_at' => now()])->saveQuietly();
     ```
 
-- [ ] **Step 4 — `SendStaffBroadcastEmailToSubscriberJob` (LIFE-E#4).** Use `broadcast_email_receipts.insertOrIgnore`:
+- [x] **Step 4 — `SendStaffBroadcastEmailToSubscriberJob` (LIFE-E#4).** Use `broadcast_email_receipts.insertOrIgnore`:
     ```php
     $inserted = DB::table('notifications.broadcast_email_receipts')->insertOrIgnore([
         'notification_id' => $this->notificationId,
