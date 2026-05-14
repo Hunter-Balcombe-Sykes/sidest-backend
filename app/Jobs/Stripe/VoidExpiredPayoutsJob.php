@@ -88,14 +88,16 @@ class VoidExpiredPayoutsJob implements ShouldQueue
 
         foreach ([30, 7, 1] as $daysOut) {
             $tag = 'T-'.$daysOut;
-            $anchor = now()->subDays($gracePeriodDays - $daysOut);
-            $windowStart = $anchor->copy()->startOfDay();
-            $windowEnd = $anchor->copy()->endOfDay();
+            // We want to fire the warning $daysOut days BEFORE void_at — i.e.
+            // when void_at = now + $daysOut (within a 24h window for the cron's
+            // daily cadence).
+            $target = now()->addDays($daysOut);
+            $windowStart = $target->copy()->startOfDay();
+            $windowEnd = $target->copy()->endOfDay();
 
             $candidates = CommissionPayout::query()
-                ->whereIn('status', ['pending', 'pending_funds'])
-                ->whereNotNull('grace_started_at')
-                ->whereBetween('grace_started_at', [$windowStart, $windowEnd])
+                ->where('status', 'pending')
+                ->whereBetween('void_at', [$windowStart, $windowEnd])
                 ->where(function ($q) use ($brandSideCodes) {
                     // Either: brand-side blocker (notify brand regardless of affiliate state)
                     // Or: affiliate-side issue with affiliate not yet active

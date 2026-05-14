@@ -104,10 +104,7 @@ class CommissionVoidService
 
         $unfundedBrandIds = Professional::query()
             ->where('professional_type', 'brand')
-            ->where(function ($q) {
-                $q->whereNull('stripe_customer_id')
-                    ->orWhereNull('stripe_payment_method_id');
-            })
+            ->whereNull('stripe_payment_method_id')
             ->pluck('id')
             ->all();
 
@@ -209,11 +206,13 @@ class CommissionVoidService
      * Cancel commission payouts whose 60-day grace window has expired
      * without the affiliate connecting Stripe Connect.
      *
-     * Scans pending/pending_funds payouts past their void_at via the
-     * partial index commission_payouts_void_at_idx, then for each one
-     * checks the affiliate's Stripe status and cancels if not active.
-     * Linked orders are voided in the same transaction so the affiliate's
-     * dashboard shows a consistent "expired" state.
+     * Scans pending payouts past their void_at, checks the affiliate's Stripe status, and
+     * cancels if not active. Linked orders are voided in the same transaction so the
+     * affiliate's dashboard shows a consistent "expired" state.
+     *
+     * Under Option A the void path only applies to 'pending' (PI not yet created). Once a
+     * payout is 'processing' (PI accepted by Stripe), the void path is a no-op — the PI
+     * resolves via the payment_intent.* webhook and the result is whatever Stripe decides.
      *
      * Called from VoidExpiredPayoutsJob (nightly cron).
      *
@@ -223,8 +222,6 @@ class CommissionVoidService
     {
         $stats = ['cancelled_count' => 0, 'cancelled_cents' => 0, 'voided_entries' => 0];
 
-        // Pre-fetch inactive affiliate IDs so the main query uses set membership
-        // (hash join) instead of a correlated per-row EXISTS probe against professionals.
         $inactiveAffiliateIds = Professional::query()
             ->where('stripe_connect_status', '!=', 'active')
             ->pluck('id')
@@ -235,7 +232,7 @@ class CommissionVoidService
         }
 
         CommissionPayout::query()
-            ->whereIn('status', ['pending', 'pending_funds'])
+            ->where('status', 'pending')
             ->where('void_at', '<', now())
             ->whereIn('affiliate_professional_id', $inactiveAffiliateIds)
             ->with('brandProfessional:id,display_name')
@@ -256,9 +253,9 @@ class CommissionVoidService
     }
 
     /**
-     * Cancel a single expired payout and void its linked orders.
-     * Optimistic lock guards against an in-flight ExecuteCommissionPayoutJob
-     * advancing the status to 'collecting' between the SELECT and UPDATE.
+     * Cancel a single pending payout and void its linked orders.
+     * Optimistic lock guards against an in-flight ExecuteCommissionPayoutJob advancing
+     * the status to 'processing' between the SELECT and UPDATE.
      */
     private function cancelExpiredPayout(CommissionPayout $payout, array &$stats): void
     {
@@ -285,7 +282,7 @@ class CommissionVoidService
 
             $updated = CommissionPayout::query()
                 ->where('id', $payout->id)
-                ->whereIn('status', ['pending', 'pending_funds'])
+                ->where('status', 'pending')
                 ->update([
                     'status' => 'cancelled',
                     'failure_code' => 'grace_period_expired',
@@ -365,8 +362,11 @@ class CommissionVoidService
     {
         $sent = 0;
 
-        // Collect affiliates in both warning windows (day 20 and day 28) then
-        // batch-load their pending commission totals to avoid N+1 queries.
+        // TODO[stripe-v2]: stripe_grace_period_ends_at column dropped. Grace
+        // period warnings (day 20 and day 28) need v2 re-implementation in Phase 4.
+        // Short-circuited: always returns 0 until Phase 4 restores the grace period logic.
+        return 0;
+
         $warningWindows = [
             'day20' => [
                 'range' => [now()->addDays(10)->startOfDay(), now()->addDays(10)->endOfDay()],
@@ -384,9 +384,6 @@ class CommissionVoidService
             Professional::query()
                 ->whereIn('professional_type', ['influencer', 'professional'])
                 ->where('stripe_connect_status', '!=', 'active')
-                ->whereNotNull('stripe_grace_period_ends_at')
-                ->where('stripe_grace_period_ends_at', '>', now())
-                ->whereBetween('stripe_grace_period_ends_at', $window['range'])
                 ->chunkById(200, function ($affiliates) use (&$sent, $key, $window) {
                     // Batch-load pending amounts for the chunk to avoid N+1
                     $pendingAmounts = $this->getPendingCommissionCentsBatch(
@@ -430,12 +427,11 @@ class CommissionVoidService
         $windowStart = now()->subDays($voidWindowDays);
         $windowEnd = now()->subDays($voidWindowDays - 5);
 
+        // TODO[stripe-v2]: stripe_grace_period_ends_at column dropped. All
+        // non-active affiliates are now treated as past-grace (no grace period
+        // distinction available). Phase 4 will add capability-based checks.
         $inactiveAffiliateIds = Professional::query()
             ->where('stripe_connect_status', '!=', 'active')
-            ->where(function ($q) {
-                $q->whereNull('stripe_grace_period_ends_at')
-                    ->orWhere('stripe_grace_period_ends_at', '<=', now());
-            })
             ->pluck('id')
             ->all();
 
@@ -514,7 +510,7 @@ class CommissionVoidService
 
         foreach ($warningWindows as $key => $window) {
             CommissionPayout::query()
-                ->whereIn('status', ['pending', 'pending_funds'])
+                ->where('status', 'pending')
                 ->whereBetween('void_at', $window['range'])
                 ->whereIn('affiliate_professional_id', $inactiveAffiliateIds)
                 ->chunkById(200, function ($payouts) use (&$sent, $key, $window): void {
@@ -539,11 +535,14 @@ class CommissionVoidService
 
     /**
      * Check if an affiliate is within their grace period (Stripe not yet required).
+     *
+     * TODO[stripe-v2]: stripe_grace_period_ends_at column dropped. Grace period
+     * distinction is no longer available; affiliates are assumed post-grace.
+     * Phase 4 will add capability-based grace period checks.
      */
     public function isInGracePeriod(Professional $affiliate): bool
     {
-        return $affiliate->stripe_grace_period_ends_at !== null
-            && $affiliate->stripe_grace_period_ends_at->isFuture();
+        return false;
     }
 
     /**

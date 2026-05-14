@@ -4,20 +4,25 @@ use App\Jobs\Stripe\ExecuteCommissionPayoutJob;
 use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
-use App\Services\Notifications\NotificationPublisher;
+use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Stripe\Exception\ApiConnectionException;
+use Stripe\Exception\ApiErrorException;
 use Stripe\Exception\InvalidRequestException;
+use Stripe\Exception\RateLimitException;
 use Stripe\StripeClient;
 
-// Tests for CommissionPayoutService::processPayoutBatch and retryPayout, plus
-// ExecuteCommissionPayoutJob::failed(). These cover the three gaps fixed in V2:
-//   Gap 1 — idempotent resume (no wallet double-debit, skip completed steps)
-//   Gap 2 — auto-refund on transfer failure
-//   Gap 3 — job-level observability (failed() hook transitions payout status)
+// V2: Process a single commission payout via destination charge.
+//   One platform-scope PaymentIntent with customer_account, on_behalf_of,
+//   transfer_data.destination, application_fee_amount. No transfers->create.
+//
+//   processPayoutBatch returns: true=completed, null=in-flight, false=failed.
+//
+//   State machine: pending → processing → completed|failed|cancelled.
+//   No collecting/transferring/pending_funds states.
 
 afterEach(function () {
     \Illuminate\Support\Carbon::setTestNow(null);
@@ -28,17 +33,16 @@ beforeEach(function () {
     Bus::fake();
     setupProfessionalsTable();
     setupCommerceOrdersTables();
+    setupBrandStoreSettingsTable();
 
     $conn = DB::connection('pgsql');
     foreach ([
         'stripe_connect_account_id TEXT',
         'stripe_connect_status TEXT DEFAULT \'not_connected\'',
-        'stripe_customer_id TEXT',
         'stripe_payment_method_id TEXT',
-        'stripe_connect_customer_id TEXT',
-        'stripe_connect_payment_method_id TEXT',
-        'stripe_manual_balance_cents INTEGER DEFAULT 0',
-        'stripe_manual_balance_currency TEXT',
+        'stripe_payment_method_brand TEXT',
+        'stripe_payment_method_last4 TEXT',
+        'payout_method TEXT',
     ] as $col) {
         try {
             $conn->statement("ALTER TABLE core.professionals ADD COLUMN {$col}");
@@ -50,8 +54,8 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
         affiliate_professional_id TEXT,
-        stripe_payment_intent_id TEXT,
-        stripe_transfer_id TEXT,
+        payment_intent_id TEXT,
+        charge_id TEXT,
         status TEXT NOT NULL DEFAULT \'pending\',
         gross_commission_cents INTEGER NOT NULL DEFAULT 0,
         platform_fee_cents INTEGER NOT NULL DEFAULT 0,
@@ -62,1229 +66,669 @@ beforeEach(function () {
         ledger_entry_count INTEGER NOT NULL DEFAULT 0,
         eligible_after TEXT,
         processed_at TEXT,
-        funding_source TEXT,
-        wallet_debit_cents INTEGER DEFAULT 0,
         charge_cents INTEGER DEFAULT 0,
         retry_count INTEGER NOT NULL DEFAULT 0,
         needs_manual_refund INTEGER NOT NULL DEFAULT 0,
         void_at TEXT,
         transfer_completed_at TEXT,
-        stripe_error_code TEXT,
-        stripe_error_message TEXT,
-        next_retry_at TEXT,
-        last_retry_at TEXT,
-        funding_failure_count INTEGER NOT NULL DEFAULT 0,
         failure_category TEXT,
         grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
-        grace_started_at TEXT,
         created_at TEXT,
         updated_at TEXT
     )');
 
-    // commission_payout_items links payouts to commerce.orders rows post-Phase-4.
-    // order_id is NOT NULL in production; left nullable here because SQLite test
-    // setup doesn't enforce the constraint and several tests insert minimal rows.
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
         id TEXT PRIMARY KEY,
+        payout_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL DEFAULT 0
+    )');
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_movements (
+        id TEXT PRIMARY KEY,
         payout_id TEXT,
-        order_id TEXT,
+        entry_type TEXT,
         amount_cents INTEGER,
-        created_at TEXT,
-        updated_at TEXT
+        created_at TEXT
     )');
 
-    // brand_store_settings is used by processEligiblePayouts for per-brand hold-day lookups.
-    $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_store_settings (
-        id TEXT PRIMARY KEY, professional_id TEXT, payout_hold_days INTEGER,
-        default_commission_rate REAL, created_at TEXT, updated_at TEXT
+    $conn->statement('CREATE TABLE IF NOT EXISTS commerce.brand_affiliate_rollup (
+        brand_professional_id TEXT,
+        affiliate_professional_id TEXT,
+        paid_cents INTEGER DEFAULT 0,
+        reversed_commission_cents INTEGER DEFAULT 0
     )');
-
 });
 
-// --- seed helpers (prefixed with "payoutSvc_" to avoid global name collisions) ---
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-/**
- * Inserts a commerce.orders row and returns its UUID.
- * Phase 3.5+: processEligiblePayouts reads from commerce.orders (not the legacy ledger).
- */
-function payoutSvc_seedOrder(
-    string $brandId,
-    string $affiliateId,
-    int $commissionCents = 1000,
-    string $currency = 'AUD',
-    ?\Illuminate\Support\Carbon $occurredAt = null,
-    string $status = 'approved',
-    int $refundCents = 0,
-    array $extraColumns = [],
-): string {
-    $orderId = (string) Str::uuid();
-    $ts = ($occurredAt ?? now())->toDateTimeString();
-    DB::connection('pgsql')->table('commerce.orders')->insert(array_merge([
-        'id' => $orderId,
-        'shopify_order_id' => 'shop_order_'.substr($orderId, 0, 8),
-        'shopify_shop_domain' => 'test.myshopify.com',
-        'shopify_updated_at' => $ts,
-        'brand_professional_id' => $brandId,
-        'affiliate_professional_id' => $affiliateId,
-        'status' => $status,
-        'gross_cents' => $commissionCents * 10,
-        'discount_cents' => 0,
-        'refund_cents' => $refundCents,
-        'net_cents' => $commissionCents * 10 - $refundCents,
-        'commission_cents' => $commissionCents,
-        'commission_rate' => 10.0,
-        'rate_source' => 'brand_default',
-        'currency_code' => $currency,
-        'line_items' => '[]',
-        'shopify_data' => '{}',
-        'occurred_at' => $ts,
-        'created_at' => now()->toDateTimeString(),
-        'updated_at' => now()->toDateTimeString(),
-    ], $extraColumns));
-
-    return $orderId;
-}
-
-function payoutSvc_seedBrand(string $id, array $overrides = []): void
+function v2_createBrand(?string $id = null): Professional
 {
-    $now = now()->toDateTimeString();
-    // Default to a brand that's fully set up for the new direct-charge flow.
-    // Tests that want to exercise the "not yet set up" path can override these.
-    DB::connection('pgsql')->table('core.professionals')->insert(array_merge([
+    $id ??= Str::uuid()->toString();
+
+    return tap(new Professional([
         'id' => $id,
-        'handle' => "brand-{$id}",
-        'handle_lc' => "brand-{$id}",
-        'display_name' => "Brand {$id}",
+        'country_code' => 'AU',
         'professional_type' => 'brand',
-        'status' => 'active',
-        'stripe_connect_account_id' => 'acct_brand_test_'.$id,
+        'stripe_connect_account_id' => 'acct_brand_'.$id,
         'stripe_connect_status' => 'active',
-        'stripe_connect_customer_id' => 'cus_on_brand_'.$id,
-        'stripe_connect_payment_method_id' => 'pm_on_brand_'.$id,
-        // Platform-scoped IDs kept for SaaS-billing tests that still reference them.
-        'stripe_customer_id' => 'cus_test',
-        'stripe_payment_method_id' => 'pm_test',
-        'stripe_manual_balance_cents' => 0,
-        'stripe_manual_balance_currency' => 'AUD',
-        'created_at' => $now,
-        'updated_at' => $now,
-    ], $overrides));
+        'stripe_payment_method_id' => 'pm_card_'.$id,
+        'stripe_payment_method_brand' => 'visa',
+        'stripe_payment_method_last4' => '4242',
+        'payout_method' => 'card',
+    ]), fn (Professional $p) => $p->save());
 }
 
-function payoutSvc_seedAffiliate(string $id, array $overrides = []): void
+function v2_createAffiliate(?string $id = null): Professional
 {
-    $now = now()->toDateTimeString();
-    DB::connection('pgsql')->table('core.professionals')->insert(array_merge([
+    $id ??= Str::uuid()->toString();
+
+    return tap(new Professional([
         'id' => $id,
-        'handle' => "affiliate-{$id}",
-        'handle_lc' => "affiliate-{$id}",
-        'display_name' => "Affiliate {$id}",
-        'professional_type' => 'influencer',
-        'status' => 'active',
-        'stripe_connect_account_id' => 'acct_test',
+        'country_code' => 'AU',
+        'professional_type' => 'affiliate',
+        'stripe_connect_account_id' => 'acct_aff_'.$id,
         'stripe_connect_status' => 'active',
-        'created_at' => now()->toDateTimeString(),
-        'updated_at' => now()->toDateTimeString(),
-    ], $overrides));
+        'stripe_payment_method_id' => null,
+    ]), fn (Professional $p) => $p->save());
 }
 
-function payoutSvc_seedPayout(string $id, array $overrides = []): CommissionPayout
+function v2_createOrder(Professional $brand, Professional $affiliate, array $overrides = []): Order
 {
-    $now = now()->toDateTimeString();
-    DB::connection('pgsql')->table('commerce.commission_payouts')->insert(array_merge([
-        'id' => $id,
-        'brand_professional_id' => 'brand-1',
-        'affiliate_professional_id' => 'aff-1',
-        'status' => 'pending',
-        'gross_commission_cents' => 10000,
-        'platform_fee_cents' => 300,
-        'net_payout_cents' => 9700,
-        'currency_code' => 'AUD',
-        'wallet_debit_cents' => 0,
-        'charge_cents' => 0,
-        'retry_count' => 0,
-        'created_at' => $now,
-        'updated_at' => $now,
-    ], $overrides));
-
-    return CommissionPayout::find($id);
-}
-
-/**
- * Insert a commerce.commission_payout_items row and stamp the order's payout_id,
- * mirroring what createPayoutBatch does atomically in production.
- */
-function payoutSvc_seedPayoutItem(string $payoutId, string $orderId, int $amountCents = 1000): void
-{
-    DB::connection('pgsql')->table('commerce.commission_payout_items')->insert([
-        'id' => (string) \Illuminate\Support\Str::uuid(),
-        'payout_id' => $payoutId,
-        'order_id' => $orderId,
-        'amount_cents' => $amountCents,
-        'created_at' => now()->toDateTimeString(),
-        'updated_at' => now()->toDateTimeString(),
-    ]);
-    DB::connection('pgsql')->table('commerce.orders')
-        ->where('id', $orderId)
-        ->update(['payout_id' => $payoutId]);
-}
-
-/**
- * Build a Mockery StripeClient mock wired with per-service sub-mocks.
- * StripeClient::__get delegates to getService(), so we mock getService() —
- * that is the actual method Mockery intercepts when $stripe->paymentIntents is accessed.
- */
-function payoutSvc_makeStripe(array $services = []): StripeClient
-{
-    $piMock = $services['pi'] ?? Mockery::mock();
-    $transferMock = $services['transfer'] ?? Mockery::mock();
-    $refundMock = $services['refund'] ?? Mockery::mock();
-
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->shouldReceive('getService')->with('paymentIntents')->andReturn($piMock);
-    $stripe->shouldReceive('getService')->with('transfers')->andReturn($transferMock);
-    $stripe->shouldReceive('getService')->with('refunds')->andReturn($refundMock);
-
-    return $stripe;
-}
-
-// ============================================================
-// Guard conditions
-// ============================================================
-
-it('returns true immediately when payout is already completed', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['status' => 'completed']);
-
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->shouldNotReceive('__get');
-
-    $service = new CommissionPayoutService($stripe);
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeTrue();
-});
-
-it('marks affiliate_not_connected when affiliate has no active Stripe account', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1', [
-        'stripe_connect_account_id' => null,
-        'stripe_connect_status' => 'not_connected',
-    ]);
-    $payout = payoutSvc_seedPayout('p1');
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeNull();
-    $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('pending_funds');
-    expect($fresh->failure_code)->toBe('affiliate_not_connected');
-});
-
-// #STRIPE-4 — grace_started_at must be stamped exactly once across multiple
-// markPendingFunding calls. void_at can keep resetting; the warning clock cannot.
-
-it('markPendingFunding stamps grace_started_at on first failure', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1', [
-        'stripe_connect_account_id' => null,
-        'stripe_connect_status' => 'not_connected',
-    ]);
-    $payout = payoutSvc_seedPayout('p1');
-
-    expect($payout->grace_started_at)->toBeNull();
-
-    (new CommissionPayoutService(Mockery::mock(StripeClient::class)))
-        ->processPayoutBatch($payout);
-
-    $fresh = $payout->fresh();
-    expect($fresh->grace_started_at)->not->toBeNull();
-    expect($fresh->grace_started_at->isCurrentMinute())->toBeTrue();
-});
-
-it('markPendingFunding does NOT reset grace_started_at on subsequent failures', function () {
-    // The whole point of #STRIPE-4: even though void_at gets bumped to now()+60d
-    // every retry, grace_started_at stays at the original first-failure timestamp.
-    // Without this, T-30/T-7/T-1 windows would slide forward forever.
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1', [
-        'stripe_connect_account_id' => null,
-        'stripe_connect_status' => 'not_connected',
-    ]);
-
-    $originalGraceStart = now()->subDays(40);
-    $payout = payoutSvc_seedPayout('p1', [
-        'status' => 'pending_funds',
-        'failure_code' => 'affiliate_not_connected',
-        'funding_failure_count' => 40,
-        'grace_started_at' => $originalGraceStart->toDateTimeString(),
-        'void_at' => now()->addDays(60)->toDateTimeString(),
-    ]);
-
-    (new CommissionPayoutService(Mockery::mock(StripeClient::class)))
-        ->processPayoutBatch($payout);
-
-    $fresh = $payout->fresh();
-    // grace_started_at must equal the original timestamp — within a second to account for parsing.
-    expect($fresh->grace_started_at->diffInSeconds($originalGraceStart))->toBeLessThan(2);
-    // void_at should have moved (proving the retry path actually ran).
-    expect($fresh->void_at->isAfter(now()->addDays(55)))->toBeTrue();
-});
-
-it('fails with brand_missing when brand professional does not exist', function () {
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['brand_professional_id' => 'nonexistent-brand']);
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeFalse();
-    $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('failed');
-    expect($fresh->failure_code)->toBe('brand_missing');
-});
-
-it('marks brand_payment_method_missing when brand has no card on file', function () {
-    // In the direct-charge model, "no card" means the brand-Connect-scoped PM
-    // column is unset. Platform-scoped columns (SaaS billing) are NOT consulted.
-    payoutSvc_seedBrand('brand-1', ['stripe_connect_payment_method_id' => null]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1');
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeNull();
-    $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('pending_funds');
-    expect($fresh->failure_code)->toBe('brand_payment_method_missing');
-});
-
-it('does NOT flag currency mismatch when wallet balance is zero regardless of currency', function () {
-    // Zero balance with wrong currency code should proceed to card charge, not halt.
-    payoutSvc_seedBrand('brand-1', [
-        'stripe_manual_balance_cents' => 0,
-        'stripe_manual_balance_currency' => 'EUR',
-    ]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['currency_code' => 'AUD', 'gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->once()->andReturn((object) [
-        'id' => 'pi_test',
-        'status' => 'succeeded',
-        'latest_charge' => 'ch_test',
-    ]);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
-
-    $publisher = Mockery::mock(NotificationPublisher::class);
-    $publisher->shouldNotReceive('publish');
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]), $publisher);
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeTrue();
-    expect($payout->fresh()->status)->toBe('completed');
-});
-
-// ============================================================
-// Happy paths
-// ============================================================
-
-it('completes a card-only payout when brand wallet balance is zero', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->once()->andReturn((object) [
-        'id' => 'pi_test',
-        'status' => 'succeeded',
-        'latest_charge' => 'ch_test',
-    ]);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $payout->refresh();
-    expect($result)->toBeTrue();
-    expect($payout->status)->toBe('completed');
-    expect($payout->stripe_transfer_id)->toBe('tr_test');
-    expect($payout->wallet_debit_cents)->toBe(0);
-    expect($payout->charge_cents)->toBe(10000);
-    expect($payout->funding_source)->toBe('card');
-});
-
-// ============================================================
-// Gap 1 — Idempotent resume (no double-charge)
-// ============================================================
-
-it('does not re-debit the wallet when resuming from collecting status', function () {
-    // Brand has zero wallet balance; a previous run already debited 5000 and committed
-    // the payout to 'collecting'. On resume the service must read wallet_debit_cents
-    // from the DB rather than calling debitBrandManualBalancePartial again.
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'status' => 'collecting',
-        'wallet_debit_cents' => 5000,
-        'charge_cents' => 5000,
-        'funding_source' => 'wallet_and_card',
-        'gross_commission_cents' => 10000,
-        'net_payout_cents' => 9700,
-    ]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->once()->andReturn((object) [
-        'id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test',
-    ]);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeTrue();
-    // Wallet stays at 0 — the resume path read wallet_debit_cents from the record
-    $brand = Professional::find('brand-1');
-    expect((int) $brand->stripe_manual_balance_cents)->toBe(0);
-});
-
-it('skips PaymentIntent creation and retrieves the existing one when resuming from collected status', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'status' => 'collected',
-        'stripe_payment_intent_id' => 'pi_existing',
-        'wallet_debit_cents' => 0,
-        'charge_cents' => 10000,
-        'gross_commission_cents' => 10000,
-        'net_payout_cents' => 9700,
-    ]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldNotReceive('create');
-    // Retrieve now passes (id, expand-options, stripe-account-options) — match all three.
-    $piMock->shouldReceive('retrieve')
-        ->withArgs(function ($id, $args, $opts) {
-            expect($id)->toBe('pi_existing');
-            expect($opts['stripe_account'])->toBe('acct_brand_test_brand-1');
-
-            return true;
-        })
-        ->once()
-        ->andReturn((object) [
-            'id' => 'pi_existing',
-            'status' => 'succeeded',
-            'latest_charge' => (object) [
-                'id' => 'ch_existing',
-                'balance_transaction' => (object) ['net' => 9700],
-            ],
-        ]);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')
-        ->once()
-        ->with(Mockery::on(fn ($p) => ($p['source_transaction'] ?? null) === 'ch_existing'), Mockery::any())
-        ->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeTrue();
-    expect($payout->fresh()->status)->toBe('completed');
-});
-
-it('skips wallet debit and card charge when resuming from transferring status', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'status' => 'transferring',
-        'wallet_debit_cents' => 0,
-        'charge_cents' => 10000,
-        'gross_commission_cents' => 10000,
-        'net_payout_cents' => 9700,
-    ]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldNotReceive('create');
-    $piMock->shouldNotReceive('retrieve');
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeTrue();
-    expect($payout->fresh()->stripe_transfer_id)->toBe('tr_test');
-});
-
-it('skips transfer creation and leaves payout at transferring when stripe_transfer_id was already recorded', function () {
-    // Simulates a crash between saving stripe_transfer_id and saving status=completed.
-    // On resume the service must not create a second transfer.
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'status' => 'transferring',
-        'stripe_transfer_id' => 'tr_already',
-        'wallet_debit_cents' => 0,
-        'charge_cents' => 10000,
-        'gross_commission_cents' => 10000,
-        'net_payout_cents' => 9700,
-    ]);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldNotReceive('create');
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $fresh = $payout->fresh();
-    expect($result)->toBeTrue();
-    // Guard path: stripe_transfer_id was already recorded, $newTransfer is null.
-    // We leave the payout at 'transferring' so the transfer.paid webhook completes it.
-    expect($fresh->status)->toBe('transferring');
-    expect($fresh->stripe_transfer_id)->toBe('tr_already');
-});
-
-// ============================================================
-// Gap 2 — Auto-refund on transfer failure
-// ============================================================
-
-it('auto-refunds the brand on the brand\'s Connect account when transfer fails', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->andReturn((object) [
-        'id' => 'pi_test', 'status' => 'succeeded',
-        'latest_charge' => (object) [
-            'id' => 'ch_test',
-            'balance_transaction' => (object) ['net' => 9300],
-        ],
-    ]);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->andThrow(
-        new InvalidRequestException('Transfer destination not found')
-    );
-
-    $refundMock = Mockery::mock();
-    // Refund must address the brand's Connect account via stripe_account.
-    $refundMock->shouldReceive('create')->once()
-        ->withArgs(function ($payload, $opts) {
-            expect($payload['payment_intent'])->toBe('pi_test');
-            expect($opts['idempotency_key'])->toBe('rf_p1_pi_test');
-            expect($opts['stripe_account'])->toBe('acct_brand_test_brand-1');
-
-            return true;
-        })
-        ->andReturn((object) ['id' => 're_test']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock, 'refund' => $refundMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $payout->refresh();
-    expect($result)->toBeFalse();
-    expect($payout->status)->toBe('failed');
-    expect($payout->failure_code)->toBe('transfer_failed_refunded');
-    // PI ID cleared so an admin retry generates a fresh idempotency key
-    expect($payout->stripe_payment_intent_id)->toBeNull();
-});
-
-it('marks transfer_failed_refund_needed when transfer fails and auto-refund also fails', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->andReturn((object) [
-        'id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test',
-    ]);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->andThrow(
-        new InvalidRequestException('Transfer failed')
-    );
-
-    $refundMock = Mockery::mock();
-    $refundMock->shouldReceive('create')->andThrow(new \RuntimeException('Refund API down'));
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock, 'refund' => $refundMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $payout->refresh();
-    expect($result)->toBeFalse();
-    expect($payout->status)->toBe('failed');
-    expect($payout->failure_code)->toBe('transfer_failed_refund_needed');
-    // PI ID is NOT cleared — manual refund still requires the reference
-    expect($payout->stripe_payment_intent_id)->toBe('pi_test');
-});
-
-// ============================================================
-// Transient error re-throws (Horizon retry contract)
-// ============================================================
-
-it('re-throws ApiConnectionException from paymentIntents create so Horizon retries', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1');
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->andThrow(new ApiConnectionException('Network error'));
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock]));
-
-    expect(fn () => $service->processPayoutBatch($payout))
-        ->toThrow(ApiConnectionException::class);
-
-    // Wallet debit + status update committed atomically before the exception
-    expect($payout->fresh()->status)->toBe('collecting');
-});
-
-it('re-throws ApiConnectionException from transfers create so Horizon retries without refunding', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1');
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->andReturn((object) [
-        'id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test',
-    ]);
-
-    $refundMock = Mockery::mock();
-    $refundMock->shouldNotReceive('create');
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->andThrow(new ApiConnectionException('Timeout'));
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock, 'refund' => $refundMock]));
-
-    expect(fn () => $service->processPayoutBatch($payout))
-        ->toThrow(ApiConnectionException::class);
-
-    // Payout status advances to 'transferring' before the exception so Horizon
-    // resumes from this step rather than re-charging on the next attempt.
-    expect($payout->fresh()->status)->toBe('transferring');
-});
-
-// ============================================================
-// retryPayout
-// ============================================================
-
-it('blocks retryPayout when failure_code is transfer_failed_refund_needed', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'status' => 'failed',
-        'failure_code' => 'transfer_failed_refund_needed',
-    ]);
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $result = $service->retryPayout($payout);
-
-    expect($result)->toBeFalse();
-    // Payout not touched
-    $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('failed');
-    expect($fresh->failure_code)->toBe('transfer_failed_refund_needed');
-});
-
-it('blocks retryPayout when payout status is neither failed nor pending', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['status' => 'completed']);
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $result = $service->retryPayout($payout);
-
-    expect($result)->toBeFalse();
-    expect($payout->fresh()->status)->toBe('completed');
-});
-
-it('increments retry_count on admin retry so a fresh PaymentIntent idempotency key is used', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'status' => 'failed',
-        'failure_code' => 'charge_failed',
-        'retry_count' => 2,
-    ]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->andReturn((object) [
-        'id' => 'pi_r3', 'status' => 'succeeded', 'latest_charge' => 'ch_r3',
-    ]);
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->andReturn((object) ['id' => 'tr_r3', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $service->retryPayout($payout);
-
-    expect($payout->fresh()->retry_count)->toBe(3);
-});
-
-// ============================================================
-// ExecuteCommissionPayoutJob::failed() hook
-// ============================================================
-
-it('transitions payout to failed when the job exhausts all Horizon retries', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['status' => 'collecting']);
-
-    $job = new ExecuteCommissionPayoutJob($payout->id);
-    $job->failed(new \RuntimeException('Stripe outage after 5 attempts'));
-
-    $payout->refresh();
-    expect($payout->status)->toBe('failed');
-    expect($payout->failure_code)->toBe('job_exhausted');
-    expect($payout->failure_reason)->toContain('Stripe outage after 5 attempts');
-});
-
-it('does not overwrite already-completed status in the failed hook', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['status' => 'completed']);
-
-    $job = new ExecuteCommissionPayoutJob($payout->id);
-    $job->failed(new \RuntimeException('Late error'));
-
-    expect($payout->fresh()->status)->toBe('completed');
-});
-
-it('does not overwrite already-failed status in the failed hook', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'status' => 'failed',
-        'failure_code' => 'transfer_failed_refund_needed',
-    ]);
-
-    $job = new ExecuteCommissionPayoutJob($payout->id);
-    $job->failed(new \RuntimeException('Second failure'));
-
-    $fresh = $payout->fresh();
-    expect($fresh->status)->toBe('failed');
-    // Original failure_code preserved
-    expect($fresh->failure_code)->toBe('transfer_failed_refund_needed');
-});
-
-// ============================================================
-// #V5-025 — UTC cutoff for payout hold window
-// ============================================================
-
-it('uses UTC for payout cutoff so an app-timezone offset does not shorten the hold window', function () {
-    $conn = DB::connection('pgsql');
-
-    $conn->table('brand.brand_store_settings')->insert([
-        'id' => 'bss-tz', 'professional_id' => 'brand-tz', 'payout_hold_days' => 7,
-        'created_at' => now()->toDateTimeString(), 'updated_at' => now()->toDateTimeString(),
-    ]);
-
-    // Carbon::now() converts testNow to date_default_timezone_get(), so we must set
-    // the PHP default TZ BEFORE setting the mock. With Auckland (UTC+12) as the default,
-    // now() returns '2026-05-02 12:00:00 +1200' and the two cutoff strings diverge:
-    //   now()->subDays(7)        → '2026-04-25 12:00:00' (Auckland local, no TZ in string)
-    //   now()->utc()->subDays(7) → '2026-04-25 00:00:00' (UTC)
-    date_default_timezone_set('Pacific/Auckland');
-    \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::parse('2026-05-02 00:00:00', 'UTC'));
-
-    payoutSvc_seedBrand('brand-tz');
-    payoutSvc_seedAffiliate('aff-tz');
-
-    // Order occurred 6 days + 18 hours ago (UTC) — still within the 7-day hold window.
-    // App-TZ cutoff '2026-04-25 12:00:00' incorrectly includes it (06:00 ≤ 12:00).
-    // UTC cutoff    '2026-04-25 00:00:00' correctly excludes it  (06:00 > 00:00).
-    $conn->table('commerce.orders')->insert([
-        'id' => (string) Str::uuid(),
-        'shopify_order_id' => 'shop_tz_1',
-        'shopify_shop_domain' => 'test.myshopify.com',
-        'brand_professional_id' => 'brand-tz',
-        'affiliate_professional_id' => 'aff-tz',
+    // Order has $guarded=['*']; use forceFill to bypass mass-assignment guard.
+    // shopify_shop_domain is part of the unique constraint with shopify_order_id, so it
+    // must be set — paired with the per-order Str::uuid() to keep tests independent.
+    return tap((new Order)->forceFill(array_merge([
+        'id' => Str::uuid()->toString(),
+        'brand_professional_id' => $brand->id,
+        'affiliate_professional_id' => $affiliate->id,
         'status' => 'approved',
-        'gross_cents' => 100000,
-        'discount_cents' => 0,
+        'gross_cents' => 10000,
+        'commission_cents' => 1000,
         'refund_cents' => 0,
-        'net_cents' => 100000,
-        'commission_cents' => 10000,
-        'commission_rate' => 10.0,
-        'rate_source' => 'brand_default',
         'currency_code' => 'AUD',
-        'line_items' => '[]',
-        'shopify_data' => '{}',
-        'shopify_updated_at' => '2026-04-25 06:00:00',
-        'occurred_at' => '2026-04-25 06:00:00',
-        'created_at' => '2026-04-25 06:00:00',
-        'updated_at' => '2026-04-25 06:00:00',
-    ]);
+        'payout_id' => null,
+        'shopify_order_id' => 'shop_'.Str::uuid()->toString(),
+        'shopify_shop_domain' => 'test-'.Str::random(8).'.myshopify.com',
+        'occurred_at' => now()->subDays(10),
+        'payout_eligible_at' => now()->subDay(),
+        'rate_source' => 'active',
+    ], $overrides)), fn (Order $o) => $o->save());
+}
 
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    expect($stats['batches_created'])->toBe(0);
-});
-
-// ============================================================
-// Phase 3.5 — processEligiblePayouts reads from commerce.orders
-// ============================================================
-
-it('creates a payout batch from eligible commerce.orders and stamps payout_id on those orders', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-
-    $orderId = payoutSvc_seedOrder(
-        brandId: 'brand-1',
-        affiliateId: 'aff-1',
-        commissionCents: 5000,
-        currency: 'AUD',
-        occurredAt: now()->subDays(10),
-    );
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    expect($stats['batches_created'])->toBe(1);
-    expect($stats['batches_dispatched'])->toBeGreaterThanOrEqual(1);
-
-    // Order should be stamped with the new payout_id.
-    $order = Order::find($orderId);
-    expect($order->payout_id)->not->toBeNull();
-
-    // Payout item should link to the order via order_id (the only link target post-Phase-4).
-    $item = DB::connection('pgsql')->table('commerce.commission_payout_items')
-        ->where('order_id', $orderId)
-        ->first();
-    expect($item)->not->toBeNull();
-    expect($item->amount_cents)->toBe(5000);
-});
-
-it('does not create a payout batch for orders still within the hold window', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-
-    // Order occurred 3 days ago — within the 7-day default hold window.
-    payoutSvc_seedOrder(
-        brandId: 'brand-1',
-        affiliateId: 'aff-1',
-        commissionCents: 5000,
-        occurredAt: now()->subDays(3),
-    );
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    expect($stats['batches_created'])->toBe(0);
-});
-
-it('does not include orders with non-approved status in payout sweep', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-
-    payoutSvc_seedOrder(
-        brandId: 'brand-1',
-        affiliateId: 'aff-1',
-        commissionCents: 5000,
-        occurredAt: now()->subDays(10),
-        status: 'pending', // not yet approved
-    );
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    expect($stats['batches_created'])->toBe(0);
-});
-
-it('does not include orders with non-zero refund_cents in payout sweep', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-
-    payoutSvc_seedOrder(
-        brandId: 'brand-1',
-        affiliateId: 'aff-1',
-        commissionCents: 5000,
-        occurredAt: now()->subDays(10),
-        refundCents: 1000, // partially refunded
-    );
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    expect($stats['batches_created'])->toBe(0);
-});
-
-it('does not re-dispatch a pending_funds payout stuck on wallet_currency_mismatch', function () {
-    // A wallet_currency_mismatch payout re-dispatched on every sweep would hit the
-    // same mismatch check, call markPendingFunding again (no-op), and flood Horizon.
-    // The sweep must skip it until an admin clears the failure_code via /retry.
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    payoutSvc_seedPayout('stuck-1', [
-        'status' => 'pending_funds',
-        'failure_code' => 'wallet_currency_mismatch',
-        'eligible_after' => now()->subDay()->toDateTimeString(),
-    ]);
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    // The mismatch payout must not be counted as requeued.
-    expect($stats['batches_requeued'])->toBe(0);
-    expect($stats['batches_dispatched'])->toBe(0);
-});
-
-// ============================================================
-// Phase 4 — voiding an expired payout VOIDS its linked orders
-// (commission forfeit; the orders cannot re-enter the payout pool)
-// ============================================================
-
-it('voiding an expired payout voids the linked orders and clears their payout_id stamp', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1', ['stripe_connect_status' => 'not_connected', 'stripe_connect_account_id' => null]);
-
-    // Seed an order, manually stamp a payout on it (simulates a prior createPayoutBatch).
-    $orderId = payoutSvc_seedOrder(
-        brandId: 'brand-1',
-        affiliateId: 'aff-1',
-        commissionCents: 5000,
-        occurredAt: now()->subDays(10),
-    );
-
-    // Create an expired payout referencing that order.
-    $payoutId = (string) Str::uuid();
-    DB::connection('pgsql')->table('commerce.commission_payouts')->insert([
-        'id' => $payoutId,
-        'brand_professional_id' => 'brand-1',
-        'affiliate_professional_id' => 'aff-1',
+function v2_createPayout(Professional $brand, Professional $affiliate, array $overrides = []): CommissionPayout
+{
+    // CommissionPayout has $guarded=['*']; use forceFill to bypass mass-assignment guard.
+    return tap((new CommissionPayout)->forceFill(array_merge([
+        'id' => Str::uuid()->toString(),
+        'brand_professional_id' => $brand->id,
+        'affiliate_professional_id' => $affiliate->id,
         'status' => 'pending',
-        'gross_commission_cents' => 5000,
-        'platform_fee_cents' => 150,
-        'net_payout_cents' => 4850,
+        'gross_commission_cents' => 1000,
+        'platform_fee_cents' => 30,
+        'net_payout_cents' => 970,
         'currency_code' => 'AUD',
         'ledger_entry_count' => 1,
-        'void_at' => now()->subDay()->toDateTimeString(),
-        'created_at' => now()->toDateTimeString(),
-        'updated_at' => now()->toDateTimeString(),
-    ]);
+        'eligible_after' => now()->subDay(),
+        'void_at' => now()->addDays(60),
+        'retry_count' => 0,
+    ], $overrides)), fn (CommissionPayout $p) => $p->save());
+}
 
-    // Link the order to the payout via a payout item.
-    DB::connection('pgsql')->table('commerce.commission_payout_items')->insert([
-        'id' => (string) Str::uuid(),
-        'payout_id' => $payoutId,
-        'order_id' => $orderId,
-        'amount_cents' => 5000,
-        'created_at' => now()->toDateTimeString(),
-    ]);
+function v2_mockStripeClient(): StripeClient
+{
+    $mock = Mockery::mock(StripeClient::class)->makePartial();
+    $mock->paymentIntents = Mockery::mock();
+    $mock->refunds = Mockery::mock();
 
-    // Stamp the order's payout_id.
-    DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->update(['payout_id' => $payoutId]);
+    return $mock;
+}
 
-    // Confirm stamp before void.
-    $before = DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
-    expect($before->payout_id)->toBe($payoutId);
+// ─── processPayoutBatch — guard conditions ─────────────────────────────────
 
-    // Run the expired-payout void sweep.
-    $publisher = Mockery::mock(\App\Services\Notifications\NotificationPublisher::class);
-    $publisher->shouldReceive('publish')->andReturnNull();
-    $voidService = new \App\Services\Stripe\CommissionVoidService($publisher);
-    $voidService->processExpiredPayouts();
+it('skips completed payouts (idempotent)', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['status' => 'completed', 'processed_at' => now()]);
 
-    // Payout should be cancelled.
-    $payout = CommissionPayout::find($payoutId);
-    expect($payout->status)->toBe('cancelled');
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldNotReceive('create');
 
-    // Order is voided (commission forfeit) AND payout_id is cleared.
-    $after = DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
-    expect($after->payout_id)->toBeNull();
-    expect($after->status)->toBe('voided');
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeTrue();
 });
 
-it('after a voided payout, the linked orders are NOT picked up again — commission is forfeit', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1', ['stripe_connect_status' => 'not_connected', 'stripe_connect_account_id' => null]);
+it('does NOT create a second PI when a processing payout is re-dispatched (BECS T+2 safety)', function () {
+    // The daily sweep re-queues processing payouts so a missed webhook eventually
+    // reconciles. Stripe's idempotency-key cache is only 24h, so calling PI.create
+    // a second time with the same key after 24h creates a duplicate PI — a duplicate
+    // charge against the brand. The service must short-circuit when payment_intent_id
+    // is already set and status is processing.
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, [
+        'status' => 'processing',
+        'payment_intent_id' => 'pi_already_in_flight',
+    ]);
 
-    $orderId = payoutSvc_seedOrder(
-        brandId: 'brand-1',
-        affiliateId: 'aff-1',
-        commissionCents: 3000,
-        occurredAt: now()->subDays(10),
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldNotReceive('create');
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    // null = parked at processing, awaiting the webhook to drive it terminal.
+    expect($result)->toBeNull();
+    expect($payout->fresh()->payment_intent_id)->toBe('pi_already_in_flight');
+});
+
+it('DOES create a PI when a processing payout has no payment_intent_id yet (mid-flight crash recovery)', function () {
+    // Edge: payout was marked processing but the PI create didn't persist (e.g. a crash
+    // between status='processing' write and the PI ID write). On retry we should proceed
+    // with the create; Stripe's idempotency key keeps it safe within the 24h window.
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, [
+        'status' => 'processing',
+        'payment_intent_id' => null,
+    ]);
+
+    $piMock = (object) ['id' => 'pi_recovered', 'status' => 'succeeded', 'latest_charge' => 'ch_recovered'];
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')->once()->andReturn($piMock);
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeTrue();
+    expect($payout->fresh()->payment_intent_id)->toBe('pi_recovered');
+});
+
+it('fails when brand professional is missing', function () {
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout(
+        tap(new Professional(['id' => Str::uuid()->toString(), 'professional_type' => 'brand']), fn ($p) => $p->save()),
+        $aff,
+        ['brand_professional_id' => 'nonexistent-id'],
     );
 
-    // Simulate the payout + stamp state.
-    $payoutId = (string) Str::uuid();
-    DB::connection('pgsql')->table('commerce.commission_payouts')->insert([
-        'id' => $payoutId,
-        'brand_professional_id' => 'brand-1',
-        'affiliate_professional_id' => 'aff-1',
-        'status' => 'pending',
-        'gross_commission_cents' => 3000,
-        'platform_fee_cents' => 90,
-        'net_payout_cents' => 2910,
-        'currency_code' => 'AUD',
-        'ledger_entry_count' => 1,
-        'void_at' => now()->subDay()->toDateTimeString(),
-        'created_at' => now()->toDateTimeString(),
-        'updated_at' => now()->toDateTimeString(),
-    ]);
-    DB::connection('pgsql')->table('commerce.commission_payout_items')->insert([
-        'id' => (string) Str::uuid(),
-        'payout_id' => $payoutId,
-        'order_id' => $orderId,
-        'amount_cents' => 3000,
-        'created_at' => now()->toDateTimeString(),
-    ]);
-    DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->update([
-        'payout_id' => $payoutId,
-    ]);
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldNotReceive('create');
 
-    // Void the expired payout while the affiliate is still not_connected — that's what
-    // processExpiredPayouts looks for. Phase 4+: orders are voided AND payout_id cleared.
-    $publisher = Mockery::mock(\App\Services\Notifications\NotificationPublisher::class);
-    $publisher->shouldReceive('publish')->andReturnNull();
-    $voidService = new \App\Services\Stripe\CommissionVoidService($publisher);
-    $voidService->processExpiredPayouts();
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
 
-    $afterVoid = DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
-    expect($afterVoid->payout_id)->toBeNull();
-    expect($afterVoid->status)->toBe('voided');
-
-    // Even if the affiliate connects Stripe AFTER the void, the order does not
-    // re-enter the pool — commission is forfeit (intentional in the new model).
-    DB::connection('pgsql')->table('core.professionals')->where('id', 'aff-1')->update([
-        'stripe_connect_status' => 'active',
-        'stripe_connect_account_id' => 'acct_retest',
-    ]);
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    expect($stats['batches_created'])->toBe(0);
+    expect($result)->toBeFalse();
+    expect($payout->fresh()->status)->toBe('failed');
+    expect($payout->fresh()->failure_code)->toBe('brand_missing');
 });
 
-// ============================================================
-// #PAY-3 — post-creation refund window guard (revalidatePayoutOrders)
-// ============================================================
+it('fails when affiliate connect account is not active', function () {
+    $brand = v2_createBrand();
+    $aff = tap(new Professional([
+        'id' => Str::uuid()->toString(),
+        'country_code' => 'AU',
+        'professional_type' => 'affiliate',
+        'stripe_connect_account_id' => null,
+        'stripe_connect_status' => 'not_connected',
+    ]), fn (Professional $p) => $p->save());
+    $payout = v2_createPayout($brand, $aff);
 
-it('cancels the payout and releases orders when all linked orders are refunded before processing', function () {
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'gross_commission_cents' => 10000,
-        'platform_fee_cents' => 300,
-        'net_payout_cents' => 9700,
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldNotReceive('create');
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeFalse();
+    expect($payout->fresh()->failure_code)->toBe('affiliate_not_connected');
+});
+
+it('fails when brand is not ready — missing connect account, not active, or no payment method', function (
+    ?string $accountId,
+    string $status,
+    ?string $pmId,
+    string $expectedCode,
+) {
+    $brand = tap(new Professional([
+        'id' => Str::uuid()->toString(),
+        'country_code' => 'AU',
+        'professional_type' => 'brand',
+        'stripe_connect_account_id' => $accountId,
+        'stripe_connect_status' => $status,
+        'stripe_payment_method_id' => $pmId,
+    ]), fn (Professional $p) => $p->save());
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldNotReceive('create');
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeFalse();
+    expect($payout->fresh()->failure_code)->toBe($expectedCode);
+})->with([
+    'no connect account' => [null, 'active', 'pm_123', 'brand_not_ready'],
+    'not active status' => ['acct_123', 'onboarding', 'pm_123', 'brand_not_ready'],
+    'no payment method' => ['acct_123', 'active', null, 'brand_not_ready'],
+]);
+
+it('fails when net payout is zero', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['net_payout_cents' => 0]);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldNotReceive('create');
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeFalse();
+    expect($payout->fresh()->failure_code)->toBe('net_payout_zero');
+});
+
+// ─── processPayoutBatch — happy path (synchronous success) ─────────────────
+
+it('creates a platform-scope PaymentIntent and marks completed on synchronous success', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff);
+    v2_createOrder($brand, $aff, ['payout_id' => $payout->id]);
+
+    $pi = (object) [
+        'id' => 'pi_test_123',
+        'status' => 'succeeded',
+        'latest_charge' => 'ch_test_456',
+    ];
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')
+        ->once()
+        ->with(\Mockery::on(function (array $params) use ($brand, $aff, $payout) {
+            return $params['customer_account'] === $brand->stripe_connect_account_id
+                && $params['on_behalf_of'] === $brand->stripe_connect_account_id
+                && $params['transfer_data']['destination'] === $aff->stripe_connect_account_id
+                && $params['application_fee_amount'] === $payout->platform_fee_cents
+                && $params['confirm'] === true
+                && $params['off_session'] === true
+                && $params['metadata']['sidest_payout_id'] === $payout->id;
+        }), \Mockery::any())
+        ->andReturn($pi);
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeTrue();
+    expect($payout->fresh()->status)->toBe('completed');
+    expect($payout->fresh()->payment_intent_id)->toBe('pi_test_123');
+    expect($payout->fresh()->charge_id)->toBe('ch_test_456');
+    expect($payout->fresh()->processed_at)->not->toBeNull();
+});
+
+it('stores payment_intent_id and charge_id on the payout after PI create', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['gross_commission_cents' => 2000, 'platform_fee_cents' => 60, 'net_payout_cents' => 1940]);
+
+    $pi = (object) [
+        'id' => 'pi_sync_ok',
+        'status' => 'succeeded',
+        'latest_charge' => 'ch_sync_ok',
+    ];
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')->once()->andReturn($pi);
+
+    $svc = new CommissionPayoutService($stripe);
+    $svc->processPayoutBatch($payout);
+
+    $fresh = $payout->fresh();
+    expect($fresh->payment_intent_id)->toBe('pi_sync_ok');
+    expect($fresh->charge_id)->toBe('ch_sync_ok');
+});
+
+// ─── processPayoutBatch — BECS / processing path (returns null) ─────────────
+
+it('returns null when PI status is processing (BECS T+2 path)', function () {
+    $brand = v2_createBrand();
+    $brand->forceFill(['payout_method' => 'becs'])->save();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff);
+
+    $pi = (object) [
+        'id' => 'pi_becs_123',
+        'status' => 'processing',
+        'latest_charge' => null,
+    ];
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')->once()->andReturn($pi);
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeNull();
+    expect($payout->fresh()->status)->toBe('processing');
+    expect($payout->fresh()->payment_intent_id)->toBe('pi_becs_123');
+});
+
+// ─── processPayoutBatch — requires_action → failure ─────────────────────────
+
+it('fails when PI requires_action (off_session 3DS impossible)', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff);
+
+    $pi = (object) [
+        'id' => 'pi_3ds',
+        'status' => 'requires_action',
+    ];
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')->once()->andReturn($pi);
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeFalse();
+    expect($payout->fresh()->status)->toBe('failed');
+    expect($payout->fresh()->failure_code)->toBe('charge_requires_action');
+});
+
+// ─── processPayoutBatch — transient errors re-thrown for Horizon retry ──────
+
+it('re-throws ApiConnectionException so Horizon retries', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')->once()
+        ->andThrow(new ApiConnectionException('Connection timeout'));
+
+    $svc = new CommissionPayoutService($stripe);
+
+    expect(fn () => $svc->processPayoutBatch($payout))
+        ->toThrow(ApiConnectionException::class);
+    // Status stays at 'processing' so the job retries with the same idempotency key.
+    expect($payout->fresh()->status)->toBe('processing');
+});
+
+it('re-throws RateLimitException so Horizon retries', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')->once()
+        ->andThrow(new RateLimitException('Rate limit hit'));
+
+    $svc = new CommissionPayoutService($stripe);
+
+    expect(fn () => $svc->processPayoutBatch($payout))
+        ->toThrow(RateLimitException::class);
+});
+
+// ─── processPayoutBatch — other ApiErrorException → hard failure ────────────
+
+it('fails the payout on non-transient ApiErrorException', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')->once()
+        ->andThrow(new InvalidRequestException('Invalid request', 400));
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeFalse();
+    expect($payout->fresh()->status)->toBe('failed');
+    expect($payout->fresh()->failure_code)->not->toBeNull();
+});
+
+// ─── revalidatePayoutOrders — cancellation path ────────────────────────────
+
+it('cancels payout when all orders become ineligible during revalidation', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff);
+    // Order exists but is now refunded — revalidatePayoutOrders should cancel.
+    $order = v2_createOrder($brand, $aff, [
+        'payout_id' => $payout->id,
+        'status' => 'refunded',
+        'refund_cents' => 10000,
+    ]);
+    CommissionPayoutItem::create([
+        'payout_id' => $payout->id,
+        'order_id' => $order->id,
+        'amount_cents' => 1000,
     ]);
 
-    // Simulate refund webhook arriving after batch creation.
-    $orderId = payoutSvc_seedOrder('brand-1', 'aff-1', 10000, 'AUD', now()->subDays(10), 'refunded', 10000);
-    payoutSvc_seedPayoutItem('p1', $orderId, 10000);
-
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->shouldNotReceive('__get'); // no Stripe calls should happen
-
-    $service = new CommissionPayoutService($stripe);
-    $result = $service->processPayoutBatch($payout);
+    $svc = new CommissionPayoutService(v2_mockStripeClient());
+    $result = $svc->processPayoutBatch($payout);
 
     expect($result)->toBeNull();
     expect($payout->fresh()->status)->toBe('cancelled');
-
-    // Order released back to the pool (payout_id cleared).
-    $order = DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
-    expect($order->payout_id)->toBeNull();
-
-    // Payout item removed.
-    $itemCount = DB::connection('pgsql')->table('commerce.commission_payout_items')
-        ->where('payout_id', 'p1')->count();
-    expect($itemCount)->toBe(0);
+    expect($payout->fresh()->processed_at)->not->toBeNull();
 });
 
-it('rebuilds batch amounts and completes when some linked orders are refunded before processing', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    // Batch was created for two orders totalling 20 000 cents.
-    $payout = payoutSvc_seedPayout('p1', [
-        'gross_commission_cents' => 20000,
-        'platform_fee_cents' => 600,
-        'net_payout_cents' => 19400,
+it('rebuilds payout totals when some orders are removed during revalidation', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, [
+        'gross_commission_cents' => 2000,
+        'platform_fee_cents' => 60,
+        'net_payout_cents' => 1940,
         'ledger_entry_count' => 2,
     ]);
+    $good = v2_createOrder($brand, $aff, ['payout_id' => $payout->id, 'commission_cents' => 1000]);
+    $stale = v2_createOrder($brand, $aff, ['payout_id' => $payout->id, 'commission_cents' => 1000, 'status' => 'refunded', 'refund_cents' => 10000]);
+    CommissionPayoutItem::create(['payout_id' => $payout->id, 'order_id' => $good->id, 'amount_cents' => 1000]);
+    CommissionPayoutItem::create(['payout_id' => $payout->id, 'order_id' => $stale->id, 'amount_cents' => 1000]);
 
-    $goodId = payoutSvc_seedOrder('brand-1', 'aff-1', 10000, 'AUD', now()->subDays(10), 'approved', 0);
-    $refundedId = payoutSvc_seedOrder('brand-1', 'aff-1', 10000, 'AUD', now()->subDays(10), 'refunded', 10000);
-    payoutSvc_seedPayoutItem('p1', $goodId, 10000);
-    payoutSvc_seedPayoutItem('p1', $refundedId, 10000);
+    $pi = (object) ['id' => 'pi_rebuilt', 'status' => 'succeeded', 'latest_charge' => 'ch_rebuilt'];
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')->once()->andReturn($pi);
 
-    // After rebuild: gross=10000, fee=2000 (20%), net=8000. Card charged for gross (no wallet).
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')
-        ->once()
-        ->with(Mockery::on(fn ($p) => $p['amount'] === 10000), Mockery::any())
-        ->andReturn((object) ['id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test']);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')
-        ->once()
-        ->with(Mockery::on(fn ($p) => $p['amount'] === 8000), Mockery::any())
-        ->andReturn((object) ['id' => 'tr_test', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
 
     expect($result)->toBeTrue();
+    $fresh = $payout->fresh();
+    expect($fresh->gross_commission_cents)->toBe(1000);
+    expect($fresh->ledger_entry_count)->toBe(1);
+    // Stale order released back to the pool.
+    expect(Order::find($stale->id)->payout_id)->toBeNull();
+});
+
+// ─── Retry key format ──────────────────────────────────────────────────────
+
+it('uses pi_{payout_id} idempotency key on first attempt', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff);
+
+    $pi = (object) ['id' => 'pi_key_1', 'status' => 'succeeded', 'latest_charge' => 'ch_1'];
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')
+        ->once()
+        ->with(\Mockery::on(fn ($p) => true), ['idempotency_key' => 'pi_'.$payout->id])
+        ->andReturn($pi);
+
+    $svc = new CommissionPayoutService($stripe);
+    $svc->processPayoutBatch($payout);
+});
+
+it('appends retry count to idempotency key on retry', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['retry_count' => 2]);
+
+    $pi = (object) ['id' => 'pi_key_r2', 'status' => 'succeeded', 'latest_charge' => 'ch_r2'];
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')
+        ->once()
+        ->with(\Mockery::on(fn ($p) => true), ['idempotency_key' => 'pi_'.$payout->id.'_r2'])
+        ->andReturn($pi);
+
+    $svc = new CommissionPayoutService($stripe);
+    $svc->processPayoutBatch($payout);
+});
+
+// ─── retryPayout ───────────────────────────────────────────────────────────
+
+it('retryPayout resets a failed payout to pending and re-processes', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, [
+        'status' => 'failed',
+        'failure_code' => 'charge_declined',
+        'failure_reason' => 'Card declined',
+        'processed_at' => now(),
+        'retry_count' => 0,
+    ]);
+
+    $pi = (object) ['id' => 'pi_retry', 'status' => 'succeeded', 'latest_charge' => 'ch_retry'];
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldReceive('create')->once()->andReturn($pi);
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->retryPayout($payout);
+
+    expect($result)->toBeTrue();
+    $fresh = $payout->fresh();
+    expect($fresh->status)->toBe('completed');
+    expect($fresh->retry_count)->toBe(1);
+    expect($fresh->failure_code)->toBeNull();
+});
+
+it('retryPayout skips completed payouts', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['status' => 'completed', 'processed_at' => now()]);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldNotReceive('create');
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->retryPayout($payout);
+
+    expect($result)->toBeFalse();
+});
+
+// ─── Webhook hooks ─────────────────────────────────────────────────────────
+
+it('markPaymentIntentSucceeded advances payout to completed', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['status' => 'processing', 'payment_intent_id' => 'pi_webhook']);
+
+    $svc = new CommissionPayoutService(v2_mockStripeClient());
+    $svc->markPaymentIntentSucceeded($payout, 'ch_webhook_123');
 
     $fresh = $payout->fresh();
     expect($fresh->status)->toBe('completed');
-    expect($fresh->gross_commission_cents)->toBe(10000);
-    expect($fresh->net_payout_cents)->toBe(8000);
-    expect($fresh->ledger_entry_count)->toBe(1);
-
-    // Refunded order's payout_id cleared; good order's stamp retained.
-    $refunded = DB::connection('pgsql')->table('commerce.orders')->where('id', $refundedId)->first();
-    expect($refunded->payout_id)->toBeNull();
-    $good = DB::connection('pgsql')->table('commerce.orders')->where('id', $goodId)->first();
-    expect($good->payout_id)->toBe('p1');
+    expect($fresh->charge_id)->toBe('ch_webhook_123');
+    expect($fresh->processed_at)->not->toBeNull();
+    expect($fresh->transfer_completed_at)->not->toBeNull();
 });
 
-// ============================================================
-// A3.2 — Card-on-file gate + rate_source='pending' exclusion
-// ============================================================
+it('markPaymentIntentSucceeded is idempotent', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['status' => 'completed', 'processed_at' => now(), 'charge_id' => 'ch_existing']);
 
-it('does not create a payout batch for brands without stripe_connect_payment_method_id', function () {
-    // Brand-Connect-scoped PM column is what the new eligibility filter checks.
-    payoutSvc_seedBrand('brand-1', ['stripe_connect_payment_method_id' => null]);
-    payoutSvc_seedAffiliate('aff-1');
+    $svc = new CommissionPayoutService(v2_mockStripeClient());
+    $svc->markPaymentIntentSucceeded($payout, 'ch_new_ignored');
 
-    payoutSvc_seedOrder(
-        brandId: 'brand-1',
-        affiliateId: 'aff-1',
-        commissionCents: 5000,
-        occurredAt: now()->subDays(10),
-    );
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    expect($stats['batches_created'])->toBe(0);
+    expect($payout->fresh()->charge_id)->toBe('ch_existing');
 });
 
-it('does not create a payout batch for brands without stripe_connect_customer_id', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_connect_customer_id' => null]);
-    payoutSvc_seedAffiliate('aff-1');
+it('markPaymentIntentFailed transitions payout to failed', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['status' => 'processing', 'payment_intent_id' => 'pi_fail']);
 
-    payoutSvc_seedOrder(
-        brandId: 'brand-1',
-        affiliateId: 'aff-1',
-        commissionCents: 5000,
-        occurredAt: now()->subDays(10),
-    );
+    $svc = new CommissionPayoutService(v2_mockStripeClient());
+    $svc->markPaymentIntentFailed($payout, 'card_declined', 'Card was declined');
 
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    expect($stats['batches_created'])->toBe(0);
-});
-
-it('does not include rate_source=pending orders in the payout sweep', function () {
-    // Orders with rate_source='pending' have an out-of-bounds metafield rate and cannot be valued.
-    payoutSvc_seedBrand('brand-1');
-    payoutSvc_seedAffiliate('aff-1');
-
-    payoutSvc_seedOrder(
-        brandId: 'brand-1',
-        affiliateId: 'aff-1',
-        commissionCents: 5000,
-        occurredAt: now()->subDays(10),
-        extraColumns: ['rate_source' => 'pending'],
-    );
-
-    $service = new CommissionPayoutService(Mockery::mock(StripeClient::class));
-    $stats = $service->processEligiblePayouts();
-
-    expect($stats['batches_created'])->toBe(0);
-});
-
-// ============================================================
-// A3.3 — Transfer.status check before flipping to completed
-// ============================================================
-
-it('leaves payout at transferring when Transfer.status is not paid', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->once()->andReturn((object) [
-        'id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test',
-    ]);
-
-    $transferMock = Mockery::mock();
-    // Stripe returns 'pending' when the Connect account is not fully onboarded.
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_pending', 'status' => 'pending']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $payout->refresh();
-    expect($result)->toBeTrue();
-    expect($payout->status)->toBe('transferring');
-    expect($payout->stripe_transfer_id)->toBe('tr_pending');
-    // transfer_completed_at must not be stamped until the webhook fires
-    expect($payout->transfer_completed_at)->toBeNull();
-});
-
-it('stamps transfer_completed_at when Transfer.status is paid immediately', function () {
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', ['gross_commission_cents' => 10000, 'net_payout_cents' => 9700]);
-
-    $piMock = Mockery::mock();
-    $piMock->shouldReceive('create')->once()->andReturn((object) [
-        'id' => 'pi_test', 'status' => 'succeeded', 'latest_charge' => 'ch_test',
-    ]);
-
-    $transferMock = Mockery::mock();
-    $transferMock->shouldReceive('create')->once()->andReturn((object) ['id' => 'tr_paid', 'status' => 'paid']);
-
-    $service = new CommissionPayoutService(payoutSvc_makeStripe(['pi' => $piMock, 'transfer' => $transferMock]));
-    $result = $service->processPayoutBatch($payout);
-
-    $payout->refresh();
-    expect($result)->toBeTrue();
-    expect($payout->status)->toBe('completed');
-    expect($payout->transfer_completed_at)->not->toBeNull();
-});
-
-it('fails with net_payout_zero when resuming from collecting with a zero net amount', function () {
-    // Belt-and-suspenders guard: if net_payout_cents somehow reached 0 while the
-    // payout is already in collecting state, we must not attempt a Stripe transfer.
-    payoutSvc_seedBrand('brand-1', ['stripe_manual_balance_cents' => 0]);
-    payoutSvc_seedAffiliate('aff-1');
-    $payout = payoutSvc_seedPayout('p1', [
-        'status' => 'collecting',
-        'gross_commission_cents' => 0,
-        'platform_fee_cents' => 0,
-        'net_payout_cents' => 0,
-        'wallet_debit_cents' => 0,
-        'charge_cents' => 0,
-    ]);
-
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->shouldNotReceive('__get');
-
-    $service = new CommissionPayoutService($stripe);
-    $result = $service->processPayoutBatch($payout);
-
-    expect($result)->toBeFalse();
     $fresh = $payout->fresh();
     expect($fresh->status)->toBe('failed');
-    expect($fresh->failure_code)->toBe('net_payout_zero');
+    expect($fresh->failure_code)->toBe('card_declined');
+    expect($fresh->failure_reason)->toBe('Card was declined');
+    expect($fresh->processed_at)->not->toBeNull();
+});
+
+it('markPaymentIntentFailed skips already-completed payouts', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['status' => 'completed', 'processed_at' => now()]);
+
+    $svc = new CommissionPayoutService(v2_mockStripeClient());
+    $svc->markPaymentIntentFailed($payout, 'should_be_ignored', 'Should not apply');
+
+    expect($payout->fresh()->status)->toBe('completed');
+});
+
+// ─── processEligiblePayouts ────────────────────────────────────────────────
+
+it('dispatches jobs for existing pending payouts within the sweep window', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['status' => 'pending', 'eligible_after' => now()->subDay()]);
+
+    $svc = new CommissionPayoutService(v2_mockStripeClient());
+    $stats = $svc->processEligiblePayouts();
+
+    expect($stats['batches_dispatched'])->toBe(1);
+    expect($stats['batches_requeued'])->toBe(1);
+    Bus::assertDispatched(ExecuteCommissionPayoutJob::class, fn ($job) => $job->payoutId === $payout->id);
+});
+
+it('skips payouts with eligible_after in the future', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    v2_createPayout($brand, $aff, ['status' => 'pending', 'eligible_after' => now()->addDays(30)]);
+
+    $svc = new CommissionPayoutService(v2_mockStripeClient());
+    $stats = $svc->processEligiblePayouts();
+
+    expect($stats['batches_dispatched'])->toBe(0);
+});
+
+it('creates new payout batches for eligible approved orders', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    v2_createOrder($brand, $aff, ['commission_cents' => 1500]);
+
+    $svc = new CommissionPayoutService(v2_mockStripeClient());
+    $stats = $svc->processEligiblePayouts();
+
+    expect($stats['batches_created'])->toBe(1);
+});
+
+it('excludes brands with missing payment method from eligibility', function () {
+    $brand = tap(new Professional([
+        'id' => Str::uuid()->toString(),
+        'country_code' => 'AU',
+        'professional_type' => 'brand',
+        'stripe_connect_account_id' => 'acct_no_pm',
+        'stripe_connect_status' => 'active',
+        'stripe_payment_method_id' => null,
+    ]), fn (Professional $p) => $p->save());
+    $aff = v2_createAffiliate();
+    v2_createOrder($brand, $aff);
+
+    $svc = new CommissionPayoutService(v2_mockStripeClient());
+    $stats = $svc->processEligiblePayouts();
+
+    // Brand has no payment method — not eligible, no batch created.
+    expect($stats['batches_created'])->toBe(0);
 });

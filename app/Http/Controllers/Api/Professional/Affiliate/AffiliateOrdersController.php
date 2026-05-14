@@ -36,6 +36,7 @@ class AffiliateOrdersController extends ApiController
         $query = DB::table('commerce.orders as o')
             ->leftJoin('core.professionals as brand', 'brand.id', '=', 'o.brand_professional_id')
             ->leftJoin('core.customers as c', 'c.id', '=', 'o.customer_id')
+            ->leftJoin('commerce.commission_payouts as cp', 'cp.id', '=', 'o.payout_id')
             ->where('o.affiliate_professional_id', $affiliateProfessionalId)
             ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES)
             ->select($this->rowColumns())
@@ -72,6 +73,7 @@ class AffiliateOrdersController extends ApiController
         $row = DB::table('commerce.orders as o')
             ->leftJoin('core.professionals as brand', 'brand.id', '=', 'o.brand_professional_id')
             ->leftJoin('core.customers as c', 'c.id', '=', 'o.customer_id')
+            ->leftJoin('commerce.commission_payouts as cp', 'cp.id', '=', 'o.payout_id')
             ->where('o.affiliate_professional_id', $affiliateProfessionalId)
             ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES)
             ->where('o.id', $order)
@@ -109,6 +111,7 @@ class AffiliateOrdersController extends ApiController
             'o.payout_id',
             'o.occurred_at',
             'o.shopify_data',
+            'cp.status as payout_status',
             'brand.display_name as brand_display_name',
             'brand.handle as brand_handle',
             'c.full_name as customer_full_name',
@@ -151,7 +154,7 @@ class AffiliateOrdersController extends ApiController
         if ($status === null || $status === '') {
             return null;
         }
-        abort_unless(in_array($status, ['pending', 'paid', 'reversed'], true), 422, 'Invalid status filter.');
+        abort_unless(in_array($status, ['pending', 'processing', 'paid', 'reversed'], true), 422, 'Invalid status filter.');
 
         return (string) $status;
     }
@@ -159,7 +162,8 @@ class AffiliateOrdersController extends ApiController
     /**
      * Apply the derived-status filter at SQL level so pagination is correct.
      * Mirrors BrandOrdersController::applyStatusFilter — same semantics, same
-     * upstream EXCLUDED_FROM_AGGREGATES exclusion.
+     * upstream EXCLUDED_FROM_AGGREGATES exclusion. See that method's docblock
+     * for the full state machine mapping.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      */
@@ -173,8 +177,15 @@ class AffiliateOrdersController extends ApiController
 
         match ($status) {
             'reversed' => $query->whereRaw($reversed),
-            'paid' => $query->whereRaw("NOT ({$reversed})")->whereNotNull('o.payout_id'),
-            'pending' => $query->whereRaw("NOT ({$reversed})")->whereNull('o.payout_id'),
+            'paid' => $query->whereRaw("NOT ({$reversed})")
+                ->where('cp.status', 'completed'),
+            'processing' => $query->whereRaw("NOT ({$reversed})")
+                ->whereIn('cp.status', ['pending', 'processing']),
+            'pending' => $query->whereRaw("NOT ({$reversed})")
+                ->where(function ($q) {
+                    $q->whereNull('o.payout_id')
+                        ->orWhereIn('cp.status', ['failed', 'cancelled']);
+                }),
         };
     }
 
@@ -305,8 +316,8 @@ class AffiliateOrdersController extends ApiController
     }
 
     /**
-     * Maps order aggregate state → ledger-flavoured lifecycle pill for the UI.
-     * Identical semantics to EmbeddedOrderAnalyticsController::deriveLineStatus.
+     * Maps order aggregate state → 4-state lifecycle pill for the UI.
+     * See BrandOrdersController::deriveLifecycleStatus for the full state machine.
      */
     private function deriveLifecycleStatus(object $row): string
     {
@@ -316,10 +327,16 @@ class AffiliateOrdersController extends ApiController
         if ((int) $row->refund_cents >= (int) $row->net_cents && (int) $row->net_cents > 0) {
             return 'reversed';
         }
-        if (! empty($row->payout_id)) {
+        if (empty($row->payout_id)) {
+            return 'pending';
+        }
+        if (in_array($row->payout_status, ['failed', 'cancelled'], true)) {
+            return 'pending';
+        }
+        if ($row->payout_status === 'completed') {
             return 'paid';
         }
 
-        return 'pending';
+        return 'processing';
     }
 }

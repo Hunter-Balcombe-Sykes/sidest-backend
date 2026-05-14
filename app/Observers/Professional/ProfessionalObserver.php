@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 class ProfessionalObserver
 {
     use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function __construct(

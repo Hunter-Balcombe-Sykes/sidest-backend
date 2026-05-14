@@ -56,11 +56,14 @@ it('is idempotent — second patch overwrites first', function () {
     $controller = new StaffStoreSettingsController;
 
     $controller->update(Request::create('/', 'PATCH', ['payout_hold_days' => 14]), $professional);
-    $response = $controller->update(Request::create('/', 'PATCH', ['payout_hold_days' => 21]), $professional);
+    $response = $controller->update(Request::create('/', 'PATCH', ['payout_hold_days' => 28]), $professional);
     $data = json_decode($response->getContent(), true);
 
+    // Staff controller's validation rule is `in:0,7,14,28` (same as the brand-facing tier
+    // set) — the previous 21 here was outside the allowed set. Using 28 keeps the
+    // idempotent-overwrite semantics while staying inside the validated tier list.
     expect($response->status())->toBe(200)
-        ->and($data['payout_hold_days'])->toBe(21);
+        ->and($data['payout_hold_days'])->toBe(28);
 });
 
 it('returns 422 when no updatable fields provided', function () {

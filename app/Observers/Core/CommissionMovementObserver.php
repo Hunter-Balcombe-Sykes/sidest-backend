@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 class CommissionMovementObserver
 {
     use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function __construct(private readonly NotificationPublisher $publisher) {}

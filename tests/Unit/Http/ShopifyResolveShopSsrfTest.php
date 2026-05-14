@@ -6,7 +6,7 @@ use Tests\TestCase;
 
 uses(TestCase::class)->in(__FILE__);
 
-function makeController(): ShopifyIntegrationController
+function makeShopifyController(): ShopifyIntegrationController
 {
     return new ShopifyIntegrationController(
         Mockery::mock(\App\Services\Shopify\ShopifyTeardownService::class)->shouldIgnoreMissing()
@@ -70,12 +70,12 @@ it('allows public IPs', function () {
 });
 
 it('resolveSafeIps returns null for blocked private IPs', function () {
-    expect(invokePrivate(makeController(), 'resolveSafeIps', '127.0.0.1'))->toBeNull();
-    expect(invokePrivate(makeController(), 'resolveSafeIps', '169.254.169.254'))->toBeNull();
+    expect(invokePrivate(makeShopifyController(), 'resolveSafeIps', '127.0.0.1'))->toBeNull();
+    expect(invokePrivate(makeShopifyController(), 'resolveSafeIps', '169.254.169.254'))->toBeNull();
 });
 
 it('resolveSafeIps returns empty array for public IP literals (no pinning needed)', function () {
-    expect(invokePrivate(makeController(), 'resolveSafeIps', '8.8.8.8'))->toBe([]);
+    expect(invokePrivate(makeShopifyController(), 'resolveSafeIps', '8.8.8.8'))->toBe([]);
 });
 
 it('discoverShopifyHandle returns the structured Shopify.shop value', function () {
@@ -86,7 +86,7 @@ it('discoverShopifyHandle returns the structured Shopify.shop value', function (
         ),
     ]);
 
-    $result = invokePrivate(makeController(), 'discoverShopifyHandle', '8.8.8.8');
+    $result = invokePrivate(makeShopifyController(), 'discoverShopifyHandle', '8.8.8.8');
 
     expect($result)->toBe('real-store.myshopify.com');
 });
@@ -102,7 +102,7 @@ it('discoverShopifyHandle ignores bare myshopify mentions in body text (no UGC f
         ),
     ]);
 
-    $result = invokePrivate(makeController(), 'discoverShopifyHandle', '8.8.8.8');
+    $result = invokePrivate(makeShopifyController(), 'discoverShopifyHandle', '8.8.8.8');
 
     expect($result)->toBeNull();
 });
@@ -115,7 +115,7 @@ it('discoverShopifyHandle still matches "shop": JSON-style token', function () {
         ),
     ]);
 
-    $result = invokePrivate(makeController(), 'discoverShopifyHandle', '8.8.8.8');
+    $result = invokePrivate(makeShopifyController(), 'discoverShopifyHandle', '8.8.8.8');
 
     expect($result)->toBe('json-store.myshopify.com');
 });
@@ -123,7 +123,7 @@ it('discoverShopifyHandle still matches "shop": JSON-style token', function () {
 it('discoverShopifyHandle short-circuits on a blocked private host without making an HTTP call', function () {
     Http::fake();
 
-    $result = invokePrivate(makeController(), 'discoverShopifyHandle', '169.254.169.254');
+    $result = invokePrivate(makeShopifyController(), 'discoverShopifyHandle', '169.254.169.254');
 
     expect($result)->toBeNull();
     Http::assertNothingSent();

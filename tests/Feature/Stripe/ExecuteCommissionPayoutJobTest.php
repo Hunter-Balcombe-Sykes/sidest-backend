@@ -6,18 +6,25 @@ use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-// Tests for ExecuteCommissionPayoutJob: handle(), failed(), and the retryPayout()
-// double-debit fix (wallet_debit_cents > 0 resumes from 'collecting', not 'pending').
+// Tests for ExecuteCommissionPayoutJob under the v2 state machine
+// (pending → processing → completed | failed | cancelled).
+//
+// The legacy collecting/transferring states are gone. processPayoutBatch returns
+// true (completed synchronously), null (BECS pre-settlement — webhook completes),
+// or false (failed). The job logs the distinction between cancelled-by-revalidation
+// (terminal) and parked-at-processing (awaiting webhook).
 
 beforeEach(function () {
     setupProfessionalsTable();
+    // failed() releases linked orders back to the sweep pool — needs the orders table.
+    setupCommerceOrdersTables();
 
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
         affiliate_professional_id TEXT,
-        stripe_payment_intent_id TEXT,
-        stripe_transfer_id TEXT,
+        payment_intent_id TEXT,
+        charge_id TEXT,
         status TEXT NOT NULL DEFAULT \'pending\',
         gross_commission_cents INTEGER NOT NULL DEFAULT 0,
         platform_fee_cents INTEGER NOT NULL DEFAULT 0,
@@ -28,11 +35,12 @@ beforeEach(function () {
         ledger_entry_count INTEGER NOT NULL DEFAULT 0,
         eligible_after TEXT,
         processed_at TEXT,
-        funding_source TEXT,
-        wallet_debit_cents INTEGER DEFAULT 0,
         charge_cents INTEGER DEFAULT 0,
         retry_count INTEGER NOT NULL DEFAULT 0,
         needs_manual_refund INTEGER NOT NULL DEFAULT 0,
+        transfer_completed_at TEXT,
+        last_retry_at TEXT,
+        grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
         created_at TEXT,
         updated_at TEXT
     )');
@@ -50,7 +58,6 @@ function execJob_seedPayout(string $id, array $overrides = []): CommissionPayout
         'platform_fee_cents' => 300,
         'net_payout_cents' => 9700,
         'currency_code' => 'AUD',
-        'wallet_debit_cents' => 0,
         'charge_cents' => 0,
         'retry_count' => 0,
         'created_at' => $now,
@@ -92,8 +99,8 @@ it('handle() calls processPayoutBatch for a pending payout', function () {
     $job->handle($service);
 });
 
-it('handle() calls processPayoutBatch for a mid-flight collecting payout', function () {
-    execJob_seedPayout('p1', ['status' => 'collecting', 'wallet_debit_cents' => 5000]);
+it('handle() calls processPayoutBatch for a processing payout (idempotent resume)', function () {
+    execJob_seedPayout('p1', ['status' => 'processing']);
 
     $service = Mockery::mock(CommissionPayoutService::class);
     $service->shouldReceive('processPayoutBatch')->once();
@@ -102,10 +109,8 @@ it('handle() calls processPayoutBatch for a mid-flight collecting payout', funct
     $job->handle($service);
 });
 
-it('handle() returns cleanly when processPayoutBatch returns null (transfer in-flight)', function () {
-    // null return means the transfer is parked at 'transferring'; the webhook will complete it.
-    // The job must not throw, must not retry, and must not alter payout state.
-    execJob_seedPayout('p1', ['status' => 'transferring']);
+it('handle() returns cleanly when processPayoutBatch returns null (processing — awaiting webhook)', function () {
+    execJob_seedPayout('p1', ['status' => 'processing']);
 
     $service = Mockery::mock(CommissionPayoutService::class);
     $service->shouldReceive('processPayoutBatch')
@@ -115,21 +120,16 @@ it('handle() returns cleanly when processPayoutBatch returns null (transfer in-f
     Log::spy();
 
     $job = new ExecuteCommissionPayoutJob('p1');
-    $job->handle($service); // must not throw
+    $job->handle($service);
 
-    // Payout status unchanged — webhook handles the final transition.
-    expect(CommissionPayout::find('p1')->status)->toBe('transferring');
+    expect(CommissionPayout::find('p1')->status)->toBe('processing');
 
-    // Logs the awaiting-webhook message, NOT the cancelled message.
     Log::shouldHaveReceived('info')
-        ->withArgs(fn ($msg) => str_contains($msg, 'parked at transferring'))
+        ->withArgs(fn ($msg) => str_contains($msg, 'parked at processing'))
         ->once();
 });
 
-it('handle() logs cancelled-by-revalidation (not awaiting-webhook) when processPayoutBatch returns null on a cancelled payout', function () {
-    // Both the in-flight transfer case and the revalidation-cancelled case return null from
-    // processPayoutBatch. The handler must distinguish them so a cancelled payout is not
-    // logged as "stuck in transferring" and chased by ReconcileStuckTransferringPayoutsJob.
+it('handle() logs cancelled-by-revalidation when processPayoutBatch returns null on a cancelled payout', function () {
     execJob_seedPayout('p1', ['status' => 'cancelled']);
 
     $service = Mockery::mock(CommissionPayoutService::class);
@@ -146,15 +146,15 @@ it('handle() logs cancelled-by-revalidation (not awaiting-webhook) when processP
         ->withArgs(fn ($msg) => str_contains($msg, 'cancelled by order revalidation'))
         ->once();
     Log::shouldNotHaveReceived('info', [
-        Mockery::on(fn ($msg) => str_contains($msg, 'parked at transferring')),
+        Mockery::on(fn ($msg) => str_contains($msg, 'parked at processing')),
         Mockery::any(),
     ]);
 });
 
 // ─── failed() ────────────────────────────────────────────────────────────────
 
-it('failed() transitions a collecting payout to failed with job_exhausted code', function () {
-    execJob_seedPayout('p1', ['status' => 'collecting']);
+it('failed() transitions a processing payout to failed with job_exhausted code', function () {
+    execJob_seedPayout('p1', ['status' => 'processing']);
 
     $job = new ExecuteCommissionPayoutJob('p1');
     $job->failed(new \RuntimeException('Stripe network timeout'));
@@ -179,42 +179,76 @@ it('failed() does not overwrite a completed payout', function () {
 it('failed() does not overwrite a payout already marked failed', function () {
     execJob_seedPayout('p1', [
         'status' => 'failed',
-        'failure_code' => 'transfer_failed',
+        'failure_code' => 'card_declined',
     ]);
 
     $job = new ExecuteCommissionPayoutJob('p1');
     $job->failed(new \RuntimeException('Duplicate callback'));
 
     $payout = CommissionPayout::find('p1');
-    // Code should remain the original; failed() guards against overwriting
-    expect($payout->failure_code)->toBe('transfer_failed');
+    expect($payout->failure_code)->toBe('card_declined');
 });
 
 it('failed() is a no-op when payout no longer exists', function () {
     $job = new ExecuteCommissionPayoutJob('missing-id');
 
-    // Should not throw
     $job->failed(new \RuntimeException('Ghost job'));
 
     expect(true)->toBeTrue();
 });
 
-// ─── retryPayout() double-debit fix ──────────────────────────────────────────
+it('failed() releases linked orders back to the sweep pool (payout_id → NULL)', function () {
+    execJob_seedPayout('p1', ['status' => 'processing']);
 
-it('retryPayout() resets to collecting when wallet was previously debited, preventing double-debit', function () {
-    // Payout exhausted Horizon retries while in 'transferring' status (PI succeeded, wallet debited,
-    // transfer timed out). failed() leaves wallet_debit_cents intact for this case so retryPayout()
-    // must resume from 'collecting' to skip re-debiting against the already-reduced balance.
+    // Seed two linked orders so we can verify both are released.
+    $now = now()->toDateTimeString();
+    $orderIds = [
+        \Illuminate\Support\Str::uuid()->toString(),
+        \Illuminate\Support\Str::uuid()->toString(),
+    ];
+    foreach ($orderIds as $orderId) {
+        \Illuminate\Support\Facades\DB::connection('pgsql')->table('commerce.orders')->insert([
+            'id' => $orderId,
+            'shopify_order_id' => 'shop_'.$orderId,
+            'shopify_shop_domain' => 'test-'.$orderId.'.myshopify.com',
+            'brand_professional_id' => \Illuminate\Support\Str::uuid()->toString(),
+            'affiliate_professional_id' => \Illuminate\Support\Str::uuid()->toString(),
+            'status' => 'approved',
+            'gross_cents' => 10000,
+            'commission_cents' => 1000,
+            'refund_cents' => 0,
+            'net_cents' => 10000,
+            'commission_rate' => 10,
+            'rate_source' => 'brand_default',
+            'currency_code' => 'AUD',
+            'payout_id' => 'p1',
+            'occurred_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
+
+    $job = new ExecuteCommissionPayoutJob('p1');
+    $job->failed(new \RuntimeException('Stripe network timeout'));
+
+    // Both orders should have payout_id cleared so the next sweep can re-batch them.
+    foreach ($orderIds as $orderId) {
+        $row = \Illuminate\Support\Facades\DB::connection('pgsql')->table('commerce.orders')->where('id', $orderId)->first();
+        expect($row->payout_id)->toBeNull();
+    }
+});
+
+// ─── retryPayout() v2 behaviour ─────────────────────────────────────────────
+
+it('retryPayout() resets to pending and increments retry_count', function () {
     execJob_seedPayout('p1', [
         'status' => 'failed',
-        'failure_code' => 'job_exhausted',
-        'wallet_debit_cents' => 4000,
-        'charge_cents' => 6000,
+        'failure_code' => 'card_declined',
+        'retry_count' => 2,
     ]);
 
     $payout = CommissionPayout::find('p1');
 
-    // Subclass so retryPayout() runs normally but processPayoutBatch is stubbed.
     $service = new class extends \App\Services\Stripe\CommissionPayoutService
     {
         public ?string $capturedStatus = null;
@@ -231,69 +265,13 @@ it('retryPayout() resets to collecting when wallet was previously debited, preve
 
     $result = $service->retryPayout($payout);
 
-    // processPayoutBatch must have seen 'collecting', not 'pending'
-    expect($service->capturedStatus)->toBe('collecting');
-    expect($result)->toBeTrue();
-});
-
-it('retryPayout() resets to pending when wallet was not previously debited', function () {
-    execJob_seedPayout('p1', [
-        'status' => 'failed',
-        'failure_code' => 'job_exhausted',
-        'wallet_debit_cents' => 0,
-        'charge_cents' => 0,
-    ]);
-
-    $payout = CommissionPayout::find('p1');
-
-    $service = new class extends \App\Services\Stripe\CommissionPayoutService
-    {
-        public ?string $capturedStatus = null;
-
-        public function __construct() {}
-
-        public function processPayoutBatch(CommissionPayout $payout): ?bool
-        {
-            $this->capturedStatus = $payout->status;
-
-            return true;
-        }
-    };
-
-    $service->retryPayout($payout);
-
     expect($service->capturedStatus)->toBe('pending');
-});
-
-it('retryPayout() increments retry_count on each call', function () {
-    execJob_seedPayout('p1', [
-        'status' => 'failed',
-        'failure_code' => 'job_exhausted',
-        'retry_count' => 2,
-    ]);
-
-    $payout = CommissionPayout::find('p1');
-
-    $service = new class extends \App\Services\Stripe\CommissionPayoutService
-    {
-        public function __construct() {}
-
-        public function processPayoutBatch(CommissionPayout $payout): ?bool
-        {
-            return true;
-        }
-    };
-
-    $service->retryPayout($payout);
-
+    expect($result)->toBeTrue();
     expect(CommissionPayout::find('p1')->retry_count)->toBe(3);
 });
 
-it('retryPayout() returns false and does not retry transfer_failed_refund_needed payouts', function () {
-    execJob_seedPayout('p1', [
-        'status' => 'failed',
-        'failure_code' => 'transfer_failed_refund_needed',
-    ]);
+it('retryPayout() returns false for non-failed/cancelled payouts', function () {
+    execJob_seedPayout('p1', ['status' => 'pending']);
 
     $payout = CommissionPayout::find('p1');
 
@@ -308,4 +286,18 @@ it('retryPayout() returns false and does not retry transfer_failed_refund_needed
     };
 
     expect($service->retryPayout($payout))->toBeFalse();
+});
+
+// ─── Uniqueness / config ────────────────────────────────────────────────────
+
+it('uniqueId() returns the payout ID', function () {
+    $job = new ExecuteCommissionPayoutJob('payout-abc');
+
+    expect($job->uniqueId())->toBe('payout-abc');
+});
+
+it('backoff() returns the configured intervals', function () {
+    $job = new ExecuteCommissionPayoutJob('p1');
+
+    expect($job->backoff())->toBe([60, 120, 300, 600]);
 });

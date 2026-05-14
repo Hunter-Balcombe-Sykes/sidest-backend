@@ -13,18 +13,14 @@ use Illuminate\Support\Facades\Notification;
 // window has expired without the affiliate connecting Stripe Connect.
 // Closes #CR-003 — UI promised 60-day grace but no enforcement existed.
 //
-// Phase 4+: linked commerce.orders rows are voided (status='voided') instead of
-// legacy commission_movements. The voidOrder() optimistic guard uses the
-// payout_id stamp to scope the update to exactly the orders attached to the
-// just-cancelled payout.
+// v2 state machine: pending → processing → completed | failed | cancelled.
+// The legacy pending_funds and collecting statuses are removed.
 
 afterEach(function () {
     \Illuminate\Support\Carbon::setTestNow(null);
 });
 
 beforeEach(function () {
-    // Fake the notification system globally — fireGraceWarnings() calls ->notify() on
-    // every run, including tests that don't assert on notifications.
     Notification::fake();
 
     setupProfessionalsTable();
@@ -39,7 +35,6 @@ beforeEach(function () {
         try {
             $conn->statement("ALTER TABLE core.professionals ADD COLUMN {$col}");
         } catch (\Throwable) {
-            // already added by another helper
         }
     }
 
@@ -47,8 +42,8 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
         affiliate_professional_id TEXT,
-        stripe_payment_intent_id TEXT,
-        stripe_transfer_id TEXT,
+        payment_intent_id TEXT,
+        charge_id TEXT,
         status TEXT NOT NULL DEFAULT \'pending\',
         gross_commission_cents INTEGER NOT NULL DEFAULT 0,
         platform_fee_cents INTEGER NOT NULL DEFAULT 0,
@@ -59,8 +54,6 @@ beforeEach(function () {
         ledger_entry_count INTEGER NOT NULL DEFAULT 0,
         eligible_after TEXT,
         processed_at TEXT,
-        funding_source TEXT,
-        wallet_debit_cents INTEGER DEFAULT 0,
         charge_cents INTEGER DEFAULT 0,
         retry_count INTEGER NOT NULL DEFAULT 0,
         needs_manual_refund INTEGER NOT NULL DEFAULT 0,
@@ -77,13 +70,11 @@ beforeEach(function () {
         created_at TEXT
     )');
 
-    // Add lifecycle columns from A1.1 migration (ALTER is idempotent via try/catch).
     foreach ([
         "grace_notifications_sent TEXT NOT NULL DEFAULT '[]'",
         'transfer_completed_at TEXT',
         'funding_failure_count INTEGER NOT NULL DEFAULT 0',
         'failure_category TEXT',
-        // #STRIPE-4 — warning-clock anchor (separate from void_at).
         'grace_started_at TEXT',
     ] as $col) {
         try {
@@ -147,7 +138,6 @@ function expiredPayout_seedPayout(string $id, string $voidAt, string $status = '
         'currency_code' => 'AUD',
         'ledger_entry_count' => 1,
         'eligible_after' => $now,
-        'wallet_debit_cents' => 0,
         'charge_cents' => 0,
         'retry_count' => 0,
         'needs_manual_refund' => 0,
@@ -157,11 +147,6 @@ function expiredPayout_seedPayout(string $id, string $voidAt, string $status = '
     ], $overrides));
 }
 
-/**
- * Phase 4+: payouts link to commerce.orders via commission_payout_items.
- * Seeds an approved order stamped with the payout_id and a payout_item row that
- * links the two — mirroring the production write path in CommissionPayoutService.
- */
 function expiredPayout_seedLinkedOrder(string $orderId, string $payoutId, string $status = 'approved', int $amountCents = 10000): void
 {
     $now = now()->toDateTimeString();
@@ -225,12 +210,9 @@ it('voids expired payouts when affiliate has not connected Stripe', function () 
     expect(Order::find('o1')->status)->toBe('voided');
     expect(Order::find('o2')->status)->toBe('voided');
 
-    // Linked orders' payout_id is cleared after voiding so reports don't
-    // surface them as still attached to a cancelled payout.
     expect(Order::find('o1')->payout_id)->toBeNull();
     expect(Order::find('o2')->payout_id)->toBeNull();
 
-    // Audit-log rows recorded for both voids.
     expect(OrderEvent::where('order_id', 'o1')->where('event_type', 'voided')->count())->toBe(1);
     expect(OrderEvent::where('order_id', 'o2')->where('event_type', 'voided')->count())->toBe(1);
 });
@@ -259,24 +241,7 @@ it('does not void payouts still within their grace period', function () {
     expect(Order::find('o1')->status)->toBe('approved');
 });
 
-it('voids expired payouts in pending_funds status too', function () {
-    // pending_funds is the post-charge-failure state — the partial index
-    // commission_payouts_void_at_idx covers both pending and pending_funds.
-    expiredPayout_seedBrand('brand-1');
-    expiredPayout_seedAffiliate('aff-1', 'not_connected');
-    expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString(), status: 'pending_funds');
-    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
-
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
-
-    expect(CommissionPayout::find('p1')->status)->toBe('cancelled');
-    expect(Order::find('o1')->status)->toBe('voided');
-});
-
 it('leaves completed payouts alone even if void_at is in the past', function () {
-    // Completed payouts have void_at in the past on purpose — the migration
-    // backfilled void_at for every existing row. The cron must filter by
-    // status so an already-paid payout cannot be retroactively cancelled.
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->subDays(60)->toDateTimeString(), status: 'completed');
@@ -311,14 +276,10 @@ it('publishes a voided notification to the affiliate when their payout expires',
 });
 
 // ============================================================
-// #VEP-6 — Optimistic-lock race coverage
+// #VEP-6 — Optimistic-lock race coverage (v2: processing, not collecting)
 // ============================================================
 
-it('does not cancel payout or void linked orders when status changed concurrently', function () {
-    // Simulate: another process (ExecuteCommissionPayoutJob) advanced the payout to
-    // 'collecting' between the chunk SELECT and the optimistic-lock UPDATE inside
-    // cancelExpiredPayout(). The whereIn('status', ['pending', 'pending_funds']) guard
-    // must fire 0 rows updated — leaving payout and orders untouched.
+it('does not cancel payout or void linked orders when status changed to processing concurrently', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString(), status: 'pending');
@@ -327,11 +288,11 @@ it('does not cancel payout or void linked orders when status changed concurrentl
     DB::connection('pgsql')
         ->table('commerce.commission_payouts')
         ->where('id', 'p1')
-        ->update(['status' => 'collecting']);
+        ->update(['status' => 'processing']);
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
 
-    expect(CommissionPayout::find('p1')->status)->toBe('collecting');
+    expect(CommissionPayout::find('p1')->status)->toBe('processing');
     expect(Order::find('o1')->status)->toBe('approved');
 });
 
@@ -343,8 +304,6 @@ it('processes all expired payouts across two chunks', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
 
-    // Seed 201 expired payouts — one more than the chunkById(200) boundary —
-    // so the loop must complete at least two chunk passes.
     $past = now()->subDay()->toDateTimeString();
     $now = now()->toDateTimeString();
     $rows = [];
@@ -360,7 +319,6 @@ it('processes all expired payouts across two chunks', function () {
             'currency_code' => 'AUD',
             'ledger_entry_count' => 0,
             'eligible_after' => $now,
-            'wallet_debit_cents' => 0,
             'charge_cents' => 0,
             'retry_count' => 0,
             'needs_manual_refund' => 0,
@@ -383,8 +341,6 @@ it('processes all expired payouts across two chunks', function () {
 });
 
 it('publishes notification only once when the same expired payout is processed on two consecutive runs', function () {
-    // First run cancels the payout. Second run finds no pending/pending_funds payouts
-    // past void_at, so nothing is selected and publisher is never called again.
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString());
@@ -400,19 +356,19 @@ it('publishes notification only once when the same expired payout is processed o
 });
 
 // ============================================================
-// #VEP-8 — Grace warning notifications (T-30 / T-7 / T-1)
+// Grace warning notifications (T-30 / T-7 / T-1)
+//
+// Under Option A the warning anchors on `void_at` directly — fired $daysOut days before
+// void_at, regardless of any legacy grace_started_at marker. The previous v1 model used
+// grace_started_at as the warning anchor because void_at moved on each funding retry;
+// under v2 the retry loop is gone, so void_at is stable and is the right anchor.
 // ============================================================
 
-it('fires a T-30 grace warning when grace_started_at is 30 days into a 60-day window', function () {
-    // #STRIPE-4: warnings now anchor on grace_started_at (stamped once on first
-    // markPendingFunding). With 60-day grace, T-30 fires when grace_started_at
-    // = now() - 30d (i.e. 30 days remaining out of 60).
+it('fires a T-30 grace warning when void_at is 30 days away', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
 
-    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
-        'grace_started_at' => now()->subDays(30)->toDateTimeString(),
-    ]);
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
@@ -430,8 +386,7 @@ it('fires a T-30 grace warning when grace_started_at is 30 days into a 60-day wi
 it('does not re-fire a grace warning if T-30 already recorded in grace_notifications_sent', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
-    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
-        'grace_started_at' => now()->subDays(30)->toDateTimeString(),
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString(), status: 'pending', overrides: [
         'grace_notifications_sent' => '["T-30"]',
     ]);
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
@@ -446,26 +401,7 @@ it('does not re-fire a grace warning if T-30 already recorded in grace_notificat
 
 it('does not send a grace warning when affiliate already has active Stripe Connect', function () {
     expiredPayout_seedBrand('brand-1');
-    expiredPayout_seedAffiliate('aff-1', 'active'); // already connected
-    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
-        'grace_started_at' => now()->subDays(30)->toDateTimeString(),
-    ]);
-    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
-
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
-
-    Notification::assertNothingSent();
-});
-
-// #STRIPE-4 — warning-clock anchored on grace_started_at, not void_at.
-
-it('does not send a grace warning when grace_started_at is NULL (payout never failed)', function () {
-    // Pure 'pending' payouts that haven't reached pending_funds have NULL
-    // grace_started_at — markPendingFunding hasn't been called yet. No warnings
-    // until they actually fail funding; otherwise we'd warn about payouts that
-    // are simply waiting for their hold window to close.
-    expiredPayout_seedBrand('brand-1');
-    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedAffiliate('aff-1', 'active');
     expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
@@ -474,34 +410,22 @@ it('does not send a grace warning when grace_started_at is NULL (payout never fa
     Notification::assertNothingSent();
 });
 
-it('still fires T-30 when retries reset void_at to +60d (the original #STRIPE-4 bug case)', function () {
-    // Reproduces the bug: an affiliate-not-connected payout has been bouncing
-    // through markPendingFunding for 30 days. void_at always reads as +60d
-    // because it gets reset on every retry. Pre-fix the warning never fired;
-    // post-fix it correctly fires off grace_started_at.
+it('does not send a grace warning when void_at is far in the future (not yet in any warning window)', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
-    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
-        'grace_started_at' => now()->subDays(30)->toDateTimeString(),
-        'funding_failure_count' => 25, // ~25 retries deep
-    ]);
+    // void_at +45d falls outside the T-30 / T-7 / T-1 windows.
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(45)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
 
-    Notification::assertSentTo(
-        \App\Models\Core\Professional\Professional::find('aff-1'),
-        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class,
-        fn ($n) => $n->daysRemaining === 30
-    );
+    Notification::assertNothingSent();
 });
 
-it('fires T-7 when grace_started_at is 53 days into a 60-day window', function () {
+it('fires T-7 when void_at is 7 days away', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
-    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
-        'grace_started_at' => now()->subDays(53)->toDateTimeString(),
-    ]);
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(7)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());
@@ -513,12 +437,10 @@ it('fires T-7 when grace_started_at is 53 days into a 60-day window', function (
     );
 });
 
-it('fires T-1 when grace_started_at is 59 days into a 60-day window', function () {
+it('fires T-1 when void_at is 1 day away', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
-    expiredPayout_seedPayout('p1', voidAt: now()->addDays(60)->toDateTimeString(), status: 'pending_funds', overrides: [
-        'grace_started_at' => now()->subDays(59)->toDateTimeString(),
-    ]);
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(1)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
     expiredPayout_makeJob()->handle(expiredPayout_makeService());

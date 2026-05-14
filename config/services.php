@@ -61,15 +61,22 @@ return [
     'stripe' => [
         'secret_key' => env('STRIPE_SECRET_KEY'),
         'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
-        // Two scoped webhook secrets — one per Stripe destination:
-        //   - connect_webhook_secret: events from connected accounts (v1 names: account.updated,
-        //     transfer.*, payment_method.detached, etc.)
-        //   - platform_webhook_secret: events on the platform (v2.core.account.* + v1
-        //     payment_intent.*/charge.refunded fired by destination charges)
-        // The legacy single 'webhook_secret' is removed; controllers select the right secret
-        // by endpoint, not by trial validation.
+        // Three scoped webhook secrets — one per Stripe Event Destination. The new
+        // Event Destinations system splits delivery by payload style, so the platform
+        // endpoint is served by two destinations (snapshot for v1 events, thin for v2
+        // account events) with separate signing secrets.
+        //   - connect_webhook_secret:       Connect-scope v1 events (account.updated,
+        //                                   account.application.deauthorized, checkout.session.completed,
+        //                                   payment_method.attached|detached)
+        //   - platform_webhook_secret:      Platform-scope v1 snapshot events
+        //                                   (payment_intent.*, charge.refunded, charge.dispute.created)
+        //                                   fired by destination charges
+        //   - platform_thin_webhook_secret: Platform-scope v2 thin events
+        //                                   (v2.core.account.* lifecycle on direct connected accounts)
+        // Controllers select the right secret by endpoint route, not by trial validation.
         'connect_webhook_secret' => env('STRIPE_CONNECT_WEBHOOK_SECRET'),
         'platform_webhook_secret' => env('STRIPE_PLATFORM_WEBHOOK_SECRET'),
+        'platform_thin_webhook_secret' => env('STRIPE_PLATFORM_THIN_WEBHOOK_SECRET'),
         // 2026-02-25.clover ships v2 Accounts GA. Required for v2.core.accounts.*
         // operations used by the destination-charge flow.
         'api_version' => env('STRIPE_API_VERSION', '2026-02-25.clover'),

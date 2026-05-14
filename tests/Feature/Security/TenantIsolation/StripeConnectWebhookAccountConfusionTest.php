@@ -71,6 +71,19 @@ it('processes account.updated when event.account matches data.object.id', functi
         ->where('id', $legitimate->id)
         ->update(['stripe_connect_account_id' => 'acct_LEGIT']);
 
+    // Under v2 the account.updated handler delegates to StripeConnectService::syncAccountStatus
+    // which retrieves the v2 account from Stripe. Stub it so the test stays isolated from the
+    // real Stripe API.
+    $mockService = Mockery::mock(\App\Services\Stripe\StripeConnectService::class)->makePartial();
+    $mockService->shouldReceive('syncAccountStatus')->andReturn([
+        'status' => 'active',
+        'stripe_connect_account_id' => 'acct_LEGIT',
+        'card_payments_active' => true,
+        'stripe_transfers_active' => true,
+        'requirements' => [],
+    ]);
+    app()->instance(\App\Services\Stripe\StripeConnectService::class, $mockService);
+
     // Legitimate event: top-level account matches data.object.id
     $fakeEvent = Event::constructFrom([
         'id' => 'evt_fake_legit',
@@ -79,9 +92,6 @@ it('processes account.updated when event.account matches data.object.id', functi
         'data' => [
             'object' => [
                 'id' => 'acct_LEGIT',
-                'charges_enabled' => true,
-                'payouts_enabled' => false,
-                'details_submitted' => false,
                 'object' => 'account',
             ],
         ],

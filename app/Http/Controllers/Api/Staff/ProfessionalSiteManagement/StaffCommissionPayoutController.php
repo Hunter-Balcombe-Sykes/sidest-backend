@@ -31,13 +31,13 @@ class StaffCommissionPayoutController extends ApiController
      * GET /staff/commission-payouts
      *
      * List all payouts platform-wide. Query params:
-     *   status              — pending|processing|completed|failed|pending_funds|...
+     *   status              — pending|processing|completed|failed|cancelled
      *   failure_code        — filter by failure code, e.g. wallet_currency_mismatch
      *   needs_manual_refund — true|false (filter for stuck double-failure cases)
      *   per_page            — default 25, max 100
      *
-     * Tip: ?status=pending_funds&failure_code=wallet_currency_mismatch lists all
-     * payouts blocked on a brand wallet currency mismatch (requires admin action).
+     * Tip: ?status=failed&failure_code=charge_failed lists all payouts blocked on a
+     * charge failure (may require admin action).
      */
     public function index(Request $request): JsonResponse
     {
@@ -69,8 +69,7 @@ class StaffCommissionPayoutController extends ApiController
      * POST /staff/commission-payouts/{payout}/retry
      *
      * Manually retry a stuck payout batch. Only `failed` and `pending` batches
-     * are retryable — `completed` / `collecting` / `collected` / `transferring`
-     * return 422.
+     * are retryable — `completed` / `cancelled` return 422.
      *
      * Payouts with needs_manual_refund=true must be acknowledged first via
      * POST /staff/commission-payouts/{payout}/acknowledge-manual-refund.

@@ -7,13 +7,15 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Stripe\StripeClient;
 
-// Verifies processEligiblePayouts only batches commissions for brands that
-// have completed the full brand-as-Connect-account setup:
-//   - stripe_connect_account_id  (account exists)
-//   - stripe_connect_status='active'  (Connect onboarded + verified)
-//   - stripe_connect_customer_id  (customer on brand's own account)
-//   - stripe_connect_payment_method_id  (PM on brand's own account)
-// Missing any of the four → brand is excluded and no payout batch is created.
+// Verifies processEligiblePayouts batches commissions only for brands whose v2 Account
+// is fully provisioned:
+//   - stripe_connect_account_id IS NOT NULL  (v2 Account exists)
+//   - stripe_connect_status = 'active'       (dual-capability check passed)
+//   - stripe_payment_method_id IS NOT NULL   (saved card/BECS on the brand's own Account)
+//
+// Missing any of the three → brand is excluded. stripe_connect_customer_id is no longer
+// checked — the v2 customer configuration enables PM storage at the Account level; a
+// separate customer object is not required.
 
 beforeEach(function () {
     Bus::fake();
@@ -24,10 +26,9 @@ beforeEach(function () {
     foreach ([
         'stripe_connect_account_id TEXT',
         'stripe_connect_status TEXT',
-        'stripe_customer_id TEXT',
         'stripe_payment_method_id TEXT',
-        'stripe_connect_customer_id TEXT',
-        'stripe_connect_payment_method_id TEXT',
+        'stripe_payment_method_brand TEXT',
+        'stripe_payment_method_last4 TEXT',
     ] as $col) {
         try {
             $conn->statement("ALTER TABLE core.professionals ADD COLUMN {$col}");
@@ -45,12 +46,12 @@ beforeEach(function () {
         currency_code TEXT NOT NULL DEFAULT \'AUD\',
         ledger_entry_count INTEGER NOT NULL DEFAULT 0,
         eligible_after TEXT, void_at TEXT, processed_at TEXT,
-        funding_source TEXT, failure_code TEXT, failure_reason TEXT,
-        wallet_debit_cents INTEGER DEFAULT 0, charge_cents INTEGER DEFAULT 0,
+        payment_intent_id TEXT, charge_cents INTEGER DEFAULT 0,
+        failure_code TEXT, failure_reason TEXT,
         retry_count INTEGER NOT NULL DEFAULT 0,
-        funding_failure_count INTEGER NOT NULL DEFAULT 0,
-        next_retry_at TEXT, last_retry_at TEXT,
         needs_manual_refund INTEGER NOT NULL DEFAULT 0,
+        transfer_completed_at TEXT, last_retry_at TEXT,
+        grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
         created_at TEXT, updated_at TEXT
     )');
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
@@ -75,8 +76,7 @@ function eligibility_seedBrand(string $id, array $overrides = []): void
         'status' => 'active',
         'stripe_connect_account_id' => 'acct_brand_test',
         'stripe_connect_status' => 'active',
-        'stripe_connect_customer_id' => 'cus_brand_test',
-        'stripe_connect_payment_method_id' => 'pm_brand_test',
+        'stripe_payment_method_id' => 'pm_brand_test',
         'created_at' => $now,
         'updated_at' => $now,
     ], $overrides));
@@ -137,7 +137,7 @@ function eligibility_runSweep(): array
     return (new CommissionPayoutService($stripe))->processEligiblePayouts();
 }
 
-it('batches a payout when brand has all four brand-Connect columns set', function () {
+it('batches a payout when brand has all three v2 eligibility columns set', function () {
     eligibility_seedBrand('brand-eligible');
     eligibility_seedAffiliate('aff-1');
     eligibility_seedOrder('brand-eligible', 'aff-1');
@@ -148,12 +148,9 @@ it('batches a payout when brand has all four brand-Connect columns set', functio
     Bus::assertDispatched(ExecuteCommissionPayoutJob::class);
 });
 
-it('skips brand without stripe_connect_account_id even if platform-scoped IDs are set', function () {
+it('skips brand without stripe_connect_account_id', function () {
     eligibility_seedBrand('brand-no-account', [
         'stripe_connect_account_id' => null,
-        // Old platform-scoped IDs are set — must NOT count
-        'stripe_customer_id' => 'cus_platform',
-        'stripe_payment_method_id' => 'pm_platform',
     ]);
     eligibility_seedAffiliate('aff-1');
     eligibility_seedOrder('brand-no-account', 'aff-1');
@@ -169,18 +166,26 @@ it('skips brand whose stripe_connect_status is not active', function () {
     expect(eligibility_runSweep()['batches_created'])->toBe(0);
 });
 
-it('skips brand without stripe_connect_customer_id', function () {
-    eligibility_seedBrand('brand-no-cus', ['stripe_connect_customer_id' => null]);
+it('skips brand whose stripe_connect_status is onboarding', function () {
+    eligibility_seedBrand('brand-onboarding', ['stripe_connect_status' => 'onboarding']);
     eligibility_seedAffiliate('aff-1');
-    eligibility_seedOrder('brand-no-cus', 'aff-1');
+    eligibility_seedOrder('brand-onboarding', 'aff-1');
 
     expect(eligibility_runSweep()['batches_created'])->toBe(0);
 });
 
-it('skips brand without stripe_connect_payment_method_id', function () {
-    eligibility_seedBrand('brand-no-pm', ['stripe_connect_payment_method_id' => null]);
+it('skips brand without stripe_payment_method_id', function () {
+    eligibility_seedBrand('brand-no-pm', ['stripe_payment_method_id' => null]);
     eligibility_seedAffiliate('aff-1');
     eligibility_seedOrder('brand-no-pm', 'aff-1');
+
+    expect(eligibility_runSweep()['batches_created'])->toBe(0);
+});
+
+it('skips brand with not_connected stripe_connect_status', function () {
+    eligibility_seedBrand('brand-disconnected', ['stripe_connect_status' => 'not_connected']);
+    eligibility_seedAffiliate('aff-1');
+    eligibility_seedOrder('brand-disconnected', 'aff-1');
 
     expect(eligibility_runSweep()['batches_created'])->toBe(0);
 });

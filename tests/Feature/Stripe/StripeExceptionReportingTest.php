@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
-use App\Http\Requests\Stripe\ConfirmPaymentMethodRequest;
 use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
@@ -19,15 +18,11 @@ use Illuminate\Support\Str;
 
 beforeEach(function () {
     setupProfessionalsTable();
-    // Add Stripe columns that setupProfessionalsTable doesn't include
     foreach ([
         'stripe_connect_account_id TEXT',
         'stripe_connect_status TEXT',
-        'stripe_connect_customer_id TEXT',
-        'stripe_connect_payment_method_id TEXT',
         'stripe_payment_method_brand TEXT',
         'stripe_payment_method_last4 TEXT',
-        'stripe_customer_id TEXT',
     ] as $col) {
         try {
             DB::connection('pgsql')->statement("ALTER TABLE core.professionals ADD COLUMN {$col}");
@@ -77,7 +72,7 @@ it('reports a Stripe ApiConnectionException from syncPaymentMethodSession and re
 
     $brand = stripeReport_makeBrand();
     $exception = new \Stripe\Exception\ApiConnectionException('Could not connect to Stripe.');
-    $service = stripeReport_makeService('syncBrandConnectPaymentMethodFromCheckoutSession', $exception);
+    $service = stripeReport_makeService('syncBrandPaymentMethodFromCheckoutSession', $exception);
 
     $controller = stripeReport_makeController($service);
 
@@ -87,27 +82,6 @@ it('reports a Stripe ApiConnectionException from syncPaymentMethodSession and re
     $request->attributes->set('professional', $brand);
 
     $response = $controller->syncPaymentMethodSession($request);
-
-    expect($response->getStatusCode())->toBe(422);
-    Exceptions::assertReported(\Stripe\Exception\ApiConnectionException::class);
-});
-
-it('reports a Stripe ApiConnectionException from confirmPaymentMethod and returns 422', function () {
-    Exceptions::fake();
-    Gate::before(fn () => true);
-
-    $brand = stripeReport_makeBrand();
-    $exception = new \Stripe\Exception\ApiConnectionException('Could not connect to Stripe.');
-    $service = stripeReport_makeService('saveBrandConnectPaymentMethod', $exception);
-
-    $controller = stripeReport_makeController($service);
-
-    $request = ConfirmPaymentMethodRequest::create('/api/stripe/payment-method/confirm', 'POST', [
-        'payment_method_id' => 'pm_test_abc',
-    ]);
-    $request->attributes->set('professional', $brand);
-
-    $response = $controller->confirmPaymentMethod($request);
 
     expect($response->getStatusCode())->toBe(422);
     Exceptions::assertReported(\Stripe\Exception\ApiConnectionException::class);

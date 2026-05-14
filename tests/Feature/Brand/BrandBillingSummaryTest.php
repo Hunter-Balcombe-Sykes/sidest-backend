@@ -50,7 +50,7 @@ it('returns billing summary with masked card for a brand with a card on their Co
 
     $conn = DB::connection('pgsql');
     foreach ([
-        'stripe_connect_payment_method_id TEXT NULL',
+        'stripe_payment_method_id TEXT NULL',
         'stripe_payment_method_brand TEXT NULL',
         'stripe_payment_method_last4 TEXT NULL',
     ] as $col) {
@@ -64,7 +64,7 @@ it('returns billing summary with masked card for a brand with a card on their Co
     $conn->table('core.professionals')
         ->where('id', $brand->id)
         ->update([
-            'stripe_connect_payment_method_id' => 'pm_on_brand_4242',
+            'stripe_payment_method_id' => 'pm_on_brand_4242',
             'stripe_payment_method_brand' => 'visa',
             'stripe_payment_method_last4' => '4242',
         ]);

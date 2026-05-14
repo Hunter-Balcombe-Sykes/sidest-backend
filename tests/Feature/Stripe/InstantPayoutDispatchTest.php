@@ -41,6 +41,8 @@ function instantBrand(array $overrides = []): Professional
 {
     $id = (string) Str::uuid();
     $now = now()->toDateTimeString();
+    // Under v2 the instant-payout dispatcher checks: stripe_connect_account_id (v2 Account),
+    // stripe_connect_status='active', AND stripe_payment_method_id. All three must be present.
     DB::connection('pgsql')->table('core.professionals')->insert(array_merge([
         'id' => $id,
         'handle' => "brand-{$id}",
@@ -49,7 +51,8 @@ function instantBrand(array $overrides = []): Professional
         'professional_type' => 'brand',
         'status' => 'active',
         'primary_email' => 'brand@example.com',
-        'stripe_customer_id' => 'cus_test',
+        'stripe_connect_account_id' => 'acct_brand_test',
+        'stripe_connect_status' => 'active',
         'stripe_payment_method_id' => 'pm_test',
         'created_at' => $now,
         'updated_at' => $now,

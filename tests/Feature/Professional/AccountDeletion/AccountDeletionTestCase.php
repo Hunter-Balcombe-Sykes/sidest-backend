@@ -165,5 +165,30 @@ class AccountDeletionTestCase
             created_at TEXT,
             updated_at TEXT
         )');
+
+        // site.enquiries — purge job iterates this table via soft-delete sweep.
+        // Empty schema is enough for the test (sweep returns zero rows).
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.enquiries (
+            id TEXT PRIMARY KEY,
+            professional_id TEXT,
+            customer_email TEXT,
+            customer_phone TEXT,
+            customer_name TEXT,
+            message TEXT,
+            deleted_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )');
+
+        // site.service_categories — also swept by the GC for legacy soft-deleted rows.
+        $conn->statement('CREATE TABLE IF NOT EXISTS site.service_categories (
+            id TEXT PRIMARY KEY,
+            professional_id TEXT,
+            name TEXT,
+            sort_order INTEGER DEFAULT 0,
+            deleted_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )');
     }
 }

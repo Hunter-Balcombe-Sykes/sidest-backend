@@ -33,7 +33,6 @@ class CommissionPayout extends BaseModel
         'gross_commission_cents' => 'integer',
         'platform_fee_cents' => 'integer',
         'net_payout_cents' => 'integer',
-        'wallet_debit_cents' => 'integer',
         'charge_cents' => 'integer',
         'ledger_entry_count' => 'integer',
         'retry_count' => 'integer',
@@ -46,14 +45,8 @@ class CommissionPayout extends BaseModel
 
         // Lifecycle columns added 2026-05-10
         'transfer_completed_at' => 'datetime',
-        'next_retry_at' => 'datetime',
         'last_retry_at' => 'datetime',
-        'funding_failure_count' => 'integer',
         'grace_notifications_sent' => 'array',
-
-        // #STRIPE-4: warning-clock anchor, stamped once on first markPendingFunding.
-        // Decoupled from void_at (which resets every retry for retry-safety).
-        'grace_started_at' => 'datetime',
     ];
 
     public function brandProfessional(): BelongsTo
@@ -89,11 +82,6 @@ class CommissionPayout extends BaseModel
     public function isFailed(): bool
     {
         return $this->status === 'failed';
-    }
-
-    public function isReversed(): bool
-    {
-        return $this->status === 'reversed';
     }
 
     protected static function newFactory(): CommissionPayoutFactory

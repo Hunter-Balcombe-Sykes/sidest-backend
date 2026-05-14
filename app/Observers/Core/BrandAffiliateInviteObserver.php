@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 class BrandAffiliateInviteObserver
 {
     use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     // Memoize brand names within the request to avoid N+1 on bulk CSV imports.

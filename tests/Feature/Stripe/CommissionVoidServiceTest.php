@@ -166,18 +166,20 @@ it('does not void commissions for affiliates with active Stripe', function () {
     expect(Order::find('c1')->status)->toBe('approved');
 });
 
-it('identifies affiliates within grace period', function () {
+it('isInGracePeriod always returns false under v2 (per-affiliate grace period is gone)', function () {
+    // Under v2 Option A the per-affiliate "stripe_grace_period_ends_at" concept is removed.
+    // Each payout has its own void_at deadline; there is no longer a global per-professional
+    // grace window. isInGracePeriod is retained as a compat shim returning false for any input.
     $publisher = Mockery::mock(NotificationPublisher::class);
     $service = new CommissionVoidService($publisher);
 
-    seedVoidAffiliate('aff-in', 'not_connected', now()->addDays(10)->toDateTimeString());
-    seedVoidAffiliate('aff-out', 'not_connected', now()->subDays(5)->toDateTimeString());
+    seedVoidAffiliate('aff-future', 'not_connected', now()->addDays(10)->toDateTimeString());
+    seedVoidAffiliate('aff-past', 'not_connected', now()->subDays(5)->toDateTimeString());
+    seedVoidAffiliate('aff-null', 'not_connected', null);
 
-    $inGrace = Professional::find('aff-in');
-    $outGrace = Professional::find('aff-out');
-
-    expect($service->isInGracePeriod($inGrace))->toBeTrue();
-    expect($service->isInGracePeriod($outGrace))->toBeFalse();
+    expect($service->isInGracePeriod(Professional::find('aff-future')))->toBeFalse();
+    expect($service->isInGracePeriod(Professional::find('aff-past')))->toBeFalse();
+    expect($service->isInGracePeriod(Professional::find('aff-null')))->toBeFalse();
 });
 
 it('does not void orders that already have a payout_id', function () {

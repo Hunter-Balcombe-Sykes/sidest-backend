@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 class BrandPartnerLinkObserver
 {
     use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function created(BrandPartnerLink $link): void

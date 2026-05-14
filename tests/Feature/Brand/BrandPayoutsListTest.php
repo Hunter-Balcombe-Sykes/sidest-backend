@@ -20,13 +20,12 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT NOT NULL,
         affiliate_professional_id TEXT NOT NULL,
-        stripe_payment_intent_id TEXT,
-        stripe_transfer_id TEXT,
+        payment_intent_id TEXT,
+        charge_id TEXT,
         status TEXT,
         gross_commission_cents INTEGER,
         platform_fee_cents INTEGER,
         net_payout_cents INTEGER,
-        wallet_debit_cents INTEGER,
         charge_cents INTEGER,
         currency_code TEXT,
         failure_code TEXT,
@@ -41,7 +40,6 @@ beforeEach(function () {
         ledger_entry_count INTEGER,
         eligible_after TEXT,
         processed_at TEXT,
-        funding_source TEXT,
         void_at TEXT,
         needs_manual_refund INTEGER DEFAULT 0,
         retry_count INTEGER DEFAULT 0,
@@ -64,44 +62,48 @@ function insertBrandPayout(array $attrs): void
 {
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('commerce.commission_payouts')->insert(array_merge([
-        'status'                  => 'completed',
-        'gross_commission_cents'  => 1000,
-        'platform_fee_cents'      => 100,
-        'net_payout_cents'        => 900,
-        'currency_code'           => 'AUD',
-        'funding_failure_count'   => 0,
-        'created_at'              => $now,
-        'updated_at'              => $now,
+        'status' => 'completed',
+        'gross_commission_cents' => 1000,
+        'platform_fee_cents' => 100,
+        'net_payout_cents' => 900,
+        'currency_code' => 'AUD',
+        'funding_failure_count' => 0,
+        'created_at' => $now,
+        'updated_at' => $now,
     ], $attrs));
 }
 
 it('returns a paginated list of brand payouts with affiliate name and lifecycle fields', function () {
     $brand = createBrandTenant('bp-brand-list');
-    $aff   = createAffiliateTenant('bp-aff-list');
+    $aff = createAffiliateTenant('bp-aff-list');
 
     insertBrandPayout([
-        'id'                       => 'pay-brand-1',
-        'brand_professional_id'    => $brand->id,
-        'affiliate_professional_id'=> $aff->id,
-        'net_payout_cents'         => 900,
-        'failure_category'         => 'stripe_connect',
+        'id' => 'pay-brand-1',
+        'brand_professional_id' => $brand->id,
+        'affiliate_professional_id' => $aff->id,
+        'net_payout_cents' => 900,
+        'failure_category' => 'stripe_connect',
     ]);
 
     $controller = app(BrandPayoutsController::class);
-    $resource   = $controller->index(makeBrandPayoutsRequest($brand));
-    $response   = $resource->toResponse(makeBrandPayoutsRequest($brand));
-    $body       = json_decode($response->getContent(), true);
+    $resource = $controller->index(makeBrandPayoutsRequest($brand));
+    $response = $resource->toResponse(makeBrandPayoutsRequest($brand));
+    $body = json_decode($response->getContent(), true);
 
     expect($response->getStatusCode())->toBe(200);
     expect($body['data'])->toHaveCount(1);
 
     $item = $body['data'][0];
     expect($item['id'])->toBe('pay-brand-1');
-    // Lifecycle fields must be present on brand view.
+    // Lifecycle fields surfaced on the brand view under Option A. The v1
+    // funding_failure_count / next_retry_at retry-loop fields are gone (Phase 9
+    // cleanup — no more funding retry lifecycle under destination charges); the
+    // resource now exposes payment_intent_id so brands can cross-reference the
+    // Stripe dashboard for receipt lookup.
     expect($item)->toHaveKeys([
         'failure_code', 'failure_category', 'failure_reason',
         'stripe_error_code', 'stripe_error_message',
-        'funding_failure_count',
+        'payment_intent_id',
     ]);
     expect($item['failure_category'])->toBe('stripe_connect');
     // Affiliate relation
@@ -111,23 +113,23 @@ it('returns a paginated list of brand payouts with affiliate name and lifecycle 
 it('does not include payouts belonging to another brand', function () {
     $brandA = createBrandTenant('bp-brand-a');
     $brandB = createBrandTenant('bp-brand-b');
-    $aff    = createAffiliateTenant('bp-aff-shared');
+    $aff = createAffiliateTenant('bp-aff-shared');
 
     insertBrandPayout([
-        'id'                       => 'pay-a-only',
-        'brand_professional_id'    => $brandA->id,
-        'affiliate_professional_id'=> $aff->id,
+        'id' => 'pay-a-only',
+        'brand_professional_id' => $brandA->id,
+        'affiliate_professional_id' => $aff->id,
     ]);
     insertBrandPayout([
-        'id'                       => 'pay-b-only',
-        'brand_professional_id'    => $brandB->id,
-        'affiliate_professional_id'=> $aff->id,
+        'id' => 'pay-b-only',
+        'brand_professional_id' => $brandB->id,
+        'affiliate_professional_id' => $aff->id,
     ]);
 
     $controller = app(BrandPayoutsController::class);
-    $resource   = $controller->index(makeBrandPayoutsRequest($brandA));
-    $response   = $resource->toResponse(makeBrandPayoutsRequest($brandA));
-    $body       = json_decode($response->getContent(), true);
+    $resource = $controller->index(makeBrandPayoutsRequest($brandA));
+    $response = $resource->toResponse(makeBrandPayoutsRequest($brandA));
+    $body = json_decode($response->getContent(), true);
 
     $ids = collect($body['data'])->pluck('id')->all();
     expect($ids)->toContain('pay-a-only');

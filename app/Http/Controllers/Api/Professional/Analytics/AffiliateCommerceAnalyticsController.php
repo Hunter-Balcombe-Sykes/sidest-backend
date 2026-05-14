@@ -279,7 +279,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
         try {
             $pendingAgg = DB::table('commerce.commission_payouts')
                 ->where('affiliate_professional_id', $professionalId)
-                ->whereIn('status', ['pending', 'pending_funds', 'collecting', 'transferring'])
+                ->whereIn('status', ['pending', 'processing'])
                 ->selectRaw('
                     CAST(COALESCE(SUM(net_payout_cents), 0) AS INTEGER) as net_pending_cents,
                     MIN(eligible_after) as next_eligible_at,
@@ -350,7 +350,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
 
             $atRisk = DB::table('commerce.commission_payouts')
                 ->where('affiliate_professional_id', $professionalId)
-                ->whereIn('status', ['pending', 'pending_funds'])
+                ->where('status', 'pending')
                 ->where('void_at', '>', now())
                 ->selectRaw('
                     COUNT(*) as payout_count,
@@ -365,7 +365,7 @@ class AffiliateCommerceAnalyticsController extends ApiController
                 $earliest = DB::table('commerce.commission_payouts')
                     ->where('affiliate_professional_id', $professionalId)
                     ->where('void_at', '=', $atRisk->earliest_at)
-                    ->whereIn('status', ['pending', 'pending_funds'])
+                    ->where('status', 'pending')
                     ->orderBy('net_payout_cents', 'desc')
                     ->select('net_payout_cents')
                     ->first();

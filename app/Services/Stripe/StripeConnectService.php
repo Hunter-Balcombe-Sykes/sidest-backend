@@ -10,17 +10,27 @@ use Illuminate\Support\Facades\Cache;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
 
-// V2: Core. Stripe Connect Express onboarding, payment method collection, wallet management, and manual top-up checkout sessions. Required for affiliate payout flow.
+/**
+ * Stripe v2 Accounts + destination-charge plumbing.
+ *
+ * Brands get a single v2 Account with three configurations:
+ *   - merchant   → card_payments capability (so the destination charge has a settlement merchant)
+ *   - customer   → enables PaymentMethod storage on the brand's own Account (the Account IS the customer)
+ *   - recipient  → stripe_balance.stripe_transfers (required for on_behalf_of destination charges)
+ *
+ * Affiliates get a v2 Account with only the recipient configuration — they receive transfers, they
+ * never charge a customer themselves.
+ *
+ * Responsibilities are pinned to the platform: fees_collector=application and losses_collector=application.
+ * Stripe processing fees come out of our application_fee_amount, and Partna bears risk on negative balances.
+ *
+ * The status cache wraps a single v2 account retrieve per professional and is busted by the platform
+ * webhook (v2.core.account.* events) and by `?fresh=1` after onboarding return.
+ */
 class StripeConnectService
 {
     private StripeClient $stripe;
 
-    /**
-     * Cache TTL (seconds) for the syncAccountStatus payload. Short on purpose:
-     * Stripe Connect status changes are eventual via webhooks, so a 60s window
-     * bounds how long a non-onboarding caller can see stale charges_enabled /
-     * payouts_enabled data when the account.updated webhook is in transit.
-     */
     private const STATUS_CACHE_TTL = 60;
 
     public function __construct(private readonly CacheLockService $cacheLock)
@@ -33,12 +43,9 @@ class StripeConnectService
 
     /**
      * Cache key for a connected account's status payload. Keyed on the Stripe
-     * account ID (not the professional ID) so the webhook bust path can
-     * forget the cache without a DB lookup — the webhook already carries the
-     * account ID in event->account.
-     *
-     * Static so the webhook handler can bust the cache without instantiating
-     * the service (which would force-load the Stripe SDK with a real secret).
+     * account ID so the webhook bust path can forget the cache without a DB
+     * lookup — the v2.core.account.* event carries the account ID in
+     * data.related_object.id.
      */
     public static function statusCacheKey(string $accountId): string
     {
@@ -49,11 +56,6 @@ class StripeConnectService
      * Evict the cached account status. MUST clear the SWR ":stale" copy too —
      * forgetting only the primary key would leave the stale-while-revalidate
      * last-good copy live for up to 10×TTL, defeating the bust entirely.
-     *
-     * Called from:
-     *   - StripeConnectController@status when the request includes ?fresh=1
-     *     (post-onboarding redirect; user must see live state, not cached).
-     *   - StripeConnectWebhookController on every account.updated event.
      */
     public static function forgetStatusCache(string $accountId): void
     {
@@ -63,24 +65,8 @@ class StripeConnectService
     }
 
     /**
-     * Create a Stripe Connect Express account for a professional/influencer/brand.
-     *
-     * Requires country_code to be set on the professional. Without it the
-     * account would silently default to 'AU' and Stripe would later reject
-     * the KYC form for non-AU users. Fail fast instead so the frontend can
-     * prompt for country before onboarding.
-     *
-     * Brands and affiliates take different paths:
-     *   - Affiliate → business_type=individual, transfers capability only.
-     *     Affiliates only RECEIVE transfers — they never process customer
-     *     payments themselves.
-     *   - Brand → business_type=company, BOTH transfers AND card_payments
-     *     capabilities. Brands need card_payments so we can run the
-     *     commission charge as a direct charge on their account (brand =
-     *     merchant of record on the customer's statement), and transfers so
-     *     the funds can flow on from brand → affiliate. Stripe forces these
-     *     two capabilities together — see
-     *     https://docs.stripe.com/connect/account-capabilities.
+     * Dispatch: create a brand or affiliate v2 Account based on professional type.
+     * Persists the new account ID + status='onboarding' to the professional.
      */
     public function createConnectAccount(Professional $professional): string
     {
@@ -91,60 +77,131 @@ class StripeConnectService
             );
         }
 
-        $isBrand = $professional->isBrand();
+        $accountId = $professional->isBrand()
+            ? $this->createBrandConnectAccount($professional)
+            : $this->createAffiliateConnectAccount($professional);
 
-        $capabilities = ['transfers' => ['requested' => true]];
-        if ($isBrand) {
-            // Direct-charge commission payouts require the connected account to
-            // accept card payments. Without card_payments the PaymentIntent
-            // with stripe_account=brand option would 400 immediately.
-            $capabilities['card_payments'] = ['requested' => true];
-        }
-
-        $accountPayload = array_merge([
-            'type' => 'express',
-            'country' => $this->mapCountryCode($professional->country_code),
-            'email' => $professional->primary_email,
-            'business_type' => $isBrand ? 'company' : 'individual',
-            'metadata' => [
-                'sidest_professional_id' => $professional->id,
-                'professional_type' => $professional->professional_type,
-            ],
-            'capabilities' => $capabilities,
-        ], $this->buildAccountPrefillPayload($professional));
-
-        $account = $this->stripe->accounts->create(
-            $accountPayload,
-            ['idempotency_key' => "acct_{$professional->id}"],
-        );
-
-        $update = [
-            'stripe_connect_account_id' => $account->id,
+        $professional->update([
+            'stripe_connect_account_id' => $accountId,
             'stripe_connect_status' => 'onboarding',
-            'stripe_grace_period_ends_at' => $professional->stripe_grace_period_ends_at
-                ?? now()->addDays((int) config('partna.store.signup_grace_period_days', 30)),
+        ]);
+
+        return $accountId;
+    }
+
+    /**
+     * Create a brand v2 Account with merchant + customer + recipient configurations.
+     *
+     * - merchant.card_payments: brand is settlement merchant on the destination charge,
+     *   so Stripe needs card_payments on the brand's Account.
+     * - customer (empty config): enables PaymentMethod storage scoped to this Account.
+     *   The brand's saved card lives here.
+     * - recipient.stripe_balance.stripe_transfers: required for the destination charge's
+     *   on_behalf_of=brand_acct → transfer_data.destination=affiliate_acct flow. Without
+     *   this capability the PI create rejects with an invalid_request_error.
+     *
+     * Dashboard=express gives the brand a hosted dashboard to resolve KYC issues and
+     * view their charge history. Responsibilities are application-collected so Stripe
+     * processing fees come out of our application_fee_amount and Partna bears negative
+     * balances (mitigated by the order grace period before a payout settles).
+     */
+    public function createBrandConnectAccount(Professional $brand): string
+    {
+        $payload = [
+            'contact_email' => $this->stringOrNull($brand->primary_email),
+            'identity' => $this->buildBrandIdentityPayload($brand),
+            'configuration' => [
+                'merchant' => [
+                    'capabilities' => [
+                        'card_payments' => ['requested' => true],
+                    ],
+                ],
+                // Empty object — presence of the customer config is what enables PM storage.
+                'customer' => (object) [],
+                'recipient' => [
+                    'capabilities' => [
+                        'stripe_balance' => [
+                            'stripe_transfers' => ['requested' => true],
+                        ],
+                    ],
+                ],
+            ],
+            'defaults' => [
+                'responsibilities' => [
+                    'fees_collector' => 'application',
+                    'losses_collector' => 'application',
+                ],
+                'currency' => strtolower($this->resolveShopCurrency($brand) ?? 'aud'),
+            ],
+            'dashboard' => 'express',
+            'metadata' => [
+                'sidest_professional_id' => $brand->id,
+                'professional_type' => $brand->professional_type,
+            ],
         ];
 
-        // Seed wallet currency from Shopify's shop_currency so brands with
-        // non-AUD stores don't get locked into the AUD DB default.
-        $shopCurrency = $this->resolveShopCurrency($professional);
-        if ($shopCurrency) {
-            $update['stripe_manual_balance_currency'] = $shopCurrency;
-        }
-
-        $professional->update($update);
+        $account = $this->stripe->v2->core->accounts->create(
+            $this->filterNullsRecursive($payload),
+            ['idempotency_key' => "acct_brand_{$brand->id}"],
+        );
 
         return $account->id;
     }
 
     /**
-     * Generate an onboarding link for a Connect Express account.
+     * Create an affiliate v2 Account with recipient configuration only.
      *
-     * If the professional previously soft-disconnected (status='disconnected'
-     * but account_id preserved), reset their status to 'onboarding' so the
-     * webhook handler stops skipping updates and the next account.updated
-     * event flows through normally. Stripe KYC is preserved on the account,
-     * so reconnecting is typically a one-click flow.
+     * Affiliates receive transfers from the platform balance (auto-routed by destination
+     * charges) and pay out to their external bank. They never charge a customer themselves,
+     * so no merchant or customer configuration is requested.
+     */
+    public function createAffiliateConnectAccount(Professional $affiliate): string
+    {
+        $payload = [
+            'contact_email' => $this->stringOrNull($affiliate->primary_email),
+            'identity' => $this->buildAffiliateIdentityPayload($affiliate),
+            'configuration' => [
+                'recipient' => [
+                    'capabilities' => [
+                        'stripe_balance' => [
+                            'stripe_transfers' => ['requested' => true],
+                        ],
+                    ],
+                ],
+            ],
+            'defaults' => [
+                'responsibilities' => [
+                    'fees_collector' => 'application',
+                    'losses_collector' => 'application',
+                ],
+                'currency' => strtolower($this->resolveShopCurrency($affiliate) ?? 'aud'),
+            ],
+            'dashboard' => 'express',
+            'metadata' => [
+                'sidest_professional_id' => $affiliate->id,
+                'professional_type' => $affiliate->professional_type,
+            ],
+        ];
+
+        $account = $this->stripe->v2->core->accounts->create(
+            $this->filterNullsRecursive($payload),
+            ['idempotency_key' => "acct_affiliate_{$affiliate->id}"],
+        );
+
+        return $account->id;
+    }
+
+    /**
+     * Create a v2 Account onboarding link.
+     *
+     * For brands we list all three configurations so the hosted flow collects merchant
+     * KYC, customer PM consent (covered by the separate Checkout setup session, but
+     * declaring the config here gates capability activation), and recipient details.
+     * Affiliates only need recipient.
+     *
+     * ?fresh=1 is appended to return_url so the dashboard's first /stripe/status call
+     * after redirect skips the cache and shows live capability state instead of racing
+     * the v2.core.account.* webhook delivery.
      */
     public function createOnboardingLink(Professional $professional, string $returnUrl, string $refreshUrl): string
     {
@@ -152,125 +209,54 @@ class StripeConnectService
 
         if (! $accountId) {
             $accountId = $this->createConnectAccount($professional);
-        } else {
-            if ($professional->stripe_connect_status === 'disconnected') {
-                $professional->update(['stripe_connect_status' => 'onboarding']);
-            }
-
-            // Patch business_type on any existing account that hasn't finished
-            // onboarding yet — brands get 'company', everyone else 'individual'.
-            // Stripe permits this update while details_submitted is false; once
-            // submitted it's locked in.
-            $desiredBusinessType = $professional->isBrand() ? 'company' : 'individual';
-            try {
-                $existing = $this->stripe->accounts->retrieve($accountId);
-                if (! $existing->details_submitted && $existing->business_type !== $desiredBusinessType) {
-                    $this->stripe->accounts->update($accountId, ['business_type' => $desiredBusinessType]);
-                }
-            } catch (ApiErrorException) {
-                // Non-fatal — continue with existing account as-is.
-            }
+        } elseif ($professional->stripe_connect_status === 'not_connected') {
+            $professional->update(['stripe_connect_status' => 'onboarding']);
         }
 
-        // Inject ?fresh=1 so the dashboard's first /stripe/status call after
-        // Stripe redirects the user back skips the cache. Without this the
-        // post-onboarding screen would race the account.updated webhook and
-        // typically render the pre-onboarding state for several seconds.
+        $configurations = $professional->isBrand()
+            ? ['merchant', 'customer', 'recipient']
+            : ['recipient'];
+
         $returnUrlWithBypass = $returnUrl.(str_contains($returnUrl, '?') ? '&' : '?').'fresh=1';
 
-        $link = $this->stripe->accountLinks->create([
+        $link = $this->stripe->v2->core->accountLinks->create([
             'account' => $accountId,
-            'refresh_url' => $refreshUrl,
-            'return_url' => $returnUrlWithBypass,
-            'type' => 'account_onboarding',
+            'use_case' => [
+                'type' => 'account_onboarding',
+                'account_onboarding' => [
+                    'configurations' => $configurations,
+                    'refresh_url' => $refreshUrl,
+                    'return_url' => $returnUrlWithBypass,
+                ],
+            ],
         ]);
 
         return $link->url;
     }
 
     /**
-     * Check the status of a Connect account and sync it locally.
+     * Create a v2 Express dashboard link.
      *
-     * If the professional is in the locally-disconnected state, we skip the
-     * Stripe round-trip entirely — their account still exists at Stripe and
-     * would return 'active', but the user has explicitly opted out. Let them
-     * stay disconnected until they reconnect via createOnboardingLink.
-     */
-    public function syncAccountStatus(Professional $professional): array
-    {
-        $accountId = $professional->stripe_connect_account_id;
-
-        if (! $accountId) {
-            return [
-                'status' => 'not_connected',
-                'charges_enabled' => false,
-                'payouts_enabled' => false,
-                'details_submitted' => false,
-            ];
-        }
-
-        if ($professional->stripe_connect_status === 'disconnected') {
-            return [
-                'status' => 'disconnected',
-                'charges_enabled' => false,
-                'payouts_enabled' => false,
-                'details_submitted' => false,
-            ];
-        }
-
-        // Cache wraps the Stripe round-trip only — the early-return branches
-        // above are already free. Bust paths: ?fresh=1 on the controller
-        // (post-onboarding redirect) and account.updated webhook.
-        return $this->cacheLock->rememberLocked(
-            self::statusCacheKey($accountId),
-            self::STATUS_CACHE_TTL,
-            fn () => $this->fetchAndSyncAccountStatus($professional, $accountId),
-        );
-    }
-
-    /**
-     * Inner closure for syncAccountStatus — single Stripe call + DB sync, then
-     * the response shape consumed by /api/stripe/status.
-     *
-     * @return array{status: string, charges_enabled: bool, payouts_enabled: bool, details_submitted: bool, requirements: array<int, string>}
-     */
-    private function fetchAndSyncAccountStatus(Professional $professional, string $accountId): array
-    {
-        $account = $this->stripe->accounts->retrieve($accountId);
-
-        $status = self::determineAccountStatus($account);
-
-        if ($professional->stripe_connect_status !== $status) {
-            $professional->update(['stripe_connect_status' => $status]);
-        }
-
-        return [
-            'status' => $status,
-            'charges_enabled' => (bool) $account->charges_enabled,
-            'payouts_enabled' => (bool) $account->payouts_enabled,
-            'details_submitted' => (bool) $account->details_submitted,
-            'requirements' => $account->requirements?->currently_due ?? [],
-        ];
-    }
-
-    /**
-     * Get the Stripe Express dashboard login link for a connected account.
+     * Available to active and restricted accounts so restricted-state users can resolve
+     * KYC issues themselves. not_connected/onboarding accounts return null — the
+     * frontend routes them to createOnboardingLink instead.
      */
     public function createDashboardLink(Professional $professional): ?string
     {
         $accountId = $professional->stripe_connect_account_id;
 
-        // Allow restricted accounts to access their dashboard so they can resolve
-        // KYC issues themselves. Previously this was 'active'-only which locked
-        // out the exact users who most needed the dashboard. Disconnected/onboarding
-        // accounts still return null — the frontend routes them to the onboarding
-        // link instead.
         if (! $accountId || ! in_array($professional->stripe_connect_status, ['active', 'restricted'], true)) {
             return null;
         }
 
         try {
-            $link = $this->stripe->accounts->createLoginLink($accountId);
+            $link = $this->stripe->v2->core->accountLinks->create([
+                'account' => $accountId,
+                'use_case' => [
+                    'type' => 'account_management',
+                    'account_management' => [],
+                ],
+            ]);
 
             return $link->url;
         } catch (ApiErrorException) {
@@ -279,98 +265,197 @@ class StripeConnectService
     }
 
     /**
-     * Soft-disconnect a professional's Stripe Connect account.
+     * Read the v2 Account, derive status from capabilities, persist if changed.
      *
-     * We preserve the stripe_connect_account_id so reconnection reuses the
-     * existing Express account — no Stripe orphan accumulation, no lost KYC
-     * data for the affiliate, reconnection is a one-click flow. Express
-     * doesn't support a clean "reject/delete" API call for accounts with
-     * history, so this local-flag approach is the canonical pattern.
+     * Cache wraps the Stripe round-trip only; the not_connected early-returns are
+     * already free. Bust paths: ?fresh=1 on the controller (post-onboarding redirect)
+     * and v2.core.account.* events on the platform-thin webhook.
      *
-     * The payout service already guards on stripe_connect_status === 'active',
-     * so disconnected affiliates don't receive payouts. The webhook handler
-     * skips account.updated events for disconnected accounts to prevent
-     * late Stripe events from silently re-activating them.
+     * @return array{
+     *     status: string,
+     *     stripe_connect_account_id: ?string,
+     *     card_payments_active: bool,
+     *     stripe_transfers_active: bool,
+     *     requirements: array<int, string>
+     * }
+     */
+    public function syncAccountStatus(Professional $professional): array
+    {
+        $accountId = $professional->stripe_connect_account_id;
+
+        if (! $accountId) {
+            return $this->disconnectedStatusPayload();
+        }
+
+        if ($professional->stripe_connect_status === 'not_connected') {
+            return $this->disconnectedStatusPayload();
+        }
+
+        return $this->cacheLock->rememberLocked(
+            self::statusCacheKey($accountId),
+            self::STATUS_CACHE_TTL,
+            fn () => $this->fetchAndSyncAccountStatus($professional, $accountId),
+        );
+    }
+
+    /**
+     * Single Stripe round-trip + DB sync. Status is derived dual-capability against the
+     * v2 account configuration (see determineAccountStatus for the rules).
+     *
+     * @return array{
+     *     status: string,
+     *     stripe_connect_account_id: string,
+     *     card_payments_active: bool,
+     *     stripe_transfers_active: bool,
+     *     requirements: array<int, string>
+     * }
+     */
+    private function fetchAndSyncAccountStatus(Professional $professional, string $accountId): array
+    {
+        $account = $this->stripe->v2->core->accounts->retrieve($accountId, [
+            'include' => ['configuration.merchant', 'configuration.customer', 'configuration.recipient', 'requirements'],
+        ]);
+
+        $status = self::determineAccountStatus($account, $professional);
+
+        if ($professional->stripe_connect_status !== $status) {
+            $professional->update(['stripe_connect_status' => $status]);
+        }
+
+        return [
+            'status' => $status,
+            'stripe_connect_account_id' => $accountId,
+            'card_payments_active' => self::capabilityIsActive($account, 'configuration.merchant.capabilities.card_payments.status'),
+            'stripe_transfers_active' => self::capabilityIsActive($account, 'configuration.recipient.capabilities.stripe_balance.stripe_transfers.status'),
+            'requirements' => $this->extractRequirements($account),
+        ];
+    }
+
+    /**
+     * Derive the canonical local status from a v2 Account object.
+     *
+     * Dual-capability check (audit P0-4):
+     *   - Brand: BOTH card_payments AND stripe_transfers must be 'active', AND no
+     *     requirements.currently_due. Either capability alone or both with outstanding
+     *     requirements → 'restricted'. Neither → 'onboarding'.
+     *   - Affiliate: only stripe_transfers.status === 'active' matters.
+     *
+     * Without the dual check, a brand whose card_payments activated but whose
+     * stripe_transfers is still 'pending' would surface as 'active' locally while
+     * every destination-charge PI silently failed at Stripe.
+     */
+    public static function determineAccountStatus(object $account, Professional $professional): string
+    {
+        $transfersActive = self::capabilityIsActive($account, 'configuration.recipient.capabilities.stripe_balance.stripe_transfers.status');
+
+        if (! $professional->isBrand()) {
+            return $transfersActive ? 'active' : 'onboarding';
+        }
+
+        $cardActive = self::capabilityIsActive($account, 'configuration.merchant.capabilities.card_payments.status');
+        $requirementsDue = ! empty(data_get($account, 'requirements.currently_due', []));
+
+        if ($cardActive && $transfersActive && ! $requirementsDue) {
+            return 'active';
+        }
+
+        if ($cardActive || $transfersActive || $requirementsDue) {
+            return 'restricted';
+        }
+
+        return 'onboarding';
+    }
+
+    /**
+     * Soft-disconnect: null the Account ID and PM fields locally. Stripe-side the v2
+     * Account still exists with its KYC intact, but we lose the link entirely — the
+     * next onboarding creates a fresh Account.
+     *
+     * (C6 in the audit: previous plan kept the account ID to support "reconnect with
+     * one click", but v2 Accounts can't be cleanly re-attached the same way, so we
+     * drop the reference and the user re-onboards from scratch if they come back.)
      */
     public function disconnectAccount(Professional $professional): void
     {
+        $accountId = $professional->stripe_connect_account_id;
+
         $professional->update([
-            'stripe_connect_status' => 'disconnected',
+            'stripe_connect_account_id' => null,
+            'stripe_connect_status' => 'not_connected',
+            'stripe_payment_method_id' => null,
+            'stripe_payment_method_brand' => null,
+            'stripe_payment_method_last4' => null,
         ]);
-    }
 
-    /**
-     * Create a Stripe Customer scoped to the BRAND'S OWN Connect account so the
-     * saved card lives on the same account that will later run the commission
-     * direct charge. Brand must already be onboarded — Stripe rejects customer
-     * creates on accounts that don't have card_payments capability.
-     */
-    public function createBrandConnectCustomer(Professional $brand): string
-    {
-        if (! $brand->stripe_connect_account_id) {
-            throw new \RuntimeException('Brand must complete Stripe Connect onboarding before adding a payment method.');
+        if ($accountId !== null) {
+            self::forgetStatusCache($accountId);
         }
-
-        $customer = $this->stripe->customers->create(
-            [
-                'email' => $brand->primary_email,
-                'name' => $brand->display_name,
-                'metadata' => [
-                    'sidest_professional_id' => $brand->id,
-                    'professional_type' => $brand->professional_type,
-                    'purpose' => 'brand_commission_funding',
-                ],
-            ],
-            [
-                'stripe_account' => $brand->stripe_connect_account_id,
-                'idempotency_key' => "brand_connect_customer_{$brand->id}",
-            ],
-        );
-
-        $brand->update([
-            'stripe_connect_customer_id' => $customer->id,
-        ]);
-
-        return $customer->id;
     }
 
     /**
-     * Stripe Checkout hosted setup flow scoped to the BRAND'S OWN Connect
-     * account. The resulting Customer + PaymentMethod live on the brand's
-     * account, where the commission direct charge will later read them.
+     * Create a Checkout session that saves a card to the brand's v2 Account.
      *
-     * The `stripe_account` request option (SDK form of the `Stripe-Account`
-     * HTTP header) is what makes Stripe create the session on the brand's
-     * account instead of Partna's platform.
+     * customer_account ties the SetupIntent to the brand's v2 Account directly (no
+     * separate v1 Customer object). The session runs on the platform — no
+     * stripe_account header — because v2 Accounts are addressed by ID, not header.
+     *
+     * @return array{checkout_url: string, session_id: string}
      */
-    public function createBrandConnectPaymentMethodSetupSession(
+    public function createBrandPaymentMethodSetupSession(
         Professional $brand,
         string $successUrl,
         string $cancelUrl,
     ): array {
-        if (! $brand->stripe_connect_account_id) {
-            throw new \RuntimeException('Brand must complete Stripe Connect onboarding before adding a payment method.');
-        }
+        $this->assertBrandIsActive($brand);
 
-        $customerId = $brand->stripe_connect_customer_id;
-        if (! $customerId) {
-            $customerId = $this->createBrandConnectCustomer($brand);
-        }
+        return $this->createCheckoutSetupSession($brand, $successUrl, $cancelUrl, ['card']);
+    }
 
-        $session = $this->stripe->checkout->sessions->create(
-            [
-                'mode' => 'setup',
-                'customer' => $customerId,
-                'payment_method_types' => ['card'],
-                'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_pm_session_id'),
-                'cancel_url' => $cancelUrl,
-                'metadata' => [
-                    'purpose' => 'brand_commission_payment_method',
-                    'sidest_professional_id' => $brand->id,
-                ],
+    /**
+     * Create a Checkout session that saves a BECS Direct Debit mandate to the brand's
+     * v2 Account. Stripe Checkout collects the BSB + account number and renders the
+     * mandate acceptance UI automatically.
+     *
+     * BECS settles T+2 and carries a 7-year dispute window under NPPA rules. With
+     * losses_collector='application' Partna bears that exposure — disputed BECS payments
+     * within the 7-year window are debited from the platform balance regardless of when
+     * they occurred. Any operator-level limit on which brands can use BECS lives outside
+     * this service (none exists today).
+     *
+     * @return array{checkout_url: string, session_id: string}
+     */
+    public function createBrandBecsSetupSession(
+        Professional $brand,
+        string $successUrl,
+        string $cancelUrl,
+    ): array {
+        $this->assertBrandIsActive($brand);
+
+        return $this->createCheckoutSetupSession($brand, $successUrl, $cancelUrl, ['au_becs_debit']);
+    }
+
+    /**
+     * @param  array<int, string>  $paymentMethodTypes
+     * @return array{checkout_url: string, session_id: string}
+     */
+    private function createCheckoutSetupSession(
+        Professional $brand,
+        string $successUrl,
+        string $cancelUrl,
+        array $paymentMethodTypes,
+    ): array {
+        $session = $this->stripe->checkout->sessions->create([
+            'mode' => 'setup',
+            'customer_account' => $brand->stripe_connect_account_id,
+            'payment_method_types' => $paymentMethodTypes,
+            'success_url' => $this->appendCheckoutSessionParam($successUrl, 'stripe_pm_session_id'),
+            'cancel_url' => $cancelUrl,
+            'metadata' => [
+                'purpose' => 'brand_commission_payment_method',
+                'sidest_professional_id' => $brand->id,
+                'requested_method' => $paymentMethodTypes[0] ?? 'card',
             ],
-            ['stripe_account' => $brand->stripe_connect_account_id],
-        );
+        ]);
 
         return [
             'checkout_url' => $session->url,
@@ -379,26 +464,24 @@ class StripeConnectService
     }
 
     /**
-     * Sync the brand's saved card from a completed Checkout setup session that
-     * ran on the BRAND'S OWN Connect account. Mirrors
-     * syncPaymentMethodFromCheckoutSession but every Stripe API call carries
-     * `stripe_account = brand_connect_account_id` so the lookups hit the right
-     * account, and the IDs land in the brand-Connect-scoped columns.
+     * Persist a saved payment method from a completed Checkout setup session.
      *
-     * @return array{payment_method_id: string, setup_intent_id: string}
+     * Handles both card and BECS paths — payout_method is derived from the PM type
+     * Stripe returns ('card' → 'card', 'au_becs_debit' → 'becs'). The masked-display
+     * columns (brand, last4) cover both — for BECS, last4 is the account number tail
+     * and brand stores 'bank' or the financial institution name when Stripe provides it.
+     *
+     * @return array{payment_method_id: string, payout_method: string}
      */
-    public function syncBrandConnectPaymentMethodFromCheckoutSession(Professional $brand, string $sessionId): array
+    public function syncBrandPaymentMethodFromCheckoutSession(Professional $brand, string $sessionId): array
     {
         if (! $brand->stripe_connect_account_id) {
             throw new \RuntimeException('Brand has no Stripe Connect account.');
         }
 
-        $stripeAccountOption = ['stripe_account' => $brand->stripe_connect_account_id];
-
         $session = $this->stripe->checkout->sessions->retrieve(
             $sessionId,
-            ['expand' => ['setup_intent']],
-            $stripeAccountOption,
+            ['expand' => ['setup_intent.payment_method']],
         );
 
         if (($session->mode ?? null) !== 'setup') {
@@ -410,162 +493,70 @@ class StripeConnectService
         }
 
         $metadataProId = $session->metadata?->sidest_professional_id ?? null;
-        if ($metadataProId && $metadataProId !== $brand->id) {
+        if ($metadataProId !== null && $metadataProId !== $brand->id) {
             throw new \RuntimeException('Setup session does not belong to this account.');
         }
 
-        $sessionCustomerId = is_string($session->customer)
-            ? $session->customer
-            : ($session->customer->id ?? null);
-
-        if ($brand->stripe_connect_customer_id && $sessionCustomerId && $brand->stripe_connect_customer_id !== $sessionCustomerId) {
-            throw new \RuntimeException('Setup session customer does not match account customer.');
+        $setupIntent = $session->setup_intent;
+        if (is_string($setupIntent) || $setupIntent === null) {
+            throw new \RuntimeException('Setup session missing expanded setup intent.');
         }
-
-        if (! $brand->stripe_connect_customer_id && $sessionCustomerId) {
-            $brand->update(['stripe_connect_customer_id' => $sessionCustomerId]);
-            $brand->refresh();
-        }
-
-        $setupIntentId = is_string($session->setup_intent)
-            ? $session->setup_intent
-            : ($session->setup_intent->id ?? null);
-
-        if (! $setupIntentId) {
-            throw new \RuntimeException('Setup session missing setup intent.');
-        }
-
-        $setupIntent = $this->stripe->setupIntents->retrieve(
-            $setupIntentId,
-            ['expand' => ['payment_method']],
-            $stripeAccountOption,
-        );
 
         if (($setupIntent->status ?? null) !== 'succeeded') {
             throw new \RuntimeException('Setup intent has not succeeded.');
         }
 
-        $paymentMethodId = is_string($setupIntent->payment_method)
-            ? $setupIntent->payment_method
-            : ($setupIntent->payment_method->id ?? null);
-
-        if (! $paymentMethodId) {
+        $paymentMethod = $setupIntent->payment_method;
+        if (is_string($paymentMethod) || $paymentMethod === null) {
             throw new \RuntimeException('No payment method found on setup intent.');
         }
 
-        $this->saveBrandConnectPaymentMethod($brand, $paymentMethodId);
+        [$payoutMethod, $brandLabel, $last4] = $this->extractPaymentMethodDisplay($paymentMethod);
+
+        $brand->update([
+            'stripe_payment_method_id' => $paymentMethod->id,
+            'stripe_payment_method_brand' => $brandLabel,
+            'stripe_payment_method_last4' => $last4,
+            'payout_method' => $payoutMethod,
+        ]);
 
         return [
-            'payment_method_id' => $paymentMethodId,
-            'setup_intent_id' => $setupIntentId,
+            'payment_method_id' => $paymentMethod->id,
+            'payout_method' => $payoutMethod,
         ];
     }
 
     /**
-     * Save the brand's default payment method on the BRAND'S OWN Connect
-     * account. Reads the PM with `stripe_account = brand_connect_id` and
-     * persists the IDs to the brand-Connect-scoped columns.
+     * Detach the brand's saved PaymentMethod from the v2 Account and null the local
+     * cache columns. Tolerant of "already detached" / 404 — the user state is what
+     * matters; the PM is gone from Stripe one way or another.
      */
-    public function saveBrandConnectPaymentMethod(Professional $brand, string $paymentMethodId): void
+    public function removeBrandPaymentMethod(Professional $brand): void
     {
-        if (! $brand->stripe_connect_account_id) {
-            throw new \RuntimeException('Brand has no Stripe Connect account.');
+        $paymentMethodId = $brand->stripe_payment_method_id;
+
+        if ($paymentMethodId !== null) {
+            try {
+                $this->stripe->paymentMethods->detach($paymentMethodId);
+            } catch (ApiErrorException) {
+                // PM already detached or never existed at Stripe — proceed with local cleanup.
+            }
         }
-
-        $stripeAccountOption = ['stripe_account' => $brand->stripe_connect_account_id];
-
-        $pm = $this->stripe->paymentMethods->retrieve($paymentMethodId, null, $stripeAccountOption);
 
         $brand->update([
-            'stripe_connect_payment_method_id' => $paymentMethodId,
-            'stripe_payment_method_brand' => $pm->card?->brand ?? null,
-            'stripe_payment_method_last4' => $pm->card?->last4 ?? null,
+            'stripe_payment_method_id' => null,
+            'stripe_payment_method_brand' => null,
+            'stripe_payment_method_last4' => null,
+            'payout_method' => null,
         ]);
-
-        if ($brand->stripe_connect_customer_id) {
-            $this->stripe->customers->update(
-                $brand->stripe_connect_customer_id,
-                ['invoice_settings' => ['default_payment_method' => $paymentMethodId]],
-                $stripeAccountOption,
-            );
-        }
     }
 
     /**
-     * Check if a brand has a valid payment method for commission direct charges.
-     * Reads the brand-Connect-scoped columns (the platform-scoped columns are
-     * for SaaS billing, not commissions).
+     * True iff the brand has a saved payment method ready for commission destination charges.
      */
     public function brandHasPaymentMethod(Professional $brand): bool
     {
-        return $brand->stripe_connect_customer_id !== null
-            && $brand->stripe_connect_payment_method_id !== null;
-    }
-
-    /**
-     * List a brand's saved payment methods on their Connect account.
-     */
-    public function listPaymentMethods(Professional $brand): array
-    {
-        if (! $brand->stripe_connect_account_id || ! $brand->stripe_connect_customer_id) {
-            return [];
-        }
-
-        $methods = $this->stripe->paymentMethods->all(
-            [
-                'customer' => $brand->stripe_connect_customer_id,
-                'type' => 'card',
-            ],
-            ['stripe_account' => $brand->stripe_connect_account_id],
-        );
-
-        return array_map(fn ($m) => [
-            'id' => $m->id,
-            'brand' => $m->card?->brand,
-            'last4' => $m->card?->last4,
-            'exp_month' => $m->card?->exp_month,
-            'exp_year' => $m->card?->exp_year,
-            'is_default' => $m->id === $brand->stripe_connect_payment_method_id,
-        ], $methods->data);
-    }
-
-    /**
-     * Remove a brand's commission-payment setup. Clears the brand-Connect-scoped
-     * columns only — the platform-scoped columns belong to SaaS billing and are
-     * managed separately.
-     */
-    public function removeBrandPaymentSetup(Professional $brand): void
-    {
-        $brand->update([
-            'stripe_connect_customer_id' => null,
-            'stripe_connect_payment_method_id' => null,
-            'stripe_payment_method_brand' => null,
-            'stripe_payment_method_last4' => null,
-        ]);
-    }
-
-    private function appendCheckoutSessionParam(string $url, string $param): string
-    {
-        $separator = str_contains($url, '?') ? '&' : '?';
-
-        return $url.$separator.$param.'={CHECKOUT_SESSION_ID}';
-    }
-
-    /**
-     * Determine the Connect account status from a Stripe Account object.
-     * Shared by both the service and the webhook controller.
-     */
-    public static function determineAccountStatus(object $account): string
-    {
-        if ($account->charges_enabled && $account->payouts_enabled && $account->details_submitted) {
-            return 'active';
-        }
-
-        if ($account->requirements?->disabled_reason ?? null) {
-            return 'restricted';
-        }
-
-        return 'onboarding';
+        return ! empty($brand->stripe_payment_method_id);
     }
 
     /**
@@ -589,9 +580,157 @@ class StripeConnectService
     }
 
     /**
+     * @return array{
+     *     status: string,
+     *     stripe_connect_account_id: ?string,
+     *     card_payments_active: bool,
+     *     stripe_transfers_active: bool,
+     *     requirements: array<int, string>
+     * }
+     */
+    private function disconnectedStatusPayload(): array
+    {
+        return [
+            'status' => 'not_connected',
+            'stripe_connect_account_id' => null,
+            'card_payments_active' => false,
+            'stripe_transfers_active' => false,
+            'requirements' => [],
+        ];
+    }
+
+    private function assertBrandIsActive(Professional $brand): void
+    {
+        if (! $brand->stripe_connect_account_id) {
+            throw new \RuntimeException('Brand must complete Stripe Connect onboarding before adding a payment method.');
+        }
+
+        if (! in_array($brand->stripe_connect_status, ['active', 'restricted'], true)) {
+            throw new \RuntimeException('Brand Stripe Connect account is not active.');
+        }
+    }
+
+    /**
+     * Build the minimum v2 identity block for a brand.
+     *
+     * We seed entity_type + country only. Stripe collects the rest during onboarding —
+     * Express renders prefill fields when present but a richer prefill block uses a
+     * different shape from v1 and is a Phase 13+ enhancement (out of scope here).
+     *
+     * @return array<string, mixed>
+     */
+    private function buildBrandIdentityPayload(Professional $brand): array
+    {
+        return [
+            'entity_type' => 'company',
+            'country' => $this->mapCountryCode($brand->country_code),
+        ];
+    }
+
+    /**
+     * Build the minimum v2 identity block for an affiliate.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildAffiliateIdentityPayload(Professional $affiliate): array
+    {
+        return [
+            'entity_type' => 'individual',
+            'country' => $this->mapCountryCode($affiliate->country_code),
+        ];
+    }
+
+    /**
+     * Extract masked-display fields from a PaymentMethod, returning [payout_method, brand_label, last4].
+     *
+     * @return array{0: string, 1: ?string, 2: ?string}
+     */
+    private function extractPaymentMethodDisplay(object $paymentMethod): array
+    {
+        $type = (string) ($paymentMethod->type ?? '');
+
+        if ($type === 'card') {
+            return [
+                'card',
+                $this->stringOrNull($paymentMethod->card->brand ?? null),
+                $this->stringOrNull($paymentMethod->card->last4 ?? null),
+            ];
+        }
+
+        if ($type === 'au_becs_debit') {
+            return [
+                'becs',
+                $this->stringOrNull($paymentMethod->au_becs_debit->bsb_number ?? null) ?? 'bank',
+                $this->stringOrNull($paymentMethod->au_becs_debit->last4 ?? null),
+            ];
+        }
+
+        throw new \RuntimeException("Unsupported payment method type for brand payouts: {$type}");
+    }
+
+    /**
+     * Check whether a capability on a v2 Account is in the 'active' state.
+     *
+     * Capability paths follow the v2 shape, e.g.
+     *   configuration.merchant.capabilities.card_payments.status
+     *   configuration.recipient.capabilities.stripe_balance.stripe_transfers.status
+     */
+    private static function capabilityIsActive(object $account, string $path): bool
+    {
+        return data_get($account, $path) === 'active';
+    }
+
+    /**
+     * Pull the currently_due requirements list off a v2 Account, defaulting to empty.
+     *
+     * @return array<int, string>
+     */
+    private function extractRequirements(object $account): array
+    {
+        $list = data_get($account, 'requirements.currently_due');
+
+        if (! is_array($list)) {
+            return [];
+        }
+
+        return array_values(array_filter($list, 'is_string'));
+    }
+
+    private function appendCheckoutSessionParam(string $url, string $param): string
+    {
+        $separator = str_contains($url, '?') ? '&' : '?';
+
+        return $url.$separator.$param.'={CHECKOUT_SESSION_ID}';
+    }
+
+    /**
+     * Strip null/empty entries from a nested array so the Stripe SDK doesn't reject
+     * the v2 Account create on optional fields we don't have values for yet.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function filterNullsRecursive(array $payload): array
+    {
+        foreach ($payload as $key => $value) {
+            if (is_array($value)) {
+                $filtered = $this->filterNullsRecursive($value);
+                if ($filtered === []) {
+                    unset($payload[$key]);
+                } else {
+                    $payload[$key] = $filtered;
+                }
+            } elseif ($value === null) {
+                unset($payload[$key]);
+            }
+        }
+
+        return $payload;
+    }
+
+    /**
      * Stripe Connect supported countries as of 2026. Source:
      * https://docs.stripe.com/connect/cross-border-payouts#supported-countries-and-currencies
-     * Update when Stripe expands the list.
      *
      * @var array<int, string>
      */
@@ -617,132 +756,6 @@ class StripeConnectService
         return $upper;
     }
 
-    /**
-     * Build the Stripe Account prefill block from a Professional row.
-     *
-     * Stripe pre-populates the Express onboarding form from any business_profile
-     * and individual/company fields we pass on create. Missing fields are silently
-     * dropped (via array_filter) so partial data is safe. Fields stay editable
-     * for the user; we're saving them keystrokes, not locking values.
-     *
-     * Notes:
-     * - business_profile.product_description is only sent when there's no URL.
-     *   Stripe asks for one or the other; sending both is noisy.
-     * - phone is only sent when it looks like E.164 (starts with '+').
-     *   Free-form phone numbers cause Stripe to reject the entire create call.
-     * - Address is only sent when line1 AND country are both present. Stripe
-     *   rejects partial addresses without those two fields together.
-     * - For brands we emit `company` (display_name, phone, address); for
-     *   affiliates we emit `individual` (first/last name, email, phone, address).
-     *
-     * @return array<string, mixed>
-     */
-    private function buildAccountPrefillPayload(Professional $professional): array
-    {
-        $payload = [];
-
-        $url = is_string($professional->partna_url ?? null) && trim($professional->partna_url) !== ''
-            ? $professional->partna_url
-            : null;
-
-        $businessProfile = array_filter([
-            'name' => $this->stringOrNull($professional->display_name),
-            'url' => $url,
-            // Only fall back to description when no URL is set (Stripe asks for one).
-            'product_description' => $url === null ? $this->stringOrNull($professional->bio) : null,
-            'support_email' => $this->stringOrNull($professional->primary_email),
-        ]);
-
-        if ($businessProfile !== []) {
-            $payload['business_profile'] = $businessProfile;
-        }
-
-        $address = $this->buildAddressOrNull($professional);
-
-        if ($professional->isBrand()) {
-            $company = array_filter([
-                'name' => $this->stringOrNull($professional->display_name),
-                'phone' => $this->e164PhoneOrNull($professional->phone),
-            ]);
-            if ($address !== null) {
-                $company['address'] = $address;
-            }
-            if ($company !== []) {
-                $payload['company'] = $company;
-            }
-
-            return $payload;
-        }
-
-        $individual = array_filter([
-            'first_name' => $this->stringOrNull($professional->first_name),
-            'last_name' => $this->stringOrNull($professional->last_name),
-            'email' => $this->stringOrNull($professional->primary_email),
-            'phone' => $this->e164PhoneOrNull($professional->phone),
-        ]);
-
-        if ($address !== null) {
-            $individual['address'] = $address;
-        }
-
-        if ($individual !== []) {
-            $payload['individual'] = $individual;
-        }
-
-        return $payload;
-    }
-
-    /**
-     * Build a Stripe address block from location_* fields, or null when the
-     * required minimum (line1 + country) isn't present.
-     *
-     * The address is optional prefill — Stripe accepts the create call without
-     * it. If location_country is a free-form value ("Australia", "USA") that
-     * doesn't resolve to a Stripe-supported ISO code, skip the address block
-     * entirely rather than aborting the whole onboarding.
-     *
-     * @return array<string, string>|null
-     */
-    private function buildAddressOrNull(Professional $professional): ?array
-    {
-        $line1 = $this->stringOrNull($professional->location_street_address);
-        $rawCountry = $this->stringOrNull($professional->location_country);
-
-        if ($line1 === null || $rawCountry === null) {
-            return null;
-        }
-
-        $country = $this->mapCountryCodeOrNull($rawCountry);
-        if ($country === null) {
-            return null;
-        }
-
-        return array_filter([
-            'line1' => $line1,
-            'city' => $this->stringOrNull($professional->location_city),
-            'state' => $this->stringOrNull($professional->location_state),
-            'postal_code' => $this->stringOrNull($professional->location_postcode),
-            'country' => $country,
-        ]);
-    }
-
-    /**
-     * Tolerant variant of mapCountryCode — returns null instead of aborting
-     * when the value isn't a Stripe-supported ISO code. For optional
-     * prefill fields where an invalid country should drop the block, not
-     * blow up the request.
-     */
-    private function mapCountryCodeOrNull(?string $code): ?string
-    {
-        $upper = strtoupper(trim((string) $code));
-
-        if ($upper === '' || ! in_array($upper, self::STRIPE_CONNECT_SUPPORTED_COUNTRIES, true)) {
-            return null;
-        }
-
-        return $upper;
-    }
-
     private function stringOrNull(mixed $value): ?string
     {
         if (! is_string($value)) {
@@ -751,19 +764,5 @@ class StripeConnectService
         $trimmed = trim($value);
 
         return $trimmed === '' ? null : $trimmed;
-    }
-
-    /**
-     * Stripe rejects the entire account create when phone isn't E.164. Drop
-     * anything that doesn't start with '+' rather than risk a 400.
-     */
-    private function e164PhoneOrNull(mixed $value): ?string
-    {
-        $value = $this->stringOrNull($value);
-        if ($value === null) {
-            return null;
-        }
-
-        return str_starts_with($value, '+') ? $value : null;
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Stripe;
 
+use App\Models\Commerce\Order;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Bus\Queueable;
@@ -60,8 +61,7 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
         $durationMs = (int) round((microtime(true) - $start) * 1000);
 
         if ($result === null) {
-            // Two distinct null cases: (a) transfer in-flight — webhook or
-            // ReconcileStuckTransferringPayoutsJob will complete it; (b) batch cancelled by
+            // Two distinct null cases: (a) transfer in-flight — webhook will complete it; (b) batch cancelled by
             // revalidatePayoutOrders because all linked orders became ineligible — terminal,
             // no webhook will ever arrive. Re-read status so the operations log distinguishes
             // them; otherwise a cancelled payout looks "stuck in transferring" indefinitely.
@@ -72,7 +72,7 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
                     'duration_ms' => $durationMs,
                 ]);
             } else {
-                Log::info('ExecuteCommissionPayoutJob parked at transferring — awaiting webhook', [
+                Log::info('ExecuteCommissionPayoutJob parked at processing — awaiting webhook', [
                     'payout_id' => $this->payoutId,
                     'duration_ms' => $durationMs,
                 ]);
@@ -122,5 +122,10 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
             'failure_reason' => 'Payout job exhausted all Horizon retries after transient errors. '.$e->getMessage(),
             'processed_at' => now(),
         ])->save();
+
+        // Release linked orders back to the sweep pool. Without this, the daily sweep
+        // (whereNull('payout_id')) ignores them and they're permanently orphaned to a
+        // dead payout. Matches CommissionPayoutService::failPayout's release behaviour.
+        Order::where('payout_id', $this->payoutId)->update(['payout_id' => null]);
     }
 }

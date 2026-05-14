@@ -17,7 +17,7 @@ class ProfessionalFactory extends Factory
     {
         $first = fake()->firstName();
         $last = fake()->lastName();
-        $handle = strtolower($first . $last . fake()->randomNumber(4));
+        $handle = strtolower($first.$last.fake()->randomNumber(4));
 
         return [
             'id' => (string) Str::uuid(),
@@ -40,8 +40,7 @@ class ProfessionalFactory extends Factory
     public function withCard(): static
     {
         return $this->state(fn () => [
-            'stripe_customer_id' => 'cus_' . fake()->bothify('?#?#?#?#'),
-            'stripe_payment_method_id' => 'pm_' . fake()->bothify('?#?#?#?#'),
+            'stripe_payment_method_id' => 'pm_'.fake()->bothify('?#?#?#?#'),
             'stripe_payment_method_brand' => 'visa',
             'stripe_payment_method_last4' => '4242',
         ]);
