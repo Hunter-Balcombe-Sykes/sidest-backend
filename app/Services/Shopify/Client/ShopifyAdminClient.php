@@ -55,11 +55,16 @@ class ShopifyAdminClient
         ?int $timeoutSeconds = null,
     ): Response {
         $timeout = $timeoutSeconds ?? (int) config('services.shopify.throttle.default_timeout', 20);
-        $maxRetries = (int) config('services.shopify.throttle.max_inprocess_retries', 3);
-        $maxWait = (int) config('services.shopify.throttle.max_wait_ms', 5000);
         $queryHash = sha1($query);
-        $attempt = 0;
         $shopDomain = $shop->value;
+
+        // One immediate retry without sleep — absorbs single-packet transient
+        // blips where the local bucket and Shopify's edge disagree about how
+        // much capacity is available. Anything beyond that throws and lets
+        // the job's backoff() handle the delay across workers, instead of
+        // tying up a worker thread with usleep(). Master Pattern 17 / DB-D#SCALE-3.
+        $maxImmediateRetries = 1;
+        $attempt = 0;
 
         while (true) {
             $this->preAcquireBudget($shopDomain, $queryHash);
@@ -68,13 +73,17 @@ class ShopifyAdminClient
             $this->reconcileFromResponse($response, $shopDomain, $queryHash, $started);
 
             if ($this->isThrottled($response)) {
+                $maxWait = (int) config('services.shopify.throttle.max_wait_ms', 5000);
                 $wait = $this->throttleWaitMs($response, $maxWait);
-                if ($attempt >= $maxRetries) {
+                if ($attempt >= $maxImmediateRetries) {
                     throw new ShopifyThrottledException($shopDomain, $wait, $attempt, $queryHash);
                 }
+                // No usleep — bubble retry-delay to the queue's backoff() on
+                // the throw path. The second attempt re-pre-acquires (which
+                // itself does one short usleep on deficit), so we don't fire
+                // back-to-back-to-back at Shopify's edge. The wait we'd have
+                // slept is still recorded for observability.
                 $this->metrics->throttled($shopDomain, $wait, $attempt + 1);
-                // Blocks the worker thread — keep max_inprocess_retries low (default 3).
-                usleep($wait * 1000);
                 $attempt++;
 
                 continue;

@@ -2,6 +2,7 @@
 
 namespace App\Services\Hydrogen;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -22,6 +23,27 @@ class HydrogenDeploymentService
      */
     public function dispatchDeployment(string $professionalId): void
     {
+        // Per-brand debounce — collapse any wizard auto-saves into a single
+        // deploy per minute. GitHub Actions has a 5K req/hr limit per token,
+        // shared across all brands; without this, rapid saves on one wizard
+        // can starve the budget for everyone. Cache::add atomically claims
+        // the key if absent; the dropped deploys catch up on the next push
+        // to sidest-storefront (which deploys everyone). Master Pattern 17 /
+        // DB-D#SCALE-4.
+        //
+        // The debounce key is claimed BEFORE the GitHub-token check below.
+        // Rationale: missing-token is a config error, not a hot path; the
+        // alternative (token-check first) would let two simultaneous saves
+        // both observe "no token" then both claim and race the moment the
+        // token is configured.
+        if (! Cache::add("hydrogen:deploy:debounce:{$professionalId}", true, 60)) {
+            Log::info('HydrogenDeployment: debounced rapid dispatch.', [
+                'professional_id' => $professionalId,
+            ]);
+
+            return;
+        }
+
         $token = config('partna.hydrogen.github_token');
 
         if (empty($token)) {

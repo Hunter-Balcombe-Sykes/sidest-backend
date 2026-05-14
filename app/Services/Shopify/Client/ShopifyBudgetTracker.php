@@ -17,6 +17,20 @@ use Illuminate\Support\Facades\Redis;
  */
 class ShopifyBudgetTracker
 {
+    /**
+     * keyPrefix lets the same class back two independent buckets: the default
+     * 'shopify:bucket' for Admin GraphQL, and 'shopify:storefront-bucket' for
+     * Storefront. The two APIs have separate budgets at Shopify's edge, so the
+     * local-bucket state must not collide.
+     */
+    public function __construct(
+        private readonly string $keyPrefix = 'shopify:bucket',
+    ) {
+        if ($this->keyPrefix === '') {
+            throw new \InvalidArgumentException('ShopifyBudgetTracker keyPrefix must not be empty.');
+        }
+    }
+
     private const LUA_ACQUIRE = <<<'LUA'
 local bucket = redis.call('HMGET', KEYS[1], 'tokens', 'updated_ms')
 local tokens = tonumber(bucket[1])
@@ -111,6 +125,6 @@ LUA;
 
     private function key(string $shopDomain): string
     {
-        return "shopify:bucket:{$shopDomain}";
+        return "{$this->keyPrefix}:{$shopDomain}";
     }
 }

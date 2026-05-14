@@ -382,4 +382,15 @@ class CacheKeyGenerator
     {
         return "embedded:product-analytics:{$professionalId}:{$productId}";
     }
+
+    /**
+     * Per-product sidest.active flag (1-product scope). Resolves the active
+     * boolean for a single product without re-fetching the whole brand catalog,
+     * avoiding a thundering-herd of paginated Admin GraphQL calls when many
+     * concurrent requests miss at once. Master Pattern 17 / DB-F#SCALE-6.
+     */
+    public static function embeddedProductActive(string $professionalId, string $productId): string
+    {
+        return "embedded:product-active:{$professionalId}:{$productId}";
+    }
 }

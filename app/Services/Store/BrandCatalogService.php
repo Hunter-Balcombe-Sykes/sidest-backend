@@ -148,6 +148,14 @@ query productCustomPhotos($productId: ID!) {
 }
 GRAPHQL;
 
+    private const PRODUCT_ACTIVE_QUERY = <<<'GRAPHQL'
+query productActive($productId: ID!) {
+  product(id: $productId) {
+    metafield(namespace: "partna", key: "active") { value }
+  }
+}
+GRAPHQL;
+
     private const METAFIELDS_SET = <<<'GRAPHQL'
 mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
   metafieldsSet(metafields: $metafields) {
@@ -440,6 +448,36 @@ GRAPHQL;
         }
 
         return $out;
+    }
+
+    /**
+     * Fetch the partna.active metafield for one product, scoped to one product
+     * per Shopify call (no full-catalog pagination). Caller is responsible for
+     * caching — the controller wraps this with rememberLockedNullable so a cold
+     * miss for a single product never fans out into a paginated catalog fetch.
+     * Master Pattern 17 / DB-F#SCALE-6.
+     *
+     * @throws \App\Exceptions\Shopify\ShopifyClientException on transport, throttle, or GraphQL error
+     */
+    public function fetchProductActiveMetafield(ProfessionalIntegration $integration, string $productGid): ?bool
+    {
+        $resolved = $this->resolveCredentials($integration);
+
+        if ($resolved['shop_domain'] === '' || $resolved['access_token'] === '') {
+            return null;
+        }
+
+        $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::PRODUCT_ACTIVE_QUERY, [
+            'productId' => $productGid,
+        ]);
+
+        $value = Arr::get($response->json(), 'data.product.metafield.value');
+
+        if ($value === null) {
+            return null;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
     /**
@@ -987,9 +1025,17 @@ GRAPHQL;
 
         $touchedKeys = array_column($metafields, 'key');
 
-        // If 'active' was changed, also bust the affiliate-facing catalog cache.
+        // If 'active' was changed, also bust the affiliate-facing catalog cache
+        // and the per-product active cache (embedded:product-active:*).
         if (in_array('active', $touchedKeys, true)) {
             $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandActiveCatalog($brandId));
+
+            if ($productGid !== null) {
+                $productId = preg_replace('#^gid://shopify/Product/#', '', $productGid);
+                // embedded:product-active:* is written by rememberLockedNullable
+                // with no `:stale` twin — single Cache::forget is sufficient.
+                Cache::forget(CacheKeyGenerator::embeddedProductActive($brandId, (string) $productId));
+            }
         }
 
         // If per-product custom_photos_enabled was changed, bust the targeted lookup cache.

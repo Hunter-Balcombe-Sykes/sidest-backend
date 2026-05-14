@@ -216,6 +216,67 @@ it('falls through to generic theme hints when the theme name is unknown', functi
     expect($imported['corner_radius'])->toBe('pill');
 });
 
+it('throws ShopifyGraphQLException when the Storefront brand query returns errors (no silent emptyBrand)', function () {
+    // Master Pattern 17 / DB-D#SCALE-1: prior behaviour was to swallow errors
+    // into emptyBrand() so the install completed without a logo. Now the
+    // exception bubbles so the job's backoff() retries instead.
+    $integration = makeBrandDesignImporterIntegration();
+
+    Http::fake([
+        'importer.myshopify.com/api/*/graphql.json' => Http::response([
+            'errors' => [
+                ['message' => 'Access denied for brand', 'extensions' => ['code' => 'ACCESS_DENIED']],
+            ],
+        ]),
+        'importer.myshopify.com/admin/api/*/graphql.json' => Http::response(brandDesignFakeThemesResponse('Dawn')),
+        'importer.myshopify.com/admin/api/*/themes/*/assets.json*' => Http::response(brandDesignFakeAssetResponse([])),
+    ]);
+
+    expect(fn () => app(BrandDesignImporter::class)->import($integration))
+        ->toThrow(\App\Exceptions\Shopify\ShopifyGraphQLException::class);
+});
+
+it('throws ShopifyThrottledException on Storefront THROTTLED (so the job backoff retries)', function () {
+    $integration = makeBrandDesignImporterIntegration();
+
+    Http::fake([
+        // Both initial + immediate-retry attempt see THROTTLED → throw.
+        'importer.myshopify.com/api/*/graphql.json' => Http::response([
+            'errors' => [
+                ['message' => 'Throttled', 'extensions' => ['code' => 'THROTTLED']],
+            ],
+        ]),
+        'importer.myshopify.com/admin/api/*/graphql.json' => Http::response(brandDesignFakeThemesResponse('Dawn')),
+        'importer.myshopify.com/admin/api/*/themes/*/assets.json*' => Http::response(brandDesignFakeAssetResponse([])),
+    ]);
+
+    expect(fn () => app(BrandDesignImporter::class)->import($integration))
+        ->toThrow(\App\Exceptions\Shopify\ShopifyThrottledException::class);
+});
+
+it('still returns empty brand (no exception) when no storefront token has been provisioned yet', function () {
+    // The "CreateStorefrontAccessTokenJob hasn't run yet" path is expected
+    // and not an error — install must still complete with theme tokens.
+    $integration = makeBrandDesignImporterIntegration();
+    $integration->storefront_token = null;
+    $integration->save();
+
+    Http::fake([
+        'importer.myshopify.com/admin/api/*/graphql.json' => Http::response(brandDesignFakeThemesResponse('Dawn')),
+        'importer.myshopify.com/admin/api/*/themes/*/assets.json*' => Http::response(brandDesignFakeAssetResponse([
+            'buttons_radius' => 8,
+        ])),
+    ]);
+
+    $imported = app(BrandDesignImporter::class)->import($integration);
+
+    expect($imported['logo']['full_url'])->toBeNull();
+    expect($imported['slogan'])->toBeNull();
+    expect($imported['colors']['accent'])->toBeNull();
+    // Theme tokens still imported.
+    expect($imported['corner_radius'])->toBe('default');
+});
+
 it('throws RuntimeException on a non-Shopify shop_domain', function () {
     $integration = makeBrandDesignImporterIntegration('evil.example.com');
 

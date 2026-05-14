@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Commerce\Order;
-use App\Models\Core\Professional\Professional;
+use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use App\Services\Store\BrandCatalogService;
@@ -164,32 +164,48 @@ class EmbeddedProductAnalyticsController extends ApiController
     }
 
     /**
-     * Look up the sidest.active metafield for this product. Null when the
-     * metafield isn't set yet (newly synced product).
+     * Look up the sidest.active metafield for this product, single-product
+     * scope (no full-catalog fetch). Cached per (brand, product) for 10
+     * minutes so concurrent analytics requests on the same product never
+     * race against the Shopify Admin budget. Null when the metafield isn't
+     * set yet (newly synced product) or when Shopify is unreachable.
+     *
+     * TTL layering: this inner cache (10m) is wrapped by show()'s outer
+     * analytics cache (5m). On an outer hit, this method isn't called; the
+     * inner cache only fires on outer cold-miss + concurrent fetches for the
+     * same product, where it dedupes the Shopify hit to one call. Bust path:
+     * BrandCatalogService::bustCatalogCaches drops this key when `active` is
+     * written via the dashboard. EmbeddedProductSettingsController writes do
+     * NOT currently bust it (deferred Step 3 — Master Pattern 17 follow-up).
+     *
+     * Master Pattern 17 / DB-F#SCALE-6.
      */
     private function resolveActive(string $professionalId, string $productId): ?bool
     {
-        try {
-            $professional = Professional::findOrFail($professionalId);
-            $catalog = $this->catalog->fetchBrandCatalog($professional);
-        } catch (\Throwable) {
-            return null;
-        }
+        $cacheKey = CacheKeyGenerator::embeddedProductActive($professionalId, $productId);
 
-        if (! is_array($catalog)) {
-            return null;
-        }
+        return $this->cacheLock->rememberLockedNullable(
+            $cacheKey,
+            600, // 10 minutes
+            function () use ($professionalId, $productId) {
+                $integration = ProfessionalIntegration::query()
+                    ->where('professional_id', $professionalId)
+                    ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+                    ->first();
 
-        $needle = "gid://shopify/Product/{$productId}";
+                if (! $integration) {
+                    return null;
+                }
 
-        foreach ($catalog as $product) {
-            if (($product['gid'] ?? null) === $needle) {
-                $value = $product['metafields']['active'] ?? null;
-
-                return is_bool($value) ? $value : null;
-            }
-        }
-
-        return null;
+                try {
+                    return $this->catalog->fetchProductActiveMetafield(
+                        $integration,
+                        "gid://shopify/Product/{$productId}",
+                    );
+                } catch (\Throwable) {
+                    return null;
+                }
+            },
+        );
     }
 }

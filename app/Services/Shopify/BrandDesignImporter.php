@@ -4,8 +4,8 @@ namespace App\Services\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\Client\ShopifyStorefrontClient;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // Imports the brand-design shape from Shopify for a single integration.
@@ -26,6 +26,7 @@ class BrandDesignImporter
 {
     public function __construct(
         private readonly ShopifyAdminClient $client,
+        private readonly ShopifyStorefrontClient $storefront,
     ) {}
 
     // Enum buckets. These thresholds intentionally match the design brief —
@@ -171,12 +172,24 @@ class BrandDesignImporter
     }
 
     /**
+     * Pull the brand-design shape from Shopify Storefront API.
+     *
+     * The `brand` field on `Shop` exists only in the Storefront API, not the
+     * Admin API. If no storefront token has been provisioned yet (e.g. the
+     * CreateStorefrontAccessTokenJob hasn't run), this returns an empty
+     * shape and the caller still imports theme tokens — that case is
+     * expected and pre-conditional, not an error.
+     *
+     * Throttle and GraphQL errors propagate as exceptions so the install
+     * job's backoff() chain retries instead of silently installing a
+     * no-logo brand (the historic bug — DB-D#SCALE-1).
+     *
      * @return array{slogan: ?string, logo: array, squareLogo: array, colors: array, shop_gid: ?string}
+     *
+     * @throws \App\Exceptions\Shopify\ShopifyThrottledException
+     * @throws \App\Exceptions\Shopify\ShopifyGraphQLException
+     * @throws \App\Exceptions\Shopify\ShopifyTransportException
      */
-    // The `brand` field on `Shop` exists only in the Storefront API, not the
-    // Admin API. If no storefront token has been provisioned yet (e.g. the
-    // CreateStorefrontAccessTokenJob hasn't run), we skip brand data and still
-    // import theme tokens.
     private function fetchBrand(string $shopDomain, string $apiVersion, ?string $storefrontToken): array
     {
         if ($storefrontToken === null || $storefrontToken === '') {
@@ -185,32 +198,8 @@ class BrandDesignImporter
             return $this->emptyBrand();
         }
 
-        try {
-            $response = Http::withHeaders([
-                'X-Shopify-Storefront-Access-Token' => $storefrontToken,
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json',
-            ])->post("https://{$shopDomain}/api/{$apiVersion}/graphql.json", [
-                'query' => self::STOREFRONT_BRAND_QUERY,
-            ]);
-        } catch (\Throwable $e) {
-            Log::warning('Storefront brand query transport failed.', [
-                'shop_domain' => $shopDomain,
-                'error' => $e->getMessage(),
-            ]);
-
-            return $this->emptyBrand();
-        }
-
-        $errors = $response->json('errors', []);
-        if (! empty($errors)) {
-            Log::warning('Storefront brand query had errors.', [
-                'shop_domain' => $shopDomain,
-                'errors' => $errors,
-            ]);
-
-            return $this->emptyBrand();
-        }
+        $shop = ShopDomain::fromUntrusted($shopDomain);
+        $response = $this->storefront->graphql($shop, $storefrontToken, $apiVersion, self::STOREFRONT_BRAND_QUERY);
 
         return [
             'slogan' => $response->json('data.shop.brand.slogan'),

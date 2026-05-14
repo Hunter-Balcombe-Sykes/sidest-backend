@@ -172,7 +172,11 @@ it('retries in-process on a THROTTLED response and succeeds when budget recovers
     Http::assertSentCount(2);
 });
 
-it('throws ShopifyThrottledException when max in-process retries are exhausted', function () {
+it('throws ShopifyThrottledException after the single immediate retry (no in-process sleep)', function () {
+    // Master Pattern 17 / DB-D#SCALE-3: the THROTTLED path now bubbles the
+    // retry delay to the queue's backoff() instead of tying up a worker with
+    // usleep. We expect exactly two HTTP calls — the initial attempt + one
+    // immediate retry — before the client throws.
     Http::fake([
         "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::response([
             'errors' => [
@@ -190,16 +194,14 @@ it('throws ShopifyThrottledException when max in-process retries are exhausted',
         ], 200),
     ]);
 
-    $maxRetries = (int) config('services.shopify.throttle.max_inprocess_retries', 3);
-
     try {
         $this->client->graphql($this->shop, $this->token, $this->version, 'query { shop { id } }');
         $this->fail('Expected ShopifyThrottledException was not thrown');
     } catch (\App\Exceptions\Shopify\ShopifyThrottledException $e) {
-        expect($e->attempts)->toBe($maxRetries);
+        expect($e->attempts)->toBe(1);
         expect($e->waitMs)->toBeGreaterThan(0);
     }
 
-    // 1 initial attempt + max_inprocess_retries retries = max_inprocess_retries + 1 total calls
-    Http::assertSentCount($maxRetries + 1);
+    // 1 initial attempt + 1 immediate retry = 2 total calls.
+    Http::assertSentCount(2);
 });

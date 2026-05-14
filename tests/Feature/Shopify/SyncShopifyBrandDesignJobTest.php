@@ -230,19 +230,21 @@ it('is a no-op when the integration row does not exist', function () {
     expect(true)->toBeTrue();
 });
 
-it('succeeds with empty brand data when both APIs are down', function () {
+it('throws when the Storefront API is down so the job backoff() retries', function () {
+    // Master Pattern 17 / DB-D#SCALE-1: prior behaviour was to swallow Storefront
+    // failures and mark the integration synced anyway — installing a no-logo brand.
+    // Now the exception propagates so the queue's backoff() chain retries instead.
     $integration = seedBrandDesignJobFixtures();
 
-    // Fail every Shopify call. Both the Storefront brand query and the Admin
-    // theme query return errors — the importer degrades gracefully and still
-    // writes design tokens with null brand values (leave-if-absent).
     Http::fake([
         'bdjob.myshopify.com/*' => Http::response(['errors' => [['message' => 'boom']]], 500),
     ]);
 
-    SyncShopifyBrandDesignJob::dispatchSync($integration->id);
+    expect(fn () => SyncShopifyBrandDesignJob::dispatchSync($integration->id))
+        ->toThrow(\App\Exceptions\Shopify\ShopifyTransportException::class);
 
-    // Job succeeds — no credentials were thrown away, no retry needed.
+    // Integration was NOT marked 'synced' — the next retry gets another chance
+    // to import the real brand data instead of locking in an empty record.
     $integration->refresh();
-    expect($integration->provider_metadata['brand_design_state'])->toBe('synced');
+    expect($integration->provider_metadata['brand_design_state'] ?? null)->not->toBe('synced');
 });

@@ -32,6 +32,18 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(\App\Services\Shopify\Client\ShopifyCostTracker::class);
         $this->app->singleton(\App\Services\Shopify\Client\ShopifyMetrics::class);
         $this->app->singleton(\App\Services\Shopify\Client\ShopifyBulkOperationLock::class);
+
+        // Storefront client needs its own budget bucket — Shopify gives Admin
+        // and Storefront separate budgets at their edge, so the local-bucket
+        // state must not collide. The cost tracker is shared (sha1 hashes
+        // namespace samples by content).
+        $this->app->singleton(\App\Services\Shopify\Client\ShopifyStorefrontClient::class, function ($app) {
+            return new \App\Services\Shopify\Client\ShopifyStorefrontClient(
+                budget: new \App\Services\Shopify\Client\ShopifyBudgetTracker('shopify:storefront-bucket'),
+                cost: $app->make(\App\Services\Shopify\Client\ShopifyCostTracker::class),
+                metrics: $app->make(\App\Services\Shopify\Client\ShopifyMetrics::class),
+            );
+        });
     }
 
     /**
