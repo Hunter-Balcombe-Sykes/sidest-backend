@@ -732,10 +732,16 @@ class EmbeddedSetupController extends ApiController
                 'reason' => $validation['reason'],
             ]);
 
-            return $this->error(
-                'Shopify rejected the new access token. Uninstall and reinstall the Partna app from Shopify admin to issue a fresh credential.',
-                422,
-            );
+            // Structured `reason` field lets Remix auto-heal — when the Shopify
+            // app is uninstalled+reinstalled, Shopify revokes the old access
+            // token but the Remix-side PrismaSession still caches it. Without
+            // a typed reason, Remix would have to string-match the message to
+            // know whether to clear its session cache. See
+            // `Partna-Shopify-App/app/routes/app.tsx` for the consumer.
+            return response()->json([
+                'message' => 'Shopify rejected the new access token. The Remix-side SDK session will be cleared so the next embedded load runs Token Exchange to issue a fresh credential.',
+                'reason' => 'shopify_token_rejected',
+            ], 422);
         }
 
         $integration = ProfessionalIntegration::updateOrCreate(
