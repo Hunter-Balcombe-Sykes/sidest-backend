@@ -259,3 +259,199 @@ it('denies an affiliate calling /stripe/payouts with role=brand (cross-role)', f
         makePayoutsRequest($aff, ['role' => 'brand'])
     ))->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
 });
+
+// ─── Phase 2: filters + cursor pagination ───────────────────────────────────
+
+it('filters payouts by status[]', function () {
+    seedPayoutProfessional('pro-aff-f1', 'afff1', 'Aff F1', 'influencer');
+    seedPayoutProfessional('pro-brand-f1', 'brandf1', 'Brand F1');
+
+    foreach (['completed', 'failed', 'completed', 'pending'] as $i => $status) {
+        seedCommissionPayoutRow([
+            'id' => "pay-fil-{$i}",
+            'brand_professional_id' => 'pro-brand-f1',
+            'affiliate_professional_id' => 'pro-aff-f1',
+            'status' => $status,
+        ]);
+    }
+
+    $summary = Mockery::mock(CommissionPayoutService::class);
+    $summary->shouldReceive('getPayoutSummary')->andReturn([]);
+
+    $aff = Professional::query()->find('pro-aff-f1');
+    $response = makePayoutsController($summary)->payouts(
+        makePayoutsRequest($aff, ['status' => ['completed']])
+    );
+
+    $data = $response->getData(true);
+    expect($data['payouts'])->toHaveCount(2);
+    foreach ($data['payouts'] as $p) {
+        expect($p['status'])->toBe('completed');
+    }
+});
+
+it('filters payouts by date_from', function () {
+    seedPayoutProfessional('pro-aff-f2', 'afff2', 'Aff F2', 'influencer');
+    seedPayoutProfessional('pro-brand-f2', 'brandf2', 'Brand F2');
+
+    seedCommissionPayoutRow([
+        'id' => 'pay-old',
+        'brand_professional_id' => 'pro-brand-f2',
+        'affiliate_professional_id' => 'pro-aff-f2',
+        'created_at' => '2026-01-01 12:00:00',
+    ]);
+    seedCommissionPayoutRow([
+        'id' => 'pay-new',
+        'brand_professional_id' => 'pro-brand-f2',
+        'affiliate_professional_id' => 'pro-aff-f2',
+        'created_at' => '2026-05-01 12:00:00',
+    ]);
+
+    $summary = Mockery::mock(CommissionPayoutService::class);
+    $summary->shouldReceive('getPayoutSummary')->andReturn([]);
+
+    $aff = Professional::query()->find('pro-aff-f2');
+    $response = makePayoutsController($summary)->payouts(
+        makePayoutsRequest($aff, ['date_from' => '2026-03-01'])
+    );
+
+    $data = $response->getData(true);
+    expect(collect($data['payouts'])->pluck('id')->all())->toBe(['pay-new']);
+});
+
+it('paginates payouts via cursor with stable has_more flag', function () {
+    seedPayoutProfessional('pro-aff-p', 'affp', 'Aff P', 'influencer');
+    seedPayoutProfessional('pro-brand-p', 'brandp', 'Brand P');
+
+    // 5 payouts, fetch limit=2 — expect cursor + has_more=true on page 1,
+    // then has_more=false on the final page.
+    for ($i = 0; $i < 5; $i++) {
+        seedCommissionPayoutRow([
+            'id' => "pay-p-{$i}",
+            'brand_professional_id' => 'pro-brand-p',
+            'affiliate_professional_id' => 'pro-aff-p',
+            'created_at' => '2026-05-'.str_pad((string) ($i + 1), 2, '0', STR_PAD_LEFT).' 10:00:00',
+        ]);
+    }
+
+    $summary = Mockery::mock(CommissionPayoutService::class);
+    $summary->shouldReceive('getPayoutSummary')->andReturn([]);
+
+    $aff = Professional::query()->find('pro-aff-p');
+
+    $first = makePayoutsController($summary)->payouts(
+        makePayoutsRequest($aff, ['limit' => 2])
+    )->getData(true);
+
+    expect($first['payouts'])->toHaveCount(2);
+    expect($first['pagination']['has_more'])->toBeTrue();
+    expect($first['pagination']['cursor'])->not->toBeNull();
+
+    // Drive page 2 with the returned cursor.
+    $second = makePayoutsController($summary)->payouts(
+        makePayoutsRequest($aff, ['limit' => 2, 'cursor' => $first['pagination']['cursor']])
+    )->getData(true);
+
+    expect($second['payouts'])->toHaveCount(2);
+    expect($second['pagination']['has_more'])->toBeTrue();
+
+    // Page 3 finishes the list.
+    $third = makePayoutsController($summary)->payouts(
+        makePayoutsRequest($aff, ['limit' => 2, 'cursor' => $second['pagination']['cursor']])
+    )->getData(true);
+
+    expect($third['payouts'])->toHaveCount(1);
+    expect($third['pagination']['has_more'])->toBeFalse();
+});
+
+// ─── Phase 2: GET /stripe/payouts/{id} payoutDetail ─────────────────────────
+
+it('payoutDetail returns the payout and its linked orders for the affiliate', function () {
+    setupCommerceOrdersTables();
+
+    seedPayoutProfessional('pro-aff-d1', 'affd1', 'Aff D1', 'influencer');
+    seedPayoutProfessional('pro-brand-d1', 'brandd1', 'Brand D1');
+
+    seedCommissionPayoutRow([
+        'id' => 'pay-detail-1',
+        'brand_professional_id' => 'pro-brand-d1',
+        'affiliate_professional_id' => 'pro-aff-d1',
+        'gross_commission_cents' => 5000,
+        'ledger_entry_count' => 2,
+    ]);
+
+    $now = now()->toDateTimeString();
+    foreach (['ord-1', 'ord-2'] as $i => $orderId) {
+        \Illuminate\Support\Facades\DB::connection('pgsql')->table('commerce.orders')->insert([
+            'id' => $orderId,
+            'shopify_order_id' => 'shop_'.$orderId,
+            'shopify_shop_domain' => 'd1.myshopify.com',
+            'brand_professional_id' => 'pro-brand-d1',
+            'affiliate_professional_id' => 'pro-aff-d1',
+            'status' => 'approved',
+            'gross_cents' => 5000,
+            'commission_cents' => 2500,
+            'refund_cents' => 0,
+            'net_cents' => 5000,
+            'commission_rate' => 50,
+            'rate_source' => 'brand_default',
+            'currency_code' => 'AUD',
+            'payout_id' => 'pay-detail-1',
+            'occurred_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
+
+    $summary = Mockery::mock(CommissionPayoutService::class);
+    $summary->shouldNotReceive('getPayoutSummary');
+
+    $aff = Professional::query()->find('pro-aff-d1');
+    $request = \Illuminate\Http\Request::create('/api/stripe/payouts/pay-detail-1', 'GET');
+    $request->attributes->set('professional', $aff);
+
+    $response = makePayoutsController($summary)->payoutDetail($request, 'pay-detail-1');
+
+    expect($response->status())->toBe(200);
+    $data = $response->getData(true);
+    expect($data['payout']['id'])->toBe('pay-detail-1');
+    expect($data['payout']['gross_commission_cents'])->toBe(5000);
+    expect($data['orders'])->toHaveCount(2);
+    expect(collect($data['orders'])->pluck('id')->all())->toContain('ord-1', 'ord-2');
+});
+
+it('payoutDetail returns 404 for missing payout', function () {
+    seedPayoutProfessional('pro-aff-d2', 'affd2', 'Aff D2', 'influencer');
+
+    $summary = Mockery::mock(CommissionPayoutService::class);
+    $aff = Professional::query()->find('pro-aff-d2');
+
+    $request = \Illuminate\Http\Request::create('/api/stripe/payouts/does-not-exist', 'GET');
+    $request->attributes->set('professional', $aff);
+
+    $response = makePayoutsController($summary)->payoutDetail($request, 'does-not-exist');
+
+    expect($response->status())->toBe(404);
+});
+
+it('payoutDetail returns 404 for a foreign payout (cross-tenant)', function () {
+    seedPayoutProfessional('pro-aff-d3', 'affd3', 'Aff D3', 'influencer');
+    seedPayoutProfessional('pro-aff-other', 'affother', 'Aff Other', 'influencer');
+    seedPayoutProfessional('pro-brand-d3', 'brandd3', 'Brand D3');
+
+    seedCommissionPayoutRow([
+        'id' => 'pay-foreign',
+        'brand_professional_id' => 'pro-brand-d3',
+        'affiliate_professional_id' => 'pro-aff-other',
+    ]);
+
+    $summary = Mockery::mock(CommissionPayoutService::class);
+    $aff = Professional::query()->find('pro-aff-d3');
+
+    $request = \Illuminate\Http\Request::create('/api/stripe/payouts/pay-foreign', 'GET');
+    $request->attributes->set('professional', $aff);
+
+    $response = makePayoutsController($summary)->payoutDetail($request, 'pay-foreign');
+
+    expect($response->status())->toBe(404);
+});

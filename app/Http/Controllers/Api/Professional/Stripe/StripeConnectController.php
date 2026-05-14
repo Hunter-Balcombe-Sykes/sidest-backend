@@ -286,45 +286,153 @@ class StripeConnectController extends Controller
             $query->where('affiliate_professional_id', $pro->id);
         }
 
-        $payouts = $query
+        // Filters
+        if ($dateFrom = $request->input('date_from')) {
+            $query->where('created_at', '>=', $dateFrom);
+        }
+        if ($dateTo = $request->input('date_to')) {
+            // Inclusive of the entire `date_to` day — the frontend sends YYYY-MM-DD.
+            $query->where('created_at', '<=', $dateTo.' 23:59:59');
+        }
+        $statuses = array_values(array_filter((array) $request->input('status', [])));
+        if (! empty($statuses)) {
+            $query->whereIn('status', $statuses);
+        }
+
+        // Cursor pagination — base64-encoded {t,id} of the last row from the previous page.
+        // Order by (created_at DESC, id DESC) so cursor comparison stays total across rows
+        // with identical timestamps.
+        if ($cursor = $request->input('cursor')) {
+            $decoded = json_decode(base64_decode((string) $cursor), true);
+            if (is_array($decoded) && isset($decoded['t'], $decoded['id'])) {
+                $query->where(function ($q) use ($decoded): void {
+                    $q->where('created_at', '<', $decoded['t'])
+                        ->orWhere(function ($q2) use ($decoded): void {
+                            $q2->where('created_at', $decoded['t'])
+                                ->where('id', '<', $decoded['id']);
+                        });
+                });
+            }
+        }
+
+        $limit = (int) $request->input('limit', 25);
+        $rows = $query
             ->orderByDesc('created_at')
-            ->limit(50)
-            ->get()
-            ->map(fn ($p) => [
-                'id' => $p->id,
-                'status' => $p->status,
-                'gross_commission_cents' => $p->gross_commission_cents,
-                'platform_fee_cents' => $p->platform_fee_cents,
-                'net_payout_cents' => $p->net_payout_cents,
-                'currency_code' => $p->currency_code,
-                'ledger_entry_count' => $p->ledger_entry_count,
-                'failure_reason' => $p->failure_reason,
-                'eligible_after' => $p->eligible_after?->toIso8601String(),
-                'processed_at' => $p->processed_at?->toIso8601String(),
-                // Per-payout grace deadline. Affiliate side renders this as
-                // "expires in N days" badge on rows where the affiliate
-                // hasn't connected Stripe yet; brand side uses it for
-                // reporting visibility.
-                'void_at' => $p->void_at?->toIso8601String(),
-                'created_at' => $p->created_at?->toIso8601String(),
-                'brand' => $p->brandProfessional ? [
-                    'id' => $p->brandProfessional->id,
-                    'name' => $p->brandProfessional->display_name,
-                    'handle' => $p->brandProfessional->handle,
-                ] : null,
-                'affiliate' => $p->affiliateProfessional ? [
-                    'id' => $p->affiliateProfessional->id,
-                    'name' => $p->affiliateProfessional->display_name,
-                    'handle' => $p->affiliateProfessional->handle,
-                ] : null,
-            ]);
+            ->orderByDesc('id')
+            ->limit($limit + 1)
+            ->get();
+
+        $hasMore = $rows->count() > $limit;
+        $visible = $rows->take($limit);
+
+        $nextCursor = null;
+        if ($hasMore && $visible->isNotEmpty()) {
+            $last = $visible->last();
+            // Use toDateTimeString() (not ISO) so cursor format matches the column's
+            // stored representation — keeps lexicographic comparisons sound on test
+            // backends that store created_at as TEXT.
+            $nextCursor = base64_encode((string) json_encode([
+                't' => $last->created_at?->toDateTimeString(),
+                'id' => (string) $last->id,
+            ]));
+        }
+
+        $payouts = $visible->map(fn ($p) => $this->shapePayoutListRow($p));
 
         $summary = $this->payoutService->getPayoutSummary($pro);
 
         return response()->json([
-            'payouts' => $payouts,
+            'payouts' => $payouts->values(),
             'summary' => $summary,
+            'pagination' => [
+                'cursor' => $nextCursor,
+                'has_more' => $hasMore,
+            ],
         ]);
+    }
+
+    /**
+     * GET /stripe/payouts/{payoutId}
+     *
+     * Drill-down for a single commission payout. Returns the payout plus the linked
+     * orders from commerce.orders (where payout_id = {payoutId}) so brands can answer
+     * "why is this payout $X?" without leaving the Partna dashboard.
+     *
+     * Cross-tenant access returns 404 (per CLAUDE.md "403 vs 404 standard") — neither
+     * the brand nor the affiliate of someone else's payout should be told it exists.
+     */
+    public function payoutDetail(Request $request, string $payoutId): JsonResponse
+    {
+        $pro = $request->attributes->get('professional');
+
+        $payout = CommissionPayout::with([
+            'brandProfessional:id,display_name,handle',
+            'affiliateProfessional:id,display_name,handle',
+        ])->find($payoutId);
+
+        $isBrand = ($pro->professional_type ?? null) === 'brand';
+        $ownsAsBrand = $payout && $isBrand
+            && (string) $payout->brand_professional_id === (string) $pro->id;
+        $ownsAsAffiliate = $payout && ! $isBrand
+            && (string) $payout->affiliate_professional_id === (string) $pro->id;
+
+        if (! $payout || (! $ownsAsBrand && ! $ownsAsAffiliate)) {
+            return response()->json(['error' => 'not_found'], 404);
+        }
+
+        $orders = \App\Models\Commerce\Order::query()
+            ->where('payout_id', $payoutId)
+            ->orderBy('occurred_at')
+            ->get();
+
+        return response()->json([
+            'payout' => $this->shapePayoutListRow($payout),
+            'orders' => $orders->map(fn ($o) => [
+                'id' => $o->id,
+                'shopify_order_id' => $o->shopify_order_id,
+                'status' => $o->status,
+                'gross_cents' => (int) $o->gross_cents,
+                'commission_cents' => (int) $o->commission_cents,
+                'commission_rate' => (float) $o->commission_rate,
+                'refund_cents' => (int) ($o->refund_cents ?? 0),
+                'net_cents' => (int) ($o->net_cents ?? 0),
+                'currency_code' => $o->currency_code,
+                'occurred_at' => $o->occurred_at?->toIso8601String(),
+            ])->values(),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function shapePayoutListRow(CommissionPayout $p): array
+    {
+        return [
+            'id' => $p->id,
+            'status' => $p->status,
+            'gross_commission_cents' => $p->gross_commission_cents,
+            'platform_fee_cents' => $p->platform_fee_cents,
+            'net_payout_cents' => $p->net_payout_cents,
+            'currency_code' => $p->currency_code,
+            'ledger_entry_count' => $p->ledger_entry_count,
+            'failure_reason' => $p->failure_reason,
+            'payment_intent_id' => $p->payment_intent_id ?? null,
+            'eligible_after' => $p->eligible_after?->toIso8601String(),
+            'processed_at' => $p->processed_at?->toIso8601String(),
+            'void_at' => $p->void_at?->toIso8601String(),
+            'transfer_completed_at' => $p->transfer_completed_at?->toIso8601String(),
+            'created_at' => $p->created_at?->toIso8601String(),
+            'brand' => $p->brandProfessional ? [
+                'id' => $p->brandProfessional->id,
+                'name' => $p->brandProfessional->display_name,
+                'handle' => $p->brandProfessional->handle,
+            ] : null,
+            'affiliate' => $p->affiliateProfessional ? [
+                'id' => $p->affiliateProfessional->id,
+                'name' => $p->affiliateProfessional->display_name,
+                'handle' => $p->affiliateProfessional->handle,
+            ] : null,
+        ];
     }
 
     /**
