@@ -843,7 +843,7 @@ P1 visitor-PII retention gap is the headline. The other two are P2/P3 quality-of
 **Original ID:** Phase 6 Pattern 4
 **Closes:** DATA-B#DATA-1, DATA-B#DATA-2
 **Tier:** P1 (1 P1 · 1 P2) · **Effort:** ~3h
-**Status:** Done — 2026-05-14 (pre-existing; all 6 steps already shipped across `AccountDeletionService`, `SiteMedia::booted()`, `MediaVariant` docblock, `ProfessionalStaffResource`, `PublicSitePayload` view, and full test coverage in `ConfirmDeletionTest`, `CancelDeletionTest`, `SiteMediaForceDeleteTest`)
+**Status:** Done — 2026-05-14 (pre-existing; all 6 steps already shipped across `AccountDeletionService`, `SiteMedia::booted()`, `MediaVariant` docblock, `ProfessionalStaffResource`, `PublicSitePayload` view, and full test coverage in `ConfirmDeletionTest`, `CancelDeletionTest`, `SiteMediaForceDeleteTest`). Opus review follow-up `9559b6e5`: original-file leak fixed in `forceDeleting` hook + `lockForUpdate` on site re-read in cancel paths.
 **Depends on:** none
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
