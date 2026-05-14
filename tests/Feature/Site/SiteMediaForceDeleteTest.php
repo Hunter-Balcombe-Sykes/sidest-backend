@@ -111,6 +111,42 @@ it('removes the SiteMedia DB row itself after force-delete', function () {
     expect(SiteMedia::withTrashed()->find($mediaId))->toBeNull();
 });
 
+it('deletes the original upload file when a SiteMedia row is force-deleted', function () {
+    $siteId = (string) Str::uuid();
+    $mediaId = (string) Str::uuid();
+    $now = now()->toDateTimeString();
+
+    DB::connection('pgsql')->table('site.sites')->insert([
+        'id' => $siteId,
+        'professional_id' => (string) Str::uuid(),
+        'subdomain' => 'test-site-original',
+        'is_published' => 1,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $originalPath = "images/{$mediaId}/original.jpg";
+
+    DB::connection('pgsql')->table('site.site_media')->insert([
+        'id' => $mediaId,
+        'site_id' => $siteId,
+        'pool' => SiteMedia::POOL_GALLERY,
+        'media_type' => SiteMedia::MEDIA_TYPE_IMAGE,
+        'processing_state' => SiteMedia::PROCESSING_STATE_READY,
+        'is_active' => 1,
+        'path' => $originalPath,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    Storage::disk('media')->put($originalPath, 'fake-original-bytes');
+
+    $media = SiteMedia::query()->findOrFail($mediaId);
+    $media->forceDelete();
+
+    Storage::disk('media')->assertMissing($originalPath);
+});
+
 it('does not throw when a variant file is already missing from storage', function () {
     $siteId = (string) Str::uuid();
     $mediaId = (string) Str::uuid();

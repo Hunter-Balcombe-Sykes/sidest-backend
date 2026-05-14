@@ -324,8 +324,15 @@ class AccountDeletionService
             // Re-publish the site only if it was programmatically unpublished by our
             // deletion flow (unpublished_at is the signal). A manually unpublished
             // site (unpublished_at = null) must stay offline — we don't own that state.
-            if ($professional->site && $professional->site->unpublished_at !== null) {
-                $professional->site->update([
+            // Re-read with a lock to avoid acting on a stale relation-cache snapshot —
+            // a concurrent manual-unpublish could otherwise flip unpublished_at to null
+            // between relation load and this check.
+            $site = Site::query()
+                ->where('professional_id', $professional->id)
+                ->lockForUpdate()
+                ->first();
+            if ($site && $site->unpublished_at !== null) {
+                $site->update([
                     'is_published' => true,
                     'unpublished_at' => null,
                 ]);
@@ -393,8 +400,15 @@ class AccountDeletionService
             // Re-publish the site only if it was programmatically unpublished by our
             // deletion flow (unpublished_at is the signal). A manually unpublished
             // site (unpublished_at = null) must stay offline — we don't own that state.
-            if ($professional->site && $professional->site->unpublished_at !== null) {
-                $professional->site->update([
+            // Re-read with a lock to avoid acting on a stale relation-cache snapshot —
+            // a concurrent manual-unpublish could otherwise flip unpublished_at to null
+            // between relation load and this check.
+            $site = Site::query()
+                ->where('professional_id', $professional->id)
+                ->lockForUpdate()
+                ->first();
+            if ($site && $site->unpublished_at !== null) {
+                $site->update([
                     'is_published' => true,
                     'unpublished_at' => null,
                 ]);

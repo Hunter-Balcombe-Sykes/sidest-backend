@@ -107,6 +107,7 @@ class SiteMedia extends BaseModel
         // wipes media_variants rows at the same time the parent row is deleted,
         // so forceDeleted (after-event) would find an empty relation.
         static::forceDeleting(function (SiteMedia $media): void {
+            // Delete processed variants (each row tracks its own disk).
             $variantPaths = $media->mediaVariants()
                 ->whereNotNull('path')
                 ->get(['disk', 'path']);
@@ -122,6 +123,23 @@ class SiteMedia extends BaseModel
                         'media_id' => $media->id,
                         'disk' => $variant->disk,
                         'path' => $variant->path,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // Also delete the original upload. SiteMedia has no disk column — the
+            // original always lives on the configured media disk (same as purgeDocumentArtifact).
+            if ($media->path) {
+                try {
+                    $mediaDisk = Storage::disk((string) config('partna.media_disk'));
+                    if ($mediaDisk->exists($media->path)) {
+                        $mediaDisk->delete($media->path);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to delete original file during SiteMedia force-delete', [
+                        'media_id' => $media->id,
+                        'path' => $media->path,
                         'error' => $e->getMessage(),
                     ]);
                 }
