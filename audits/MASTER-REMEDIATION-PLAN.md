@@ -68,7 +68,7 @@ PR #12–#25 introduced 3 partials, 2 regressions, and 1 symptom-now-visible. **
 | 2 | LIFE-D#1 (P1, part of Pattern D) | **Symptom now visible** | PR #13 `9fedbcb` — `BrandDesignMediaService::listDesignMedia` always returns ready-state placeholders. The race condition is unchanged, but any race-bypass orphan now appears to brands as a 6th placeholder card with no thumbnail. |
 | 2 | LIFE-B#3 (P2, part of Pattern A) | **Partially touched** | PR #12 — removed one of ten observer log sites; nine remaining sites still need `request_id` + tenant ID context. |
 | 3 | SCALE-A#CACHE-1 (P2 → P1 candidate) | **Closed 2026-05-14** | Master Pattern 14 shipped — `rememberLocked` wrap on `fetchActiveCatalog` with int TTL + jitter; same PR closes the other 3 P2s in the pattern. |
-| 3 | SCALE-B#CACHE-1 (P1, part of Pattern 3) | **Partial** | PR #12 `a118f62` — added alias-aware affiliate lookup at line 633–647 (`orWhereExists` subquery). No `rememberLocked` wrap; the new subquery actually increases per-request work. |
+| 3 | SCALE-B#CACHE-1 (P1, part of Pattern 3) | **Closed 2026-05-14** | Master Pattern 15 shipped on `development` (commit `37893a19`). `HydrogenAffiliateController::show()` wraps post-gate payload assembly in `CacheLockService::rememberLocked` (int 60s TTL → ±20% jitter + 10× stale twin). Same commit closes SCALE-B#CACHE-2 and SCALE-B#CACHE-7; observer fan-out (Site/Block/SiteMedia/BrandStoreSettings/ProfessionalIntegration/BrandPartnerLink/new AffiliateProductSelection) keeps the cache fresh on dashboard writes; provider_metadata cascade busts every linked affiliate's product cache when a brand toggles `custom_photos_enabled`. |
 | 3 | SCALE-B#CACHE-4 (P1, part of Master 11 Step 2) | **Closed** | PR #27 `c8aece8` — `EmbeddedOrderAnalyticsController::show()` now reads `commerce.orders` + `order_items` with `affiliate_professional_id` and `deriveLineStatus()` from order aggregate state. The $0/no-affiliate-per-order bug is fixed end-to-end. |
 | 3 | SCALE-B#CACHE-3 (P1, part of Master 11 Step 1) | **Partial — data half closed** | PR #28 `4927b02` — `EmbeddedSetupController::overview()` now reads `commerce.orders` (all-time + 30d windows) and subtracts `reversed_commission_cents` from `commerce.brand_affiliate_rollup`. The $0 dashboard bug is fixed. **Remaining:** Step 1's caching half (wrap in `CacheLockService::rememberLocked` keyed by new `CacheKeyGenerator::embeddedSetupOverview()`) is still open — `overview()` has no cache wrap and reads raw `DB::` on every request. Effort to close: ~30 min. |
 
@@ -198,7 +198,7 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
     - **Tier:** P2 (4 P2 — regression bumps SCALE-A#CACHE-1 to P1 candidate) · **Effort:** ~1 day · **Closes:** 4 findings
     - **Why this slot:** required gate before Master 17's vendor budget work touches the same call sites.
 
-15. **Master Pattern 15 — Hydrogen internal controllers `rememberLocked` wrap** (Phase 3 Pattern 3)
+15. **Master Pattern 15 — Hydrogen internal controllers `rememberLocked` wrap** (Phase 3 Pattern 3) ✅ **Closed 2026-05-14** (commit `37893a19`)
     - **Tier:** P1 (2 P1 + 1 P2) · **Effort:** ~1.5 days · **Closes:** 3 findings
     - **Why this slot:** largest blast radius (every public storefront page view); low-risk fix with established pattern.
 
@@ -1225,7 +1225,7 @@ Four findings, all P2, all the same one-line swap plus constructor injection. Th
 **Original ID:** Phase 3 Pattern 3
 **Closes:** SCALE-B#CACHE-1, SCALE-B#CACHE-2, SCALE-B#CACHE-7
 **Tier:** P1 (2 P1 · 1 P2) · **Effort:** ~1.5 days
-**Status:** Partial (SCALE-B#CACHE-1 — PR #12 `a118f62` added alias-aware affiliate lookup but no `rememberLocked` wrap)
+**Status:** ✅ **Closed 2026-05-14** — all 6 steps shipped on `development` (commit `37893a19`). All three controllers now wrap their post-gate payload assembly in `CacheLockService::rememberLocked` with int 60s TTL (inheriting Pattern 4 jitter + SWR :stale companion). `CacheKeyGenerator` gained `hydrogenAffiliate(brandId, handle)`, `hydrogenBrandConfig(shopDomain)`, `hydrogenAffiliateProducts(affiliateId)`. `SiteCacheService` gained matching `forget*` methods (each clears `:stale` twin); `invalidateSite()` dispatches the right one based on site-owner role. Observer fan-out: `SiteObserver`/`BlockObserver` via `invalidateSite()`; `SiteMediaObserver` busts per-pool; `BrandStoreSettingsObserver`, `ProfessionalIntegrationObserver` (with old-shop-domain rename handling), `BrandPartnerLinkObserver` busts on link create/delete; new `AffiliateProductSelectionObserver` registered in `EventServiceProvider`. `ProfessionalIntegrationObserver` also cascades affiliate-products bust to every linked affiliate when `provider_metadata` (`custom_photos_enabled`) changes — closes the one Important issue Opus review flagged. `Cache-Control: no-store` preserved on `HydrogenAffiliateController` per SCALE-B#CACHE-9 hand-off. Closes SCALE-B#CACHE-1, SCALE-B#CACHE-2, SCALE-B#CACHE-7.
 **Depends on:** Master Pattern 13 (jitter), Master Pattern 14 (Cache::memo migration patterns established)
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -1243,26 +1243,26 @@ The data these endpoints assemble changes only on explicit dashboard edits — s
 
 ### What to do
 
-- [ ] **Step 1 — Add three new cache keys to `CacheKeyGenerator`.**
+- [x] **Step 1 — Add three new cache keys to `CacheKeyGenerator`.**
     - `hydrogenAffiliate(string $brandProfessionalId, string $affiliateHandle): string` → `"hydrogen:affiliate:v1:{$brandId}:{$handle}"`
     - `hydrogenBrandConfig(string $shopDomain): string` → `"hydrogen:brand-config:v1:{$shopDomain}"`
     - `hydrogenAffiliateProducts(string $affiliateId): string` → `"hydrogen:affiliate-products:v1:{$affiliateId}"`
-- [ ] **Step 2 — Wrap `HydrogenAffiliateController::show()`** (`app/Http/Controllers/Api/Internal/HydrogenAffiliateController.php:44–82`).
+- [x] **Step 2 — Wrap `HydrogenAffiliateController::show()`** (`app/Http/Controllers/Api/Internal/HydrogenAffiliateController.php:44–82`).
     - Inject `CacheLockService` via the constructor.
     - Wrap the entire payload assembly in `$this->cacheLock->rememberLocked($key, 60, fn () => [...])`. Pass `60` (int seconds), not a `DateTimeInterface` — see Pattern 4 Step 4.
     - Keep the `Cache-Control: no-store` response header for now; SCALE-B#CACHE-9 follow-up handles CDN strategy.
     - Closes SCALE-B#CACHE-1.
-- [ ] **Step 3 — Wrap `HydrogenBrandConfigController::show()`** (`app/Http/Controllers/Api/Internal/HydrogenBrandConfigController.php:27–70`).
+- [x] **Step 3 — Wrap `HydrogenBrandConfigController::show()`** (`app/Http/Controllers/Api/Internal/HydrogenBrandConfigController.php:27–70`).
     - Inject `CacheLockService`; wrap response body in `rememberLocked($key, 60, ...)`.
     - Closes SCALE-B#CACHE-2.
-- [ ] **Step 4 — Wrap `HydrogenAffiliateProductsController::show()`** (`app/Http/Controllers/Api/Internal/HydrogenAffiliateProductsController.php:35–78`).
+- [x] **Step 4 — Wrap `HydrogenAffiliateProductsController::show()`** (`app/Http/Controllers/Api/Internal/HydrogenAffiliateProductsController.php:35–78`).
     - Same pattern: inject `CacheLockService`, wrap in `rememberLocked($key, 60, ...)`.
     - Closes SCALE-B#CACHE-7.
-- [ ] **Step 5 — Add three push-invalidation methods to `SiteCacheService`.**
+- [x] **Step 5 — Add three push-invalidation methods to `SiteCacheService`.**
     - `forgetHydrogenAffiliate(string $siteId): void` — invoked by `SiteObserver`, `BlockObserver`, `SiteMediaObserver` on any site/block/media write. Calculate the affected key from the site's affiliate handle.
     - `forgetHydrogenBrandConfig(string $professionalId): void` — parallel to the existing `forgetBrandDesign`. Invoked from `BrandStoreSettings` observer (`app/Observers/Core/BrandStoreSettingsObserver.php` or `app/Observers/Retail/BrandStoreSettingsObserver.php` — both exist; check which fires for Shopify-integration writes) and the Shopify integration provision/teardown paths.
     - `forgetHydrogenAffiliateProducts(string $affiliateId): void` — invoked when `AffiliateProductSelection` rows change (add an observer if none exists yet, or hook the explicit forget into the curation write endpoints) and when custom-photo `SiteMedia` rows change (via `SiteMediaObserver`).
-- [ ] **Step 6 — Verify `Cache-Control: no-store` preservation.** All three controllers serve into the Hydrogen storefront layer; the existing `no-store` on `HydrogenAffiliateController` was added in commit `b9de807` to prevent Oxygen/CDN from caching stale payload shapes across deploys. Keep it on all three until SCALE-B#CACHE-9 lands the deploy-keyed ETag strategy.
+- [x] **Step 6 — Verify `Cache-Control: no-store` preservation.** All three controllers serve into the Hydrogen storefront layer; the existing `no-store` on `HydrogenAffiliateController` was added in commit `b9de807` to prevent Oxygen/CDN from caching stale payload shapes across deploys. Keep it on all three until SCALE-B#CACHE-9 lands the deploy-keyed ETag strategy.
 
 ### Plain English
 
