@@ -233,28 +233,49 @@ it('subscription updated handler delegates to created when no local row exists (
     expect(Subscription::where('stripe_subscription_id', 'sub_race_unknown')->exists())->toBeTrue();
 });
 
-it('throws LogicException when Stripe sends trialing status', function () {
+it('downgrades trialing subscriptions to incomplete and logs (STRP-H — no throw)', function () {
+    // STRP-H: previously this handler threw a LogicException when Stripe sent trialing
+    // status. Combined with the ack-before-process anti-pattern (now fixed by the
+    // STRP-C delete-on-failure trait), throwing silenced the event and left the local
+    // subscription unsynced forever. New behavior: log loudly for Nightwatch alerting
+    // and map trialing → STATUS_INCOMPLETE so no entitlements are granted; a later
+    // subscription.updated with the real status promotes the row at that point.
     $professional = basilTestProfessional('cus_trial');
     basilTestPlan('price_trial');
+
+    $start = now()->startOfMonth()->timestamp;
+    $end = now()->endOfMonth()->timestamp;
 
     $stripeSubscription = (object) [
         'id' => 'sub_trial',
         'customer' => 'cus_trial',
         'status' => 'trialing',
-        'current_period_start' => now()->timestamp,
-        'current_period_end' => now()->addMonth()->timestamp,
         'cancel_at_period_end' => false,
         'metadata' => (object) ['sidest_professional_id' => $professional->id],
         'items' => (object) [
-            'data' => [(object) ['price' => (object) ['id' => 'price_trial']]],
+            'data' => [(object) [
+                'price' => (object) ['id' => 'price_trial'],
+                'current_period_start' => $start,
+                'current_period_end' => $end,
+            ]],
         ],
     ];
     $event = (object) ['type' => 'customer.subscription.created'];
+
+    \Illuminate\Support\Facades\Log::spy();
 
     $controller = new StripeWebhookController;
     $method = new ReflectionMethod($controller, 'handleSubscriptionCreated');
     $method->setAccessible(true);
 
-    expect(fn () => $method->invoke($controller, $stripeSubscription, $event))
-        ->toThrow(\LogicException::class, 'does not use trials');
+    // No throw — the handler completes and persists the subscription as 'incomplete'.
+    $method->invoke($controller, $stripeSubscription, $event);
+
+    $localSub = \App\Models\Billing\Subscription::where('stripe_subscription_id', 'sub_trial')->first();
+    expect($localSub)->not->toBeNull()
+        ->and($localSub->status)->toBe(\App\Models\Billing\Subscription::STATUS_INCOMPLETE);
+
+    \Illuminate\Support\Facades\Log::shouldHaveReceived('error')
+        ->withArgs(fn ($message) => str_contains($message, 'unexpected_trialing_status'))
+        ->once();
 });

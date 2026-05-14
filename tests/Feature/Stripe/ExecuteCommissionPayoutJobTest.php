@@ -88,15 +88,20 @@ it('handle() skips processing when payout is not found', function () {
     $job->handle($service);
 });
 
-it('handle() skips processing when payout is already completed', function () {
-    execJob_seedPayout('p1', ['status' => 'completed']);
+it('handle() skips processing when payout is already in a terminal state (BECS race defence)', function (string $status) {
+    // Critical: failed/cancelled are now in the guard. Without them, a job dispatched by
+    // the daily sweep that runs AFTER the BECS payment_intent.payment_failed webhook
+    // already marked the payout 'failed' would fall through to a fresh PI create. Because
+    // BECS settlement is T+2 (48h) and Stripe's idempotency-key cache is only 24h, Stripe
+    // would issue a SECOND PaymentIntent — charging the brand twice.
+    execJob_seedPayout('p1', ['status' => $status]);
 
     $service = Mockery::mock(CommissionPayoutService::class);
     $service->shouldNotReceive('processPayoutBatch');
 
     $job = new ExecuteCommissionPayoutJob('p1');
     $job->handle($service);
-});
+})->with(['completed', 'failed', 'cancelled']);
 
 it('handle() calls processPayoutBatch for a pending payout', function () {
     $payout = execJob_seedPayout('p1', ['status' => 'pending']);
@@ -140,18 +145,14 @@ it('handle() returns cleanly when processPayoutBatch returns null (processing �
         ->once();
 });
 
-it('handle() skips processing when payout is failed (BECS race guard)', function () {
-    execJob_seedPayout('p1', ['status' => 'failed', 'processed_at' => now()->toDateTimeString()]);
-
-    $service = Mockery::mock(CommissionPayoutService::class);
-    $service->shouldNotReceive('processPayoutBatch');
-
-    $job = new ExecuteCommissionPayoutJob('p1');
-    $job->handle($service);
-});
-
-it('handle() skips processing when payout is already cancelled', function () {
-    execJob_seedPayout('p1', ['status' => 'cancelled']);
+it('handle() logs cancelled-by-revalidation when processPayoutBatch cancels the payout mid-flow', function () {
+    // After the BECS race fix, a payout that's already 'cancelled' at handle() entry
+    // returns immediately — processPayoutBatch is never called. The cancelled-by-
+    // revalidation log path only fires when processPayoutBatch ITSELF cancels the
+    // payout during execution (revalidatePayoutOrders detecting all orders refunded).
+    // We simulate that by seeding 'pending' and having the service mock mutate the
+    // status to 'cancelled' before returning null.
+    execJob_seedPayout('p1', ['status' => 'pending']);
 
     $service = Mockery::mock(CommissionPayoutService::class);
     $service->shouldNotReceive('processPayoutBatch');
@@ -166,10 +167,10 @@ it('handle() logs cancelled-by-revalidation when processPayoutBatch transitions 
     $service = Mockery::mock(CommissionPayoutService::class);
     $service->shouldReceive('processPayoutBatch')
         ->once()
-        ->andReturnUsing(function () {
-            // Simulate revalidatePayoutOrders cancelling all linked orders.
-            DB::connection('pgsql')->table('commerce.commission_payouts')
-                ->where('id', 'p1')
+        ->andReturnUsing(function ($payout) {
+            DB::connection('pgsql')
+                ->table('commerce.commission_payouts')
+                ->where('id', $payout->id)
                 ->update(['status' => 'cancelled']);
 
             return null;

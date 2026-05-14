@@ -33,6 +33,7 @@ beforeEach(function () {
         stripe_event_id TEXT UNIQUE,
         event_type TEXT,
         payload TEXT,
+        received_at TEXT,
         processed_at TEXT
     )');
 });
@@ -260,11 +261,11 @@ it('v2.core.account.updated webhook via platform-thin forgets the cached status'
         'api_version' => '2024-04-10',
         'created' => time(),
         'type' => 'v2.core.account.updated',
-        'data' => [
-            'related_object' => [
-                'id' => $accountId,
-                'type' => 'account',
-            ],
+        'data' => ['account_id' => $accountId],
+        'related_object' => [
+            'id' => $accountId,
+            'type' => 'v2.core.account',
+            'url' => '/v2/core/accounts/'.$accountId,
         ],
         'livemode' => false,
     ];

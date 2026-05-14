@@ -3,15 +3,11 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\Stripe\SyncBrandPaymentMethodFromCheckoutSessionJob;
-use App\Models\Billing\WebhookEvent;
 use App\Models\Core\Professional\Professional;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Stripe\Exception\SignatureVerificationException;
-use Stripe\Webhook;
 
 /**
  * Stripe Connect-scope webhooks — v1 events fired on connected accounts.
@@ -35,57 +31,33 @@ class StripeConnectWebhookController extends Controller
 
     public function __invoke(Request $request): JsonResponse
     {
-        $payload = $request->getContent();
-        $sigHeader = $request->header('Stripe-Signature');
-
-        if (! $sigHeader) {
-            return response()->json(['error' => 'Missing signature'], 400);
-        }
-
-        $secret = (string) config('services.stripe.connect_webhook_secret');
-        if ($secret === '') {
-            Log::error('Stripe Connect webhook hit with no secret configured');
-
-            return response()->json(['error' => 'No webhook secret configured'], 400);
-        }
-
-        try {
-            $event = Webhook::constructEvent($payload, $sigHeader, $secret);
-        } catch (SignatureVerificationException) {
-            Log::warning('Stripe Connect webhook signature verification failed');
-
-            return response()->json(['error' => 'Invalid signature'], 400);
-        } catch (\Exception $e) {
-            Log::warning('Stripe Connect webhook parse error', ['error' => $e->getMessage()]);
-
-            return response()->json(['error' => 'Invalid payload'], 400);
-        }
-
-        if (! $this->validateEventStructure($event)) {
-            return response()->json(['error' => 'Invalid payload structure'], 400);
+        $event = $this->constructStripeEvent(
+            $request,
+            (string) config('services.stripe.connect_webhook_secret'),
+        );
+        if ($event instanceof JsonResponse) {
+            return $event;
         }
 
         // Idempotency: firstOrCreate on stripe_event_id. Stripe event IDs are globally unique
         // across all destinations, so billing.webhook_events covers this controller and the
         // platform and billing controllers without collision.
-        $webhookEvent = WebhookEvent::firstOrCreate(
-            ['stripe_event_id' => $event->id],
-            ['event_type' => $event->type, 'processed_at' => now()]
-        );
-
-        if (! $webhookEvent->wasRecentlyCreated) {
-            return response()->json(['received' => true]);
+        $webhookEvent = $this->dedupeOrAck($event, $request->getContent());
+        if ($webhookEvent instanceof JsonResponse) {
+            return $webhookEvent;
         }
 
-        $webhookEvent->forceFill(['payload' => json_decode($payload, true)])->save();
+        // Capture handleParsedEvent's response by reference — it's public + JsonResponse-typed
+        // for direct invocation by tenant-isolation tests, but we still want delete-on-failure
+        // around the handler match. The closure throws on handler exceptions (trait drops the
+        // dedup row); a non-throwing 400 (account_mismatch tamper) marks processed_at and
+        // returns the rejection response as-is.
+        $handlerResponse = null;
+        $this->runHandlerWithFailureCleanup($webhookEvent, function () use ($event, &$handlerResponse): void {
+            $handlerResponse = $this->handleParsedEvent($event);
+        });
 
-        try {
-            return $this->handleParsedEvent($event);
-        } catch (\Throwable $e) {
-            // Delete the dedup row so Stripe's retry sees a fresh delivery, not a permanent 200.
-            $webhookEvent->delete();
-            throw $e;
-        }
+        return $handlerResponse ?? response()->json(['received' => true]);
     }
 
     /**
@@ -155,8 +127,11 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
-        // syncAccountStatus does the v2 retrieve + dual-capability derive + DB persist.
-        app(StripeConnectService::class)->syncAccountStatus($professional);
+        // STRP-F: dispatch the v2 account retrieve as an async job (same rationale as
+        // the platform-thin handler — avoid blocking the webhook response on a Stripe
+        // API call). syncAccountStatus does the v2 retrieve + dual-capability derive +
+        // DB persist inside the job.
+        \App\Jobs\Stripe\SyncStripeAccountStatusJob::dispatch($professional->id);
     }
 
     /**
@@ -206,9 +181,10 @@ class StripeConnectWebhookController extends Controller
      */
     private function handleCheckoutSessionCompleted(object $session): void
     {
-        $professionalId = $session->metadata?->sidest_professional_id
-            ?? $session->metadata?->professional_id
-            ?? null;
+        // STRP-M: legacy `professional_id` metadata fallback removed — current code
+        // (StripeConnectService::createCheckoutSetupSession) only writes the
+        // `sidest_professional_id` key; the fallback was unreachable dead code.
+        $professionalId = $session->metadata?->sidest_professional_id ?? null;
 
         if (! $professionalId) {
             Log::warning('stripe.checkout_completed.missing_professional_id', [

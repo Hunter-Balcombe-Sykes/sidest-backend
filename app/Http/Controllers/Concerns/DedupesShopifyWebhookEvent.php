@@ -37,7 +37,7 @@ trait DedupesShopifyWebhookEvent
             'provider' => 'shopify',
             'stripe_event_id' => $webhookId,
             'event_type' => $topic,
-            'processed_at' => now(),
+            'received_at' => now(),
         ]);
 
         return $inserted > 0;

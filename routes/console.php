@@ -116,6 +116,21 @@ Schedule::job(new \App\Jobs\Stripe\VoidExpiredPayoutsJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: void-expired-payouts');
     });
 
+// STRP-D: Reconciles payouts stuck in 'processing' that lost their
+// payment_intent.succeeded webhook (Stripe retry window exhausted or transient
+// handler failure that delete-on-failure couldn't recover from). Daily at 04:00
+// UTC — runs AFTER ProcessCommissionPayoutsJob's hourly sweep so any auto-recovery
+// from a re-delivered webhook happens first. 3-day threshold (set in the job
+// itself) = BECS T+2 + 1 buffer day.
+Schedule::job(new \App\Jobs\Stripe\ReconcileStuckPayoutsJob)
+    ->dailyAt('04:00')
+    ->timezone('UTC')
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: reconcile-stuck-payouts');
+    });
+
 Schedule::command('partna:analytics:purge-raw-events')
     ->dailyAt('03:00')
     ->withoutOverlapping()

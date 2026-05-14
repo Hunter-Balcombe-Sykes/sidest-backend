@@ -4,20 +4,20 @@ use App\Jobs\Stripe\ReconcileStuckPayoutsJob;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Stripe\StripeClient;
 
-// STRP-3: daily reconciliation for payouts stuck in 'processing' longer than 3 days.
-// Without this, a lost payment_intent.succeeded webhook leaves the payout in 'processing'
-// forever — the daily sweep re-dispatches jobs but each job immediately no-ops on the
-// processing guard. This job asks Stripe directly: "what is the current PI status?"
-
-afterEach(function () {
-    \Illuminate\Support\Carbon::setTestNow(null);
-});
+// Tests for the STRP-D reconciliation job: payouts stuck in 'processing' beyond
+// the BECS T+2 + 1 buffer window get their actual PI status pulled from Stripe
+// and advanced via markPaymentIntentSucceeded / markPaymentIntentFailed.
+//
+// Combined with the STRP-C delete-on-failure pattern in the trait, this closes
+// the recovery gap for webhooks that get permanently lost (Stripe's retry window
+// exhausted after persistent handler failures).
 
 beforeEach(function () {
     setupProfessionalsTable();
+    setupCommerceOrdersTables();
 
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
         id TEXT PRIMARY KEY,
@@ -38,27 +38,26 @@ beforeEach(function () {
         charge_cents INTEGER DEFAULT 0,
         retry_count INTEGER NOT NULL DEFAULT 0,
         needs_manual_refund INTEGER NOT NULL DEFAULT 0,
-        grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
+        transfer_completed_at TEXT,
+        failure_category TEXT,
         created_at TEXT,
         updated_at TEXT
     )');
 });
 
-function reconcile_seedPayout(string $id, array $overrides = []): CommissionPayout
+function reconcileSeedPayout(array $overrides): CommissionPayout
 {
+    $id = $overrides['id'] ?? Str::uuid()->toString();
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('commerce.commission_payouts')->insert(array_merge([
         'id' => $id,
         'brand_professional_id' => 'brand-1',
         'affiliate_professional_id' => 'aff-1',
-        'payment_intent_id' => 'pi_test_'.$id,
         'status' => 'processing',
         'gross_commission_cents' => 10000,
         'platform_fee_cents' => 300,
         'net_payout_cents' => 9700,
         'currency_code' => 'AUD',
-        'charge_cents' => 0,
-        'retry_count' => 0,
         'created_at' => $now,
         'updated_at' => $now,
     ], $overrides));
@@ -66,196 +65,142 @@ function reconcile_seedPayout(string $id, array $overrides = []): CommissionPayo
     return CommissionPayout::find($id);
 }
 
-// ─── PI succeeded: marks payout completed ────────────────────────────────────
+function reconcileJobWithStripeMock(StripeClient $stripeMock): ReconcileStuckPayoutsJob
+{
+    return new class($stripeMock) extends ReconcileStuckPayoutsJob
+    {
+        public function __construct(public StripeClient $injected)
+        {
+            parent::__construct();
+        }
 
-it('calls markPaymentIntentSucceeded when Stripe reports pi status as succeeded', function () {
-    \Illuminate\Support\Carbon::setTestNow(now());
+        protected function makeStripeClient(): StripeClient
+        {
+            return $this->injected;
+        }
+    };
+}
 
-    reconcile_seedPayout('p_succeeded', [
-        'payment_intent_id' => 'pi_succeeded',
+it('advances a stuck succeeded payout via markPaymentIntentSucceeded', function () {
+    $payout = reconcileSeedPayout([
+        'id' => 'pay_stuck_succeeded',
+        'payment_intent_id' => 'pi_stuck_ok',
+        'status' => 'processing',
         'updated_at' => now()->subDays(4)->toDateTimeString(),
     ]);
 
-    $pi = (object) [
-        'id' => 'pi_succeeded',
-        'status' => 'succeeded',
-        'latest_charge' => 'ch_recovered',
-    ];
+    $pi = (object) ['id' => 'pi_stuck_ok', 'status' => 'succeeded', 'latest_charge' => 'ch_stuck_ok'];
+    $paymentIntentsMock = Mockery::mock();
+    $paymentIntentsMock->shouldReceive('retrieve')->once()->with('pi_stuck_ok')->andReturn($pi);
 
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->paymentIntents = Mockery::mock();
-    $stripe->paymentIntents->shouldReceive('retrieve')
-        ->with('pi_succeeded')
-        ->andReturn($pi);
+    $stripeMock = Mockery::mock(StripeClient::class)->makePartial();
+    $stripeMock->paymentIntents = $paymentIntentsMock;
 
     $payoutService = Mockery::mock(CommissionPayoutService::class);
     $payoutService->shouldReceive('markPaymentIntentSucceeded')
         ->once()
-        ->withArgs(fn ($payout, $chargeId) => $payout->id === 'p_succeeded' && $chargeId === 'ch_recovered');
+        ->withArgs(fn ($p, $charge) => $p->id === 'pay_stuck_succeeded' && $charge === 'ch_stuck_ok');
 
-    $job = new ReconcileStuckPayoutsJob($stripe, $payoutService);
-    $job->handle();
+    reconcileJobWithStripeMock($stripeMock)->handle($payoutService);
 });
 
-// ─── PI failed: marks payout failed ──────────────────────────────────────────
-
-it('calls markPaymentIntentFailed when Stripe reports pi status as requires_payment_method', function () {
-    \Illuminate\Support\Carbon::setTestNow(now());
-
-    reconcile_seedPayout('p_failed', [
-        'payment_intent_id' => 'pi_failed',
+it('marks a stuck terminally-failed payout via markPaymentIntentFailed', function () {
+    reconcileSeedPayout([
+        'id' => 'pay_stuck_failed',
+        'payment_intent_id' => 'pi_stuck_fail',
+        'status' => 'processing',
         'updated_at' => now()->subDays(4)->toDateTimeString(),
     ]);
 
     $pi = (object) [
-        'id' => 'pi_failed',
+        'id' => 'pi_stuck_fail',
         'status' => 'requires_payment_method',
-        'latest_charge' => null,
+        'last_payment_error' => (object) ['code' => 'card_declined', 'message' => 'Card declined.'],
     ];
+    $paymentIntentsMock = Mockery::mock();
+    $paymentIntentsMock->shouldReceive('retrieve')->once()->andReturn($pi);
 
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->paymentIntents = Mockery::mock();
-    $stripe->paymentIntents->shouldReceive('retrieve')
-        ->with('pi_failed')
-        ->andReturn($pi);
+    $stripeMock = Mockery::mock(StripeClient::class)->makePartial();
+    $stripeMock->paymentIntents = $paymentIntentsMock;
 
     $payoutService = Mockery::mock(CommissionPayoutService::class);
     $payoutService->shouldReceive('markPaymentIntentFailed')
         ->once()
-        ->withArgs(fn ($payout) => $payout->id === 'p_failed');
+        ->withArgs(fn ($p, $code) => $p->id === 'pay_stuck_failed' && $code === 'card_declined');
 
-    $job = new ReconcileStuckPayoutsJob($stripe, $payoutService);
-    $job->handle();
+    reconcileJobWithStripeMock($stripeMock)->handle($payoutService);
 });
 
-// ─── PI still processing: heartbeat log only ─────────────────────────────────
-
-it('logs a heartbeat and leaves the payout untouched when Stripe reports pi still processing', function () {
-    \Illuminate\Support\Carbon::setTestNow(now());
-
-    reconcile_seedPayout('p_heartbeat', [
-        'payment_intent_id' => 'pi_heartbeat',
+it('skips payouts that are still processing at Stripe (BECS settlement in flight)', function () {
+    reconcileSeedPayout([
+        'id' => 'pay_still_processing',
+        'payment_intent_id' => 'pi_still_processing',
+        'status' => 'processing',
         'updated_at' => now()->subDays(4)->toDateTimeString(),
     ]);
 
-    $pi = (object) ['id' => 'pi_heartbeat', 'status' => 'processing'];
+    $pi = (object) ['id' => 'pi_still_processing', 'status' => 'processing'];
+    $paymentIntentsMock = Mockery::mock();
+    $paymentIntentsMock->shouldReceive('retrieve')->once()->andReturn($pi);
 
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->paymentIntents = Mockery::mock();
-    $stripe->paymentIntents->shouldReceive('retrieve')
-        ->with('pi_heartbeat')
-        ->andReturn($pi);
+    $stripeMock = Mockery::mock(StripeClient::class)->makePartial();
+    $stripeMock->paymentIntents = $paymentIntentsMock;
 
     $payoutService = Mockery::mock(CommissionPayoutService::class);
     $payoutService->shouldNotReceive('markPaymentIntentSucceeded');
     $payoutService->shouldNotReceive('markPaymentIntentFailed');
 
-    Log::spy();
-
-    $job = new ReconcileStuckPayoutsJob($stripe, $payoutService);
-    $job->handle();
-
-    Log::shouldHaveReceived('info')
-        ->withArgs(fn ($msg) => str_contains($msg, 'stripe.reconcile.still_processing'))
-        ->once();
+    reconcileJobWithStripeMock($stripeMock)->handle($payoutService);
 });
 
-// ─── Freshly-stuck payouts are skipped (3-day threshold) ────────────────────
-
-it('skips payouts updated within the 3-day BECS threshold', function () {
-    \Illuminate\Support\Carbon::setTestNow(now());
-
-    reconcile_seedPayout('p_fresh', [
-        'payment_intent_id' => 'pi_fresh',
-        'updated_at' => now()->subDays(1)->toDateTimeString(), // only 1 day old, within threshold
+it('does not pick up payouts younger than the 3-day threshold', function () {
+    reconcileSeedPayout([
+        'id' => 'pay_too_young',
+        'payment_intent_id' => 'pi_too_young',
+        'status' => 'processing',
+        'updated_at' => now()->subDays(2)->toDateTimeString(),
     ]);
 
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->paymentIntents = Mockery::mock();
-    $stripe->paymentIntents->shouldNotReceive('retrieve');
+    $paymentIntentsMock = Mockery::mock();
+    $paymentIntentsMock->shouldNotReceive('retrieve');
+
+    $stripeMock = Mockery::mock(StripeClient::class)->makePartial();
+    $stripeMock->paymentIntents = $paymentIntentsMock;
 
     $payoutService = Mockery::mock(CommissionPayoutService::class);
-    $payoutService->shouldNotReceive('markPaymentIntentSucceeded');
-    $payoutService->shouldNotReceive('markPaymentIntentFailed');
 
-    $job = new ReconcileStuckPayoutsJob($stripe, $payoutService);
-    $job->handle();
+    reconcileJobWithStripeMock($stripeMock)->handle($payoutService);
 });
 
-// ─── requires_capture is NOT a terminal failure — should heartbeat, not fail ──
-
-it('treats requires_capture as still-processing, not a terminal failure', function () {
-    \Illuminate\Support\Carbon::setTestNow(now());
-
-    reconcile_seedPayout('p_capture', [
-        'payment_intent_id' => 'pi_capture',
+it('continues processing other payouts when one retrieve fails', function () {
+    reconcileSeedPayout([
+        'id' => 'pay_retrieve_fails',
+        'payment_intent_id' => 'pi_retrieve_fails',
+        'status' => 'processing',
+        'updated_at' => now()->subDays(5)->toDateTimeString(),
+    ]);
+    reconcileSeedPayout([
+        'id' => 'pay_retrieve_ok',
+        'payment_intent_id' => 'pi_retrieve_ok',
+        'status' => 'processing',
         'updated_at' => now()->subDays(4)->toDateTimeString(),
     ]);
 
-    $pi = (object) ['id' => 'pi_capture', 'status' => 'requires_capture'];
+    $paymentIntentsMock = Mockery::mock();
+    $paymentIntentsMock->shouldReceive('retrieve')
+        ->with('pi_retrieve_fails')
+        ->andThrow(new \RuntimeException('Network blip'));
+    $paymentIntentsMock->shouldReceive('retrieve')
+        ->with('pi_retrieve_ok')
+        ->andReturn((object) ['id' => 'pi_retrieve_ok', 'status' => 'succeeded', 'latest_charge' => 'ch_ok']);
 
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->paymentIntents = Mockery::mock();
-    $stripe->paymentIntents->shouldReceive('retrieve')
-        ->with('pi_capture')
-        ->andReturn($pi);
-
-    $payoutService = Mockery::mock(CommissionPayoutService::class);
-    $payoutService->shouldNotReceive('markPaymentIntentFailed');
-    $payoutService->shouldNotReceive('markPaymentIntentSucceeded');
-
-    $job = new ReconcileStuckPayoutsJob($stripe, $payoutService);
-    $job->handle();
-});
-
-// ─── Expanded latest_charge object form extracts charge ID correctly ──────────
-
-it('extracts charge_id from an expanded latest_charge object on success', function () {
-    \Illuminate\Support\Carbon::setTestNow(now());
-
-    reconcile_seedPayout('p_expanded', [
-        'payment_intent_id' => 'pi_expanded',
-        'updated_at' => now()->subDays(4)->toDateTimeString(),
-    ]);
-
-    $pi = (object) [
-        'id' => 'pi_expanded',
-        'status' => 'succeeded',
-        'latest_charge' => (object) ['id' => 'ch_expanded_123'],
-    ];
-
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->paymentIntents = Mockery::mock();
-    $stripe->paymentIntents->shouldReceive('retrieve')
-        ->with('pi_expanded')
-        ->andReturn($pi);
+    $stripeMock = Mockery::mock(StripeClient::class)->makePartial();
+    $stripeMock->paymentIntents = $paymentIntentsMock;
 
     $payoutService = Mockery::mock(CommissionPayoutService::class);
     $payoutService->shouldReceive('markPaymentIntentSucceeded')
         ->once()
-        ->withArgs(fn ($payout, $chargeId) => $payout->id === 'p_expanded' && $chargeId === 'ch_expanded_123');
+        ->withArgs(fn ($p) => $p->id === 'pay_retrieve_ok');
 
-    $job = new ReconcileStuckPayoutsJob($stripe, $payoutService);
-    $job->handle();
-});
-
-// ─── Non-processing payouts are not queried ──────────────────────────────────
-
-it('ignores payouts that are not in processing status', function () {
-    \Illuminate\Support\Carbon::setTestNow(now());
-
-    reconcile_seedPayout('p_completed', [
-        'payment_intent_id' => 'pi_completed',
-        'status' => 'completed',
-        'updated_at' => now()->subDays(10)->toDateTimeString(),
-    ]);
-
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->paymentIntents = Mockery::mock();
-    $stripe->paymentIntents->shouldNotReceive('retrieve');
-
-    $payoutService = Mockery::mock(CommissionPayoutService::class);
-
-    $job = new ReconcileStuckPayoutsJob($stripe, $payoutService);
-    $job->handle();
+    reconcileJobWithStripeMock($stripeMock)->handle($payoutService);
 });

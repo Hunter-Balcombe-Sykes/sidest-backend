@@ -28,22 +28,25 @@ beforeEach(function () {
 
     // Production schema uses uuid/jsonb/timestamptz; SQLite-in-memory only supports TEXT.
     // The UNIQUE constraint on stripe_event_id is what the dedupe logic actually relies on.
+    // received_at = set on dedup row creation; processed_at = set after handler completes.
     $conn->statement('CREATE TABLE IF NOT EXISTS billing.webhook_events (
         id TEXT PRIMARY KEY,
         stripe_event_id TEXT NOT NULL UNIQUE,
         event_type TEXT NOT NULL,
         payload TEXT,
-        processed_at TEXT NOT NULL DEFAULT (datetime(\'now\'))
+        received_at TEXT NOT NULL DEFAULT (datetime(\'now\')),
+        processed_at TEXT NULL
     )');
 });
 
 it('skips processing when stripe_event_id already logged', function () {
-    // Pre-seed: this event was already processed.
+    // Pre-seed: this event was already received (and processed) in a prior delivery.
     DB::table('billing.webhook_events')->insert([
         'id' => (string) Str::uuid(),
         'stripe_event_id' => 'evt_duplicate_123',
         'event_type' => 'account.updated',
         'payload' => json_encode(['id' => 'evt_duplicate_123']),
+        'received_at' => now()->toDateTimeString(),
         'processed_at' => now()->toDateTimeString(),
     ]);
 
@@ -97,6 +100,60 @@ it('skips processing when stripe_event_id already logged', function () {
 
     // insertOrIgnore must not add a second row.
     expect(DB::table('billing.webhook_events')->where('stripe_event_id', 'evt_duplicate_123')->count())->toBe(1);
+});
+
+it('deletes the dedup row when the handler throws so Stripe can retry (STRP-C delete-on-failure)', function () {
+    // Critical reliability fix: prior to STRP-C the WebhookEvent row was committed
+    // BEFORE the handler ran. A transient handler failure (DB deadlock, transient
+    // Stripe API error, etc.) returned 500 to Stripe — but on Stripe's retry the
+    // dedup row already existed, so the webhook was acked immediately with 200 and
+    // the underlying event was permanently silenced.
+    $mockService = Mockery::mock(\App\Services\Stripe\StripeConnectService::class)->makePartial();
+    $mockService->shouldReceive('syncAccountStatus')
+        ->andThrow(new \RuntimeException('Simulated transient handler failure'));
+    app()->instance(\App\Services\Stripe\StripeConnectService::class, $mockService);
+
+    Professional::create([
+        'id' => (string) Str::uuid(),
+        'handle' => 'p_throw',
+        'handle_lc' => 'p_throw',
+        'display_name' => 'P throw',
+        'professional_type' => 'affiliate',
+        'status' => 'active',
+        'stripe_connect_account_id' => 'acct_throw_test',
+        'stripe_connect_status' => 'onboarding',
+    ]);
+
+    $payload = json_encode([
+        'id' => 'evt_handler_throws',
+        'type' => 'account.updated',
+        'account' => 'acct_throw_test',
+        'data' => ['object' => ['id' => 'acct_throw_test']],
+    ]);
+
+    $signingSecret = 'whsec_test_dedupe';
+    config(['services.stripe.connect_webhook_secret' => $signingSecret]);
+    config(['services.stripe.webhook_secret' => null]);
+
+    $timestamp = time();
+    $signedPayload = "{$timestamp}.{$payload}";
+    $signature = hash_hmac('sha256', $signedPayload, $signingSecret);
+
+    // Laravel catches the RuntimeException and renders a 500. We don't assert on the
+    // response shape here — the critical assertion is that the dedup row was DELETED
+    // so Stripe's next retry can re-attempt processing instead of being acked.
+    $this->call(
+        'POST',
+        '/api/webhooks/stripe-connect',
+        [], [], [],
+        [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_STRIPE_SIGNATURE' => "t={$timestamp},v1={$signature}",
+        ],
+        $payload
+    );
+
+    expect(DB::table('billing.webhook_events')->where('stripe_event_id', 'evt_handler_throws')->count())->toBe(0);
 });
 
 it('processes a fresh event and records it in webhook_events', function () {
