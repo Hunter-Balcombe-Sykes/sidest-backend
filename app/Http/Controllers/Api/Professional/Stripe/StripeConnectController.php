@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Professional\Stripe;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\Professional\Stripe\ExportsRequest;
 use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
 use App\Http\Requests\Api\Professional\Stripe\TransactionsRequest;
 use App\Http\Requests\Stripe\CreatePaymentMethodSetupRequest;
@@ -12,6 +13,7 @@ use App\Http\Resources\Stripe\TransactionResource;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Stripe\ExportService;
 use App\Services\Stripe\StripeBalanceService;
 use App\Services\Stripe\StripeConnectService;
 use App\Services\Stripe\StripeTransactionFetcher;
@@ -28,6 +30,7 @@ class StripeConnectController extends Controller
         private readonly CommissionPayoutService $payoutService,
         private readonly StripeTransactionFetcher $transactionFetcher,
         private readonly StripeBalanceService $balanceService,
+        private readonly ExportService $exportService,
         private readonly CacheLockService $cacheLock,
     ) {}
 
@@ -581,5 +584,46 @@ class StripeConnectController extends Controller
         return response()->json([
             'payouts' => $rows,
         ]);
+    }
+
+    /**
+     * GET /stripe/exports/{type}.{format}
+     *
+     * Streaming export for the Documents tab. type ∈ {transactions, payouts,
+     * detailed-commissions, eofy}; format ∈ {csv, xlsx}. role + filters in the
+     * query string scope the data to the caller. Cross-role calls are rejected
+     * via the same skeleton pattern used elsewhere.
+     */
+    public function export(ExportsRequest $request, string $type, string $format)
+    {
+        if (! in_array($type, ['transactions', 'payouts', 'detailed-commissions', 'eofy'], true)) {
+            return response()->json(['error' => 'invalid_type'], 422);
+        }
+        if (! in_array($format, ['csv', 'xlsx'], true)) {
+            return response()->json(['error' => 'invalid_format'], 422);
+        }
+
+        $pro = $request->attributes->get('professional');
+        $role = (string) $request->input('role');
+
+        $skeleton = new CommissionPayout;
+        $skeleton->forceFill($role === 'brand'
+            ? ['brand_professional_id' => $pro->id]
+            : ['affiliate_professional_id' => $pro->id]);
+        Gate::forUser($pro)->authorize('viewOwnPayouts', $skeleton);
+
+        $filters = [
+            'date_from' => $request->input('date_from'),
+            'date_to' => $request->input('date_to'),
+            'status' => $request->input('status', []),
+            'fy' => $request->input('fy'),
+        ];
+
+        return match ($type) {
+            'transactions' => $this->exportService->exportTransactions($pro, $role, $format, $filters),
+            'payouts' => $this->exportService->exportPayouts($pro, $role, $format, $filters),
+            'detailed-commissions' => $this->exportService->exportDetailedCommissions($pro, $role, $format, $filters),
+            'eofy' => $this->exportService->exportEofy($pro, $role, $format, $filters),
+        };
     }
 }

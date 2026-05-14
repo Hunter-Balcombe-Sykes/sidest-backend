@@ -424,6 +424,8 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::get('/stripe/payouts/{payoutId}', [StripeConnectController::class, 'payoutDetail']);
         Route::get('/stripe/transactions', [StripeConnectController::class, 'transactions']);
         Route::get('/stripe/balance', [StripeConnectController::class, 'balance']);
+        Route::get('/stripe/exports/{type}.{format}', [StripeConnectController::class, 'export'])
+            ->where('format', 'csv|xlsx');
 
         // Brand billing & payout history (Lane B prerequisites — new role-scoped endpoints)
         Route::get('/brand/billing-summary', [BrandBillingSummaryController::class, 'show']);

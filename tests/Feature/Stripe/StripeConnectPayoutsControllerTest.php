@@ -5,6 +5,7 @@ use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Stripe\ExportService;
 use App\Services\Stripe\StripeBalanceService;
 use App\Services\Stripe\StripeConnectService;
 use App\Services\Stripe\StripeTransactionFetcher;
@@ -99,6 +100,7 @@ function makePayoutsController(CommissionPayoutService $payoutService): StripeCo
         $payoutService,
         $fetcherStub,
         $balanceStub,
+        Mockery::mock(ExportService::class),
         app(CacheLockService::class),
     );
 }
