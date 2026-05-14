@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
 // End-to-end coverage for CreateShopifyAffiliateDiscountJob — dispatched at
-// the end of the Shopify OAuth chain and by sidest:install-affiliate-discount
+// the end of the Shopify OAuth chain and by partna:install-affiliate-discount
 // for existing brands. Stubs the Shopify Admin API so we can assert the exact
 // GraphQL calls the job makes and the provider_metadata state transitions it
 // writes.
@@ -76,7 +76,7 @@ it('installs automatic app discount when function is present and none exists', f
                             ['node' => [
                                 'id' => 'gid://shopify/ShopifyFunction/abc123',
                                 'apiType' => 'discount',
-                                'title' => 'sidest-affiliate-discount',
+                                'title' => 'partna-affiliate-discount',
                                 'app' => ['title' => 'Partna'],
                             ]],
                         ],
@@ -106,7 +106,7 @@ it('installs automatic app discount when function is present and none exists', f
 
     $integration->refresh();
     $meta = is_array($integration->provider_metadata) ? $integration->provider_metadata : json_decode($integration->provider_metadata, true);
-    expect($meta['sidest_discount_state'] ?? null)->toBe('registered');
+    expect($meta['partna_discount_state'] ?? null)->toBe('registered');
 });
 
 it('skips create when automatic discount backed by function already exists', function () {
@@ -121,7 +121,7 @@ it('skips create when automatic discount backed by function already exists', fun
                             ['node' => [
                                 'id' => 'gid://shopify/ShopifyFunction/abc123',
                                 'apiType' => 'discount',
-                                'title' => 'sidest-affiliate-discount',
+                                'title' => 'partna-affiliate-discount',
                                 'app' => ['title' => 'Partna'],
                             ]],
                         ],
@@ -140,7 +140,7 @@ it('skips create when automatic discount backed by function already exists', fun
                                     'status' => 'ACTIVE',
                                     'appDiscountType' => [
                                         'functionId' => 'gid://shopify/ShopifyFunction/abc123',
-                                        'title' => 'sidest-affiliate-discount',
+                                        'title' => 'partna-affiliate-discount',
                                     ],
                                 ],
                             ]],
@@ -154,7 +154,7 @@ it('skips create when automatic discount backed by function already exists', fun
 
     $integration->refresh();
     $meta = is_array($integration->provider_metadata) ? $integration->provider_metadata : json_decode($integration->provider_metadata, true);
-    expect($meta['sidest_discount_state'] ?? null)->toBe('registered');
+    expect($meta['partna_discount_state'] ?? null)->toBe('registered');
 
     // No third call should have been made — assert the mutation wasn't fired.
     Http::assertSentCount(2);
@@ -175,7 +175,7 @@ it('marks state as pending when function is not present on the store yet', funct
     $meta = is_array($integration->provider_metadata) ? $integration->provider_metadata : json_decode($integration->provider_metadata, true);
     // Pending, not failed — a later `shopify app deploy` that rolls the
     // function out to all stores lets a retry complete cleanly.
-    expect($meta['sidest_discount_state'] ?? null)->toBe('pending');
+    expect($meta['partna_discount_state'] ?? null)->toBe('pending');
 });
 
 it('marks state as failed when shop_domain is malformed', function () {
@@ -185,5 +185,5 @@ it('marks state as failed when shop_domain is malformed', function () {
 
     $integration->refresh();
     $meta = is_array($integration->provider_metadata) ? $integration->provider_metadata : json_decode($integration->provider_metadata, true);
-    expect($meta['sidest_discount_state'] ?? null)->toBe('failed');
+    expect($meta['partna_discount_state'] ?? null)->toBe('failed');
 });

@@ -54,7 +54,7 @@ class InstallAffiliateDiscountCommand extends Command
             $this->line("  dispatched for integration {$integration->id} (brand {$integration->professional_id})");
         }
 
-        $this->info('All install jobs dispatched. Watch Horizon for completion + provider_metadata.sidest_discount_state for results.');
+        $this->info('All install jobs dispatched. Watch Horizon for completion + provider_metadata.partna_discount_state for results.');
 
         return self::SUCCESS;
     }
