@@ -24,6 +24,8 @@ class NudgeStuckOnboardingJob implements ShouldQueue
 
     public int $tries = 3;
 
+    public int $backoff = 60;
+
     public int $timeout = 300;
 
     /**

@@ -19,6 +19,10 @@ class SendEnquiryNotificationJob implements ShouldQueue
 
     public int $tries = 3;
 
+    public array $backoff = [30, 90, 180];
+
+    public int $timeout = 30;
+
     public function __construct(
         public readonly string $enquiryId,
         public readonly string $notificationEmail,
@@ -39,5 +43,15 @@ class SendEnquiryNotificationJob implements ShouldQueue
         }
 
         Mail::to($this->notificationEmail)->send(new SiteEnquiryNotification($enquiry));
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        report($e);
+        Log::error('SendEnquiryNotificationJob failed permanently', [
+            'enquiry_id' => $this->enquiryId,
+            'notification_email' => $this->notificationEmail,
+            'error' => $e->getMessage(),
+        ]);
     }
 }

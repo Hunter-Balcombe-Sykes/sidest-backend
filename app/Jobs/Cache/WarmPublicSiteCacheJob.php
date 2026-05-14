@@ -14,6 +14,12 @@ class WarmPublicSiteCacheJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $tries = 3;
+
+    public array $backoff = [5, 15, 30];
+
+    public int $timeout = 10;
+
     public function __construct(
         public string $subdomain
     ) {
@@ -26,5 +32,10 @@ class WarmPublicSiteCacheJob implements ShouldQueue
     public function handle(SiteCacheService $siteCache): void
     {
         $siteCache->warmSiteCache(strtolower($this->subdomain));
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        report($e);
     }
 }

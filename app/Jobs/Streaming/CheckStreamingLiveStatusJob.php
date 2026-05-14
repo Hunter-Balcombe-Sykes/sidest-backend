@@ -20,6 +20,9 @@ class CheckStreamingLiveStatusJob implements ShouldQueue
 
     public int $tries = 1;
 
+    // No backoff — tries=1 means no retry, so backoff is moot, but required for hygiene.
+    public int $backoff = 0;
+
     public int $timeout = 90;
 
     public function handle(LiveStatusPoller $poller): void

@@ -24,6 +24,10 @@ class FanOutBrandStatusNotificationJob implements ShouldQueue
 
     public int $tries = 3;
 
+    public int $backoff = 30;
+
+    public int $timeout = 120;
+
     // Bound batch size so any one Redis pipeline write stays predictable.
     // Shared with SendStaffBroadcastEmailsJob — keep in sync if changed.
     private const BATCH_CHUNK_SIZE = 200;

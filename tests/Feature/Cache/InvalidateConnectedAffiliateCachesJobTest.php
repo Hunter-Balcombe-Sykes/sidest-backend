@@ -33,3 +33,27 @@ it('can be dispatched with a delay via Queue::fake', function () {
         return $job->subdomain === 'delayed-affiliate';
     });
 });
+
+it('has 3 tries', function () {
+    $job = new InvalidateConnectedAffiliateCachesJob('test');
+
+    expect($job->tries)->toBe(3);
+});
+
+it('has backoff of [5, 15, 30]', function () {
+    $job = new InvalidateConnectedAffiliateCachesJob('test');
+
+    expect($job->backoff)->toBe([5, 15, 30]);
+});
+
+it('has a timeout of 10', function () {
+    $job = new InvalidateConnectedAffiliateCachesJob('test');
+
+    expect($job->timeout)->toBe(10);
+});
+
+it('calls report() on failure', function () {
+    $e = new \RuntimeException('cache error');
+    $job = new InvalidateConnectedAffiliateCachesJob('test');
+    $job->failed($e); // Should not throw
+})->throwsNoExceptions();

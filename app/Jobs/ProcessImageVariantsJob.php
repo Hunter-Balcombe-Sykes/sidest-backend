@@ -32,6 +32,8 @@ class ProcessImageVariantsJob implements ShouldQueue
 
     public int $backoff = 30;
 
+    public int $timeout = 120;
+
     /**
      * @param  string  $originalPath  Path of the original on the media disk.
      * @param  string  $imageId  UUID of the SiteMedia row.

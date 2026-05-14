@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Cloudflare;
 
+use App\Jobs\Concerns\HasCloudflareRetryPolicy;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cloudflare\CloudflareDnsService;
 use Illuminate\Bus\Queueable;
@@ -17,20 +18,13 @@ use Throwable;
 // professionals without a site row.
 class ProvisionBrandDnsJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-
-    public int $tries = 3;
+    use Dispatchable, HasCloudflareRetryPolicy, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 30;
 
     public function __construct(public readonly string $professionalId)
     {
         $this->onQueue('integrations');
-    }
-
-    public function backoff(): array
-    {
-        return [10, 30, 60];
     }
 
     public function handle(CloudflareDnsService $dns): void

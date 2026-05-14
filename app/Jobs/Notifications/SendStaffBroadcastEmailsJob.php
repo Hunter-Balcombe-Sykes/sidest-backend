@@ -23,6 +23,8 @@ class SendStaffBroadcastEmailsJob implements ShouldQueue
 
     public array $backoff = [10, 30, 60];
 
+    public int $timeout = 120;
+
     // Bound batch size so any one Redis pipeline write stays predictable.
     // Shared with FanOutBrandStatusNotificationJob — keep in sync if changed.
     private const BATCH_CHUNK_SIZE = 200;

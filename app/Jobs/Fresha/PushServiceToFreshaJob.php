@@ -20,6 +20,8 @@ class PushServiceToFreshaJob implements ShouldQueue
 
     public array $backoff = [30, 60];
 
+    public int $timeout = 30;
+
     public function __construct(
         public string $serviceId,
         public string $action = 'upsert'

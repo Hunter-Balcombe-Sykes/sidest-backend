@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Cloudflare;
 
+use App\Jobs\Concerns\HasCloudflareRetryPolicy;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cloudflare\CloudflareKvService;
@@ -12,6 +13,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 // Syncs one professional's subdomain routing entries in Cloudflare KV.
 // Brands get {"type":"brand"} — Edge Worker passes through to Hydrogen.
@@ -22,11 +24,14 @@ use Illuminate\Support\Facades\Log;
 // Dispatched by observers on: handle change, brand_partner_links change, brand URL change.
 class SyncSubdomainToKvJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HasCloudflareRetryPolicy, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
+    public int $timeout = 30;
 
-    public function __construct(public readonly string $professionalId) {}
+    public function __construct(public readonly string $professionalId)
+    {
+        $this->onQueue('integrations');
+    }
 
     public function handle(CloudflareKvService $kv): void
     {
@@ -82,6 +87,15 @@ class SyncSubdomainToKvJob implements ShouldQueue
         foreach ($handles as $handle) {
             $kv->put($handle, ['type' => 'affiliate', 'redirect' => $siteUrl]);
         }
+    }
+
+    public function failed(Throwable $e): void
+    {
+        report($e);
+        Log::error('cloudflare.sync_subdomain_to_kv.failed', [
+            'professional_id' => $this->professionalId,
+            'error' => $e->getMessage(),
+        ]);
     }
 
     /** @return array<int, string> */

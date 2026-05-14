@@ -26,6 +26,8 @@ class VoidPendingCommissionsForLinkJob implements ShouldQueue
 
     public int $backoff = 60;
 
+    public int $timeout = 120;
+
     public function __construct(
         public readonly string $affiliateProfessionalId,
         public readonly string $brandProfessionalId,

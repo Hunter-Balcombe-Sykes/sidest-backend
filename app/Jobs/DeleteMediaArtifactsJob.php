@@ -30,6 +30,8 @@ class DeleteMediaArtifactsJob implements ShouldQueue
 
     public int $backoff = 30;
 
+    public int $timeout = 120;
+
     /**
      * @param  string  $mediaId  UUID of the (now soft-deleted) SiteMedia row.
      * @param  string  $basePath  Storage prefix for all video artifacts (videos/{proId}/{mediaId}).

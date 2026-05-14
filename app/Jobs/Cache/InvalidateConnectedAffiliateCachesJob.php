@@ -16,6 +16,12 @@ class InvalidateConnectedAffiliateCachesJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $tries = 3;
+
+    public array $backoff = [5, 15, 30];
+
+    public int $timeout = 10;
+
     public function __construct(
         public string $subdomain
     ) {
@@ -26,5 +32,10 @@ class InvalidateConnectedAffiliateCachesJob implements ShouldQueue
     {
         $key = CacheKeyGenerator::publicSitePayload($this->subdomain);
         Cache::deleteMultiple([$key, $key.':stale']);
+    }
+
+    public function failed(\Throwable $e): void
+    {
+        report($e);
     }
 }

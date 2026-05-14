@@ -22,6 +22,8 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
 
     public array $backoff = [30, 120, 300];
 
+    public int $timeout = 30;
+
     public function __construct(
         public readonly string $notificationId,
         public readonly string $category,

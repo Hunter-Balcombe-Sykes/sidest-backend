@@ -21,6 +21,8 @@ class SyncSquareCatalogDeltaJob implements ShouldQueue
 
     public array $backoff = [30, 60];
 
+    public int $timeout = 120;
+
     public function __construct(
         public string $merchantId,
         public ?string $beginTime = null,

@@ -20,6 +20,10 @@ class SendBrandStatusNotificationJob implements ShouldQueue
 
     public int $tries = 3;
 
+    public int $backoff = 30;
+
+    public int $timeout = 30;
+
     public function __construct(
         public readonly string $affiliateProfessionalId,
         public readonly string $brandProfessionalId,

@@ -36,6 +36,8 @@ class ProcessVideoVariantsJob implements ShouldQueue
 
     public int $backoff = 60;
 
+    public int $timeout = 720;
+
     /**
      * @param  string  $mediaId  UUID of the SiteMedia row.
      * @param  string  $originalPath  Storage path of the uploaded original.

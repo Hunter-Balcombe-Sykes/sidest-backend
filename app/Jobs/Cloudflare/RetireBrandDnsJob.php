@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Cloudflare;
 
+use App\Jobs\Concerns\HasCloudflareRetryPolicy;
 use App\Services\Cloudflare\CloudflareDnsService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -9,16 +10,20 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 // Removes the Cloudflare CNAME for a retired subdomain. Looks up the record by name
 // (no stored record ID needed). Used when a brand renames their subdomain.
 class RetireBrandDnsJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HasCloudflareRetryPolicy, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
+    public int $timeout = 30;
 
-    public function __construct(public readonly string $subdomain) {}
+    public function __construct(public readonly string $subdomain)
+    {
+        $this->onQueue('integrations');
+    }
 
     public function handle(CloudflareDnsService $dns): void
     {
@@ -39,5 +44,14 @@ class RetireBrandDnsJob implements ShouldQueue
         }
 
         $dns->deleteRecord((string) $record['id']);
+    }
+
+    public function failed(Throwable $e): void
+    {
+        report($e);
+        Log::error('cloudflare.retire_brand_dns.failed', [
+            'subdomain' => $this->subdomain,
+            'error' => $e->getMessage(),
+        ]);
     }
 }

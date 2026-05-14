@@ -29,6 +29,14 @@ beforeEach(function () {
     }
 });
 
+it('has correct reliability properties on ProcessVideoVariantsJob', function () {
+    $job = new ProcessVideoVariantsJob('media-id', 'videos/test/original.mp4', 'videos/test/media-id');
+
+    expect($job->tries)->toBe(2);
+    expect($job->backoff)->toBe(60);
+    expect($job->timeout)->toBe(720);
+});
+
 it('rethrows image processing exceptions and marks failed in failed handler', function () {
     $imageId = seedSiteImageRow(SiteMedia::MEDIA_TYPE_IMAGE);
     $originalPath = "images/test/{$imageId}/original.jpg";

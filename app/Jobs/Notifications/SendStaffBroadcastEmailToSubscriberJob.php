@@ -22,6 +22,10 @@ class SendStaffBroadcastEmailToSubscriberJob implements ShouldQueue
 
     public int $tries = 3;
 
+    public array $backoff = [10, 30, 60];
+
+    public int $timeout = 30;
+
     public function __construct(
         public string $notificationId,
         public string $subscriptionId
