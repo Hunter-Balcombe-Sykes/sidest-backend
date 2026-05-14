@@ -7,6 +7,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\CacheLockService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiErrorException;
 use Stripe\StripeClient;
 
@@ -250,16 +251,20 @@ class StripeConnectService
         }
 
         try {
-            $link = $this->stripe->v2->core->accountLinks->create([
-                'account' => $accountId,
-                'use_case' => [
-                    'type' => 'account_management',
-                    'account_management' => [],
-                ],
-            ]);
+            // v1 login_links is the correct API for Express dashboard access — it works on v2
+            // accounts and returns a one-time URL. There is no v2 equivalent today; the v2
+            // accountLinks API only supports account_onboarding and account_update use cases.
+            $link = $this->stripe->accounts->createLoginLink($accountId);
 
             return $link->url;
-        } catch (ApiErrorException) {
+        } catch (ApiErrorException $e) {
+            report($e);
+            Log::error('Stripe Express dashboard login link failed', [
+                'professional_id' => $professional->id,
+                'account_id' => $accountId,
+                'error' => $e->getMessage(),
+            ]);
+
             return null;
         }
     }

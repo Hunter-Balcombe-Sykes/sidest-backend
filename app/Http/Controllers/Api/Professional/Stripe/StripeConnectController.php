@@ -99,7 +99,11 @@ class StripeConnectController extends Controller
         $url = $this->connectService->createDashboardLink($pro);
 
         if (! $url) {
-            return response()->json(['error' => 'Dashboard not available. Complete onboarding first.'], 422);
+            $reason = in_array($pro->stripe_connect_status, ['active', 'restricted'], true)
+                ? 'Could not generate a Stripe Dashboard link right now. Please try again in a moment.'
+                : 'Complete Stripe onboarding before opening the dashboard.';
+
+            return response()->json(['error' => $reason], 422);
         }
 
         return response()->json(['dashboard_url' => $url]);
