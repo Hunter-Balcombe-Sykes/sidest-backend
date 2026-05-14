@@ -111,4 +111,36 @@ class AnalyticsCacheService
         Cache::forget(CacheKeyGenerator::embeddedSetupOverview($professionalId));
         Cache::forget(CacheKeyGenerator::embeddedSetupOverview($professionalId).':stale');
     }
+
+    /**
+     * Bust per-product analytics caches for a brand's set of Shopify product
+     * IDs. Called from the order webhook jobs (paid / updated / refund) with
+     * the numeric `product_id` from each affected line item so the embedded
+     * product-block sees the new sale within seconds instead of waiting for
+     * the 5-minute TTL.
+     *
+     * Product IDs are Shopify's numeric form (no `gid://` prefix) — matches
+     * the cache-key shape EmbeddedProductAnalyticsController writes.
+     *
+     * @param  array<int, string|int>  $productIds  Numeric Shopify product IDs (empty values skipped)
+     */
+    public function invalidateProductAnalytics(string $professionalId, array $productIds): void
+    {
+        $keys = [];
+        foreach (array_unique($productIds) as $productId) {
+            $productId = (string) $productId;
+            if ($productId === '') {
+                continue;
+            }
+            $key = CacheKeyGenerator::embeddedProductAnalytics($professionalId, $productId);
+            $keys[] = $key;
+            $keys[] = $key.':stale';
+        }
+
+        if ($keys === []) {
+            return;
+        }
+
+        Cache::deleteMultiple($keys);
+    }
 }

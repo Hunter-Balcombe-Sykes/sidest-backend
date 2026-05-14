@@ -67,7 +67,7 @@ PR #12–#25 introduced 3 partials, 2 regressions, and 1 symptom-now-visible. **
 | 2 | LIFE-D#9 (P2 → **P1 candidate**) | **Regressed** | PR #12 `a118f62` — `SyncSubdomainToKvJob` expanded from one delete to a `foreach` over `ProfessionalHandleAlias`. The original swallow-and-log bug now hides one Cloudflare failure per alias instead of one per professional. Bundle the rethrow with Master 23's `$backoff`. |
 | 2 | LIFE-D#1 (P1, part of Pattern D) | **Symptom now visible** | PR #13 `9fedbcb` — `BrandDesignMediaService::listDesignMedia` always returns ready-state placeholders. The race condition is unchanged, but any race-bypass orphan now appears to brands as a 6th placeholder card with no thumbnail. |
 | 2 | LIFE-B#3 (P2, part of Pattern A) | **Partially touched** | PR #12 — removed one of ten observer log sites; nine remaining sites still need `request_id` + tenant ID context. |
-| 3 | SCALE-A#CACHE-1 (P2 → **P1 candidate**) | **Regressed** | PR #17 `bef81ef` — `AffiliateProductCatalogService::fetchActiveCatalog` switched Storefront API → Admin API without adding `rememberLocked`. Two services now stampede the same Admin API budget on cold cache. |
+| 3 | SCALE-A#CACHE-1 (P2 → P1 candidate) | **Closed 2026-05-14** | Master Pattern 14 shipped — `rememberLocked` wrap on `fetchActiveCatalog` with int TTL + jitter; same PR closes the other 3 P2s in the pattern. |
 | 3 | SCALE-B#CACHE-1 (P1, part of Pattern 3) | **Partial** | PR #12 `a118f62` — added alias-aware affiliate lookup at line 633–647 (`orWhereExists` subquery). No `rememberLocked` wrap; the new subquery actually increases per-request work. |
 | 3 | SCALE-B#CACHE-4 (P1, part of Master 11 Step 2) | **Closed** | PR #27 `c8aece8` — `EmbeddedOrderAnalyticsController::show()` now reads `commerce.orders` + `order_items` with `affiliate_professional_id` and `deriveLineStatus()` from order aggregate state. The $0/no-affiliate-per-order bug is fixed end-to-end. |
 | 3 | SCALE-B#CACHE-3 (P1, part of Master 11 Step 1) | **Partial — data half closed** | PR #28 `4927b02` — `EmbeddedSetupController::overview()` now reads `commerce.orders` (all-time + 30d windows) and subtracts `reversed_commission_cents` from `commerce.brand_affiliate_rollup`. The $0 dashboard bug is fixed. **Remaining:** Step 1's caching half (wrap in `CacheLockService::rememberLocked` keyed by new `CacheKeyGenerator::embeddedSetupOverview()`) is still open — `overview()` has no cache wrap and reads raw `DB::` on every request. Effort to close: ~30 min. |
@@ -1138,7 +1138,7 @@ Every cached value has two copies — a fresh primary that expires fast and a st
 **Original ID:** Phase 3 Pattern 1
 **Closes:** SCALE-A#CACHE-1, SCALE-A#CACHE-2, SCALE-B#CACHE-5, SCALE-B#CACHE-6 (and SCALE-D#CACHE-4 dup-bundle)
 **Tier:** P2 (4 P2 — SCALE-A#CACHE-1 regressed to P1 candidate after PR #17) · **Effort:** ~1 day
-**Status:** Regressed (SCALE-A#CACHE-1 — PR #17 `bef81ef` switched Storefront→Admin API without adding `rememberLocked`; two services now stampede the same Admin API budget)
+**Status:** ✅ **Closed 2026-05-14** — all 5 steps shipped on `development`. `rememberLocked` swap landed on `AffiliateProductCatalogService::fetchActiveCatalog` (Step 1), `BrandCatalogService::fetchBrandCatalog` + `resolveCollectionGid` (Step 2), `HydrogenBrandDesignController::show` (Step 3), `EmbeddedProductAnalyticsController::show` (Step 4). All bust sites extended to clear the `:stale` twin. `AnalyticsCacheService::invalidateProductAnalytics()` added with regex-validated numeric `product_id` extraction and wired into both `ProcessShopifyOrderWebhookJob` (paid) and `ProcessShopifyOrderUpdatedWebhookJob` (updated/edited/cancelled/refund). `composer guard:no-cache-memo` added and wired into the test pipeline (Step 5). One out-of-spec call site (`StorePlanSubscriptionRequest::freePlanId`) converted to bare `Cache::remember` — single global key, 1hr TTL, no stampede surface. Opus review APPROVED-WITH-NITS; the one IMPORTANT issue (product_id regex validation) fixed before push. Closes SCALE-A#CACHE-1, SCALE-A#CACHE-2, SCALE-B#CACHE-5, SCALE-B#CACHE-6, SCALE-D#CACHE-4.
 **Depends on:** Master Pattern 13 (jitter); precedes Master Pattern 18 (vendor budget discipline)
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1168,7 +1168,7 @@ Additionally, `Cache::memo()->remember` with a `DateTimeInterface` TTL (e.g. `no
 
 ### What to do
 
-- [ ] **Step 1 — Migrate `AffiliateProductCatalogService::fetchActiveCatalog()`. URGENT — stampede risk worsened 2026-05-12.**
+- [x] **Step 1 — Migrate `AffiliateProductCatalogService::fetchActiveCatalog()`. URGENT — stampede risk worsened 2026-05-12.**
     - **Post-baseline note:** PR #17 (`bef81ef`) switched the underlying API from Storefront → Admin. The cache wrapper (`Cache::memo()->remember`, now at lines 190–197) was untouched. Cold-cache concurrent requests now race against the Admin API's 1000-pt/sec budget — and they share that budget with `BrandCatalogService::fetchBrandCatalog` (Step 2 below). Two services, same bucket, no lock. **Land Step 1 + Step 2 in one PR; don't ship them separately.** PR #17 also renamed the closure target: `queryStorefrontCatalog` → `queryAdminCatalog`.
     - Inject `CacheLockService` via the constructor.
     - Replace:
@@ -1191,24 +1191,24 @@ Additionally, `Cache::memo()->remember` with a `DateTimeInterface` TTL (e.g. `no
     - Extend existing bust calls (verify line numbers post-PR #17/#24; method names unchanged) to also forget the SWR stale key: `Cache::forget(CacheKeyGenerator::brandActiveCatalog($id).':stale')`.
     - **Safe-sequencing note:** this is a pure cache-layer wrap — same cache key, same GraphQL query, same response shape, just adds a Redis lock around cold-cache regeneration. Zero behaviour change for callers. Land before Phase 4 `#DB-D#SCALE-1` (routing through `ShopifyAdminClient`) so the throttle waits added there don't compound on unbounded concurrency.
     - Closes SCALE-A#CACHE-1 / SCALE-D#CACHE-4 (Affiliate half).
-- [ ] **Step 2 — Migrate `BrandCatalogService::fetchBrandCatalog()`.**
+- [x] **Step 2 — Migrate `BrandCatalogService::fetchBrandCatalog()`.**
     - Inject `CacheLockService` via the constructor.
     - Replace `Cache::memo()->remember` at line 374 with `$this->cacheLock->rememberLocked(...)`. The config value `partna.cache.ttls.brand_admin_catalog` is already an int — jitter applies automatically.
     - Repeat for the `brandCollectionGid` key at line 835 (same root cause).
     - Extend all four bust sites (lines 588, 677, 711, 982) to also clear `CacheKeyGenerator::brandAdminCatalog($id).':stale'`.
     - Closes SCALE-A#CACHE-2 / SCALE-D#CACHE-4 (Brand half).
-- [ ] **Step 3 — Migrate `HydrogenBrandDesignController::show()`.**
+- [x] **Step 3 — Migrate `HydrogenBrandDesignController::show()`.**
     - Inject `CacheLockService` (parallel to the existing `BrandDesignMediaService` injection).
     - Replace `Cache::memo()->remember($cacheKey, self::CACHE_TTL_SECONDS, ...)` with `$this->cacheLock->rememberLocked($cacheKey, self::CACHE_TTL_SECONDS, ...)`. TTL is already a const int (`5`); no DateTime concern.
     - Keep the 5s TTL — appropriate for rapid design-change propagation. Pattern 4 jitter is moot at 5s (the synchronized-expiry window is too narrow to matter); the SWR fast path is the real win.
     - Push-invalidation already exists via `SiteCacheService::forgetBrandDesign(string $siteId)` — no changes needed.
     - Closes SCALE-B#CACHE-5.
-- [ ] **Step 4 — Migrate `EmbeddedProductAnalyticsController::show()`.**
+- [x] **Step 4 — Migrate `EmbeddedProductAnalyticsController::show()`.**
     - Inject `CacheLockService` via the constructor.
     - Replace `Cache::memo()->remember($cacheKey, now()->addMinutes(5), ...)` with `$this->cacheLock->rememberLocked($cacheKey, 300, ...)`. **Pass `300` (int), not `now()->addMinutes(5)`.**
     - Add push-invalidation: extend `AnalyticsCacheService::invalidateAnalytics()` or the Shopify orders webhook handler to `Cache::forget("embedded:product-analytics:{$professionalId}:{$productId}")` when a new order for that product arrives. The key pattern is already correctly namespaced per brand + product, so targeted forget is straightforward.
     - Closes SCALE-B#CACHE-6.
-- [ ] **Step 5 — Add a CI lint for `Cache::memo()->remember`.** A composer guard (similar to `guard:no-laravel-migrations`) that fails the build if `Cache::memo()->remember` appears in any new file under `app/`. Reason: the API surface is indistinguishable from `rememberLocked` at a glance, and future contributors will reach for `Cache::memo()` by Laravel convention. CI enforcement prevents regression.
+- [x] **Step 5 — Add a CI lint for `Cache::memo()->remember`.** A composer guard (similar to `guard:no-laravel-migrations`) that fails the build if `Cache::memo()->remember` appears in any new file under `app/`. Reason: the API surface is indistinguishable from `rememberLocked` at a glance, and future contributors will reach for `Cache::memo()` by Laravel convention. CI enforcement prevents regression.
 
 ### Plain English
 

@@ -833,7 +833,12 @@ class SiteCacheService
      */
     public function forgetBrandDesign(string $siteId): void
     {
-        Cache::forget(CacheKeyGenerator::hydrogenBrandDesign($siteId));
+        // hydrogenBrandDesign is wrapped in CacheLockService::rememberLocked,
+        // which writes a :stale twin. Clear both or the SWR fast path keeps
+        // serving the pre-write value for up to 10× the 5s base TTL.
+        $key = CacheKeyGenerator::hydrogenBrandDesign($siteId);
+        Cache::forget($key);
+        Cache::forget($key.':stale');
     }
 
     /**

@@ -100,6 +100,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
         $analyticsCache->invalidateAnalytics($this->professionalId);
         $analyticsCache->invalidateAnalytics($affiliateId);
+        $this->bustProductAnalyticsFromOrder($analyticsCache, $order);
     }
 
     /**
@@ -161,6 +162,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
         $analyticsCache->invalidateAnalytics($this->professionalId);
         $analyticsCache->invalidateAnalytics($affiliateId);
+        $this->bustProductAnalyticsFromOrder($analyticsCache, $order);
     }
 
     /**
@@ -225,6 +227,7 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
         $analyticsCache->invalidateAnalytics($this->professionalId);
         $analyticsCache->invalidateAnalytics($affiliateId);
+        $this->bustProductAnalyticsFromOrder($analyticsCache, $order);
     }
 
     /**
@@ -332,6 +335,42 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
         $analyticsCache->invalidateAnalytics($this->professionalId);
         $analyticsCache->invalidateAnalytics($affiliateId);
+        $this->bustProductAnalyticsFromOrder($analyticsCache, $order);
+    }
+
+    /**
+     * Forget per-product analytics caches for every product on this order.
+     *
+     * Reads line items from the persisted order row (Order::line_items JSONB) so
+     * topic-specific payload shapes don't matter — refunds/create has a
+     * different shape (refund_line_items) but the underlying products are still
+     * captured on the order row by the earlier orders/paid write. Stubs with
+     * empty line_items are a no-op; the eventual orders/paid will populate and
+     * dispatch its own bust via ProcessShopifyOrderWebhookJob.
+     *
+     * Intentional over-invalidation for refunds: we bust every product on the
+     * order even when only a subset is refunded. Over-invalidation is safe
+     * (worst case is an extra cold-cache rebuild on next read); fishing the
+     * refunded subset out of refund_line_items[].line_item.product_id would
+     * couple this job to the refund payload shape with no correctness gain.
+     *
+     * Product IDs are regex-validated as numeric to defend against tampered
+     * line_items JSONB landing junk segments in Redis DEL keys.
+     */
+    private function bustProductAnalyticsFromOrder(AnalyticsCacheService $analyticsCache, Order $order): void
+    {
+        $lineItems = is_array($order->line_items) ? $order->line_items : [];
+
+        $productIds = array_values(array_filter(array_map(
+            fn ($li) => is_array($li) ? (string) Arr::get($li, 'product_id', '') : '',
+            $lineItems
+        ), fn (string $id) => $id !== '' && preg_match('/^\d+$/', $id) === 1));
+
+        if ($productIds === []) {
+            return;
+        }
+
+        $analyticsCache->invalidateProductAnalytics($this->professionalId, $productIds);
     }
 
     /**

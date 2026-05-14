@@ -5,10 +5,11 @@ namespace App\Http\Controllers\Api\Internal;
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
+use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 // Backs the affiliate-product-block Shopify admin UI extension.
@@ -21,6 +22,7 @@ class EmbeddedProductAnalyticsController extends ApiController
 {
     public function __construct(
         private readonly BrandCatalogService $catalog,
+        private readonly CacheLockService $cacheLock,
     ) {}
 
     /**
@@ -39,11 +41,19 @@ class EmbeddedProductAnalyticsController extends ApiController
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $productId = (string) preg_replace('#^gid://shopify/Product/#', '', $shopifyProductId);
 
-        $cacheKey = "embedded:product-analytics:{$professionalId}:{$productId}";
+        $cacheKey = CacheKeyGenerator::embeddedProductAnalytics($professionalId, $productId);
 
-        return Cache::memo()->remember($cacheKey, now()->addMinutes(5), function () use ($professionalId, $productId) {
-            return $this->success($this->build($professionalId, $productId));
-        });
+        // Int TTL (300s) — DateTimeInterface TTLs skip writeWithJitter's ±20%
+        // jitter. Bust on every order/refund webhook via
+        // AnalyticsCacheService::invalidateProductAnalytics() so the rollup
+        // reflects new sales within seconds, not 5 minutes.
+        $payload = $this->cacheLock->rememberLocked(
+            $cacheKey,
+            300,
+            fn () => $this->build($professionalId, $productId),
+        );
+
+        return $this->success($payload);
     }
 
     /**

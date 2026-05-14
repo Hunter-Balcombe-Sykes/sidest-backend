@@ -5,6 +5,7 @@ namespace App\Services\Store;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use App\Services\Shopify\Client\ShopifyAdminClient;
 use App\Services\Shopify\ShopDomain;
 use Illuminate\Support\Arr;
@@ -15,6 +16,7 @@ class BrandCatalogService
 {
     public function __construct(
         private readonly ShopifyAdminClient $client,
+        private readonly CacheLockService $cacheLock,
     ) {}
 
     private const PRODUCTS_PER_PAGE = 50;
@@ -371,7 +373,7 @@ GRAPHQL;
      */
     public function fetchBrandCatalog(Professional $brand): array
     {
-        return Cache::memo()->remember(
+        return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::brandAdminCatalog((string) $brand->id),
             (int) config('partna.cache.ttls.brand_admin_catalog'),
             fn () => $this->queryAdminCatalog($brand),
@@ -585,8 +587,10 @@ GRAPHQL;
         }
 
         // Cache bust — variant state affects both brand and affiliate catalog views.
-        Cache::forget(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
-        Cache::forget(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
+        // Forget :stale twins so the CacheLockService SWR fast path doesn't keep
+        // serving the pre-bust value for up to 10× the base TTL.
+        $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
+        $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
 
         // Recompute the derived has_enabled_variants flag — now trivially true.
         $this->writeHasEnabledVariants($integration, $productGid, true);
@@ -673,9 +677,10 @@ GRAPHQL;
             }
         }
 
-        // Bust caches — variant state affects both brand and affiliate views
-        Cache::forget(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
-        Cache::forget(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
+        // Bust caches — variant state affects both brand and affiliate views.
+        // :stale twins must die alongside the primary or SWR keeps serving stale.
+        $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
+        $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
 
         // Recompute and persist the derived product-level flag
         $hasEnabled = count($disabledVariantGids) < count($allVariantGids);
@@ -708,8 +713,9 @@ GRAPHQL;
 
         // Writing has_enabled_variants moves the product in/out of the Active Products
         // smart collection, so the affiliate-facing cache must be invalidated too.
-        Cache::forget(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
-        Cache::forget(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
+        // :stale twins die with the primary or SWR keeps serving the pre-write state.
+        $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
+        $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandActiveCatalog((string) $integration->professional_id));
 
         return [
             'success' => empty($userErrors),
@@ -777,10 +783,12 @@ GRAPHQL;
 
         $userErrors = Arr::get($deleteResponse->json(), 'data.metafieldDelete.userErrors', []);
 
-        // Bust caches
-        Cache::forget(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
+        // Bust caches — :stale twin must die alongside the primary so the SWR
+        // fast path can't keep serving the pre-delete value.
+        $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandAdminCatalog((string) $integration->professional_id));
 
         if ($key === 'custom_photos_enabled') {
+            // brandProductCustomPhotos is a raw Cache::put (no SWR layer) — single forget is sufficient.
             Cache::forget(CacheKeyGenerator::brandProductCustomPhotos((string) $integration->professional_id, $productGid));
         }
 
@@ -832,7 +840,9 @@ GRAPHQL;
     {
         $cacheKey = CacheKeyGenerator::brandCollectionGid((string) $integration->professional_id, $handle);
 
-        return Cache::memo()->remember($cacheKey, now()->addSeconds((int) config('partna.cache.ttls.collection_gid')), function () use ($integration, $handle) {
+        // Int TTL so writeWithJitter can apply ±20% jitter; the config value
+        // is already int seconds.
+        return $this->cacheLock->rememberLocked($cacheKey, (int) config('partna.cache.ttls.collection_gid'), function () use ($integration, $handle) {
             $resolved = $this->resolveCredentials($integration);
 
             $response = $this->graphql($resolved['shop_domain'], $resolved['access_token'], self::COLLECTIONS_QUERY, [
@@ -972,20 +982,35 @@ GRAPHQL;
     {
         $brandId = (string) $integration->professional_id;
 
-        // Always bust the admin catalog cache
-        Cache::forget(CacheKeyGenerator::brandAdminCatalog($brandId));
+        // Always bust the admin catalog cache (primary + SWR :stale twin).
+        $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandAdminCatalog($brandId));
 
         $touchedKeys = array_column($metafields, 'key');
 
-        // If 'active' was changed, also bust the affiliate-facing catalog cache
+        // If 'active' was changed, also bust the affiliate-facing catalog cache.
         if (in_array('active', $touchedKeys, true)) {
-            Cache::forget(CacheKeyGenerator::brandActiveCatalog($brandId));
+            $this->bustCatalogKeyWithStale(CacheKeyGenerator::brandActiveCatalog($brandId));
         }
 
-        // If per-product custom_photos_enabled was changed, bust the targeted lookup cache
+        // If per-product custom_photos_enabled was changed, bust the targeted lookup cache.
+        // brandProductCustomPhotos uses raw Cache::put (no SWR) — single forget is sufficient.
         if ($productGid !== null && in_array('custom_photos_enabled', $touchedKeys, true)) {
             Cache::forget(CacheKeyGenerator::brandProductCustomPhotos($brandId, $productGid));
         }
+    }
+
+    /**
+     * Forget both the primary cache key and its CacheLockService SWR `:stale` twin.
+     *
+     * CacheLockService::writeWithJitter writes every value to `$key` (primary,
+     * jittered TTL) AND `$key:stale` (10× TTL, last-good window). If only the
+     * primary is forgotten the SWR fast path keeps serving the pre-bust value
+     * for up to 10× the base TTL, defeating the invalidation.
+     */
+    private function bustCatalogKeyWithStale(string $key): void
+    {
+        Cache::forget($key);
+        Cache::forget($key.':stale');
     }
 
     /**

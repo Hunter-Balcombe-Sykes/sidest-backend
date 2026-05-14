@@ -2,6 +2,7 @@
 
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use App\Services\Store\AffiliateProductCatalogService;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Support\Str;
@@ -10,6 +11,7 @@ it('resolves affiliate brand integration throws when no link exists', function (
     // Use a Mockery partial so we don't need to seed the brand_partner_links table.
     $service = Mockery::mock(AffiliateProductCatalogService::class, [
         Mockery::mock(BrandCatalogService::class),
+        Mockery::mock(CacheLockService::class),
     ])->makePartial();
 
     $service->shouldReceive('resolveAffiliateBrandIntegration')
@@ -21,12 +23,13 @@ it('resolves affiliate brand integration throws when no link exists', function (
         ->toThrow(\RuntimeException::class, 'No brand connection found.');
 });
 
-it('constructs with the BrandCatalogService dependency', function () {
-    // After the V2 refactor, AffiliateProductCatalogService requires BrandCatalogService
-    // in its constructor. This test is a guard against that signature drifting again
-    // without the test suite catching it.
+it('constructs with the BrandCatalogService and CacheLockService dependencies', function () {
+    // Master Pattern 14 added CacheLockService as a constructor dep so
+    // fetchActiveCatalog uses rememberLocked (single-flight + jitter + SWR).
+    // This test guards the signature against future drift.
     $service = new AffiliateProductCatalogService(
-        Mockery::mock(BrandCatalogService::class)
+        Mockery::mock(BrandCatalogService::class),
+        Mockery::mock(CacheLockService::class),
     );
 
     expect($service)->toBeInstanceOf(AffiliateProductCatalogService::class);

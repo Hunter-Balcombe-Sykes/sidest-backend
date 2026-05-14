@@ -9,16 +9,17 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AffiliateProductCatalogService
 {
     public function __construct(
-        private readonly BrandCatalogService $brandCatalogService
+        private readonly BrandCatalogService $brandCatalogService,
+        private readonly CacheLockService $cacheLock,
     ) {}
 
     private const ADMIN_PRODUCTS_PER_PAGE = 50;
@@ -205,9 +206,12 @@ GRAPHQL;
      */
     public function fetchActiveCatalog(string $brandProfessionalId): array
     {
-        return Cache::memo()->remember(
+        // Int TTL (not now()->addMinutes(5)) so CacheLockService::writeWithJitter
+        // applies ±20% jitter — DateTimeInterface TTLs skip jitter entirely and
+        // cause synchronized expiry across the fleet.
+        return $this->cacheLock->rememberLocked(
             CacheKeyGenerator::brandActiveCatalog($brandProfessionalId),
-            now()->addMinutes(5),
+            300,
             fn () => $this->queryAdminCatalog($brandProfessionalId),
         );
     }

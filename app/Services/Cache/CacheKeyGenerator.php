@@ -342,4 +342,16 @@ class CacheKeyGenerator
     {
         return "embedded:setup:overview:v1:{$professionalId}";
     }
+
+    /**
+     * Per-product analytics rollup shown in the embedded Shopify admin
+     * product-block extension (30-day units, revenue, commission, variant
+     * breakdown, recent sales). Keyed by (brand, Shopify product ID) so
+     * AnalyticsCacheService::invalidateProductAnalytics() can target just the
+     * products on a freshly-paid or refunded order.
+     */
+    public static function embeddedProductAnalytics(string $professionalId, string $productId): string
+    {
+        return "embedded:product-analytics:{$professionalId}:{$productId}";
+    }
 }

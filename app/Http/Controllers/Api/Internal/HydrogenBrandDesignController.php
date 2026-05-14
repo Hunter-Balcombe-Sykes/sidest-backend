@@ -8,11 +8,11 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use App\Services\Media\BrandDesignMediaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Cache;
 
 // Internal endpoint that gives Hydrogen the resolved brand-design shape for a
 // brand. Reads tokens from site.settings.design and media from site_media
@@ -28,6 +28,7 @@ class HydrogenBrandDesignController extends ApiController
 
     public function __construct(
         private readonly BrandDesignMediaService $brandDesign,
+        private readonly CacheLockService $cacheLock,
     ) {}
 
     public function show(Request $request, string $slug): JsonResponse
@@ -53,10 +54,14 @@ class HydrogenBrandDesignController extends ApiController
         $site = Site::where('professional_id', $professional->id)->first();
         $cacheKey = CacheKeyGenerator::hydrogenBrandDesign((string) ($site?->id ?? "nosite:{$professional->id}"));
 
-        $payload = Cache::memo()->remember(
+        // Single-flight via CacheLockService: cold-cache concurrent requests
+        // (post-deploy or after SiteCacheService::forgetBrandDesign) collapse onto
+        // one DB+media lookup instead of stampeding. The SWR fast path keeps the
+        // window between primary expiry and explicit bust effectively zero.
+        $payload = $this->cacheLock->rememberLocked(
             $cacheKey,
             self::CACHE_TTL_SECONDS,
-            fn () => $this->buildDesignPayload($professional, $site)
+            fn () => $this->buildDesignPayload($professional, $site),
         );
 
         return $this->success($payload);

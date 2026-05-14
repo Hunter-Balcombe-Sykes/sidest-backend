@@ -22,7 +22,10 @@ class StorePlanSubscriptionRequest extends BaseFormRequest
 
     private function freePlanId(): string
     {
-        return Cache::memo()->remember('billing.free_plan_id', 3600, function () {
+        // Plain Cache::remember — single global key (no per-tenant cardinality),
+        // tiny lookup, 1hr TTL. Stampede impact is bounded; the single-flight
+        // CacheLockService machinery would be overkill here.
+        return Cache::remember('billing.free_plan_id', 3600, function () {
             return Plan::where('plan_key', 'free')->value('id') ?? '';
         });
     }

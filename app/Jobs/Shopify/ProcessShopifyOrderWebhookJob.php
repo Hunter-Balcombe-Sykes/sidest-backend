@@ -220,6 +220,19 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
             $analyticsCache->invalidateAnalytics($this->brandProfessionalId);
             $analyticsCache->invalidateAnalytics((string) $affiliate->id);
 
+            // Per-product invalidation for the embedded product-analytics block — keyed
+            // by numeric Shopify product_id from line items (matches the controller's
+            // cache key shape after stripping the gid:// prefix). Regex-validated so
+            // a tampered payload can't write junk segments into Redis DEL keys —
+            // mirrors the defense applied by extractProductGids() below.
+            $productIds = array_values(array_filter(array_map(
+                fn ($li) => (string) Arr::get($li, 'product_id', ''),
+                $lineItems
+            ), fn (string $id) => $id !== '' && preg_match('/^\d+$/', $id) === 1));
+            if ($productIds !== []) {
+                $analyticsCache->invalidateProductAnalytics($this->brandProfessionalId, $productIds);
+            }
+
             // Instant payout: when the brand has opted into hold_days=0 and all
             // payout prerequisites are met, kick the payout sweep now instead of
             // waiting up to an hour for the next scheduled cron. The sweep job

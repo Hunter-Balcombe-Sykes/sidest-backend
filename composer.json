@@ -57,11 +57,15 @@
         ],
         "test": [
             "@composer guard:no-laravel-migrations",
+            "@composer guard:no-cache-memo",
             "@php artisan config:clear --ansi",
             "@php artisan test"
         ],
         "guard:no-laravel-migrations": [
             "@php -r 'if (is_dir(\"database/migrations\")) { foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(\"database/migrations\")) as $f) { if ($f->isFile() && $f->getExtension() === \"php\") { fwrite(STDERR, \"Laravel migrations are not allowed: \" . $f->getPathname() . PHP_EOL); exit(1); } } }'"
+        ],
+        "guard:no-cache-memo": [
+            "@php -r '$bad = []; if (is_dir(\"app\")) { foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(\"app\")) as $f) { if ($f->isFile() && $f->getExtension() === \"php\" && str_contains(file_get_contents($f->getPathname()), \"Cache::memo()->remember\")) { $bad[] = $f->getPathname(); } } } if (!empty($bad)) { fwrite(STDERR, \"Cache::memo()->remember is banned in app/ — use CacheLockService::rememberLocked (Master Pattern 14):\" . PHP_EOL); foreach ($bad as $p) { fwrite(STDERR, \"  $p\" . PHP_EOL); } exit(1); }'"
         ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
