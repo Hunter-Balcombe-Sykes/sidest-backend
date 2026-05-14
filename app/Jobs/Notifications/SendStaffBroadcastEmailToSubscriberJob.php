@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
@@ -46,6 +47,19 @@ class SendStaffBroadcastEmailToSubscriberJob implements ShouldQueue
         // Respect unsubscribes that happened after the broadcast was queued
         if ($sub->status !== 'subscribed') {
             return;
+        }
+
+        // Claim the send slot before touching the mailer — at-most-once delivery.
+        // A crash between insert and send leaves a "sent" receipt for a never-sent
+        // email, which is the correct bias for broadcast: losing one copy is better
+        // than a subscriber receiving duplicates.
+        $inserted = DB::table('notifications.broadcast_email_receipts')->insertOrIgnore([
+            'notification_id' => $this->notificationId,
+            'subscription_id' => $this->subscriptionId,
+        ]);
+
+        if ($inserted === 0) {
+            return; // already delivered on a previous attempt
         }
 
         $unsubscribeUrl = route('public.unsubscribe', ['token' => $sub->unsubscribe_token]);

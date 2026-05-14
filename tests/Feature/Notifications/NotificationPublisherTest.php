@@ -47,6 +47,7 @@ beforeEach(function () {
         starts_at TEXT NULL,
         ends_at TEXT NULL,
         dedupe_key TEXT NULL,
+        email_sent_at TEXT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )');

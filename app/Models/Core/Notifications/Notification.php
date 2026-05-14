@@ -49,6 +49,7 @@ class Notification extends BaseModel
         'updated_at' => 'datetime',
         'starts_at' => 'datetime',
         'ends_at' => 'datetime',
+        'email_sent_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo

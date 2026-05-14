@@ -62,13 +62,21 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
             return;
         }
 
-        $notification = Notification::query()->find($this->notificationId);
-        if (! $notification instanceof Notification) {
-            Log::warning('Notification email skipped: notification not found', [
-                'notification_id' => $this->notificationId,
-            ]);
+        // Lock the row to prevent concurrent workers both reading email_sent_at = null.
+        // At-least-once semantics: stamp happens after send, so a crash between send and
+        // stamp will cause a retry to re-send. For financially-sensitive emails this is
+        // preferable to never sending.
+        $notification = DB::transaction(function () {
+            $n = Notification::query()->lockForUpdate()->find($this->notificationId);
+            if ($n === null || $n->email_sent_at !== null) {
+                return null;
+            }
 
-            return;
+            return $n;
+        });
+
+        if ($notification === null) {
+            return; // already sent or notification deleted
         }
 
         $email = DB::table('core.professionals')
@@ -95,6 +103,8 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
         }
 
         Mail::to($email)->send($mailable);
+
+        $notification->forceFill(['email_sent_at' => now()])->saveQuietly();
     }
 
     public function failed(\Throwable $e): void

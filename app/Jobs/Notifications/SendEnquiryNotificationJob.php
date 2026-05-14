@@ -42,7 +42,13 @@ class SendEnquiryNotificationJob implements ShouldQueue
             return;
         }
 
+        if ($enquiry->email_sent_at !== null) {
+            return; // already sent on a previous attempt
+        }
+
         Mail::to($this->notificationEmail)->send(new SiteEnquiryNotification($enquiry));
+
+        $enquiry->forceFill(['email_sent_at' => now()])->saveQuietly();
     }
 
     public function failed(\Throwable $e): void

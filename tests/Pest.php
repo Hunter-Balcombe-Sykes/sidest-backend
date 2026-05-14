@@ -1009,6 +1009,7 @@ function setupNotificationsTable(): void
         severity TEXT NULL,
         starts_at TEXT NULL,
         ends_at TEXT NULL,
+        email_sent_at TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
     )');
@@ -1401,6 +1402,7 @@ function setupEnquiriesTable(): void
         ip_hash TEXT NULL,
         user_agent TEXT NULL,
         read_at TEXT NULL,
+        email_sent_at TEXT NULL,
         deleted_at TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
@@ -1436,4 +1438,53 @@ function createEnquiryFor(Professional $pro, array $overrides = []): \App\Models
     \Illuminate\Support\Facades\DB::connection('pgsql')->table('site.enquiries')->insert($row);
 
     return \App\Models\Core\Site\Enquiry::withTrashed()->findOrFail($id);
+}
+
+/**
+ * notifications.broadcast_email_receipts — dedup sentinel for broadcast emails.
+ * PK (notification_id, subscription_id) is the idempotency guard.
+ */
+function setupBroadcastEmailReceiptsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS notifications.broadcast_email_receipts (
+        notification_id TEXT NOT NULL,
+        subscription_id TEXT NOT NULL,
+        email_sent_at TEXT NULL,
+        PRIMARY KEY (notification_id, subscription_id)
+    )');
+}
+
+/**
+ * core.notification_email_policies — per-pro and global send-mode overrides.
+ * Empty in most tests; default behaviour (no rows) resolves to enabled.
+ */
+function setupNotificationEmailPoliciesTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.notification_email_policies (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        category_key TEXT NULL,
+        mode TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
+/**
+ * notifications.notification_email_preferences — per-pro category opt-outs.
+ * Empty in most tests; default behaviour (no rows) resolves to enabled.
+ */
+function setupNotificationEmailPreferencesTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS notifications.notification_email_preferences (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        category_key TEXT NULL,
+        enabled INTEGER NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
 }
