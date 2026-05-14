@@ -364,8 +364,16 @@ class CommissionPayoutService
      */
     public function processPayoutBatch(CommissionPayout $payout): ?bool
     {
-        if ($payout->status === 'completed') {
-            return true;
+        // Terminal-state guard (defence-in-depth — ExecuteCommissionPayoutJob's
+        // handle() guard already short-circuits these before reaching here).
+        // Synchronous callers (admin retry path, future flows) must not be able to
+        // re-enter PI create on a payout that settled into a terminal state. For
+        // BECS payouts the original idempotency key has expired by T+2 — Stripe
+        // would issue a second PI, charging the brand twice.
+        // retryPayout() resets status to 'pending' BEFORE calling here, so admin
+        // retries pass through this guard correctly.
+        if (in_array($payout->status, ['completed', 'failed', 'cancelled'], true)) {
+            return $payout->status === 'completed';
         }
 
         // Re-dispatch guard. The daily sweep re-queues 'processing' payouts so a missed

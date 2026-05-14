@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
-use App\Models\Billing\WebhookEvent;
+use App\Models\Commerce\CommissionClawback;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutRefundService;
@@ -13,8 +13,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Stripe\Event;
-use Stripe\Exception\SignatureVerificationException;
-use Stripe\Webhook;
 
 /**
  * Stripe v2 destination-charge platform webhooks.
@@ -45,104 +43,63 @@ class StripePlatformWebhookController extends Controller
      */
     public function __invoke(Request $request): JsonResponse
     {
-        $event = $this->verifyAndDedupe(
+        $event = $this->constructStripeEvent(
             $request,
             (string) config('services.stripe.platform_webhook_secret'),
         );
-
         if ($event instanceof JsonResponse) {
             return $event;
         }
 
-        match ($event->type) {
-            'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object),
-            'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object),
-            'charge.refunded' => $this->handleChargeRefunded($event->data->object),
-            'charge.dispute.created' => $this->handleChargeDisputeCreated($event->data->object),
-            default => Log::debug('Unhandled Stripe platform snapshot event', ['type' => $event->type]),
-        };
+        $webhookEvent = $this->dedupeOrAck($event, $request->getContent());
+        if ($webhookEvent instanceof JsonResponse) {
+            return $webhookEvent;
+        }
+
+        $this->runHandlerWithFailureCleanup($webhookEvent, function () use ($event): void {
+            match ($event->type) {
+                'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object),
+                'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object),
+                'charge.refunded' => $this->handleChargeRefunded($event->data->object),
+                'charge.dispute.created' => $this->handleChargeDisputeCreated($event->data->object),
+                default => Log::debug('Unhandled Stripe platform snapshot event', ['type' => $event->type]),
+            };
+        });
 
         return response()->json(['received' => true]);
     }
 
     /**
-     * Thin endpoint — handles v2 platform-scope events. The payload only carries
-     * data.related_object.id (the account ID); we re-fetch via syncAccountStatus to get
-     * the full capability state.
+     * Thin endpoint — handles v2 platform-scope events. The payload carries
+     * related_object.id at the top level (the account ID); we re-fetch via
+     * syncAccountStatus to get the full capability state.
      */
     public function thin(Request $request): JsonResponse
     {
-        $event = $this->verifyAndDedupe(
+        $event = $this->constructStripeEvent(
             $request,
             (string) config('services.stripe.platform_thin_webhook_secret'),
         );
-
         if ($event instanceof JsonResponse) {
             return $event;
         }
 
-        if (! str_starts_with($event->type, 'v2.core.account')) {
-            Log::debug('Unhandled Stripe platform thin event', ['type' => $event->type]);
-
-            return response()->json(['received' => true]);
+        $webhookEvent = $this->dedupeOrAck($event, $request->getContent());
+        if ($webhookEvent instanceof JsonResponse) {
+            return $webhookEvent;
         }
 
-        $this->handleV2AccountEvent($event);
+        $this->runHandlerWithFailureCleanup($webhookEvent, function () use ($event): void {
+            if (! str_starts_with($event->type, 'v2.core.account')) {
+                Log::debug('Unhandled Stripe platform thin event', ['type' => $event->type]);
+
+                return;
+            }
+
+            $this->handleV2AccountEvent($event);
+        });
 
         return response()->json(['received' => true]);
-    }
-
-    /**
-     * Verify HMAC + dedup the event. Returns the parsed Event on success, or a JsonResponse
-     * with the appropriate error code when the request is invalid or already processed.
-     */
-    private function verifyAndDedupe(Request $request, string $secret): Event|JsonResponse
-    {
-        $payload = $request->getContent();
-        $sigHeader = $request->header('Stripe-Signature');
-
-        if (! $sigHeader) {
-            return response()->json(['error' => 'Missing signature'], 400);
-        }
-
-        if ($secret === '') {
-            Log::error('Stripe platform webhook hit with no secret configured', [
-                'path' => $request->path(),
-            ]);
-
-            return response()->json(['error' => 'No webhook secret configured'], 400);
-        }
-
-        try {
-            $event = Webhook::constructEvent($payload, $sigHeader, $secret);
-        } catch (SignatureVerificationException) {
-            Log::warning('Stripe platform webhook signature verification failed', [
-                'path' => $request->path(),
-            ]);
-
-            return response()->json(['error' => 'Invalid signature'], 400);
-        } catch (\Exception $e) {
-            Log::warning('Stripe platform webhook parse error', ['error' => $e->getMessage()]);
-
-            return response()->json(['error' => 'Invalid payload'], 400);
-        }
-
-        if (! $this->validateEventStructure($event)) {
-            return response()->json(['error' => 'Invalid payload structure'], 400);
-        }
-
-        $webhookEvent = WebhookEvent::firstOrCreate(
-            ['stripe_event_id' => $event->id],
-            ['event_type' => $event->type, 'processed_at' => now()]
-        );
-
-        if (! $webhookEvent->wasRecentlyCreated) {
-            return response()->json(['received' => true]);
-        }
-
-        $webhookEvent->forceFill(['payload' => json_decode($payload, true)])->save();
-
-        return $event;
     }
 
     /**
@@ -199,15 +156,17 @@ class StripePlatformWebhookController extends Controller
     }
 
     /**
-     * charge.refunded — informational only.
+     * charge.refunded — informational log + reconciliation of the clawback row's
+     * application_fee_refund_cents / transfer_reversal_cents against Stripe's actual
+     * allocation (STRP-J).
      *
-     * The clawback row is written synchronously inside CommissionPayoutRefundService::
-     * clawbackCompletedPayout at the time we call refunds->create, using our local
-     * proportional estimate of the application_fee_refund / transfer_reversal split.
-     * This webhook arrives later carrying Stripe's actual allocation, but we don't
-     * currently reconcile our estimate against it — we just log. A future enhancement
-     * could diff `$charge->amount_refunded` against the clawback row and flag drift,
-     * but for now the local estimate is treated as authoritative.
+     * Flow: the clawback row is written synchronously inside CommissionPayoutRefundService::
+     * clawbackCompletedPayout at refunds->create time, using our local proportional
+     * estimate. Stripe applies its own rounding when it actually issues the
+     * application_fee_refund / transfer_reversal, which can differ from our estimate
+     * by ±1 cent. This webhook arrives later carrying the ground truth — we diff,
+     * log drift > 1 cent for Nightwatch alerting, and persist Stripe's authoritative
+     * values so monthly reconciliation queries don't have to apply tolerance logic.
      *
      * Subscription billing refunds (no sidest_payout_id metadata) pass through silently.
      */
@@ -224,6 +183,49 @@ class StripePlatformWebhookController extends Controller
             'amount_refunded' => $charge->amount_refunded ?? null,
             'refunded' => $charge->refunded ?? null,
         ]);
+
+        $stripeRefund = $charge->refunds->data[0] ?? null;
+        if ($stripeRefund === null || ! isset($stripeRefund->id)) {
+            return;
+        }
+
+        $stripeFeeRefund = (int) ($stripeRefund->application_fee_refund->amount ?? 0);
+        $stripeTransferReversal = (int) ($stripeRefund->transfer_reversal->amount ?? 0);
+
+        $clawback = CommissionClawback::query()
+            ->where('payout_id', $payoutId)
+            ->where('refund_id', $stripeRefund->id)
+            ->first();
+
+        if ($clawback === null) {
+            Log::info('stripe.platform.clawback_drift.no_local_row', [
+                'payout_id' => $payoutId,
+                'refund_id' => $stripeRefund->id,
+            ]);
+
+            return;
+        }
+
+        $feeDrift = abs($stripeFeeRefund - (int) $clawback->application_fee_refund_cents);
+        $transferDrift = abs($stripeTransferReversal - (int) $clawback->transfer_reversal_cents);
+
+        if ($feeDrift > 1 || $transferDrift > 1) {
+            Log::warning('stripe.platform.clawback_drift', [
+                'payout_id' => $payoutId,
+                'refund_id' => $stripeRefund->id,
+                'local_fee_refund_cents' => (int) $clawback->application_fee_refund_cents,
+                'stripe_fee_refund_cents' => $stripeFeeRefund,
+                'fee_drift_cents' => $feeDrift,
+                'local_transfer_reversal_cents' => (int) $clawback->transfer_reversal_cents,
+                'stripe_transfer_reversal_cents' => $stripeTransferReversal,
+                'transfer_drift_cents' => $transferDrift,
+            ]);
+        }
+
+        $clawback->forceFill([
+            'application_fee_refund_cents' => $stripeFeeRefund,
+            'transfer_reversal_cents' => $stripeTransferReversal,
+        ])->save();
     }
 
     /**
@@ -267,16 +269,14 @@ class StripePlatformWebhookController extends Controller
     /**
      * Resolve the Professional from a v2 account event and trigger a status sync.
      *
-     * Thin payload carries data.related_object.id (the account ID). The sync itself
-     * re-fetches the full v2 account state so we don't need event body fields.
+     * v2 thin payloads put related_object at the TOP level — sibling to id/type/created.
+     * (data may exist on v2 events but carries event-specific scalars like account_id,
+     * NOT the v1-style full snapshot.) The sync itself re-fetches the full v2 account
+     * state so we don't read event body fields beyond related_object.id.
      */
     private function handleV2AccountEvent(Event $event): void
     {
-        $accountId = (string) (
-            $event->data->related_object->id
-                ?? $event->data->object->id
-                ?? ''
-        );
+        $accountId = (string) ($event->related_object->id ?? '');
 
         if ($accountId === '') {
             Log::warning('stripe.platform.v2_account_event.missing_account_id', [
@@ -322,10 +322,13 @@ class StripePlatformWebhookController extends Controller
             return;
         }
 
-        // syncAccountStatus internally retrieves the v2 account and persists the derived
-        // dual-capability status. We don't read event body fields — thin payload doesn't
-        // carry them anyway.
-        app(StripeConnectService::class)->syncAccountStatus($professional);
+        // STRP-F: dispatch the v2 account retrieve as an async job so the webhook
+        // returns 200 in milliseconds — Stripe's ~25s webhook timeout otherwise risks
+        // a slow Accounts API hit timing out the webhook → retry → silenced. The job's
+        // ShouldBeUnique key debounces back-to-back events for the same account; the
+        // sync itself runs syncAccountStatus (v2 retrieve + dual-capability derive +
+        // DB persist) with its own retry budget.
+        \App\Jobs\Stripe\SyncStripeAccountStatusJob::dispatch($professional->id);
     }
 
     private function extractLatestChargeId(object $paymentIntent): ?string

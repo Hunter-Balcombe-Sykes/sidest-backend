@@ -53,7 +53,14 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
     {
         $payout = CommissionPayout::find($this->payoutId);
 
-        if (! $payout || $payout->status === 'completed') {
+        // Terminal-state guard: completed/failed/cancelled payouts must not re-enter
+        // processPayoutBatch. The BECS T+2 settlement window exceeds Stripe's 24h
+        // idempotency-key cache, so a job dispatched by the daily sweep that runs
+        // AFTER the payment_intent.payment_failed webhook already marked the payout
+        // 'failed' would otherwise fall through to a fresh paymentIntents->create
+        // — Stripe forgets the original key past 24h and issues a duplicate PI,
+        // charging the brand twice for commission they already disputed.
+        if (! $payout || in_array($payout->status, ['completed', 'failed', 'cancelled'], true)) {
             return;
         }
 

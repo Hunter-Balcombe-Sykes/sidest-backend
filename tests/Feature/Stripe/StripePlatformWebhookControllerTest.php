@@ -31,6 +31,7 @@ beforeEach(function () {
         stripe_event_id TEXT UNIQUE,
         event_type TEXT,
         payload TEXT,
+        received_at TEXT,
         processed_at TEXT
     )');
 
@@ -397,6 +398,79 @@ it('uses decline_code as fallback when last_payment_error has no code', function
 // charge.refunded
 // ============================================================
 
+it('reconciles clawback row with Stripe actual fee_refund / transfer_reversal on charge.refunded (STRP-J)', function () {
+    // Seed the clawback table + a row with local estimates that differ from what Stripe
+    // ultimately allocated. The webhook should update the row with Stripe's authoritative
+    // values and emit a drift warning if the delta exceeds 1 cent.
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_clawbacks (
+        id TEXT PRIMARY KEY,
+        payout_id TEXT NOT NULL,
+        order_id TEXT,
+        refund_id TEXT,
+        shopify_refund_id TEXT,
+        stripe_reversal_id TEXT,
+        refund_amount_cents INTEGER DEFAULT 0,
+        application_fee_refund_cents INTEGER DEFAULT 0,
+        transfer_reversal_cents INTEGER DEFAULT 0,
+        amount_cents INTEGER DEFAULT 0,
+        is_partial INTEGER DEFAULT 0,
+        needs_manual_refund INTEGER DEFAULT 0,
+        status TEXT,
+        failure_reason TEXT,
+        currency_code TEXT,
+        metadata TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )');
+
+    platformWebhook_seedProfessional('pro-brand');
+    platformWebhook_seedProfessional('pro-aff');
+    $payout = platformWebhook_seedPayout('p_clawback_drift', 'completed', [
+        'charge_id' => 'ch_clawback_drift',
+        'payment_intent_id' => 'pi_clawback_drift',
+    ]);
+
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('commerce.commission_clawbacks')->insert([
+        'id' => \Illuminate\Support\Str::uuid()->toString(),
+        'payout_id' => 'p_clawback_drift',
+        'order_id' => 'order_clawback_drift',
+        'refund_id' => 're_clawback_drift',
+        'application_fee_refund_cents' => 30,
+        'transfer_reversal_cents' => 4970,
+        'status' => 'reversed',
+        'currency_code' => 'AUD',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $event = platformWebhook_buildEvent('charge.refunded', [
+        'id' => 'ch_clawback_drift',
+        'metadata' => ['sidest_payout_id' => 'p_clawback_drift'],
+        'amount_refunded' => 5000,
+        'refunded' => true,
+        'refunds' => [
+            'data' => [
+                [
+                    'id' => 're_clawback_drift',
+                    // Stripe's authoritative split — differs from our local estimate by +/- 1c.
+                    'application_fee_refund' => ['amount' => 31],
+                    'transfer_reversal' => ['amount' => 4969],
+                ],
+            ],
+        ],
+    ]);
+
+    platformWebhook_postSnapshot($event)->assertOk();
+
+    $fresh = DB::connection('pgsql')->table('commerce.commission_clawbacks')
+        ->where('payout_id', 'p_clawback_drift')
+        ->where('refund_id', 're_clawback_drift')
+        ->first();
+    expect((int) $fresh->application_fee_refund_cents)->toBe(31)
+        ->and((int) $fresh->transfer_reversal_cents)->toBe(4969);
+});
+
 it('passes through charge.refunded for subscription billing charges', function () {
     $payoutService = Mockery::mock(CommissionPayoutService::class)->shouldIgnoreMissing();
     $refundService = Mockery::mock(CommissionPayoutRefundService::class)->shouldIgnoreMissing();
@@ -471,9 +545,11 @@ it('returns 200 for a duplicate thin event', function () {
         'api_version' => '2024-04-10',
         'created' => time(),
         'type' => 'v2.core.account.updated',
-        'data' => [
-            'related_object' => ['id' => 'acct_does_not_exist', 'type' => 'account'],
-            'object' => ['id' => 'acct_does_not_exist'],
+        'data' => ['account_id' => 'acct_does_not_exist'],
+        'related_object' => [
+            'id' => 'acct_does_not_exist',
+            'type' => 'v2.core.account',
+            'url' => '/v2/core/accounts/acct_does_not_exist',
         ],
         'livemode' => false,
     ];
@@ -530,9 +606,11 @@ it('forgets cache and syncs account status on v2.core.account.updated', function
         'api_version' => '2024-04-10',
         'created' => time(),
         'type' => 'v2.core.account.updated',
-        'data' => [
-            'related_object' => ['id' => 'acct_v2_update', 'type' => 'account'],
-            'object' => ['id' => 'acct_v2_update'],
+        'data' => ['account_id' => 'acct_v2_update'],
+        'related_object' => [
+            'id' => 'acct_v2_update',
+            'type' => 'v2.core.account',
+            'url' => '/v2/core/accounts/acct_v2_update',
         ],
         'livemode' => false,
     ];
@@ -574,9 +652,11 @@ it('nukes account fields on v2.core.account.closed', function () {
         'api_version' => '2024-04-10',
         'created' => time(),
         'type' => 'v2.core.account.closed',
-        'data' => [
-            'related_object' => ['id' => 'acct_v2_closed', 'type' => 'account'],
-            'object' => ['id' => 'acct_v2_closed'],
+        'data' => ['account_id' => 'acct_v2_closed'],
+        'related_object' => [
+            'id' => 'acct_v2_closed',
+            'type' => 'v2.core.account',
+            'url' => '/v2/core/accounts/acct_v2_closed',
         ],
         'livemode' => false,
     ];

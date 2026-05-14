@@ -1079,7 +1079,8 @@ function setupWebhookEventsTable(): void
         stripe_event_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
         payload TEXT,
-        processed_at TEXT NOT NULL DEFAULT (datetime(\'now\')),
+        received_at TEXT NOT NULL DEFAULT (datetime(\'now\')),
+        processed_at TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL,
         UNIQUE (provider, stripe_event_id)

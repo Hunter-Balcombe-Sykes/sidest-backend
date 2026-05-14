@@ -21,7 +21,8 @@ beforeEach(function () {
         stripe_event_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
         payload TEXT,
-        processed_at TEXT NOT NULL DEFAULT (datetime(\'now\')),
+        received_at TEXT NOT NULL DEFAULT (datetime(\'now\')),
+        processed_at TEXT NULL,
         UNIQUE (provider, stripe_event_id)
     )');
 });
@@ -82,7 +83,7 @@ it('allows the same id across different providers', function () {
         'provider' => 'stripe',
         'stripe_event_id' => $sharedId,
         'event_type' => 'transfer.paid',
-        'processed_at' => now()->toDateTimeString(),
+        'received_at' => now()->toDateTimeString(),
     ]);
 
     // Shopify dedup should claim it because the composite key is (provider, id).

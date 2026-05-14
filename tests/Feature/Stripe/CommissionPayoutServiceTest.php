@@ -186,10 +186,19 @@ function v2_mockStripeClient(): StripeClient
 
 // ─── processPayoutBatch — guard conditions ─────────────────────────────────
 
-it('skips completed payouts (idempotent)', function () {
+it('skips terminal-state payouts without re-creating PI (BECS race defence)', function (string $status, bool $expectedReturn) {
+    // Without the terminal-state guard a BECS payout that the webhook already
+    // marked 'failed' (T+2 settlement window > Stripe's 24h idempotency cache)
+    // would fall through to a fresh PI create here and Stripe would charge the
+    // brand a second time. Same exposure on 'cancelled' if a synchronous caller
+    // (admin retry, future flow) re-entered after revalidatePayoutOrders cancelled.
     $brand = v2_createBrand();
     $aff = v2_createAffiliate();
-    $payout = v2_createPayout($brand, $aff, ['status' => 'completed', 'processed_at' => now()]);
+    $payout = v2_createPayout($brand, $aff, [
+        'status' => $status,
+        'processed_at' => $status === 'completed' ? now() : null,
+        'failure_code' => $status === 'failed' ? 'card_declined' : null,
+    ]);
 
     $stripe = v2_mockStripeClient();
     $stripe->paymentIntents->shouldNotReceive('create');
@@ -197,8 +206,12 @@ it('skips completed payouts (idempotent)', function () {
     $svc = new CommissionPayoutService($stripe);
     $result = $svc->processPayoutBatch($payout);
 
-    expect($result)->toBeTrue();
-});
+    expect($result)->toBe($expectedReturn);
+})->with([
+    'completed' => ['completed', true],
+    'failed' => ['failed', false],
+    'cancelled' => ['cancelled', false],
+]);
 
 it('does NOT create a second PI when a processing payout is re-dispatched (BECS T+2 safety)', function () {
     // The daily sweep re-queues processing payouts so a missed webhook eventually

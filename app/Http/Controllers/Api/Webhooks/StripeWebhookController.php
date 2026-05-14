@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Controller;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
-use App\Models\Billing\WebhookEvent;
 use App\Models\Core\Professional\Professional;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Professional\SiteProvisioningService;
@@ -15,8 +14,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Stripe\Exception\SignatureVerificationException;
-use Stripe\Webhook;
 
 // V2: Core. Processes Stripe Billing subscription lifecycle webhooks. Source of truth for subscription state.
 class StripeWebhookController extends Controller
@@ -25,58 +22,32 @@ class StripeWebhookController extends Controller
 
     public function __invoke(Request $request): JsonResponse
     {
-        $payload = $request->getContent();
-        $sigHeader = $request->header('Stripe-Signature');
-
-        if (! $sigHeader) {
-            return response()->json(['error' => 'Missing signature'], 400);
-        }
-
-        $secret = config('services.stripe.webhook_secret');
-
-        if (! $secret) {
-            return response()->json(['error' => 'No webhook secret configured'], 400);
-        }
-
-        try {
-            $event = Webhook::constructEvent($payload, $sigHeader, $secret);
-        } catch (SignatureVerificationException) {
-            Log::warning('Stripe billing webhook signature verification failed');
-
-            return response()->json(['error' => 'Invalid signature'], 400);
-        } catch (\Exception $e) {
-            Log::warning('Stripe billing webhook parse error', ['error' => $e->getMessage()]);
-
-            return response()->json(['error' => 'Invalid payload'], 400);
-        }
-
-        if (! $this->validateEventStructure($event)) {
-            return response()->json(['error' => 'Invalid payload structure'], 400);
+        $event = $this->constructStripeEvent(
+            $request,
+            (string) config('services.stripe.webhook_secret'),
+        );
+        if ($event instanceof JsonResponse) {
+            return $event;
         }
 
         // Idempotency: firstOrCreate on the UNIQUE stripe_event_id. wasRecentlyCreated
         // distinguishes "won the race / first delivery" from "duplicate — skip".
-        $webhookEvent = WebhookEvent::firstOrCreate(
-            ['stripe_event_id' => $event->id],
-            ['event_type' => $event->type, 'processed_at' => now()]
-        );
-
-        if (! $webhookEvent->wasRecentlyCreated) {
-            return response()->json(['received' => true]);
+        $webhookEvent = $this->dedupeOrAck($event, $request->getContent());
+        if ($webhookEvent instanceof JsonResponse) {
+            return $webhookEvent;
         }
 
-        // Payload is HMAC-verified; set via forceFill (not mass-assignment) to preserve $fillable restriction.
-        $webhookEvent->forceFill(['payload' => json_decode($payload, true)])->save();
-
-        match ($event->type) {
-            'customer.subscription.created' => $this->handleSubscriptionCreated($event->data->object, $event),
-            'customer.subscription.updated' => $this->handleSubscriptionUpdated($event->data->object, $event),
-            'customer.subscription.deleted' => $this->handleSubscriptionDeleted($event->data->object, $event),
-            'invoice.paid' => $this->handleInvoicePaid($event->data->object, $event),
-            'invoice.payment_failed' => $this->handleInvoicePaymentFailed($event->data->object, $event),
-            'payment_method.detached' => $this->handlePaymentMethodDetached($event->data->object),
-            default => Log::debug('Unhandled Stripe billing event', ['type' => $event->type]),
-        };
+        $this->runHandlerWithFailureCleanup($webhookEvent, function () use ($event): void {
+            match ($event->type) {
+                'customer.subscription.created' => $this->handleSubscriptionCreated($event->data->object, $event),
+                'customer.subscription.updated' => $this->handleSubscriptionUpdated($event->data->object, $event),
+                'customer.subscription.deleted' => $this->handleSubscriptionDeleted($event->data->object, $event),
+                'invoice.paid' => $this->handleInvoicePaid($event->data->object, $event),
+                'invoice.payment_failed' => $this->handleInvoicePaymentFailed($event->data->object, $event),
+                'payment_method.detached' => $this->handlePaymentMethodDetached($event->data->object),
+                default => Log::debug('Unhandled Stripe billing event', ['type' => $event->type]),
+            };
+        });
 
         return response()->json(['received' => true]);
     }
@@ -148,7 +119,7 @@ class StripeWebhookController extends Controller
                     'current_period_start' => $period['start'],
                     'current_period_end' => $period['end'],
                     'cancel_at_period_end' => $subscription->cancel_at_period_end ?? false,
-                    'provider_payload' => json_decode(json_encode($event), true),
+                    'provider_payload' => $this->sanitizeForStorage($event),
                 ])->save();
 
                 return;
@@ -171,7 +142,7 @@ class StripeWebhookController extends Controller
                 'current_period_start' => $period['start'],
                 'current_period_end' => $period['end'],
                 'cancel_at_period_end' => $subscription->cancel_at_period_end ?? false,
-                'provider_payload' => json_decode(json_encode($event), true),
+                'provider_payload' => $this->sanitizeForStorage($event),
             ]);
             $localSub->stripe_customer_id = (string) $subscription->customer;
             $localSub->stripe_subscription_id = (string) $subscription->id;
@@ -206,7 +177,7 @@ class StripeWebhookController extends Controller
         $updates = [
             'status' => $this->mapStripeStatus($subscription->status),
             'cancel_at_period_end' => $subscription->cancel_at_period_end ?? false,
-            'provider_payload' => json_decode(json_encode($event), true),
+            'provider_payload' => $this->sanitizeForStorage($event),
         ];
 
         // Basil (2025-03-31) moved period fields onto items[]. Skip period sync when
@@ -263,7 +234,7 @@ class StripeWebhookController extends Controller
         $localSub->update([
             'status' => Subscription::STATUS_CANCELED,
             'ended_at' => now(),
-            'provider_payload' => json_decode(json_encode($event), true),
+            'provider_payload' => $this->sanitizeForStorage($event),
         ]);
 
         // For affiliates, fall back to free plan. Brands do NOT get a free fallback.
@@ -292,7 +263,7 @@ class StripeWebhookController extends Controller
         }
 
         $updates = [
-            'provider_payload' => json_decode(json_encode($event), true),
+            'provider_payload' => $this->sanitizeForStorage($event),
         ];
 
         // Reset to active if was past_due (successful retry)
@@ -329,7 +300,7 @@ class StripeWebhookController extends Controller
 
         $localSub->update([
             'status' => Subscription::STATUS_PAST_DUE,
-            'provider_payload' => json_decode(json_encode($event), true),
+            'provider_payload' => $this->sanitizeForStorage($event),
         ]);
 
         // Notify the professional about the payment failure
@@ -418,6 +389,59 @@ class StripeWebhookController extends Controller
         return null;
     }
 
+    /**
+     * STRP-L: Strip customer PII from a Stripe event before persisting to provider_payload.
+     *
+     * Stripe subscription + invoice events include the customer's billing address,
+     * email, phone, saved card metadata, etc. inline with the resource snapshot.
+     * Storing the full payload verbatim is heavy (MBs per row at scale) AND creates a
+     * PII-at-rest concern. We keep IDs, status fields, and timestamps so debugging
+     * stays possible — names, addresses, card / BECS / SEPA details get redacted.
+     *
+     * @return array<string, mixed>
+     */
+    private function sanitizeForStorage(object $event): array
+    {
+        $data = json_decode(json_encode($event), true);
+        if (! is_array($data)) {
+            return [];
+        }
+
+        $sensitive = [
+            'name',
+            'email',
+            'phone',
+            'address',
+            'billing_details',
+            'shipping',
+            'tax_ids',
+            'preferred_locales',
+            'card',
+            'au_becs_debit',
+            'us_bank_account',
+            'sepa_debit',
+            'bacs_debit',
+        ];
+
+        $scrub = function (array &$node) use (&$scrub, $sensitive): void {
+            foreach ($node as $key => &$value) {
+                if (in_array($key, $sensitive, true)) {
+                    $node[$key] = '[REDACTED]';
+
+                    continue;
+                }
+
+                if (is_array($value)) {
+                    $scrub($value);
+                }
+            }
+        };
+
+        $scrub($data);
+
+        return $data;
+    }
+
     private function mapStripeStatus(string $stripeStatus): string
     {
         return match ($stripeStatus) {
@@ -427,14 +451,23 @@ class StripeWebhookController extends Controller
             'canceled' => Subscription::STATUS_CANCELED,
             'incomplete' => Subscription::STATUS_INCOMPLETE,
             'incomplete_expired' => Subscription::STATUS_INCOMPLETE_EXPIRED,
-            // Partna does not use trials. If Stripe sends 'trialing' it's a
-            // misconfigured subscription in the dashboard — fail loud rather than
-            // silently granting active entitlements to a non-paying customer.
-            // Throwing here returns 500 → Stripe retries → Nightwatch alerts ops.
-            'trialing' => throw new \LogicException(
-                'Received trialing subscription status but Partna does not use trials. '
-                .'Check the Stripe Dashboard for a misconfigured subscription.'
-            ),
+            // Partna does not use trials. If Stripe sends 'trialing' it's a misconfigured
+            // subscription in the dashboard. STRP-H: previously we threw a LogicException
+            // here — but combined with the ack-before-process anti-pattern (now fixed by
+            // STRP-C delete-on-failure), throwing in a webhook handler used to silence the
+            // event forever AND leave the subscription state unsynced. Now we log loudly
+            // for Nightwatch alerting and downgrade to STATUS_INCOMPLETE so entitlements
+            // are NOT granted; the next subscription.updated with a real status will
+            // promote the row at that point.
+            'trialing' => (function () use ($stripeStatus): string {
+                Log::error('stripe.subscription.unexpected_trialing_status', [
+                    'message' => 'Subscription has trialing status — Partna does not use trials. '
+                        .'Dashboard misconfiguration likely. Treating as incomplete; no entitlements granted.',
+                    'stripe_status' => $stripeStatus,
+                ]);
+
+                return Subscription::STATUS_INCOMPLETE;
+            })(),
             'paused' => Subscription::STATUS_PAUSED,
             default => $stripeStatus,
         };

@@ -31,6 +31,7 @@ beforeEach(function () {
         stripe_event_id TEXT UNIQUE,
         event_type TEXT,
         payload TEXT,
+        received_at TEXT,
         processed_at TEXT
     )');
 });

@@ -33,11 +33,12 @@ class WebhookEvent extends BaseModel
         'provider',
         'stripe_event_id',
         'event_type',
-        'processed_at',
+        'received_at',
     ];
 
     protected $casts = [
         'payload' => 'array',
+        'received_at' => 'datetime',
         'processed_at' => 'datetime',
     ];
 }
