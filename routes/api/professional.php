@@ -418,6 +418,7 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/stripe/payment-method/sync-session', [StripeConnectController::class, 'syncPaymentMethodSession']);
         Route::delete('/stripe/payment-method', [StripeConnectController::class, 'removePaymentMethod']);
         Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
+        Route::get('/stripe/transactions', [StripeConnectController::class, 'transactions']);
 
         // Brand billing & payout history (Lane B prerequisites — new role-scoped endpoints)
         Route::get('/brand/billing-summary', [BrandBillingSummaryController::class, 'show']);

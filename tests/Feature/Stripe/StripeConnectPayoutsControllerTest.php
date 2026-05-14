@@ -3,8 +3,10 @@
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
 use App\Models\Core\Professional\Professional;
+use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
+use App\Services\Stripe\StripeTransactionFetcher;
 use Illuminate\Support\Facades\DB;
 
 // Happy-path coverage for StripeConnectController::payouts() — the
@@ -88,8 +90,14 @@ function seedCommissionPayoutRow(array $attrs): void
 function makePayoutsController(CommissionPayoutService $payoutService): StripeConnectController
 {
     $connectStub = Mockery::mock(StripeConnectService::class);
+    $fetcherStub = Mockery::mock(StripeTransactionFetcher::class);
 
-    return new StripeConnectController($connectStub, $payoutService);
+    return new StripeConnectController(
+        $connectStub,
+        $payoutService,
+        $fetcherStub,
+        app(CacheLockService::class),
+    );
 }
 
 function makePayoutsRequest(Professional $pro, array $query = []): PayoutsRequest

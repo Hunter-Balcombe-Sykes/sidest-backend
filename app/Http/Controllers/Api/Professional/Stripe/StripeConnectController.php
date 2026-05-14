@@ -4,12 +4,16 @@ namespace App\Http\Controllers\Api\Professional\Stripe;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
+use App\Http\Requests\Api\Professional\Stripe\TransactionsRequest;
 use App\Http\Requests\Stripe\CreatePaymentMethodSetupRequest;
 use App\Http\Requests\Stripe\OnboardRequest;
 use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
+use App\Http\Resources\Stripe\TransactionResource;
 use App\Models\Retail\CommissionPayout;
+use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
+use App\Services\Stripe\StripeTransactionFetcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -21,6 +25,8 @@ class StripeConnectController extends Controller
     public function __construct(
         private readonly StripeConnectService $connectService,
         private readonly CommissionPayoutService $payoutService,
+        private readonly StripeTransactionFetcher $transactionFetcher,
+        private readonly CacheLockService $cacheLock,
     ) {}
 
     /**
@@ -318,6 +324,58 @@ class StripeConnectController extends Controller
         return response()->json([
             'payouts' => $payouts,
             'summary' => $summary,
+        ]);
+    }
+
+    /**
+     * GET /stripe/transactions
+     *
+     * Returns a unified list of Stripe-side transactions scoped to the caller's role:
+     *   brand     → charges + refunds across their commission payouts
+     *   affiliate → transfers + reversals across their incoming commission
+     *
+     * Data is pulled live from Stripe per request (no local mirror); a 60s
+     * CacheLockService wrap keyed by role + professional + filter hash absorbs
+     * tab-flipping and rapid filter changes without blowing through Stripe's
+     * 100 req/s budget. Cursor pagination is supported via the request's
+     * `limit` param; richer cursor semantics come in Phase 2 alongside the
+     * payouts endpoint extension.
+     */
+    public function transactions(TransactionsRequest $request): JsonResponse
+    {
+        $pro = $request->attributes->get('professional');
+        $role = (string) $request->input('role');
+
+        $skeleton = new CommissionPayout;
+        $skeleton->forceFill($role === 'brand'
+            ? ['brand_professional_id' => $pro->id]
+            : ['affiliate_professional_id' => $pro->id]);
+        Gate::forUser($pro)->authorize('viewOwnTransactions', $skeleton);
+
+        $filters = [
+            'date_from' => $request->input('date_from'),
+            'date_to' => $request->input('date_to'),
+            'type' => $request->input('type', 'all'),
+            'limit' => $request->input('limit', 25),
+        ];
+
+        $cacheKey = sprintf(
+            'stripe:txns:%s:%s:%s',
+            $role,
+            $pro->id,
+            hash('xxh64', json_encode($filters) ?: ''),
+        );
+
+        $rows = $this->cacheLock->rememberLocked(
+            $cacheKey,
+            60,
+            fn () => $role === 'brand'
+                ? $this->transactionFetcher->forBrand($pro, $filters)
+                : $this->transactionFetcher->forAffiliate($pro, $filters),
+        );
+
+        return response()->json([
+            'transactions' => TransactionResource::collection($rows),
         ]);
     }
 }

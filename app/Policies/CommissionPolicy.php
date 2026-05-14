@@ -99,6 +99,18 @@ class CommissionPolicy extends BasePolicy
         return false;
     }
 
+    /**
+     * Authorizes a professional to view their own Stripe transactions list — role-aware.
+     *
+     * Mirrors viewOwnPayouts: a brand requesting role=brand or an affiliate requesting
+     * role=affiliate is fine; cross-role calls are rejected so neither can enumerate the
+     * other's Stripe data via the transactions endpoint.
+     */
+    public function viewOwnTransactions(Professional $pro, CommissionPayout $skeleton): bool
+    {
+        return $this->viewOwnPayouts($pro, $skeleton);
+    }
+
     public function update(Professional $actor, Model $record): bool|Response
     {
         if ($denied = $this->denyIfPendingDeletion($actor)) {

@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Models\Core\Professional\Professional;
+use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
+use App\Services\Stripe\StripeTransactionFetcher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
@@ -180,7 +182,12 @@ it('controller status endpoint with ?fresh=1 forgets the cache before delegating
     attachStripeV2MockToService($service, $stripeClient);
 
     $payoutStub = Mockery::mock(CommissionPayoutService::class);
-    $controller = new StripeConnectController($service, $payoutStub);
+    $controller = new StripeConnectController(
+        $service,
+        $payoutStub,
+        Mockery::mock(StripeTransactionFetcher::class),
+        app(CacheLockService::class),
+    );
 
     $request = Request::create('/api/stripe/status?fresh=1', 'GET');
     $request->attributes->set('professional', $pro);
@@ -215,7 +222,12 @@ it('controller status endpoint without fresh=1 serves cached payload without cal
     attachStripeV2MockToService($service, $stripeClient);
 
     $payoutStub = Mockery::mock(CommissionPayoutService::class);
-    $controller = new StripeConnectController($service, $payoutStub);
+    $controller = new StripeConnectController(
+        $service,
+        $payoutStub,
+        Mockery::mock(StripeTransactionFetcher::class),
+        app(CacheLockService::class),
+    );
 
     $request = Request::create('/api/stripe/status', 'GET');
     $request->attributes->set('professional', $pro);
