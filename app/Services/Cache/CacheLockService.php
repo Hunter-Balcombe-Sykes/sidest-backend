@@ -2,6 +2,7 @@
 
 namespace App\Services\Cache;
 
+use App\Services\Cache\Concerns\JitteredTtl;
 use Closure;
 use DateTimeInterface;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -38,6 +39,8 @@ use Throwable;
  */
 class CacheLockService
 {
+    use JitteredTtl;
+
     /**
      * Sentinel cached by rememberLockedNullable when a closure returns null,
      * so the cache layer can distinguish "key absent" from "computed, was null".
@@ -175,10 +178,9 @@ class CacheLockService
             return;
         }
 
-        // Apply ±20% jitter: mt_rand(0, 4000) / 10000.0 gives [0.0, 0.4],
-        // adding 0.8 shifts the range to [0.8, 1.2].
-        $jitteredTtl = (int) round($ttl * (0.8 + mt_rand(0, 4000) / 10000.0));
-        $staleTtl = $ttl * self::STALE_TTL_MULTIPLIER;
+        // Independent jitter draws so primary and stale copies expire at different seconds.
+        $jitteredTtl = self::applyJitter($ttl);
+        $staleTtl = self::applyJitter($ttl * self::STALE_TTL_MULTIPLIER);
 
         Cache::put($key, $value, $jitteredTtl);
         Cache::put($staleKey, $value, $staleTtl);

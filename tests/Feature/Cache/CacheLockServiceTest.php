@@ -37,12 +37,12 @@ it('runs closure and stores result on cache miss', function () {
     Cache::shouldReceive('get')->with('test:miss')->twice()->andReturn(null, null);
     Cache::shouldReceive('get')->with('test:miss:stale')->once()->andReturn(null);
     Cache::shouldReceive('lock')->with('lock:test:miss', 10)->once()->andReturn($lock);
-    // Primary gets jittered TTL (±20% of 60 → [48, 72]); stale gets 60×10=600.
+    // Primary and stale both get independently jittered int TTLs (±20% of 60 and 600 respectively).
     Cache::shouldReceive('put')
         ->with('test:miss', ['fresh' => 'value'], M::type('int'))
         ->once();
     Cache::shouldReceive('put')
-        ->with('test:miss:stale', ['fresh' => 'value'], 600)
+        ->with('test:miss:stale', ['fresh' => 'value'], M::type('int'))
         ->once();
 
     $result = $this->service->rememberLocked(
@@ -160,7 +160,7 @@ it('honours custom lockSeconds and blockSeconds', function () {
         ->with('test:custom', 'v', M::type('int'))
         ->once();
     Cache::shouldReceive('put')
-        ->with('test:custom:stale', 'v', 600)
+        ->with('test:custom:stale', 'v', M::type('int'))
         ->once();
 
     $result = $this->service->rememberLocked(
@@ -346,6 +346,40 @@ it('nullable: throws if closure returns the reserved sentinel string', function 
     );
 
     expect($call)->toThrow(\LogicException::class, 'reserved');
+});
+
+it('stale key receives jittered TTL — not a fixed STALE_MULTIPLIER × base', function () {
+    $staleTtls = [];
+
+    for ($i = 0; $i < 20; $i++) {
+        $lock = M::mock(Lock::class);
+        $lock->shouldReceive('block')->with(5)->once();
+        $lock->shouldReceive('release')->once()->andReturn(true);
+
+        Cache::shouldReceive('get')->with("jitter:stale:$i")->twice()->andReturn(null, null);
+        Cache::shouldReceive('get')->with("jitter:stale:$i:stale")->once()->andReturn(null);
+        Cache::shouldReceive('lock')->with("lock:jitter:stale:$i", 10)->once()->andReturn($lock);
+        Cache::shouldReceive('put')
+            ->with("jitter:stale:$i", 'v', M::type('int'))
+            ->once();
+        Cache::shouldReceive('put')
+            ->with("jitter:stale:$i:stale", 'v', M::on(function ($ttl) use (&$staleTtls) {
+                $staleTtls[] = $ttl;
+
+                return true;
+            }))
+            ->once();
+
+        $this->service->rememberLocked("jitter:stale:$i", 60, fn () => 'v');
+    }
+
+    // Fixed stale (no jitter): all values identical → array_unique returns 1 element → fails.
+    // Jittered stale: spreads across [480, 720]; 20 samples will contain >1 distinct value.
+    expect(count(array_unique($staleTtls)))->toBeGreaterThan(1);
+
+    foreach ($staleTtls as $ttl) {
+        expect($ttl)->toBeGreaterThanOrEqual(480)->and($ttl)->toBeLessThanOrEqual(720);
+    }
 });
 
 it('nullable: releases lock when closure throws', function () {

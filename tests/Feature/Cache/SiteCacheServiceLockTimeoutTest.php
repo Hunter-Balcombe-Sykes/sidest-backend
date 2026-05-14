@@ -152,6 +152,39 @@ it('returns stale payload immediately when primary expired and another worker is
     expect($result)->toBe($stalePayload);
 });
 
+it('writePayloadWithStale writes stale key with jittered TTL — not fixed at PAYLOAD_STALE_TTL_MULTIPLIER × base', function () {
+    // Invoke the private writePayloadWithStale directly via reflection so we can run
+    // 20 iterations without needing a real DB (buildPayloadFromDb requires PostgreSQL).
+    $staleTtls = [];
+    $service = new SiteCacheService(new CacheLockService);
+    $method = new ReflectionMethod(SiteCacheService::class, 'writePayloadWithStale');
+
+    for ($i = 0; $i < 20; $i++) {
+        Cache::shouldReceive('put')
+            ->with("site:stale-jitter:$i", 'v', M::type('int'))
+            ->once();
+        Cache::shouldReceive('put')
+            ->with("site:stale-jitter:$i:stale", 'v', M::on(function ($ttl) use (&$staleTtls) {
+                $staleTtls[] = $ttl;
+
+                return true;
+            }))
+            ->once();
+
+        $method->invoke($service, "site:stale-jitter:$i", 'v');
+    }
+
+    // base=900s; stale range = 900×10×[0.8,1.2] = [7200,10800].
+    // Fixed stale (no jitter): all values identical → count(array_unique) = 1 → fails.
+    expect(count(array_unique($staleTtls)))->toBeGreaterThan(1);
+
+    $base = (int) config('partna.cache.ttls.public_payload');
+    foreach ($staleTtls as $ttl) {
+        expect($ttl)->toBeGreaterThanOrEqual((int) round($base * 10 * 0.8))
+            ->and($ttl)->toBeLessThanOrEqual((int) round($base * 10 * 1.2));
+    }
+});
+
 it('returns null from stale MISS_SENTINEL when primary expired and another worker is recomputing', function () {
     // Same SWR fast path but stale carries the negative-cache sentinel — public 404
     // must persist (don't expose a non-existent subdomain to the DB just because

@@ -10,6 +10,7 @@ use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteSubdomainAlias;
 use App\Models\Views\PublicSitePayload;
+use App\Services\Cache\Concerns\JitteredTtl;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -19,6 +20,8 @@ use Throwable;
 // V2: Public site payload caching with single-flight locking (prevents thundering herd). Handles 95% of traffic. Simplified in V2 — no more product payload caching.
 class SiteCacheService
 {
+    use JitteredTtl;
+
     private const MISS_SENTINEL = '__MISS__';
 
     /**
@@ -122,22 +125,11 @@ class SiteCacheService
      */
     private function writePayloadWithStale(string $key, mixed $value): void
     {
-        $staleTtl = (int) config('partna.cache.ttls.public_payload') * self::PAYLOAD_STALE_TTL_MULTIPLIER;
+        $base = (int) config('partna.cache.ttls.public_payload');
 
-        Cache::put($key, $value, $this->jitteredPayloadTtl());
-        Cache::put($key.':stale', $value, $staleTtl);
-    }
-
-    /**
-     * Returns the public_payload TTL with ±20% jitter applied.
-     *
-     * Mirrors CacheLockService::writeWithJitter's distribution so payload-cache
-     * writes (which use raw Cache::put inside our manual single-flight) get the
-     * same expiry-spreading behaviour as rememberLocked-managed entries.
-     */
-    private function jitteredPayloadTtl(): int
-    {
-        return (int) round((int) config('partna.cache.ttls.public_payload') * (0.8 + mt_rand(0, 4000) / 10000.0));
+        // Independent jitter draws so primary and stale copies expire at different seconds.
+        Cache::put($key, $value, self::applyJitter($base));
+        Cache::put($key.':stale', $value, self::applyJitter($base * self::PAYLOAD_STALE_TTL_MULTIPLIER));
     }
 
     /**
