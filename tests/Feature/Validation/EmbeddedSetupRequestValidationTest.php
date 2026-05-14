@@ -86,6 +86,53 @@ it('accepts update-setting with each allowed key', function () {
     }
 });
 
+// The next tests construct the request with bound input via Request::create so
+// rules() can read $this->input('key') and apply the key-aware value rules.
+// (new UpdateSettingRequest)->rules() returns the default-branch rules only.
+
+it('rejects default_commission_rate when value is not numeric', function () {
+    $req = UpdateSettingRequest::create('/dummy', 'POST', [
+        'key' => 'default_commission_rate',
+        'value' => 'not-a-number',
+    ]);
+
+    $v = Validator::make($req->all(), $req->rules());
+
+    expect($v->fails())->toBeTrue();
+    expect($v->errors()->has('value'))->toBeTrue();
+});
+
+it('rejects default_commission_rate when value is outside 0..100', function (string $value) {
+    $req = UpdateSettingRequest::create('/dummy', 'POST', [
+        'key' => 'default_commission_rate',
+        'value' => $value,
+    ]);
+
+    $v = Validator::make($req->all(), $req->rules());
+
+    expect($v->fails())->toBeTrue();
+    expect($v->errors()->has('value'))->toBeTrue();
+})->with([
+    'below_min' => '-1',
+    'above_max' => '101',
+    'far_above' => '9999',
+]);
+
+it('accepts default_commission_rate when value is within 0..100 inclusive', function (string $value) {
+    $req = UpdateSettingRequest::create('/dummy', 'POST', [
+        'key' => 'default_commission_rate',
+        'value' => $value,
+    ]);
+
+    $v = Validator::make($req->all(), $req->rules());
+
+    expect($v->fails())->toBeFalse();
+})->with([
+    'boundary_low' => '0',
+    'mid_decimal' => '12.5',
+    'boundary_high' => '100',
+]);
+
 // SaveDeploymentTokenRequest ──────────────────────────────────────────────────
 
 it('rejects save-deployment-token with no token', function () {
