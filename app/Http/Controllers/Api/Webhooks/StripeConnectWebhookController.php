@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\Stripe\SyncBrandPaymentMethodFromCheckoutSessionJob;
 use App\Models\Core\Professional\Professional;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;

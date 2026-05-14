@@ -145,23 +145,13 @@ it('handle() returns cleanly when processPayoutBatch returns null (processing â€
         ->once();
 });
 
-it('handle() logs cancelled-by-revalidation when processPayoutBatch cancels the payout mid-flow', function () {
+it('handle() logs cancelled-by-revalidation when processPayoutBatch transitions payout to cancelled', function () {
     // After the BECS race fix, a payout that's already 'cancelled' at handle() entry
     // returns immediately â€” processPayoutBatch is never called. The cancelled-by-
     // revalidation log path only fires when processPayoutBatch ITSELF cancels the
     // payout during execution (revalidatePayoutOrders detecting all orders refunded).
     // We simulate that by seeding 'pending' and having the service mock mutate the
     // status to 'cancelled' before returning null.
-    execJob_seedPayout('p1', ['status' => 'pending']);
-
-    $service = Mockery::mock(CommissionPayoutService::class);
-    $service->shouldNotReceive('processPayoutBatch');
-
-    $job = new ExecuteCommissionPayoutJob('p1');
-    $job->handle($service);
-});
-
-it('handle() logs cancelled-by-revalidation when processPayoutBatch transitions payout to cancelled', function () {
     execJob_seedPayout('p1', ['status' => 'pending']);
 
     $service = Mockery::mock(CommissionPayoutService::class);
