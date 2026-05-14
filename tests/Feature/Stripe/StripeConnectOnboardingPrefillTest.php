@@ -99,34 +99,89 @@ function makeService(StripeClient $stripe): StripeConnectService
     return $service;
 }
 
-it('brand identity payload sets entity_type=company and country', function () {
+it('brand identity payload includes entity_type, country, and business prefill', function () {
     $brand = makeConnectPrefillProfessional([
         'professional_type' => 'brand',
         'country_code' => 'AU',
+        'display_name' => 'Acme Test Co',
     ]);
 
     [$stripe, $captured] = captureV2AccountCreatePayload();
     makeService($stripe)->createConnectAccount($brand);
 
-    expect($captured['payload']['identity'] ?? null)->toBe([
-        'entity_type' => 'company',
-        'country' => 'AU',
-    ]);
+    $identity = $captured['payload']['identity'] ?? [];
+    expect($identity['entity_type'])->toBe('company');
+    expect($identity['country'])->toBe('AU');
+    // Phase 5 — name + business_profile prefill from display_name (no Shopify metadata here).
+    expect($identity['business']['name'])->toBe('Acme Test Co');
+    expect($identity['business']['business_profile']['mcc'])->toBe('5734');
 });
 
-it('affiliate identity payload sets entity_type=individual and country', function () {
+it('affiliate identity payload includes individual prefill (given_name + surname + email)', function () {
     $affiliate = makeConnectPrefillProfessional([
         'professional_type' => 'professional',
         'country_code' => 'US',
+        'first_name' => 'Jane',
+        'last_name' => 'Doe',
+        'primary_email' => 'jane@example.com',
     ]);
 
     [$stripe, $captured] = captureV2AccountCreatePayload();
     makeService($stripe)->createConnectAccount($affiliate);
 
-    expect($captured['payload']['identity'] ?? null)->toBe([
-        'entity_type' => 'individual',
-        'country' => 'US',
+    $identity = $captured['payload']['identity'] ?? [];
+    expect($identity['entity_type'])->toBe('individual');
+    expect($identity['country'])->toBe('US');
+    expect($identity['individual']['given_name'])->toBe('Jane');
+    expect($identity['individual']['surname'])->toBe('Doe');
+    expect($identity['individual']['email'])->toBe('jane@example.com');
+});
+
+it('brand prefill uses Shopify shop_name + shop_url when integration metadata is present', function () {
+    $brand = makeConnectPrefillProfessional([
+        'professional_type' => 'brand',
+        'country_code' => 'AU',
+        'display_name' => 'Fallback Co',
     ]);
+
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('core.professional_integrations')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $brand->id,
+        'provider' => 'shopify',
+        'provider_metadata' => json_encode([
+            'shop_name' => 'Acme Boutique',
+            'shop_domain' => 'acme.myshopify.com',
+        ]),
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    [$stripe, $captured] = captureV2AccountCreatePayload();
+    makeService($stripe)->createConnectAccount($brand);
+
+    $identity = $captured['payload']['identity'] ?? [];
+    // Shop_name from Shopify wins over display_name fallback.
+    expect($identity['business']['name'])->toBe('Acme Boutique');
+    expect($identity['business']['business_profile']['url'])->toBe('https://acme.myshopify.com');
+});
+
+it('affiliate prefill falls back to splitting display_name when first/last not set', function () {
+    $affiliate = makeConnectPrefillProfessional([
+        'professional_type' => 'professional',
+        'country_code' => 'AU',
+        'display_name' => 'Alex Influencer',
+        'first_name' => null,
+        'last_name' => null,
+        'primary_email' => 'alex@example.com',
+    ]);
+
+    [$stripe, $captured] = captureV2AccountCreatePayload();
+    makeService($stripe)->createConnectAccount($affiliate);
+
+    $identity = $captured['payload']['identity'] ?? [];
+    expect($identity['individual']['given_name'])->toBe('Alex');
+    expect($identity['individual']['surname'])->toBe('Influencer');
 });
 
 it('brand v2 payload includes merchant + customer + recipient configurations', function () {

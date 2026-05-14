@@ -725,11 +725,7 @@ class StripeConnectService
      */
     private function resolveShopCurrency(Professional $professional): ?string
     {
-        $integration = ProfessionalIntegration::query()
-            ->where('professional_id', $professional->id)
-            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
-            ->first();
-
+        $integration = $this->resolveShopifyIntegration($professional);
         if (! $integration) {
             return null;
         }
@@ -737,6 +733,40 @@ class StripeConnectService
         $currency = Arr::get($integration->provider_metadata ?? [], 'shop_currency');
 
         return ($currency && is_string($currency)) ? strtoupper(trim($currency)) : null;
+    }
+
+    /**
+     * Phase 5 — extract Shopify shop metadata used to prefill the v2 Account create call.
+     *
+     * @return array{shop_name: ?string, shop_url: ?string, shop_domain: ?string}
+     */
+    private function resolveShopMetadata(Professional $professional): array
+    {
+        $integration = $this->resolveShopifyIntegration($professional);
+        $meta = $integration?->provider_metadata ?? [];
+
+        $shopName = $this->stringOrNull(Arr::get($meta, 'shop_name') ?? Arr::get($meta, 'name'));
+        $shopDomain = $this->stringOrNull(Arr::get($meta, 'shop_domain') ?? Arr::get($meta, 'myshopify_domain'));
+        $shopUrl = $this->stringOrNull(Arr::get($meta, 'shop_url') ?? Arr::get($meta, 'primary_domain'));
+
+        // If we have a shop_domain but no shop_url, derive the canonical URL.
+        if ($shopUrl === null && $shopDomain !== null) {
+            $shopUrl = "https://{$shopDomain}";
+        }
+
+        return [
+            'shop_name' => $shopName,
+            'shop_url' => $shopUrl,
+            'shop_domain' => $shopDomain,
+        ];
+    }
+
+    private function resolveShopifyIntegration(Professional $professional): ?ProfessionalIntegration
+    {
+        return ProfessionalIntegration::query()
+            ->where('professional_id', $professional->id)
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->first();
     }
 
     /**
@@ -771,33 +801,65 @@ class StripeConnectService
     }
 
     /**
-     * Build the minimum v2 identity block for a brand.
+     * Build the v2 identity block for a brand, with prefill from Shopify shop metadata.
      *
-     * We seed entity_type + country only. Stripe collects the rest during onboarding —
-     * Express renders prefill fields when present but a richer prefill block uses a
-     * different shape from v1 and is a Phase 13+ enhancement (out of scope here).
+     * Stripe-hosted onboarding skips steps where prefilled values pass validation, so the
+     * brand only fills in bank details + ID verification. Falls back to bare minimum
+     * (entity_type + country) if Shopify isn't connected yet.
      *
      * @return array<string, mixed>
      */
     private function buildBrandIdentityPayload(Professional $brand): array
     {
-        return [
+        $shop = $this->resolveShopMetadata($brand);
+
+        $business = array_filter([
+            'name' => $shop['shop_name'] ?? $brand->display_name,
+            'business_profile' => array_filter([
+                'url' => $shop['shop_url'],
+                'mcc' => '5734',
+                'product_description' => 'Affiliate-driven product sales via Partna',
+            ]),
+        ]);
+
+        return array_filter([
             'entity_type' => 'company',
             'country' => $this->mapCountryCode($brand->country_code),
-        ];
+            'business' => empty($business) ? null : $business,
+        ]);
     }
 
     /**
-     * Build the minimum v2 identity block for an affiliate.
+     * Build the v2 identity block for an affiliate, with prefill from Partna signup data.
+     *
+     * Stripe-hosted onboarding skips identity fields it already has — affiliate only needs
+     * to add bank details + ID verification.
      *
      * @return array<string, mixed>
      */
     private function buildAffiliateIdentityPayload(Professional $affiliate): array
     {
-        return [
+        $firstName = $this->stringOrNull($affiliate->first_name);
+        $lastName = $this->stringOrNull($affiliate->last_name);
+
+        // If first/last aren't split out, fall back to splitting display_name on the first space.
+        if ($firstName === null && $lastName === null && $this->stringOrNull($affiliate->display_name)) {
+            $parts = preg_split('/\s+/', trim((string) $affiliate->display_name), 2) ?: [];
+            $firstName = $parts[0] ?? null;
+            $lastName = $parts[1] ?? null;
+        }
+
+        $individual = array_filter([
+            'given_name' => $firstName,
+            'surname' => $lastName,
+            'email' => $this->stringOrNull($affiliate->primary_email),
+        ]);
+
+        return array_filter([
             'entity_type' => 'individual',
             'country' => $this->mapCountryCode($affiliate->country_code),
-        ];
+            'individual' => empty($individual) ? null : $individual,
+        ]);
     }
 
     /**
