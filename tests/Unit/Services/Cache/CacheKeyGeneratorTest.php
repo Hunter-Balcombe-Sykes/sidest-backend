@@ -16,3 +16,8 @@ it('returns the default key when window_days is null', function () {
     $key = CacheKeyGenerator::affiliateProjections('11111111-2222-3333-4444-555555555555', null);
     expect($key)->toBe('analytics:commerce:affiliate:projections:v1:11111111-2222-3333-4444-555555555555');
 });
+
+it('builds a stable, professional-scoped cache key for embedded setup overview', function () {
+    $key = CacheKeyGenerator::embeddedSetupOverview('11111111-2222-3333-4444-555555555555');
+    expect($key)->toBe('embedded:setup:overview:v1:11111111-2222-3333-4444-555555555555');
+});

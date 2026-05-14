@@ -105,5 +105,10 @@ class AnalyticsCacheService
         }
 
         Cache::deleteMultiple(array_values(array_unique($keys)));
+
+        // Bust the embedded setup overview panel (affiliate count + commission
+        // totals + recent sales) so brands see live numbers after any commerce write.
+        Cache::forget(CacheKeyGenerator::embeddedSetupOverview($professionalId));
+        Cache::forget(CacheKeyGenerator::embeddedSetupOverview($professionalId).':stale');
     }
 }

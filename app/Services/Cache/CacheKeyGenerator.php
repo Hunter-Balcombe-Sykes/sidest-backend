@@ -331,4 +331,15 @@ class CacheKeyGenerator
     {
         return "pro:{$professionalId}:bookings:milestone-totals";
     }
+
+    /**
+     * Cached overview payload for the embedded Shopify admin setup wizard.
+     * Covers affiliate_count, all-time + 30-day commission/revenue, and
+     * recent_sales — all derived from commerce.orders + brand_affiliate_rollup.
+     * Busted by AnalyticsCacheService::invalidateAnalytics() on any commerce write.
+     */
+    public static function embeddedSetupOverview(string $professionalId): string
+    {
+        return "embedded:setup:overview:v1:{$professionalId}";
+    }
 }

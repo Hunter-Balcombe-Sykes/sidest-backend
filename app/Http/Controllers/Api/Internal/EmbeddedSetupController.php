@@ -309,86 +309,94 @@ class EmbeddedSetupController extends ApiController
     {
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
 
-        $affiliateCount = BrandPartnerLink::where('brand_professional_id', $professionalId)->count();
+        $payload = $this->cacheLock->rememberLocked(
+            CacheKeyGenerator::embeddedSetupOverview($professionalId),
+            60,
+            function () use ($professionalId) {
+                $thirtyDaysAgo = now()->subDays(30);
 
-        $thirtyDaysAgo = now()->subDays(30);
+                $affiliateCount = BrandPartnerLink::where('brand_professional_id', $professionalId)->count();
 
-        // All-time commission earned (approved less reversed) and dominant currency.
-        // Phase-4: read commerce.orders directly. commission_movements no longer
-        // stores accrual rows — only money movements (payouts/clawbacks/adjustments).
-        $allTimeRow = DB::table('commerce.orders')
-            ->where('brand_professional_id', $professionalId)
-            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
-            ->selectRaw('COALESCE(SUM(commission_cents), 0) AS commission_cents')
-            ->first();
-        $totalCommissionCents = (int) ($allTimeRow->commission_cents ?? 0);
+                // All-time commission earned (approved less reversed) and dominant currency.
+                // Phase-4: read commerce.orders directly. commission_movements no longer
+                // stores accrual rows — only money movements (payouts/clawbacks/adjustments).
+                $allTimeRow = DB::table('commerce.orders')
+                    ->where('brand_professional_id', $professionalId)
+                    ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
+                    ->selectRaw('COALESCE(SUM(commission_cents), 0) AS commission_cents')
+                    ->first();
+                $totalCommissionCents = (int) ($allTimeRow->commission_cents ?? 0);
 
-        $reversedAllTimeRow = DB::table('commerce.brand_affiliate_rollup')
-            ->where('brand_professional_id', $professionalId)
-            ->selectRaw('COALESCE(SUM(reversed_commission_cents), 0) AS reversed_cents')
-            ->first();
-        $totalCommissionCents = max(0, $totalCommissionCents - (int) ($reversedAllTimeRow->reversed_cents ?? 0));
+                $reversedAllTimeRow = DB::table('commerce.brand_affiliate_rollup')
+                    ->where('brand_professional_id', $professionalId)
+                    ->selectRaw('COALESCE(SUM(reversed_commission_cents), 0) AS reversed_cents')
+                    ->first();
+                $totalCommissionCents = max(0, $totalCommissionCents - (int) ($reversedAllTimeRow->reversed_cents ?? 0));
 
-        // Dominant currency in the brand's order history; falls back to AUD when there are no orders yet.
-        $currencyRow = DB::table('commerce.orders')
-            ->where('brand_professional_id', $professionalId)
-            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
-            ->selectRaw('currency_code, COUNT(*) AS cnt')
-            ->groupBy('currency_code')
-            ->orderByDesc('cnt')
-            ->first();
-        $currencyCode = strtoupper((string) ($currencyRow->currency_code ?? 'AUD'));
+                // Dominant currency in the brand's order history; falls back to AUD when there are no orders yet.
+                $currencyRow = DB::table('commerce.orders')
+                    ->where('brand_professional_id', $professionalId)
+                    ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
+                    ->selectRaw('currency_code, COUNT(*) AS cnt')
+                    ->groupBy('currency_code')
+                    ->orderByDesc('cnt')
+                    ->first();
+                $currencyCode = strtoupper((string) ($currencyRow->currency_code ?? 'AUD'));
 
-        // 30-day commission + revenue from commerce.orders.
-        $window30dRow = DB::table('commerce.orders')
-            ->where('brand_professional_id', $professionalId)
-            ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
-            ->where('occurred_at', '>=', $thirtyDaysAgo)
-            ->selectRaw('
-                COALESCE(SUM(commission_cents), 0) AS commission_cents,
-                COALESCE(SUM(gross_cents), 0) AS revenue_cents
-            ')
-            ->first();
-        $commission30dCents = (int) ($window30dRow->commission_cents ?? 0);
-        $revenue30dCents = (int) ($window30dRow->revenue_cents ?? 0);
+                // 30-day commission + revenue from commerce.orders.
+                $window30dRow = DB::table('commerce.orders')
+                    ->where('brand_professional_id', $professionalId)
+                    ->whereNotIn('status', Order::EXCLUDED_FROM_AGGREGATES)
+                    ->where('occurred_at', '>=', $thirtyDaysAgo)
+                    ->selectRaw('
+                        COALESCE(SUM(commission_cents), 0) AS commission_cents,
+                        COALESCE(SUM(gross_cents), 0) AS revenue_cents
+                    ')
+                    ->first();
+                $commission30dCents = (int) ($window30dRow->commission_cents ?? 0);
+                $revenue30dCents = (int) ($window30dRow->revenue_cents ?? 0);
 
-        // Last 5 sales — join core.professionals for the affiliate display name.
-        $recentSalesRows = DB::table('commerce.orders as o')
-            ->leftJoin('core.professionals as aff', 'aff.id', '=', 'o.affiliate_professional_id')
-            ->where('o.brand_professional_id', $professionalId)
-            ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES)
-            ->orderByDesc('o.occurred_at')
-            ->limit(5)
-            ->select([
-                'o.commission_cents',
-                'o.currency_code',
-                'o.occurred_at',
-                'aff.display_name AS affiliate_display_name',
-                'aff.handle AS affiliate_handle',
-            ])
-            ->get();
+                // Last 5 sales — join core.professionals for the affiliate display name.
+                $recentSalesRows = DB::table('commerce.orders as o')
+                    ->leftJoin('core.professionals as aff', 'aff.id', '=', 'o.affiliate_professional_id')
+                    ->where('o.brand_professional_id', $professionalId)
+                    ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES)
+                    ->orderByDesc('o.occurred_at')
+                    ->limit(5)
+                    ->select([
+                        'o.commission_cents',
+                        'o.currency_code',
+                        'o.occurred_at',
+                        'aff.display_name AS affiliate_display_name',
+                        'aff.handle AS affiliate_handle',
+                    ])
+                    ->get();
 
-        $recentSales = $recentSalesRows->map(fn ($row) => [
-            'affiliate_name' => (string) ($row->affiliate_display_name
-                ?? $row->affiliate_handle
-                ?? 'Unknown'),
-            // Format as decimal string (cents → dollars) with currency suffix —
-            // matches the existing app._index.tsx RecentSale.commission contract.
-            'commission' => number_format((int) $row->commission_cents / 100, 2)
-                .' '.strtoupper((string) ($row->currency_code ?? '')),
-            'occurred_at' => $row->occurred_at
-                ? Carbon::parse($row->occurred_at)->toIso8601String()
-                : null,
-        ])->values()->all();
+                $recentSales = $recentSalesRows->map(fn ($row) => [
+                    'affiliate_name' => (string) ($row->affiliate_display_name
+                        ?? $row->affiliate_handle
+                        ?? 'Unknown'),
+                    // Format as decimal string (cents → dollars) with currency suffix —
+                    // matches the existing app._index.tsx RecentSale.commission contract.
+                    'commission' => number_format((int) $row->commission_cents / 100, 2)
+                        .' '.strtoupper((string) ($row->currency_code ?? '')),
+                    'occurred_at' => $row->occurred_at
+                        ? Carbon::parse($row->occurred_at)->toIso8601String()
+                        : null,
+                ])->values()->all();
 
-        return $this->success([
-            'affiliate_count' => $affiliateCount,
-            'total_commission_cents' => $totalCommissionCents,
-            'currency_code' => $currencyCode,
-            'commission_30d_cents' => $commission30dCents,
-            'revenue_30d_cents' => $revenue30dCents,
-            'recent_sales' => $recentSales,
-        ]);
+                return [
+                    'affiliate_count' => $affiliateCount,
+                    'total_commission_cents' => $totalCommissionCents,
+                    'currency_code' => $currencyCode,
+                    'commission_30d_cents' => $commission30dCents,
+                    'revenue_30d_cents' => $revenue30dCents,
+                    'recent_sales' => $recentSales,
+                ];
+            },
+        );
+
+        return $this->success($payload);
     }
 
     /**
