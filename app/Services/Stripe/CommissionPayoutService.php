@@ -569,6 +569,11 @@ class CommissionPayoutService
     private function failPayout(CommissionPayout $payout, string $code, string $reason): void
     {
         // Release orders so the next sweep can re-batch them under the same or a different affiliate.
+        // Delete the payout_items rows too — the cpi_unique_order partial index allows each order in
+        // at most one item row, so leaving them behind blocks re-batching even though orders.payout_id
+        // is null. The next sweep would hit a UniqueConstraintViolationException on CommissionPayoutItem
+        // create. Cleanup mirrored in ExecuteCommissionPayoutJob::failed for the queue-exhausted path.
+        CommissionPayoutItem::where('payout_id', $payout->id)->delete();
         Order::where('payout_id', $payout->id)->update(['payout_id' => null]);
 
         $payout->forceFill([

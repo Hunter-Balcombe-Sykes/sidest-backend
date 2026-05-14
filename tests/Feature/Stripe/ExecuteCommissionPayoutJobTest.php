@@ -44,6 +44,17 @@ beforeEach(function () {
         created_at TEXT,
         updated_at TEXT
     )');
+
+    // failed() now also deletes payout_items so the cpi_unique_order partial index
+    // doesn't block the next sweep from re-claiming released orders.
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payout_items (
+        id TEXT PRIMARY KEY,
+        payout_id TEXT,
+        order_id TEXT,
+        amount_cents INTEGER,
+        created_at TEXT,
+        updated_at TEXT
+    )');
 });
 
 function execJob_seedPayout(string $id, array $overrides = []): CommissionPayout
