@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Stripe\ExportService;
 use App\Services\Stripe\StripeBalanceService;
 use App\Services\Stripe\StripeConnectService;
 use App\Services\Stripe\StripeTransactionFetcher;
@@ -48,6 +49,7 @@ function earnings_makeController(StripeClient $stripeMock): StripeConnectControl
         Mockery::mock(CommissionPayoutService::class),
         Mockery::mock(StripeTransactionFetcher::class),
         new StripeBalanceService($stripeMock),
+        Mockery::mock(ExportService::class),
         app(CacheLockService::class),
     );
 }

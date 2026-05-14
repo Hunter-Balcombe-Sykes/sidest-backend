@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Stripe\ExportService;
 use App\Services\Stripe\StripeBalanceService;
 use App\Services\Stripe\StripeConnectService;
 use App\Services\Stripe\StripeTransactionFetcher;
@@ -188,6 +189,7 @@ it('controller status endpoint with ?fresh=1 forgets the cache before delegating
         $payoutStub,
         Mockery::mock(StripeTransactionFetcher::class),
         Mockery::mock(StripeBalanceService::class),
+        Mockery::mock(ExportService::class),
         app(CacheLockService::class),
     );
 
@@ -229,6 +231,7 @@ it('controller status endpoint without fresh=1 serves cached payload without cal
         $payoutStub,
         Mockery::mock(StripeTransactionFetcher::class),
         Mockery::mock(StripeBalanceService::class),
+        Mockery::mock(ExportService::class),
         app(CacheLockService::class),
     );
 

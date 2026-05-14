@@ -17,6 +17,7 @@
         "laravel/nightwatch": "^1.24",
         "laravel/tinker": "^2.10.1",
         "league/flysystem-aws-s3-v3": "^3.0",
+        "openspout/openspout": "^5.7",
         "predis/predis": "^3.3",
         "stripe/stripe-php": "^19.4"
     },
