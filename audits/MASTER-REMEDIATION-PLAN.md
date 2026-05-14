@@ -206,8 +206,8 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
     - **Tier:** P1 (3 P1 + 2 P2) · **Effort:** ~2 days · **Closes:** 5 findings (DB-F#SCALE-3, DB-F#SCALE-4, DB-F#SCALE-5, DB-D#SCALE-2, DB-E#SCALE-1)
     - **Why this slot:** webhook + transaction-scope safety; ships correct functionality today but degrades under any concurrent load. DB-D#SCALE-2 was auto-closed when the wallet model was removed (no residual `creditWalletFromCheckoutSession` in `StripeConnectService`).
 
-17. **Master Pattern 17 — Vendor API budget discipline** (Phase 4 Pattern 4)
-    - **Tier:** P1 (2 P1 + 3 P2) · **Effort:** ~2 days · **Closes:** 5 findings
+17. **Master Pattern 17 — Vendor API budget discipline** (Phase 4 Pattern 4) ⚠️ **Partial — 4 of 5 steps closed 2026-05-14** (commit pending). Step 3 (DB-F#SCALE-1, embedded `metafieldsSet` refactor) deferred pending Shopify-docs verification.
+    - **Tier:** P1 (2 P1 + 3 P2) · **Effort:** ~2 days · **Closes:** 4 of 5 findings (DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-6). DB-F#SCALE-1 (P1) remains open as a Step-3 follow-up.
     - **Why this slot:** depends on Master 14's `rememberLocked` migration; second of the two P1 silent-data-bug patterns in Phase 4.
 
 18. **Master Pattern 18 — N+1 / lazy-load defence sweep** (Phase 4 Pattern 5)
@@ -1352,7 +1352,7 @@ Phase 4 currently runs without customers; these don't *show* as bugs in Nightwat
 **Original ID:** Phase 4 Pattern 4
 **Closes:** DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-1, DB-F#SCALE-6
 **Tier:** P1 (2 P1 · 3 P2) · **Effort:** ~2 days
-**Status:** Open
+**Status:** ⚠️ **Partial — Closed 2026-05-14 (Steps 1, 2, 4, 5); Step 3 deferred.** Steps 1/2/4/5 shipped on `development`. Closes DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-6. Step 3 (DB-F#SCALE-1, P1 — `EmbeddedProductSettingsController` `metafieldsSet` refactor) deferred pending Shopify-docs verification of `metafieldsSet` semantics, max batch size (PRODUCTVARIANT owners), and access-scope deltas vs `productVariantUpdate`. The embedded admin extension is high-touch surface (hard-won onboarding/install fixes); refactor it in a follow-up PR after docs are reviewed. Opus review APPROVED (no blockers); IMPORTANT items (stacked PHPDoc in `BrandCatalogService`, TTL-layering comment on `resolveActive`, `Cache::forget` vs stale-twin for `embedded:product-active:*`) fixed before push.
 **Depends on:** Master Pattern 14 (DB-F#SCALE-6 requires `BrandCatalogService::fetchBrandCatalog` migration shipped first)
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1372,31 +1372,31 @@ The unifying fix is **make every vendor call go through the budget-aware path, b
 
 ### What to do
 
-- [ ] **Step 1 — Extract `ShopifyStorefrontClient` and migrate `BrandDesignImporter::fetchBrand()`** (`app/Services/Shopify/BrandDesignImporter.php`).
+- [x] **Step 1 — Extract `ShopifyStorefrontClient` and migrate `BrandDesignImporter::fetchBrand()`** (`app/Services/Shopify/BrandDesignImporter.php`).
     - Create `app/Services/Shopify/Client/ShopifyStorefrontClient.php` mirroring `ShopifyAdminClient`'s shape: budget pre-acquire, cost tracking (Storefront uses a separate points system — track separately), and `ShopifyThrottledException` on `THROTTLED` extension code (same Storefront response shape as Admin GraphQL).
     - Replace the inline `Http::withHeaders($storefrontToken)->post(...)` in `fetchBrand()` with `$this->storefront->graphql($shopDomain, $storefrontToken, self::STOREFRONT_BRAND_QUERY)`.
     - Crucially: **stop swallowing `$errors` into `emptyBrand()`**. On `THROTTLED`, throw `ShopifyThrottledException` and let the install job's existing `backoff()` chain handle retry. On other errors, throw `ShopifyGraphQLException` so the job fails loudly rather than installing a no-logo brand.
     - Register the Storefront query hash with `ShopifyCostTracker` so cost learning applies to future syncs.
     - Closes **DB-D#SCALE-1** (P1 silent data bug).
-- [ ] **Step 2 — Rework `ShopifyAdminClient::graphql()` THROTTLED path to bubble to queue `backoff()`** (`app/Services/Shopify/Client/ShopifyAdminClient.php`).
+- [x] **Step 2 — Rework `ShopifyAdminClient::graphql()` THROTTLED path to bubble to queue `backoff()`** (`app/Services/Shopify/Client/ShopifyAdminClient.php`).
     - On the first `THROTTLED` response, immediately throw `ShopifyThrottledException` — do not `usleep` and retry in-process. Every production Shopify job already defines `backoff()`, so the queue handles retry delay across workers.
     - Keep at most **one** immediate in-process retry without sleep, to absorb single-packet transient blips (where the bucket refills before a queue round-trip).
     - In `preAcquireBudget()`, after the first `usleep()` + retry, accept the deficit on second-miss and proceed — the `THROTTLED` response path already handles over-commitment correctly.
     - Closes **DB-D#SCALE-3** (P2 worker-pool starvation).
-- [ ] **Step 3 — Refactor `EmbeddedProductSettingsController` to batch and reuse** (`app/Http/Controllers/Api/Internal/EmbeddedProductSettingsController.php`).
+- [ ] **Step 3 — Refactor `EmbeddedProductSettingsController` to batch and reuse** (`app/Http/Controllers/Api/Internal/EmbeddedProductSettingsController.php`). ⚠️ **DEFERRED (2026-05-14).** Embedded admin extension is high-touch surface — Josh's team spent significant effort getting the install/onboarding flow right; refactoring the metafield write path needs Shopify-docs verification first. Open questions before resuming: (1) `metafieldsSet` semantics for `PRODUCTVARIANT` owners (does it upsert by `(ownerId, namespace, key)` the same as `PRODUCT`?), (2) max-batch size per call (last known: 25), (3) access scope deltas vs the current `productVariantUpdate` / `productUpdate` mutations, (4) `userErrors` shape changes that affect the current error-propagation in `update()`. Also note: until this lands, `EmbeddedProductSettingsController` writes to `partna.active` won't bust the per-product `embedded:product-active:*` cache added in Step 4 (10m TTL acceptable per plan).
     - `saveVariantEnabledStates()` (lines 473–489): accept the variant list as a parameter from the caller (which already obtained it via `fetchProductMetafields()`); delete the redundant `fetchVariants()` call.
     - Replace the per-variant `saveVariantMetafield()` loop with a single `metafieldsSet` bulk mutation. Shopify's `metafieldsSet` accepts an array of `{ownerId, namespace, key, type, value}` triples and upserts by owner+namespace+key — no need to look up existing IDs first.
     - `saveMetafield()` (lines 358–468): replace the two-call (query-then-create/update) pattern with a single `metafieldsSet` mutation. `metafieldsSet` upserts.
     - `show()` (lines 88–141): keep the current 3-call shape for now (collections lookups have different cache lifecycles); revisit if Shopify GraphQL exposes a combined query node. Mark with a `// TODO: collapse to single GraphQL operation once Shopify schema permits` comment so the next reader understands the deliberate choice.
     - Track `X-Shopify-Graphql-Cost` response headers and surface budget exhaustion as 429 with `Retry-After` to the embedded client (uses existing `ShopifyBudgetTracker` headers).
     - Closes **DB-F#SCALE-1** (P1 rate-limit drain).
-- [ ] **Step 4 — Eliminate full-catalog fetch in `EmbeddedProductAnalyticsController::resolveActive()`** (`app/Http/Controllers/Api/Internal/EmbeddedProductAnalyticsController.php:161–180`).
+- [x] **Step 4 — Eliminate full-catalog fetch in `EmbeddedProductAnalyticsController::resolveActive()`** (`app/Http/Controllers/Api/Internal/EmbeddedProductAnalyticsController.php:161–180`).
     - **Sequencing note:** Phase 3 Pattern 1 Step 4 wraps `show()` with `rememberLocked`; Phase 3 Pattern 1 Step 2 hardens `fetchBrandCatalog()`. Land both before this fix — otherwise the interim `resolveActive()` thundering-herd is left worse.
     - **Preferred (long-term):** mirror the `sidest.active` metafield to a local column on `commerce.order_items` or a dedicated `brand_product_states` table, populated by the catalog sync job. `resolveActive()` becomes `DB::table('...')->where('shopify_product_id', $productId)->where('brand_professional_id', $professionalId)->value('active')`.
     - **Minimum (P2 close):** cache the active flag independently under `embedded:product-active:{professionalId}:{productId}` (10m TTL, `rememberLocked`), populated lazily on miss. This is one-product scope per cache miss, not full-catalog scope.
     - Either path eliminates the per-call-miss full-catalog fetch.
     - Closes **DB-F#SCALE-6** (P2).
-- [ ] **Step 5 — Add per-brand debounce to `HydrogenDeploymentService::dispatchDeployment()`** (`app/Services/Hydrogen/HydrogenDeploymentService.php`).
+- [x] **Step 5 — Add per-brand debounce to `HydrogenDeploymentService::dispatchDeployment()`** (`app/Services/Hydrogen/HydrogenDeploymentService.php`).
     - At the top of the method: `if (! Cache::add("hydrogen:deploy:debounce:{$professionalId}", true, 60)) { Log::info('HydrogenDeployment: debounced rapid dispatch', [...]); return; }`.
     - The 60-second window collapses any wizard auto-saves into a single deploy per minute per brand. GitHub's rate-limit budget is preserved for other brands.
     - Closes **DB-D#SCALE-4** (P2).
