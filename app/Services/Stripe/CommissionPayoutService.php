@@ -18,13 +18,18 @@ use Stripe\Exception\RateLimitException;
 use Stripe\StripeClient;
 
 /**
- * Commission payouts under Stripe v2 Option A — destination charge with on_behalf_of.
+ * Commission payouts under Stripe v2 Option A — destination charge to affiliate.
  *
- * A single platform-scope PaymentIntent does three things atomically at settlement:
+ * A single platform-scope PaymentIntent does two things atomically at settlement:
  *   1. Charges the brand's saved card/BECS account (customer_account=brand_acct, payment_method=brand_pm).
- *   2. Names the brand as merchant of record (on_behalf_of=brand_acct).
- *   3. Routes funds — application_fee to the platform balance and (gross - fee) to the affiliate
+ *   2. Routes funds — application_fee to the platform balance and (gross - fee) to the affiliate
  *      (transfer_data.destination=affiliate_acct).
+ *
+ * NOTE — no on_behalf_of: Stripe rejects on_behalf_of != transfer_data.destination for card
+ * payment_method_types. Phase 13 canary §C2 verdict was platform-as-merchant-of-record (which
+ * matches our domain: Partna bills the brand for commission, the card statement showing
+ * "Partna" is correct). Consistent with fees_collector=application + losses_collector=application
+ * already set on v2 Account creation.
  *
  * Failure paths short-circuit before the PI create. The completion handshake comes from the
  * payment_intent.succeeded webhook on the platform endpoint (see StripePlatformWebhookController).
@@ -432,10 +437,17 @@ class CommissionPayoutService
         try {
             // Platform-scope create (no stripe_account header).
             //   customer_account: brand's v2 Account (NOT a v1 'customer' — the Account IS the customer).
-            //   on_behalf_of:     brand is settlement merchant on the cardholder statement.
             //   transfer_data.destination: (gross - application_fee) routes to the affiliate at settlement.
             //   application_fee_amount:    routes our cut to the platform balance.
             // Stripe handles fund movement atomically; we never call transfers->create.
+            //
+            // No on_behalf_of: Stripe rejects on_behalf_of != transfer_data.destination for card
+            // (and card_present) payment_method_types — "must settle in the country of the
+            // destination account". Plan §C2 canary verdict: platform becomes merchant of record
+            // for the commission charge, which is correct for our domain (Partna bills the brand
+            // for affiliate commission; the card statement showing "Partna" matches reality).
+            // Consistent with fees_collector=application + losses_collector=application already
+            // set at v2 Account creation.
             $pi = $this->stripe->paymentIntents->create([
                 'amount' => $payout->gross_commission_cents,
                 'currency' => $currencyLower,
@@ -444,7 +456,6 @@ class CommissionPayoutService
                 'payment_method_types' => [$paymentMethodType],
                 'confirm' => true,
                 'off_session' => true,
-                'on_behalf_of' => $brand->stripe_connect_account_id,
                 'transfer_data' => ['destination' => $affiliate->stripe_connect_account_id],
                 'application_fee_amount' => $payout->platform_fee_cents,
                 'description' => "Commission payout #{$payout->id}",
