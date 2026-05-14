@@ -16,7 +16,7 @@ use Stripe\Exception\RateLimitException;
 use Stripe\StripeClient;
 
 // V2: Process a single commission payout via destination charge.
-//   One platform-scope PaymentIntent with customer_account, on_behalf_of,
+//   One platform-scope PaymentIntent with customer_account,
 //   transfer_data.destination, application_fee_amount. No transfers->create.
 //
 //   processPayoutBatch returns: true=completed, null=in-flight, false=failed.
@@ -351,7 +351,7 @@ it('creates a platform-scope PaymentIntent and marks completed on synchronous su
         ->once()
         ->with(\Mockery::on(function (array $params) use ($brand, $aff, $payout) {
             return $params['customer_account'] === $brand->stripe_connect_account_id
-                && $params['on_behalf_of'] === $brand->stripe_connect_account_id
+                && ! array_key_exists('on_behalf_of', $params)
                 && $params['transfer_data']['destination'] === $aff->stripe_connect_account_id
                 && $params['application_fee_amount'] === $payout->platform_fee_cents
                 && $params['confirm'] === true
