@@ -2,6 +2,7 @@
 
 namespace App\Services\Shopify;
 
+use App\Exceptions\Shopify\InvalidShopDomainException;
 use App\Exceptions\Shopify\ShopifyTransportException;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
@@ -13,13 +14,13 @@ use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
-use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\BrandStatusService;
 use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
-// V2: Handles Shopify reinstalls and existing-account connects. Fresh installs are deferred to the setup wizard via bootstrap.
+// V2: Handles Shopify reinstalls. Fresh installs (including ones whose Shopify shop email matches an
+// existing Partna account) are deferred to the setup wizard via the setup-token + bootstrap flow.
 class BrandSignupService
 {
     use NormalizesShopDomain;
@@ -81,65 +82,11 @@ class BrandSignupService
         );
     }
 
-    public function handleExistingBrandConnect(
-        Professional $professional,
-        string $shopDomain,
-        string $accessToken,
-        array $shopData,
-        array $scopes,
-    ): BrandSignupResult {
-        $shopId = trim((string) Arr::get($shopData, 'id', ''));
-        $shopCurrency = strtoupper(trim((string) Arr::get($shopData, 'currency', '')));
-
-        $integration = ProfessionalIntegration::updateOrCreate(
-            [
-                'professional_id' => (string) $professional->id,
-                'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
-            ],
-            [
-                'external_account_id' => $shopDomain,
-                'access_token' => $accessToken,
-                'provider_metadata' => [
-                    'shop_domain' => $shopDomain,
-                    'shop_id' => $shopId !== '' ? "gid://shopify/Shop/{$shopId}" : null,
-                    'shop_currency' => $shopCurrency !== '' ? $shopCurrency : null,
-                    'scopes' => $scopes,
-                    'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
-                    'connected_at' => now()->toIso8601String(),
-                    'webhook_registration_state' => 'queued',
-                ],
-            ]
-        );
-
-        BrandProfile::firstOrCreate(
-            ['professional_id' => (string) $professional->id],
-            ['setup_complete' => false]
-        );
-
-        $site = Site::where('professional_id', $professional->id)->first();
-        $brandProfile = BrandProfile::where('professional_id', $professional->id)->first();
-
-        if ($site) {
-            $this->autoFill->fillFromShopData($professional, $site, $brandProfile, $shopData);
-        }
-
-        app(ProfessionalCacheService::class)->invalidateProfessional($professional);
-
-        $this->dispatchInstallJobs((string) $integration->id);
-
-        Log::info('Shopify brand connect (existing account)', [
-            'professional_id' => (string) $professional->id,
-            'shop_domain' => $shopDomain,
-        ]);
-
-        return new BrandSignupResult(
-            professional: $professional,
-            site: $site,
-            brandProfile: $brandProfile,
-            integration: $integration,
-            isReinstall: false,
-        );
-    }
+    // Path B (auto-link via shopData.email match) was removed for SEC-B#3 / SEC-F#1
+    // along with the controller code that called handleExistingBrandConnect.
+    // Email-match installs now flow through the setup-token path (Path C) and the
+    // integration is attached to a Professional inside BootstrapController, AFTER
+    // Supabase JWT auth proves account ownership.
 
     /**
      * Delete this app's storefront access token from Shopify.
@@ -147,17 +94,30 @@ class BrandSignupService
      */
     private function revokeStorefrontToken(array $metadata, string $oldAccessToken): void
     {
-        $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
-        if ($shopDomain === '' || $oldAccessToken === '') {
+        $rawShopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
+        if ($rawShopDomain === '' || $oldAccessToken === '') {
             return;
         }
 
+        try {
+            $shop = ShopDomain::fromUntrusted($rawShopDomain);
+        } catch (InvalidShopDomainException $e) {
+            // Best-effort: a malformed shop_domain in stored metadata is unexpected
+            // but not worth aborting reinstall over.
+            Log::warning('Shopify reinstall: stored shop_domain failed validation, skipping storefront token revocation', [
+                'shop_domain' => $rawShopDomain,
+            ]);
+
+            return;
+        }
+
+        $shopDomain = $shop->value;
         $apiVersion = trim((string) config('services.shopify.api_version', '2025-01'));
 
         try {
             $response = $this->shopifyClient->rest(
                 method: 'GET',
-                shopDomain: $shopDomain,
+                shop: $shop,
                 accessToken: $oldAccessToken,
                 path: "/admin/api/{$apiVersion}/storefront_access_tokens.json",
                 timeoutSeconds: 15,
@@ -190,7 +150,7 @@ class BrandSignupService
             try {
                 $this->shopifyClient->rest(
                     method: 'DELETE',
-                    shopDomain: $shopDomain,
+                    shop: $shop,
                     accessToken: $oldAccessToken,
                     path: "/admin/api/{$apiVersion}/storefront_access_tokens/{$id}.json",
                     timeoutSeconds: 15,

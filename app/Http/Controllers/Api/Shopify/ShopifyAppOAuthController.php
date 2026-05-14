@@ -5,10 +5,10 @@ namespace App\Http\Controllers\Api\Shopify;
 use App\Exceptions\Shopify\ShopifyTransportException;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
-use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\BrandSignupService;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\ShopDomain;
 use App\Services\Shopify\ShopifySetupTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -114,7 +114,7 @@ class ShopifyAppOAuthController extends ApiController
             $apiVersion = (string) config('services.shopify.api_version', '2025-01');
             $shopResponse = $this->shopifyClient->rest(
                 method: 'GET',
-                shopDomain: $shop,
+                shop: ShopDomain::fromUntrusted($shop),
                 accessToken: $accessToken,
                 path: "/admin/api/{$apiVersion}/shop.json",
             );
@@ -129,7 +129,9 @@ class ShopifyAppOAuthController extends ApiController
         $basePath = "https://admin.shopify.com/store/{$shopHandle}/apps/{$appHandle}";
 
         try {
-            // Path A: Reinstall — existing integration for this shop domain
+            // Path A: Reinstall — existing integration for this shop domain. Safe to
+            // auto-link because Shopify already proved ownership of the previously-
+            // installed shop (the access token issued at OAuth time replaces the old one).
             $existingIntegration = ProfessionalIntegration::query()
                 ->where('shopify_shop_domain', $shop)
                 ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -146,26 +148,11 @@ class ShopifyAppOAuthController extends ApiController
                 return redirect()->away($basePath);
             }
 
-            // Path B: Existing account — shop email matches a Professional's primary_email (indexed local lookup).
-            // Users whose Shopify email differs from their Partna email fall through to Path C.
-            if ($shopEmail !== '') {
-                $existingProfessional = Professional::whereRaw('lower(primary_email) = ?', [$shopEmail])->first();
-
-                if ($existingProfessional) {
-                    $result = $this->brandSignup->handleExistingBrandConnect(
-                        $existingProfessional, $shop, $accessToken, $shopData, $scopes
-                    );
-
-                    Log::info('Shopify OAuth: existing account connect', [
-                        'professional_id' => (string) $result->professional->id,
-                        'shop_domain' => $shop,
-                    ]);
-
-                    return redirect()->away($basePath);
-                }
-            }
-
-            // Path C: Fresh install — cache credentials and redirect to setup wizard
+            // Path B (email auto-match) was removed for SEC-B#3 / SEC-F#1: shopData.email
+            // is a Shopify-controlled, editable string and cannot prove ownership of a
+            // Partna account. Every non-reinstall install now uses the setup-token flow
+            // below — the merchant must Supabase-authenticate inside the setup wizard
+            // before BootstrapController attaches the integration to a Professional.
             $setupToken = $this->setupTokens->create($shop, $accessToken, $shopData, $scopes, $shopEmail);
 
             Log::info('Shopify OAuth: fresh install, redirecting to setup', [

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\ShopDomain;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
@@ -331,6 +332,6 @@ class ReconcileSmartCollectionRulesCommand extends Command
 
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables = []): \Illuminate\Http\Client\Response
     {
-        return $this->client->graphql($shopDomain, $accessToken, $apiVersion, $query, $variables);
+        return $this->client->graphql(ShopDomain::fromUntrusted($shopDomain), $accessToken, $apiVersion, $query, $variables);
     }
 }

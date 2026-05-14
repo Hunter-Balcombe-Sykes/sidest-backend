@@ -5,9 +5,11 @@ namespace App\Services\Shopify\Client;
 use App\Exceptions\Shopify\ShopifyGraphQLException;
 use App\Exceptions\Shopify\ShopifyThrottledException;
 use App\Exceptions\Shopify\ShopifyTransportException;
+use App\Services\Shopify\ShopDomain;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use InvalidArgumentException;
 
 /**
  * Single entry point for all Shopify Admin API calls.
@@ -45,7 +47,7 @@ class ShopifyAdminClient
      * @throws ShopifyTransportException non-2xx HTTP, timeout, or connection failure
      */
     public function graphql(
-        string $shopDomain,
+        ShopDomain $shop,
         string $accessToken,
         string $apiVersion,
         string $query,
@@ -57,11 +59,12 @@ class ShopifyAdminClient
         $maxWait = (int) config('services.shopify.throttle.max_wait_ms', 5000);
         $queryHash = sha1($query);
         $attempt = 0;
+        $shopDomain = $shop->value;
 
         while (true) {
             $this->preAcquireBudget($shopDomain, $queryHash);
             $started = microtime(true);
-            $response = $this->post($shopDomain, $accessToken, $apiVersion, $query, $variables, $timeout);
+            $response = $this->post($shop, $accessToken, $apiVersion, $query, $variables, $timeout);
             $this->reconcileFromResponse($response, $shopDomain, $queryHash, $started);
 
             if ($this->isThrottled($response)) {
@@ -99,15 +102,26 @@ class ShopifyAdminClient
      */
     public function rest(
         string $method,
-        string $shopDomain,
+        ShopDomain $shop,
         string $accessToken,
         string $path,
         array $body = [],
         ?int $timeoutSeconds = null,
         bool $allow401 = false,
     ): Response {
+        // Defence in depth: refuse any path that doesn't address the Admin API.
+        // Without this guard, a buggy caller could request e.g. `/oauth/...` on
+        // the shop domain — outside the API surface this client is supposed to
+        // speak to — and the access token would still be sent.
+        if (! str_starts_with($path, '/admin/')) {
+            throw new InvalidArgumentException(
+                "ShopifyAdminClient::rest() requires a path under /admin/, got: {$path}"
+            );
+        }
+
         $timeout = $timeoutSeconds ?? (int) config('services.shopify.throttle.default_timeout', 20);
         $maxRetries = (int) config('services.shopify.throttle.max_inprocess_retries', 3);
+        $shopDomain = $shop->value;
         $url = "https://{$shopDomain}{$path}";
 
         $attempt = 0;
@@ -119,7 +133,7 @@ class ShopifyAdminClient
                     'POST' => $pending->post($url, $body),
                     'PUT' => $pending->put($url, $body),
                     'DELETE' => $pending->delete($url, $body),
-                    default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
+                    default => throw new InvalidArgumentException("Unsupported HTTP method: {$method}"),
                 };
             } catch (ConnectionException $e) {
                 throw new ShopifyTransportException($shopDomain, 0, $e->getMessage(), $e);
@@ -155,11 +169,13 @@ class ShopifyAdminClient
      * the lock on terminal state.
      */
     public function bulkQuery(
-        string $shopDomain,
+        ShopDomain $shop,
         string $accessToken,
         string $apiVersion,
         string $query,
     ): string {
+        $shopDomain = $shop->value;
+
         if (! $this->bulkLock->acquire($shopDomain)) {
             $this->metrics->bulkLockContended($shopDomain);
             throw new \RuntimeException("Shopify bulk operation already in progress for {$shopDomain}");
@@ -175,7 +191,7 @@ class ShopifyAdminClient
         GRAPHQL;
 
         try {
-            $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $mutation, ['query' => $query]);
+            $response = $this->graphql($shop, $accessToken, $apiVersion, $mutation, ['query' => $query]);
         } catch (\Throwable $e) {
             $this->bulkLock->release($shopDomain);
             throw $e;
@@ -196,12 +212,14 @@ class ShopifyAdminClient
      * Same locking semantics as bulkQuery.
      */
     public function bulkMutation(
-        string $shopDomain,
+        ShopDomain $shop,
         string $accessToken,
         string $apiVersion,
         string $mutation,
         string $stagedUploadPath,
     ): string {
+        $shopDomain = $shop->value;
+
         if (! $this->bulkLock->acquire($shopDomain)) {
             $this->metrics->bulkLockContended($shopDomain);
             throw new \RuntimeException("Shopify bulk operation already in progress for {$shopDomain}");
@@ -217,7 +235,7 @@ class ShopifyAdminClient
         GRAPHQL;
 
         try {
-            $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $runner, [
+            $response = $this->graphql($shop, $accessToken, $apiVersion, $runner, [
                 'mutation' => $mutation,
                 'stagedUploadPath' => $stagedUploadPath,
             ]);
@@ -246,13 +264,15 @@ class ShopifyAdminClient
      * @return array{status: string, url: string|null, error_code: string|null}
      */
     public function waitForBulkOperation(
-        string $shopDomain,
+        ShopDomain $shop,
         string $accessToken,
         string $apiVersion,
         string $operationId,
         int $pollIntervalMs = 2000,
         int $timeoutSeconds = 600,
     ): array {
+        $shopDomain = $shop->value;
+
         $query = <<<'GRAPHQL'
         query bulkOperationStatus($id: ID!) {
           node(id: $id) { ... on BulkOperation { id status errorCode url } }
@@ -264,7 +284,7 @@ class ShopifyAdminClient
 
         while (microtime(true) < $deadline) {
             try {
-                $response = $this->graphql($shopDomain, $accessToken, $apiVersion, $query, ['id' => $operationId]);
+                $response = $this->graphql($shop, $accessToken, $apiVersion, $query, ['id' => $operationId]);
             } catch (\Throwable $e) {
                 $this->bulkLock->release($shopDomain);
                 throw $e;
@@ -291,13 +311,15 @@ class ShopifyAdminClient
     }
 
     private function post(
-        string $shopDomain,
+        ShopDomain $shop,
         string $accessToken,
         string $apiVersion,
         string $query,
         array $variables,
         int $timeout,
     ): Response {
+        $shopDomain = $shop->value;
+
         try {
             $response = Http::withHeaders([
                 'X-Shopify-Access-Token' => $accessToken,

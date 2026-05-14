@@ -4,6 +4,7 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\ShopDomain;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -230,7 +231,7 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
     private function queryShopify(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables = []): array
     {
         $response = $this->client->graphql(
-            $shopDomain,
+            ShopDomain::fromUntrusted($shopDomain),
             $accessToken,
             $apiVersion,
             $query,

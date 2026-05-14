@@ -88,7 +88,7 @@ class ShopifyDataResyncService
         try {
             $response = $this->client->rest(
                 method: 'GET',
-                shopDomain: $shopDomain,
+                shop: ShopDomain::fromUntrusted($shopDomain),
                 accessToken: $accessToken,
                 path: "/admin/api/{$apiVersion}/shop.json",
             );

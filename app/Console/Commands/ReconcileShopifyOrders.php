@@ -6,6 +6,7 @@ use App\Jobs\Shopify\ProcessShopifyOrderWebhookJob;
 use App\Models\Commerce\Order;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\ShopDomain;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
@@ -86,6 +87,17 @@ class ReconcileShopifyOrders extends Command
             return;
         }
 
+        try {
+            $shop = ShopDomain::fromUntrusted($shopDomain);
+        } catch (\App\Exceptions\Shopify\InvalidShopDomainException $e) {
+            Log::warning('ReconcileShopifyOrders: integration has invalid shop_domain, skipping', [
+                'integration_id' => (string) $integration->id,
+                'shop_domain' => $shopDomain,
+            ]);
+
+            return;
+        }
+
         // Determine the since timestamp. Precedence: --since flag > stored reconciled_through > 7 days ago.
         $since = $sinceOverride
             ?? $integration->reconciled_through
@@ -120,7 +132,7 @@ class ReconcileShopifyOrders extends Command
 
             $response = $shopifyClient->rest(
                 method: 'GET',
-                shopDomain: $shopDomain,
+                shop: $shop,
                 accessToken: $accessToken,
                 path: $path,
             );

@@ -447,7 +447,7 @@ class ShopifyTeardownService
         try {
             $response = $this->client->rest(
                 method: 'GET',
-                shopDomain: $shopDomain,
+                shop: ShopDomain::fromUntrusted($shopDomain),
                 accessToken: $accessToken,
                 path: "/admin/api/{$apiVersion}/storefront_access_tokens.json",
                 timeoutSeconds: 15,
@@ -479,7 +479,7 @@ class ShopifyTeardownService
             try {
                 $deleteRes = $this->client->rest(
                     method: 'DELETE',
-                    shopDomain: $shopDomain,
+                    shop: ShopDomain::fromUntrusted($shopDomain),
                     accessToken: $accessToken,
                     path: "/admin/api/{$apiVersion}/storefront_access_tokens/{$id}.json",
                     timeoutSeconds: 15,
@@ -551,7 +551,7 @@ class ShopifyTeardownService
         try {
             $response = $this->client->rest(
                 method: 'DELETE',
-                shopDomain: $shopDomain,
+                shop: ShopDomain::fromUntrusted($shopDomain),
                 accessToken: $accessToken,
                 path: '/admin/api_permissions/current.json',
                 timeoutSeconds: 15,
@@ -567,7 +567,7 @@ class ShopifyTeardownService
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
         return $this->client->graphql(
-            $shopDomain,
+            ShopDomain::fromUntrusted($shopDomain),
             $accessToken,
             $apiVersion,
             $query,

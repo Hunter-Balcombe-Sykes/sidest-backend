@@ -2,6 +2,7 @@
 
 use App\Services\Shopify\Client\ShopifyAdminClient;
 use App\Services\Shopify\Client\ShopifyBulkOperationLock;
+use App\Services\Shopify\ShopDomain;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Redis;
 
@@ -9,14 +10,15 @@ beforeEach(function () {
     Redis::del('shopify:bulk_lock:test.myshopify.com');
     Redis::del('shopify:bucket:test.myshopify.com');
     $this->client = app(ShopifyAdminClient::class);
-    $this->shop = 'test.myshopify.com';
+    $this->shopName = 'test.myshopify.com';
+    $this->shop = ShopDomain::fromUntrusted($this->shopName);
     $this->token = 'shpat_test';
     $this->version = '2025-01';
 });
 
 it('starts a bulk query and returns the operation id', function () {
     Http::fake([
-        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+        "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::response([
             'data' => [
                 'bulkOperationRunQuery' => [
                     'bulkOperation' => ['id' => 'gid://shopify/BulkOperation/1', 'status' => 'CREATED'],
@@ -33,14 +35,14 @@ it('starts a bulk query and returns the operation id', function () {
 });
 
 it('refuses to start a bulk op when another is in flight on the same shop', function () {
-    app(ShopifyBulkOperationLock::class)->acquire($this->shop);
+    app(ShopifyBulkOperationLock::class)->acquire($this->shopName);
 
     expect(fn () => $this->client->bulkQuery($this->shop, $this->token, $this->version, 'query { products { edges { node { id } } } }'))
         ->toThrow(\RuntimeException::class, 'already in progress');
 });
 
 it('polls waitForBulkOperation until COMPLETED and returns the url', function () {
-    Http::fakeSequence("https://{$this->shop}/admin/api/{$this->version}/graphql.json")
+    Http::fakeSequence("https://{$this->shopName}/admin/api/{$this->version}/graphql.json")
         ->push([
             'data' => ['node' => ['status' => 'RUNNING', 'url' => null]],
             'extensions' => ['cost' => ['requestedQueryCost' => 1, 'actualQueryCost' => 1, 'throttleStatus' => ['maximumAvailable' => 1000, 'currentlyAvailable' => 999, 'restoreRate' => 100]]],
