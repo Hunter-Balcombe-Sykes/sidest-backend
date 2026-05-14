@@ -4,6 +4,7 @@ namespace App\Jobs\Stripe;
 
 use App\Models\Commerce\Order;
 use App\Models\Retail\CommissionPayout;
+use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -123,9 +124,10 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
             'processed_at' => now(),
         ])->save();
 
-        // Release linked orders back to the sweep pool. Without this, the daily sweep
-        // (whereNull('payout_id')) ignores them and they're permanently orphaned to a
-        // dead payout. Matches CommissionPayoutService::failPayout's release behaviour.
+        // Release linked orders + their payout_items back to the sweep pool. Without this,
+        // the daily sweep (whereNull('payout_id')) ignores the orders and the cpi_unique_order
+        // partial index blocks the next batch from claiming them. Mirrors failPayout's cleanup.
+        CommissionPayoutItem::where('payout_id', $this->payoutId)->delete();
         Order::where('payout_id', $this->payoutId)->update(['payout_id' => null]);
     }
 }
