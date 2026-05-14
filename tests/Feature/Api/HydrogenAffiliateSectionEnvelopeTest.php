@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateController;
 use App\Models\Core\Site\Block;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Support\Str;
 
 // Exercises the sectionEnvelope() helper via reflection so we can assert the
@@ -14,8 +15,16 @@ function invokeEnvelope(HydrogenAffiliateController $controller, $sections, stri
     return $method->invoke($controller, $sections, $type, $data);
 }
 
+// The CacheLockService dep is required for show() but irrelevant to the
+// section-envelope helper — these tests never enter the caching path. Pass
+// a real instance so the constructor signature is satisfied without mocking.
+function envelopeController(): HydrogenAffiliateController
+{
+    return new HydrogenAffiliateController(new CacheLockService);
+}
+
 it('omits block_id from the shop envelope when no block row exists', function () {
-    $controller = new HydrogenAffiliateController;
+    $controller = envelopeController();
     $sections = collect(); // no blocks at all
 
     $result = invokeEnvelope($controller, $sections, 'shop', fn () => null);
@@ -27,7 +36,7 @@ it('omits block_id from the shop envelope when no block row exists', function ()
 });
 
 it('includes block_id in the shop envelope when the block exists and is live', function () {
-    $controller = new HydrogenAffiliateController;
+    $controller = envelopeController();
     $blockId = (string) Str::uuid();
     $block = new Block;
     $block->id = $blockId;
@@ -45,7 +54,7 @@ it('includes block_id in the shop envelope when the block exists and is live', f
 });
 
 it('includes block_id in the shop envelope when the block exists but is draft', function () {
-    $controller = new HydrogenAffiliateController;
+    $controller = envelopeController();
     $blockId = (string) Str::uuid();
     $block = new Block;
     $block->id = $blockId;
@@ -69,7 +78,7 @@ it('treats is_active=true but is_enabled=false as draft (requirements gate)', fu
     // The pro turned the section Live, but underlying data went away
     // (e.g. last gallery image deleted → SiteMediaObserver flipped
     // is_enabled to false). The public render path must hide it.
-    $controller = new HydrogenAffiliateController;
+    $controller = envelopeController();
     $blockId = (string) Str::uuid();
     $block = new Block;
     $block->id = $blockId;

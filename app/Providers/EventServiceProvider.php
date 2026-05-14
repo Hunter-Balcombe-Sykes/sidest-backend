@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\BrandProfile;
@@ -15,6 +16,7 @@ use App\Models\Core\Site\SiteMedia;
 use App\Models\Retail\BrandStoreSettings;
 use App\Models\Retail\CommissionMovement;
 use App\Models\Retail\CommissionPayout;
+use App\Observers\Commerce\AffiliateProductSelectionObserver;
 use App\Observers\Core\BlockObserver;
 use App\Observers\Core\BrandAffiliateInviteObserver;
 use App\Observers\Core\BrandPartnerLinkObserver;
@@ -52,5 +54,6 @@ class EventServiceProvider extends ServiceProvider
         BrandProfile::observe(BrandProfileObserver::class);
         BrandStoreSettings::observe(BrandStoreSettingsObserver::class);
         SiteMedia::observe(SiteMediaObserver::class);
+        AffiliateProductSelection::observe(AffiliateProductSelectionObserver::class);
     }
 }

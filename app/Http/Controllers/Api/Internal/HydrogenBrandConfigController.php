@@ -8,6 +8,8 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
 use App\Models\Retail\BrandStoreSettings;
+use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -17,6 +19,16 @@ use Illuminate\Validation\ValidationException;
 // V2: Internal endpoint for Hydrogen loaders. Returns brand config, storefront token, and shop metafield values by shop domain.
 class HydrogenBrandConfigController extends ApiController
 {
+    // 60s primary TTL with a 10× stale window via CacheLockService. Hot read
+    // path (every Hydrogen storefront initial render). Busted on writes to
+    // ProfessionalIntegration, BrandStoreSettings, the brand's Site, and
+    // SiteMedia rows where pool=brand_gallery.
+    private const CACHE_TTL_SECONDS = 60;
+
+    public function __construct(
+        private readonly CacheLockService $cacheLock,
+    ) {}
+
     public function show(Request $request): JsonResponse
     {
         $validator = Validator::make($request->query(), [
@@ -29,6 +41,12 @@ class HydrogenBrandConfigController extends ApiController
 
         $shopDomain = strtolower(trim($validator->validated()['shop_domain']));
 
+        $cacheKey = CacheKeyGenerator::hydrogenBrandConfig($shopDomain);
+
+        // Cache the full payload including 404 lookups would be wrong (a brand
+        // that installs Shopify post-cache would be locked out). So gate runs
+        // outside the cache; only the success-path payload is cached. The
+        // gate's 1 DB query is cheap relative to the 5+ queries this saves.
         $integration = ProfessionalIntegration::query()
             ->where('shopify_shop_domain', $shopDomain)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -38,10 +56,39 @@ class HydrogenBrandConfigController extends ApiController
             return $this->error('Brand not found for this shop domain.', 404);
         }
 
+        $payload = $this->cacheLock->rememberLocked(
+            $cacheKey,
+            self::CACHE_TTL_SECONDS,
+            fn () => $this->buildBrandConfigPayload($integration, $shopDomain),
+        );
+
+        // null surfaces as a 404. writeWithJitter does Cache::put the null,
+        // but Cache::get() returns null for both "stored null" and "key
+        // absent", so the next request recomputes — a brand becoming active
+        // is visible on the next call. Minor Redis write waste on this rare
+        // path is the deliberate tradeoff vs rememberLockedNullable.
+        if ($payload === null) {
+            return $this->error('Brand not found or inactive.', 404);
+        }
+
+        return $this->success($payload);
+    }
+
+    /**
+     * Build the brand-config payload. Returns null when the professional is
+     * absent or inactive so show() can map to a 404 — and the null itself is
+     * not cached (CacheLockService::rememberLocked treats null as "miss" and
+     * recomputes next call). This is intentional: the negative case here
+     * should retry quickly when a brand becomes active.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function buildBrandConfigPayload(ProfessionalIntegration $integration, string $shopDomain): ?array
+    {
         $professional = Professional::find($integration->professional_id);
 
         if (! $professional || $professional->status !== 'active') {
-            return $this->error('Brand not found or inactive.', 404);
+            return null;
         }
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
@@ -54,7 +101,7 @@ class HydrogenBrandConfigController extends ApiController
         $typography = is_array($design['typography'] ?? null) ? $design['typography'] : [];
         $media = is_array($design['media'] ?? null) ? $design['media'] : [];
 
-        return $this->success([
+        return [
             'brand_professional_id' => (string) $professional->id,
             'brand_name' => $professional->display_name,
             'brand_handle' => $professional->handle,
@@ -89,7 +136,7 @@ class HydrogenBrandConfigController extends ApiController
                 'brand_logo_url' => is_string($media['brand_logo_url'] ?? null) ? $media['brand_logo_url'] : null,
             ],
             'fallback_gallery' => $this->getFallbackGallery($site),
-        ]);
+        ];
     }
 
     private function getFallbackGallery(?Site $site): array

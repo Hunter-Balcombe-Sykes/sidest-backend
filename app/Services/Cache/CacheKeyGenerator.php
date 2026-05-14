@@ -274,6 +274,34 @@ class CacheKeyGenerator
         return "hydrogen:brand-design:v1:{$siteId}";
     }
 
+    // Hydrogen affiliate-page response cache. Keyed by (brand_professional_id,
+    // affiliate_handle) — the two pieces of identity HydrogenAffiliateController
+    // resolves before assembling the 13-DB-query payload. The slug part is the
+    // request input (not affiliate->handle), so aliases populate separate cache
+    // entries; invalidation walks aliases to clear all variants. 60s TTL is the
+    // safety net; SiteCacheService::forgetHydrogenAffiliate is the fast path.
+    public static function hydrogenAffiliate(string $brandProfessionalId, string $affiliateHandle): string
+    {
+        return 'hydrogen:affiliate:v1:'.$brandProfessionalId.':'.strtolower($affiliateHandle);
+    }
+
+    // Hydrogen brand-config response cache. Keyed by shop_domain — the only
+    // request input, and 1:1 with brand_professional_id via integration row.
+    // Busted on writes to ProfessionalIntegration, BrandStoreSettings, the
+    // brand's Site (design tokens), and SiteMedia (pool=brand_gallery).
+    public static function hydrogenBrandConfig(string $shopDomain): string
+    {
+        return 'hydrogen:brand-config:v1:'.strtolower($shopDomain);
+    }
+
+    // Hydrogen affiliate-products response cache. Keyed by affiliate_id — the
+    // only request input. Busted on AffiliateProductSelection writes and on
+    // SiteMedia writes where pool=POOL_PRODUCT (custom product photos).
+    public static function hydrogenAffiliateProducts(string $affiliateId): string
+    {
+        return "hydrogen:affiliate-products:v1:{$affiliateId}";
+    }
+
     public static function brandProductCustomPhotos(string $brandProfessionalId, string $productGid): string
     {
         return "brand:{$brandProfessionalId}:product:{$productGid}:custom_photos";

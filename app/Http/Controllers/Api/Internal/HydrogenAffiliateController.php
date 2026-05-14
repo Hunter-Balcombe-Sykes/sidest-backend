@@ -10,6 +10,8 @@ use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
+use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +33,16 @@ use Illuminate\Validation\ValidationException;
 // Draft/Live (links) is handled server-side: is_active=false rows are filtered out.
 class HydrogenAffiliateController extends ApiController
 {
+    // 60s primary TTL; CacheLockService writes a :stale twin at 10× this (10 min
+    // last-good window) so the cache survives a brief origin hiccup. Push
+    // invalidation via SiteCacheService::forgetHydrogenAffiliate keeps the
+    // visible-to-user lag at ~zero on dashboard edits.
+    private const CACHE_TTL_SECONDS = 60;
+
+    public function __construct(
+        private readonly CacheLockService $cacheLock,
+    ) {}
+
     public function show(Request $request): JsonResponse
     {
         $validator = Validator::make($request->query(), [
@@ -70,6 +82,35 @@ class HydrogenAffiliateController extends ApiController
             return $this->error('Affiliate not found.', 404);
         }
 
+        // Gate checks (3 cheap indexed lookups) run on every request; the
+        // expensive 13+ query payload assembly is cached. Cache key includes
+        // brand_id so two brands viewing the same affiliate get separate
+        // entries — aligns with the per-brand authorization gate above.
+        $cacheKey = CacheKeyGenerator::hydrogenAffiliate(
+            (string) $integration->professional_id,
+            $slug,
+        );
+
+        $payload = $this->cacheLock->rememberLocked(
+            $cacheKey,
+            self::CACHE_TTL_SECONDS,
+            fn () => $this->buildAffiliatePayload($affiliate),
+        );
+
+        // no-store: payload shape has evolved (e.g. links.id added in b9de807).
+        // Prevent Oxygen/CDN from caching a stale shape across deploys. The
+        // backend's own rememberLocked still protects the origin from stampedes.
+        return $this->success($payload)->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * Assemble the full affiliate-page payload. Extracted from show() so the
+     * 13+ DB queries here run inside the rememberLocked closure.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildAffiliatePayload(Professional $affiliate): array
+    {
         $site = Site::where('professional_id', $affiliate->id)->first();
 
         // Preload the site's section blocks once — every envelope helper reads
@@ -84,9 +125,7 @@ class HydrogenAffiliateController extends ApiController
         // into getAffiliateLinks().
         $booking = $this->getAffiliateBooking($site, $sections);
 
-        // no-store: payload shape has evolved (e.g. links.id added in b9de807).
-        // Prevent Oxygen/CDN from caching a stale shape across deploys.
-        return $this->success([
+        return [
             'affiliate_id' => (string) $affiliate->id,
             'name' => $affiliate->display_name,
             'slug' => $affiliate->handle,
@@ -105,7 +144,7 @@ class HydrogenAffiliateController extends ApiController
             // the visitor opens the shop card. block_id is absent (not null)
             // when the block hasn't been created — Hydrogen guards on presence.
             'shop' => $this->sectionEnvelope($sections, 'shop', fn () => null),
-        ])->header('Cache-Control', 'no-store');
+        ];
     }
 
     /**
