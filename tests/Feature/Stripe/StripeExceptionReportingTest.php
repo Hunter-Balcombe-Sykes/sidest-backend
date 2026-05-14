@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
+use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\StripeConnectService;
+use App\Services\Stripe\StripeTransactionFetcher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Gate;
@@ -54,8 +56,14 @@ function stripeReport_makeBrand(): \App\Models\Core\Professional\Professional
 function stripeReport_makeController(StripeConnectService $service): StripeConnectController
 {
     $payoutService = Mockery::mock(CommissionPayoutService::class);
+    $fetcherStub = Mockery::mock(StripeTransactionFetcher::class);
 
-    return new StripeConnectController($service, $payoutService);
+    return new StripeConnectController(
+        $service,
+        $payoutService,
+        $fetcherStub,
+        app(CacheLockService::class),
+    );
 }
 
 function stripeReport_makeService(string $method, \Throwable $exception): StripeConnectService
