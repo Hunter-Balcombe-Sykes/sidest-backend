@@ -140,13 +140,40 @@ it('handle() returns cleanly when processPayoutBatch returns null (processing â€
         ->once();
 });
 
-it('handle() logs cancelled-by-revalidation when processPayoutBatch returns null on a cancelled payout', function () {
+it('handle() skips processing when payout is failed (BECS race guard)', function () {
+    execJob_seedPayout('p1', ['status' => 'failed', 'processed_at' => now()->toDateTimeString()]);
+
+    $service = Mockery::mock(CommissionPayoutService::class);
+    $service->shouldNotReceive('processPayoutBatch');
+
+    $job = new ExecuteCommissionPayoutJob('p1');
+    $job->handle($service);
+});
+
+it('handle() skips processing when payout is already cancelled', function () {
     execJob_seedPayout('p1', ['status' => 'cancelled']);
+
+    $service = Mockery::mock(CommissionPayoutService::class);
+    $service->shouldNotReceive('processPayoutBatch');
+
+    $job = new ExecuteCommissionPayoutJob('p1');
+    $job->handle($service);
+});
+
+it('handle() logs cancelled-by-revalidation when processPayoutBatch transitions payout to cancelled', function () {
+    execJob_seedPayout('p1', ['status' => 'pending']);
 
     $service = Mockery::mock(CommissionPayoutService::class);
     $service->shouldReceive('processPayoutBatch')
         ->once()
-        ->andReturn(null);
+        ->andReturnUsing(function () {
+            // Simulate revalidatePayoutOrders cancelling all linked orders.
+            DB::connection('pgsql')->table('commerce.commission_payouts')
+                ->where('id', 'p1')
+                ->update(['status' => 'cancelled']);
+
+            return null;
+        });
 
     Log::spy();
 

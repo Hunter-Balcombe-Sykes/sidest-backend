@@ -59,7 +59,7 @@ graph TD
 
 ## Status snapshot — already shipped
 
-PR #12–#25 introduced 3 partials, 2 regressions, and 1 symptom-now-visible. **Same-day post-baseline update (2026-05-12): PR #26–#30 closed Master Pattern 11's data-source half (1 full P1 close + 1 partial P1 close) and introduced 4 new findings — see "Post-baseline delta" below.**
+PR #12–#25 introduced 3 partials, 2 regressions, and 1 symptom-now-visible. **Same-day post-baseline update (2026-05-12): PR #26–#30 closed Master Pattern 11's data-source halves (2 full P1 closes); the remaining caching wrap was closed by commit `4f90cf4` on 2026-05-14. Master Pattern 11 is now fully closed. PR #26–#30 also introduced 4 new findings — see "Post-baseline delta" below.**
 
 | Phase | Pattern / Finding ID | Status | Evidence (commit / PR / line) |
 |-------|---------------------|--------|-------------------------------|
@@ -70,19 +70,19 @@ PR #12–#25 introduced 3 partials, 2 regressions, and 1 symptom-now-visible. **
 | 3 | SCALE-A#CACHE-1 (P2 → P1 candidate) | **Closed 2026-05-14** | Master Pattern 14 shipped — `rememberLocked` wrap on `fetchActiveCatalog` with int TTL + jitter; same PR closes the other 3 P2s in the pattern. |
 | 3 | SCALE-B#CACHE-1 (P1, part of Pattern 3) | **Closed 2026-05-14** | Master Pattern 15 shipped on `development` (commit `37893a19`). `HydrogenAffiliateController::show()` wraps post-gate payload assembly in `CacheLockService::rememberLocked` (int 60s TTL → ±20% jitter + 10× stale twin). Same commit closes SCALE-B#CACHE-2 and SCALE-B#CACHE-7; observer fan-out (Site/Block/SiteMedia/BrandStoreSettings/ProfessionalIntegration/BrandPartnerLink/new AffiliateProductSelection) keeps the cache fresh on dashboard writes; provider_metadata cascade busts every linked affiliate's product cache when a brand toggles `custom_photos_enabled`. |
 | 3 | SCALE-B#CACHE-4 (P1, part of Master 11 Step 2) | **Closed** | PR #27 `c8aece8` — `EmbeddedOrderAnalyticsController::show()` now reads `commerce.orders` + `order_items` with `affiliate_professional_id` and `deriveLineStatus()` from order aggregate state. The $0/no-affiliate-per-order bug is fixed end-to-end. |
-| 3 | SCALE-B#CACHE-3 (P1, part of Master 11 Step 1) | **Partial — data half closed** | PR #28 `4927b02` — `EmbeddedSetupController::overview()` now reads `commerce.orders` (all-time + 30d windows) and subtracts `reversed_commission_cents` from `commerce.brand_affiliate_rollup`. The $0 dashboard bug is fixed. **Remaining:** Step 1's caching half (wrap in `CacheLockService::rememberLocked` keyed by new `CacheKeyGenerator::embeddedSetupOverview()`) is still open — `overview()` has no cache wrap and reads raw `DB::` on every request. Effort to close: ~30 min. |
+| 3 | SCALE-B#CACHE-3 (P1, part of Master 11 Step 1) | **Closed 2026-05-14** | PR #28 `4927b02` closed the data half (`EmbeddedSetupController::overview()` reads `commerce.orders` all-time + 30d, subtracts `reversed_commission_cents` from `commerce.brand_affiliate_rollup`). Commit `4f90cf4` (2026-05-14) closed the caching half — `overview()` payload now wrapped in `CacheLockService::rememberLocked` keyed by new `CacheKeyGenerator::embeddedSetupOverview()` with 60s TTL + jitter + SWR. |
 
 Phases 4, 5, and 6 source plans contain no post-baseline annotations marking patterns or findings as shipped.
 
 ## Post-baseline delta — PR #26–#30 (2026-05-12, same day)
 
-Five PRs landed after this plan was generated. Net effect: **Master Pattern 11 (the largest P1 silent-data-bug pattern) is mostly closed**; four new findings emerge from the new code paths.
+Five PRs landed after this plan was generated. Net effect: **Master Pattern 11 (the largest P1 silent-data-bug pattern) is fully closed** (data halves via PR #27 + PR #28 on 2026-05-12; caching wrap via commit `4f90cf4` on 2026-05-14); four new findings emerge from the new code paths.
 
 ### Closed / partially closed by PR #26–#30
 
 - **Master Pattern 11 Step 2 — `EmbeddedOrderAnalyticsController` off `CommissionMovement`** — closed by PR #27 (`c8aece8`). `commerce.orders` + `order_items` join with `payout_id`-based status derivation; no per-line accrual rows referenced.
 - **Master Pattern 11 Step 1 (data source) — `EmbeddedSetupController::overview()` off `CommissionMovement`** — closed by PR #28 (`4927b02`). Reads `commerce.orders` (filtered by `EXCLUDED_FROM_AGGREGATES`) + subtracts rollup's `reversed_commission_cents`; dominant currency picked by row count; 30-day window from `gross_cents`/`commission_cents`.
-- **Master Pattern 11 Step 1 (caching) — `rememberLocked` wrap + new `embeddedSetupOverview()` cache key** — **still open.** The constructor already injects `CacheLockService` for `brandProfile()`; adding it to `overview()` is ~10 lines plus a 1-line cache-key helper. Tier downgraded from P1 (silent data) to P2 (cache stampede).
+- **Master Pattern 11 Step 1 (caching) — `rememberLocked` wrap + new `embeddedSetupOverview()` cache key** — **closed by commit `4f90cf4` (2026-05-14).** `overview()` payload now wrapped in `CacheLockService::rememberLocked` keyed by the new `CacheKeyGenerator::embeddedSetupOverview($professionalId)` helper, 60s TTL with jitter + SWR. Closes SCALE-B#CACHE-3 end-to-end.
 
 ### New findings introduced by PR #26–#30
 
@@ -181,9 +181,9 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
     - **Tier:** P2 (4 P2 + 1 P3) · **Effort:** ~1 day · **Closes:** 5 findings
     - **Why this slot:** rides Master 9's logging-surface touches; one PR, no logic changes.
 
-11. **Master Pattern 11 — Embedded controllers off `CommissionMovement`** (Phase 3 Pattern 2)
-    - **Tier:** P1 (2 P1) · **Effort:** ~1 day · **Closes:** 2 findings
-    - **Why this slot:** P1 silent data bug — embedded dashboards currently show $0 commission for every brand.
+11. **Master Pattern 11 — Embedded controllers off `CommissionMovement`** (Phase 3 Pattern 2) — ✅ **Done 2026-05-14** (PR #27 `c8aece8` Step 2; PR #28 `4927b02` Step 1 data source; commit `4f90cf4` Step 1 caching wrap + Step 3 cache key helper)
+    - **Tier:** P1 (2 P1) · **Effort:** ~1 day · **Closes:** 2 findings (SCALE-B#CACHE-3, SCALE-B#CACHE-4)
+    - **Why this slot:** P1 silent data bug — embedded dashboards were showing $0 commission for every brand.
 
 12. **Master Pattern 12 — Canonical Shopify webhook controller base** (Phase 1 Pattern C) — ✅ **Done 2026-05-13** (commit `bf620b22`; tests `782907cf`; robustness `ffc449c4`)
     - **Tier:** P2 · **Effort:** ~2–4h · **Closes:** 2 findings (across 6 files)
@@ -1009,7 +1009,7 @@ This is the most cross-cutting pattern in Phase 2. Logging hygiene is invisible 
 
 ---
 
-## Master Pattern 11 — Migrate two embedded-app controllers off `CommissionMovement` accrual reads
+## ✅ Master Pattern 11 — Migrate two embedded-app controllers off `CommissionMovement` accrual reads
 
 **Original ID:** Phase 3 Pattern 2
 **Closes:** SCALE-B#CACHE-3, SCALE-B#CACHE-4
@@ -3245,14 +3245,29 @@ Each source plan has a tail-end appendix listing problems discovered while draft
 
 ---
 
+## Out-of-band audit — Stripe v2 payout pipeline (2026-05-14)
+
+Audit `audit-2026-05-14-stripe-v2-overhaul-any-defect-that-could-prevent-p.md` — 4 findings, all closed same day.
+
+| ID | Tier | Title | Status | Evidence |
+|----|------|-------|--------|----------|
+| STRP-1 | P1 | BECS failure race — duplicate PaymentIntent outside 24h idempotency window | **Closed 2026-05-14** | `ExecuteCommissionPayoutJob::handle()` terminal-state guard extended to `['completed','failed','cancelled']`; defence-in-depth guard added in `CommissionPayoutService::processPayoutBatch()`. |
+| STRP-2 | P2 | Ack-before-process anti-pattern — transient handler failure permanently silences webhook across all 3 Stripe controllers | **Closed 2026-05-14** | try/catch delete-on-failure pattern applied to `StripePlatformWebhookController` (class property), `StripeConnectWebhookController`, and `StripeWebhookController`. Dedup row is deleted before re-throw so Stripe's retry delivers the event fresh. |
+| STRP-3 | P2 | No recovery path for `processing` payouts with lost `payment_intent.*` webhook | **Closed 2026-05-14** | `ReconcileStuckPayoutsJob` created — queries payouts stale for 3+ days, re-fetches PI status from Stripe, drives to `completed`/`failed` as appropriate. Scheduled daily at 02:00 UTC via `routes/console.php`. Code review blocker fixed: `requires_capture` removed from `TERMINAL_FAILED_STATUSES` (not a failed state — would risk double-charge on manual-capture PIs). |
+| STRP-4 | P3 | `charge.refunded` webhook never reconciles Stripe's actual fee/transfer allocation against local clawback estimates | **Closed 2026-05-14** | `handleChargeRefunded` now reads `$charge->refunds->data[0]->application_fee_refund->amount` and `transfer_reversal->amount`, compares against `CommissionClawback` row, logs `stripe.platform.clawback_drift` warning when drift exceeds 1 cent. |
+
+---
+
 # Plan totals
 
 - **Total unique findings (as of plan generation 2026-05-12):** 167 across 6 phases (1 cross-phase duplicate collapsed: SEC-F#4 ≡ DATA-C2a#DATA-1)
 - **Post-baseline delta (same-day, after PR #26–#30):** +4 new findings (#POST-1 P2, #POST-2 P2, #POST-3 P3, #POST-4 P3 watch) → **171 unique findings**
+- **Out-of-band delta (2026-05-14, Stripe v2 audit):** +4 new findings (STRP-1 P1, STRP-2 P2, STRP-3 P2, STRP-4 P3) → **175 unique findings; all 4 closed same day**
 - **Total master patterns:** 41 (1 absorption: Phase 2 Pattern C merged into Master Pattern 19)
-- **Total standalone fixes:** 41 original + 4 post-baseline (#POST-1 through #POST-4) = **45**
-- **Status:** 39 Open · 1 Partial · 0 fully Shipped (M8 confirmed pre-existing → moved to Done)
-  - Master Pattern 11 is the only Partial: PR #27 + PR #28 closed both P1 silent-data halves; remaining work (caching wrap on `EmbeddedSetupController::overview()`) drops to P2.
+- **Total standalone fixes:** 41 original + 4 post-baseline (#POST-1 through #POST-4) + 4 out-of-band (STRP-1 through STRP-4) = **49**
+- **Status:** 39 Open · 0 Partial · 1 fully Shipped (Master Pattern 11; M8 confirmed pre-existing → moved to Done)
+  - Master Pattern 11 fully closed 2026-05-14: PR #27 + PR #28 closed both P1 silent-data halves on 2026-05-12; commit `4f90cf4` (2026-05-14) closed the caching wrap on `EmbeddedSetupController::overview()`.
   - PR #12–#25 introduced 3 partials, 2 regressions, 1 symptom-now-visible across other master patterns/standalones — all annotated inline.
-  - PR #26–#30 closed 1 full P1 finding (SCALE-B#CACHE-4) and partially closed 1 P1 finding (SCALE-B#CACHE-3 data half).
+  - PR #26–#30 closed 1 full P1 finding (SCALE-B#CACHE-4) and 1 P1 finding (SCALE-B#CACHE-3 data half); SCALE-B#CACHE-3's caching half closed by commit `4f90cf4`.
+  - STRP-1 through STRP-4 all closed 2026-05-14 (out-of-band Stripe v2 payout audit).
 - **Estimated remaining effort:** ~8–10 weeks of focused work (sum of per-phase estimates ~40.5–52 days; cross-phase dedup and absorption save ~0.5–1 day)

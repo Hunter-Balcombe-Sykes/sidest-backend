@@ -79,7 +79,13 @@ class StripeConnectWebhookController extends Controller
 
         $webhookEvent->forceFill(['payload' => json_decode($payload, true)])->save();
 
-        return $this->handleParsedEvent($event);
+        try {
+            return $this->handleParsedEvent($event);
+        } catch (\Throwable $e) {
+            // Delete the dedup row so Stripe's retry sees a fresh delivery, not a permanent 200.
+            $webhookEvent->delete();
+            throw $e;
+        }
     }
 
     /**

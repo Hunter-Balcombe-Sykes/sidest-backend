@@ -322,3 +322,40 @@ describe('checkout.session.completed webhook', function () {
         expect($response->getStatusCode())->toBe(200);
     });
 });
+
+// ============================================================
+// STRP-2: delete-on-failure so Stripe can retry
+// ============================================================
+
+it('stripe connect — deletes webhook_event row when handler throws, allowing Stripe to retry', function () {
+    $proId = (string) Str::uuid();
+    DB::table('core.professionals')->insert([
+        'id' => $proId,
+        'handle' => 'aff_throw',
+        'handle_lc' => 'aff_throw',
+        'display_name' => 'Aff Throw',
+        'professional_type' => 'affiliate',
+        'status' => 'active',
+        'stripe_connect_account_id' => 'acct_throw',
+        'stripe_connect_status' => 'active',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $mockService = Mockery::mock(\App\Services\Stripe\StripeConnectService::class)->makePartial();
+    $mockService->shouldReceive('syncAccountStatus')
+        ->andThrow(new \RuntimeException('Transient write failure'));
+    app()->instance(\App\Services\Stripe\StripeConnectService::class, $mockService);
+
+    $event = realStripeAccountUpdatedEvent('acct_throw');
+    $body = json_encode($event);
+    $sig = signStripeBody($body, 'whsec_connect_test');
+
+    $this->call('POST', '/api/webhooks/stripe-connect', [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        'HTTP_STRIPE_SIGNATURE' => $sig,
+    ], $body)->assertStatus(500);
+
+    // Row deleted so Stripe's retry is not silenced by the dedup guard
+    expect(DB::table('billing.webhook_events')->where('stripe_event_id', $event['id'])->count())->toBe(0);
+});

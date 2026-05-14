@@ -53,7 +53,7 @@ class ExecuteCommissionPayoutJob implements ShouldBeUnique, ShouldQueue
     {
         $payout = CommissionPayout::find($this->payoutId);
 
-        if (! $payout || $payout->status === 'completed') {
+        if (! $payout || in_array($payout->status, ['completed', 'failed', 'cancelled'], true)) {
             return;
         }
 

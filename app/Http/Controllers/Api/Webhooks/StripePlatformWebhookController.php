@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
 use App\Models\Billing\WebhookEvent;
+use App\Models\Commerce\CommissionClawback;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutRefundService;
@@ -35,6 +36,9 @@ class StripePlatformWebhookController extends Controller
 {
     use ValidatesStripeWebhookPayload;
 
+    // Held across the request so __invoke/thin can delete it when a handler throws.
+    private ?WebhookEvent $currentWebhookEvent = null;
+
     public function __construct(
         private readonly CommissionPayoutService $payoutService,
         private readonly CommissionPayoutRefundService $refundService,
@@ -54,13 +58,19 @@ class StripePlatformWebhookController extends Controller
             return $event;
         }
 
-        match ($event->type) {
-            'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object),
-            'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object),
-            'charge.refunded' => $this->handleChargeRefunded($event->data->object),
-            'charge.dispute.created' => $this->handleChargeDisputeCreated($event->data->object),
-            default => Log::debug('Unhandled Stripe platform snapshot event', ['type' => $event->type]),
-        };
+        try {
+            match ($event->type) {
+                'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object),
+                'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object),
+                'charge.refunded' => $this->handleChargeRefunded($event->data->object),
+                'charge.dispute.created' => $this->handleChargeDisputeCreated($event->data->object),
+                default => Log::debug('Unhandled Stripe platform snapshot event', ['type' => $event->type]),
+            };
+        } catch (\Throwable $e) {
+            // Delete the dedup row so Stripe's retry sees a fresh delivery, not a permanent 200.
+            $this->currentWebhookEvent?->delete();
+            throw $e;
+        }
 
         return response()->json(['received' => true]);
     }
@@ -87,7 +97,12 @@ class StripePlatformWebhookController extends Controller
             return response()->json(['received' => true]);
         }
 
-        $this->handleV2AccountEvent($event);
+        try {
+            $this->handleV2AccountEvent($event);
+        } catch (\Throwable $e) {
+            $this->currentWebhookEvent?->delete();
+            throw $e;
+        }
 
         return response()->json(['received' => true]);
     }
@@ -141,6 +156,7 @@ class StripePlatformWebhookController extends Controller
         }
 
         $webhookEvent->forceFill(['payload' => json_decode($payload, true)])->save();
+        $this->currentWebhookEvent = $webhookEvent;
 
         return $event;
     }
@@ -224,6 +240,53 @@ class StripePlatformWebhookController extends Controller
             'amount_refunded' => $charge->amount_refunded ?? null,
             'refunded' => $charge->refunded ?? null,
         ]);
+
+        // STRP-4: reconcile Stripe's authoritative allocation against our proportional estimate.
+        // Rounding differences > 1 cent indicate the fee_ratio math diverged from Stripe's internal
+        // rounding and should be flagged for month-end reconciliation.
+        $firstRefund = $charge->refunds->data[0] ?? null;
+        if (! $firstRefund) {
+            return;
+        }
+
+        $stripeFeeCents = isset($firstRefund->application_fee_refund->amount)
+            ? (int) $firstRefund->application_fee_refund->amount
+            : null;
+        $stripeTransferCents = isset($firstRefund->transfer_reversal->amount)
+            ? (int) $firstRefund->transfer_reversal->amount
+            : null;
+
+        if ($stripeFeeCents === null && $stripeTransferCents === null) {
+            return;
+        }
+
+        $clawback = CommissionClawback::where('payout_id', $payoutId)
+            ->where('refund_id', (string) $firstRefund->id)
+            ->first();
+
+        if (! $clawback) {
+            return;
+        }
+
+        $feeDrift = $stripeFeeCents !== null
+            ? abs((int) $clawback->application_fee_refund_cents - $stripeFeeCents)
+            : 0;
+        $transferDrift = $stripeTransferCents !== null
+            ? abs((int) $clawback->transfer_reversal_cents - $stripeTransferCents)
+            : 0;
+
+        if ($feeDrift > 1 || $transferDrift > 1) {
+            Log::warning('stripe.platform.clawback_drift', [
+                'payout_id' => $payoutId,
+                'refund_id' => $firstRefund->id,
+                'estimated_fee_refund_cents' => $clawback->application_fee_refund_cents,
+                'stripe_fee_refund_cents' => $stripeFeeCents,
+                'fee_drift_cents' => $feeDrift,
+                'estimated_transfer_reversal_cents' => $clawback->transfer_reversal_cents,
+                'stripe_transfer_reversal_cents' => $stripeTransferCents,
+                'transfer_drift_cents' => $transferDrift,
+            ]);
+        }
     }
 
     /**

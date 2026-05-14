@@ -68,15 +68,21 @@ class StripeWebhookController extends Controller
         // Payload is HMAC-verified; set via forceFill (not mass-assignment) to preserve $fillable restriction.
         $webhookEvent->forceFill(['payload' => json_decode($payload, true)])->save();
 
-        match ($event->type) {
-            'customer.subscription.created' => $this->handleSubscriptionCreated($event->data->object, $event),
-            'customer.subscription.updated' => $this->handleSubscriptionUpdated($event->data->object, $event),
-            'customer.subscription.deleted' => $this->handleSubscriptionDeleted($event->data->object, $event),
-            'invoice.paid' => $this->handleInvoicePaid($event->data->object, $event),
-            'invoice.payment_failed' => $this->handleInvoicePaymentFailed($event->data->object, $event),
-            'payment_method.detached' => $this->handlePaymentMethodDetached($event->data->object),
-            default => Log::debug('Unhandled Stripe billing event', ['type' => $event->type]),
-        };
+        try {
+            match ($event->type) {
+                'customer.subscription.created' => $this->handleSubscriptionCreated($event->data->object, $event),
+                'customer.subscription.updated' => $this->handleSubscriptionUpdated($event->data->object, $event),
+                'customer.subscription.deleted' => $this->handleSubscriptionDeleted($event->data->object, $event),
+                'invoice.paid' => $this->handleInvoicePaid($event->data->object, $event),
+                'invoice.payment_failed' => $this->handleInvoicePaymentFailed($event->data->object, $event),
+                'payment_method.detached' => $this->handlePaymentMethodDetached($event->data->object),
+                default => Log::debug('Unhandled Stripe billing event', ['type' => $event->type]),
+            };
+        } catch (\Throwable $e) {
+            // Delete the dedup row so Stripe's retry sees a fresh delivery, not a permanent 200.
+            $webhookEvent->delete();
+            throw $e;
+        }
 
         return response()->json(['received' => true]);
     }

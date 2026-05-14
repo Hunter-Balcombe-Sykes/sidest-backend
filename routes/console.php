@@ -83,6 +83,17 @@ Schedule::job(new \App\Jobs\Stripe\ProcessCommissionPayoutsJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: process-commission-payouts');
     });
 
+// STRP-3: daily Stripe round-trip for payouts stuck in 'processing' beyond the BECS T+2 window.
+// Runs after the main sweep so any payouts the sweep just advanced are excluded from the stale query.
+Schedule::job(new \App\Jobs\Stripe\ReconcileStuckPayoutsJob)
+    ->dailyAt('02:00')
+    ->timezone('UTC')
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: reconcile-stuck-payouts');
+    });
+
 // Daily at 06:00 UTC. Voids stale commissions (affiliate-side and brand-side)
 // and emits grace-period warnings. Operates on 30-day windows, so hourly cadence
 // was wasted load — once a day is the right granularity.

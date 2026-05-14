@@ -368,6 +368,12 @@ class CommissionPayoutService
             return true;
         }
 
+        // Defence-in-depth: terminal states that should never reach PI creation.
+        // The job-level guard catches this first; this layer protects direct callers.
+        if (in_array($payout->status, ['failed', 'cancelled'], true)) {
+            return false;
+        }
+
         // Re-dispatch guard. The daily sweep re-queues 'processing' payouts so a missed
         // payment_intent.succeeded webhook eventually gets reconciled — but the sweep
         // can fire any number of times during BECS's T+2 settlement window. Stripe's

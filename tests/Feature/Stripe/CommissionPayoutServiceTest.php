@@ -200,6 +200,34 @@ it('skips completed payouts (idempotent)', function () {
     expect($result)->toBeTrue();
 });
 
+it('processPayoutBatch() returns false immediately for a failed payout — defence-in-depth against BECS race', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['status' => 'failed', 'processed_at' => now()]);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldNotReceive('create');
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeFalse();
+});
+
+it('processPayoutBatch() returns false immediately for a cancelled payout — defence-in-depth', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, ['status' => 'cancelled']);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->paymentIntents->shouldNotReceive('create');
+
+    $svc = new CommissionPayoutService($stripe);
+    $result = $svc->processPayoutBatch($payout);
+
+    expect($result)->toBeFalse();
+});
+
 it('does NOT create a second PI when a processing payout is re-dispatched (BECS T+2 safety)', function () {
     // The daily sweep re-queues processing payouts so a missed webhook eventually
     // reconciles. Stripe's idempotency-key cache is only 24h, so calling PI.create

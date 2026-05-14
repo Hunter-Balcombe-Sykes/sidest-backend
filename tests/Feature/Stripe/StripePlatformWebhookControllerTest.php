@@ -650,3 +650,183 @@ it('returns 200 for unhandled snapshot event types', function () {
         'HTTP_STRIPE_SIGNATURE' => $sig,
     ], $body)->assertOk();
 });
+
+// ============================================================
+// STRP-2: delete-on-failure so Stripe can retry
+// ============================================================
+
+it('deletes webhook_event row when payment_intent handler throws, allowing Stripe to retry', function () {
+    platformWebhook_seedProfessional('pro-brand');
+    platformWebhook_seedProfessional('pro-aff');
+    platformWebhook_seedPayout('p_handler_throws', 'processing');
+
+    $payoutService = Mockery::mock(CommissionPayoutService::class);
+    $payoutService->shouldReceive('markPaymentIntentSucceeded')
+        ->andThrow(new \RuntimeException('Transient DB deadlock'));
+    $refundService = Mockery::mock(CommissionPayoutRefundService::class)->shouldIgnoreMissing();
+    platformWebhook_makeController($payoutService, $refundService);
+
+    $event = platformWebhook_buildEvent('payment_intent.succeeded', [
+        'id' => 'pi_throw_test',
+        'metadata' => ['sidest_payout_id' => 'p_handler_throws'],
+        'latest_charge' => 'ch_throw',
+    ]);
+
+    // Handler throws → 500 returned to Stripe so it will retry
+    platformWebhook_postSnapshot($event)->assertStatus(500);
+
+    // Row must be gone so Stripe's retry is not silenced by the dedup guard
+    expect(WebhookEvent::where('stripe_event_id', $event['id'])->count())->toBe(0);
+});
+
+// ============================================================
+// STRP-4: clawback drift detection
+// ============================================================
+
+it('logs clawback_drift warning when Stripe refund amounts differ from local estimates by more than 1 cent', function () {
+    // Set up the clawbacks table so the handler can look up estimates.
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_clawbacks (
+        id TEXT PRIMARY KEY,
+        payout_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        shopify_refund_id TEXT,
+        stripe_reversal_id TEXT,
+        refund_id TEXT,
+        refund_amount_cents INTEGER,
+        application_fee_refund_cents INTEGER,
+        transfer_reversal_cents INTEGER,
+        is_partial INTEGER NOT NULL DEFAULT 0,
+        needs_manual_refund INTEGER NOT NULL DEFAULT 0,
+        amount_cents INTEGER NOT NULL DEFAULT 0,
+        currency_code TEXT NOT NULL DEFAULT \'AUD\',
+        status TEXT NOT NULL DEFAULT \'reversed\',
+        failure_reason TEXT,
+        metadata TEXT NOT NULL DEFAULT \'{}\',
+        created_at TEXT,
+        updated_at TEXT
+    )');
+
+    platformWebhook_seedProfessional('pro-brand');
+    platformWebhook_seedProfessional('pro-aff');
+    platformWebhook_seedPayout('p_drift', 'completed', ['charge_id' => 'ch_drift_charge']);
+
+    // Seed the clawback row with locally-computed estimates.
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('commerce.commission_clawbacks')->insert([
+        'id' => \Illuminate\Support\Str::uuid()->toString(),
+        'payout_id' => 'p_drift',
+        'order_id' => 'order_drift',
+        'refund_id' => 're_drift_123',
+        'stripe_reversal_id' => 're_drift_123',
+        'refund_amount_cents' => 10000,
+        'application_fee_refund_cents' => 300,  // our estimate
+        'transfer_reversal_cents' => 9700,       // our estimate
+        'amount_cents' => 9700,
+        'currency_code' => 'AUD',
+        'status' => 'reversed',
+        'metadata' => '{}',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    // Stripe's actual allocation differs by 3 cents (outside the ±1 rounding tolerance).
+    $event = platformWebhook_buildEvent('charge.refunded', [
+        'id' => 'ch_drift_charge',
+        'metadata' => ['sidest_payout_id' => 'p_drift'],
+        'amount_refunded' => 10000,
+        'refunded' => true,
+        'refunds' => [
+            'data' => [[
+                'id' => 're_drift_123',
+                'amount' => 10000,
+                'application_fee_refund' => ['amount' => 303],  // 3 cents more than our estimate of 300
+                'transfer_reversal' => ['amount' => 9697],       // 3 cents less than our estimate of 9700
+            ]],
+        ],
+    ]);
+
+    $payoutService = Mockery::mock(CommissionPayoutService::class)->shouldIgnoreMissing();
+    $refundService = Mockery::mock(CommissionPayoutRefundService::class)->shouldIgnoreMissing();
+    platformWebhook_makeController($payoutService, $refundService);
+
+    \Illuminate\Support\Facades\Log::spy();
+
+    platformWebhook_postSnapshot($event)->assertOk();
+
+    \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')
+        ->withArgs(fn ($channel) => str_contains($channel, 'stripe.platform.clawback_drift'))
+        ->once();
+});
+
+it('does not log clawback_drift when Stripe refund amounts match local estimates within 1 cent', function () {
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_clawbacks (
+        id TEXT PRIMARY KEY,
+        payout_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        shopify_refund_id TEXT,
+        stripe_reversal_id TEXT,
+        refund_id TEXT,
+        refund_amount_cents INTEGER,
+        application_fee_refund_cents INTEGER,
+        transfer_reversal_cents INTEGER,
+        is_partial INTEGER NOT NULL DEFAULT 0,
+        needs_manual_refund INTEGER NOT NULL DEFAULT 0,
+        amount_cents INTEGER NOT NULL DEFAULT 0,
+        currency_code TEXT NOT NULL DEFAULT \'AUD\',
+        status TEXT NOT NULL DEFAULT \'reversed\',
+        failure_reason TEXT,
+        metadata TEXT NOT NULL DEFAULT \'{}\',
+        created_at TEXT,
+        updated_at TEXT
+    )');
+
+    platformWebhook_seedProfessional('pro-brand2');
+    platformWebhook_seedProfessional('pro-aff2');
+    platformWebhook_seedPayout('p_nodrift', 'completed', ['charge_id' => 'ch_nodrift_charge']);
+
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('commerce.commission_clawbacks')->insert([
+        'id' => \Illuminate\Support\Str::uuid()->toString(),
+        'payout_id' => 'p_nodrift',
+        'order_id' => 'order_nodrift',
+        'refund_id' => 're_nodrift_123',
+        'stripe_reversal_id' => 're_nodrift_123',
+        'refund_amount_cents' => 10000,
+        'application_fee_refund_cents' => 300,
+        'transfer_reversal_cents' => 9700,
+        'amount_cents' => 9700,
+        'currency_code' => 'AUD',
+        'status' => 'reversed',
+        'metadata' => '{}',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    // Stripe's values match exactly (within 1 cent — no drift).
+    $event = platformWebhook_buildEvent('charge.refunded', [
+        'id' => 'ch_nodrift_charge',
+        'metadata' => ['sidest_payout_id' => 'p_nodrift'],
+        'amount_refunded' => 10000,
+        'refunded' => true,
+        'refunds' => [
+            'data' => [[
+                'id' => 're_nodrift_123',
+                'amount' => 10000,
+                'application_fee_refund' => ['amount' => 300],  // exact match
+                'transfer_reversal' => ['amount' => 9700],
+            ]],
+        ],
+    ]);
+
+    $payoutService = Mockery::mock(CommissionPayoutService::class)->shouldIgnoreMissing();
+    $refundService = Mockery::mock(CommissionPayoutRefundService::class)->shouldIgnoreMissing();
+    platformWebhook_makeController($payoutService, $refundService);
+
+    \Illuminate\Support\Facades\Log::spy();
+
+    platformWebhook_postSnapshot($event)->assertOk();
+
+    \Illuminate\Support\Facades\Log::shouldNotHaveReceived('warning',
+        [Mockery::on(fn ($msg) => str_contains($msg, 'clawback_drift')),
+            Mockery::any()]);
+});
