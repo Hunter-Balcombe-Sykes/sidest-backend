@@ -530,6 +530,11 @@ class CommissionPayoutService
     /**
      * Webhook hook: payment_intent.succeeded on the platform scope advances the payout.
      * Called by StripePlatformWebhookController. Idempotent — skips if already completed.
+     *
+     * After marking the payout completed, enriches the affiliate-visible Stripe objects
+     * (Transfer + destination_payment) with brand identity so the affiliate's Express
+     * dashboard shows where the payment came from. Enrichment is best-effort — failure
+     * logs but does not roll back the payout completion.
      */
     public function markPaymentIntentSucceeded(CommissionPayout $payout, ?string $chargeId = null): void
     {
@@ -553,6 +558,112 @@ class CommissionPayoutService
         }
 
         $this->markCompleted($payout, $brand, $affiliate);
+
+        // Best-effort enrichment of the affiliate-side Stripe objects so their Express
+        // dashboard transaction shows the brand name + payout context. Failure here is
+        // non-fatal: the payout is already marked completed and the underlying financial
+        // record is intact regardless of whether Stripe display fields are set.
+        try {
+            $this->enrichAffiliateTransactionView($payout->fresh(), $brand, $affiliate);
+        } catch (\Throwable $e) {
+            Log::warning('payout.enrich_affiliate_view_failed', [
+                'payout_id' => $payout->id,
+                'payment_intent_id' => $payout->payment_intent_id,
+                'charge_id' => $payout->charge_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Populate description + metadata on the Transfer (platform-side) and the
+     * destination_payment (affiliate-side, what their Express dashboard reads).
+     *
+     * Stripe does not auto-propagate the platform PI's description/metadata to either
+     * the Transfer or destination_payment — they're separate Stripe objects scoped to
+     * the connected account. We write to both: the Transfer for platform-side ops
+     * visibility, and the destination_payment (via Stripe-Account header) for the
+     * affiliate's own dashboard view. Idempotent — re-running sets the same values.
+     */
+    private function enrichAffiliateTransactionView(
+        CommissionPayout $payout,
+        Professional $brand,
+        Professional $affiliate,
+    ): void {
+        if (! $payout->charge_id) {
+            return;
+        }
+
+        // Expand `transfer` so we get the Transfer object inline and avoid a second
+        // round-trip just to read destination_payment off it.
+        $charge = $this->stripe->charges->retrieve($payout->charge_id, [
+            'expand' => ['transfer'],
+        ]);
+
+        if (! is_object($charge)) {
+            return;
+        }
+
+        $transferObject = is_object($charge->transfer ?? null) ? $charge->transfer : null;
+        $transferId = $transferObject?->id
+            ?? (is_string($charge->transfer ?? null) ? $charge->transfer : null);
+        $destinationPaymentId = $transferObject?->destination_payment ?? null;
+
+        $description = $this->buildAffiliateFacingDescription($brand, $payout);
+        $metadata = [
+            'sidest_brand_handle' => (string) ($brand->handle ?? ''),
+            'sidest_brand_name' => (string) ($brand->display_name ?? ''),
+            'sidest_payout_id' => $payout->id,
+            'sidest_orders_count' => (string) $payout->ledger_entry_count,
+            'sidest_batch_date' => now()->toDateString(),
+        ];
+
+        if ($transferId) {
+            $this->stripe->transfers->update($transferId, [
+                'description' => $description,
+                'metadata' => $metadata,
+            ]);
+        }
+
+        if ($destinationPaymentId && $affiliate->stripe_connect_account_id) {
+            // Stripe-Account header scopes this Charges API call to the affiliate's
+            // connected account, where destination_payment lives. Without the header
+            // we'd hit a 404 — destination_payment objects are not visible on the
+            // platform account directly.
+            $this->stripe->charges->update(
+                $destinationPaymentId,
+                [
+                    'description' => $description,
+                    'metadata' => $metadata,
+                ],
+                ['stripe_account' => $affiliate->stripe_connect_account_id],
+            );
+        }
+    }
+
+    /**
+     * Human-readable description for the affiliate's Express dashboard. Stripe caps
+     * description at 1024 chars; we stay compact so it renders cleanly in the
+     * transaction-detail header.
+     */
+    private function buildAffiliateFacingDescription(Professional $brand, CommissionPayout $payout): string
+    {
+        $brandName = trim((string) ($brand->display_name ?? $brand->handle ?? 'a Partna brand'));
+        if ($brandName === '') {
+            $brandName = 'a Partna brand';
+        }
+
+        $shortPayoutId = substr((string) $payout->id, 0, 8);
+        $orderCount = (int) $payout->ledger_entry_count;
+        $orderSuffix = $orderCount === 1 ? 'order' : 'orders';
+
+        return sprintf(
+            'Partna commission from %s (payout %s, %d %s)',
+            $brandName,
+            $shortPayoutId,
+            $orderCount,
+            $orderSuffix,
+        );
     }
 
     /**
