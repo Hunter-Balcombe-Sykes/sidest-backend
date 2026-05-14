@@ -1014,7 +1014,7 @@ This is the most cross-cutting pattern in Phase 2. Logging hygiene is invisible 
 **Original ID:** Phase 3 Pattern 2
 **Closes:** SCALE-B#CACHE-3, SCALE-B#CACHE-4
 **Tier:** P1 (2 P1) · **Effort:** ~1 day (≈30 min remaining)
-**Status:** **Partial — data-source halves closed by PR #27 + PR #28 (2026-05-12). Step 2 fully done; Step 1's data-source query rewritten but caching wrap (Step 1 caching half + Step 3 cache key helper) deferred. Tier on the remaining work is P2 (cache stampede), not P1 (the silent-data bug is closed).**
+**Status:** **Complete — all steps closed. PR #27 (Step 2), PR #28 (Step 1 data source), `4f90cf4` (Step 1 caching wrap + Step 3 cache key helper, 2026-05-14).**
 **Depends on:** none
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1033,18 +1033,18 @@ Both are exposed in the embedded Shopify admin UI extensions. Brands looking at 
 
 ### What to do
 
-- [ ] **Step 1 — Rewrite `EmbeddedSetupController::overview()`** (`app/Http/Controllers/Api/Internal/EmbeddedSetupController.php:316–371`).
+- [x] **Step 1 — Rewrite `EmbeddedSetupController::overview()`** (`app/Http/Controllers/Api/Internal/EmbeddedSetupController.php:316–371`).
     - Replace all `CommissionMovement::where(...)->whereIn('status', ['pending','approved'])` queries with the live pattern from `BrandCommerceAnalyticsController::buildCommissionSummary()`: `SUM(commission_cents)` over `commerce.orders` where `status NOT IN (Order::EXCLUDED_FROM_AGGREGATES)`.
     - For "pending" (unpaid) commission: `commerce.orders WHERE brand_professional_id = $id AND status NOT IN (excluded) AND payout_id IS NULL`.
     - For `recent_sales`: `commerce.orders JOIN core.professionals` on `affiliate_professional_id` for the display name.
-    - **While you're here:** wrap the rewritten payload in `CacheLockService::rememberLocked` keyed by a new `CacheKeyGenerator::embeddedSetupOverview(string $professionalId)` (pattern `"embedded:setup:overview:v1:{$professionalId}"`) with a 60s TTL + SWR. Bust via `AnalyticsCacheService::invalidateAnalytics()` on commerce writes. The `CacheLockService` is already injected into the controller — no new wiring. Closes SCALE-B#CACHE-3.
-- [ ] **Step 2 — Rewrite `EmbeddedOrderAnalyticsController::show()`** (`app/Http/Controllers/Api/Internal/EmbeddedOrderAnalyticsController.php:47–57`).
+    - **While you're here:** wrap the rewritten payload in `CacheLockService::rememberLocked` keyed by a new `CacheKeyGenerator::embeddedSetupOverview(string $professionalId)` (pattern `"embedded:setup:overview:v1:{$professionalId}"`) with a 60s TTL + SWR. Bust via `AnalyticsCacheService::invalidateAnalytics()` on commerce writes. The `CacheLockService` is already injected into the controller — no new wiring. Closes SCALE-B#CACHE-3. **Done in `4f90cf4` (2026-05-14).**
+- [x] **Step 2 — Rewrite `EmbeddedOrderAnalyticsController::show()`** (`app/Http/Controllers/Api/Internal/EmbeddedOrderAnalyticsController.php:47–57`).
     - Replace the `CommissionMovement::with('affiliateProfessional')->where('shopify_order_id', $orderId)` query with a `commerce.order_items JOIN commerce.orders` query, parallel to `EmbeddedProductAnalyticsController::build()` (lines 67–116 of that file — the direct model to follow).
     - Affiliate attribution: `commerce.orders.affiliate_professional_id` → join `core.professionals` for display name.
     - Per-line-item breakdown: `commerce.order_items.commission_rate`, `line_total_cents`, `commission_cents` (already mirrored from `line_items` JSONB by the trigger).
     - Status summary: map `commerce.orders.status` → display states, not per-entry statuses.
-    - Closes SCALE-B#CACHE-4.
-- [ ] **Step 3 — Add `CacheKeyGenerator::embeddedSetupOverview()` method.** DeepSeek's draft referenced this method as if it existed; it does not. Add it alongside the Step 1 fix.
+    - Closes SCALE-B#CACHE-4. **Done in PR #27 (`c8aece8`, 2026-05-12).**
+- [x] **Step 3 — Add `CacheKeyGenerator::embeddedSetupOverview()` method.** DeepSeek's draft referenced this method as if it existed; it does not. Add it alongside the Step 1 fix. **Done in `4f90cf4` (2026-05-14).**
 
 ### Plain English
 
