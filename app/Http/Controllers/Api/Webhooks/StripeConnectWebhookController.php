@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\Stripe\SyncBrandPaymentMethodFromCheckoutSessionJob;
 use App\Models\Billing\WebhookEvent;
 use App\Models\Core\Professional\Professional;
 use App\Services\Stripe\StripeConnectService;
@@ -233,8 +234,12 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
-        app(StripeConnectService::class)->syncBrandPaymentMethodFromCheckoutSession(
-            $professional,
+        // Vendor I/O moved to a queue job — Stripe's 10s webhook deadline only
+        // bounds the dispatch, not the Session::retrieve round-trip. Master
+        // Pattern 16 (DB-F#SCALE-4): the webhook handler held an HTTP worker
+        // open across a Stripe API call while Stripe itself was waiting on us.
+        SyncBrandPaymentMethodFromCheckoutSessionJob::dispatch(
+            (string) $professional->id,
             (string) $session->id,
         );
     }

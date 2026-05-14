@@ -12,6 +12,8 @@ use App\Http\Requests\Api\Internal\Embedded\SaveDeploymentTokenRequest;
 use App\Http\Requests\Api\Internal\Embedded\SaveIdentityRequest;
 use App\Http\Requests\Api\Internal\Embedded\SetupDomainRequest;
 use App\Http\Requests\Api\Internal\Embedded\UpdateSettingRequest;
+use App\Jobs\Cloudflare\ProvisionBrandDnsJob;
+use App\Jobs\Cloudflare\ProvisionBrandDnsTxtJob;
 use App\Jobs\Shopify\CreateShopifyCollectionsJob;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
@@ -28,7 +30,6 @@ use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use App\Services\Cache\ProfessionalCacheService;
-use App\Services\Cloudflare\CloudflareDnsService;
 use App\Services\Hydrogen\HydrogenDeploymentService;
 use App\Services\Professional\BrandStatusService;
 use App\Services\Store\BrandCatalogService;
@@ -532,14 +533,21 @@ class EmbeddedSetupController extends ApiController
 
     /**
      * Provision a platform subdomain (brand.partna.au) for this brand's Oxygen storefront.
-     * Creates a CNAME DNS record via Cloudflare and persists the storefront ID.
+     * Persists the storefront ID and dispatches a queue job to create the CNAME record.
+     *
+     * Master Pattern 16 (DB-F#SCALE-5): Cloudflare API I/O is now off the wizard
+     * request path. The local DB write happens in-request so the existing
+     * `domainStatus()` endpoint can read `oxygen_storefront_id` immediately;
+     * the actual DNS record creation runs in `ProvisionBrandDnsJob`. The
+     * wizard already has to tolerate DNS propagation time after this returns,
+     * so a few extra seconds for the job to land doesn't change the UX.
      *
      * @return JsonResponse { data: { domain: string } }
      */
     public function setupDomain(SetupDomainRequest $request): JsonResponse
     {
         // Subdomain input is validated for format but we use the brand's canonical
-        // site subdomain — never the request input — for the CNAME hostname (see below).
+        // site subdomain — never the request input — for the CNAME hostname.
         $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
@@ -554,18 +562,20 @@ class EmbeddedSetupController extends ApiController
 
         $subdomain = (string) $site->subdomain;
 
-        // CNAME: {subdomain}.partna.au → shops.myshopify.com, DNS-only (proxied=false).
-        // Shopify Oxygen does not support Cloudflare's proxy — it needs a direct CNAME.
-        // upsertCname handles existing records so re-running fixes a previously proxied record.
-        $dns = new CloudflareDnsService;
-        $dns->upsertCname($subdomain, 'shops.myshopify.com', false);
-
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],
             [
                 'oxygen_storefront_id' => (string) $data['oxygen_storefront_id'],
             ],
         );
+
+        // Debounce: the embedded wizard's auto-save can fire this endpoint
+        // multiple times in quick succession. Cache::add returns false if the
+        // key already exists, so a redundant click within 30s skips dispatch.
+        // Mirrors the per-shop lock pattern in ShopifyBulkOperationLock.
+        if (Cache::add("dns:provision:cname:{$professionalId}", true, 30)) {
+            ProvisionBrandDnsJob::dispatch($professionalId);
+        }
 
         $this->cache->invalidateProfessional($professional);
         app(BrandStatusService::class)->sync($professional);
@@ -581,7 +591,9 @@ class EmbeddedSetupController extends ApiController
      * add the record themselves — they copy the token from Shopify and we create:
      *   shopify_verification_{subdomain}.partna.au TXT → {txt_value}
      *
-     * Uses upsertTxt so re-attempts with a freshly generated Shopify token always win.
+     * Master Pattern 16 (DB-F#SCALE-5): Cloudflare API I/O is dispatched to a
+     * queue job so the wizard request thread does not block on the round-trip.
+     * The job is debounced per-brand to absorb wizard auto-save bursts.
      *
      * @return JsonResponse { data: { record_name: string } }
      */
@@ -599,9 +611,15 @@ class EmbeddedSetupController extends ApiController
 
         $subdomain = (string) $site->subdomain;
         $recordName = "shopify_verification_{$subdomain}";
+        $txtValue = (string) $data['txt_value'];
 
-        $dns = new CloudflareDnsService;
-        $dns->upsertTxt($recordName, (string) $data['txt_value']);
+        // Keyed by professional_id AND the TXT value so a freshly regenerated
+        // Shopify token always lands — the debounce only suppresses duplicate
+        // dispatches of the same value within a 30s window.
+        $debounceKey = 'dns:provision:txt:'.$professionalId.':'.sha1($txtValue);
+        if (Cache::add($debounceKey, true, 30)) {
+            ProvisionBrandDnsTxtJob::dispatch($professionalId, $recordName, $txtValue);
+        }
 
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],

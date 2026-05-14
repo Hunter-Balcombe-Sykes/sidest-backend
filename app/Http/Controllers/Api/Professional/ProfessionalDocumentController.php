@@ -71,93 +71,108 @@ class ProfessionalDocumentController extends ApiController
         $rawFilename = (string) preg_replace('/[\x00-\x1F\x7F]/', '', $rawFilename);
         $originalFilename = substr($rawFilename, 0, 255);
 
-        // Flat-replace: inside one transaction, soft-delete the existing row
-        // (if any), create the new row, stream the file to R2, and set the path.
-        // The old row's R2 bytes are deleted AFTER commit so a transaction
-        // rollback doesn't leave an active row pointing at missing bytes.
+        // Master Pattern 16 (DB-E#SCALE-1): the R2 PUT is performed OUTSIDE
+        // the transaction so the Postgres connection slot + advisory lock are
+        // not held across a 50–500ms Cloudflare round-trip.
         //
-        // If the transaction closure throws AFTER we've streamed the new file
-        // to R2, the uploaded bytes would be orphaned (row gone, file remains).
-        // Track the new path and clean it up in the catch branch below.
+        // The transaction is the serialization point — it soft-deletes the
+        // previous doc row and inserts the new row with path:''. The empty
+        // path is the claim token: concurrent uploads for the same site see
+        // the row and the advisory lock serializes them. The R2 PUT then runs
+        // post-commit and the path is patched in. Mirrors BrandGalleryController.
+        //
+        // Extension is derived from the actual MIME — never from the
+        // client-supplied filename (spoofable).
+        $ext = match ($actualMime) {
+            'application/pdf' => 'pdf',
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+        };
+
         $previousPath = null;
-        $newUploadedPath = null;
+        $previousId = null;
+        $media = DB::transaction(function () use ($site, $file, $actualMime, $title, $caption, $originalFilename, &$previousPath, &$previousId) {
+            if (DB::getDriverName() === 'pgsql') {
+                DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-documents:{$site->id}"]);
+            }
+
+            // Flat-replace targets any non-deleted doc (including drafts)
+            // so uploading a new file always takes over the single slot.
+            $existing = SiteMedia::query()
+                ->where('site_id', $site->id)
+                ->where('pool', SiteMedia::POOL_DOCUMENTS)
+                ->whereNull('deleted_at')
+                ->first();
+
+            if ($existing) {
+                // Capture path + id for post-commit cleanup (path) and for
+                // restore-on-failure (id, see catch branch below).
+                $previousPath = (string) $existing->path;
+                $previousId = (string) $existing->id;
+                // Suppress the old row's `deleted` observer event during
+                // flat-replace — the new row's `saved` event a few lines
+                // below will trigger section-visibility reevaluation once.
+                // Without this, both events fire post-commit and do the
+                // same DB read + check in sequence (wasted work).
+                SiteMedia::withoutEvents(function () use ($existing): void {
+                    $existing->delete();
+                });
+            }
+
+            return SiteMedia::create([
+                'site_id' => $site->id,
+                'pool' => SiteMedia::POOL_DOCUMENTS,
+                'path' => '',
+                'alt_text' => $title,
+                'caption' => $caption,
+                'sort_order' => 0,
+                'is_active' => true,
+                'media_type' => SiteMedia::MEDIA_TYPE_DOCUMENT,
+                'processing_state' => SiteMedia::PROCESSING_STATE_READY,
+                'original_mime' => $actualMime,
+                'original_filename' => $originalFilename,
+                'original_size_bytes' => $file->getSize(),
+            ]);
+        });
+
+        // Post-commit: stream the bytes to R2 (the lock and connection slot
+        // have already released). If this throws, delete the empty-path row
+        // we just inserted so the slot doesn't stay claimed by a phantom.
+        $mediaDisk = config('partna.media_disk');
+        $path = "documents/{$pro->id}/{$media->id}/original.{$ext}";
+
         try {
-            $media = DB::transaction(function () use ($site, $pro, $file, $actualMime, $title, $caption, $originalFilename, &$previousPath, &$newUploadedPath) {
-                if (DB::getDriverName() === 'pgsql') {
-                    DB::select('select pg_advisory_xact_lock(hashtext(?))', ["site-documents:{$site->id}"]);
-                }
+            $stream = fopen($file->getRealPath(), 'rb');
+            Storage::disk($mediaDisk)->put($path, $stream, 'public');
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
 
-                // Flat-replace targets any non-deleted doc (including drafts)
-                // so uploading a new file always takes over the single slot.
-                $existing = SiteMedia::query()
-                    ->where('site_id', $site->id)
-                    ->where('pool', SiteMedia::POOL_DOCUMENTS)
-                    ->whereNull('deleted_at')
-                    ->first();
-
-                if ($existing) {
-                    // Capture the path for post-commit R2 cleanup.
-                    $previousPath = (string) $existing->path;
-                    // Suppress the old row's `deleted` observer event during
-                    // flat-replace — the new row's `saved` event a few lines
-                    // below will trigger section-visibility reevaluation once.
-                    // Without this, both events fire post-commit and do the
-                    // same DB read + check in sequence (wasted work).
-                    SiteMedia::withoutEvents(function () use ($existing): void {
-                        $existing->delete();
-                    });
-                }
-
-                // Extension is derived from the actual MIME — never from the
-                // client-supplied filename (spoofable).
-                $ext = match ($actualMime) {
-                    'application/pdf' => 'pdf',
-                    'image/jpeg' => 'jpg',
-                    'image/png' => 'png',
-                };
-
-                $media = SiteMedia::create([
-                    'site_id' => $site->id,
-                    'pool' => SiteMedia::POOL_DOCUMENTS,
-                    'path' => '',
-                    'alt_text' => $title,
-                    'caption' => $caption,
-                    'sort_order' => 0,
-                    'is_active' => true,
-                    'media_type' => SiteMedia::MEDIA_TYPE_DOCUMENT,
-                    'processing_state' => SiteMedia::PROCESSING_STATE_READY,
-                    'original_mime' => $actualMime,
-                    'original_filename' => $originalFilename,
-                    'original_size_bytes' => $file->getSize(),
-                ]);
-
-                // Stream to R2 (not in-memory) — matches the video upload path
-                // so 10 MB PDFs don't peg worker memory.
-                $mediaDisk = config('partna.media_disk');
-                $path = "documents/{$pro->id}/{$media->id}/original.{$ext}";
-                $stream = fopen($file->getRealPath(), 'rb');
-                Storage::disk($mediaDisk)->put($path, $stream, 'public');
-                if (is_resource($stream)) {
-                    fclose($stream);
-                }
-                $newUploadedPath = $path;
-
-                $media->update(['path' => $path]);
-
-                return $media;
-            });
+            $media->update(['path' => $path]);
         } catch (\Throwable $e) {
-            // Transaction failed after the R2 put succeeded — clean up the
-            // orphaned bytes so we don't leak storage on retries.
-            if ($newUploadedPath !== null) {
-                try {
-                    Storage::disk(config('partna.media_disk'))->delete($newUploadedPath);
-                } catch (\Throwable $cleanupError) {
-                    Log::warning('Failed to clean up orphaned document R2 object after transaction failure', [
-                        'path' => $newUploadedPath,
-                        'error' => $cleanupError->getMessage(),
-                    ]);
-                }
+            // Best-effort cleanup of any partial R2 upload, then drop the
+            // empty-path row, then restore the prior soft-deleted doc.
+            //
+            // Pre-Pattern-16, a Cloudflare R2 failure rolled back the whole
+            // transaction (including the soft-delete of the prior doc). With
+            // the PUT now outside the transaction, the soft-delete already
+            // committed — so on failure we explicitly restore() the prior
+            // row so flat-replace remains "atomic swap or no change". The
+            // prior R2 bytes are still in place because we throw before the
+            // post-commit cleanup block runs.
+            try {
+                Storage::disk($mediaDisk)->delete($path);
+            } catch (\Throwable $cleanupError) {
+                Log::warning('Failed to clean up orphaned document R2 object after upload failure', [
+                    'path' => $path,
+                    'error' => $cleanupError->getMessage(),
+                ]);
+            }
+            $media->forceDelete();
+            if ($previousId !== null) {
+                SiteMedia::withTrashed()
+                    ->where('id', $previousId)
+                    ->update(['deleted_at' => null]);
             }
             throw $e;
         }
@@ -165,8 +180,7 @@ class ProfessionalDocumentController extends ApiController
         // Post-commit: delete old R2 bytes. Safe to run outside the txn because
         // the old row is already soft-deleted (so no reader will try to fetch
         // the old path), and if this delete fails we just leak bytes — not a
-        // correctness issue. If the transaction had rolled back, $previousPath
-        // would stay null and this is a no-op.
+        // correctness issue.
         if ($previousPath !== null && $previousPath !== '') {
             try {
                 Storage::disk(config('partna.media_disk'))->delete($previousPath);

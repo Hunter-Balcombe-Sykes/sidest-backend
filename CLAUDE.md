@@ -90,6 +90,7 @@ config/
 - **Soft deletes** with 30-day retention (configurable via `SOFT_DELETE_RETENTION_DAYS`).
 - **JSON columns** for flexible settings (site.settings, brand product configs, etc.).
 - **Authorization via Policies** — never inline 403 checks in controllers. See below.
+- **Queue jobs for vendor I/O — check for existing jobs before adding a new one.** Before proposing a new `App\Jobs\<Vendor>\<Action>Job`, run `rg --files-with-matches "<vendor>Service" app/Jobs/` to confirm an analogous job doesn't already exist. Master Pattern 16 (DB-F#SCALE-5) found that `ProvisionBrandDnsJob` already existed but a controller bypassed it — duplicate jobs and bypassed jobs both leak vendor I/O onto request threads.
 
 ### Authorization Pattern
 

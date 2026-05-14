@@ -1,7 +1,9 @@
 <?php
 
+use App\Jobs\Shopify\PurgeAffiliateProductSelectionsJob;
 use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\ProfessionalIntegration;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
@@ -81,7 +83,9 @@ it('app/uninstalled — valid HMAC clears access_token and marks disconnected_re
     expect($meta['disconnected_at'])->not->toBeNull();
 });
 
-it('app/uninstalled — purges affiliate product selections for the brand', function () {
+it('app/uninstalled — dispatches PurgeAffiliateProductSelectionsJob (Master Pattern 16)', function () {
+    Bus::fake([PurgeAffiliateProductSelectionsJob::class]);
+
     $brandId = (string) Str::uuid();
     DB::table('core.professional_integrations')->insert([
         'id' => (string) Str::uuid(),
@@ -107,9 +111,35 @@ it('app/uninstalled — purges affiliate product selections for the brand', func
         'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
     ])->assertOk();
 
+    // Webhook hands off to the queue — rows are NOT deleted synchronously now.
+    // Master Pattern 16 (DB-F#SCALE-3) avoids holding row locks across a large
+    // delete inside the Shopify ack window.
     expect(AffiliateProductSelection::query()
         ->where('brand_professional_id', $brandId)
-        ->count())->toBe(0);
+        ->count())->toBe(2);
+
+    Bus::assertDispatched(
+        PurgeAffiliateProductSelectionsJob::class,
+        fn (PurgeAffiliateProductSelectionsJob $job) => $job->brandProfessionalId === $brandId
+            && $job->queue === 'integrations',
+    );
+});
+
+it('PurgeAffiliateProductSelectionsJob deletes all selections for the given brand', function () {
+    $brandId = (string) Str::uuid();
+    $otherBrandId = (string) Str::uuid();
+
+    DB::table('commerce.affiliate_product_selections')->insert([
+        ['id' => (string) Str::uuid(), 'brand_professional_id' => $brandId, 'shopify_product_gid' => 'gid://shopify/Product/1', 'created_at' => now(), 'updated_at' => now()],
+        ['id' => (string) Str::uuid(), 'brand_professional_id' => $brandId, 'shopify_product_gid' => 'gid://shopify/Product/2', 'created_at' => now(), 'updated_at' => now()],
+        ['id' => (string) Str::uuid(), 'brand_professional_id' => $otherBrandId, 'shopify_product_gid' => 'gid://shopify/Product/3', 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    (new PurgeAffiliateProductSelectionsJob($brandId))->handle();
+
+    // Target brand's selections gone; other brands untouched.
+    expect(AffiliateProductSelection::query()->where('brand_professional_id', $brandId)->count())->toBe(0);
+    expect(AffiliateProductSelection::query()->where('brand_professional_id', $otherBrandId)->count())->toBe(1);
 });
 
 it('app/uninstalled — unknown shop_domain returns 200 without side effects', function () {

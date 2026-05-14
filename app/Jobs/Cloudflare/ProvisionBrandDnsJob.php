@@ -10,6 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 // Provisions the Cloudflare CNAME for a brand's subdomain → shops.myshopify.com (DNS-only).
 // Idempotent — safe to dispatch multiple times. No-op for non-brand professionals or
@@ -20,7 +21,17 @@ class ProvisionBrandDnsJob implements ShouldQueue
 
     public int $tries = 3;
 
-    public function __construct(public readonly string $professionalId) {}
+    public int $timeout = 30;
+
+    public function __construct(public readonly string $professionalId)
+    {
+        $this->onQueue('integrations');
+    }
+
+    public function backoff(): array
+    {
+        return [10, 30, 60];
+    }
 
     public function handle(CloudflareDnsService $dns): void
     {
@@ -42,5 +53,14 @@ class ProvisionBrandDnsJob implements ShouldQueue
         // upsertCname is idempotent — safe to call repeatedly.
         // Oxygen requires DNS-only (proxied=false).
         $dns->upsertCname($subdomain, 'shops.myshopify.com', false);
+    }
+
+    public function failed(Throwable $e): void
+    {
+        report($e);
+        Log::error('cloudflare.provision_brand_dns.failed', [
+            'professional_id' => $this->professionalId,
+            'error' => $e->getMessage(),
+        ]);
     }
 }

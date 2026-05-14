@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
+use App\Jobs\Stripe\SyncBrandPaymentMethodFromCheckoutSessionJob;
 use App\Services\Stripe\StripeConnectService;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -203,7 +205,9 @@ it('stripe connect — account.application.deauthorized resets connect state to 
 // ============================================================
 
 describe('checkout.session.completed webhook', function () {
-    it('mode=setup routes to syncBrandPaymentMethodFromCheckoutSession', function () {
+    it('mode=setup dispatches SyncBrandPaymentMethodFromCheckoutSessionJob (Master Pattern 16)', function () {
+        Bus::fake([SyncBrandPaymentMethodFromCheckoutSessionJob::class]);
+
         $proId = (string) Str::uuid();
         DB::table('core.professionals')->insert([
             'id' => $proId,
@@ -216,13 +220,11 @@ describe('checkout.session.completed webhook', function () {
             'updated_at' => now(),
         ]);
 
+        // The service must NOT be called synchronously — the whole point of
+        // Master Pattern 16 is to keep the Stripe Session::retrieve off the
+        // webhook handler's hot path.
         $mockService = Mockery::mock(StripeConnectService::class);
-        $mockService->shouldReceive('syncBrandPaymentMethodFromCheckoutSession')
-            ->once()
-            ->withArgs(function ($pro, $sessionId) use ($proId) {
-                return $pro->id === $proId && $sessionId === 'cs_test_session_1';
-            })
-            ->andReturn(['payment_method_id' => 'pm_ok', 'setup_intent_id' => 'seti_ok']);
+        $mockService->shouldNotReceive('syncBrandPaymentMethodFromCheckoutSession');
         app()->instance(StripeConnectService::class, $mockService);
 
         $event = \Stripe\Event::constructFrom([
@@ -245,9 +247,18 @@ describe('checkout.session.completed webhook', function () {
         $controller = app(StripeConnectWebhookController::class);
         $response = $controller->handleParsedEvent($event);
         expect($response->getStatusCode())->toBe(200);
+
+        Bus::assertDispatched(
+            SyncBrandPaymentMethodFromCheckoutSessionJob::class,
+            fn (SyncBrandPaymentMethodFromCheckoutSessionJob $job) => $job->professionalId === $proId
+                && $job->checkoutSessionId === 'cs_test_session_1'
+                && $job->queue === 'integrations',
+        );
     });
 
-    it('mode=payment is ignored (top-ups removed) without throwing', function () {
+    it('mode=payment is ignored (top-ups removed) without throwing or dispatching the sync job', function () {
+        Bus::fake([SyncBrandPaymentMethodFromCheckoutSessionJob::class]);
+
         $proId = (string) Str::uuid();
         DB::table('core.professionals')->insert([
             'id' => $proId,
@@ -284,6 +295,8 @@ describe('checkout.session.completed webhook', function () {
         $controller = app(StripeConnectWebhookController::class);
         $response = $controller->handleParsedEvent($event);
         expect($response->getStatusCode())->toBe(200);
+
+        Bus::assertNotDispatched(SyncBrandPaymentMethodFromCheckoutSessionJob::class);
     });
 
     it('missing professional_id logs a warning and returns 200', function () {
