@@ -163,9 +163,16 @@ class VerifySupabaseJwt
 
         $key = $this->resolveSigningKey((string) $kid, (string) $alg);
 
-        // Decode + verify signature + exp/nbf automatically
-        JWT::$leeway = 60; // clock skew tolerance
-        $decoded = JWT::decode($jwt, $key);
+        // Decode + verify signature + exp/nbf automatically.
+        // Restore leeway in finally — JWT::$leeway is process-wide static state that
+        // would bleed into every subsequent JWT::decode in this worker without restoration.
+        $priorLeeway = JWT::$leeway;
+        JWT::$leeway = 60; // Supabase tokens can arrive with up to ~60s clock skew
+        try {
+            $decoded = JWT::decode($jwt, $key);
+        } finally {
+            JWT::$leeway = $priorLeeway;
+        }
 
         return json_decode(json_encode($decoded), true) ?: [];
     }
