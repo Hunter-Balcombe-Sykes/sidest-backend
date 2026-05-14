@@ -12,6 +12,7 @@ use App\Http\Resources\Stripe\TransactionResource;
 use App\Models\Retail\CommissionPayout;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Stripe\StripeBalanceService;
 use App\Services\Stripe\StripeConnectService;
 use App\Services\Stripe\StripeTransactionFetcher;
 use Illuminate\Http\JsonResponse;
@@ -26,6 +27,7 @@ class StripeConnectController extends Controller
         private readonly StripeConnectService $connectService,
         private readonly CommissionPayoutService $payoutService,
         private readonly StripeTransactionFetcher $transactionFetcher,
+        private readonly StripeBalanceService $balanceService,
         private readonly CacheLockService $cacheLock,
     ) {}
 
@@ -484,6 +486,57 @@ class StripeConnectController extends Controller
 
         return response()->json([
             'transactions' => TransactionResource::collection($rows),
+        ]);
+    }
+
+    /**
+     * GET /stripe/balance — affiliate only.
+     *
+     * Returns the affiliate's available + pending balance (AUD, cents) plus the
+     * auto-payout schedule from their connected account. Cached 60s per affiliate.
+     */
+    public function balance(Request $request): JsonResponse
+    {
+        $pro = $request->attributes->get('professional');
+
+        if (($pro->professional_type ?? null) === 'brand') {
+            return response()->json(['error' => 'affiliate_only'], 403);
+        }
+
+        $cacheKey = 'stripe:balance:'.$pro->id;
+        $payload = $this->cacheLock->rememberLocked($cacheKey, 60, function () use ($pro) {
+            return [
+                'balance' => $this->balanceService->forAffiliate($pro),
+                'schedule' => $this->balanceService->payoutScheduleFor($pro),
+            ];
+        });
+
+        return response()->json($payload);
+    }
+
+    /**
+     * GET /stripe/payouts/upcoming — affiliate only.
+     *
+     * Returns Stripe Payouts on the connected account currently in pending or
+     * in_transit state — the "money on the way" view. Cached 60s.
+     */
+    public function upcomingPayouts(Request $request): JsonResponse
+    {
+        $pro = $request->attributes->get('professional');
+
+        if (($pro->professional_type ?? null) === 'brand') {
+            return response()->json(['error' => 'affiliate_only'], 403);
+        }
+
+        $cacheKey = 'stripe:upcoming_payouts:'.$pro->id;
+        $rows = $this->cacheLock->rememberLocked(
+            $cacheKey,
+            60,
+            fn () => $this->balanceService->upcomingFor($pro),
+        );
+
+        return response()->json([
+            'payouts' => $rows,
         ]);
     }
 }

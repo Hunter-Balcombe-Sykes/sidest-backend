@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
 use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
+use App\Services\Stripe\StripeBalanceService;
 use App\Services\Stripe\StripeConnectService;
 use App\Services\Stripe\StripeTransactionFetcher;
 use Illuminate\Support\Facades\DB;
@@ -62,6 +63,7 @@ function stripeReport_makeController(StripeConnectService $service): StripeConne
         $service,
         $payoutService,
         $fetcherStub,
+        Mockery::mock(StripeBalanceService::class),
         app(CacheLockService::class),
     );
 }

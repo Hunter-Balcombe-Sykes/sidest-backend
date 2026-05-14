@@ -418,8 +418,11 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/stripe/payment-method/sync-session', [StripeConnectController::class, 'syncPaymentMethodSession']);
         Route::delete('/stripe/payment-method', [StripeConnectController::class, 'removePaymentMethod']);
         Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
+        // /upcoming registered BEFORE /{payoutId} so the literal segment wins over the placeholder.
+        Route::get('/stripe/payouts/upcoming', [StripeConnectController::class, 'upcomingPayouts']);
         Route::get('/stripe/payouts/{payoutId}', [StripeConnectController::class, 'payoutDetail']);
         Route::get('/stripe/transactions', [StripeConnectController::class, 'transactions']);
+        Route::get('/stripe/balance', [StripeConnectController::class, 'balance']);
 
         // Brand billing & payout history (Lane B prerequisites — new role-scoped endpoints)
         Route::get('/brand/billing-summary', [BrandBillingSummaryController::class, 'show']);
