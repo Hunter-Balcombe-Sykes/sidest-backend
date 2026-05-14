@@ -190,9 +190,9 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
     - **Why this slot:** orchestrator can fan it out across 6 files in one half-day session; cleaner before Master 31's webhook tests.
     - **Closure detail:** `App\Http\Controllers\Concerns\HandlesShopifyWebhook` trait extracted; canonical 6-step sequence (HMAC → atomic `Cache::add` dedup → optional DB-level dedup → shop lookup → JSON decode (422 on malformed) → dispatch). All 6 drifting controllers converted in one commit. `ffc449c4` follow-up: release the cache dedup key if the dispatched job fails, so Shopify's retry can re-enter. Master 31 (webhook test sweep) now unblocked.
 
-13. **Master Pattern 13 — `:stale` TTL jitter on both cache writers** (Phase 3 Pattern 4)
-    - **Tier:** P2 · **Effort:** ~0.5 day · **Closes:** 2 findings
-    - **Why this slot:** lands before Master 15/16/19 so new cache entries inherit the fix.
+13. **Master Pattern 13 — `:stale` TTL jitter on both cache writers** (Phase 3 Pattern 4) — ✅ **Done 2026-05-14** (commit `be625fb7`)
+    - **Tier:** P2 · **Effort:** ~0.5 day · **Closes:** 2 findings (SCALE-D#CACHE-2, SCALE-D#CACHE-3)
+    - **Closure detail:** `JitteredTtl` trait extracted; independent jitter draws on both primary and stale in `CacheLockService::writeWithJitter` and `SiteCacheService::writePayloadWithStale`. `jitteredPayloadTtl()` removed (replaced by trait). Probabilistic spread tests added to both service test files.
 
 14. **Master Pattern 14 — `Cache::memo()->remember` → `rememberLocked` migration** (Phase 3 Pattern 1)
     - **Tier:** P2 (4 P2 — regression bumps SCALE-A#CACHE-1 to P1 candidate) · **Effort:** ~1 day · **Closes:** 4 findings
@@ -1090,7 +1090,7 @@ Seven of these doors were built by different people on different days, and most 
 **Original ID:** Phase 3 Pattern 4
 **Closes:** SCALE-D#CACHE-2, SCALE-D#CACHE-3
 **Tier:** P2 (2 P2) · **Effort:** ~0.5 day
-**Status:** Open
+**Status:** ✅ Done 2026-05-14 (commit `be625fb7`)
 **Depends on:** none (sequence before Master 14, 15, 16 so new cache entries inherit jittered stale TTLs)
 **Lane:** 1 — Sonnet execute · Sonnet review (tests + Pint gate)
 
@@ -1102,7 +1102,7 @@ When that synchronized stale-expiry moment arrives, every SWR fast path returnin
 
 ### What to do
 
-- [ ] **Step 1 — Add jitter to `CacheLockService::writeWithJitter`** (`app/Services/Cache/CacheLockService.php`, the `int` branch).
+- [x] **Step 1 — Add jitter to `CacheLockService::writeWithJitter`** (`app/Services/Cache/CacheLockService.php`, the `int` branch).
     - Apply an independent `mt_rand` draw to `$staleTtl`:
         ```php
         $staleTtl = (int) round(
@@ -1110,7 +1110,7 @@ When that synchronized stale-expiry moment arrives, every SWR fast path returnin
         );
         ```
     - Keep the ±20% distribution proportional to the stale window (multiplied through the stale TTL, not the primary), so the spread is meaningful at long stale windows. Closes SCALE-D#CACHE-2.
-- [ ] **Step 2 — Add jitter to `SiteCacheService::writePayloadWithStale`** (`app/Services/Cache/SiteCacheService.php`).
+- [x] **Step 2 — Add jitter to `SiteCacheService::writePayloadWithStale`** (`app/Services/Cache/SiteCacheService.php`).
     - Same formula on `$staleTtl`:
         ```php
         $staleTtl = (int) round(
@@ -1120,8 +1120,8 @@ When that synchronized stale-expiry moment arrives, every SWR fast path returnin
         );
         ```
     - Closes SCALE-D#CACHE-3.
-- [ ] **Step 3 — Extract a shared static helper.** Both classes now have identical jitter logic; pull it into a tiny `App\Services\Cache\Concerns\JitteredTtl` trait (or a static helper on `CacheLockService`) so the next cache writer added to the codebase inherits the discipline. Single source of truth.
-- [ ] **Step 4 — Confirm `DateTimeInterface` skip behaviour.** Per SCALE-A#CACHE-1's insight, `writeWithJitter` skips jitter entirely when the TTL is a `DateTimeInterface` (only ints get jittered). All `rememberLocked` call sites in this plan must pass **int seconds**, not `now()->addMinutes(N)` deadlines, or Pattern 4's hardening is bypassed at the call site.
+- [x] **Step 3 — Extract a shared static helper.** Both classes now have identical jitter logic; pull it into a tiny `App\Services\Cache\Concerns\JitteredTtl` trait (or a static helper on `CacheLockService`) so the next cache writer added to the codebase inherits the discipline. Single source of truth.
+- [x] **Step 4 — Confirm `DateTimeInterface` skip behaviour.** Per SCALE-A#CACHE-1's insight, `writeWithJitter` skips jitter entirely when the TTL is a `DateTimeInterface` (only ints get jittered). All `rememberLocked` call sites in this plan must pass **int seconds**, not `now()->addMinutes(N)` deadlines, or Pattern 4's hardening is bypassed at the call site.
 
 ### Plain English
 
