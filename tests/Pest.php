@@ -200,6 +200,13 @@ function setupProfessionalsTable(): void
         stripe_payment_method_last4 TEXT NULL,
         stripe_commission_funding_mode TEXT NULL,
         payout_method TEXT NULL,
+        stripe_card_payment_method_id TEXT NULL,
+        stripe_card_brand TEXT NULL,
+        stripe_card_last4 TEXT NULL,
+        stripe_becs_payment_method_id TEXT NULL,
+        stripe_becs_bsb TEXT NULL,
+        stripe_becs_last4 TEXT NULL,
+        preferred_payout_method TEXT NULL,
         deleted_at TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL

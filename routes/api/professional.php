@@ -417,6 +417,7 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/stripe/payment-method/setup-becs', [StripeConnectController::class, 'createBecsCheckoutSession']);
         Route::post('/stripe/payment-method/sync-session', [StripeConnectController::class, 'syncPaymentMethodSession']);
         Route::delete('/stripe/payment-method', [StripeConnectController::class, 'removePaymentMethod']);
+        Route::put('/stripe/payment-method/preference', [StripeConnectController::class, 'setPaymentMethodPreference']);
         Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
         // /upcoming registered BEFORE /{payoutId} so the literal segment wins over the placeholder.
         Route::get('/stripe/payouts/upcoming', [StripeConnectController::class, 'upcomingPayouts']);

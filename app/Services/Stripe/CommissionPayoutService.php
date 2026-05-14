@@ -421,12 +421,23 @@ class CommissionPayoutService
         if (
             ! $brand->stripe_connect_account_id
             || $brand->stripe_connect_status !== 'active'
-            || ! $brand->stripe_payment_method_id
         ) {
             $this->failPayout(
                 $payout,
                 'brand_not_ready',
-                'Brand has not completed Stripe Connect onboarding with a saved payment method.',
+                'Brand has not completed Stripe Connect onboarding.',
+            );
+
+            return false;
+        }
+
+        // Phase 4 — multi-PM selection. preferred → BECS-if-present → card → legacy fallback.
+        $resolved = $this->resolveBrandPaymentMethod($brand);
+        if ($resolved === null) {
+            $this->failPayout(
+                $payout,
+                'brand_not_ready',
+                'Brand has no payment method on file.',
             );
 
             return false;
@@ -439,7 +450,8 @@ class CommissionPayoutService
         }
 
         $retryKey = $payout->retry_count > 0 ? '_r'.$payout->retry_count : '';
-        $paymentMethodType = $brand->payout_method === 'becs' ? 'au_becs_debit' : 'card';
+        $paymentMethodType = $resolved['type'];
+        $paymentMethodId = $resolved['id'];
         $currencyLower = strtolower($payout->currency_code);
 
         $payout->forceFill([
@@ -466,7 +478,7 @@ class CommissionPayoutService
                 'amount' => $payout->gross_commission_cents,
                 'currency' => $currencyLower,
                 'customer_account' => $brand->stripe_connect_account_id,
-                'payment_method' => $brand->stripe_payment_method_id,
+                'payment_method' => $paymentMethodId,
                 'payment_method_types' => [$paymentMethodType],
                 'confirm' => true,
                 'off_session' => true,
@@ -807,5 +819,47 @@ class CommissionPayoutService
         $requestId = $e->getRequestId() ?? 'no_request_id';
 
         return sprintf('[%s] %s (request_id=%s)', $code, $message, $requestId);
+    }
+
+    /**
+     * Phase 4 — multi-PM resolution at PI-create time. Mirrors StripeConnectService's
+     * public resolver; inlined here to avoid a circular service dependency between
+     * Stripe services.
+     *
+     * Selection order:
+     *   1. preferred_payout_method when set AND that type's id is present
+     *   2. BECS if becs_payment_method_id is present
+     *   3. card if card_payment_method_id is present
+     *   4. legacy stripe_payment_method_id (rows not migrated yet)
+     *
+     * @return array{id: string, type: string}|null
+     */
+    private function resolveBrandPaymentMethod(Professional $brand): ?array
+    {
+        $cardId = $brand->stripe_card_payment_method_id ?? null;
+        $becsId = $brand->stripe_becs_payment_method_id ?? null;
+        $preferred = $brand->preferred_payout_method ?? null;
+
+        if ($preferred === 'card' && $cardId) {
+            return ['id' => $cardId, 'type' => 'card'];
+        }
+        if ($preferred === 'becs' && $becsId) {
+            return ['id' => $becsId, 'type' => 'au_becs_debit'];
+        }
+
+        if ($becsId) {
+            return ['id' => $becsId, 'type' => 'au_becs_debit'];
+        }
+        if ($cardId) {
+            return ['id' => $cardId, 'type' => 'card'];
+        }
+
+        if (! empty($brand->stripe_payment_method_id)) {
+            $type = ($brand->payout_method ?? null) === 'becs' ? 'au_becs_debit' : 'card';
+
+            return ['id' => $brand->stripe_payment_method_id, 'type' => $type];
+        }
+
+        return null;
     }
 }
