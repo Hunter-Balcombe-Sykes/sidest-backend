@@ -200,7 +200,7 @@
         }
         ```
 
-- [ ] **#SCHED-1** · P3 — Six scheduler-driven jobs have no documented dispatch site or confirmed scheduler registration
+- [x] **#SCHED-1** · P3 — Six scheduler-driven jobs have no documented dispatch site or confirmed scheduler registration
     - **Where:** app/Jobs/Notifications/InviteExpirySweepJob.php; app/Jobs/Notifications/NudgeStuckOnboardingJob.php; app/Jobs/Notifications/SendWeeklyAnalyticsNotificationJob.php; app/Jobs/Streaming/CheckStreamingLiveStatusJob.php; app/Jobs/Stripe/VoidExpiredPayoutsJob.php; app/Jobs/Stripe/ProcessCommissionPayoutsJob.php
     - **Affects:** Invite expiry, onboarding nudges, weekly analytics emails, live-stream status polling, payout voiding, and daily commission processing. If any scheduler entry is accidentally dropped, the feature silently stops with no test failures or error logs.
     - **Effort:** S (~0.5–1h)

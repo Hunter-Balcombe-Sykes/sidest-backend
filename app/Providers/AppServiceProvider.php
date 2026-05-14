@@ -432,6 +432,32 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        // Embedded Shopify app — keyed by the resolved shop domain from the
+        // JWT (`dest` claim). VerifyShopifySessionToken is pinned ahead of
+        // ThrottleRequests in bootstrap/app.php so the attribute is set before
+        // this callback fires. Fail loud (500 → Nightwatch) on a missing
+        // attribute instead of falling back to $request->ip(): behind Cloudflare
+        // every backend request shares a small pool of edge IPs, so an IP
+        // fallback would silently bucket every tenant (and every auth failure)
+        // into one shared limit. Matches the per-uid pattern used by every
+        // other authenticated limiter in this file.
+        RateLimiter::for('embedded-by-shop', function (Request $request) use ($throttleEnabled) {
+            if (! $throttleEnabled) {
+                return Limit::none();
+            }
+
+            $shop = $request->attributes->get('embedded_shop_domain')
+                ?? throw new \RuntimeException('embedded_shop_domain missing on embedded-by-shop route — VerifyShopifySessionToken middleware not applied or priority pin removed');
+
+            return Limit::perMinute(60)
+                ->by('embedded-shop:'.$shop)
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many embedded app requests. Please wait a moment and try again.',
+                    ], 429);
+                });
+        });
+
         // Public plans listing
         RateLimiter::for('plans', function (Request $request) use ($throttleEnabled) {
             if (! $throttleEnabled) {

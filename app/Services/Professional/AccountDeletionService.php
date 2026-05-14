@@ -167,6 +167,16 @@ class AccountDeletionService
             ProfessionalIntegration::query()
                 ->where('professional_id', $professional->id)
                 ->delete();
+
+            // Immediately take the public storefront offline so a deleted brand's
+            // shop stops serving requests for the full 30-day grace period.
+            // SiteObserver::saved() handles cache invalidation automatically.
+            if ($professional->site) {
+                $professional->site->update([
+                    'is_published' => false,
+                    'unpublished_at' => now(),
+                ]);
+            }
         });
 
         $this->cancelStripeAtPeriodEnd($professional);
@@ -310,6 +320,23 @@ class AccountDeletionService
                 'deletion_previous_status' => null,
                 'deletion_token_hash' => null,
             ]);
+
+            // Re-publish the site only if it was programmatically unpublished by our
+            // deletion flow (unpublished_at is the signal). A manually unpublished
+            // site (unpublished_at = null) must stay offline — we don't own that state.
+            // Re-read with a lock to avoid acting on a stale relation-cache snapshot —
+            // a concurrent manual-unpublish could otherwise flip unpublished_at to null
+            // between relation load and this check.
+            $site = Site::query()
+                ->where('professional_id', $professional->id)
+                ->lockForUpdate()
+                ->first();
+            if ($site && $site->unpublished_at !== null) {
+                $site->update([
+                    'is_published' => true,
+                    'unpublished_at' => null,
+                ]);
+            }
         });
 
         $this->resumeStripeSubscription($professional);
@@ -369,6 +396,23 @@ class AccountDeletionService
                 'deletion_previous_status' => null,
                 'deletion_token_hash' => null,
             ]);
+
+            // Re-publish the site only if it was programmatically unpublished by our
+            // deletion flow (unpublished_at is the signal). A manually unpublished
+            // site (unpublished_at = null) must stay offline — we don't own that state.
+            // Re-read with a lock to avoid acting on a stale relation-cache snapshot —
+            // a concurrent manual-unpublish could otherwise flip unpublished_at to null
+            // between relation load and this check.
+            $site = Site::query()
+                ->where('professional_id', $professional->id)
+                ->lockForUpdate()
+                ->first();
+            if ($site && $site->unpublished_at !== null) {
+                $site->update([
+                    'is_published' => true,
+                    'unpublished_at' => null,
+                ]);
+            }
         });
 
         $this->resumeStripeSubscription($professional);

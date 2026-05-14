@@ -3,78 +3,41 @@
 namespace App\Http\Controllers\Api\Webhooks;
 
 use App\Http\Controllers\Api\ApiController;
-use App\Http\Controllers\Concerns\DedupesShopifyWebhookEvent;
-use App\Http\Controllers\Concerns\ValidatesShopifyWebhookHmac;
+use App\Http\Controllers\Concerns\HandlesShopifyWebhook;
 use App\Jobs\Shopify\ProcessShopifyOrderUpdatedWebhookJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
 
 // Phase 3: Receives Shopify refunds/create webhooks. Updates refund_cents on the parent order;
 // the trg_rollup_clawback trigger handles the brand_affiliate_rollup delta automatically.
 class ShopifyRefundsCreateWebhookController extends ApiController
 {
-    use DedupesShopifyWebhookEvent;
-    use ValidatesShopifyWebhookHmac;
+    use HandlesShopifyWebhook;
 
-    public function __invoke(Request $request): JsonResponse
+    protected function topic(): string
     {
-        $rawBody = (string) $request->getContent();
-        $signature = (string) $request->header('X-Shopify-Hmac-SHA256', '');
-        $webhookId = (string) $request->header('X-Shopify-Webhook-Id', '');
-        $eventId = (string) $request->header('X-Shopify-Event-Id', '');
-        $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop-Domain', '')));
+        return 'refunds/create';
+    }
 
-        $dedupeKey = $webhookId !== '' ? "shopify:webhook:refund-create:{$webhookId}" : null;
-        if ($dedupeKey && Cache::has($dedupeKey)) {
-            return $this->success(['received' => true, 'duplicate' => true]);
-        }
+    protected function dedupCachePrefix(): string
+    {
+        return 'shopify:webhook:refund-create';
+    }
 
-        if (! $this->isValidShopifyHmac($rawBody, $signature)) {
-            Log::warning('Shopify refunds/create webhook: invalid HMAC signature', [
-                'shop_domain' => $shopDomain,
-            ]);
+    protected function claimWebhookEvent(string $webhookId): bool
+    {
+        return $this->claimShopifyWebhookEvent($webhookId, $this->topic());
+    }
 
-            return $this->error('invalid signature', 401);
-        }
-
-        if ($dedupeKey && ! Cache::add($dedupeKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
-            return $this->success(['received' => true, 'duplicate' => true]);
-        }
-
-        // Durable DB-backed dedup beneath the cache fast-path. Survives Redis
-        // flush and Shopify retries beyond the 24h cache TTL.
-        if (! $this->claimShopifyWebhookEvent($webhookId, 'refunds/create')) {
-            return $this->success(['received' => true, 'duplicate' => true]);
-        }
-
-        $integration = ProfessionalIntegration::query()
-            ->where('shopify_shop_domain', $shopDomain)
-            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
-            ->first();
-
-        if (! $integration) {
-            Log::warning('Shopify refunds/create webhook: unknown shop domain', [
-                'shop_domain' => $shopDomain,
-            ]);
-
-            return $this->success(['received' => true]);
-        }
-
-        $payload = json_decode($rawBody, true);
-        if (! is_array($payload)) {
-            return $this->success(['received' => true]);
-        }
-
+    protected function dispatchWebhookJob(
+        ProfessionalIntegration $integration,
+        array $payload,
+        string $eventId,
+    ): void {
         ProcessShopifyOrderUpdatedWebhookJob::dispatch(
             (string) $integration->professional_id,
             $payload,
-            'refunds/create',
+            $this->topic(),
             $eventId,
         );
-
-        return $this->success(['received' => true]);
     }
 }

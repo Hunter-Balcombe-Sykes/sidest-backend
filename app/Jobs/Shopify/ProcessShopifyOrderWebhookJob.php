@@ -232,6 +232,7 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
 
         Log::info('ProcessShopifyOrderWebhookJob: processed', [
             'order_id' => $orderId,
+            'shopify_event_id' => $this->shopifyEventId,
             'brand_professional_id' => $this->brandProfessionalId,
             'affiliate_id' => (string) $affiliate->id,
             'commission_cents' => $totalCommissionCents,

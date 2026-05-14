@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 // V2: An uploaded image or video belonging to a site. Tracks processing state (pending/processing/ready/failed) and owns MediaVariant children.
 class SiteMedia extends BaseModel
@@ -94,6 +96,56 @@ class SiteMedia extends BaseModel
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /* ------------------------------------------------------------------ */
+    /*  Lifecycle hooks */
+    /* ------------------------------------------------------------------ */
+
+    protected static function booted(): void
+    {
+        // Collect variant storage paths BEFORE forceDelete fires — the DB cascade
+        // wipes media_variants rows at the same time the parent row is deleted,
+        // so forceDeleted (after-event) would find an empty relation.
+        static::forceDeleting(function (SiteMedia $media): void {
+            // Delete processed variants (each row tracks its own disk).
+            $variantPaths = $media->mediaVariants()
+                ->whereNotNull('path')
+                ->get(['disk', 'path']);
+
+            foreach ($variantPaths as $variant) {
+                try {
+                    $disk = Storage::disk((string) $variant->disk);
+                    if ($disk->exists($variant->path)) {
+                        $disk->delete($variant->path);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to delete variant file during SiteMedia force-delete', [
+                        'media_id' => $media->id,
+                        'disk' => $variant->disk,
+                        'path' => $variant->path,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // Also delete the original upload. SiteMedia has no disk column — the
+            // original always lives on the configured media disk (same as purgeDocumentArtifact).
+            if ($media->path) {
+                try {
+                    $mediaDisk = Storage::disk((string) config('partna.media_disk'));
+                    if ($mediaDisk->exists($media->path)) {
+                        $mediaDisk->delete($media->path);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to delete original file during SiteMedia force-delete', [
+                        'media_id' => $media->id,
+                        'path' => $media->path,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        });
+    }
 
     /* ------------------------------------------------------------------ */
     /*  Relationships */

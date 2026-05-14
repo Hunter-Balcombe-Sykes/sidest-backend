@@ -17,6 +17,7 @@ beforeEach(function () {
     Cache::flush();
     setupProfessionalIntegrationsTable();
     setupCommerceOrdersTables();
+    setupWebhookEventsTable();
     Config::set('services.shopify.webhook_secret', 'test-shop-secret');
     Config::set('services.shopify.fallback_secret', '');
 });

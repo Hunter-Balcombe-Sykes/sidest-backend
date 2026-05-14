@@ -15,6 +15,7 @@ use App\Models\Analytics\SiteVisit;
 use App\Models\Core\Site\Block;
 use App\Services\Cache\AnalyticsCacheService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 // Records pageview and click analytics events from public mini-sites.
@@ -70,7 +71,9 @@ class AnalyticsController extends ApiController
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            report($e);
+            Log::warning('Analytics cache invalidation failed on pageview', ['site_id' => $site->id, 'error' => $e->getMessage()]);
         }
 
         return $this->success([
@@ -180,7 +183,9 @@ class AnalyticsController extends ApiController
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            report($e);
+            Log::warning('Analytics cache invalidation failed on click', ['site_id' => $site->id, 'error' => $e->getMessage()]);
         }
 
         return $this->success([
@@ -221,7 +226,9 @@ class AnalyticsController extends ApiController
 
         try {
             $this->analyticsCache->invalidateAnalytics($site->professional_id);
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            report($e);
+            Log::warning('Analytics cache invalidation failed on cart event', ['site_id' => $site->id, 'error' => $e->getMessage()]);
         }
 
         return $this->success(['message' => 'Cart event recorded', 'event_id' => $event->id], 201);

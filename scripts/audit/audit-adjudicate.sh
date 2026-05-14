@@ -24,6 +24,8 @@ DRAFTS=""
 LENS=""
 LENS_FILE=""
 OUT=""
+OUT_DIR=""
+OUT_PROVIDED=false
 MODEL="sonnet"
 ADJ_PROMPT="$(dirname "$0")/adjudicate-prompt.md"
 MAX_BUDGET="2.00"
@@ -36,7 +38,8 @@ while [[ $# -gt 0 ]]; do
         --scope)         SCOPE_PATHS+=("$2"); shift 2 ;;
         --lens)          LENS="$2"; shift 2 ;;
         --lens-file)     LENS_FILE="$2"; shift 2 ;;
-        --out)           OUT="$2"; shift 2 ;;
+        --out)           OUT="$2"; OUT_PROVIDED=true; shift 2 ;;
+        --out-dir)       OUT_DIR="$2"; shift 2 ;;
         --model)         MODEL="$2"; shift 2 ;;
         --system-prompt) ADJ_PROMPT="$2"; shift 2 ;;
         --max-budget)    MAX_BUDGET="$2"; shift 2 ;;
@@ -59,6 +62,38 @@ if [[ -z "$OUT" ]]; then
     SLUG=$(echo "$LENS_TEXT" | tr '[:upper:]' '[:lower:]' | tr ' /' '--' | tr -cd 'a-z0-9-' | head -c 50)
     SLUG="${SLUG%-}"
     OUT="audit-$(date +%F)-${SLUG}.md"
+fi
+
+# When --out-dir is given and --out was NOT explicitly set, organize the
+# auto-derived filename into the directory. Explicit --out always wins.
+if [[ -n "$OUT_DIR" ]] && ! $OUT_PROVIDED; then
+    mkdir -p "$OUT_DIR"
+    OUT="${OUT_DIR}/${OUT}"
+fi
+
+# Refuse to overwrite an auto-derived path. The slug is derived from lens
+# text alone, so re-running the same lens on different scopes would silently
+# clobber the prior audit. Append -2, -3, ... until a free name is claimed.
+# Explicit --out always wins (operator opted into the exact filename).
+#
+# Concurrency-safe: uses `set -o noclobber` inside a subshell with `: > file`
+# to atomically test-and-create. The shell's open(O_CREAT|O_EXCL) syscall is
+# the single point where two parallel pipelines compete — the loser falls
+# through to the next candidate, so each pipeline ends up with a unique
+# placeholder. claude's later `> "$OUT"` redirect overwrites the empty
+# placeholder with real output (parent shell does not have noclobber set).
+if ! $OUT_PROVIDED; then
+    base="${OUT%.md}"
+    candidate="$OUT"
+    n=1
+    while ! (set -o noclobber; : > "$candidate") 2>/dev/null; do
+        n=$((n + 1))
+        candidate="${base}-${n}.md"
+    done
+    if [[ "$candidate" != "$OUT" ]]; then
+        echo "→ Output file existed; claimed ${candidate} to avoid overwrite" >&2
+    fi
+    OUT="$candidate"
 fi
 
 # --- Build user message ---

@@ -12,6 +12,7 @@ use App\Http\Resources\BrandCatalogProductResource;
 use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class BrandCatalogController extends ApiController
 {
@@ -35,6 +36,8 @@ class BrandCatalogController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 500);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
 
@@ -58,6 +61,8 @@ class BrandCatalogController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 500);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
 
@@ -123,6 +128,8 @@ class BrandCatalogController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 500);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Probe failed: '.$e->getMessage(), 502);
         }
 
@@ -172,6 +179,8 @@ class BrandCatalogController extends ApiController
                 try {
                     $this->catalogService->deleteProductMetafield($integration, $productGid, 'commission_override');
                 } catch (\Throwable $e) {
+                    report($e);
+
                     return $this->error('Unable to reach Shopify. Please try again.', 502);
                 }
             } else {
@@ -184,6 +193,8 @@ class BrandCatalogController extends ApiController
                 try {
                     $this->catalogService->deleteProductMetafield($integration, $productGid, 'affiliate_discount_pct');
                 } catch (\Throwable $e) {
+                    report($e);
+
                     return $this->error('Unable to reach Shopify. Please try again.', 502);
                 }
             } else {
@@ -196,6 +207,8 @@ class BrandCatalogController extends ApiController
                 try {
                     $this->catalogService->deleteProductMetafield($integration, $productGid, 'custom_photos_enabled');
                 } catch (\Throwable $e) {
+                    report($e);
+
                     return $this->error('Unable to reach Shopify. Please try again.', 502);
                 }
             } else {
@@ -214,6 +227,8 @@ class BrandCatalogController extends ApiController
             try {
                 $productVariantGids = $this->catalogService->fetchProductVariantGids($integration, $productGid);
             } catch (\Throwable $e) {
+                report($e);
+
                 return $this->error('Unable to reach Shopify. Please try again.', 502);
             }
 
@@ -244,6 +259,8 @@ class BrandCatalogController extends ApiController
                     return $this->error($msg, 422);
                 }
             } catch (\Throwable $e) {
+                report($e);
+
                 return $this->error('Unable to reach Shopify. Please try again.', 502);
             }
         }
@@ -260,6 +277,8 @@ class BrandCatalogController extends ApiController
             } catch (\RuntimeException $e) {
                 return $this->error($e->getMessage(), $e->getCode() ?: 502);
             } catch (\Throwable $e) {
+                report($e);
+
                 return $this->error('Unable to reach Shopify. Please try again.', 502);
             }
         }
@@ -276,7 +295,8 @@ class BrandCatalogController extends ApiController
             try {
                 $this->catalogService->clearVariantDisablesForProduct($integration, $productGid);
             } catch (\Throwable $e) {
-                \Log::warning('Failed to cascade variant enable on product activation', [
+                report($e);
+                Log::warning('Failed to cascade variant enable on product activation', [
                     'product_gid' => $productGid,
                     'error' => $e->getMessage(),
                 ]);
@@ -320,7 +340,8 @@ class BrandCatalogController extends ApiController
                 try {
                     $this->catalogService->clearVariantDisablesForProduct($resolved['integration'], $productGid);
                 } catch (\Throwable $e) {
-                    \Log::warning('Failed to cascade variant enable on product activation (toggleActive)', [
+                    report($e);
+                    Log::warning('Failed to cascade variant enable on product activation (toggleActive)', [
                         'product_gid' => $productGid,
                         'error' => $e->getMessage(),
                     ]);
@@ -329,6 +350,8 @@ class BrandCatalogController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 502);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
 
@@ -368,6 +391,8 @@ class BrandCatalogController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 502);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
 
@@ -407,6 +432,8 @@ class BrandCatalogController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 502);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
 

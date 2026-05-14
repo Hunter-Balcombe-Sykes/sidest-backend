@@ -46,7 +46,10 @@ class BrandDesignMediaService
             $originalPath = $this->images->storeOriginal($file, $basePath);
         } catch (Throwable $e) {
             Log::error('BrandDesignMediaService: failed to store logo original.', [
+                'request_id' => request()->header('X-Request-Id', ''),
+                'operation' => __METHOD__,
                 'site_id' => $site->id,
+                'professional_id' => (string) $site->professional_id,
                 'purpose' => $purpose,
                 'error' => $e->getMessage(),
             ]);
@@ -55,7 +58,7 @@ class BrandDesignMediaService
         }
 
         $media->update(['path' => $originalPath]);
-        $this->dispatchVariantJob($media->id, $originalPath, $basePath);
+        $this->dispatchVariantJob($media->id, $originalPath, $basePath, (string) $site->id);
         $this->invalidateSiteCache($site);
 
         return $media->refresh();
@@ -83,7 +86,10 @@ class BrandDesignMediaService
             Storage::disk($this->images->resolvedDiskName())->put($originalPath, $bytes, 'public');
         } catch (Throwable $e) {
             Log::error('BrandDesignMediaService: failed to store logo bytes.', [
+                'request_id' => request()->header('X-Request-Id', ''),
+                'operation' => __METHOD__,
                 'site_id' => $site->id,
+                'professional_id' => (string) $site->professional_id,
                 'purpose' => $purpose,
                 'error' => $e->getMessage(),
             ]);
@@ -92,7 +98,7 @@ class BrandDesignMediaService
         }
 
         $media->update(['path' => $originalPath]);
-        $this->dispatchVariantJob($media->id, $originalPath, $basePath);
+        $this->dispatchVariantJob($media->id, $originalPath, $basePath, (string) $site->id);
         $this->invalidateSiteCache($site);
 
         return $media->refresh();
@@ -152,7 +158,10 @@ class BrandDesignMediaService
             $originalPath = $this->images->storeOriginal($file, $basePath);
         } catch (Throwable $e) {
             Log::error('BrandDesignMediaService: failed to store placeholder original.', [
+                'request_id' => request()->header('X-Request-Id', ''),
+                'operation' => __METHOD__,
                 'site_id' => $site->id,
+                'professional_id' => (string) $site->professional_id,
                 'media_id' => $media->id,
                 'error' => $e->getMessage(),
             ]);
@@ -161,7 +170,7 @@ class BrandDesignMediaService
         }
 
         $media->update(['path' => $originalPath]);
-        $this->dispatchVariantJob($media->id, $originalPath, $basePath);
+        $this->dispatchVariantJob($media->id, $originalPath, $basePath, (string) $site->id);
         $this->invalidateSiteCache($site);
 
         return $media->refresh();
@@ -438,7 +447,7 @@ class BrandDesignMediaService
         });
     }
 
-    private function dispatchVariantJob(string $imageId, string $originalPath, string $basePath): void
+    private function dispatchVariantJob(string $imageId, string $originalPath, string $basePath, string $siteId = ''): void
     {
         $queueDefault = (string) config('queue.default', 'sync');
         $processInline = in_array(app()->environment(), ['local', 'testing'], true)
@@ -450,10 +459,15 @@ class BrandDesignMediaService
                     originalPath: $originalPath,
                     imageId: $imageId,
                     basePath: $basePath,
+                    siteId: $siteId,
                 );
             } catch (Throwable $e) {
+                report($e);
                 Log::error('BrandDesignMediaService: inline variant processing failed.', [
+                    'request_id' => request()->header('X-Request-Id', ''),
+                    'operation' => __METHOD__,
                     'image_id' => $imageId,
+                    'site_id' => $siteId,
                     'error' => $e->getMessage(),
                 ]);
             }
@@ -466,10 +480,15 @@ class BrandDesignMediaService
                 originalPath: $originalPath,
                 imageId: $imageId,
                 basePath: $basePath,
+                siteId: $siteId,
             );
         } catch (Throwable $e) {
+            report($e);
             Log::error('BrandDesignMediaService: queue dispatch failed; falling back to sync.', [
+                'request_id' => request()->header('X-Request-Id', ''),
+                'operation' => __METHOD__,
                 'image_id' => $imageId,
+                'site_id' => $siteId,
                 'error' => $e->getMessage(),
             ]);
             try {
@@ -477,10 +496,15 @@ class BrandDesignMediaService
                     originalPath: $originalPath,
                     imageId: $imageId,
                     basePath: $basePath,
+                    siteId: $siteId,
                 );
             } catch (Throwable $sync) {
+                report($sync);
                 Log::error('BrandDesignMediaService: sync fallback also failed.', [
+                    'request_id' => request()->header('X-Request-Id', ''),
+                    'operation' => __METHOD__,
                     'image_id' => $imageId,
+                    'site_id' => $siteId,
                     'error' => $sync->getMessage(),
                 ]);
             }
@@ -497,8 +521,12 @@ class BrandDesignMediaService
             // inside its 5s staleWhileRevalidate window.
             $siteCache->forgetBrandDesign((string) $site->id);
         } catch (Throwable $e) {
+            report($e);
             Log::warning('BrandDesignMediaService: cache invalidation failed.', [
+                'request_id' => request()->header('X-Request-Id', ''),
+                'operation' => __METHOD__,
                 'site_id' => $site->id,
+                'professional_id' => (string) $site->professional_id,
                 'error' => $e->getMessage(),
             ]);
         }

@@ -6,6 +6,7 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\ShopDomain;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -320,7 +321,7 @@ GRAPHQL;
         $responseBody = [];
         try {
             $response = $this->client->graphql(
-                $shopDomain,
+                ShopDomain::fromUntrusted($shopDomain),
                 $accessToken,
                 $apiVersion,
                 $query,
@@ -956,7 +957,7 @@ GRAPHQL;
         // Client throws ShopifyTransportException on non-2xx and ShopifyGraphQLException
         // on top-level errors — both propagate as RuntimeException for the caller.
         return $this->client->graphql(
-            $shopDomain,
+            ShopDomain::fromUntrusted($shopDomain),
             $accessToken,
             $apiVersion,
             $query,

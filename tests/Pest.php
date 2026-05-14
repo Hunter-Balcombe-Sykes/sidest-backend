@@ -218,6 +218,7 @@ function setupSitesTable(): void
         subdomain TEXT NULL,
         subdomain_changed_at TEXT NULL,
         is_published INTEGER NULL,
+        unpublished_at TEXT NULL,
         settings TEXT NULL,
         deleted_at TEXT NULL,
         created_at TEXT NULL,
@@ -1061,11 +1062,13 @@ function createDocumentFor(Professional $pro, array $overrides = []): \App\Model
  * exercise the LWW guard directly must call markTestSkipped() on non-pgsql connections.
  */
 /**
- * billing.webhook_events — the dedupe ledger written by every webhook controller
- * (Stripe + Shopify) via the DedupesShopifyWebhookEvent trait or firstOrCreate.
+ * billing.webhook_events — the durable dedupe ledger written by every webhook controller
+ * (Stripe + Shopify) via the DedupesShopifyWebhookEvent trait, firstOrCreate, or the
+ * DB-level claimShopifyWebhookEvent / claimStripeWebhookEvent helpers.
  *
  * Provider distinguishes Stripe events from Shopify events; `stripe_event_id` is
  * historically named but semantically holds the external event ID for the provider.
+ * The UNIQUE (provider, stripe_event_id) constraint is what makes the dedup race-safe.
  */
 function setupWebhookEventsTable(): void
 {
@@ -1078,7 +1081,8 @@ function setupWebhookEventsTable(): void
         payload TEXT,
         processed_at TEXT NOT NULL DEFAULT (datetime(\'now\')),
         created_at TEXT NULL,
-        updated_at TEXT NULL
+        updated_at TEXT NULL,
+        UNIQUE (provider, stripe_event_id)
     )');
 }
 
@@ -1205,6 +1209,7 @@ function setupSiteVisitsTable(): void
         visitor_id TEXT NULL,
         session_id TEXT NULL,
         ip_hash TEXT NULL,
+        user_agent TEXT NULL,
         device_type TEXT NULL,
         country_code TEXT NULL,
         referrer TEXT NULL,

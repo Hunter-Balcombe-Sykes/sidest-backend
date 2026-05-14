@@ -113,6 +113,7 @@ class CommerceNotificationService
 
             $this->notifyBookingMilestonesForProfessional($professionalId);
         } catch (\Throwable $e) {
+            report($e);
             Log::warning('Booking notifications failed', [
                 'professional_id' => $context['professional_id'] ?? null,
                 'message' => $e->getMessage(),

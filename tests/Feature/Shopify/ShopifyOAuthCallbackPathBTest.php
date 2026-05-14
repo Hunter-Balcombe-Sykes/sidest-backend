@@ -1,13 +1,17 @@
 <?php
 
 use App\Http\Controllers\Api\Shopify\ShopifyAppOAuthController;
-use App\Models\Core\Professional\Professional;
-use App\Services\Shopify\BrandSignupResult;
 use App\Services\Shopify\BrandSignupService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+
+// Path B (auto-link Shopify install to a Professional whose primary_email matches
+// the Shopify shop.email) was removed for SEC-B#3 / SEC-F#1: the Shopify-controlled
+// shop.email field is editable by any store admin and cannot prove ownership of a
+// Partna account. Email-match installs now fall through to Path C — the setup-token
+// flow, which forces Supabase JWT auth before the integration is linked.
 
 // Builds a valid Shopify OAuth callback request with a correctly computed HMAC.
 function makeShopifyCallbackRequest(string $shop, string $nonce, string $secret): Request
@@ -55,7 +59,7 @@ beforeEach(function () {
     // Schema-prefixed tables — use shared helper to avoid DDL drift
     setupProfessionalsTable();
 
-    // Needed for Path A check (must be empty to reach Path B/C in these tests)
+    // Needed for Path A check (must be empty to reach Path C in these tests)
     $conn->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
         id TEXT PRIMARY KEY,
         professional_id TEXT,
@@ -67,13 +71,15 @@ beforeEach(function () {
     )');
 });
 
-it('takes Path B and calls handleExistingBrandConnect when shop email matches a professional primary_email', function () {
+it('does NOT auto-link when shop email matches an existing professional — falls through to Path C', function () {
     $shop = 'matching-shop.myshopify.com';
     $shopEmail = 'owner@matchedshop.com';
     $nonce = 'testnonce_'.Str::random(8);
     $secret = config('services.shopify.api_secret');
 
-    // Seed a professional whose primary_email matches the Shopify store email
+    // Seed a professional whose primary_email matches the Shopify store email —
+    // pre-fix code would silently link this shop into Josh's account. New behavior:
+    // ignore the email match and force the setup-token + Supabase-auth flow.
     $proId = Str::uuid()->toString();
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $proId,
@@ -88,32 +94,16 @@ it('takes Path B and calls handleExistingBrandConnect when shop email matches a 
         'updated_at' => now()->toDateTimeString(),
     ]);
 
-    // Fake Shopify HTTP calls
     Http::fake([
         "https://{$shop}/admin/oauth/access_token" => Http::response(['access_token' => 'shpat_fake'], 200),
         "https://{$shop}/admin/api/*/shop.json" => Http::response(['shop' => ['email' => $shopEmail, 'id' => 99]], 200),
     ]);
 
-    // Mock BrandSignupService so we don't need full DB setup for integration/site/etc.
-    $professional = Professional::on('pgsql')->find($proId);
-    $fakeSite = Mockery::mock(\App\Models\Core\Site\Site::class)->makePartial();
-    $fakeIntegration = Mockery::mock(\App\Models\Core\Professional\ProfessionalIntegration::class)->makePartial();
-    $fakeResult = new BrandSignupResult(
-        professional: $professional,
-        site: $fakeSite,
-        brandProfile: null,
-        integration: $fakeIntegration,
-        isReinstall: false,
-    );
-
+    // handleExistingBrandConnect must never be invoked — it was deleted along with Path B.
     $brandSignup = Mockery::mock(BrandSignupService::class);
-    $brandSignup->shouldReceive('handleExistingBrandConnect')
-        ->once()
-        ->with(Mockery::type(Professional::class), $shop, 'shpat_fake', Mockery::any(), Mockery::any())
-        ->andReturn($fakeResult);
+    $brandSignup->shouldNotReceive('handleExistingBrandConnect');
     app()->instance(BrandSignupService::class, $brandSignup);
 
-    // Set up nonce in cache
     cache()->put("shopify_oauth_nonce_{$shop}", $nonce, now()->addMinutes(10));
 
     $request = makeShopifyCallbackRequest($shop, $nonce, $secret);
@@ -121,8 +111,8 @@ it('takes Path B and calls handleExistingBrandConnect when shop email matches a 
     $response = $controller->callback($request);
 
     expect($response->getStatusCode())->toBe(302);
-    // Redirect should be to the app base path, NOT to /setup
-    expect($response->headers->get('Location'))->not->toContain('setup');
+    // Path C redirect — to the setup wizard with a token. Supabase auth happens there.
+    expect($response->headers->get('Location'))->toContain('shopify_setup_token');
 });
 
 it('falls through to Path C when shop email does not match any professional primary_email', function () {
@@ -130,8 +120,6 @@ it('falls through to Path C when shop email does not match any professional prim
     $shopEmail = 'nomatch@shopify.com';
     $nonce = 'testnonce_'.Str::random(8);
     $secret = config('services.shopify.api_secret');
-
-    // No professional in DB with this email
 
     Http::fake([
         "https://{$shop}/admin/oauth/access_token" => Http::response(['access_token' => 'shpat_fake'], 200),

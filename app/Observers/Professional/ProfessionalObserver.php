@@ -4,6 +4,7 @@ namespace App\Observers\Professional;
 
 use App\Jobs\Cloudflare\SyncSubdomainToKvJob;
 use App\Models\Core\Professional\Professional;
+use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Cache\ProfessionalCacheService;
 use Illuminate\Support\Facades\Log;
 
@@ -11,6 +12,8 @@ use Illuminate\Support\Facades\Log;
 // Also syncs Cloudflare KV when handle changes (subdomain routing table).
 class ProfessionalObserver
 {
+    use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function __construct(
@@ -22,10 +25,10 @@ class ProfessionalObserver
         try {
             $this->professionalCache->invalidateProfessional($professional);
         } catch (\Throwable $e) {
-            Log::warning('Professional cache invalidation failed on update', [
+            Log::warning('Professional cache invalidation failed on update', $this->logContext(__METHOD__, [
                 'professional_id' => $professional->id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
 
         // Handle change → KV needs to re-sync. SyncSubdomainToKvJob now writes
@@ -38,10 +41,10 @@ class ProfessionalObserver
             try {
                 SyncSubdomainToKvJob::dispatch((string) $professional->id);
             } catch (\Throwable $e) {
-                Log::warning('ProfessionalObserver: KV sync dispatch failed on handle change', [
+                Log::warning('ProfessionalObserver: KV sync dispatch failed on handle change', $this->logContext(__METHOD__, [
                     'professional_id' => $professional->id,
                     'message' => $e->getMessage(),
-                ]);
+                ]));
             }
         }
     }
@@ -51,10 +54,10 @@ class ProfessionalObserver
         try {
             $this->professionalCache->invalidateProfessional($professional);
         } catch (\Throwable $e) {
-            Log::warning('Professional cache invalidation failed on delete', [
+            Log::warning('Professional cache invalidation failed on delete', $this->logContext(__METHOD__, [
                 'professional_id' => $professional->id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 
@@ -63,10 +66,10 @@ class ProfessionalObserver
         try {
             $this->professionalCache->invalidateProfessional($professional);
         } catch (\Throwable $e) {
-            Log::warning('Professional cache invalidation failed on restore', [
+            Log::warning('Professional cache invalidation failed on restore', $this->logContext(__METHOD__, [
                 'professional_id' => $professional->id,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 }

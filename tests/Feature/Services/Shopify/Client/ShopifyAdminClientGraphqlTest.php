@@ -3,6 +3,7 @@
 use App\Exceptions\Shopify\ShopifyGraphQLException;
 use App\Exceptions\Shopify\ShopifyTransportException;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\ShopDomain;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Redis;
 
@@ -13,14 +14,15 @@ beforeEach(function () {
     Redis::del('shopify:cost:'.sha1('query { ok }'));
     Redis::del('shopify:cost:'.sha1('query test { ok }'));
     $this->client = app(ShopifyAdminClient::class);
-    $this->shop = 'test.myshopify.com';
+    $this->shopName = 'test.myshopify.com';
+    $this->shop = ShopDomain::fromUntrusted($this->shopName);
     $this->token = 'shpat_test';
     $this->version = '2025-01';
 });
 
 it('returns the Response object on a successful GraphQL call', function () {
     Http::fake([
-        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+        "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::response([
             'data' => ['shop' => ['id' => 'gid://shopify/Shop/1']],
             'extensions' => [
                 'cost' => [
@@ -43,7 +45,7 @@ it('returns the Response object on a successful GraphQL call', function () {
 
 it('throws ShopifyGraphQLException when top-level errors are present (non-throttled)', function () {
     Http::fake([
-        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+        "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::response([
             'errors' => [
                 ['message' => 'Field "foo" does not exist', 'extensions' => ['code' => 'undefinedField']],
             ],
@@ -56,7 +58,7 @@ it('throws ShopifyGraphQLException when top-level errors are present (non-thrott
 
 it('throws ShopifyTransportException on non-2xx HTTP status', function () {
     Http::fake([
-        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response('Internal Server Error', 500),
+        "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::response('Internal Server Error', 500),
     ]);
 
     expect(fn () => $this->client->graphql($this->shop, $this->token, $this->version, 'query { shop { id } }'))
@@ -65,7 +67,7 @@ it('throws ShopifyTransportException on non-2xx HTTP status', function () {
 
 it('sends the access token in the X-Shopify-Access-Token header', function () {
     Http::fake([
-        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+        "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::response([
             'data' => ['ok' => true],
             'extensions' => ['cost' => ['requestedQueryCost' => 1, 'actualQueryCost' => 1, 'throttleStatus' => ['maximumAvailable' => 1000, 'currentlyAvailable' => 999, 'restoreRate' => 100]]],
         ], 200),
@@ -80,7 +82,7 @@ it('sends the access token in the X-Shopify-Access-Token header', function () {
 
 it('reconciles the local bucket from throttleStatus after each response', function () {
     Http::fake([
-        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+        "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::response([
             'data' => ['ok' => true],
             'extensions' => [
                 'cost' => [
@@ -100,13 +102,13 @@ it('reconciles the local bucket from throttleStatus after each response', functi
 
     // After reconcile, local bucket should report 450 available.
     $tracker = app(\App\Services\Shopify\Client\ShopifyBudgetTracker::class);
-    $result = $tracker->tryAcquire($this->shop, 50, 1000, 100);
+    $result = $tracker->tryAcquire($this->shopName, 50, 1000, 100);
     expect($result['remaining'])->toBe(400);
 });
 
 it('records actual cost for future query estimates', function () {
     Http::fake([
-        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+        "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::response([
             'data' => ['ok' => true],
             'extensions' => [
                 'cost' => [
@@ -133,7 +135,7 @@ it('records actual cost for future query estimates', function () {
 
 it('retries in-process on a THROTTLED response and succeeds when budget recovers', function () {
     Http::fake([
-        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::sequence()
+        "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::sequence()
             ->push([
                 'errors' => [
                     ['message' => 'Throttled', 'extensions' => ['code' => 'THROTTLED']],
@@ -172,7 +174,7 @@ it('retries in-process on a THROTTLED response and succeeds when budget recovers
 
 it('throws ShopifyThrottledException when max in-process retries are exhausted', function () {
     Http::fake([
-        "https://{$this->shop}/admin/api/{$this->version}/graphql.json" => Http::response([
+        "https://{$this->shopName}/admin/api/{$this->version}/graphql.json" => Http::response([
             'errors' => [
                 ['message' => 'Throttled', 'extensions' => ['code' => 'THROTTLED']],
             ],

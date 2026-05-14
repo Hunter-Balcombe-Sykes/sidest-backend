@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\ShopDomain;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
@@ -252,7 +253,7 @@ class MigrateMetafieldNamespaceCommand extends Command
 
         do {
             $variables = $cursor !== null ? ['after' => $cursor] : [];
-            $response = $client->graphql($shopDomain, $accessToken, $apiVersion, self::PRODUCTS_QUERY, $variables);
+            $response = $client->graphql(ShopDomain::fromUntrusted($shopDomain), $accessToken, $apiVersion, self::PRODUCTS_QUERY, $variables);
             $edges = $response->json('data.products.edges', []);
             $hasNextPage = (bool) $response->json('data.products.pageInfo.hasNextPage');
 
@@ -323,7 +324,7 @@ class MigrateMetafieldNamespaceCommand extends Command
 
             // Shopify's metafieldsSet accepts up to 25 per call.
             foreach (array_chunk($batch, 25) as $chunk) {
-                $result = $client->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELDS_SET, ['metafields' => $chunk]);
+                $result = $client->graphql(ShopDomain::fromUntrusted($shopDomain), $accessToken, $apiVersion, self::METAFIELDS_SET, ['metafields' => $chunk]);
                 $errors = $result->json('data.metafieldsSet.userErrors', []);
                 if (! empty($errors)) {
                     $this->error('  metafieldsSet error: '.json_encode($errors));
@@ -345,7 +346,7 @@ class MigrateMetafieldNamespaceCommand extends Command
         string $apiVersion,
         bool $dryRun,
     ): array {
-        $response = $client->graphql($shopDomain, $accessToken, $apiVersion, self::SHOP_QUERY);
+        $response = $client->graphql(ShopDomain::fromUntrusted($shopDomain), $accessToken, $apiVersion, self::SHOP_QUERY);
         $shop = $response->json('data.shop', []);
         $shopGid = (string) ($shop['id'] ?? '');
 
@@ -381,7 +382,7 @@ class MigrateMetafieldNamespaceCommand extends Command
             return [count($toWrite), 0];
         }
 
-        $result = $client->graphql($shopDomain, $accessToken, $apiVersion, self::METAFIELDS_SET, ['metafields' => $toWrite]);
+        $result = $client->graphql(ShopDomain::fromUntrusted($shopDomain), $accessToken, $apiVersion, self::METAFIELDS_SET, ['metafields' => $toWrite]);
         $errors = $result->json('data.metafieldsSet.userErrors', []);
         if (! empty($errors)) {
             $this->error('  Shop metafields error: '.json_encode($errors));
@@ -401,7 +402,7 @@ class MigrateMetafieldNamespaceCommand extends Command
         $deleted = 0;
 
         foreach (['PRODUCT', 'PRODUCTVARIANT', 'SHOP'] as $ownerType) {
-            $response = $client->graphql($shopDomain, $accessToken, $apiVersion, self::DEFINITIONS_QUERY, [
+            $response = $client->graphql(ShopDomain::fromUntrusted($shopDomain), $accessToken, $apiVersion, self::DEFINITIONS_QUERY, [
                 'ownerType' => $ownerType,
                 'namespace' => 'sidest',
                 'first' => 50,
@@ -420,7 +421,7 @@ class MigrateMetafieldNamespaceCommand extends Command
 
                 // deleteAllAssociatedMetafields: false — preserve the raw values
                 // even after the definition is gone. They'll be orphaned but harmless.
-                $client->graphql($shopDomain, $accessToken, $apiVersion, self::DEFINITION_DELETE, [
+                $client->graphql(ShopDomain::fromUntrusted($shopDomain), $accessToken, $apiVersion, self::DEFINITION_DELETE, [
                     'id' => $id,
                     'deleteAllAssociatedMetafields' => false,
                 ]);

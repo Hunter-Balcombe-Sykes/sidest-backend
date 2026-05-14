@@ -52,6 +52,10 @@ class VerifySupabaseJwt
             return response()->json(['message' => 'Missing Bearer token'], 401);
         }
 
+        // Resolved once so both JWKS-fail and auth-server-fail logs in the same
+        // request share the same value — critical for Nightwatch trace correlation.
+        $requestId = $request->header('X-Request-Id', (string) str()->uuid());
+
         // 1) Try verify via JWKS (asymmetric signing)
         try {
             $claims = $this->verifyWithJwks($token);
@@ -73,6 +77,8 @@ class VerifySupabaseJwt
             // Log every JWKS failure before falling back — repeated infra-level failures
             // (e.g. network blocking JWKS fetches) are security-relevant and must be visible.
             Log::warning('JWT JWKS verification failed, falling back to auth server', [
+                'request_id' => $requestId,
+                'operation' => __METHOD__,
                 'reason' => $e->getMessage(),
                 'ip' => $request->ip(),
             ]);
@@ -97,6 +103,8 @@ class VerifySupabaseJwt
                 return $next($request);
             } catch (\Throwable $e2) {
                 Log::warning('JWT verification failed', [
+                    'request_id' => $requestId,
+                    'operation' => __METHOD__,
                     'reason' => $e2->getMessage(),
                     'ip' => $request->ip(),
                 ]);
@@ -155,9 +163,16 @@ class VerifySupabaseJwt
 
         $key = $this->resolveSigningKey((string) $kid, (string) $alg);
 
-        // Decode + verify signature + exp/nbf automatically
-        JWT::$leeway = 60; // clock skew tolerance
-        $decoded = JWT::decode($jwt, $key);
+        // Decode + verify signature + exp/nbf automatically.
+        // Restore leeway in finally — JWT::$leeway is process-wide static state that
+        // would bleed into every subsequent JWT::decode in this worker without restoration.
+        $priorLeeway = JWT::$leeway;
+        JWT::$leeway = 60; // Supabase tokens can arrive with up to ~60s clock skew
+        try {
+            $decoded = JWT::decode($jwt, $key);
+        } finally {
+            JWT::$leeway = $priorLeeway;
+        }
 
         return json_decode(json_encode($decoded), true) ?: [];
     }

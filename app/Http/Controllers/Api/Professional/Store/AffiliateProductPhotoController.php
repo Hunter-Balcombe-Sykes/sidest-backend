@@ -310,6 +310,7 @@ class AffiliateProductPhotoController extends ApiController
                 );
             }
         } catch (Throwable $e) {
+            report($e);
             Log::error('Product photo: image processing dispatch failed', [
                 'image_id' => $imageId,
                 'error' => $e->getMessage(),

@@ -98,7 +98,7 @@
 
 ## P3 — Nice to have
 
-- [ ] **#BLOT-2** · P3 — Stale "custom domain" comment in `BrandPartnerSiteSettingsSync::syncWithoutPersist` after custom-domain removal
+- [x] **#BLOT-2** · P3 — Stale "custom domain" comment in `BrandPartnerSiteSettingsSync::syncWithoutPersist` after custom-domain removal
     - **Where:** app/Services/Professional/BrandPartnerSiteSettingsSync.php (comment block inside `syncWithoutPersist`, above `$brandPartner['storefront_base_url'] = ...`)
     - **Affects:** Developers reading the brand-partner settings sync code — the comment implies a conditional custom-domain branch that no longer exists, causing a search for code that was deleted weeks ago.
     - **Effort:** S (~0.5–1h)
@@ -121,7 +121,7 @@
         }
         ```
 
-- [ ] **#BLOT-3** · P3 — Dead `$onboardingComplete` parameter in `BrandOnboardingReadinessService::syncBrandStatus`
+- [x] **#BLOT-3** · P3 — Dead `$onboardingComplete` parameter in `BrandOnboardingReadinessService::syncBrandStatus`
     - **Where:** app/Services/Professional/BrandOnboardingReadinessService.php:62 (private method `syncBrandStatus`)
     - **Affects:** Developers maintaining the checklist — the parameter implies a short-circuit optimisation (skip recompute when already known) that was never implemented.
     - **Effort:** S (~0.5–1h)

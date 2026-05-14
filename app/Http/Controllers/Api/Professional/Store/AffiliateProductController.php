@@ -18,6 +18,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class AffiliateProductController extends ApiController
 {
@@ -41,6 +42,8 @@ class AffiliateProductController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 500);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach product catalog. Please try again.', 502);
         }
 
@@ -67,6 +70,8 @@ class AffiliateProductController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 500);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach product catalog. Please try again.', 502);
         }
 
@@ -115,6 +120,8 @@ class AffiliateProductController extends ApiController
                 return $this->error('This product is not available for selection.', 422);
             }
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach product catalog. Please try again.', 502);
         }
 
@@ -252,6 +259,7 @@ class AffiliateProductController extends ApiController
         try {
             $enabled = $this->catalogService->getEnabledVariantGidsForProduct($brandId, $productGid);
         } catch (\Throwable $e) {
+            report($e);
             $errorResponse = $this->error('Unable to reach product catalog. Please try again.', 502);
 
             return null;
@@ -380,6 +388,8 @@ class AffiliateProductController extends ApiController
             try {
                 $this->catalogService->seedDefaultSelections($pro, $data['brand_professional_id'], clearExisting: true);
             } catch (\Throwable $e) {
+                report($e);
+
                 return $this->error('Unable to reset selections. Please try again.', 502);
             }
 
@@ -395,7 +405,12 @@ class AffiliateProductController extends ApiController
             try {
                 $this->catalogService->seedDefaultSelections($pro, (string) $brandId, clearExisting: true);
             } catch (\Throwable $e) {
-                // Log but continue with remaining brands
+                report($e);
+                Log::warning('Failed to reset default selections for brand', [
+                    'affiliate_professional_id' => $pro->id,
+                    'brand_professional_id' => $brandId,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 

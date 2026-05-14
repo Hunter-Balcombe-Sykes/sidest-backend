@@ -49,6 +49,8 @@ class BrandCollectionController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 500);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
 
@@ -86,6 +88,8 @@ class BrandCollectionController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 502);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
 
@@ -121,6 +125,8 @@ class BrandCollectionController extends ApiController
         } catch (\RuntimeException $e) {
             return $this->error($e->getMessage(), $e->getCode() ?: 502);
         } catch (\Throwable $e) {
+            report($e);
+
             return $this->error('Unable to reach Shopify. Please try again.', 502);
         }
 

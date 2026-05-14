@@ -21,6 +21,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class BrandStoreSettingsController extends ApiController
 {
@@ -52,6 +53,11 @@ class BrandStoreSettingsController extends ApiController
             $resolved = $this->catalogService->resolveBrandIntegration($pro);
             $metadata = $resolved['metadata'];
         } catch (\Throwable $e) {
+            report($e);
+            Log::warning('Failed to resolve brand integration in store settings show', [
+                'professional_id' => $pro->id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         $brandProfile = BrandProfile::where('professional_id', $pro->id)->first();
@@ -212,6 +218,8 @@ class BrandStoreSettingsController extends ApiController
             } catch (\RuntimeException $e) {
                 return $this->error($e->getMessage(), $e->getCode() ?: 502);
             } catch (\Throwable $e) {
+                report($e);
+
                 return $this->error('Unable to reach Shopify. Please try again.', 502);
             }
         }
@@ -231,7 +239,8 @@ class BrandStoreSettingsController extends ApiController
             try {
                 $resolved = $this->catalogService->resolveBrandIntegration($pro);
                 $freshMetadata = is_array($resolved['integration']->provider_metadata) ? $resolved['integration']->provider_metadata : [];
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                report($e);
                 $freshMetadata = [];
             }
         }

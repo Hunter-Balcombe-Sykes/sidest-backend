@@ -101,12 +101,6 @@ return [
         'secret_key' => env('CLOUDFLARE_TURNSTILE_SECRET_KEY'),
     ],
 
-    // Shared key for Sidest-Embedded Shopify app → backend calls.
-    // Set in both .env (Laravel) and PARTNA_EMBEDDED_API_KEY env var in the Remix app.
-    'embedded' => [
-        'api_key' => env('PARTNA_EMBEDDED_API_KEY', env('SIDEST_EMBEDDED_API_KEY')),
-    ],
-
     'twitch' => [
         'client_id' => env('TWITCH_CLIENT_ID'),
         'client_secret' => env('TWITCH_CLIENT_SECRET'),
@@ -119,7 +113,18 @@ return [
     'shopify' => [
         'api_key' => env('SHOPIFY_API_KEY'),
         'api_secret' => env('SHOPIFY_API_SECRET'),
-        'api_version' => env('SHOPIFY_API_VERSION', '2025-01'),
+        // Max times a single JTI may be used within the 120s replay-cache window.
+        // Default 25: covers Remix SSR fan-out (root + route loaders each making
+        // 1–3 backend calls with the same JWT) while blocking brute-force replay.
+        // Override to 1 in tests to keep strict one-time-use assertions.
+        'jti_max_uses' => (int) env('SHOPIFY_JTI_MAX_USES', 25),
+        // 2026-04 (April 26) is the current stable Admin API release as of
+        // May 2026. Bumped from 2025-01 alongside Partna-Shopify-App's
+        // ApiVersion.April26 — the two MUST move together to keep the
+        // EmbeddedSetupController validator (validateShopifyAccessToken) and
+        // the Remix-side Admin API client on the same version.
+        // 2026-07 is still RC until July 1 — do not pin RC versions.
+        'api_version' => env('SHOPIFY_API_VERSION', '2026-04'),
         'app_scopes' => env('SHOPIFY_APP_SCOPES', ''),
         'webhook_secret' => env('SHOPIFY_WEBHOOK_SECRET', env('SHOPIFY_API_SECRET')),
         'fallback_secret' => env('SHOPIFY_FALLBACK_SECRET'),

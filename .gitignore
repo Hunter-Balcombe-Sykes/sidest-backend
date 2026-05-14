@@ -31,6 +31,7 @@ Thumbs.db
 
 # Audit orchestrator runtime state
 .audit-work/state.json
+.audit-work/state.json.before-*
 .audit-work/questions/
 .audit-work/blocked/
 .audit-work/logs/

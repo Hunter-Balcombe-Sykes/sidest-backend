@@ -72,6 +72,7 @@ class InviteExpirySweepJob implements ShouldQueue
                     } catch (\Throwable $e) {
                         Log::warning('InviteExpirySweepJob failed for invite', [
                             'invite_id' => $invite->id,
+                            'brand_professional_id' => $brandId,
                             'message' => $e->getMessage(),
                         ]);
                     }

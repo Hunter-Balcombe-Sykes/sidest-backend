@@ -5,6 +5,13 @@ namespace App\Http\Controllers\Api\Internal;
 use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
+use App\Http\Requests\Api\Internal\Embedded\ProvisionDomainTxtRequest;
+use App\Http\Requests\Api\Internal\Embedded\ProvisionShopifyIntegrationRequest;
+use App\Http\Requests\Api\Internal\Embedded\SaveBusinessDetailsRequest;
+use App\Http\Requests\Api\Internal\Embedded\SaveDeploymentTokenRequest;
+use App\Http\Requests\Api\Internal\Embedded\SaveIdentityRequest;
+use App\Http\Requests\Api\Internal\Embedded\SetupDomainRequest;
+use App\Http\Requests\Api\Internal\Embedded\UpdateSettingRequest;
 use App\Jobs\Shopify\CreateShopifyCollectionsJob;
 use App\Jobs\Shopify\CreateShopifyMetafieldsJob;
 use App\Jobs\Shopify\CreateShopifySalesChannelJob;
@@ -34,9 +41,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-// Internal endpoints consumed by the Sidest-Embedded Shopify app wizard.
-// Auth: VerifyEmbeddedApiKey middleware resolves the brand via X-Shopify-Shop
-// and attaches 'embedded_professional_id' to the request.
+// Internal endpoints consumed by the Partna embedded Shopify app wizard.
+// Auth: shopify.session middleware validates the App Bridge JWT and stashes
+// 'embedded_professional_id' + 'embedded_shop_domain' on the request.
 class EmbeddedSetupController extends ApiController
 {
     use NormalizesShopDomain;
@@ -130,14 +137,9 @@ class EmbeddedSetupController extends ApiController
     /**
      * Save step 1 brand identity fields to the Professional record.
      */
-    public function saveIdentity(Request $request): JsonResponse
+    public function saveIdentity(SaveIdentityRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'name' => ['sometimes', 'string', 'max:255'],
-            'contact_email' => ['sometimes', 'email', 'max:255'],
-            'contact_number' => ['sometimes', 'string', 'max:50'],
-            'website_url' => ['sometimes', 'nullable', 'url', 'max:512'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -172,15 +174,9 @@ class EmbeddedSetupController extends ApiController
     /**
      * Save step 2 business detail fields to the BrandProfile record.
      */
-    public function saveBusinessDetails(Request $request): JsonResponse
+    public function saveBusinessDetails(SaveBusinessDetailsRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'legal_business_name' => ['required', 'string', 'max:255'],
-            'abn' => ['required', 'string', 'max:14'],
-            'business_type' => ['required', 'string', 'max:100'],
-            'industries' => ['required', 'array'],
-            'industries.*' => ['string', 'max:100'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -208,12 +204,9 @@ class EmbeddedSetupController extends ApiController
      *
      * Accepted keys: default_commission_rate, theme_id, setup_complete
      */
-    public function updateSetting(Request $request): JsonResponse
+    public function updateSetting(UpdateSettingRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'key' => ['required', 'string', 'in:default_commission_rate,theme_id,setup_complete'],
-            'value' => ['required', 'string'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -249,12 +242,9 @@ class EmbeddedSetupController extends ApiController
      * Store the Oxygen deployment token and optionally the storefront ID.
      * The token is encrypted at-rest via the model's encrypted cast.
      */
-    public function saveDeploymentToken(Request $request): JsonResponse
+    public function saveDeploymentToken(SaveDeploymentTokenRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'token' => ['required', 'string', 'max:512'],
-            'storefront_id' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -538,14 +528,11 @@ class EmbeddedSetupController extends ApiController
      *
      * @return JsonResponse { data: { domain: string } }
      */
-    public function setupDomain(Request $request): JsonResponse
+    public function setupDomain(SetupDomainRequest $request): JsonResponse
     {
-        $request->validate([
-            'oxygen_storefront_id' => ['required', 'string'],
-            // Subdomain input is validated but we use the brand's canonical site subdomain — not
-            // this input — for security. The field is accepted to match client expectations.
-            'subdomain' => ['required', 'string', 'regex:/^[a-z0-9][a-z0-9-]{0,62}$/'],
-        ]);
+        // Subdomain input is validated for format but we use the brand's canonical
+        // site subdomain — never the request input — for the CNAME hostname (see below).
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -568,7 +555,7 @@ class EmbeddedSetupController extends ApiController
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],
             [
-                'oxygen_storefront_id' => (string) $request->input('oxygen_storefront_id'),
+                'oxygen_storefront_id' => (string) $data['oxygen_storefront_id'],
             ],
         );
 
@@ -590,11 +577,9 @@ class EmbeddedSetupController extends ApiController
      *
      * @return JsonResponse { data: { record_name: string } }
      */
-    public function provisionDomainTxt(Request $request): JsonResponse
+    public function provisionDomainTxt(ProvisionDomainTxtRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'txt_value' => ['required', 'string', 'max:255'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
@@ -637,18 +622,18 @@ class EmbeddedSetupController extends ApiController
      *
      * @return JsonResponse { data: { provisioned: bool } }
      */
-    public function provisionShopifyIntegration(Request $request): JsonResponse
+    public function provisionShopifyIntegration(ProvisionShopifyIntegrationRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'access_token' => ['required', 'string', 'max:512'],
-            'shop_id' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'scopes' => ['sometimes', 'nullable', 'string', 'max:4096'],
-        ]);
+        $data = $request->validated();
 
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
         $professional = Professional::findOrFail($professionalId);
+        // Shop domain comes from the JWT `dest` claim, stashed by VerifyShopifySessionToken.
+        // The legacy X-Shopify-Shop header was removed when the static-key auth path
+        // was deleted — trusting it would re-introduce the cross-tenant compromise risk
+        // that motivated the JWT migration in the first place.
         $shopDomain = $this->normalizeShopDomain(
-            strtolower(trim((string) $request->header('X-Shopify-Shop', '')))
+            (string) $request->attributes->get('embedded_shop_domain', '')
         );
 
         $existing = ProfessionalIntegration::query()
@@ -714,22 +699,30 @@ class EmbeddedSetupController extends ApiController
             && $existing->access_token === $data['access_token'];
 
         // Validate-before-store: the embedded app re-posts session.accessToken on
-        // every load, and historically a bad token (rotated, revoked, scope mismatch)
-        // could overwrite a previously-working one — every async job afterwards 401s
-        // until the merchant reinstalls. Verify the candidate against Shopify Admin
-        // API before persisting. Skip on no-op refreshes (token unchanged) and skip
-        // on first install (no prior token to protect; refusal would block onboarding).
-        $tokenChanged = $existing !== null && $existing->access_token !== $data['access_token'];
-        if ($tokenChanged && ! $this->validateShopifyAccessToken($shopDomain, $data['access_token'])) {
+        // every load. Validate every persist against Shopify Admin API — invalid
+        // tokens (rotated, revoked, scope-mismatch) and cross-shop mixups (shop A
+        // submitting shop B's access token) get rejected before they overwrite a
+        // working credential. Transient Shopify outages return valid=true so we
+        // don't punish merchants for backend hiccups; only definitive 401 or
+        // shop-domain-mismatch refuse.
+        $validation = $this->validateShopifyAccessToken($shopDomain, $data['access_token']);
+        if (! $validation['valid']) {
             Log::warning('Shopify provision-integration: token rejected by Shopify; refusing to overwrite existing token.', [
                 'professional_id' => $professionalId,
                 'shop_domain' => $shopDomain,
+                'reason' => $validation['reason'],
             ]);
 
-            return $this->error(
-                'Shopify rejected the new access token. Uninstall and reinstall the Partna app from Shopify admin to issue a fresh credential.',
-                422,
-            );
+            // Structured `reason` field lets Remix auto-heal — when the Shopify
+            // app is uninstalled+reinstalled, Shopify revokes the old access
+            // token but the Remix-side PrismaSession still caches it. Without
+            // a typed reason, Remix would have to string-match the message to
+            // know whether to clear its session cache. See
+            // `Partna-Shopify-App/app/routes/app.tsx` for the consumer.
+            return response()->json([
+                'message' => 'Shopify rejected the new access token. The Remix-side SDK session will be cleared so the next embedded load runs Token Exchange to issue a fresh credential.',
+                'reason' => 'shopify_token_rejected',
+            ], 422);
         }
 
         $integration = ProfessionalIntegration::updateOrCreate(
@@ -841,37 +834,75 @@ class EmbeddedSetupController extends ApiController
 
     /**
      * Verify a candidate Shopify access token works against Shopify Admin API
-     * before persisting it. Prevents the documented foot-gun where a bad token
-     * (rotated/revoked/scope-mismatch) overwrites a working one and silently
-     * breaks every async job until the merchant reinstalls.
+     * before persisting it. Asserts both that the token is accepted (200) and
+     * that the shop it returns matches the requesting shop — guards against
+     * the cross-shop bug where shop A submits shop B's access token.
      *
-     * 200 → valid, return true.
-     * 401 → invalid, return false (caller must NOT overwrite existing token).
-     * Other (5xx, network error, timeout) → return true so we don't punish
-     * merchants for transient Shopify outages or local network blips.
+     * Outcomes:
+     *   200 + matching domain   → ['valid' => true,  'reason' => null]
+     *   200 + domain mismatch   → ['valid' => false, 'reason' => 'shop_domain_mismatch']
+     *   401                     → ['valid' => false, 'reason' => 'invalid_token']
+     *   5xx / network error     → ['valid' => true,  'reason' => 'transient_outage']
+     *                             (don't punish merchants for Shopify hiccups)
+     *   anything else           → ['valid' => false, 'reason' => 'unexpected_status_<code>']
+     *
+     * @return array{valid: bool, reason: ?string}
      */
-    private function validateShopifyAccessToken(string $shopDomain, string $accessToken): bool
+    private function validateShopifyAccessToken(string $shopDomain, string $accessToken): array
     {
+        $shopDomain = strtolower(trim($shopDomain, ' /'));
+
         if ($accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
-            return false;
+            return ['valid' => false, 'reason' => 'malformed_input'];
         }
 
-        $apiVersion = (string) config('services.shopify.api_version', '2025-01');
+        $apiVersion = (string) config('services.shopify.api_version', '2026-04');
         $url = "https://{$shopDomain}/admin/api/{$apiVersion}/shop.json";
 
         try {
-            $response = Http::withHeaders(['X-Shopify-Access-Token' => $accessToken])
-                ->timeout(8)
-                ->get($url);
-
-            return $response->status() !== 401;
+            $response = Http::withHeaders([
+                'X-Shopify-Access-Token' => $accessToken,
+                'Accept' => 'application/json',
+            ])->timeout(10)->get($url);
         } catch (\Throwable $e) {
-            Log::warning('Shopify provision-integration: token validation request failed; allowing write.', [
+            // Class name only — message can contain URLs / tokens.
+            Log::warning('shopify_access_token_validation_network_error', [
                 'shop_domain' => $shopDomain,
-                'error' => $e->getMessage(),
+                'error_class' => class_basename($e),
             ]);
 
-            return true;
+            return ['valid' => true, 'reason' => 'transient_outage'];
         }
+
+        if ($response->status() === 401) {
+            return ['valid' => false, 'reason' => 'invalid_token'];
+        }
+
+        if ($response->status() >= 500) {
+            Log::warning('shopify_access_token_validation_5xx', [
+                'shop_domain' => $shopDomain,
+                'status' => $response->status(),
+            ]);
+
+            return ['valid' => true, 'reason' => 'transient_outage'];
+        }
+
+        if (! $response->successful()) {
+            return ['valid' => false, 'reason' => 'unexpected_status_'.$response->status()];
+        }
+
+        $body = $response->json();
+        $responseDomain = strtolower(trim((string) ($body['shop']['myshopify_domain'] ?? ''), ' /'));
+
+        if ($responseDomain === '' || $responseDomain !== $shopDomain) {
+            Log::warning('shopify_access_token_domain_mismatch', [
+                'expected_shop_domain' => $shopDomain,
+                'response_shop_domain' => $responseDomain,
+            ]);
+
+            return ['valid' => false, 'reason' => 'shop_domain_mismatch'];
+        }
+
+        return ['valid' => true, 'reason' => null];
     }
 }

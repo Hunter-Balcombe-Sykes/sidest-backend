@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
 // End-to-end coverage for CreateShopifyAffiliateDiscountJob — dispatched at
-// the end of the Shopify OAuth chain and by sidest:install-affiliate-discount
+// the end of the Shopify OAuth chain and by partna:install-affiliate-discount
 // for existing brands. Stubs the Shopify Admin API so we can assert the exact
 // GraphQL calls the job makes and the provider_metadata state transitions it
 // writes.

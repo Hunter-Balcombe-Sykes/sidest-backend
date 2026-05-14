@@ -36,11 +36,13 @@ class ProcessImageVariantsJob implements ShouldQueue
      * @param  string  $originalPath  Path of the original on the media disk.
      * @param  string  $imageId  UUID of the SiteMedia row.
      * @param  string  $basePath  Directory prefix for variant storage.
+     * @param  string  $siteId  UUID of the owning Site — threaded into log context for Nightwatch correlation.
      */
     public function __construct(
         public readonly string $originalPath,
         public readonly string $imageId,
         public readonly string $basePath,
+        public readonly string $siteId = '',
     ) {
         $this->onQueue('images');
     }
@@ -57,6 +59,7 @@ class ProcessImageVariantsJob implements ShouldQueue
         if (! $siteMedia) {
             Log::warning('ProcessImageVariantsJob: SiteMedia row no longer exists, skipping.', [
                 'image_id' => $this->imageId,
+                'site_id' => $this->siteId,
             ]);
 
             return;
@@ -116,6 +119,7 @@ class ProcessImageVariantsJob implements ShouldQueue
                 originalTmpPath: $localTmp,
                 imageId: $this->imageId,
                 basePath: $this->basePath,
+                siteId: $this->siteId !== '' ? $this->siteId : (string) ($siteMedia->site_id ?? ''),
             );
 
             SiteMedia::query()
@@ -141,6 +145,7 @@ class ProcessImageVariantsJob implements ShouldQueue
             // retry machinery that $tries = 3 would otherwise trigger.
             Log::warning('ProcessImageVariantsJob: unprocessable image, failing without retry.', [
                 'image_id' => $this->imageId,
+                'site_id' => $this->siteId !== '' ? $this->siteId : (string) ($siteMedia->site_id ?? ''),
                 'error' => $e->getMessage(),
             ]);
 

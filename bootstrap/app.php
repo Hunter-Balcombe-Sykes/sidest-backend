@@ -4,7 +4,6 @@ use App\Http\Middleware\AddETagHeaders;
 use App\Http\Middleware\AddPublicCacheHeaders;
 use App\Http\Middleware\Auth\EnsurePartnaAdmin;
 use App\Http\Middleware\Auth\EnsurePartnaStaff;
-use App\Http\Middleware\Auth\VerifyEmbeddedApiKey;
 use App\Http\Middleware\Auth\VerifyHydrogenApiKey;
 use App\Http\Middleware\Auth\VerifyShopifySessionToken;
 use App\Http\Middleware\Auth\VerifySupabaseJwt;
@@ -12,9 +11,9 @@ use App\Http\Middleware\BrandFundingGate;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\FeatureGate;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
-use App\Http\Middleware\VerifyTurnstileCaptcha;
 use App\Http\Middleware\RequirePlan;
 use App\Http\Middleware\SecureHeaders;
+use App\Http\Middleware\VerifyTurnstileCaptcha;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -66,6 +65,17 @@ return Application::configure(basePath: dirname(__DIR__))
             VerifySupabaseJwt::class,
         );
 
+        // Same priority pin for the embedded-app session-token verifier. The
+        // `embedded-by-shop` rate limiter reads `embedded_shop_domain` from the
+        // request attributes, which VerifyShopifySessionToken sets after decoding
+        // the JWT. Without this, ThrottleRequests fires before the JWT is parsed
+        // and the per-shop limiter collapses to per-IP (or whatever fallback
+        // the limiter uses).
+        $middleware->prependToPriorityList(
+            \Illuminate\Routing\Middleware\ThrottleRequests::class,
+            VerifyShopifySessionToken::class,
+        );
+
         $middleware->alias([
             'supabase.jwt' => VerifySupabaseJwt::class,
             'current.pro' => LoadCurrentProfessional::class,
@@ -74,7 +84,6 @@ return Application::configure(basePath: dirname(__DIR__))
             'lead.log' => LogLeadRateLimits::class,
             'plan' => RequirePlan::class,
             'hydrogen.key' => VerifyHydrogenApiKey::class,
-            'embedded.key' => VerifyEmbeddedApiKey::class,
             'shopify.session' => VerifyShopifySessionToken::class,
             'feature' => FeatureGate::class,
             'captcha' => VerifyTurnstileCaptcha::class,

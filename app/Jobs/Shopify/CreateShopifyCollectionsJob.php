@@ -4,6 +4,7 @@ namespace App\Jobs\Shopify;
 
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\Client\ShopifyAdminClient;
+use App\Services\Shopify\ShopDomain;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -522,7 +523,7 @@ class CreateShopifyCollectionsJob implements ShouldBeUnique, ShouldQueue
     private function graphql(string $shopDomain, string $accessToken, string $apiVersion, string $query, array $variables): \Illuminate\Http\Client\Response
     {
         return $this->client->graphql(
-            $shopDomain,
+            ShopDomain::fromUntrusted($shopDomain),
             $accessToken,
             $apiVersion,
             $query,

@@ -241,9 +241,11 @@ class BrandDesignImporter
     private function fetchActiveThemeSettings(string $shopDomain, string $accessToken, string $apiVersion): array
     {
         // Step 1 — find the MAIN (active) theme ID and name via GraphQL.
+        $shop = ShopDomain::fromUntrusted($shopDomain);
+
         try {
             $themesResponse = $this->client->graphql(
-                $shopDomain,
+                $shop,
                 $accessToken,
                 $apiVersion,
                 self::THEMES_QUERY,
@@ -276,7 +278,7 @@ class BrandDesignImporter
         try {
             $assetResponse = $this->client->rest(
                 method: 'GET',
-                shopDomain: $shopDomain,
+                shop: $shop,
                 accessToken: $accessToken,
                 path: "/admin/api/{$apiVersion}/themes/{$themeId}/assets.json",
                 body: ['asset[key]' => 'config/settings_data.json'],

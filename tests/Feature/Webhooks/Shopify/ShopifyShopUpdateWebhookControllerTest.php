@@ -90,7 +90,7 @@ it('shop/update — duplicate webhook_id returns duplicate=true and skips dispat
     Bus::assertDispatchedTimes(ProcessShopifyShopUpdateJob::class, 1);
 });
 
-it('shop/update — already-seen webhook ID deduplicates before HMAC check', function () {
+it('shop/update — bad HMAC is always rejected even for a previously-seen webhook ID', function () {
     $proId = (string) Str::uuid();
     DB::table('core.professional_integrations')->insert([
         'id' => (string) Str::uuid(),
@@ -111,11 +111,12 @@ it('shop/update — already-seen webhook ID deduplicates before HMAC check', fun
         'X-Shopify-Webhook-Id' => $webhookId,
     ])->assertOk();
 
+    // HMAC check is always first — bad signature is rejected regardless of dedup state.
     $this->postJson('/api/webhooks/shopify/shop-update', $payload, [
         'X-Shopify-Hmac-SHA256' => 'bad-hmac',
         'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
         'X-Shopify-Webhook-Id' => $webhookId,
-    ])->assertOk()->assertJson(['received' => true, 'duplicate' => true]);
+    ])->assertStatus(401);
 
     Bus::assertDispatchedTimes(ProcessShopifyShopUpdateJob::class, 1);
 });

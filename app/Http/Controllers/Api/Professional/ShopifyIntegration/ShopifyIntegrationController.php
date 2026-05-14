@@ -687,6 +687,42 @@ class ShopifyIntegrationController extends ApiController
         return false;
     }
 
+    /**
+     * Resolve $host once and return the safe public IPs, or null if any
+     * resolved address falls in a blocked range. Returns an empty array for
+     * IP literals (already-pinned by definition).
+     *
+     * Used by discoverShopifyHandle to pin DNS through CURLOPT_RESOLVE so the
+     * Guzzle request can't re-resolve to a different IP than the one we just
+     * screened (TOCTOU / DNS-rebinding window).
+     *
+     * @return string[]|null
+     */
+    private function resolveSafeIps(string $host): ?array
+    {
+        $host = trim($host);
+        if ($host === '') {
+            return null;
+        }
+
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return $this->ipIsBlocked($host) ? null : [];
+        }
+
+        $ips = gethostbynamel($host);
+        if ($ips === false || empty($ips)) {
+            return null;
+        }
+
+        foreach ($ips as $ip) {
+            if ($this->ipIsBlocked($ip)) {
+                return null;
+            }
+        }
+
+        return $ips;
+    }
+
     private function ipIsBlocked(string $ip): bool
     {
         // NO_PRIV_RANGE  blocks 10/8, 172.16/12, 192.168/16, fc00::/7, fec0::/10
@@ -711,24 +747,41 @@ class ShopifyIntegrationController extends ApiController
     private function discoverShopifyHandle(string $host): ?string
     {
         // SSRF guard: an authenticated brand can still probe internal infrastructure
-        // via this endpoint. Rejecting private/link-local/loopback IPs blocks
-        // metadata endpoints (169.254.169.254) and internal services without
-        // breaking legitimate custom Shopify domains.
-        if ($this->isPrivateHost($host)) {
-            Log::info('Shopify resolveShop: rejected private/internal host', ['host' => $host]);
+        // via this endpoint. Resolve once via gethostbynamel(), reject if any
+        // address is private/link-local/loopback, and then pin the resolved IPs
+        // through CURLOPT_RESOLVE so Guzzle can't re-resolve to a different
+        // address between our screening and the actual request (TOCTOU / DNS
+        // rebinding window).
+        $safeIps = $this->resolveSafeIps($host);
+        if ($safeIps === null) {
+            Log::info('Shopify resolveShop: rejected private/internal/unresolvable host', ['host' => $host]);
 
             return null;
         }
 
         $url = "https://{$host}/";
 
+        // For hostnames we resolved, pin DNS to those IPs for both 443 (https)
+        // and 80 (in case anyone ever issues an http:// fetch). IP literals
+        // produce an empty $safeIps list — no pinning needed.
+        $curlOptions = [];
+        if ($safeIps !== []) {
+            $curlOptions[CURLOPT_RESOLVE] = array_map(
+                static fn (string $ip) => "{$host}:443:{$ip}",
+                $safeIps,
+            );
+        }
+
         try {
             $response = Http::timeout(6)
                 ->connectTimeout(4)
                 // SSRF hardening: disable redirects. Without this, a public-IP
                 // storefront could 302 to an internal host (e.g. 169.254.169.254)
-                // and Guzzle would follow it — bypassing isPrivateHost above.
-                ->withOptions(['allow_redirects' => false])
+                // and Guzzle would follow it — bypassing resolveSafeIps above.
+                ->withOptions(array_filter([
+                    'allow_redirects' => false,
+                    'curl' => $curlOptions !== [] ? $curlOptions : null,
+                ]))
                 ->withHeaders([
                     // Some Shopify storefronts block default PHP/curl user agents
                     // with a WAF rule. A real-browser UA sidesteps that without
@@ -759,15 +812,14 @@ class ShopifyIntegrationController extends ApiController
 
         $body = (string) $response->body();
 
-        // Shopify themes commonly embed one of these:
-        //   Shopify.shop = "foo.myshopify.com"
-        //   "shop":"foo.myshopify.com"
-        //   shop: "foo.myshopify.com"
-        // All carry the canonical <handle>.myshopify.com; we take the first.
+        // Shopify themes embed one of these structured tokens. We deliberately
+        // do NOT fall back to a bare `<handle>.myshopify.com` regex — that
+        // matches any user-generated content on the page (footer link, blog
+        // post mentioning another store, theme dev credit) and would happily
+        // hand the merchant an attacker-controlled handle.
         $patterns = [
             '/Shopify\.shop\s*=\s*["\']([a-z0-9][a-z0-9-]*\.myshopify\.com)["\']/i',
             '/["\']shop["\']\s*:\s*["\']([a-z0-9][a-z0-9-]*\.myshopify\.com)["\']/i',
-            '/([a-z0-9][a-z0-9-]*\.myshopify\.com)/i',
         ];
 
         foreach ($patterns as $pattern) {

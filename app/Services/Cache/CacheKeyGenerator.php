@@ -9,6 +9,11 @@ namespace App\Services\Cache;
 // If multi-site support is introduced, any key that caches site-scoped data under professionalId will need
 // a siteId segment added — otherwise two sites owned by the same professional would share a cache entry.
 // Methods carrying this assumption are annotated with "@multi-site: needs site_id".
+//
+// MULTI-SITE MIGRATION TASK (GS-4): Before launching multi-site, add a siteId segment to every method
+// annotated "@multi-site: needs site_id" (analyticsVisits, analyticsClicks, siteImagesViewVariants, and
+// any non-site-scoped professional lookup that aggregates across sites). Coordinate with a one-time global
+// cache flush at deploy so old professionalId-only keys orphan and TTL out naturally.
 class CacheKeyGenerator
 {
     public static function publicSite(string $subdomain): string

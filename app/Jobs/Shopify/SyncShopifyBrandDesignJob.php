@@ -254,7 +254,7 @@ class SyncShopifyBrandDesignJob implements ShouldBeUnique, ShouldQueue
         }
 
         $response = app(\App\Services\Shopify\Client\ShopifyAdminClient::class)->graphql(
-            $shopDomain,
+            \App\Services\Shopify\ShopDomain::fromUntrusted($shopDomain),
             $accessToken,
             $apiVersion,
             self::METAFIELDS_SET_MUTATION,

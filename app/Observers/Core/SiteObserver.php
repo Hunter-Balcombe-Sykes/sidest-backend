@@ -9,6 +9,7 @@ use App\Jobs\Cloudflare\SyncSubdomainToKvJob;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\Log;
 
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\Log;
 // all connected affiliates when this site belongs to a brand.
 class SiteObserver
 {
+    use LogsWithRequestContext;
+
     public bool $afterCommit = true;
 
     public function __construct(
@@ -36,11 +39,12 @@ class SiteObserver
         try {
             $this->siteCache->invalidateSite($site);
         } catch (\Throwable $e) {
-            Log::warning('Site cache invalidation failed on save', [
+            Log::warning('Site cache invalidation failed on save', $this->logContext(__METHOD__, [
                 'site_id' => $site->id,
+                'professional_id' => $site->professional_id,
                 'subdomain' => $site->subdomain,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
 
         // Warm cache asynchronously if published
@@ -49,11 +53,12 @@ class SiteObserver
                 WarmPublicSiteCacheJob::dispatch(strtolower($site->subdomain))->afterCommit();
             } catch (\Throwable $e) {
                 // Never fail the write path because cache warming failed.
-                Log::warning('WarmPublicSiteCacheJob dispatch failed', [
+                Log::warning('WarmPublicSiteCacheJob dispatch failed', $this->logContext(__METHOD__, [
                     'site_id' => $site->id,
+                    'professional_id' => $site->professional_id,
                     'subdomain' => $site->subdomain,
                     'message' => $e->getMessage(),
-                ]);
+                ]));
             }
         }
 
@@ -66,21 +71,21 @@ class SiteObserver
             try {
                 SyncSubdomainToKvJob::dispatch($professionalId);
             } catch (\Throwable $e) {
-                Log::warning('SiteObserver: KV sync dispatch failed on subdomain change', [
+                Log::warning('SiteObserver: KV sync dispatch failed on subdomain change', $this->logContext(__METHOD__, [
                     'site_id' => $site->id,
                     'professional_id' => $professionalId,
                     'message' => $e->getMessage(),
-                ]);
+                ]));
             }
 
             try {
                 $this->cascadeAffiliateKvSync($professionalId);
             } catch (\Throwable $e) {
-                Log::warning('SiteObserver: KV affiliate cascade failed', [
+                Log::warning('SiteObserver: KV affiliate cascade failed', $this->logContext(__METHOD__, [
                     'site_id' => $site->id,
                     'professional_id' => $professionalId,
                     'message' => $e->getMessage(),
-                ]);
+                ]));
             }
 
             // Provision DNS for brand sites only. Affiliates use the wildcard.
@@ -89,11 +94,11 @@ class SiteObserver
                 try {
                     ProvisionBrandDnsJob::dispatch($professionalId);
                 } catch (\Throwable $e) {
-                    Log::warning('SiteObserver: ProvisionBrandDnsJob dispatch failed', [
+                    Log::warning('SiteObserver: ProvisionBrandDnsJob dispatch failed', $this->logContext(__METHOD__, [
                         'site_id' => $site->id,
                         'professional_id' => $site->professional_id,
                         'message' => $e->getMessage(),
-                    ]);
+                    ]));
                 }
             }
 
@@ -103,11 +108,12 @@ class SiteObserver
                 try {
                     RetireBrandDnsJob::dispatch((string) $site->_oldSubdomainPendingRetire);
                 } catch (\Throwable $e) {
-                    Log::warning('SiteObserver: RetireBrandDnsJob dispatch failed', [
+                    Log::warning('SiteObserver: RetireBrandDnsJob dispatch failed', $this->logContext(__METHOD__, [
                         'site_id' => $site->id,
+                        'professional_id' => $site->professional_id,
                         'old_subdomain' => $site->_oldSubdomainPendingRetire,
                         'message' => $e->getMessage(),
-                    ]);
+                    ]));
                 }
                 unset($site->_oldSubdomainPendingRetire);
             }
@@ -119,11 +125,12 @@ class SiteObserver
         try {
             $this->siteCache->invalidateSite($site);
         } catch (\Throwable $e) {
-            Log::warning('Site cache invalidation failed on delete', [
+            Log::warning('Site cache invalidation failed on delete', $this->logContext(__METHOD__, [
                 'site_id' => $site->id,
+                'professional_id' => $site->professional_id,
                 'subdomain' => $site->subdomain,
                 'message' => $e->getMessage(),
-            ]);
+            ]));
         }
     }
 
