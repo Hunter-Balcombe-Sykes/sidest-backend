@@ -1470,7 +1470,7 @@ DB-F#SCALE-2 is a P1 active N+1 with a clear fix (~30 minutes). The two P3 guard
 **Original ID:** Phase 4 Pattern 3 (**absorbs Phase 2 Pattern C** which closes LIFE-D#3, LIFE-D#4, LIFE-D#5, LIFE-D#6)
 **Closes:** DB-B#SCALE-9, DB-B#SCALE-10, DB-B#SCALE-11, DB-C#SCALE-3, DB-D#SCALE-5, LIFE-D#3, LIFE-D#4, LIFE-D#5, LIFE-D#6
 **Tier:** P2 (5 Phase 4 P2 + 4 Phase 2 P2) · **Effort:** ~0.5 day
-**Status:** Open
+**Status:** ✅ CLOSED — shipped 2026-05-14, commit `2b01de3b`
 **Depends on:** none
 **Lane:** 1 — Sonnet execute · Sonnet review (tests + Pint gate)
 
@@ -1493,34 +1493,34 @@ Five queue jobs are missing one or more hygiene properties (`$tries`, `$backoff`
 
 ### What to do
 
-- [ ] **Step 1 — Confirm Phase 2 Pattern C status.** If `$backoff = [10, 30, 60]` and the `HasCloudflareRetryPolicy` trait have not landed on the four Cloudflare jobs (`ProvisionBrandDnsJob`, `RetireBrandDnsJob`, `RetireSubdomainFromKvJob`, `SyncSubdomainToKvJob`) — verify with `rg "backoff" app/Jobs/Cloudflare/` — fold Phase 2 Pattern C into this PR. **As of 2026-05-11, none of the Cloudflare jobs have `$backoff` set.**
-- [ ] **Step 2 — Add `$tries = 3`, `$backoff = [5, 15, 30]`, `$timeout = 10`, `failed()` to cache jobs.**
+- [x] **Step 1 — Confirm Phase 2 Pattern C status.** If `$backoff = [10, 30, 60]` and the `HasCloudflareRetryPolicy` trait have not landed on the four Cloudflare jobs (`ProvisionBrandDnsJob`, `RetireBrandDnsJob`, `RetireSubdomainFromKvJob`, `SyncSubdomainToKvJob`) — verify with `rg "backoff" app/Jobs/Cloudflare/` — fold Phase 2 Pattern C into this PR. **As of 2026-05-11, none of the Cloudflare jobs have `$backoff` set.**
+- [x] **Step 2 — Add `$tries = 3`, `$backoff = [5, 15, 30]`, `$timeout = 10`, `failed()` to cache jobs.**
     - `app/Jobs/Cache/InvalidateConnectedAffiliateCachesJob.php`
     - `app/Jobs/Cache/WarmPublicSiteCacheJob.php`
     - `failed()` calls `report($e)` so a persistent Redis failure surfaces in Nightwatch.
     - Closes **DB-B#SCALE-10**.
-- [ ] **Step 3 — Add `$backoff = [30, 90, 180]`, `$timeout = 30`, `failed()` to `SendEnquiryNotificationJob`** (`app/Jobs/Notifications/SendEnquiryNotificationJob.php`).
+- [x] **Step 3 — Add `$backoff = [30, 90, 180]`, `$timeout = 30`, `failed()` to `SendEnquiryNotificationJob`** (`app/Jobs/Notifications/SendEnquiryNotificationJob.php`).
     - `failed()` calls `report($e)` and logs `enquiry_id` + `notification_email` context so ops can manually forward the missed notification.
     - Closes **DB-B#SCALE-9**.
-- [ ] **Step 4 — Add `$backoff = [10, 30, 60]` to Shopify order webhook jobs.**
+- [x] **Step 4 — Add `$backoff = [10, 30, 60]` to Shopify order webhook jobs.**
     - `app/Jobs/Shopify/ProcessShopifyOrderWebhookJob.php`
     - `app/Jobs/Shopify/ProcessShopifyOrderUpdatedWebhookJob.php`
     - Both already have `$tries = 3`, `$timeout = 30`, and `failed()` handlers — only `$backoff` is missing.
     - **Important:** use `[10, 30, 60]` (not the `[30, 90, 180]` from `BackfillBrandHasEnabledVariantsJob`). Shopify's p99 webhook-side recovery is under 60s; longer first-delay is counter-productive at peak webhook volume.
     - Closes **DB-B#SCALE-11**.
-- [ ] **Step 5 — Round out Cloudflare jobs** (`app/Jobs/Cloudflare/ProvisionBrandDnsJob.php`, `RetireBrandDnsJob.php`, `SyncSubdomainToKvJob.php`, `RetireSubdomainFromKvJob.php`).
+- [x] **Step 5 — Round out Cloudflare jobs** (`app/Jobs/Cloudflare/ProvisionBrandDnsJob.php`, `RetireBrandDnsJob.php`, `SyncSubdomainToKvJob.php`, `RetireSubdomainFromKvJob.php`).
     - Add `public int $timeout = 30;`.
     - Add `failed(\Throwable $e): void` handler that `report($e)` and logs `professional_id`/`subdomain` context.
     - Add `$this->onQueue('integrations')` in each constructor. These are third-party API calls; they belong on `supervisor-integrations` alongside Shopify webhook processing, not on `supervisor-default`.
     - Add `public array $backoff = [10, 30, 60];` (Phase 2 Pattern C — LIFE-D#3, LIFE-D#4, LIFE-D#5, LIFE-D#6).
-    - Consider extracting `App\Jobs\Concerns\HasCloudflareRetryPolicy` trait that declares `$tries = 3` and `$backoff = [10, 30, 60]`. Four files use the same constants; centralising them prevents drift.
+    - Extracted `App\Jobs\Concerns\HasCloudflareRetryPolicy` trait declaring `$tries = 3` and `$backoff = [10, 30, 60]`. Applied to all four Cloudflare jobs; `ProvisionBrandDnsJob` refactored from `backoff()` method to trait.
     - Closes **DB-C#SCALE-3** + **Phase 2 Pattern C** (LIFE-D#3/4/5/6).
-- [ ] **Step 6 — Add `public int $timeout = 720;` to `ProcessVideoVariantsJob`** (`app/Jobs/ProcessVideoVariantsJob.php`).
+- [x] **Step 6 — Add `public int $timeout = 720;` to `ProcessVideoVariantsJob`** (`app/Jobs/ProcessVideoVariantsJob.php`).
     - 720s = 660s max FFmpeg encoding (`max(120, durationMs/1000 * 2 + 60)` for 300s videos) + 60s upload buffer.
-    - Ensure the `redis_video` supervisor in `config/horizon.php` also sets `timeout` ≥ 720 (the job-level property governs; the supervisor is a floor).
+    - Ensure the `redis_video` supervisor in `config/horizon.php` also sets `timeout` ≥ 720 (the job-level property governs; the supervisor is a floor). ✓ supervisor-videos timeout=3600.
     - The job docstring already says `--timeout=3600` — the job-class property is the canonical encoding of the contract.
     - Closes **DB-D#SCALE-5**.
-- [ ] **Step 7 — Extract `HasStandardRetryPolicy` (or similar) trait** if Phase 2 Pattern C did not already extract `HasCloudflareRetryPolicy`. Five jobs in this pattern alone now share `[10, 30, 60]` retry shapes; the next contributor will copy-paste. A `tests/Feature/Queue/JobHygienePolicyTest.php` sweep asserting every `app/Jobs/` class has `$tries`, `$backoff`, `$timeout`, and (if `failed()` is empty) at least a `report()` call, is a stronger guard.
+- [x] **Step 7 — Extract `HasStandardRetryPolicy` (or similar) trait** if Phase 2 Pattern C did not already extract `HasCloudflareRetryPolicy`. Five jobs in this pattern alone now share `[10, 30, 60]` retry shapes; the next contributor will copy-paste. A `tests/Feature/Queue/JobHygienePolicyTest.php` sweep asserting every `app/Jobs/` class has `$tries`, `$backoff`, `$timeout`, and (if `failed()` is empty) at least a `report()` call, is a stronger guard. ✓ `JobHygienePolicyTest` created; found and fixed 23 additional jobs beyond the 9 in the plan.
 
 ### Cross-phase absorption note
 
