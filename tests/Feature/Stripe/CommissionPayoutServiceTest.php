@@ -180,6 +180,12 @@ function v2_mockStripeClient(): StripeClient
     $mock = Mockery::mock(StripeClient::class)->makePartial();
     $mock->paymentIntents = Mockery::mock();
     $mock->refunds = Mockery::mock();
+    // charges + transfers are touched by the post-success affiliate enrichment path.
+    // Default to permissive mocks so tests that don't exercise enrichment specifically
+    // (e.g. the markPaymentIntentSucceeded baseline) don't trip on undefined methods.
+    // Tests that DO want to assert enrichment behaviour override these with shouldReceive.
+    $mock->charges = Mockery::mock()->shouldIgnoreMissing();
+    $mock->transfers = Mockery::mock()->shouldIgnoreMissing();
 
     return $mock;
 }
@@ -690,6 +696,105 @@ it('markPaymentIntentSucceeded is idempotent', function () {
     $svc->markPaymentIntentSucceeded($payout, 'ch_new_ignored');
 
     expect($payout->fresh()->charge_id)->toBe('ch_existing');
+});
+
+// ─── Affiliate transaction enrichment (post-success) ────────────────────────
+
+it('enriches Transfer + destination_payment with brand identity after PI succeeds', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, [
+        'status' => 'processing',
+        'payment_intent_id' => 'pi_enrich_test',
+        'charge_id' => 'ch_enrich_test',
+        'gross_commission_cents' => 1000,
+        'platform_fee_cents' => 30,
+        'net_payout_cents' => 970,
+        'ledger_entry_count' => 1,
+    ]);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->charges->shouldReceive('retrieve')
+        ->once()
+        ->with('ch_enrich_test', ['expand' => ['transfer']])
+        ->andReturn((object) [
+            'id' => 'ch_enrich_test',
+            'transfer' => (object) [
+                'id' => 'tr_enrich_test',
+                'destination_payment' => 'py_enrich_test',
+            ],
+        ]);
+
+    $stripe->transfers->shouldReceive('update')
+        ->once()
+        ->withArgs(function (string $id, array $params) use ($payout) {
+            return $id === 'tr_enrich_test'
+                && str_contains($params['description'], 'Partna commission from')
+                && $params['metadata']['sidest_payout_id'] === $payout->id
+                && $params['metadata']['sidest_orders_count'] === '1';
+        });
+
+    $stripe->charges->shouldReceive('update')
+        ->once()
+        ->withArgs(function (string $id, array $params, array $opts) use ($aff) {
+            return $id === 'py_enrich_test'
+                && str_contains($params['description'], 'Partna commission from')
+                && ($opts['stripe_account'] ?? null) === $aff->stripe_connect_account_id;
+        });
+
+    $svc = new CommissionPayoutService($stripe);
+    $svc->markPaymentIntentSucceeded($payout, 'ch_enrich_test');
+
+    expect($payout->fresh()->status)->toBe('completed');
+});
+
+it('payout completion is not rolled back when affiliate enrichment fails', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, [
+        'status' => 'processing',
+        'payment_intent_id' => 'pi_enrich_fail',
+        'charge_id' => 'ch_enrich_fail',
+    ]);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->charges->shouldReceive('retrieve')
+        ->once()
+        ->andThrow(new \RuntimeException('Stripe network blip during enrichment'));
+
+    $stripe->transfers->shouldNotReceive('update');
+    $stripe->charges->shouldNotReceive('update');
+
+    \Illuminate\Support\Facades\Log::spy();
+
+    $svc = new CommissionPayoutService($stripe);
+    $svc->markPaymentIntentSucceeded($payout, 'ch_enrich_fail');
+
+    expect($payout->fresh()->status)->toBe('completed');
+
+    \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')
+        ->withArgs(fn ($msg) => str_contains($msg, 'enrich_affiliate_view_failed'))
+        ->once();
+});
+
+it('skips affiliate enrichment when payout has no charge_id', function () {
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+    $payout = v2_createPayout($brand, $aff, [
+        'status' => 'processing',
+        'payment_intent_id' => 'pi_no_charge',
+        'charge_id' => null,
+    ]);
+
+    $stripe = v2_mockStripeClient();
+    $stripe->charges->shouldNotReceive('retrieve');
+    $stripe->transfers->shouldNotReceive('update');
+    $stripe->charges->shouldNotReceive('update');
+
+    $svc = new CommissionPayoutService($stripe);
+    $svc->markPaymentIntentSucceeded($payout, null);
+
+    expect($payout->fresh()->status)->toBe('completed');
 });
 
 it('markPaymentIntentFailed transitions payout to failed', function () {
