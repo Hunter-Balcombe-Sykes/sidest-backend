@@ -30,6 +30,7 @@ class Enquiry extends BaseModel
         'ip_hash',
         'user_agent',
         'read_at',
+        'email_sent_at',
     ];
 
     protected $casts = [
@@ -37,6 +38,7 @@ class Enquiry extends BaseModel
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
+        'email_sent_at' => 'datetime',
     ];
 
     public function professional(): BelongsTo
