@@ -414,9 +414,8 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::post('/stripe/connect/dashboard', [StripeConnectController::class, 'dashboard']);
         Route::post('/stripe/connect/disconnect', [StripeConnectController::class, 'disconnect']);
         Route::post('/stripe/payment-method/setup-checkout', [StripeConnectController::class, 'createPaymentMethodCheckoutSession']);
-        Route::post('/stripe/payment-method/confirm', [StripeConnectController::class, 'confirmPaymentMethod']);
+        Route::post('/stripe/payment-method/setup-becs', [StripeConnectController::class, 'createBecsCheckoutSession']);
         Route::post('/stripe/payment-method/sync-session', [StripeConnectController::class, 'syncPaymentMethodSession']);
-        Route::get('/stripe/payment-methods', [StripeConnectController::class, 'listPaymentMethods']);
         Route::delete('/stripe/payment-method', [StripeConnectController::class, 'removePaymentMethod']);
         Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
 

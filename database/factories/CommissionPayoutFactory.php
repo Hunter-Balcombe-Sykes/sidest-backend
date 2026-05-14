@@ -4,7 +4,7 @@ namespace Database\Factories;
 
 use App\Models\Retail\CommissionPayout;
 use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
 /**
@@ -14,6 +14,12 @@ class CommissionPayoutFactory extends Factory
 {
     protected $model = CommissionPayout::class;
 
+    /**
+     * Minimal defaults — only columns every test schema is guaranteed to have. Lifecycle
+     * fields (stripe_error_*, failure_*, transfer_completed_at, etc.) are set per-test
+     * via state methods or `create(['key' => ...])` overrides so a test using an inline
+     * SQLite CREATE TABLE without those columns doesn't break on the baseline insert.
+     */
     public function definition(): array
     {
         return [
@@ -28,18 +34,20 @@ class CommissionPayoutFactory extends Factory
             'ledger_entry_count' => 0,
             'retry_count' => 0,
             'needs_manual_refund' => false,
-            'wallet_debit_cents' => 0,
-            'charge_cents' => 0,
-
-            // Lifecycle columns
-            'transfer_completed_at' => null,
-            'stripe_error_code' => null,
-            'stripe_error_message' => null,
-            'next_retry_at' => null,
-            'last_retry_at' => null,
-            'funding_failure_count' => 0,
-            'failure_category' => null,
-            'grace_notifications_sent' => [],
         ];
+    }
+
+    /**
+     * CommissionPayout uses `$guarded = ['*']` — every write goes through forceFill()
+     * in production. Override the factory's model construction to use forceFill so
+     * test inserts don't hit MassAssignmentException.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function newModel(array $attributes = []): Model
+    {
+        $modelClass = $this->modelName();
+
+        return (new $modelClass)->forceFill($attributes);
     }
 }

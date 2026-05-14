@@ -243,8 +243,7 @@ class BrandAffiliateController extends ApiController
         $sumNet = fn (string $status): int => (int) ($bucketByStatus->get($status)?->sum('net_payout_cents') ?? 0);
 
         $commission = [
-            'pending_cents' => $sumNet('pending') + $sumNet('pending_funds')
-                + $sumNet('collecting') + $sumNet('collected') + $sumNet('transferring'),
+            'pending_cents' => $sumNet('pending') + $sumNet('processing'),
             'paid_cents' => $sumNet('completed'),
             'voided_cents' => $sumNet('cancelled') + $sumNet('failed'),
         ];

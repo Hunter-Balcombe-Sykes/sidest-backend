@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\Webhooks;
 use App\Http\Controllers\Controller;
 use App\Models\Billing\WebhookEvent;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,7 +12,22 @@ use Illuminate\Support\Facades\Log;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\Webhook;
 
-// V2: Core. Processes Stripe Connect events: account updates, checkout completions, transfer status, payment intents. Drives the commission payout lifecycle.
+/**
+ * Stripe Connect-scope webhooks — v1 events fired on connected accounts.
+ *
+ * Under Option A (destination charges) the platform-scope events (payment_intent.*,
+ * charge.*, v2.core.account.*) all fire on the platform endpoint and are handled by
+ * StripePlatformWebhookController. This controller is narrowed to the remaining
+ * Connect-scope events:
+ *
+ *   account.updated                  — v1 mirror of v2 account state changes
+ *   account.application.deauthorized — connected account owner revoked our access
+ *   checkout.session.completed       — brand finished a card/BECS setup session
+ *   payment_method.attached/detached — Stripe-side PM lifecycle on the brand's Account
+ *
+ * Transfer events (transfer.created/paid/failed/reversed) are not subscribed under Option A
+ * — destination charges auto-transfer internally and don't emit them on connect scope.
+ */
 class StripeConnectWebhookController extends Controller
 {
     use ValidatesStripeWebhookPayload;
@@ -27,47 +41,32 @@ class StripeConnectWebhookController extends Controller
             return response()->json(['error' => 'Missing signature'], 400);
         }
 
-        // Try both Connect and platform webhook secrets so one endpoint URL
-        // can handle events from connected accounts and destination charges.
-        $secrets = array_filter([
-            config('services.stripe.connect_webhook_secret'),
-            config('services.stripe.webhook_secret'),
-        ]);
+        $secret = (string) config('services.stripe.connect_webhook_secret');
+        if ($secret === '') {
+            Log::error('Stripe Connect webhook hit with no secret configured');
 
-        if ($secrets === []) {
             return response()->json(['error' => 'No webhook secret configured'], 400);
         }
 
-        $event = null;
-        foreach ($secrets as $secret) {
-            try {
-                $event = Webhook::constructEvent($payload, $sigHeader, $secret);
-                break;
-            } catch (SignatureVerificationException) {
-                continue;
-            } catch (\Exception $e) {
-                Log::warning('Stripe webhook parse error', ['error' => $e->getMessage()]);
-
-                return response()->json(['error' => 'Invalid payload'], 400);
-            }
-        }
-
-        if (! $event) {
-            Log::warning('Stripe webhook signature verification failed for all configured secrets');
+        try {
+            $event = Webhook::constructEvent($payload, $sigHeader, $secret);
+        } catch (SignatureVerificationException) {
+            Log::warning('Stripe Connect webhook signature verification failed');
 
             return response()->json(['error' => 'Invalid signature'], 400);
+        } catch (\Exception $e) {
+            Log::warning('Stripe Connect webhook parse error', ['error' => $e->getMessage()]);
+
+            return response()->json(['error' => 'Invalid payload'], 400);
         }
 
         if (! $this->validateEventStructure($event)) {
             return response()->json(['error' => 'Invalid payload structure'], 400);
         }
 
-        // Idempotency: firstOrCreate on the UNIQUE stripe_event_id. wasRecentlyCreated
-        // distinguishes "won the race / first delivery" from "duplicate — skip".
-        // Stripe event IDs are globally unique across platform + Connect events,
-        // so billing.webhook_events covers both this controller and StripeWebhookController.
-        // The row is committed before the match() dispatch: if a handler throws a 500,
-        // Stripe's retry will find the existing row here and skip re-triggering the crash.
+        // Idempotency: firstOrCreate on stripe_event_id. Stripe event IDs are globally unique
+        // across all destinations, so billing.webhook_events covers this controller and the
+        // platform and billing controllers without collision.
         $webhookEvent = WebhookEvent::firstOrCreate(
             ['stripe_event_id' => $event->id],
             ['event_type' => $event->type, 'processed_at' => now()]
@@ -77,7 +76,6 @@ class StripeConnectWebhookController extends Controller
             return response()->json(['received' => true]);
         }
 
-        // Payload is HMAC-verified; set via forceFill (not mass-assignment) to preserve $fillable restriction.
         $webhookEvent->forceFill(['payload' => json_decode($payload, true)])->save();
 
         return $this->handleParsedEvent($event);
@@ -85,25 +83,17 @@ class StripeConnectWebhookController extends Controller
 
     /**
      * Dispatch a verified, de-duplicated Stripe Event to the appropriate handler.
-     * Extracted from __invoke() so it can be unit-tested without HMAC signing.
      *
-     * Guards account-scoped event types by verifying the HMAC-signed top-level
-     * `event->account` field matches `data.object->id`. A mismatch means the
-     * payload was tampered with; we reject with 400 rather than mutating records.
+     * Account-scoped events are guarded against payload tampering: the HMAC-signed
+     * event->account must match data.object->id. account.application.* is excluded
+     * because data.object is an Application (id = ca_xxx), not an Account.
      */
     public function handleParsedEvent(\Stripe\Event $event): JsonResponse
     {
-        // For account-scoped events, event->account is the HMAC-signed source of truth.
-        // If data.object.id differs, reject — payload could have been tampered with
-        // to mutate a victim account using the attacker's valid HMAC.
-        //
-        // account.application.* events are excluded: their data.object is an Application
-        // (id = ca_xxx), not an Account, so the id won't match event->account by design.
-        $accountScopedPrefixes = ['account.', 'capability.'];
-        $isAccountScoped = collect($accountScopedPrefixes)
-            ->contains(fn ($p) => str_starts_with($event->type, $p));
+        $isAccountScoped = str_starts_with($event->type, 'account.');
+        $isApplicationEvent = str_starts_with($event->type, 'account.application.');
 
-        if ($isAccountScoped && ! str_starts_with($event->type, 'account.application.')) {
+        if ($isAccountScoped && ! $isApplicationEvent) {
             $topLevelAccount = $event->account ?? null;
             $objectId = $event->data->object->id ?? null;
 
@@ -121,20 +111,93 @@ class StripeConnectWebhookController extends Controller
         match ($event->type) {
             'account.updated' => $this->handleAccountUpdated($event->data->object),
             'account.application.deauthorized' => $this->handleAccountDeauthorized((string) ($event->account ?? '')),
-            'checkout.session.completed' => $this->handleCheckoutSessionCompleted($event->data->object, (string) ($event->account ?? '')),
-            'transfer.created' => $this->handleTransferCreated($event->data->object),
-            'transfer.paid' => $this->handleTransferPaid($event->data->object),
-            'transfer.failed' => $this->handleTransferFailed($event->data->object),
-            'transfer.reversed' => $this->handleTransferReversed($event->data->object),
-            'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded($event->data->object, (string) ($event->account ?? '')),
-            'payment_intent.payment_failed' => $this->handlePaymentIntentFailed($event->data->object, (string) ($event->account ?? '')),
+            'checkout.session.completed' => $this->handleCheckoutSessionCompleted($event->data->object),
+            'payment_method.attached', 'payment_method.detached' => $this->handlePaymentMethodLifecycle($event->type, $event->data->object),
             default => Log::debug('Unhandled Stripe Connect event', ['type' => $event->type]),
         };
 
         return response()->json(['received' => true]);
     }
 
-    private function handleCheckoutSessionCompleted(object $session, string $connectedAccountId): void
+    /**
+     * account.updated — v1 mirror of v2 account state changes on the connected account.
+     *
+     * Under Option A the canonical source for capability/requirement state is the v2 account
+     * itself (re-fetched via syncAccountStatus). v1 account.updated arrives with the legacy
+     * Account shape, which doesn't carry the v2 capability tree. We bust the status cache
+     * and trigger a sync — syncAccountStatus does the v2 retrieve internally.
+     */
+    private function handleAccountUpdated(object $account): void
+    {
+        $accountId = (string) ($account->id ?? '');
+        if ($accountId === '') {
+            return;
+        }
+
+        StripeConnectService::forgetStatusCache($accountId);
+
+        $professional = Professional::where('stripe_connect_account_id', $accountId)->first();
+        if (! $professional) {
+            Log::debug('Stripe account.updated for unknown account', ['account_id' => $accountId]);
+
+            return;
+        }
+
+        // Respect local disconnect — late events shouldn't re-activate a disconnected account.
+        if ($professional->stripe_connect_status === 'not_connected') {
+            return;
+        }
+
+        // syncAccountStatus does the v2 retrieve + dual-capability derive + DB persist.
+        app(StripeConnectService::class)->syncAccountStatus($professional);
+    }
+
+    /**
+     * account.application.deauthorized — connected account owner revoked our access from
+     * their Stripe dashboard. Null the connection locally so the payout job stops targeting
+     * the account and the UI surfaces the disconnect.
+     */
+    private function handleAccountDeauthorized(string $stripeAccountId): void
+    {
+        if ($stripeAccountId === '') {
+            Log::warning('stripe.connect.deauthorize_missing_account');
+
+            return;
+        }
+
+        $professional = Professional::where('stripe_connect_account_id', $stripeAccountId)->first();
+
+        if (! $professional) {
+            Log::debug('Stripe account.application.deauthorized for unknown account', [
+                'account_id' => $stripeAccountId,
+            ]);
+
+            return;
+        }
+
+        $professional->update([
+            'stripe_connect_account_id' => null,
+            'stripe_connect_status' => 'not_connected',
+            'stripe_payment_method_id' => null,
+            'stripe_payment_method_brand' => null,
+            'stripe_payment_method_last4' => null,
+            'payout_method' => null,
+        ]);
+
+        StripeConnectService::forgetStatusCache($stripeAccountId);
+
+        Log::info('Stripe Connect account deauthorized via dashboard', [
+            'professional_id' => $professional->id,
+            'account_id' => $stripeAccountId,
+        ]);
+    }
+
+    /**
+     * checkout.session.completed — brand finished a setup session for their saved card or
+     * BECS account. Sync the PaymentMethod onto the Professional record (sets payout_method
+     * to 'card' or 'becs' based on the PM type Stripe returns).
+     */
+    private function handleCheckoutSessionCompleted(object $session): void
     {
         $professionalId = $session->metadata?->sidest_professional_id
             ?? $session->metadata?->professional_id
@@ -150,7 +213,6 @@ class StripeConnectWebhookController extends Controller
         }
 
         $professional = Professional::find($professionalId);
-
         if (! $professional) {
             Log::warning('stripe.checkout_completed.professional_not_found', [
                 'session_id' => $session->id ?? null,
@@ -160,11 +222,8 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
-        // Only `setup` sessions are produced by Partna now (brand card-on-file
-        // flow scoped to the brand's own Connect account). The `payment` mode
-        // arm previously handled wallet top-ups; those endpoints have been
-        // removed along with the wallet model. Any stray `payment` deliveries
-        // for in-flight legacy top-ups are logged and dropped.
+        // Only `setup` sessions are produced by Partna under Option A. `payment` sessions
+        // were the legacy wallet top-up flow — gone with the wallet model.
         if (($session->mode ?? null) !== 'setup') {
             Log::info('stripe.checkout_completed.ignored_mode', [
                 'session_id' => $session->id ?? null,
@@ -174,310 +233,24 @@ class StripeConnectWebhookController extends Controller
             return;
         }
 
-        app(StripeConnectService::class)->syncBrandConnectPaymentMethodFromCheckoutSession(
+        app(StripeConnectService::class)->syncBrandPaymentMethodFromCheckoutSession(
             $professional,
-            $session->id,
+            (string) $session->id,
         );
     }
 
     /**
-     * Handle account.application.deauthorized — fired when an Express account owner
-     * revokes access via their Stripe dashboard. Mark them disconnected locally so
-     * the payout job stops targeting their account and the UI surfaces the disconnect.
-     *
-     * Note: event->account is the connected account ID (HMAC-signed); event->data->object
-     * is an Application object whose id will differ. The account-scope guard is skipped
-     * for account.application.* events for this reason.
+     * payment_method.attached and payment_method.detached — informational. The setup
+     * session flow is already covered by checkout.session.completed (which persists the
+     * PM cache fields). These events arrive on the connected account scope and let us
+     * log/audit the PM lifecycle independently. No state mutation here.
      */
-    private function handleAccountDeauthorized(string $stripeAccountId): void
+    private function handlePaymentMethodLifecycle(string $eventType, object $paymentMethod): void
     {
-        if (! $stripeAccountId) {
-            Log::warning('stripe.connect.deauthorize_missing_account');
-
-            return;
-        }
-
-        $professional = Professional::where('stripe_connect_account_id', $stripeAccountId)->first();
-
-        if (! $professional) {
-            Log::debug('Stripe account.application.deauthorized for unknown account', ['account_id' => $stripeAccountId]);
-
-            return;
-        }
-
-        $professional->update(['stripe_connect_status' => 'disconnected']);
-
-        Log::info('Stripe Connect account deauthorized via dashboard', [
-            'professional_id' => $professional->id,
-            'account_id' => $stripeAccountId,
-        ]);
-    }
-
-    private function handleAccountUpdated(object $account): void
-    {
-        // Bust the /stripe/status cache for this account regardless of whether
-        // the local stripe_connect_status enum changes — fields like charges_enabled,
-        // payouts_enabled, and requirements can flip without affecting the
-        // collapsed status string, and the dashboard surfaces those directly.
-        // Done before the unknown-account / disconnected guards so a stale
-        // entry can never outlive a legitimate Stripe-side change.
-        StripeConnectService::forgetStatusCache((string) $account->id);
-
-        $professional = Professional::where('stripe_connect_account_id', $account->id)->first();
-
-        if (! $professional) {
-            Log::debug('Stripe account.updated for unknown account', ['account_id' => $account->id]);
-
-            return;
-        }
-
-        // Respect local disconnect: if the professional has soft-disconnected
-        // the account, ignore incoming Stripe events until they explicitly
-        // reconnect via createOnboardingLink. Prevents a late account.updated
-        // event from silently re-activating a disconnected account.
-        if ($professional->stripe_connect_status === 'disconnected') {
-            Log::debug('Stripe account.updated skipped — account locally disconnected', [
-                'professional_id' => $professional->id,
-                'account_id' => $account->id,
-            ]);
-
-            return;
-        }
-
-        $status = StripeConnectService::determineAccountStatus($account);
-
-        if ($professional->stripe_connect_status !== $status) {
-            $oldStatus = $professional->stripe_connect_status;
-
-            $professional->update(['stripe_connect_status' => $status]);
-
-            Log::info('Stripe Connect status updated', [
-                'professional_id' => $professional->id,
-                'old_status' => $oldStatus,
-                'new_status' => $status,
-            ]);
-        }
-    }
-
-    private function handleTransferCreated(object $transfer): void
-    {
-        $payoutId = $transfer->metadata?->sidest_payout_id ?? null;
-
-        if (! $payoutId) {
-            return;
-        }
-
-        Log::info('Stripe transfer created', [
-            'transfer_id' => $transfer->id,
-            'payout_id' => $payoutId,
-        ]);
-    }
-
-    /**
-     * Handle transfer.paid — Stripe confirms funds have settled to the connected account.
-     * Marks the payout 'completed', stamps transfer_completed_at, clears any prior error fields,
-     * and bumps the analytics cache for both sides of the transaction.
-     *
-     * Idempotent: already-completed payouts are skipped. Payouts in a terminal failure state
-     * (failed / cancelled / reversed) are logged and skipped — they should not be re-opened.
-     */
-    private function handleTransferPaid(object $transfer): void
-    {
-        $payoutId = $transfer->metadata?->sidest_payout_id ?? null;
-
-        if (! $payoutId) {
-            Log::warning('stripe.transfer_paid.missing_payout_metadata', ['transfer_id' => $transfer->id]);
-
-            return;
-        }
-
-        $payout = CommissionPayout::find($payoutId);
-
-        if (! $payout) {
-            Log::warning('stripe.transfer_paid.payout_not_found', [
-                'transfer_id' => $transfer->id,
-                'payout_id' => $payoutId,
-            ]);
-
-            return;
-        }
-
-        if ($payout->status === 'completed') {
-            return; // idempotent
-        }
-
-        if (in_array($payout->status, ['failed', 'cancelled', 'reversed'], true)) {
-            Log::warning('stripe.transfer_paid.unexpected_status', [
-                'payout_id' => $payoutId,
-                'status' => $payout->status,
-            ]);
-
-            return;
-        }
-
-        $payout->forceFill([
-            'status' => 'completed',
-            'transfer_completed_at' => now(),
-            'processed_at' => now(),
-            'failure_code' => null,
-            'failure_reason' => null,
-            'failure_category' => null,
-            'stripe_error_code' => null,
-            'stripe_error_message' => null,
-        ])->save();
-
-        $analytics = app(\App\Services\Cache\AnalyticsCacheService::class);
-        if ($payout->affiliate_professional_id) {
-            $analytics->bumpAnalyticsVersion($payout->affiliate_professional_id);
-        }
-        if ($payout->brand_professional_id) {
-            $analytics->bumpAnalyticsVersion($payout->brand_professional_id);
-        }
-
-        Log::info('stripe.transfer_paid', ['transfer_id' => $transfer->id, 'payout_id' => $payoutId]);
-    }
-
-    private function handleTransferFailed(object $transfer): void
-    {
-        $payoutId = $transfer->metadata?->sidest_payout_id ?? null;
-
-        if (! $payoutId) {
-            return;
-        }
-
-        $payout = CommissionPayout::find($payoutId);
-
-        if (! $payout) {
-            return;
-        }
-
-        if (in_array($payout->status, ['failed', 'completed', 'cancelled'], true)) {
-            return;
-        }
-
-        $stripeFailureCode = $transfer->failure_code ?? null;
-        $payout->forceFill([
-            'status' => 'failed',
-            'failure_code' => 'transfer_failed_webhook',
-            'failure_reason' => 'Transfer failed according to Stripe webhook',
-            'failure_category' => \App\Services\Stripe\CommissionPayoutService::categorizeTransferFailure($stripeFailureCode),
-            'stripe_error_code' => $stripeFailureCode,
-            'stripe_error_message' => $transfer->failure_message ?? null,
-            'processed_at' => now(),
-        ])->save();
-
-        if ($payout->affiliate_professional_id) {
-            app(\App\Services\Cache\AnalyticsCacheService::class)
-                ->bumpAnalyticsVersion($payout->affiliate_professional_id);
-        }
-
-        Log::warning('Stripe transfer failed', [
-            'transfer_id' => $transfer->id,
-            'payout_id' => $payoutId,
-            'stripe_failure_code' => $stripeFailureCode,
-        ]);
-    }
-
-    /**
-     * Handle transfer.reversed — funds reached the affiliate and were subsequently
-     * clawed back by Stripe (compliance hold, account closure, etc.).
-     *
-     * Unlike transfer.failed (funds never left), a reversal can arrive after the payout
-     * is already 'completed'. The brand was charged; the affiliate's Stripe balance was
-     * drained. The only safe action is to mark the payout 'reversed', flag it for manual
-     * recovery, and surface it to ops — no auto-refund attempt here.
-     */
-    private function handleTransferReversed(object $transfer): void
-    {
-        $payoutId = $transfer->metadata?->sidest_payout_id ?? null;
-
-        if (! $payoutId) {
-            return;
-        }
-
-        $payout = CommissionPayout::find($payoutId);
-
-        if (! $payout) {
-            Log::warning('stripe.transfer_reversed.payout_not_found', [
-                'transfer_id' => $transfer->id,
-                'payout_id' => $payoutId,
-            ]);
-
-            return;
-        }
-
-        // Idempotent: a duplicate webhook for an already-reversed payout is a no-op.
-        if ($payout->status === 'reversed') {
-            return;
-        }
-
-        $previousStatus = $payout->status;
-
-        // transfer.reversed can arrive after 'completed' — this is the most common
-        // real-world scenario (transfer confirmed → payout marked complete → Stripe later
-        // reverses). Completed payouts must be updatable here, unlike handleTransferFailed.
-        $payout->forceFill([
-            'status' => 'reversed',
-            'failure_code' => 'transfer_reversed',
-            'failure_reason' => 'Transfer reversed by Stripe after delivery — funds clawed back',
-            'needs_manual_refund' => true,
-            'stripe_error_code' => $transfer->failure_code ?? null,
-            'stripe_error_message' => $transfer->failure_message ?? null,
-            'processed_at' => now(),
-        ])->save();
-
-        if ($payout->affiliate_professional_id) {
-            app(\App\Services\Cache\AnalyticsCacheService::class)
-                ->bumpAnalyticsVersion($payout->affiliate_professional_id);
-        }
-
-        Log::warning('stripe.transfer_reversed', [
-            'transfer_id' => $transfer->id,
-            'payout_id' => $payoutId,
-            'previous_status' => $previousStatus,
-        ]);
-    }
-
-    private function handlePaymentIntentSucceeded(object $paymentIntent, string $connectedAccountId = ''): void
-    {
-        // Commission payout payment intent. In the brand-as-Connect-account
-        // model these fire on the BRAND'S Connect account, so connectedAccountId
-        // will be the brand's Stripe account ID (logged for traceability).
-        $payoutId = $paymentIntent->metadata?->sidest_payout_id ?? null;
-        if (! $payoutId) {
-            return;
-        }
-
-        Log::info('Stripe payment intent succeeded for payout', [
-            'payment_intent_id' => $paymentIntent->id,
-            'payout_id' => $payoutId,
-            'connected_account_id' => $connectedAccountId ?: null,
-        ]);
-    }
-
-    private function handlePaymentIntentFailed(object $paymentIntent, string $connectedAccountId = ''): void
-    {
-        $payoutId = $paymentIntent->metadata?->sidest_payout_id ?? null;
-
-        if (! $payoutId) {
-            return;
-        }
-
-        $payout = CommissionPayout::find($payoutId);
-        if (! $payout || in_array($payout->status, ['failed', 'completed'], true)) {
-            return;
-        }
-
-        $payout->forceFill([
-            'status' => 'failed',
-            'failure_code' => 'payment_failed_webhook',
-            'failure_reason' => $paymentIntent->last_payment_error?->message ?? 'Payment failed',
-        ])->save();
-
-        Log::warning('Stripe payment intent failed for payout', [
-            'payment_intent_id' => $paymentIntent->id,
-            'payout_id' => $payoutId,
-            'connected_account_id' => $connectedAccountId ?: null,
+        Log::info('stripe.connect.payment_method_lifecycle', [
+            'event_type' => $eventType,
+            'payment_method_id' => $paymentMethod->id ?? null,
+            'pm_type' => $paymentMethod->type ?? null,
         ]);
     }
 }

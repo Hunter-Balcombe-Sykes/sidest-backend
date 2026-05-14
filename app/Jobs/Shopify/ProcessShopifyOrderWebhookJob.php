@@ -239,24 +239,24 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
     }
 
     /**
-     * Dispatch the payout sweep immediately when a brand has opted into instant
-     * payouts AND all payout prerequisites are met. Without this, an Instant
-     * brand still waits up to 60 minutes for the next scheduled hourly sweep.
+     * Dispatch the payout sweep immediately when a brand has opted into instant payouts
+     * AND all payout prerequisites are met.
      *
-     * Prerequisites checked here are the same set processEligiblePayouts uses:
-     *   - brand payout_hold_days = 0
-     *   - brand has stripe_customer_id AND stripe_payment_method_id
-     *   - affiliate has stripe_connect_status = 'active'
+     * v2 Option A eligibility (all required):
+     *   - Brand store settings has payout_hold_days === 0 (the Instant tier).
+     *   - Affiliate's Stripe Connect status is 'active' (transfer recipient ready).
+     *   - Brand has a saved PaymentMethod (stripe_payment_method_id non-null) to fund the
+     *     destination charge from.
+     *   - Brand's Stripe Connect status is 'active' AND has a v2 Account ID.
      *
-     * The sweep job is idempotent (lockForUpdate when stamping payout_id) so a
-     * dispatch here racing with the next scheduled run won't double-batch.
+     * Without this fast path Instant brands wait up to 60 min for the next scheduled sweep,
+     * so the feature is best-effort: a soft failure here just falls back to the cron.
      */
     private function dispatchInstantPayoutIfEligible(
         ?BrandStoreSettings $brandSettings,
         Professional $affiliate,
     ): void {
-        $holdDays = $brandSettings?->payout_hold_days;
-        if ($holdDays !== 0) {
+        if ($brandSettings?->payout_hold_days !== 0) {
             return;
         }
 
@@ -266,9 +266,18 @@ class ProcessShopifyOrderWebhookJob implements ShouldQueue
 
         $brand = Professional::query()
             ->whereKey($this->brandProfessionalId)
-            ->first(['stripe_customer_id', 'stripe_payment_method_id']);
+            ->first([
+                'id',
+                'stripe_connect_account_id',
+                'stripe_connect_status',
+                'stripe_payment_method_id',
+            ]);
 
-        if (! $brand || ! $brand->stripe_customer_id || ! $brand->stripe_payment_method_id) {
+        if (! $brand
+            || ! $brand->stripe_connect_account_id
+            || $brand->stripe_connect_status !== 'active'
+            || ! $brand->stripe_payment_method_id
+        ) {
             return;
         }
 

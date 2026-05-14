@@ -41,7 +41,7 @@ class MonitorManualRefundQueueJob implements ShouldQueue
     {
         $open = CommissionPayout::query()
             ->where('needs_manual_refund', true)
-            ->whereNotIn('status', ['cancelled', 'reversed'])
+            ->whereNotIn('status', ['cancelled', 'failed'])
             ->with(['brandProfessional:id,display_name', 'affiliateProfessional:id,display_name'])
             ->orderBy('updated_at')
             ->get();

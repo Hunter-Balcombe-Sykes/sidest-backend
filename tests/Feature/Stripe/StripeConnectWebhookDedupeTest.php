@@ -111,16 +111,33 @@ it('processes a fresh event and records it in webhook_events', function () {
         'stripe_connect_status' => 'onboarding',
     ]);
 
+    // Under v2 Option A the connect-scope account.updated handler delegates to
+    // StripeConnectService::syncAccountStatus, which retrieves the v2 account from Stripe.
+    // Stub it so the test doesn't need real API credentials; the stub performs the same
+    // status persistence the real implementation does.
+    $mockService = Mockery::mock(\App\Services\Stripe\StripeConnectService::class)->makePartial();
+    $mockService->shouldReceive('syncAccountStatus')
+        ->andReturnUsing(function ($pro) {
+            DB::table('core.professionals')
+                ->where('id', $pro->id)
+                ->update(['stripe_connect_status' => 'active']);
+
+            return [
+                'status' => 'active',
+                'stripe_connect_account_id' => $pro->stripe_connect_account_id,
+                'card_payments_active' => true,
+                'stripe_transfers_active' => true,
+                'requirements' => [],
+            ];
+        });
+    app()->instance(\App\Services\Stripe\StripeConnectService::class, $mockService);
+
     $payload = json_encode([
         'id' => 'evt_fresh_456',
         'type' => 'account.updated',
         'account' => 'acct_fresh',  // top-level field must match data.object.id (real Stripe behavior)
         'data' => ['object' => [
             'id' => 'acct_fresh',
-            'charges_enabled' => true,
-            'payouts_enabled' => true,
-            'details_submitted' => true,
-            'requirements' => ['currently_due' => []],
         ]],
     ]);
 
@@ -148,6 +165,6 @@ it('processes a fresh event and records it in webhook_events', function () {
     // Event was recorded for future dedupe.
     expect(DB::table('billing.webhook_events')->where('stripe_event_id', 'evt_fresh_456')->count())->toBe(1);
 
-    // Handler ran — status promoted to 'active'.
+    // Handler ran — status promoted to 'active' by the stubbed syncAccountStatus.
     expect($professional->fresh()->stripe_connect_status)->toBe('active');
 });

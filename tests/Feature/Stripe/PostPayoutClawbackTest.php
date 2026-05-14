@@ -7,20 +7,15 @@ use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Stripe\CommissionPayoutRefundService;
 use Illuminate\Support\Facades\DB;
-use Mockery\MockInterface;
 use Stripe\StripeClient;
 
-use function Pest\Laravel\mock;
-
-// Exercises the post-payout-refund clawback path. When a Shopify refund arrives
-// AFTER a CommissionPayout has settled, the service must issue a proportional
-// Stripe Transfer Reversal and record a commerce.commission_clawbacks row.
+// Exercises the post-payout-refund clawback path under v2 destination-charge (Option A).
+// When a Shopify refund arrives AFTER a CommissionPayout has settled, the service issues a
+// single atomic Stripe Refund with refund_application_fee + reverse_transfer (replacing the
+// v1-era transfers->createReversal chain). Stripe proportionally reverses the affiliate
+// transfer and the platform fee in one call.
 
 beforeEach(function () {
-    // Brand-as-Connect-account: clawbackCompletedPayout now loads the brand
-    // Professional to read stripe_connect_account_id for the reversal call.
-    // Provide a stub professionals table + the brand-Connect column so the
-    // factory-created brand can be retrieved with a valid Connect account.
     setupProfessionalsTable();
     setupCommerceOrdersTables();
 
@@ -40,8 +35,8 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
         affiliate_professional_id TEXT,
-        stripe_payment_intent_id TEXT,
-        stripe_transfer_id TEXT,
+        payment_intent_id TEXT,
+        charge_id TEXT,
         status TEXT NOT NULL DEFAULT \'pending\',
         gross_commission_cents INTEGER NOT NULL DEFAULT 0,
         platform_fee_cents INTEGER NOT NULL DEFAULT 0,
@@ -53,19 +48,13 @@ beforeEach(function () {
         ledger_entry_count INTEGER NOT NULL DEFAULT 0,
         eligible_after TEXT,
         processed_at TEXT,
-        funding_source TEXT,
-        wallet_debit_cents INTEGER DEFAULT 0,
         charge_cents INTEGER DEFAULT 0,
         retry_count INTEGER NOT NULL DEFAULT 0,
         needs_manual_refund INTEGER NOT NULL DEFAULT 0,
         void_at TEXT,
         transfer_completed_at TEXT,
-        next_retry_at TEXT,
         last_retry_at TEXT,
-        funding_failure_count INTEGER NOT NULL DEFAULT 0,
         grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
-        stripe_error_code TEXT,
-        stripe_error_message TEXT,
         created_at TEXT,
         updated_at TEXT
     )');
@@ -84,6 +73,12 @@ beforeEach(function () {
         order_id TEXT NOT NULL,
         shopify_refund_id TEXT,
         stripe_reversal_id TEXT,
+        refund_id TEXT,
+        refund_amount_cents INTEGER,
+        application_fee_refund_cents INTEGER,
+        transfer_reversal_cents INTEGER,
+        is_partial INTEGER NOT NULL DEFAULT 0,
+        needs_manual_refund INTEGER NOT NULL DEFAULT 0,
         amount_cents INTEGER NOT NULL,
         currency_code TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -94,19 +89,6 @@ beforeEach(function () {
     )');
 });
 
-function clawbackStripeMock(): StripeClient
-{
-    return mock(StripeClient::class, function (MockInterface $mock) {
-        $transfersMock = Mockery::mock();
-        $mock->transfers = $transfersMock;
-    })->makePartial();
-}
-
-/**
- * Seed a minimal brand professional row with a Connect account ID, so that
- * the refund-clawback path can read stripe_connect_account_id for the
- * brand-scoped Transfer Reversal.
- */
 function clawbackSeedBrand(string $id): void
 {
     $now = now()->toDateTimeString();
@@ -124,14 +106,14 @@ function clawbackSeedBrand(string $id): void
     ]);
 }
 
-it('issues a proportional Transfer Reversal when refund arrives on a completed payout', function () {
+it('issues a single atomic Refund with refund_application_fee + reverse_transfer when refund arrives on a completed payout', function () {
     $payout = CommissionPayout::factory()->create([
         'status' => 'completed',
         'gross_commission_cents' => 10000,
-        'platform_fee_cents' => 2000, // 20% fee
+        'platform_fee_cents' => 2000,
         'net_payout_cents' => 8000,
         'currency_code' => 'AUD',
-        'stripe_transfer_id' => 'tr_test_completed',
+        'payment_intent_id' => 'pi_test_completed',
         'processed_at' => now(),
     ]);
 
@@ -141,7 +123,7 @@ it('issues a proportional Transfer Reversal when refund arrives on a completed p
         'payout_id' => $payout->id,
         'gross_cents' => 5000,
         'commission_cents' => 5000,
-        'refund_cents' => 2500, // partial refund — half the order
+        'refund_cents' => 2500,
         'status' => 'partially_refunded',
         'brand_professional_id' => $payout->brand_professional_id,
         'affiliate_professional_id' => $payout->affiliate_professional_id,
@@ -150,26 +132,37 @@ it('issues a proportional Transfer Reversal when refund arrives on a completed p
     CommissionPayoutItem::factory()->create([
         'payout_id' => $payout->id,
         'order_id' => $order->id,
-        'amount_cents' => 5000, // this order's full commission share
+        'amount_cents' => 5000,
     ]);
 
-    // Expected math:
-    //   item_net = 5000 * (1 - 2000/10000) = 5000 * 0.8 = 4000
-    //   refund_share = 2500 / 5000 = 0.5
-    //   clawback = 4000 * 0.5 = 2000 cents
-    $stripe = mock(StripeClient::class);
-    $transfers = Mockery::mock();
-    $stripe->transfers = $transfers;
+    // Expected: refund_share = 2500/5000 = 0.5, refund_cents = 5000 * 0.5 = 2500.
+    // Platform-scoped Refund with both reversal flags — no stripe_account header.
+    // Idempotency key: rf_{payout_id}_{order_id}_{hash}
+    $stripe = Mockery::mock(StripeClient::class);
+    $refunds = Mockery::mock();
+    $stripe->refunds = $refunds;
 
-    $transfers->shouldReceive('createReversal')
+    $refunds->shouldReceive('create')
         ->once()
         ->with(
-            'tr_test_completed',
-            Mockery::on(fn ($payload) => $payload['amount'] === 2000),
-            Mockery::on(fn ($opts) => str_starts_with($opts['idempotency_key'], 'rev_'.$payout->id)
-                && $opts['stripe_account'] === 'acct_brand_test')
+            Mockery::on(function (array $payload) use ($payout, $order) {
+                return $payload['payment_intent'] === 'pi_test_completed'
+                    && $payload['refund_application_fee'] === true
+                    && $payload['reverse_transfer'] === true
+                    && $payload['amount'] === 2500
+                    && $payload['metadata']['sidest_payout_id'] === $payout->id
+                    && $payload['metadata']['sidest_order_id'] === $order->id;
+            }),
+            Mockery::on(function (array $opts) use ($payout, $order) {
+                // v2 format: rf_{payout_id}_{order_id}_{16-char md5 substring}
+                $expectedPrefix = "rf_{$payout->id}_{$order->id}_";
+
+                return isset($opts['idempotency_key'])
+                    && str_starts_with($opts['idempotency_key'], $expectedPrefix)
+                    && strlen($opts['idempotency_key']) === strlen($expectedPrefix) + 16;
+            }),
         )
-        ->andReturn((object) ['id' => 'trr_abc_123']);
+        ->andReturn((object) ['id' => 're_abc_123']);
 
     $service = new CommissionPayoutRefundService(
         app(AnalyticsCacheService::class),
@@ -184,23 +177,21 @@ it('issues a proportional Transfer Reversal when refund arrives on a completed p
         ->first();
 
     expect($clawback)->not->toBeNull()
-        ->and($clawback->stripe_reversal_id)->toBe('trr_abc_123')
-        ->and($clawback->amount_cents)->toBe(2000)
+        ->and($clawback->stripe_reversal_id)->toBe('re_abc_123')
         ->and($clawback->status)->toBe('reversed')
         ->and($clawback->shopify_refund_id)->toBe('rf_shopify_abc');
 
-    // Payout stays completed — clawback is recorded but doesn't mutate the payout status.
     expect($payout->fresh()->status)->toBe('completed');
 });
 
-it('flags the payout for manual refund when the Transfer Reversal fails', function () {
+it('flags the payout for manual refund when the Refund call fails', function () {
     $payout = CommissionPayout::factory()->create([
         'status' => 'completed',
         'gross_commission_cents' => 10000,
         'platform_fee_cents' => 2000,
         'net_payout_cents' => 8000,
         'currency_code' => 'AUD',
-        'stripe_transfer_id' => 'tr_insufficient',
+        'payment_intent_id' => 'pi_insufficient',
         'processed_at' => now(),
         'needs_manual_refund' => false,
     ]);
@@ -211,7 +202,7 @@ it('flags the payout for manual refund when the Transfer Reversal fails', functi
         'payout_id' => $payout->id,
         'gross_cents' => 5000,
         'commission_cents' => 5000,
-        'refund_cents' => 5000, // full refund
+        'refund_cents' => 5000,
         'status' => 'refunded',
         'brand_professional_id' => $payout->brand_professional_id,
         'affiliate_professional_id' => $payout->affiliate_professional_id,
@@ -223,15 +214,15 @@ it('flags the payout for manual refund when the Transfer Reversal fails', functi
         'amount_cents' => 5000,
     ]);
 
-    $stripe = mock(StripeClient::class);
-    $transfers = Mockery::mock();
-    $stripe->transfers = $transfers;
+    $stripe = Mockery::mock(StripeClient::class);
+    $refunds = Mockery::mock();
+    $stripe->refunds = $refunds;
 
     $stripeError = Mockery::mock(\Stripe\Exception\InvalidRequestException::class);
     $stripeError->shouldReceive('getStripeCode')->andReturn('insufficient_funds');
     $stripeError->shouldReceive('getMessage')->andReturn('Insufficient funds in connected account');
 
-    $transfers->shouldReceive('createReversal')
+    $refunds->shouldReceive('create')
         ->once()
         ->andThrow($stripeError);
 

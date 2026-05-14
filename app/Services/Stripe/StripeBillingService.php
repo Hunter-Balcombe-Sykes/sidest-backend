@@ -20,15 +20,15 @@ class StripeBillingService
     }
 
     /**
-     * Ensure the professional has a Stripe Customer. Reuses existing one
-     * (may have been created by StripeConnectService for commission charges).
+     * Ensure the professional has a Stripe Customer.
+     *
+     * TODO[stripe-v2]: stripe_customer_id column dropped from professionals.
+     * Each call currently creates a new Stripe Customer (deduplicated within the
+     * idempotency window by professional ID). Phase 3 will add proper storage
+     * for the customer ID so it can be reused across calls.
      */
     public function ensureStripeCustomer(Professional $professional): string
     {
-        if ($professional->stripe_customer_id) {
-            return $professional->stripe_customer_id;
-        }
-
         $customer = $this->stripe->customers->create([
             'email' => $professional->primary_email,
             'name' => $professional->display_name,
@@ -37,10 +37,6 @@ class StripeBillingService
                 'professional_type' => $professional->professional_type,
             ],
         ], ['idempotency_key' => "customer_{$professional->id}"]);
-
-        $professional->update([
-            'stripe_customer_id' => $customer->id,
-        ]);
 
         return $customer->id;
     }
@@ -88,19 +84,13 @@ class StripeBillingService
 
     /**
      * Create a Stripe Billing Portal session for self-service management.
+     *
+     * TODO[stripe-v2]: stripe_customer_id column dropped from professionals.
+     * Phase 3 must re-implement customer ID lookup before this can work.
      */
     public function createBillingPortalSession(Professional $professional, string $returnUrl): string
     {
-        if (! $professional->stripe_customer_id) {
-            throw new \RuntimeException('Professional does not have a Stripe customer ID.');
-        }
-
-        $session = $this->stripe->billingPortal->sessions->create([
-            'customer' => $professional->stripe_customer_id,
-            'return_url' => $returnUrl,
-        ]);
-
-        return $session->url;
+        throw new \RuntimeException('Billing portal unavailable pending v2 customer ID storage (Phase 3).');
     }
 
     /**

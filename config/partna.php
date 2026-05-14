@@ -919,8 +919,8 @@ return [
         'platform_fee_percent' => (float) env('PARTNA_STORE_PLATFORM_FEE_PERCENT', env('SIDEST_STORE_PLATFORM_FEE_PERCENT', 20)),
         // Signup grace deadline. New affiliates get this many days after Stripe
         // Connect onboarding starts before their commissions begin voiding.
-        // Used by StripeConnectService::createConnectAccount to set
-        // professionals.stripe_grace_period_ends_at.
+        // Used by StripeConnectService::createConnectAccount to set the
+        // grace deadline on v1 (stripe_grace_period_ends_at column dropped in v2).
         'signup_grace_period_days' => (int) env('PARTNA_STORE_SIGNUP_GRACE_PERIOD_DAYS', env('SIDEST_STORE_SIGNUP_GRACE_PERIOD_DAYS', 30)),
 
         // Per-payout grace deadline. Each commission_payouts row's

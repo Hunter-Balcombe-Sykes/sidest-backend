@@ -9,6 +9,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 beforeEach(function () {
+    // Pin the placeholder domain so the test doesn't depend on .env which may carry the
+    // legacy sidest.io value during the partna.au rebrand transition.
+    config(['partna.gdpr.redact_placeholder_domain' => 'gdpr.partna.au']);
+
     $conn = DB::connection('pgsql');
     try {
         $conn->statement('ATTACH DATABASE \':memory:\' AS core');

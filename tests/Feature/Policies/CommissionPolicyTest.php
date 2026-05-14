@@ -9,16 +9,10 @@ beforeEach(function () {
     $this->policy = new CommissionPolicy($this->brandAccess);
 });
 
-it('allows a brand to topUp on themselves', function () {
-    $brand = (new Professional)->forceFill(['id' => 'brand-1', 'status' => 'active', 'professional_type' => 'brand']);
-    expect($this->policy->topUp($brand, $brand))->toBeTrue();
-});
-
-it('forbids an affiliate from topping up another professional', function () {
-    $affiliate = (new Professional)->forceFill(['id' => 'aff-1', 'status' => 'active', 'professional_type' => 'affiliate']);
-    $brand = (new Professional)->forceFill(['id' => 'brand-1', 'status' => 'active', 'professional_type' => 'brand']);
-    expect($this->policy->topUp($affiliate, $brand))->toBeFalse();
-});
+// CommissionPolicy::topUp() was removed alongside the legacy brand-wallet top-up flow
+// (Phase 9 cleanup). Under v2 Option A the brand funds commission payouts via destination
+// charges on their saved card/BECS PM — no wallet, no top-up. Authorization for the saved
+// PM lifecycle is covered by managePaymentMethod below.
 
 it('allows brand to managePaymentMethod on self only', function () {
     $brand = (new Professional)->forceFill(['id' => 'brand-1', 'status' => 'active', 'professional_type' => 'brand']);

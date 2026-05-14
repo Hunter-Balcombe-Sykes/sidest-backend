@@ -7,21 +7,17 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Stripe\StripeClient;
 
-use function Pest\Laravel\mock;
-
-// Captures what we pass to Stripe accounts->create so we can assert the
-// prefill block is shaped correctly without hitting the real API.
+// Captures what we pass to $stripe->v2->core->accounts->create so we can assert the
+// v2 Account creation payload is shaped correctly without hitting the real API.
+//
+// Under v2 Option A the identity block is minimal: entity_type ('company' for brands,
+// 'individual' for affiliates) + country. Richer prefill (company / individual sub-blocks
+// with phone, address, etc.) uses a different shape from v1 and is deferred to a future
+// phase — see plan §Phase 3.2.
 
 beforeEach(function () {
     attachTestSchemas();
     setupProfessionalsTable();
-
-    // createConnectAccount writes stripe_grace_period_ends_at; not in the base helper.
-    try {
-        DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN stripe_grace_period_ends_at TEXT');
-    } catch (\Throwable) {
-        // column may already exist from a previous test run within the same connection
-    }
 
     // resolveShopCurrency() queries professional_integrations during createConnectAccount.
     // Stub the table so the query returns no rows instead of erroring.
@@ -54,11 +50,6 @@ function makeConnectPrefillProfessional(array $overrides = []): Professional
         'status' => 'active',
         'country_code' => 'AU',
         'bio' => null,
-        'location_street_address' => null,
-        'location_city' => null,
-        'location_state' => null,
-        'location_postcode' => null,
-        'location_country' => null,
         'created_at' => $now,
         'updated_at' => $now,
     ], $overrides);
@@ -68,24 +59,30 @@ function makeConnectPrefillProfessional(array $overrides = []): Professional
     return Professional::find($id);
 }
 
-function captureCreatePayload(): array
+/**
+ * Build a StripeClient mock whose v2->core->accounts->create captures the payload it
+ * receives. Returns [$client, $captured] where $captured['payload'] is populated after the
+ * service call.
+ */
+function captureV2AccountCreatePayload(): array
 {
-    // Shared array so the closure can mutate it after the mock invokes.
     $captured = new ArrayObject(['payload' => null]);
 
-    // Avoid Pest's mock() helper here — its proxy was eating the closure args.
-    $stripe = Mockery::mock(StripeClient::class);
     $accounts = Mockery::mock();
-    $stripe->accounts = $accounts;
-
     $accounts->shouldReceive('create')
         ->once()
-        ->withArgs(function ($payload) use ($captured) {
+        ->withArgs(function ($payload, $opts = []) use ($captured) {
             $captured['payload'] = $payload;
 
             return true;
         })
         ->andReturn((object) ['id' => 'acct_fake_test']);
+
+    $core = (object) ['accounts' => $accounts, 'accountLinks' => Mockery::mock()->shouldIgnoreMissing()];
+    $v2 = (object) ['core' => $core];
+
+    $stripe = Mockery::mock(StripeClient::class);
+    $stripe->v2 = $v2;
 
     return [$stripe, $captured];
 }
@@ -102,116 +99,75 @@ function makeService(StripeClient $stripe): StripeConnectService
     return $service;
 }
 
-it('prefills business_profile and individual blocks from a fully-filled professional', function () {
-    // Add the partna_url column so the helper can read it (test schema omits it by default).
-    DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
-
-    $pro = makeConnectPrefillProfessional([
-        'partna_url' => 'https://test-affiliate.partna.au',
-        'phone' => '+61412345678',
-        'bio' => 'A bio that should not be sent when URL is present',
-        'location_street_address' => '123 Test St',
-        'location_city' => 'Sydney',
-        'location_state' => 'NSW',
-        'location_postcode' => '2000',
-        'location_country' => 'AU',
+it('brand identity payload sets entity_type=company and country', function () {
+    $brand = makeConnectPrefillProfessional([
+        'professional_type' => 'brand',
+        'country_code' => 'AU',
     ]);
 
-    [$stripe, $captured] = captureCreatePayload();
-    makeService($stripe)->createConnectAccount($pro);
+    [$stripe, $captured] = captureV2AccountCreatePayload();
+    makeService($stripe)->createConnectAccount($brand);
 
-    expect($captured['payload']['business_profile'] ?? null)->toBe([
-        'name' => 'Test Affiliate',
-        'url' => 'https://test-affiliate.partna.au',
-        'support_email' => 'test@example.com',
-    ]);
-
-    expect($captured['payload']['individual'] ?? null)->toBe([
-        'first_name' => 'Test',
-        'last_name' => 'Affiliate',
-        'email' => 'test@example.com',
-        'phone' => '+61412345678',
-        'address' => [
-            'line1' => '123 Test St',
-            'city' => 'Sydney',
-            'state' => 'NSW',
-            'postal_code' => '2000',
-            'country' => 'AU',
-        ],
+    expect($captured['payload']['identity'] ?? null)->toBe([
+        'entity_type' => 'company',
+        'country' => 'AU',
     ]);
 });
 
-it('sends product_description as a fallback when partna_url is missing', function () {
-    DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
-
-    $pro = makeConnectPrefillProfessional([
-        'partna_url' => null,
-        'bio' => 'I sell handmade soap',
+it('affiliate identity payload sets entity_type=individual and country', function () {
+    $affiliate = makeConnectPrefillProfessional([
+        'professional_type' => 'professional',
+        'country_code' => 'US',
     ]);
 
-    [$stripe, $captured] = captureCreatePayload();
-    makeService($stripe)->createConnectAccount($pro);
+    [$stripe, $captured] = captureV2AccountCreatePayload();
+    makeService($stripe)->createConnectAccount($affiliate);
 
-    $bp = $captured['payload']['business_profile'] ?? [];
-    expect($bp)->toHaveKey('product_description', 'I sell handmade soap')
-        ->and($bp)->not->toHaveKey('url');
+    expect($captured['payload']['identity'] ?? null)->toBe([
+        'entity_type' => 'individual',
+        'country' => 'US',
+    ]);
 });
 
-it('drops non-E.164 phone numbers and omits address when country is missing', function () {
-    DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
-
-    $pro = makeConnectPrefillProfessional([
-        'phone' => '0412345678',                     // missing leading '+'
-        'location_street_address' => '123 Test St',
-        'location_country' => null,                  // address skipped without country
+it('brand v2 payload includes merchant + customer + recipient configurations', function () {
+    $brand = makeConnectPrefillProfessional([
+        'professional_type' => 'brand',
     ]);
 
-    [$stripe, $captured] = captureCreatePayload();
-    makeService($stripe)->createConnectAccount($pro);
+    [$stripe, $captured] = captureV2AccountCreatePayload();
+    makeService($stripe)->createConnectAccount($brand);
 
-    $individual = $captured['payload']['individual'] ?? [];
-    expect($individual)->not->toHaveKey('phone')
-        ->and($individual)->not->toHaveKey('address');
+    $configuration = $captured['payload']['configuration'] ?? [];
+
+    expect($configuration['merchant']['capabilities']['card_payments']['requested'] ?? null)->toBeTrue();
+    expect($configuration['customer'])->toBeObject();
+    expect($configuration['recipient']['capabilities']['stripe_balance']['stripe_transfers']['requested'] ?? null)->toBeTrue();
 });
 
-it('skips address when location_country is a free-form value Stripe cannot map', function () {
-    // Side St had location_country = "Australia" (full name) while country_code = "AU".
-    // The unmapped value used to abort the whole onboarding with 422; now it
-    // should silently drop the address block and let onboarding proceed.
-    DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
-
-    $pro = makeConnectPrefillProfessional([
-        'location_street_address' => '37 Hardiman Street',
-        'location_city' => 'Kensington',
-        'location_state' => 'Victoria',
-        'location_postcode' => '3031',
-        'location_country' => 'Australia', // free-form, not an ISO code
+it('affiliate v2 payload includes recipient configuration only (no merchant or customer)', function () {
+    $affiliate = makeConnectPrefillProfessional([
+        'professional_type' => 'professional',
     ]);
 
-    [$stripe, $captured] = captureCreatePayload();
-    makeService($stripe)->createConnectAccount($pro);
+    [$stripe, $captured] = captureV2AccountCreatePayload();
+    makeService($stripe)->createConnectAccount($affiliate);
 
-    $individual = $captured['payload']['individual'] ?? [];
-    expect($individual)->not->toHaveKey('address');
+    $configuration = $captured['payload']['configuration'] ?? [];
+
+    expect($configuration['recipient']['capabilities']['stripe_balance']['stripe_transfers']['requested'] ?? null)->toBeTrue();
+    expect($configuration['merchant'] ?? null)->toBeNull();
+    expect($configuration['customer'] ?? null)->toBeNull();
 });
 
-it('omits the prefill blocks entirely when the professional has no prefillable fields', function () {
-    DB::connection('pgsql')->statement('ALTER TABLE core.professionals ADD COLUMN partna_url TEXT');
-
-    $pro = makeConnectPrefillProfessional([
-        'display_name' => null,
-        'first_name' => null,
-        'last_name' => null,
-        'primary_email' => null,
-        'bio' => null,
-        'phone' => null,
-        'location_street_address' => null,
-        'location_country' => null,
+it('defaults block routes fees and losses to the platform (application) for destination charges', function () {
+    $brand = makeConnectPrefillProfessional([
+        'professional_type' => 'brand',
     ]);
 
-    [$stripe, $captured] = captureCreatePayload();
-    makeService($stripe)->createConnectAccount($pro);
+    [$stripe, $captured] = captureV2AccountCreatePayload();
+    makeService($stripe)->createConnectAccount($brand);
 
-    expect($captured['payload'])->not->toHaveKey('business_profile')
-        ->and($captured['payload'])->not->toHaveKey('individual');
+    expect($captured['payload']['defaults']['responsibilities']['fees_collector'] ?? null)->toBe('application');
+    expect($captured['payload']['defaults']['responsibilities']['losses_collector'] ?? null)->toBe('application');
+    expect($captured['payload']['dashboard'] ?? null)->toBe('express');
 });

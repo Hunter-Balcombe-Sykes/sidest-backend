@@ -15,8 +15,8 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
         affiliate_professional_id TEXT,
-        stripe_payment_intent_id TEXT,
-        stripe_transfer_id TEXT,
+        payment_intent_id TEXT,
+        charge_id TEXT,
         status TEXT NOT NULL DEFAULT \'pending\',
         gross_commission_cents INTEGER NOT NULL DEFAULT 0,
         platform_fee_cents INTEGER NOT NULL DEFAULT 0,
@@ -28,19 +28,13 @@ beforeEach(function () {
         ledger_entry_count INTEGER NOT NULL DEFAULT 0,
         eligible_after TEXT,
         processed_at TEXT,
-        funding_source TEXT,
-        wallet_debit_cents INTEGER DEFAULT 0,
         charge_cents INTEGER DEFAULT 0,
         retry_count INTEGER NOT NULL DEFAULT 0,
         needs_manual_refund INTEGER NOT NULL DEFAULT 0,
         void_at TEXT,
         transfer_completed_at TEXT,
-        next_retry_at TEXT,
         last_retry_at TEXT,
-        funding_failure_count INTEGER NOT NULL DEFAULT 0,
         grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
-        stripe_error_code TEXT,
-        stripe_error_message TEXT,
         created_at TEXT,
         updated_at TEXT
     )');
@@ -63,16 +57,15 @@ it('cancels a pending payout when over-refund drives totals to zero', function (
         'ledger_entry_count' => 1,
     ]);
 
-    // Single order in the batch. Over-refund (refund_cents > gross_cents) forces
-    // shrinkItem to compute commission=0 → newGross=0 → newNet=0 — without the
-    // refunded_to_zero guard, the transfer would be created at amount=0 and Stripe
-    // would reject as amount_too_small.
+    // Over-refund (refund_cents > gross_cents) forces shrinkItem to compute
+    // commission=0 → newGross=0 → newNet=0 — without the refunded_to_zero guard,
+    // the PI create would trip Stripe's amount_too_small.
     $order = Order::factory()->create([
         'payout_id' => $payout->id,
         'gross_cents' => 5000,
         'commission_cents' => 5000,
-        'commission_rate' => 100, // 100% commission, simplifies the math
-        'refund_cents' => 6000, // OVER-refund (rare but real on rounding/store-credit edge cases)
+        'commission_rate' => 100,
+        'refund_cents' => 6000,
         'status' => 'partially_refunded',
         'brand_professional_id' => $payout->brand_professional_id,
         'affiliate_professional_id' => $payout->affiliate_professional_id,

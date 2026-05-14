@@ -195,6 +195,11 @@ function setupProfessionalsTable(): void
         location_country TEXT NULL,
         stripe_connect_account_id TEXT NULL,
         stripe_connect_status TEXT NULL,
+        stripe_payment_method_id TEXT NULL,
+        stripe_payment_method_brand TEXT NULL,
+        stripe_payment_method_last4 TEXT NULL,
+        stripe_commission_funding_mode TEXT NULL,
+        payout_method TEXT NULL,
         deleted_at TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
@@ -734,16 +739,33 @@ function setupCommissionLedgerEntriesTable(): void
 function setupCommissionPayoutsTable(): void
 {
     attachTestSchemas();
+    // Column list mirrors the production model's writes — every Stripe-v2 lifecycle
+    // column the service forceFill()s must exist here or test inserts fail.
     \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS commerce.commission_payouts (
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT NULL,
         affiliate_professional_id TEXT NULL,
         status TEXT NULL,
+        gross_commission_cents INTEGER NULL,
+        platform_fee_cents INTEGER NULL,
         net_payout_cents INTEGER NULL,
+        charge_cents INTEGER NULL,
+        ledger_entry_count INTEGER NULL,
+        retry_count INTEGER NULL,
+        needs_manual_refund INTEGER NULL,
+        currency_code TEXT NULL,
+        payment_intent_id TEXT NULL,
+        charge_id TEXT NULL,
+        failure_code TEXT NULL,
+        failure_reason TEXT NULL,
+        failure_category TEXT NULL,
+        stripe_error_code TEXT NULL,
+        stripe_error_message TEXT NULL,
         eligible_after TEXT NULL,
         processed_at TEXT NULL,
+        transfer_completed_at TEXT NULL,
         void_at TEXT NULL,
-        currency_code TEXT NULL,
+        grace_notifications_sent TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
     )');
@@ -1038,10 +1060,36 @@ function createDocumentFor(Professional $pro, array $overrides = []): \App\Model
  * SQLite does not support INSERT ... ON CONFLICT WHERE (partial predicate), so tests that
  * exercise the LWW guard directly must call markTestSkipped() on non-pgsql connections.
  */
+/**
+ * billing.webhook_events — the dedupe ledger written by every webhook controller
+ * (Stripe + Shopify) via the DedupesShopifyWebhookEvent trait or firstOrCreate.
+ *
+ * Provider distinguishes Stripe events from Shopify events; `stripe_event_id` is
+ * historically named but semantically holds the external event ID for the provider.
+ */
+function setupWebhookEventsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS billing.webhook_events (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL DEFAULT \'stripe\',
+        stripe_event_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        payload TEXT,
+        processed_at TEXT NOT NULL DEFAULT (datetime(\'now\')),
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
+}
+
 function setupCommerceOrdersTables(): void
 {
     attachTestSchemas();
     $conn = \Illuminate\Support\Facades\DB::connection('pgsql');
+
+    // Shopify and Stripe webhook controllers all dedupe via billing.webhook_events.
+    // Auto-include the table so tests that hit those controllers don't have to.
+    setupWebhookEventsTable();
 
     $conn->statement('CREATE TABLE IF NOT EXISTS commerce.orders (
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -1062,8 +1110,9 @@ function setupCommerceOrdersTables(): void
         line_items TEXT NOT NULL DEFAULT \'[]\',
         shopify_data TEXT NOT NULL DEFAULT \'{}\',
         payout_id TEXT NULL,
+        payout_eligible_at TEXT NULL,
         reconciled_at TEXT NULL,
-        shopify_updated_at TEXT NOT NULL,
+        shopify_updated_at TEXT NULL,
         occurred_at TEXT NOT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL,

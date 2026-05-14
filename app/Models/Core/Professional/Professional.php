@@ -41,13 +41,8 @@ class Professional extends BaseModel
     protected $hidden = [
         'auth_user_id',
         'stripe_connect_account_id',
-        'stripe_customer_id',
         'stripe_payment_method_id',
-        'stripe_connect_customer_id',
-        'stripe_connect_payment_method_id',
         'stripe_commission_funding_mode',
-        'stripe_manual_balance_cents',
-        'stripe_manual_balance_currency',
         'deletion_token_hash',
     ];
 
@@ -80,25 +75,13 @@ class Professional extends BaseModel
         'handle_lc',
 
         // Stripe Connect + commission funding.
-        //
-        // Two parallel sets of customer/PM columns exist for brands:
-        //   - stripe_customer_id / stripe_payment_method_id live on Partna's
-        //     PLATFORM Stripe account. Kept for SaaS-billing subscriptions.
-        //   - stripe_connect_customer_id / stripe_connect_payment_method_id live
-        //     on the BRAND'S OWN Connect account. Used for commission-payout
-        //     direct charges where the brand is merchant of record.
         'stripe_connect_account_id',
         'stripe_connect_status',
-        'stripe_customer_id',
         'stripe_payment_method_id',
-        'stripe_connect_customer_id',
-        'stripe_connect_payment_method_id',
         'stripe_payment_method_brand',
         'stripe_payment_method_last4',
         'stripe_commission_funding_mode',
-        'stripe_manual_balance_cents',
-        'stripe_manual_balance_currency',
-        'stripe_grace_period_ends_at',
+        'payout_method',
 
         // Account deletion lifecycle
         'deletion_token_hash',
@@ -109,8 +92,6 @@ class Professional extends BaseModel
 
     protected $casts = [
         'onboarding_step' => 'integer',
-        'stripe_manual_balance_cents' => 'integer',
-        'stripe_grace_period_ends_at' => 'datetime',
         'about' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',

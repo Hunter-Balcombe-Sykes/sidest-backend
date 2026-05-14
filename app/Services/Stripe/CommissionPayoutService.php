@@ -17,7 +17,21 @@ use Stripe\Exception\ApiErrorException;
 use Stripe\Exception\RateLimitException;
 use Stripe\StripeClient;
 
-// V2: Core. Processes eligible commission payouts with hybrid funding (wallet balance first, card charge for shortfall). Transfers net amount to affiliate via Stripe Connect (80/20 split).
+/**
+ * Commission payouts under Stripe v2 Option A — destination charge with on_behalf_of.
+ *
+ * A single platform-scope PaymentIntent does three things atomically at settlement:
+ *   1. Charges the brand's saved card/BECS account (customer_account=brand_acct, payment_method=brand_pm).
+ *   2. Names the brand as merchant of record (on_behalf_of=brand_acct).
+ *   3. Routes funds — application_fee to the platform balance and (gross - fee) to the affiliate
+ *      (transfer_data.destination=affiliate_acct).
+ *
+ * Failure paths short-circuit before the PI create. The completion handshake comes from the
+ * payment_intent.succeeded webhook on the platform endpoint (see StripePlatformWebhookController).
+ *
+ * State machine: pending → processing → completed | failed | cancelled. No collecting/transferring
+ * states — the legacy 3-step direct-charge chain (PI → Transfer → Transfer) is gone.
+ */
 class CommissionPayoutService
 {
     private StripeClient $stripe;
@@ -42,9 +56,7 @@ class CommissionPayoutService
         $this->analyticsCache = $analyticsCache ?? app(AnalyticsCacheService::class);
         $this->platformFeePercent = config('partna.store.platform_fee_percent', 3);
         $this->systemHoldDays = max(0, (int) config('partna.store.payout_hold_days', 7));
-        // Clamp to [1, 365] — values outside this range produce nonsensical void_at timestamps.
-        // Falls back to the legacy 'grace_period_days' key for backward compat during the
-        // config split rollout; new code should set payout_grace_period_days directly.
+        // Clamp to [1, 365]. Legacy 'grace_period_days' key is honored for backward compat.
         $this->gracePeriodDays = max(1, min(365, (int) config(
             'partna.store.payout_grace_period_days',
             (int) config('partna.store.grace_period_days', 60),
@@ -52,9 +64,9 @@ class CommissionPayoutService
     }
 
     /**
-     * Main entry point: find all eligible unpaid commissions, batch them,
-     * and dispatch a per-payout job for each. Returns dispatch counts only —
-     * actual results are reported per-job via Horizon.
+     * Main entry point: find all eligible unpaid commissions, batch them, dispatch a
+     * per-payout job for each. Returns dispatch counts only — actual results are reported
+     * per-job via Horizon and the payment_intent.* webhooks.
      *
      * @return array{batches_dispatched: int, batches_created: int, batches_requeued: int}
      */
@@ -66,19 +78,14 @@ class CommissionPayoutService
             'batches_requeued' => 0,
         ];
 
-        // Re-dispatch any in-flight batches. ExecuteCommissionPayoutJob's idempotent
-        // resume logic handles collecting/transferring states safely.
-        // Skip wallet_currency_mismatch payouts — they cannot proceed until the brand
-        // resolves the mismatch manually. Re-dispatching them floods Horizon with no
-        // forward progress; the sweep picks them up again once an admin clears the code.
+        // Resume any in-flight batches. ExecuteCommissionPayoutJob's idempotent flow handles
+        // pending/processing states safely — pending re-runs the PI create with the same
+        // idempotency key (Stripe returns the original PI if one already exists), processing
+        // waits for the webhook.
         $existingPending = CommissionPayout::query()
-            ->whereIn('status', ['pending', 'pending_funds', 'collecting', 'transferring'])
+            ->whereIn('status', ['pending', 'processing'])
             ->whereNull('processed_at')
             ->where('eligible_after', '<=', now())
-            ->where(function ($q) {
-                $q->whereNull('failure_code')
-                    ->orWhere('failure_code', '!=', 'wallet_currency_mismatch');
-            })
             ->orderBy('eligible_after')
             ->limit(500)
             ->get();
@@ -89,27 +96,20 @@ class CommissionPayoutService
             $stats['batches_requeued']++;
         }
 
-        // Brand must have an ACTIVE Connect Express account AND a card saved on
-        // THAT Connect account before they can be charged. The commission charge
-        // is a direct charge on the brand's Connect (brand = merchant of record),
-        // so all four conditions are required:
-        //   - stripe_connect_account_id     (account exists)
-        //   - stripe_connect_status='active' (KYC + capabilities verified)
-        //   - stripe_connect_customer_id    (customer on brand's own account)
-        //   - stripe_connect_payment_method_id (PM on brand's own account)
+        // Brand eligibility: must have an ACTIVE v2 Account with a saved PaymentMethod
+        // (card or BECS). The dual-capability check (card_payments + stripe_transfers) was
+        // already enforced when we set stripe_connect_status='active' via the webhook.
         $eligibleBrandIds = Professional::query()
             ->where('professional_type', 'brand')
             ->whereNotNull('stripe_connect_account_id')
             ->where('stripe_connect_status', 'active')
-            ->whereNotNull('stripe_connect_customer_id')
-            ->whereNotNull('stripe_connect_payment_method_id')
+            ->whereNotNull('stripe_payment_method_id')
             ->pluck('id');
 
-        // Find all brands with unpaid approved orders, then apply per-brand hold days
-        // to determine which orders have cleared their hold window.
-        // Phase 3.5: source of truth moves from commission_movements to commerce.orders.
-        // Exclude rate_source='pending' orders — these have an out-of-bounds metafield
-        // and cannot be valued until the brand corrects their rate configuration.
+        // Find brands with unpaid approved orders past their grace window. payout_eligible_at
+        // is set at order creation (created_at + brand_store_settings.payout_hold_days). Orders
+        // with NULL payout_eligible_at (pre-v2 backfill not yet applied) fall back to the
+        // per-brand cutoff calculation below.
         $brandIds = Order::query()
             ->where('status', 'approved')
             ->whereNull('payout_id')
@@ -119,7 +119,6 @@ class CommissionPayoutService
             ->distinct()
             ->pluck('brand_professional_id');
 
-        // Pre-load brand store settings for hold-day lookups.
         $brandSettings = BrandStoreSettings::query()
             ->whereIn('professional_id', $brandIds)
             ->pluck('payout_hold_days', 'professional_id');
@@ -133,7 +132,15 @@ class CommissionPayoutService
                 ->whereNull('payout_id')
                 ->where('refund_cents', 0)
                 ->where('brand_professional_id', $brandId)
-                ->where('occurred_at', '<=', $cutoff)
+                // Per-order grace: new orders use payout_eligible_at directly; old orders
+                // (NULL value) fall back to the legacy occurred_at<=cutoff check.
+                ->where(function ($q) use ($cutoff) {
+                    $q->where('payout_eligible_at', '<=', now())
+                        ->orWhere(function ($q2) use ($cutoff) {
+                            $q2->whereNull('payout_eligible_at')
+                                ->where('occurred_at', '<=', $cutoff);
+                        });
+                })
                 ->select([
                     'brand_professional_id',
                     'affiliate_professional_id',
@@ -176,10 +183,9 @@ class CommissionPayoutService
     }
 
     /**
-     * Resolve the effective hold days for a brand.
-     * Uses brand override if set, otherwise system default. Honours 0 (instant)
-     * as a valid choice — UpdateBrandStoreSettingsRequest constrains brand input
-     * to 0/7/14/28, so there's no need for a server-side floor.
+     * Resolve the effective hold days for a brand. Brand override > system default.
+     * 0 (instant) is a legitimate value — UpdateBrandStoreSettingsRequest constrains
+     * brand input to 0/7/14/28 so there's no need for a server-side floor.
      */
     private function resolveHoldDays(?int $brandPayoutHoldDays): int
     {
@@ -187,13 +193,8 @@ class CommissionPayoutService
     }
 
     /**
-     * Create a payout batch record and link all eligible orders.
-     *
-     * Phase 3.5+: reads from commerce.orders directly (not commission_movements).
-     * Orders that are refunded after status='approved' have their status flipped to
-     * 'partially_refunded'/'refunded', which the WHERE clause already excludes. Refunds
-     * that arrive AFTER a payout is created are caught by revalidatePayoutOrders at the
-     * start of processPayoutBatch before any financial operations run.
+     * Create a payout batch record and link all eligible orders inside a lockForUpdate
+     * transaction so a concurrent sweep cannot double-claim the same orders.
      */
     private function createPayoutBatch(
         string $brandId,
@@ -201,8 +202,6 @@ class CommissionPayoutService
         string $currency,
         \DateTimeInterface $cutoff,
     ): ?CommissionPayout {
-        // READ COMMITTED (PG default) — lockForUpdate() prevents a concurrent batch
-        // from claiming the same orders between the SELECT and the payout_id stamp.
         return DB::transaction(function () use ($brandId, $affiliateId, $currency, $cutoff) {
             $orders = Order::query()
                 ->where('status', 'approved')
@@ -211,7 +210,13 @@ class CommissionPayoutService
                 ->where('brand_professional_id', $brandId)
                 ->where('affiliate_professional_id', $affiliateId)
                 ->where('currency_code', $currency)
-                ->where('occurred_at', '<=', $cutoff)
+                ->where(function ($q) use ($cutoff) {
+                    $q->where('payout_eligible_at', '<=', now())
+                        ->orWhere(function ($q2) use ($cutoff) {
+                            $q2->whereNull('payout_eligible_at')
+                                ->where('occurred_at', '<=', $cutoff);
+                        });
+                })
                 ->lockForUpdate()
                 ->get();
 
@@ -231,12 +236,6 @@ class CommissionPayoutService
                 return null;
             }
 
-            // Per-payout grace window — 60d from creation. If the affiliate
-            // hasn't activated Stripe Connect by then, VoidExpiredPayoutsJob
-            // cancels this payout and clears the orders' payout_id stamps.
-            // grace_period_days lives in config/partna.php so ops can tune
-            // the policy without a code release.
-            // ledger_entry_count now counts orders included; column rename deferred to Phase 4.
             $payout = CommissionPayout::forceCreate([
                 'brand_professional_id' => $brandId,
                 'affiliate_professional_id' => $affiliateId,
@@ -248,11 +247,8 @@ class CommissionPayoutService
                 'ledger_entry_count' => $orders->count(),
                 'eligible_after' => $cutoff,
                 'void_at' => now()->addDays($this->gracePeriodDays),
-                'funding_source' => null,
             ]);
 
-            // Create one payout item per order; stamp orders.payout_id atomically
-            // so the next sweep cannot double-claim these orders.
             foreach ($orders as $order) {
                 CommissionPayoutItem::create([
                     'payout_id' => $payout->id,
@@ -271,11 +267,11 @@ class CommissionPayoutService
     /**
      * Re-validate orders linked to a pending payout against the current DB state.
      *
-     * Runs inside a lockForUpdate transaction so a concurrent refund webhook cannot
-     * race this check. Stale orders (refund_cents > 0 or status != 'approved') are
-     * released back to the next sweep. If enough valid orders remain the payout is
-     * rebuilt in-place and the refreshed record is returned. If nothing valid remains
-     * (or the rebuilt net is non-positive) the payout is cancelled and null is returned.
+     * A refund webhook arriving between createPayoutBatch and the Stripe PI create could
+     * flip orders ineligible. This check runs inside a lockForUpdate transaction so a
+     * concurrent refund cannot race past us. Stale orders are released back to the next
+     * sweep, the batch is rebuilt from the remaining valid orders, and if nothing valid
+     * remains the payout is cancelled.
      */
     private function revalidatePayoutOrders(CommissionPayout $payout): ?CommissionPayout
     {
@@ -289,12 +285,10 @@ class CommissionPayoutService
                 fn ($o) => $o->status === 'approved' && (int) $o->refund_cents === 0
             );
 
-            // All orders still eligible — nothing to do.
             if ($staleOrders->isEmpty()) {
                 return $payout;
             }
 
-            // Release stale orders so the next sweep can re-evaluate them.
             $staleIds = $staleOrders->pluck('id')->all();
             Order::whereIn('id', $staleIds)->update(['payout_id' => null]);
             CommissionPayoutItem::where('payout_id', $payout->id)
@@ -311,7 +305,6 @@ class CommissionPayoutService
                 return null;
             }
 
-            // Rebuild batch totals from the remaining valid orders.
             $grossCents = (int) $validOrders->sum('commission_cents');
             $platformFeeCents = (int) round($grossCents * $this->platformFeePercent / 100);
             $netPayoutCents = $grossCents - $platformFeeCents;
@@ -351,20 +344,18 @@ class CommissionPayoutService
     }
 
     /**
-     * Process a single payout through the full 3-step flow with idempotent resume:
-     *   1) Debit wallet balance (atomic with status update — crash-safe).
-     *   2) Charge brand's card for any shortfall.
-     *   3) Transfer net amount to affiliate via Stripe Connect.
+     * Process a single payout via the Option A destination charge.
      *
-     * Each step checks the payout's current status before executing, so retries
-     * (both Horizon automatic and admin manual) resume from where they left off
-     * rather than restarting from scratch. This prevents double-debiting the wallet
-     * and double-charging the brand's card.
+     * One platform-scope PaymentIntent does the whole job. The PI succeeded webhook
+     * (StripePlatformWebhookController) marks the payout completed; we leave it in
+     * 'processing' here and return null. SCA (requires_action) is treated as a hard
+     * failure because off_session card payouts cannot prompt the brand for 3DS.
      *
      * Return values:
-     * - true:  completed
-     * - null:  pending for funding/retry
-     * - false: failed
+     * - true:  PI succeeded synchronously (rare — only for fully off-session card flows
+     *          that don't require any extra processing time on Stripe's end)
+     * - null:  PI accepted by Stripe and is processing — webhook will complete it
+     * - false: hard failure (charge declined, brand misconfigured, idempotent retry exhausted)
      */
     public function processPayoutBatch(CommissionPayout $payout): ?bool
     {
@@ -372,24 +363,29 @@ class CommissionPayoutService
             return true;
         }
 
-        // Re-validate orders before any financial operations. A refund webhook arriving
-        // after createPayoutBatch committed can flip orders ineligible; catch that here
-        // while we can still cancel cleanly rather than overpaying the affiliate.
+        // Re-dispatch guard. The daily sweep re-queues 'processing' payouts so a missed
+        // payment_intent.succeeded webhook eventually gets reconciled — but the sweep
+        // can fire any number of times during BECS's T+2 settlement window. Stripe's
+        // idempotency-key cache is only 24h, so calling PI.create with the same
+        // pi_{payout_id} key on day 2 of a BECS payout creates a SECOND PaymentIntent
+        // (Stripe forgot the original) — that's a duplicate charge against the brand.
+        //
+        // If we already have a PI on record and the payout is in flight, no-op and let
+        // the webhook complete it. Webhook handlers (markPaymentIntentSucceeded /
+        // markPaymentIntentFailed) drive the terminal-state transition.
+        if ($payout->status === 'processing' && $payout->payment_intent_id !== null) {
+            return null;
+        }
+
         if ($payout->status === 'pending') {
             $payout = $this->revalidatePayoutOrders($payout);
             if ($payout === null) {
-                return null; // Payout cancelled — all linked orders became ineligible.
+                return null;
             }
         }
 
         $brand = Professional::find($payout->brand_professional_id);
         $affiliate = Professional::find($payout->affiliate_professional_id);
-
-        if (! $affiliate?->stripe_connect_account_id || $affiliate->stripe_connect_status !== 'active') {
-            $this->markPendingFunding($payout, 'affiliate_not_connected', 'Affiliate Stripe Connect account is not active — holding for grace period');
-
-            return null;
-        }
 
         if (! $brand) {
             $this->failPayout($payout, 'brand_missing', 'Brand account was not found.');
@@ -397,469 +393,184 @@ class CommissionPayoutService
             return false;
         }
 
+        if (! $affiliate?->stripe_connect_account_id || $affiliate->stripe_connect_status !== 'active') {
+            $this->failPayout($payout, 'affiliate_not_connected', 'Affiliate Stripe Connect account is not active.');
+
+            return false;
+        }
+
         if (
             ! $brand->stripe_connect_account_id
             || $brand->stripe_connect_status !== 'active'
-            || ! $brand->stripe_connect_customer_id
-            || ! $brand->stripe_connect_payment_method_id
+            || ! $brand->stripe_payment_method_id
         ) {
-            $this->markPendingFunding(
+            $this->failPayout(
                 $payout,
-                'brand_payment_method_missing',
-                'Brand has not completed Connect onboarding and card setup. Please finish setup in Stripe settings.',
+                'brand_not_ready',
+                'Brand has not completed Stripe Connect onboarding with a saved payment method.',
             );
 
-            return null;
+            return false;
         }
 
-        $brandStripeAccountOption = ['stripe_account' => $brand->stripe_connect_account_id];
+        if ($payout->net_payout_cents <= 0) {
+            $this->failPayout($payout, 'net_payout_zero', 'Net payout amount is zero.');
 
-        $currencyUpper = strtoupper($payout->currency_code);
-        $currencyLower = strtolower($currencyUpper);
-        $amountToCollect = $payout->gross_commission_cents;
+            return false;
+        }
 
-        // Idempotency key suffix used only for PaymentIntents — retry_count is incremented
-        // on each admin manual retry so a fresh PI is created rather than returning a
-        // refunded/failed one from within the 24-hour idempotency TTL window.
-        // Transfers intentionally use a stable key (no suffix) so Stripe returns the same
-        // transfer on any retry, preventing a duplicate payout if the transfer succeeded
-        // but the HTTP response was lost before the ID could be recorded.
-        $retryKey = '_r'.$payout->retry_count;
+        $retryKey = $payout->retry_count > 0 ? '_r'.$payout->retry_count : '';
+        $paymentMethodType = $brand->payout_method === 'becs' ? 'au_becs_debit' : 'card';
+        $currencyLower = strtolower($payout->currency_code);
 
-        // Step 1: Funding source — the brand pays the full gross via direct
-        // charge on their own Connect account. The wallet pre-debit branch is
-        // bypassed in this flow because wallet balance lives on Partna's
-        // platform and doesn't compose with direct-on-brand charges (the
-        // brand's own Connect balance is what funds the subsequent Transfer
-        // to the affiliate).
-        $walletDebitCents = 0;
-        $chargeAmountCents = $amountToCollect;
+        $payout->forceFill([
+            'status' => 'processing',
+            'failure_code' => null,
+            'failure_reason' => null,
+        ])->save();
 
-        if (in_array($payout->status, ['collecting', 'collected', 'transferring'], true)) {
-            // Guard: net_payout_cents should never reach 0 here via normal flow, but if
-            // it does (e.g. after an order revalidation narrowed the batch to zero net),
-            // abort rather than attempt a zero-value Stripe transfer.
-            if ($payout->net_payout_cents <= 0) {
-                $this->failPayout($payout, 'net_payout_zero', 'Net payout amount is zero after order revalidation.');
+        try {
+            // Platform-scope create (no stripe_account header).
+            //   customer_account: brand's v2 Account (NOT a v1 'customer' — the Account IS the customer).
+            //   on_behalf_of:     brand is settlement merchant on the cardholder statement.
+            //   transfer_data.destination: (gross - application_fee) routes to the affiliate at settlement.
+            //   application_fee_amount:    routes our cut to the platform balance.
+            // Stripe handles fund movement atomically; we never call transfers->create.
+            $pi = $this->stripe->paymentIntents->create([
+                'amount' => $payout->gross_commission_cents,
+                'currency' => $currencyLower,
+                'customer_account' => $brand->stripe_connect_account_id,
+                'payment_method' => $brand->stripe_payment_method_id,
+                'payment_method_types' => [$paymentMethodType],
+                'confirm' => true,
+                'off_session' => true,
+                'on_behalf_of' => $brand->stripe_connect_account_id,
+                'transfer_data' => ['destination' => $affiliate->stripe_connect_account_id],
+                'application_fee_amount' => $payout->platform_fee_cents,
+                'description' => "Commission payout #{$payout->id}",
+                'metadata' => [
+                    'sidest_payout_id' => $payout->id,
+                    'brand_id' => $brand->id,
+                    'affiliate_id' => $affiliate->id,
+                    'batch_date' => now()->toDateString(),
+                ],
+            ], [
+                'idempotency_key' => 'pi_'.$payout->id.$retryKey,
+            ]);
+
+            $payout->forceFill([
+                'payment_intent_id' => $pi->id,
+                'charge_id' => $this->extractLatestChargeId($pi),
+            ])->save();
+
+            if ($pi->status === 'succeeded') {
+                $this->markCompleted($payout, $brand, $affiliate);
+
+                return true;
+            }
+
+            if ($pi->status === 'requires_action') {
+                // off_session card payouts cannot prompt for 3DS — treat as a hard failure.
+                // BECS PIs go 'processing' → succeeded T+2, which is the normal path.
+                $this->failPayout($payout, 'charge_requires_action', 'Card charge requires authentication — cannot proceed off-session.');
 
                 return false;
             }
 
-            // Resume — re-read previously persisted amounts; same fields as
-            // first-run path (wallet=0, charge=gross).
-            $chargeAmountCents = (int) ($payout->charge_cents ?? $amountToCollect);
-        } else {
-            $payout->forceFill([
-                'status' => 'collecting',
-                'funding_source' => 'card',
-                'wallet_debit_cents' => 0,
-                'charge_cents' => $chargeAmountCents,
-                'failure_code' => null,
-                'failure_reason' => null,
-            ])->save();
-        }
+            // 'processing' (BECS) or 'requires_capture'/other intermediate state — webhook will resolve.
+            Log::info('Commission payout PI accepted, awaiting webhook', [
+                'payout_id' => $payout->id,
+                'payment_intent_id' => $pi->id,
+                'pi_status' => $pi->status,
+                'payout_method' => $paymentMethodType,
+            ]);
 
-        // Step 2: Charge brand's card for the shortfall (if any)
-        $latestChargeId = null;
-
-        // Net deposited into the brand's balance after the direct charge
-        // settles — i.e. amount - stripe_fee - application_fee. This is the
-        // amount the Transfer to the affiliate will be sized at, because it's
-        // exactly what's available on the brand's Connect balance from this
-        // charge.
-        $brandChargeNetCents = null;
-
-        if (in_array($payout->status, ['collected', 'transferring'], true)) {
-            // PaymentIntent already succeeded in a previous run on the brand's
-            // Connect account. Retrieve the charge ID + balance_transaction so
-            // we can use source_transaction on the transfer (which also runs
-            // on brand's account, so both calls must use stripe_account=brand).
-            if ($payout->stripe_payment_intent_id && $chargeAmountCents > 0) {
-                $pi = $this->stripe->paymentIntents->retrieve(
-                    $payout->stripe_payment_intent_id,
-                    ['expand' => ['latest_charge.balance_transaction']],
-                    $brandStripeAccountOption,
-                );
-                $latestChargeId = $this->extractLatestChargeId($pi);
-                $brandChargeNetCents = $this->extractBalanceTransactionNet($pi);
-            }
-        } elseif ($chargeAmountCents > 0) {
-            try {
-                // Direct charge on the BRAND'S Connect account, NOT Partna's
-                // platform. stripe_account option makes the brand the merchant
-                // of record on the customer-facing statement, and
-                // application_fee_amount routes Partna's cut to the platform
-                // balance in one call (no separate fee Transfer needed).
-                //
-                // Expand latest_charge.balance_transaction so we get the post-
-                // fee net amount in the same response — that's the value the
-                // subsequent brand→affiliate Transfer is sized at.
-                $paymentIntent = $this->stripe->paymentIntents->create(
-                    [
-                        'amount' => $chargeAmountCents,
-                        'currency' => $currencyLower,
-                        'customer' => $brand->stripe_connect_customer_id,
-                        'payment_method' => $brand->stripe_connect_payment_method_id,
-                        'confirm' => true,
-                        'off_session' => true,
-                        'application_fee_amount' => $payout->platform_fee_cents,
-                        'description' => "Commission payout #{$payout->id}",
-                        'expand' => ['latest_charge.balance_transaction'],
-                        'metadata' => [
-                            'sidest_payout_id' => $payout->id,
-                            'brand_id' => $brand->id,
-                            'affiliate_id' => $affiliate->id,
-                        ],
-                    ],
-                    [
-                        'stripe_account' => $brand->stripe_connect_account_id,
-                        'idempotency_key' => 'pi_'.$payout->id.$retryKey,
-                    ],
-                );
-
-                // Record the PI ID immediately so a crash between create and the
-                // success-path forceFill doesn't lose it. Cleared further down on
-                // the requires_action path so retries get a fresh PI cleanly.
-                $payout->forceFill(['stripe_payment_intent_id' => $paymentIntent->id])->save();
-
-                if ($paymentIntent->status !== 'succeeded') {
-                    // SCA required — cancel the PI so the idempotency key is freed for the next
-                    // attempt. Without cancellation the same key returns this stuck PI for 24h.
-                    // Race window: the customer may complete SCA out-of-band between our
-                    // confirm() returning requires_action and our cancel() call. If cancel()
-                    // throws, re-fetch the PI; if it succeeded, refund it immediately to
-                    // prevent a double-charge on the next retry attempt.
-                    $cancelled = false;
-                    try {
-                        $this->stripe->paymentIntents->cancel(
-                            $paymentIntent->id,
-                            [],
-                            $brandStripeAccountOption,
-                        );
-                        $cancelled = true;
-                    } catch (\Throwable) {
-                        // PI may have already transitioned to a terminal state.
-                    }
-
-                    if (! $cancelled) {
-                        try {
-                            $finalPi = $this->stripe->paymentIntents->retrieve(
-                                $paymentIntent->id,
-                                null,
-                                $brandStripeAccountOption,
-                            );
-                            if (($finalPi->status ?? null) === 'succeeded') {
-                                // Customer beat us through SCA. Refund the stray charge so the
-                                // retry's fresh PI doesn't double-bill the brand. Refund runs
-                                // on the brand's account because that's where the charge lives.
-                                $this->stripe->refunds->create(
-                                    ['payment_intent' => $finalPi->id],
-                                    [
-                                        'stripe_account' => $brand->stripe_connect_account_id,
-                                        'idempotency_key' => "rf_sca_race_{$payout->id}_{$finalPi->id}",
-                                    ],
-                                );
-                                Log::warning('SCA race: PI succeeded after cancel attempt, auto-refunded stray charge', [
-                                    'payout_id' => $payout->id,
-                                    'payment_intent_id' => $finalPi->id,
-                                ]);
-                            }
-                        } catch (\Throwable $raceEx) {
-                            Log::error('SCA race recovery failed — possible orphan PI', [
-                                'payout_id' => $payout->id,
-                                'payment_intent_id' => $paymentIntent->id,
-                                'error' => $raceEx instanceof ApiErrorException
-                                    ? ($raceEx->getStripeCode() ?? 'stripe_error')
-                                    : get_class($raceEx),
-                            ]);
-                        }
-                    }
-
-                    // Clear the recorded PI ID so the next attempt (admin retry bumps
-                    // retry_count → fresh idempotency key) starts cleanly.
-                    $payout->forceFill(['stripe_payment_intent_id' => null])->save();
-
-                    $this->markPendingFunding($payout, 'charge_requires_action', 'Card charge requires authentication.');
-
-                    return null;
-                }
-
-                $latestChargeId = $this->extractLatestChargeId($paymentIntent);
-                $brandChargeNetCents = $this->extractBalanceTransactionNet($paymentIntent);
-
-                // PI ID already recorded above; just advance status.
-                $payout->forceFill(['status' => 'collected'])->save();
-            } catch (ApiConnectionException|RateLimitException $e) {
-                // Transient error — re-throw so Horizon retries with backoff.
-                // Wallet debit is already committed in 'collecting' status; the
-                // idempotent resume will skip re-debiting on the next attempt.
-                throw $e;
-            } catch (ApiErrorException $e) {
-                // Terminal card failure (declined, invalid PM, SCA permanently blocked, etc.)
-                $this->markPendingFunding($payout, 'charge_failed', $e->getStripeCode() ?? 'stripe_error');
-
-                return null;
-            }
-        } else {
-            // Fully funded by wallet — only advance status if not already past this step
-            if (! in_array($payout->status, ['collected', 'transferring'], true)) {
-                $payout->forceFill(['status' => 'collected'])->save();
-            }
-        }
-
-        // Step 3: Transfer net amount to the affiliate's Connect account
-        try {
-            if ($payout->status !== 'transferring') {
-                $payout->forceFill(['status' => 'transferring'])->save();
-            }
-
-            // Guard: skip transfer creation if a prior run already recorded the ID
-            // (e.g. the transfer was saved but the server crashed before marking complete).
-            // $newTransfer is only set when we actually call Stripe in this run; the guard
-            // path leaves it null and stays at 'transferring' for the webhook to complete.
-            //
-            // source_transaction semantics (per Stripe docs on separate-charges-and-transfers):
-            //   - source_transaction is a *funding dependency*, not a 1:1 amount link.
-            //     Stripe waits for the source charge to settle before executing the transfer.
-            //   - The transfer amount may exceed the source charge amount. In Partna's case
-            //     a wallet+card combo payout has transfer.amount = wallet_debit + card_charge,
-            //     while source_transaction = card charge only. The excess pulls from the
-            //     platform balance — which IS where the wallet balance lives, so funds are
-            //     available. The result is correct: the affiliate gets the full net payout.
-            //   - When fully wallet-funded (no card charge), $latestChargeId is null and
-            //     source_transaction is omitted. The transfer pulls entirely from platform
-            //     balance, which again is where the wallet money lives. Correct by construction.
-            //   - Stripe's docs: "refunding a charge doesn't affect any associated transfers.
-            //     It's your platform's responsibility to reconcile any amount owed back."
-            //     We honor that via CommissionPayoutRefundService::clawbackCompletedPayout.
-            $newTransfer = null;
-            if (! $payout->stripe_transfer_id) {
-                // Transfer amount = exactly what landed in the brand's balance
-                // from the direct charge. application_fee already routed
-                // Partna's cut to the platform balance, and Stripe's processing
-                // fee comes off the brand's slice on direct charges (Stripe
-                // default). brand_charge_net therefore equals everything left
-                // for the affiliate. Fall back to payout.net_payout_cents only
-                // if balance_transaction lookup failed (shouldn't happen for
-                // confirmed card payments, but is a safe last-resort default).
-                $transferAmountCents = $brandChargeNetCents ?? $payout->net_payout_cents;
-
-                $transferPayload = [
-                    'amount' => $transferAmountCents,
-                    'currency' => $currencyLower,
-                    'destination' => $affiliate->stripe_connect_account_id,
-                    'description' => "Commission payout #{$payout->id} to {$affiliate->display_name}",
-                    'metadata' => [
-                        'sidest_payout_id' => $payout->id,
-                        'brand_id' => $brand->id,
-                        'affiliate_id' => $affiliate->id,
-                    ],
-                ];
-
-                if ($latestChargeId) {
-                    $transferPayload['source_transaction'] = $latestChargeId;
-                }
-
-                // stripe_account=brand → the transfer originates from the
-                // BRAND'S Connect balance (where the charge net just landed),
-                // not from Partna's platform balance. destination=affiliate's
-                // Connect account routes the funds on to them.
-                $newTransfer = $this->stripe->transfers->create(
-                    $transferPayload,
-                    [
-                        'stripe_account' => $brand->stripe_connect_account_id,
-                        // Stable key — no retry_count suffix. Stripe returns the same transfer
-                        // on any retry (including admin retries that increment retry_count),
-                        // preventing a duplicate payout when the transfer succeeded but the
-                        // response was lost before stripe_transfer_id could be recorded.
-                        'idempotency_key' => 'tr_'.$payout->id,
-                    ],
-                );
-
-                // Persist stripe_transfer_id before the completion record. If the process
-                // crashes between these two saves, the guard above prevents re-creation.
-                $payout->forceFill(['stripe_transfer_id' => $newTransfer->id])->save();
-            }
-
-            // Transfer.status='paid' means funds landed immediately (most cases).
-            // 'pending' means the Connect account is not yet fully onboarded; the
-            // transfer.paid webhook (A2.2) will flip status to completed once Stripe settles.
-            // Guard/resume path ($newTransfer=null) stays at 'transferring' — the webhook
-            // or ReconcileStuckTransferringPayoutsJob will complete it.
-            $transferStatus = $newTransfer?->status ?? 'pending';
-
-            if ($transferStatus === 'paid') {
-                $payout->forceFill([
-                    'status' => 'completed',
-                    'processed_at' => now(),
-                    'transfer_completed_at' => now(),
-                    'failure_code' => null,
-                    'failure_reason' => null,
-                ])->save();
-
-                $this->analyticsCache->bumpAnalyticsVersion($brand->id);
-                $this->analyticsCache->bumpAnalyticsVersion($affiliate->id);
-
-                Log::info('Commission payout completed (transfer paid immediately)', [
-                    'payout_id' => $payout->id,
-                    'gross_cents' => $payout->gross_commission_cents,
-                    'wallet_debit_cents' => $walletDebitCents,
-                    'charge_cents' => $chargeAmountCents,
-                    'platform_fee_cents' => $payout->platform_fee_cents,
-                    'net_cents' => $payout->net_payout_cents,
-                    'funding_source' => $payout->funding_source,
-                    'currency' => $payout->currency_code,
-                ]);
-            } else {
-                // Leave status as 'transferring' — the transfer.paid webhook will complete it.
-                Log::info('Commission payout transfer pending Stripe settlement', [
-                    'payout_id' => $payout->id,
-                    'stripe_transfer_id' => $payout->stripe_transfer_id,
-                    'transfer_status' => $transferStatus,
-                ]);
-            }
-
-            return true;
+            return null;
         } catch (ApiConnectionException|RateLimitException $e) {
-            // Transient error — re-throw so Horizon retries from 'transferring' status.
-            // Wallet and charge are NOT reversed. The stable transfer idempotency key
-            // and the stripe_transfer_id guard above together ensure no duplicate transfer
-            // is created if the original request succeeded but the response was lost.
+            // Transient — re-throw so Horizon retries. The idempotency key ensures Stripe
+            // returns the original PI on retry rather than creating a duplicate. Status
+            // stays at 'processing'.
             throw $e;
         } catch (ApiErrorException $e) {
-            // Terminal transfer failure — attempt to auto-refund the brand's card.
-            $failureCode = 'transfer_failed';
-
-            if ($payout->stripe_payment_intent_id && $chargeAmountCents > 0) {
-                try {
-                    // The original charge lives on the brand's Connect account
-                    // (it was a direct charge there), so the refund must also
-                    // be scoped to that account via stripe_account.
-                    $this->stripe->refunds->create(
-                        ['payment_intent' => $payout->stripe_payment_intent_id],
-                        [
-                            'stripe_account' => $brand->stripe_connect_account_id,
-                            'idempotency_key' => "rf_{$payout->id}_{$payout->stripe_payment_intent_id}",
-                        ],
-                    );
-                    $failureCode = 'transfer_failed_refunded';
-                    // Clear PI ID so an admin retry can create a fresh PaymentIntent
-                    // (same idempotency key within 24h would return the now-refunded PI).
-                    $payout->forceFill(['stripe_payment_intent_id' => null])->save();
-                } catch (\Throwable $refundEx) {
-                    // Auto-refund failed — the brand may still be charged. Flag for manual resolution.
-                    $failureCode = 'transfer_failed_refund_needed';
-                    $payout->forceFill(['needs_manual_refund' => true])->save();
-                    Log::error('Auto-refund after transfer failure failed — manual action required', [
-                        'payout_id' => $payout->id,
-                        'payment_intent_id' => $payout->stripe_payment_intent_id,
-                        'transfer_error' => $e->getStripeCode() ?? 'stripe_error',
-                        'refund_error' => $refundEx instanceof ApiErrorException ? ($refundEx->getStripeCode() ?? 'stripe_error') : get_class($refundEx),
-                    ]);
-                }
-            }
-
-            $this->failPayout($payout, $failureCode, $e->getStripeCode() ?? 'stripe_error');
+            $this->failPayout(
+                $payout,
+                $e->getStripeCode() ?? 'stripe_error',
+                $this->formatStripeError($e),
+            );
 
             return false;
         }
     }
 
     /**
-     * Map a Stripe Transfer failure_code to an internal failure_category so ops
-     * triage isn't misled by a hardcoded "affiliate_account" tag on every failure.
-     * Categories drive notification routing (brand vs affiliate) and surfacing.
-     *
-     * Stripe's documented Transfer failure codes:
-     *   insufficient_funds       → platform's Stripe balance was too low (platform fault)
-     *   account_closed, account_frozen, bank_account_restricted, no_account
-     *                            → affiliate's Stripe account or bank issue
-     *   declined                 → bank declined the deposit (affiliate-side)
-     *   currency_not_supported   → currency mismatch (config/platform fault)
-     *
-     * Anything else falls through to 'other' so it's visible in reports.
+     * Webhook hook: payment_intent.succeeded on the platform scope advances the payout.
+     * Called by StripePlatformWebhookController. Idempotent — skips if already completed.
      */
-    public static function categorizeTransferFailure(?string $stripeFailureCode): string
+    public function markPaymentIntentSucceeded(CommissionPayout $payout, ?string $chargeId = null): void
     {
-        return match ($stripeFailureCode) {
-            'insufficient_funds' => 'platform_balance',
-            'account_closed', 'account_frozen', 'bank_account_restricted', 'no_account', 'declined' => 'affiliate_account',
-            'currency_not_supported' => 'currency',
-            null, '' => 'unknown',
-            default => 'other',
-        };
-    }
-
-    private function extractLatestChargeId(object $paymentIntent): ?string
-    {
-        // PaymentIntent.latest_charge replaced the charges[] array in Stripe API
-        // version 2022-08-01. Modern API versions don't return charges->data by
-        // default — we only support latest_charge (string ID or expanded object).
-        if (is_string($paymentIntent->latest_charge ?? null) && $paymentIntent->latest_charge !== '') {
-            return $paymentIntent->latest_charge;
+        if ($payout->status === 'completed') {
+            return;
         }
 
-        if (is_object($paymentIntent->latest_charge ?? null) && is_string($paymentIntent->latest_charge->id ?? null)) {
-            return $paymentIntent->latest_charge->id;
+        if ($chargeId !== null && $payout->charge_id === null) {
+            $payout->forceFill(['charge_id' => $chargeId])->save();
         }
 
-        return null;
+        $brand = Professional::find($payout->brand_professional_id);
+        $affiliate = Professional::find($payout->affiliate_professional_id);
+
+        if (! $brand || ! $affiliate) {
+            Log::error('payment_intent.succeeded for payout with missing brand/affiliate', [
+                'payout_id' => $payout->id,
+            ]);
+
+            return;
+        }
+
+        $this->markCompleted($payout, $brand, $affiliate);
     }
 
     /**
-     * Extract balance_transaction.net from a PaymentIntent whose latest_charge
-     * was retrieved/created with `expand: ['latest_charge.balance_transaction']`.
-     * Returns the net amount in minor units (cents) that landed in the
-     * connected account's balance after Stripe + application fees, or null
-     * when the BT isn't available in the response (caller should fall back).
+     * Webhook hook: payment_intent.payment_failed on the platform scope fails the payout.
+     * Called by StripePlatformWebhookController. Preserves payment_intent_id for audit.
      */
-    private function extractBalanceTransactionNet(object $paymentIntent): ?int
+    public function markPaymentIntentFailed(CommissionPayout $payout, string $code, string $message): void
     {
-        $latestCharge = $paymentIntent->latest_charge ?? null;
-        if (! is_object($latestCharge)) {
-            return null;
+        if (in_array($payout->status, ['completed', 'failed', 'cancelled'], true)) {
+            return;
         }
 
-        $bt = $latestCharge->balance_transaction ?? null;
-        if (! is_object($bt) || ! isset($bt->net)) {
-            return null;
-        }
-
-        return (int) $bt->net;
+        $this->failPayout($payout, $code, $message);
     }
 
-    private function markPendingFunding(CommissionPayout $payout, string $code, string $reason): void
+    private function markCompleted(CommissionPayout $payout, Professional $brand, Professional $affiliate): void
     {
         $payout->forceFill([
-            'status' => 'pending_funds',
-            'failure_code' => $code,
-            'failure_reason' => $reason,
-            'processed_at' => null,
-            // Increment so RetryPendingFundsPayoutsJob can enforce the 7-attempt cap.
-            'funding_failure_count' => ($payout->funding_failure_count ?? 0) + 1,
-            // Schedule the next retry attempt. RetryPendingFundsPayoutsJob queries
-            // WHERE next_retry_at <= now() — NULL never satisfies this in PostgreSQL.
-            'next_retry_at' => now()->addDay(),
-            // Reset expiry each time we park the payout — without this, the void clock
-            // counts from original creation while the payout loops in pending_funds,
-            // causing VoidExpiredPayoutsJob to silently erase the affiliate's commission.
-            'void_at' => now()->addDays($this->gracePeriodDays),
-            // Stamp warning-clock anchor on FIRST funding failure only. ?? is load-bearing:
-            // resetting on every retry would push T-30/T-7/T-1 windows out forever, the
-            // exact bug void_at-as-anchor caused before #STRIPE-4. fireGraceWarnings keys
-            // off this column, not void_at.
-            'grace_started_at' => $payout->grace_started_at ?? now(),
+            'status' => 'completed',
+            'processed_at' => now(),
+            'transfer_completed_at' => now(),
+            'failure_code' => null,
+            'failure_reason' => null,
         ])->save();
 
-        Log::notice('Commission payout pending funding', [
+        $this->analyticsCache->bumpAnalyticsVersion($brand->id);
+        $this->analyticsCache->bumpAnalyticsVersion($affiliate->id);
+
+        Log::info('Commission payout completed', [
             'payout_id' => $payout->id,
-            'code' => $code,
-            'reason' => $reason,
+            'gross_cents' => $payout->gross_commission_cents,
+            'platform_fee_cents' => $payout->platform_fee_cents,
+            'net_cents' => $payout->net_payout_cents,
+            'currency' => $payout->currency_code,
+            'payment_intent_id' => $payout->payment_intent_id,
         ]);
     }
 
     private function failPayout(CommissionPayout $payout, string $code, string $reason): void
     {
+        // Release orders so the next sweep can re-batch them under the same or a different affiliate.
+        Order::where('payout_id', $payout->id)->update(['payout_id' => null]);
+
         $payout->forceFill([
             'status' => 'failed',
             'failure_code' => $code,
@@ -871,42 +582,35 @@ class CommissionPayoutService
             'payout_id' => $payout->id,
             'code' => $code,
             'reason' => $reason,
+            'payment_intent_id' => $payout->payment_intent_id,
         ]);
     }
 
     /**
-     * Manually retry a stuck payout batch (admin endpoint).
+     * Manually retry a failed payout (admin endpoint).
      *
-     * Increments retry_count so a fresh Stripe idempotency key is used —
-     * prevents Stripe returning a refunded/failed PI from within the 24h TTL window.
-     *
-     * Blocked for transfer_failed_refund_needed: the auto-refund itself failed, so
-     * the brand may still be charged. Manual verification is required before retrying.
+     * Increments retry_count so a fresh Stripe idempotency key is used — without this
+     * Stripe would return the original failed/declined PI from within the 24-hour key
+     * TTL window. Stale failure metadata is cleared so the next attempt records the
+     * fresh outcome cleanly.
      *
      * Runs synchronously so the admin sees the result immediately.
      */
     public function retryPayout(CommissionPayout $payout): bool
     {
-        if (! in_array($payout->status, ['failed', 'pending', 'pending_funds'], true)) {
+        if (! in_array($payout->status, ['failed', 'cancelled'], true)) {
             return false;
         }
 
-        // Auto-refund failed — manual verification required before retrying to avoid double-charging.
-        if ($payout->failure_code === 'transfer_failed_refund_needed') {
-            return false;
-        }
-
-        // If the wallet was already debited in a previous run, resume from 'collecting'
-        // so processPayoutBatch() enters its idempotent resume branch and skips
-        // re-debiting. Resetting to 'pending' would bypass that branch and double-debit.
-        $resumeStatus = ((int) ($payout->wallet_debit_cents ?? 0)) > 0 ? 'collecting' : 'pending';
-
+        // Release any orders that were detached on the prior failure so they can be
+        // re-claimed by this attempt's revalidatePayoutOrders path. The orders that
+        // were on this payout last attempt may or may not still be eligible.
         $payout->forceFill([
-            'status' => $resumeStatus,
+            'status' => 'pending',
             'failure_code' => null,
             'failure_reason' => null,
-            'needs_manual_refund' => false,
             'retry_count' => ($payout->retry_count ?? 0) + 1,
+            'processed_at' => null,
         ])->save();
 
         return $this->processPayoutBatch($payout) === true;
@@ -935,5 +639,32 @@ class CommissionPayoutService
             'as_brand' => $asBrand,
             'as_affiliate' => $asAffiliate,
         ];
+    }
+
+    /**
+     * Pull the charge ID from a PI response. latest_charge is either a string ID or an
+     * expanded Charge object depending on the request. May be null for PIs in 'processing'
+     * (e.g. BECS pre-settlement) — populated later by charge.refunded reconciliation.
+     */
+    private function extractLatestChargeId(object $paymentIntent): ?string
+    {
+        if (is_string($paymentIntent->latest_charge ?? null) && $paymentIntent->latest_charge !== '') {
+            return $paymentIntent->latest_charge;
+        }
+
+        if (is_object($paymentIntent->latest_charge ?? null) && is_string($paymentIntent->latest_charge->id ?? null)) {
+            return $paymentIntent->latest_charge->id;
+        }
+
+        return null;
+    }
+
+    private function formatStripeError(ApiErrorException $e): string
+    {
+        $code = $e->getStripeCode() ?? 'stripe_error';
+        $message = $e->getMessage();
+        $requestId = $e->getRequestId() ?? 'no_request_id';
+
+        return sprintf('[%s] %s (request_id=%s)', $code, $message, $requestId);
     }
 }

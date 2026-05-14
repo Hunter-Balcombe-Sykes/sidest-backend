@@ -39,6 +39,7 @@ use App\Http\Controllers\Api\Webhooks\ShopifyShopUpdateWebhookController;
 use App\Http\Controllers\Api\Webhooks\ShopifyThemePublishedWebhookController;
 use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
+use App\Http\Controllers\Api\Webhooks\StripePlatformWebhookController;
 use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -62,6 +63,10 @@ Route::middleware('throttle:webhooks')->group(function () {
     Route::post('/webhooks/fresha', FreshaCatalogWebhookController::class);
     Route::post('/webhooks/fresha/catalog', FreshaCatalogWebhookController::class);
     Route::post('/webhooks/stripe-connect', StripeConnectWebhookController::class);
+    // Platform-scope destination-charge events. Snapshot route handles v1 events
+    // (payment_intent.*, charge.*); thin route handles v2 account events.
+    Route::post('/webhooks/stripe-platform', StripePlatformWebhookController::class);
+    Route::post('/webhooks/stripe-platform-thin', [StripePlatformWebhookController::class, 'thin']);
     Route::post('/webhooks/stripe', StripeWebhookController::class);
     Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class)
         ->middleware('throttle:shopify-webhooks');

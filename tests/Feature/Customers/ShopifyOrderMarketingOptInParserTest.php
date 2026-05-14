@@ -5,7 +5,7 @@
 use App\Jobs\Shopify\ProcessShopifyOrderWebhookJob;
 
 /**
- * Isolated coverage for the sidest_marketing_opt_in cart-attribute parser in
+ * Isolated coverage for the partna_marketing_opt_in cart-attribute parser in
  * ProcessShopifyOrderWebhookJob. The parser is a private method; we poke at it
  * via reflection so we don't have to stand up the whole webhook pipeline.
  *
@@ -31,21 +31,21 @@ it('returns null when the attribute is missing', function () {
 
 it('returns true for documented truthy values (case-insensitive)', function () {
     foreach (['true', 'TRUE', '1', 'yes', 'Yes', 'YES'] as $value) {
-        $attrs = [['name' => 'sidest_marketing_opt_in', 'value' => $value]];
+        $attrs = [['name' => 'partna_marketing_opt_in', 'value' => $value]];
         expect((test()->parse)($attrs))->toBeTrue("Expected '{$value}' to parse as true");
     }
 });
 
 it('returns false for documented falsy values (case-insensitive)', function () {
     foreach (['false', 'FALSE', '0', 'no', 'No', 'NO'] as $value) {
-        $attrs = [['name' => 'sidest_marketing_opt_in', 'value' => $value]];
+        $attrs = [['name' => 'partna_marketing_opt_in', 'value' => $value]];
         expect((test()->parse)($attrs))->toBeFalse("Expected '{$value}' to parse as false");
     }
 });
 
 it('returns null for unrecognized values so typos do not silently flip consent', function () {
     foreach (['maybe', 'idk', 'please', ''] as $value) {
-        $attrs = [['name' => 'sidest_marketing_opt_in', 'value' => $value]];
+        $attrs = [['name' => 'partna_marketing_opt_in', 'value' => $value]];
         expect((test()->parse)($attrs))->toBeNull("Expected '{$value}' to parse as null");
     }
 });

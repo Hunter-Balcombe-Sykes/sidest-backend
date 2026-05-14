@@ -12,6 +12,10 @@ beforeEach(function () {
     Bus::fake();
     Cache::flush();
     setupProfessionalIntegrationsTable();
+    // ShopifyOrdersUpdatedWebhookController dedupes via the DedupesShopifyWebhookEvent
+    // trait which inserts into billing.webhook_events. Without this table the controller
+    // crashes with "no such table" on every request.
+    setupWebhookEventsTable();
     Config::set('services.shopify.webhook_secret', 'test-shop-secret');
 });
 

@@ -83,22 +83,15 @@ class StripeWebhookController extends Controller
 
     private function handleSubscriptionCreated(object $subscription, object $event): void
     {
-        // Resolve professional: prefer stripe_customer_id lookup (tamper-proof),
-        // fall back to metadata (set server-side by StripeBillingService).
-        $stripeCustomerId = (string) ($subscription->customer ?? '');
-        $professional = $stripeCustomerId
-            ? Professional::where('stripe_customer_id', $stripeCustomerId)->first()
-            : null;
-
-        if (! $professional) {
-            $professionalId = $subscription->metadata?->sidest_professional_id ?? null;
-            $professional = $professionalId ? Professional::find($professionalId) : null;
-        }
+        // Resolve professional via metadata (set server-side by StripeBillingService).
+        // stripe_customer_id lookup removed — column dropped in v2.
+        $professionalId = $subscription->metadata?->sidest_professional_id ?? null;
+        $professional = $professionalId ? Professional::find($professionalId) : null;
 
         if (! $professional) {
             Log::warning('Stripe subscription.created: could not resolve professional', [
                 'subscription_id' => $subscription->id,
-                'customer_id' => $stripeCustomerId,
+                'customer_id' => $subscription->customer ?? null,
                 'metadata_professional_id' => $subscription->metadata?->sidest_professional_id ?? null,
             ]);
 

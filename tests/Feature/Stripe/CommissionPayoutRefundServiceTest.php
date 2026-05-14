@@ -15,8 +15,8 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT,
         affiliate_professional_id TEXT,
-        stripe_payment_intent_id TEXT,
-        stripe_transfer_id TEXT,
+        payment_intent_id TEXT,
+        charge_id TEXT,
         status TEXT NOT NULL DEFAULT \'pending\',
         gross_commission_cents INTEGER NOT NULL DEFAULT 0,
         platform_fee_cents INTEGER NOT NULL DEFAULT 0,
@@ -24,23 +24,19 @@ beforeEach(function () {
         currency_code TEXT NOT NULL DEFAULT \'AUD\',
         failure_reason TEXT,
         failure_code TEXT,
-        failure_category TEXT,
         ledger_entry_count INTEGER NOT NULL DEFAULT 0,
         eligible_after TEXT,
         processed_at TEXT,
-        funding_source TEXT,
-        wallet_debit_cents INTEGER DEFAULT 0,
         charge_cents INTEGER DEFAULT 0,
         retry_count INTEGER NOT NULL DEFAULT 0,
         needs_manual_refund INTEGER NOT NULL DEFAULT 0,
         void_at TEXT,
         transfer_completed_at TEXT,
-        next_retry_at TEXT,
         last_retry_at TEXT,
-        funding_failure_count INTEGER NOT NULL DEFAULT 0,
-        grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
+        failure_category TEXT,
         stripe_error_code TEXT,
         stripe_error_message TEXT,
+        grace_notifications_sent TEXT NOT NULL DEFAULT \'[]\',
         created_at TEXT,
         updated_at TEXT
     )');
@@ -127,7 +123,6 @@ it('full refund of the last item cancels the payout', function () {
     $payout->refresh();
     expect($payout->status)->toBe('cancelled');
     expect($payout->failure_code)->toBe('refunded_within_grace');
-    expect($payout->failure_category)->toBe('order_refunded');
 });
 
 // ─── Partial refund — shrinks item + recomputes payout totals ────────────────
@@ -151,7 +146,6 @@ it('partial refund recomputes gross_commission proportionally', function () {
         'amount_cents' => 1000,
     ]);
 
-    // Half refund
     $order->forceFill(['status' => 'partially_refunded', 'refund_cents' => 5000])->save();
     app(CommissionPayoutRefundService::class)->handleOrderRefund($order);
 
@@ -180,10 +174,27 @@ it('refund of order in a completed payout is a no-op', function () {
     expect($payout->gross_commission_cents)->toBe(5000);
 });
 
+it('refund of order in a failed payout is a no-op', function () {
+    $payout = CommissionPayout::factory()->create([
+        'status' => 'failed',
+        'gross_commission_cents' => 5000,
+    ]);
+    $order = Order::factory()->create([
+        'payout_id' => $payout->id,
+        'status' => 'refunded',
+        'refund_cents' => 5000,
+    ]);
+
+    app(CommissionPayoutRefundService::class)->handleOrderRefund($order);
+
+    $payout->refresh();
+    expect($payout->status)->toBe('failed');
+});
+
 // ─── Mid-flight flag ─────────────────────────────────────────────────────────
 
-it('refund of order in collecting/transferring sets needs_manual_refund', function () {
-    $payout = CommissionPayout::factory()->create(['status' => 'collecting']);
+it('refund of order in processing sets needs_manual_refund', function () {
+    $payout = CommissionPayout::factory()->create(['status' => 'processing']);
     $order = Order::factory()->create([
         'payout_id' => $payout->id,
         'status' => 'refunded',
@@ -204,7 +215,6 @@ it('is a no-op when the order has no payout_id', function () {
         'refund_cents' => 5000,
     ]);
 
-    // Should complete without exception.
     app(CommissionPayoutRefundService::class)->handleOrderRefund($order);
 
     expect($order->fresh()->payout_id)->toBeNull();

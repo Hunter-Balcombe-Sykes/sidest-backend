@@ -7,11 +7,15 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Stripe\StripeClient;
 
-// Verifies that StripeConnectService::createConnectAccount emits the right
-// Express-account shape per professional type — affiliates get
-// business_type=individual with transfers only; brands get business_type=
-// company with BOTH transfers AND card_payments (Stripe forces both when an
-// account both accepts charges AND forwards funds).
+// Verifies that StripeConnectService::createConnectAccount emits v2 Account shapes
+// per professional type:
+//   - Brands: entity_type=company, merchant + customer + recipient configurations
+//   - Affiliates (professional + influencer): entity_type=individual, recipient only
+//
+// v2 API uses $stripe->v2->core->accounts->create() with 'configuration' arrays
+// instead of the v1 $stripe->accounts->create() with 'type' + 'capabilities'.
+// Responsibilities ($fees_collector, $losses_collector) are application-collected;
+// dashboard=express.
 
 beforeEach(function () {
     setupProfessionalsTable();
@@ -28,7 +32,6 @@ beforeEach(function () {
         }
     }
 
-    // resolveShopCurrency() consults this table on the create path.
     DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
         id TEXT PRIMARY KEY,
         professional_id TEXT,
@@ -61,17 +64,17 @@ function brandConnect_seedProfessional(string $type, array $overrides = []): Pro
 
 function brandConnect_makeService(\Closure $expectAccountsCreate): StripeConnectService
 {
-    $accountsMock = Mockery::mock();
-    $expectAccountsCreate($accountsMock);
+    $v2AccountsMock = Mockery::mock();
+    $expectAccountsCreate($v2AccountsMock);
+
+    $v2CoreMock = (object) ['accounts' => $v2AccountsMock];
+    $v2Mock = (object) ['core' => $v2CoreMock];
 
     $stripe = Mockery::mock(StripeClient::class);
-    $stripe->shouldReceive('getService')->with('accounts')->andReturn($accountsMock);
-    $stripe->shouldReceive('getService')->andReturn(Mockery::mock()->shouldIgnoreMissing());
+    $stripe->v2 = $v2Mock;
 
-    // CacheLockService isn't exercised on the create path; pass a real one.
     $service = new StripeConnectService(app(CacheLockService::class));
 
-    // Override the private $stripe field via reflection so the mock is used.
     $ref = new \ReflectionClass($service);
     $prop = $ref->getProperty('stripe');
     $prop->setAccessible(true);
@@ -80,24 +83,33 @@ function brandConnect_makeService(\Closure $expectAccountsCreate): StripeConnect
     return $service;
 }
 
-it('brand creates Connect Express account with business_type=company and both capabilities', function () {
+it('brand creates v2 Account with entity_type=company and three configurations', function () {
     $brand = brandConnect_seedProfessional('brand', ['display_name' => 'Side St']);
 
-    $service = brandConnect_makeService(function ($accountsMock) {
-        $accountsMock->shouldReceive('create')
+    $service = brandConnect_makeService(function ($v2Accounts) {
+        $v2Accounts->shouldReceive('create')
             ->once()
             ->withArgs(function ($payload, $opts) {
-                expect($payload['type'])->toBe('express');
-                expect($payload['country'])->toBe('AU');
-                expect($payload['business_type'])->toBe('company');
-                expect($payload['capabilities'])->toHaveKey('transfers');
-                expect($payload['capabilities'])->toHaveKey('card_payments');
-                expect($payload['capabilities']['transfers']['requested'])->toBeTrue();
-                expect($payload['capabilities']['card_payments']['requested'])->toBeTrue();
-                // company block (not individual) for brands
-                expect($payload)->toHaveKey('company');
-                expect($payload)->not->toHaveKey('individual');
-                expect($payload['company']['name'])->toBe('Side St');
+                // v2: no 'type' key, uses 'configuration' instead
+                expect($payload)->not->toHaveKey('type');
+                expect($payload)->toHaveKey('configuration');
+                // Three configurations for brands
+                expect($payload['configuration'])->toHaveKey('merchant');
+                expect($payload['configuration'])->toHaveKey('customer');
+                expect($payload['configuration'])->toHaveKey('recipient');
+                // merchant.card_payments requested
+                expect($payload['configuration']['merchant']['capabilities']['card_payments']['requested'])->toBeTrue();
+                // recipient.stripe_balance.stripe_transfers requested
+                expect($payload['configuration']['recipient']['capabilities']['stripe_balance']['stripe_transfers']['requested'])->toBeTrue();
+                // entity_type (not business_type) for identity
+                expect($payload['identity']['entity_type'])->toBe('company');
+                // Responsibilities
+                expect($payload['defaults']['responsibilities']['fees_collector'])->toBe('application');
+                expect($payload['defaults']['responsibilities']['losses_collector'])->toBe('application');
+                // Dashboard
+                expect($payload['dashboard'])->toBe('express');
+                // Idempotency key
+                expect($opts['idempotency_key'])->toContain('acct_brand_');
 
                 return true;
             })
@@ -111,24 +123,21 @@ it('brand creates Connect Express account with business_type=company and both ca
     expect($brand->fresh()->stripe_connect_status)->toBe('onboarding');
 });
 
-it('affiliate creates Connect Express account with business_type=individual and transfers-only', function () {
+it('affiliate creates v2 Account with entity_type=individual and recipient-only', function () {
     $affiliate = brandConnect_seedProfessional('professional', [
         'first_name' => 'Alex',
         'last_name' => 'Aff',
     ]);
 
-    $service = brandConnect_makeService(function ($accountsMock) {
-        $accountsMock->shouldReceive('create')
+    $service = brandConnect_makeService(function ($v2Accounts) {
+        $v2Accounts->shouldReceive('create')
             ->once()
             ->withArgs(function ($payload, $opts) {
-                expect($payload['business_type'])->toBe('individual');
-                expect($payload['capabilities'])->toHaveKey('transfers');
-                // card_payments must NOT be requested for affiliates — they only receive,
-                // they don't charge customers themselves.
-                expect($payload['capabilities'])->not->toHaveKey('card_payments');
-                // individual block (not company) for affiliates
-                expect($payload)->toHaveKey('individual');
-                expect($payload)->not->toHaveKey('company');
+                expect($payload['identity']['entity_type'])->toBe('individual');
+                expect($payload['configuration'])->toHaveKey('recipient');
+                // No merchant or customer for affiliates
+                expect($payload['configuration'])->not->toHaveKey('merchant');
+                expect($payload['configuration'])->not->toHaveKey('customer');
 
                 return true;
             })
@@ -140,15 +149,15 @@ it('affiliate creates Connect Express account with business_type=individual and 
     expect($id)->toBe('acct_aff_test');
 });
 
-it('influencer (non-brand) gets the individual + transfers-only shape too', function () {
+it('influencer (non-brand) gets the individual + recipient-only shape too', function () {
     $influencer = brandConnect_seedProfessional('influencer');
 
-    $service = brandConnect_makeService(function ($accountsMock) {
-        $accountsMock->shouldReceive('create')
+    $service = brandConnect_makeService(function ($v2Accounts) {
+        $v2Accounts->shouldReceive('create')
             ->once()
             ->withArgs(function ($payload, $opts) {
-                expect($payload['business_type'])->toBe('individual');
-                expect($payload['capabilities'])->not->toHaveKey('card_payments');
+                expect($payload['identity']['entity_type'])->toBe('individual');
+                expect($payload['configuration'])->not->toHaveKey('merchant');
 
                 return true;
             })

@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\Professional\Stripe;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
-use App\Http\Requests\Stripe\ConfirmPaymentMethodRequest;
 use App\Http\Requests\Stripe\CreatePaymentMethodSetupRequest;
 use App\Http\Requests\Stripe\OnboardRequest;
 use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
@@ -25,7 +24,20 @@ class StripeConnectController extends Controller
 
     /**
      * GET /stripe/status
-     * Returns the current Stripe Connect/Customer status for the professional.
+     *
+     * Returns the brand/affiliate's Stripe Connect state for the dashboard. Shape:
+     *   {
+     *     "connect": { status, stripe_connect_account_id, card_payments_active,
+     *                  stripe_transfers_active, requirements: [...] },
+     *     "has_payment_method": bool,
+     *     "payout_method": "card" | "becs" | null,
+     *     "masked_card": { "brand": "...", "last4": "..." } | null
+     *   }
+     *
+     * The dropped-column fields (stripe_customer_id, charges_enabled, payouts_enabled,
+     * details_submitted) are gone — the frontend reads card_payments_active /
+     * stripe_transfers_active off `connect` for the dual-capability state, and reads
+     * the saved-PM display fields off the top-level keys.
      */
     public function status(Request $request): JsonResponse
     {
@@ -33,22 +45,27 @@ class StripeConnectController extends Controller
 
         // ?fresh=1 forces a live Stripe round-trip — used immediately after the
         // Stripe Connect onboarding redirect so the dashboard never renders a
-        // pre-onboarding cache hit while the account.updated webhook is in flight.
+        // pre-onboarding cache hit while the v2.core.account.* webhook is in flight.
         if ($request->boolean('fresh') && $pro->stripe_connect_account_id) {
             StripeConnectService::forgetStatusCache($pro->stripe_connect_account_id);
         }
 
         $connectStatus = $this->connectService->syncAccountStatus($pro);
-        $hasPaymentMethod = $this->connectService->brandHasPaymentMethod($pro);
         $pro->refresh();
+
+        $hasPaymentMethod = $this->connectService->brandHasPaymentMethod($pro);
+        $maskedCard = $hasPaymentMethod && $pro->stripe_payment_method_last4
+            ? [
+                'brand' => $pro->stripe_payment_method_brand,
+                'last4' => $pro->stripe_payment_method_last4,
+            ]
+            : null;
 
         return response()->json([
             'connect' => $connectStatus,
             'has_payment_method' => $hasPaymentMethod,
-            // Brand's Customer ID on their OWN Connect account — used by the
-            // frontend to gate the "Add Card" CTA. NOT the platform-scoped
-            // stripe_customer_id (which belongs to the SaaS-billing path).
-            'stripe_customer_id' => $pro->stripe_connect_customer_id,
+            'payout_method' => $pro->payout_method,
+            'masked_card' => $maskedCard,
         ]);
     }
 
@@ -101,15 +118,15 @@ class StripeConnectController extends Controller
 
         $this->connectService->disconnectAccount($pro);
 
-        return response()->json(['status' => 'disconnected']);
+        return response()->json(['status' => 'not_connected']);
     }
 
     /**
      * POST /stripe/payment-method/setup-checkout
-     * Creates a hosted Stripe Checkout setup session scoped to the brand's
-     * OWN Connect account — the saved card lives on the brand's account so
-     * the commission direct charge can later read it. Brand must already
-     * have completed Connect onboarding (have a stripe_connect_account_id).
+     *
+     * Creates a hosted Stripe Checkout setup session that saves a CARD to the brand's
+     * v2 Account. Used as the off-session payment source for destination-charge
+     * commission payouts. Brand must already have completed Connect onboarding.
      */
     public function createPaymentMethodCheckoutSession(CreatePaymentMethodSetupRequest $request): JsonResponse
     {
@@ -117,7 +134,7 @@ class StripeConnectController extends Controller
         Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         try {
-            $result = $this->connectService->createBrandConnectPaymentMethodSetupSession(
+            $result = $this->connectService->createBrandPaymentMethodSetupSession(
                 $pro,
                 $request->input('success_url'),
                 $request->input('cancel_url'),
@@ -130,19 +147,29 @@ class StripeConnectController extends Controller
     }
 
     /**
-     * POST /stripe/payment-method/confirm
-     * Saves the payment method after the brand confirms the SetupIntent on
-     * their own Connect account.
+     * POST /stripe/payment-method/setup-becs
+     *
+     * Creates a hosted Stripe Checkout setup session that saves a BECS Direct Debit
+     * mandate to the brand's v2 Account. Stripe Checkout collects the BSB +
+     * account number and renders the mandate acceptance UI automatically.
+     *
+     * BECS-specific risks: T+2 settlement timing, 7-year dispute window. Platform
+     * bears the loss with losses_collector=application. The frontend should explain
+     * these tradeoffs in the picker UI before sending the user here.
      */
-    public function confirmPaymentMethod(ConfirmPaymentMethodRequest $request): JsonResponse
+    public function createBecsCheckoutSession(CreatePaymentMethodSetupRequest $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
         Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         try {
-            $this->connectService->saveBrandConnectPaymentMethod($pro, $request->input('payment_method_id'));
+            $result = $this->connectService->createBrandBecsSetupSession(
+                $pro,
+                $request->input('success_url'),
+                $request->input('cancel_url'),
+            );
 
-            return response()->json(['status' => 'saved']);
+            return response()->json($result);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
@@ -150,8 +177,9 @@ class StripeConnectController extends Controller
 
     /**
      * POST /stripe/payment-method/sync-session
-     * Syncs the default payment method from a completed brand-scoped Checkout
-     * setup session.
+     * Syncs the saved payment method from a completed Checkout setup session on the
+     * brand's v2 Account. Handles both card and BECS — payout_method is derived from
+     * the PM type Stripe returns.
      */
     public function syncPaymentMethodSession(SyncPaymentMethodSessionRequest $request): JsonResponse
     {
@@ -159,7 +187,7 @@ class StripeConnectController extends Controller
         Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
         try {
-            $result = $this->connectService->syncBrandConnectPaymentMethodFromCheckoutSession(
+            $result = $this->connectService->syncBrandPaymentMethodFromCheckoutSession(
                 $pro,
                 $request->input('session_id'),
             );
@@ -174,29 +202,16 @@ class StripeConnectController extends Controller
     }
 
     /**
-     * GET /stripe/payment-methods
-     * Lists the brand's saved payment methods.
-     */
-    public function listPaymentMethods(Request $request): JsonResponse
-    {
-        $pro = $request->attributes->get('professional');
-        Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
-
-        $methods = $this->connectService->listPaymentMethods($pro);
-
-        return response()->json(['payment_methods' => $methods]);
-    }
-
-    /**
      * DELETE /stripe/payment-method
-     * Removes the brand's payment setup.
+     * Detaches the brand's saved PaymentMethod from their v2 Account and clears the
+     * local cache columns.
      */
     public function removePaymentMethod(Request $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
         Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
-        $this->connectService->removeBrandPaymentSetup($pro);
+        $this->connectService->removeBrandPaymentMethod($pro);
 
         return response()->json(['status' => 'removed']);
     }

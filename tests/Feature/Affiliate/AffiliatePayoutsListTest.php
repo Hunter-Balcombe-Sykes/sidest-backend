@@ -20,13 +20,12 @@ beforeEach(function () {
         id TEXT PRIMARY KEY,
         brand_professional_id TEXT NOT NULL,
         affiliate_professional_id TEXT NOT NULL,
-        stripe_payment_intent_id TEXT,
-        stripe_transfer_id TEXT,
+        payment_intent_id TEXT,
+        charge_id TEXT,
         status TEXT,
         gross_commission_cents INTEGER,
         platform_fee_cents INTEGER,
         net_payout_cents INTEGER,
-        wallet_debit_cents INTEGER,
         charge_cents INTEGER,
         currency_code TEXT,
         failure_code TEXT,
@@ -41,7 +40,6 @@ beforeEach(function () {
         ledger_entry_count INTEGER,
         eligible_after TEXT,
         processed_at TEXT,
-        funding_source TEXT,
         void_at TEXT,
         needs_manual_refund INTEGER DEFAULT 0,
         retry_count INTEGER DEFAULT 0,
@@ -64,31 +62,31 @@ function insertAffiliatePayout(array $attrs): void
 {
     $now = now()->toDateTimeString();
     DB::connection('pgsql')->table('commerce.commission_payouts')->insert(array_merge([
-        'status'                 => 'completed',
+        'status' => 'completed',
         'gross_commission_cents' => 2000,
-        'platform_fee_cents'     => 200,
-        'net_payout_cents'       => 1800,
-        'currency_code'          => 'AUD',
-        'funding_failure_count'  => 0,
-        'created_at'             => $now,
-        'updated_at'             => $now,
+        'platform_fee_cents' => 200,
+        'net_payout_cents' => 1800,
+        'currency_code' => 'AUD',
+        'funding_failure_count' => 0,
+        'created_at' => $now,
+        'updated_at' => $now,
     ], $attrs));
 }
 
 it('returns a paginated list of payouts for the authenticated affiliate', function () {
     $brand = createBrandTenant('ap-brand-list');
-    $aff   = createAffiliateTenant('ap-aff-list');
+    $aff = createAffiliateTenant('ap-aff-list');
 
     insertAffiliatePayout([
-        'id'                       => 'pay-aff-1',
-        'brand_professional_id'    => $brand->id,
-        'affiliate_professional_id'=> $aff->id,
+        'id' => 'pay-aff-1',
+        'brand_professional_id' => $brand->id,
+        'affiliate_professional_id' => $aff->id,
     ]);
 
     $controller = app(AffiliatePayoutsController::class);
-    $resource   = $controller->index(makeAffiliatePayoutsRequest($aff));
-    $response   = $resource->toResponse(makeAffiliatePayoutsRequest($aff));
-    $body       = json_decode($response->getContent(), true);
+    $resource = $controller->index(makeAffiliatePayoutsRequest($aff));
+    $response = $resource->toResponse(makeAffiliatePayoutsRequest($aff));
+    $body = json_decode($response->getContent(), true);
 
     expect($response->getStatusCode())->toBe(200);
     expect($body['data'])->toHaveCount(1);
@@ -100,24 +98,24 @@ it('returns a paginated list of payouts for the authenticated affiliate', functi
 
 it('does not include payouts belonging to another affiliate', function () {
     $brand = createBrandTenant('ap-brand-shared');
-    $affA  = createAffiliateTenant('ap-aff-a');
-    $affB  = createAffiliateTenant('ap-aff-b');
+    $affA = createAffiliateTenant('ap-aff-a');
+    $affB = createAffiliateTenant('ap-aff-b');
 
     insertAffiliatePayout([
-        'id'                       => 'pay-for-a',
-        'brand_professional_id'    => $brand->id,
-        'affiliate_professional_id'=> $affA->id,
+        'id' => 'pay-for-a',
+        'brand_professional_id' => $brand->id,
+        'affiliate_professional_id' => $affA->id,
     ]);
     insertAffiliatePayout([
-        'id'                       => 'pay-for-b',
-        'brand_professional_id'    => $brand->id,
-        'affiliate_professional_id'=> $affB->id,
+        'id' => 'pay-for-b',
+        'brand_professional_id' => $brand->id,
+        'affiliate_professional_id' => $affB->id,
     ]);
 
     $controller = app(AffiliatePayoutsController::class);
-    $resource   = $controller->index(makeAffiliatePayoutsRequest($affA));
-    $response   = $resource->toResponse(makeAffiliatePayoutsRequest($affA));
-    $body       = json_decode($response->getContent(), true);
+    $resource = $controller->index(makeAffiliatePayoutsRequest($affA));
+    $response = $resource->toResponse(makeAffiliatePayoutsRequest($affA));
+    $body = json_decode($response->getContent(), true);
 
     $ids = collect($body['data'])->pluck('id')->all();
     expect($ids)->toContain('pay-for-a');
@@ -126,21 +124,21 @@ it('does not include payouts belonging to another affiliate', function () {
 
 it('redacts failure_category=brand_funding from the affiliate response', function () {
     $brand = createBrandTenant('ap-brand-redact');
-    $aff   = createAffiliateTenant('ap-aff-redact');
+    $aff = createAffiliateTenant('ap-aff-redact');
 
     insertAffiliatePayout([
-        'id'                       => 'pay-funding-fail',
-        'brand_professional_id'    => $brand->id,
-        'affiliate_professional_id'=> $aff->id,
-        'status'                   => 'failed',
-        'failure_category'         => 'brand_funding',
-        'failure_reason'           => 'Brand wallet empty',
+        'id' => 'pay-funding-fail',
+        'brand_professional_id' => $brand->id,
+        'affiliate_professional_id' => $aff->id,
+        'status' => 'failed',
+        'failure_category' => 'brand_funding',
+        'failure_reason' => 'Brand wallet empty',
     ]);
 
     $controller = app(AffiliatePayoutsController::class);
-    $resource   = $controller->index(makeAffiliatePayoutsRequest($aff));
-    $response   = $resource->toResponse(makeAffiliatePayoutsRequest($aff));
-    $body       = json_decode($response->getContent(), true);
+    $resource = $controller->index(makeAffiliatePayoutsRequest($aff));
+    $response = $resource->toResponse(makeAffiliatePayoutsRequest($aff));
+    $body = json_decode($response->getContent(), true);
 
     // brand_funding must be redacted — affiliate sees null.
     expect($body['data'][0]['failure_category'])->toBeNull();
@@ -150,20 +148,20 @@ it('redacts failure_category=brand_funding from the affiliate response', functio
 
 it('does not redact other failure categories from the affiliate response', function () {
     $brand = createBrandTenant('ap-brand-redact2');
-    $aff   = createAffiliateTenant('ap-aff-redact2');
+    $aff = createAffiliateTenant('ap-aff-redact2');
 
     insertAffiliatePayout([
-        'id'                       => 'pay-stripe-fail',
-        'brand_professional_id'    => $brand->id,
-        'affiliate_professional_id'=> $aff->id,
-        'status'                   => 'failed',
-        'failure_category'         => 'stripe_connect',
+        'id' => 'pay-stripe-fail',
+        'brand_professional_id' => $brand->id,
+        'affiliate_professional_id' => $aff->id,
+        'status' => 'failed',
+        'failure_category' => 'stripe_connect',
     ]);
 
     $controller = app(AffiliatePayoutsController::class);
-    $resource   = $controller->index(makeAffiliatePayoutsRequest($aff));
-    $response   = $resource->toResponse(makeAffiliatePayoutsRequest($aff));
-    $body       = json_decode($response->getContent(), true);
+    $resource = $controller->index(makeAffiliatePayoutsRequest($aff));
+    $response = $resource->toResponse(makeAffiliatePayoutsRequest($aff));
+    $body = json_decode($response->getContent(), true);
 
     // stripe_connect failures are visible — the affiliate needs to fix their account.
     expect($body['data'][0]['failure_category'])->toBe('stripe_connect');

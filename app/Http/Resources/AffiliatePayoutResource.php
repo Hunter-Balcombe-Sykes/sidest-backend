@@ -23,26 +23,23 @@ class AffiliatePayoutResource extends JsonResource
             : $this->failure_category;
 
         return [
-            'id'                     => $this->id,
-            'status'                 => $this->status,
+            'id' => $this->id,
+            'status' => $this->status,
             'gross_commission_cents' => (int) $this->gross_commission_cents,
-            'net_payout_cents'       => (int) $this->net_payout_cents,
-            'platform_fee_cents'     => (int) $this->platform_fee_cents,
-            'currency_code'          => $this->currency_code,
-            'failure_code'           => $this->failure_code,
-            'failure_category'       => $failureCategory,
-            'failure_reason'         => $this->failure_reason,
-            'stripe_error_code'      => $this->stripe_error_code,
-            'stripe_error_message'   => $this->stripe_error_message,
-            'funding_failure_count'  => (int) ($this->funding_failure_count ?? 0),
-            'next_retry_at'          => $this->next_retry_at?->toIso8601String(),
-            'last_retry_at'          => $this->last_retry_at?->toIso8601String(),
-            'transfer_completed_at'  => $this->transfer_completed_at?->toIso8601String(),
-            'void_at'                => $this->void_at?->toIso8601String(),
-            'created_at'             => $this->created_at?->toIso8601String(),
+            'net_payout_cents' => (int) $this->net_payout_cents,
+            'platform_fee_cents' => (int) $this->platform_fee_cents,
+            'currency_code' => $this->currency_code,
+            'failure_code' => $this->failure_code,
+            'failure_category' => $failureCategory,
+            'failure_reason' => $this->failure_reason,
+            'stripe_error_code' => $this->stripe_error_code,
+            'stripe_error_message' => $this->stripe_error_message,
+            'transfer_completed_at' => $this->transfer_completed_at?->toIso8601String(),
+            'void_at' => $this->void_at?->toIso8601String(),
+            'created_at' => $this->created_at?->toIso8601String(),
             // Nested brand relation — only present when eager-loaded.
-            'brand'                  => $this->whenLoaded('brandProfessional', fn () => [
-                'id'   => $this->brandProfessional->id,
+            'brand' => $this->whenLoaded('brandProfessional', fn () => [
+                'id' => $this->brandProfessional->id,
                 'name' => $this->brandProfessional->display_name,
             ]),
         ];

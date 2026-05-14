@@ -12,9 +12,14 @@ use Illuminate\Support\Facades\Gate;
  * GET /brand/billing-summary
  *
  * Returns the brand's commission funding snapshot:
- *   - card presence on their Connect account (stripe_connect_payment_method_id),
+ *   - card presence on their v2 Account,
  *   - masked card brand/last4 when present,
- *   - blocked order count (approved orders that can't be funded until a card is added).
+ *   - blocked order count (approved orders that can't be funded until a payment method is added).
+ *
+ * Under Option A the brand's saved payment method (card or BECS) lives on the brand's
+ * v2 Account `customer` configuration, mirrored locally via stripe_payment_method_id
+ * for index-only presence checks. Phase 13 sandbox testing will validate that the
+ * mirror stays in sync with Stripe; until then a non-null column is treated as authoritative.
  *
  * Authorised via manageWallet — brand-type only.
  */
@@ -25,9 +30,7 @@ class BrandBillingSummaryController extends Controller
         $brand = $request->attributes->get('professional');
         Gate::forUser($brand)->authorize('manageWallet', $brand);
 
-        // Card-on-file check reads the brand-Connect-scoped column (the card
-        // lives on the brand's OWN Connect account, not Partna's platform).
-        $hasCard = ! empty($brand->stripe_connect_payment_method_id);
+        $hasCard = ! empty($brand->stripe_payment_method_id);
 
         // Blocked orders only matter when there is no payment method.
         $blockedData = (object) ['cnt' => 0, 'pending_cents' => 0];

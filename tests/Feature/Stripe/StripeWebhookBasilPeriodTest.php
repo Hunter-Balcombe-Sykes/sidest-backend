@@ -105,7 +105,7 @@ it('reads period fields from items[0] on Basil-shape subscriptions', function ()
         'customer' => 'cus_basil',
         'status' => 'active',
         'cancel_at_period_end' => false,
-        'metadata' => (object) [],
+        'metadata' => (object) ['sidest_professional_id' => $professional->id],
         'items' => (object) [
             'data' => [
                 (object) [
@@ -145,7 +145,7 @@ it('falls back to top-level period fields on pre-Basil shape', function () {
         'current_period_start' => $start,
         'current_period_end' => $end,
         'cancel_at_period_end' => false,
-        'metadata' => (object) [],
+        'metadata' => (object) ['sidest_professional_id' => $professional->id],
         'items' => (object) [
             'data' => [
                 (object) [
@@ -177,7 +177,7 @@ it('logs and returns without throwing when both shapes are missing period fields
         'customer' => 'cus_missing',
         'status' => 'active',
         'cancel_at_period_end' => false,
-        'metadata' => (object) [],
+        'metadata' => (object) ['sidest_professional_id' => $professional->id],
         'items' => (object) [
             'data' => [
                 (object) [
@@ -212,7 +212,7 @@ it('subscription updated handler delegates to created when no local row exists (
         'customer' => 'cus_race',
         'status' => 'active',
         'cancel_at_period_end' => false,
-        'metadata' => (object) [],
+        'metadata' => (object) ['sidest_professional_id' => $professional->id],
         'items' => (object) [
             'data' => [
                 (object) [
@@ -244,7 +244,7 @@ it('throws LogicException when Stripe sends trialing status', function () {
         'current_period_start' => now()->timestamp,
         'current_period_end' => now()->addMonth()->timestamp,
         'cancel_at_period_end' => false,
-        'metadata' => (object) [],
+        'metadata' => (object) ['sidest_professional_id' => $professional->id],
         'items' => (object) [
             'data' => [(object) ['price' => (object) ['id' => 'price_trial']]],
         ],
