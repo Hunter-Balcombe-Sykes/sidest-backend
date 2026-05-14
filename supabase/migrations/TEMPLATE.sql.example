@@ -1,0 +1,69 @@
+-- ============================================================
+-- Migration template — two-file pattern
+-- ============================================================
+--
+-- Use this layout whenever a migration needs BOTH schema changes
+-- AND new indexes. The two files share the same timestamp prefix
+-- and are suffixed +0 (DDL) and +1 (indexes).
+--
+-- Why two files?
+--   CREATE INDEX CONCURRENTLY cannot run inside a transaction.
+--   All DDL (ALTER TABLE, ADD CONSTRAINT, etc.) belongs inside
+--   BEGIN/COMMIT for atomicity. Splitting is the only way to get
+--   both guarantees.
+--
+-- Naming:
+--   <timestamp>0_<name>.sql   — schema changes (this file pattern)
+--   <timestamp>1_<name>_indexes.sql — CONCURRENTLY indexes
+--
+-- ============================================================
+
+-- FILE 1 of 2: <YYYYMMDDHHMMSS>0_add_<thing>.sql
+-- Schema changes: wrap in a transaction for atomicity.
+
+BEGIN;
+
+-- ── Column additions ─────────────────────────────────────────
+ALTER TABLE <schema>.<table>
+    ADD COLUMN IF NOT EXISTS <column> <type> [NULL | NOT NULL DEFAULT <val>];
+
+-- ── CHECK constraint — always NOT VALID on populated tables ──
+-- NOT VALID skips existing row scan; VALIDATE CONSTRAINT in a
+-- separate transaction acquires only SHARE UPDATE EXCLUSIVE
+-- (doesn't block concurrent writes). See CONVENTIONS.md §2.
+ALTER TABLE <schema>.<table>
+    ADD CONSTRAINT <constraint_name> CHECK (<condition>) NOT VALID;
+
+-- ── Foreign key — always NOT VALID on populated tables ───────
+-- Same reasoning as CHECK above. See CONVENTIONS.md §4.
+ALTER TABLE <schema>.<table>
+    ADD CONSTRAINT <fk_name>
+    FOREIGN KEY (<col>) REFERENCES <schema>.<other_table>(<col>)
+    ON DELETE CASCADE NOT VALID;
+
+COMMIT;
+
+-- ── Validate constraints in a second transaction ─────────────
+-- Separating BEGIN/COMMIT blocks means each statement runs
+-- without holding the other's lock window open.
+BEGIN;
+ALTER TABLE <schema>.<table> VALIDATE CONSTRAINT <constraint_name>;
+ALTER TABLE <schema>.<table> VALIDATE CONSTRAINT <fk_name>;
+COMMIT;
+
+
+-- ============================================================
+-- FILE 2 of 2: <YYYYMMDDHHMMSS>1_add_<thing>_indexes.sql
+-- Indexes: NO BEGIN/COMMIT — CONCURRENTLY is not transactional.
+-- ============================================================
+
+-- ── Indexes ──────────────────────────────────────────────────
+-- CONCURRENTLY builds in multiple passes under weaker locks;
+-- writes are never blocked. IF NOT EXISTS makes reruns safe.
+-- See CONVENTIONS.md §1 and 20260424120000_add_live_check_index.sql.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_<table>_<column>
+    ON <schema>.<table> (<column>)
+    [WHERE <partial_condition>];
+
+-- Add additional indexes below — one per statement, all outside
+-- any transaction block.

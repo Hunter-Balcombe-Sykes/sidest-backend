@@ -118,5 +118,17 @@ jobs:
           fi
           echo "No raw Cache:: calls outside the GS-1 allowlist."
 
+      - name: No unsafe migration locking patterns (Master Pattern 20)
+        run: |
+          # Master Pattern 20: migrations added after 2026-05-14 must not use patterns
+          # that cause write downtime on populated tables:
+          #   - CREATE INDEX without CONCURRENTLY (SHARE lock blocks all writes during build)
+          #   - ADD CONSTRAINT FOREIGN KEY without NOT VALID (ACCESS EXCLUSIVE + full scan)
+          #   - ALTER COLUMN SET NOT NULL (ACCESS EXCLUSIVE + full scan)
+          #
+          # Pre-convention migrations (timestamp <= 20260514100000) are grandfathered.
+          # See supabase/migrations/CONVENTIONS.md for the safe alternatives.
+          php scripts/guard-no-unsafe-migrations.php
+
       - name: Run tests
         run: composer test

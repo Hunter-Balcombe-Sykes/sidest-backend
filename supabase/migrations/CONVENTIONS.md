@@ -1,0 +1,173 @@
+# Supabase Migration Conventions
+
+These rules apply to every `.sql` file added under `supabase/migrations/` after 2026-05-14.
+Pre-convention migrations are grandfathered (they ran safely on empty tables before launch).
+
+A CI lint (`guard:no-unsafe-migrations`) enforces the three most dangerous violations automatically.
+
+---
+
+## 1. Index creation — always `CONCURRENTLY`, always outside a transaction
+
+**Safe pattern**
+
+```sql
+-- File: 20260601000001_add_foo_bar_idx.sql  (note the +1 suffix — index file is separate)
+-- No BEGIN/COMMIT — CONCURRENTLY cannot run inside a transaction.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_foo_bar
+    ON commerce.foo (bar)
+    WHERE deleted_at IS NULL;
+```
+
+**Two-file convention**: when a migration needs both schema changes (inside a `BEGIN`/`COMMIT` block)
+and new indexes, split into two files with the same timestamp prefix + sequential suffixes:
+
+```
+20260601000000_add_foo_columns.sql      ← DDL inside BEGIN/COMMIT
+20260601000001_add_foo_indexes.sql      ← CONCURRENTLY outside any transaction
+```
+
+**Why**: `CREATE INDEX` (non-concurrent) acquires a `SHARE` lock on the target table for the entire
+build duration, blocking all `INSERT`/`UPDATE`/`DELETE`. On a table with millions of rows, this is
+minutes of write downtime. `CONCURRENTLY` builds the index in multiple passes under weaker locks,
+so traffic flows throughout.
+
+**Canonical example**: `20260424120000_add_live_check_index.sql`
+
+---
+
+## 2. CHECK constraints on populated tables
+
+**Safe pattern**
+
+```sql
+-- Step A — add NOT VALID (lock-light; skips existing row validation)
+BEGIN;
+ALTER TABLE commerce.orders
+    ADD CONSTRAINT orders_status_check CHECK (status IN ('pending','active','fulfilled')) NOT VALID;
+COMMIT;
+
+-- Step B — validate in a separate transaction (SHARE UPDATE EXCLUSIVE — doesn't block writes)
+BEGIN;
+ALTER TABLE commerce.orders VALIDATE CONSTRAINT orders_status_check;
+COMMIT;
+```
+
+Split into two migration files if the validation window matters for rollout sequencing.
+
+**Why**: `ADD CONSTRAINT CHECK` without `NOT VALID` acquires `ACCESS EXCLUSIVE` and performs a
+full-table scan while holding it. `NOT VALID` drops the lock immediately after the catalog write;
+`VALIDATE CONSTRAINT` acquires only `SHARE UPDATE EXCLUSIVE`, which allows concurrent reads
+and writes.
+
+---
+
+## 3. `SET NOT NULL` on populated tables — four-step pattern
+
+Direct `ALTER COLUMN SET NOT NULL` acquires `ACCESS EXCLUSIVE` and validates every row under the
+lock. Use this four-step sequence instead:
+
+```sql
+-- Step 1: Add NOT VALID check (no row scan, lock released immediately)
+BEGIN;
+ALTER TABLE commerce.orders
+    ADD CONSTRAINT chk_orders_col_not_null CHECK (col IS NOT NULL) NOT VALID;
+COMMIT;
+
+-- Step 2: Backfill any NULLs — in a separate one-shot job or migration OUTSIDE a transaction
+UPDATE commerce.orders SET col = <default> WHERE col IS NULL;
+
+-- Step 3: Validate (acquires SHARE UPDATE EXCLUSIVE — allows concurrent writes)
+BEGIN;
+ALTER TABLE commerce.orders VALIDATE CONSTRAINT chk_orders_col_not_null;
+COMMIT;
+
+-- Step 4: Promote to NOT NULL (metadata-only once Postgres has a validated check; near-instant)
+BEGIN;
+ALTER TABLE commerce.orders ALTER COLUMN col SET NOT NULL;
+ALTER TABLE commerce.orders DROP CONSTRAINT chk_orders_col_not_null;
+COMMIT;
+```
+
+Step 4 is near-instant because Postgres skips the row scan when a validated `NOT NULL` check
+already exists. Never combine Steps 1–4 into a single transaction.
+
+---
+
+## 4. Foreign key constraints — always `NOT VALID` first
+
+```sql
+-- Step A — add FK without validation
+BEGIN;
+ALTER TABLE commerce.order_items
+    ADD CONSTRAINT fk_order_items_orders
+    FOREIGN KEY (order_id) REFERENCES commerce.orders(id) ON DELETE CASCADE NOT VALID;
+COMMIT;
+
+-- Step B — validate separately
+BEGIN;
+ALTER TABLE commerce.order_items VALIDATE CONSTRAINT fk_order_items_orders;
+COMMIT;
+```
+
+**Why**: `ADD CONSTRAINT FOREIGN KEY` without `NOT VALID` takes `ACCESS EXCLUSIVE` and validates
+every row. With `NOT VALID`, only new rows are checked at write time; `VALIDATE CONSTRAINT` back-fills
+the existing rows under `SHARE UPDATE EXCLUSIVE`.
+
+---
+
+## 5. Never backfill data inside a migration transaction
+
+If new rows need default values, dispatch a one-shot queued job after the migration runs, or run
+the `UPDATE` in a separate file outside any `BEGIN`/`COMMIT` block.
+
+```sql
+-- BAD — migration holds ACCESS EXCLUSIVE while updating millions of rows:
+BEGIN;
+ALTER TABLE commerce.orders ADD COLUMN region text;
+UPDATE commerce.orders SET region = 'AU';  -- full table scan under lock
+COMMIT;
+
+-- GOOD — DDL is fast; backfill runs outside the lock window:
+-- File 1: 20260601000000_add_region_to_orders.sql
+BEGIN;
+ALTER TABLE commerce.orders ADD COLUMN region text;
+COMMIT;
+
+-- File 2: 20260601000001_backfill_orders_region.sql  (or a dispatched job)
+UPDATE commerce.orders SET region = 'AU' WHERE region IS NULL;
+```
+
+---
+
+## 6. Migration testing requirements for hot tables
+
+Any migration that touches one of the hot `commerce.*` tables **must** be tested against a staging
+database snapshot with at least 100,000 rows in the target table before deploying to production.
+This surfaces lock-contention issues that only appear at scale.
+
+**Hot tables requiring pre-prod load testing:**
+
+| Table | Why it matters |
+|-------|---------------|
+| `commerce.orders` | Core transaction table; every payout sweep reads it |
+| `commerce.order_events` | Append-only audit log; Shopify webhooks write constantly |
+| `commerce.commission_movements` | Payout ledger; read on every affiliate dashboard load |
+| `commerce.commission_payouts` | Payout batch table; sweep updates in bulk |
+| `commerce.brand_affiliate_rollup` | Trigger-maintained rollup; high write frequency |
+
+**How to test**: restore a prod snapshot to the dev Supabase project, run `supabase db push --dry-run`
+to confirm the migration plan, then `supabase db push`. Monitor Supabase lock metrics during the run
+and check that no row-level lock waits exceed 100ms.
+
+---
+
+## Summary cheat sheet
+
+| Operation | Unsafe | Safe |
+|-----------|--------|------|
+| Add index | `CREATE INDEX` | `CREATE INDEX CONCURRENTLY IF NOT EXISTS` (outside transaction) |
+| Add CHECK | `ADD CONSTRAINT CHECK (...)` | `ADD CONSTRAINT ... NOT VALID` → `VALIDATE CONSTRAINT` |
+| Set NOT NULL | `ALTER COLUMN SET NOT NULL` | Four-step NOT VALID pattern (see §3) |
+| Add FK | `ADD CONSTRAINT FOREIGN KEY` | `ADD CONSTRAINT ... NOT VALID` → `VALIDATE CONSTRAINT` |
+| Backfill data | `UPDATE` inside migration transaction | Separate file or dispatched job |

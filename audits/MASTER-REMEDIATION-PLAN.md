@@ -10,7 +10,7 @@
 - **167 unique findings** across 6 phases after cross-phase deduplication (168 within-phase unique − 1 cross-phase dup)
 - **Tier totals:** 4 P0 · 40 P1 · 97 P2 · 26 P3
 - **41 foundational patterns** close ~128 findings; **41 standalone fixes** cover the residual ~39 (a few standalone entries bundle 2-3 closely related findings)
-- **11 patterns shipped on origin/development as of 2026-05-14:** M1 (`012285c`), M2 (merge `e5bddb3b` + follow-ups `af2a0928`/`07888024`), M3 (`7919465a`), M4 (`d4b03ee`), M5 (`260ec1d`), M6 (`a90e1e7`), M7 (`05a13f1`), M8 (pre-existing; all 6 steps confirmed shipped 2026-05-14), M9 (`1a040b27`), M10 (`6b335f4c`+`ae03598c`, merge `1e64e187`), M12 (`bf620b22` + `782907cf`/`ffc449c4`). **All 4 P0s now closed** — DATA-C1#DATA-1 by M1, SEC-A#1/SEC-F#2 + SEC-A#2/SEC-C#1 by M2, SEC-B#3/SEC-F#1 by M3. See Recommended Landing Order ✅ markers + Status Snapshot.
+- **12 patterns shipped on origin/development as of 2026-05-14:** M1 (`012285c`), M2 (merge `e5bddb3b` + follow-ups `af2a0928`/`07888024`), M3 (`7919465a`), M4 (`d4b03ee`), M5 (`260ec1d`), M6 (`a90e1e7`), M7 (`05a13f1`), M8 (pre-existing; all 6 steps confirmed shipped 2026-05-14), M9 (`1a040b27`), M10 (`6b335f4c`+`ae03598c`, merge `1e64e187`), M12 (`bf620b22` + `782907cf`/`ffc449c4`), M20 (migration safety convention + CI guard). **All 4 P0s now closed** — DATA-C1#DATA-1 by M1, SEC-A#1/SEC-F#2 + SEC-A#2/SEC-C#1 by M2, SEC-B#3/SEC-F#1 by M3. See Recommended Landing Order ✅ markers + Status Snapshot.
 - **Estimated remaining effort:** ~8–10 weeks of focused work (sum of per-phase estimates; minor savings from cross-phase dedup/absorption)
 - **P0 callouts:**
     - **DATA-C1#DATA-1** (Phase 6) — `stripe_connect_status` CHECK rejects `'disconnected'`; every Stripe disconnect raises 23514 on `core/professionals.go` → infinite webhook retries on pilot day one
@@ -206,7 +206,7 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
     - **Tier:** P1 (3 P1 + 2 P2) · **Effort:** ~2 days · **Closes:** 5 findings (DB-F#SCALE-3, DB-F#SCALE-4, DB-F#SCALE-5, DB-D#SCALE-2, DB-E#SCALE-1)
     - **Why this slot:** webhook + transaction-scope safety; ships correct functionality today but degrades under any concurrent load. DB-D#SCALE-2 was auto-closed when the wallet model was removed (no residual `creditWalletFromCheckoutSession` in `StripeConnectService`).
 
-17. **Master Pattern 17 — Vendor API budget discipline** (Phase 4 Pattern 4) ⚠️ **Partial — 4 of 5 steps closed 2026-05-14** (commit pending). Step 3 (DB-F#SCALE-1, embedded `metafieldsSet` refactor) deferred pending Shopify-docs verification.
+17. **Master Pattern 17 — Vendor API budget discipline** (Phase 4 Pattern 4) ⚠️ **Partial — 4 of 5 steps closed 2026-05-14** (commit pending). Step 3 (DB-F#SCALE-1, embedded `metafieldsSet` refactor) ✅ **Shopify-docs verification complete 2026-05-14** — all four pre-deferral questions answered against shopify.dev; approach is safe to ship. **Deferred-to-trigger** (no customer impact today, embedded panel low-volume pre-beta); resume on any of: Shopify announces removal date for `productVariantUpdate`, pilot brand reports save lag in embedded panel, `THROTTLED` exception observed from controller in Nightwatch, next `services.shopify.api_version` bump. See Master Pattern 17 Step 3 for the full verification record.
     - **Tier:** P1 (2 P1 + 3 P2) · **Effort:** ~2 days · **Closes:** 4 of 5 findings (DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-6). DB-F#SCALE-1 (P1) remains open as a Step-3 follow-up.
     - **Why this slot:** depends on Master 14's `rememberLocked` migration; second of the two P1 silent-data-bug patterns in Phase 4.
 
@@ -1352,7 +1352,7 @@ Phase 4 currently runs without customers; these don't *show* as bugs in Nightwat
 **Original ID:** Phase 4 Pattern 4
 **Closes:** DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-1, DB-F#SCALE-6
 **Tier:** P1 (2 P1 · 3 P2) · **Effort:** ~2 days
-**Status:** ⚠️ **Partial — Closed 2026-05-14 (Steps 1, 2, 4, 5); Step 3 deferred.** Steps 1/2/4/5 shipped on `development`. Closes DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-6. Step 3 (DB-F#SCALE-1, P1 — `EmbeddedProductSettingsController` `metafieldsSet` refactor) deferred pending Shopify-docs verification of `metafieldsSet` semantics, max batch size (PRODUCTVARIANT owners), and access-scope deltas vs `productVariantUpdate`. The embedded admin extension is high-touch surface (hard-won onboarding/install fixes); refactor it in a follow-up PR after docs are reviewed. Opus review APPROVED (no blockers); IMPORTANT items (stacked PHPDoc in `BrandCatalogService`, TTL-layering comment on `resolveActive`, `Cache::forget` vs stale-twin for `embedded:product-active:*`) fixed before push.
+**Status:** ⚠️ **Partial — Closed 2026-05-14 (Steps 1, 2, 4, 5); Step 3 deferred-to-trigger after docs verification.** Steps 1/2/4/5 shipped on `development`. Closes DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-6. Step 3 (DB-F#SCALE-1, P1 — `EmbeddedProductSettingsController` `metafieldsSet` refactor) **docs-verified 2026-05-14** against shopify.dev's current Admin API reference: all four pre-deferral questions answered, no scope/auth/semantic blockers, batched `metafieldsSet` confirmed safe for both `Product` and `ProductVariant` owners under `write_products` (the scope our install token already holds). **Deferred to explicit trigger** (see Step 3 trigger conditions) rather than on a calendar — no current customer impact, embedded panel low-volume pre-beta. **Bonus finding from verification:** `productVariantUpdate` (the variant-side mutation currently used in `saveVariantMetafield`, line 549) is already deprecated by Shopify in favour of `productVariantsBulkUpdate`; Step 3's `metafieldsSet` path also resolves this deprecation as a side-effect. Opus review APPROVED (no blockers); IMPORTANT items (stacked PHPDoc in `BrandCatalogService`, TTL-layering comment on `resolveActive`, `Cache::forget` vs stale-twin for `embedded:product-active:*`) fixed before push.
 **Depends on:** Master Pattern 14 (DB-F#SCALE-6 requires `BrandCatalogService::fetchBrandCatalog` migration shipped first)
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1383,13 +1383,44 @@ The unifying fix is **make every vendor call go through the budget-aware path, b
     - Keep at most **one** immediate in-process retry without sleep, to absorb single-packet transient blips (where the bucket refills before a queue round-trip).
     - In `preAcquireBudget()`, after the first `usleep()` + retry, accept the deficit on second-miss and proceed — the `THROTTLED` response path already handles over-commitment correctly.
     - Closes **DB-D#SCALE-3** (P2 worker-pool starvation).
-- [ ] **Step 3 — Refactor `EmbeddedProductSettingsController` to batch and reuse** (`app/Http/Controllers/Api/Internal/EmbeddedProductSettingsController.php`). ⚠️ **DEFERRED (2026-05-14).** Embedded admin extension is high-touch surface — Josh's team spent significant effort getting the install/onboarding flow right; refactoring the metafield write path needs Shopify-docs verification first. Open questions before resuming: (1) `metafieldsSet` semantics for `PRODUCTVARIANT` owners (does it upsert by `(ownerId, namespace, key)` the same as `PRODUCT`?), (2) max-batch size per call (last known: 25), (3) access scope deltas vs the current `productVariantUpdate` / `productUpdate` mutations, (4) `userErrors` shape changes that affect the current error-propagation in `update()`. Also note: until this lands, `EmbeddedProductSettingsController` writes to `partna.active` won't bust the per-product `embedded:product-active:*` cache added in Step 4 (10m TTL acceptable per plan).
+- [ ] **Step 3 — Refactor `EmbeddedProductSettingsController` to batch and reuse** (`app/Http/Controllers/Api/Internal/EmbeddedProductSettingsController.php`). ⚠️ **DEFERRED-TO-TRIGGER (2026-05-14).** Embedded admin extension is high-touch surface — Josh's team spent significant effort getting the install/onboarding flow right. **Shopify-docs verification complete 2026-05-14** against shopify.dev's current Admin API reference; all four pre-deferral questions answered, approach is safe to ship when triggered. No customer impact today (pre-beta, embedded panel low-volume); the deferral is calibrated to explicit trigger conditions below, not a calendar.
+
+    **Docs verification — primary sources consulted (2026-05-14):**
+    - [`metafieldsSet` mutation reference](https://shopify.dev/docs/api/admin-graphql/latest/mutations/metafieldsSet)
+    - [`HasMetafields` interface](https://shopify.dev/docs/api/admin-graphql/latest/interfaces/HasMetafields) — implementers enumerated via `#possible-types-<Type>` anchors in the page source
+    - [`productVariantsBulkUpdate` mutation](https://shopify.dev/docs/api/admin-graphql/latest/mutations/productvariantsbulkupdate) — canonical replacement for deprecated `productVariantUpdate`
+    - [`productVariantUpdate` deprecation thread](https://community.shopify.dev/t/productvariantupdate-mutation-deprecated/9400)
+    - [Manage metafields apps guide](https://shopify.dev/docs/apps/build/custom-data/metafields/manage-metafields)
+
+    **Findings — all four pre-deferral questions answered:**
+    1. **Upsert semantics — ✅ confirmed.** Shopify docs verbatim: *"Metafield values will be set regardless if they were previously created or not."* `metafieldsSet` upserts by `(ownerId, namespace, key)`, eliminating the find-then-create/update read pattern in `saveMetafield()` (lines 412–514).
+    2. **`ProductVariant` owner support — ✅ confirmed.** The `HasMetafields` interface page explicitly anchors `#possible-types-ProductVariant`, listing it as an implementer. `metafieldsSet`'s scope rule (*"Requires the same access level needed to mutate the owner resource"*) means variant ownership is gated only by `write_products` — the scope our install token already holds.
+    3. **Max batch size — ✅ 25 per call** (payload ≤10MB), per-call across all owners in a single mutation. **Caveat for implementation:** `fetchVariants` queries `variants(first: 50)`, and Shopify's default per-product variant cap is 100. The implementation must `array_chunk($triples, 25)` and loop, even though pilot brands typically have ≤10 variants — silently failing at 26+ variants is the only realistic regression risk and it's mechanically avoidable.
+    4. **Access scope deltas — ✅ none.** `productVariantUpdate`, `productUpdate`, and `metafieldsSet` (Product or ProductVariant owner) all require `write_products`. Existing install token unchanged.
+    5. **`userErrors` shape — ⚠️ minor, non-breaking.** Current code reads `userErrors { field message }`. `metafieldsSet` returns `MetafieldsSetUserError { field, message, code }` — adds a `code` field but keeps `field`+`message` identically. The existing error-propagation in `update()` (`Arr::get` on `userErrors[0].message`) continues to work unchanged; only the response key path changes (`data.metafieldsSet.userErrors` instead of `data.productUpdate.userErrors` / `data.productVariantUpdate.userErrors`).
+
+    **Bonus finding from verification (independent of the rate-limit drain):** `productVariantUpdate`, used in `saveVariantMetafield` (line 549), is **already deprecated by Shopify** in favour of `productVariantsBulkUpdate`. Shopify typically maintains deprecated mutations for ~12 months before removal. Step 3's `metafieldsSet` path skips both deprecation paths cleanly — meaning Step 3 also resolves a deprecation we hadn't otherwise tracked.
+
+    **Risk assessment — "will it break anything":**
+    - **Approach risk: zero.** All four pre-deferral questions answered against primary Shopify sources. No scope, semantic, or owner-type blockers. The new mutation is a strict superset of what the old path does (one call instead of N, upsert instead of read-then-write).
+    - **Implementation risk: standard refactor risk** (typos, edge cases in chunking logic, response-shape handling). Neutralised by TDD-first Pest tests pinning the new contract, explicit `array_chunk($triples, 25)` for the >25-variant path, and smoke-test in a Shopify dev store before merge to `development`.
+    - **Blast radius if implementation does break:** brand owners can't save settings in the embedded panel until reverted. Recoverable (revert PR), not catastrophic. Pre-beta + dev-first deploy semantics cap exposure further.
+
+    **Trigger to resume — defer until any one of these fires:**
+    1. Shopify announces a removal date for `productVariantUpdate` (moves the deprecation from "later" to "scheduled").
+    2. A pilot brand reports save lag in the embedded admin extension.
+    3. `THROTTLED` exceptions observed in Nightwatch from `EmbeddedProductSettingsController`.
+    4. Next bump of `services.shopify.api_version` — bundle Step 3 with the version bump.
+
+    **Implementation plan when triggered:**
     - `saveVariantEnabledStates()` (lines 473–489): accept the variant list as a parameter from the caller (which already obtained it via `fetchProductMetafields()`); delete the redundant `fetchVariants()` call.
-    - Replace the per-variant `saveVariantMetafield()` loop with a single `metafieldsSet` bulk mutation. Shopify's `metafieldsSet` accepts an array of `{ownerId, namespace, key, type, value}` triples and upserts by owner+namespace+key — no need to look up existing IDs first.
+    - Replace the per-variant `saveVariantMetafield()` loop with a single `metafieldsSet` bulk mutation. Shopify's `metafieldsSet` accepts an array of `{ownerId, namespace, key, type, value}` triples and upserts by owner+namespace+key — no need to look up existing IDs first. **Chunk at 25 per call via `array_chunk($triples, 25)`** to handle products with >25 variants; aggregate `userErrors` across batches before throwing.
     - `saveMetafield()` (lines 358–468): replace the two-call (query-then-create/update) pattern with a single `metafieldsSet` mutation. `metafieldsSet` upserts.
+    - **Wire cache-bust** for `embedded:product-active:{professionalId}:{productId}` (added in Step 4) when `active` is toggled — closes the 10m staleness gap the audit accepted as interim cost.
     - `show()` (lines 88–141): keep the current 3-call shape for now (collections lookups have different cache lifecycles); revisit if Shopify GraphQL exposes a combined query node. Mark with a `// TODO: collapse to single GraphQL operation once Shopify schema permits` comment so the next reader understands the deliberate choice.
     - Track `X-Shopify-Graphql-Cost` response headers and surface budget exhaustion as 429 with `Retry-After` to the embedded client (uses existing `ShopifyBudgetTracker` headers).
-    - Closes **DB-F#SCALE-1** (P1 rate-limit drain).
+    - **Required test fixtures:** product with 0 sidest metafields (create path), product with all 4 sidest metafields populated (update path), product with >25 variants (chunking path), unchanged collection-toggle paths (regression).
+    - Closes **DB-F#SCALE-1** (P1 rate-limit drain) + resolves `productVariantUpdate` deprecation.
 - [x] **Step 4 — Eliminate full-catalog fetch in `EmbeddedProductAnalyticsController::resolveActive()`** (`app/Http/Controllers/Api/Internal/EmbeddedProductAnalyticsController.php:161–180`).
     - **Sequencing note:** Phase 3 Pattern 1 Step 4 wraps `show()` with `rememberLocked`; Phase 3 Pattern 1 Step 2 hardens `fetchBrandCatalog()`. Land both before this fix — otherwise the interim `resolveActive()` thundering-herd is left worse.
     - **Preferred (long-term):** mirror the `sidest.active` metafield to a local column on `commerce.order_items` or a dedicated `brand_product_states` table, populated by the catalog sync job. `resolveActive()` becomes `DB::table('...')->where('shopify_product_id', $productId)->where('brand_professional_id', $professionalId)->value('active')`.
@@ -1541,7 +1572,7 @@ Five P2 findings + four absorbed P2 findings = nine total closed, no architectur
 **Original ID:** Phase 4 Pattern 2
 **Closes:** DB-C#SCALE-1, DB-C#SCALE-2 (which fully absorb DB-A#SCALE-1)
 **Tier:** P2 (2 P2) · **Effort:** ~0.5 day
-**Status:** Open
+**Status:** ✅ Shipped 2026-05-14
 **Depends on:** none (gates Masters 23, 24, 25 — Phase 6 DDL sweeps)
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -1557,21 +1588,22 @@ The codebase already contains the correct pattern in **`20260424120000_add_live_
 
 ### What to do
 
-- [ ] **Step 1 — Write `supabase/migrations/CONVENTIONS.md`** documenting the four rules:
+- [x] **Step 1 — Write `supabase/migrations/CONVENTIONS.md`** documenting the four rules:
     - **Index creation:** Always `CREATE INDEX CONCURRENTLY IF NOT EXISTS`, outside any transaction block. Two-file convention for migrations that need both schema changes (BEGIN/COMMIT block) and indexes: one file per concern, prefixed with the same timestamp +1.
     - **CHECK constraints on populated tables:** `ADD CONSTRAINT ... CHECK (...) NOT VALID` first (lock-light), then `VALIDATE CONSTRAINT` in a separate transaction (acquires only `SHARE UPDATE EXCLUSIVE` — doesn't block writes).
     - **`SET NOT NULL` on populated tables:** `ADD CONSTRAINT chk_col_not_null CHECK (col IS NOT NULL) NOT VALID` → backfill NULLs in a preceding `UPDATE` (outside the schema transaction) → `VALIDATE CONSTRAINT` → `ALTER COLUMN SET NOT NULL` (metadata-only once Postgres has a validated check). The final `SET NOT NULL` step is fast.
     - **Foreign keys:** `ADD CONSTRAINT ... FOREIGN KEY (...) NOT VALID` first, then `VALIDATE CONSTRAINT` separately.
     - **Inline `UPDATE` backfills:** never inside the migration transaction. Extract to a separate one-shot job dispatched after the migration lands. A migration holding a transaction lock while millions of rows update is the worst variant of this pattern.
     - Reference `20260424120000_add_live_check_index.sql` as the canonical example.
-- [ ] **Step 2 — Add a migration template** at `supabase/migrations/TEMPLATE.sql.example` showing the two-file pattern for any migration that includes both DDL and index creation, with comments explaining each lock implication.
-- [ ] **Step 3 — Add a CI lint** (composer guard alongside `guard:no-laravel-migrations`) that fails on:
+- [x] **Step 2 — Add a migration template** at `supabase/migrations/TEMPLATE.sql.example` showing the two-file pattern for any migration that includes both DDL and index creation, with comments explaining each lock implication.
+- [x] **Step 3 — Add a CI lint** (composer guard alongside `guard:no-laravel-migrations`) that fails on:
     - `CREATE INDEX` (without `CONCURRENTLY`) inside a `.sql` migration file (regex: `^\s*CREATE\s+(UNIQUE\s+)?INDEX\s+(?!CONCURRENTLY)` after stripping comments).
     - `ADD CONSTRAINT.*FOREIGN KEY` without a corresponding `NOT VALID` clause.
     - `ALTER COLUMN.*SET NOT NULL` (must use the four-step pattern above).
     - The lint allows the patterns the team prefers and fails closed on the patterns that block production traffic.
-- [ ] **Step 4 — Document migration testing.** Add to `CONVENTIONS.md`: any migration touching a `commerce.*` table after pilot launch must be tested against a staging snapshot with at least 100K rows in the target table to surface lock-contention issues *before* prod. List `commerce.orders`, `commerce.order_events`, `commerce.commission_movements`, `commerce.commission_payouts`, `commerce.brand_affiliate_rollup` as the hot tables that demand the discipline.
-- [ ] **Step 5 — Decide on backfill of shipped migrations.** Don't patch the shipped 11 in place (idempotent re-run is a no-op). **If** any of the hot tables grow significantly before the next scheduled maintenance window, schedule a separate migration that drops and recreates the perf-critical indexes via `CONCURRENTLY` to make them explicit in history. Track in a follow-up TODO; do not block this PR on it.
+    - **Shipped:** `scripts/guard-no-unsafe-migrations.php` + `guard:no-unsafe-migrations` in `composer.json` + explicit CI step in `.github/workflows/ci.yml`. Cutoff: migrations ≤ `20260514100000` grandfathered.
+- [x] **Step 4 — Document migration testing.** Add to `CONVENTIONS.md`: any migration touching a `commerce.*` table after pilot launch must be tested against a staging snapshot with at least 100K rows in the target table to surface lock-contention issues *before* prod. List `commerce.orders`, `commerce.order_events`, `commerce.commission_movements`, `commerce.commission_payouts`, `commerce.brand_affiliate_rollup` as the hot tables that demand the discipline.
+- [x] **Step 5 — Decide on backfill of shipped migrations.** Don't patch the shipped 11 in place (idempotent re-run is a no-op). **If** any of the hot tables grow significantly before the next scheduled maintenance window, schedule a separate migration that drops and recreates the perf-critical indexes via `CONCURRENTLY` to make them explicit in history. Track in a follow-up TODO; do not block this PR on it.
 
 ### Plain English
 

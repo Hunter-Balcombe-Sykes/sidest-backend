@@ -1,0 +1,112 @@
+<?php
+
+/**
+ * Guard: no unsafe migration patterns (Master Pattern 20).
+ *
+ * Fails on four patterns that cause lock-induced downtime on populated tables:
+ *   1. CREATE INDEX without CONCURRENTLY
+ *   2. ADD CONSTRAINT ... FOREIGN KEY without NOT VALID
+ *   3. ADD CONSTRAINT ... CHECK without NOT VALID
+ *   4. ALTER COLUMN ... SET NOT NULL (must use the four-step NOT VALID pattern)
+ *
+ * Migrations with timestamps <= GRANDFATHERED_CUTOFF are skipped — they ran safely on
+ * empty tables before this convention was established (2026-05-14, timestamp 20260514100000).
+ * All new migrations after that date are subject to this lint.
+ *
+ * See supabase/migrations/CONVENTIONS.md for the safe alternatives.
+ */
+
+const GRANDFATHERED_CUTOFF = '20260514100000';
+const MIGRATIONS_DIR = 'supabase/migrations';
+
+$errors = [];
+
+if (! is_dir(MIGRATIONS_DIR)) {
+    echo "Migration safety lint: no supabase/migrations directory found, skipping.\n";
+    exit(0);
+}
+
+foreach (glob(MIGRATIONS_DIR.'/*.sql') as $file) {
+    $basename = basename($file);
+
+    // Extract the 14-digit timestamp prefix.
+    if (! preg_match('/^(\d{14})/', $basename, $m)) {
+        continue;
+    }
+
+    // Skip grandfathered migrations created before the convention was established.
+    if ($m[1] <= GRANDFATHERED_CUTOFF) {
+        continue;
+    }
+
+    $raw = file_get_contents($file);
+
+    // Strip single-line SQL comments so patterns inside comments don't false-positive.
+    $content = preg_replace('/--[^\n]*/', '', $raw);
+
+    // ── Check 1: CREATE INDEX without CONCURRENTLY ────────────────────────────
+    // Matches CREATE INDEX and CREATE UNIQUE INDEX but not CREATE INDEX CONCURRENTLY.
+    if (preg_match('/\bCREATE\s+(UNIQUE\s+)?INDEX\s+(?!CONCURRENTLY\b)/i', $content)) {
+        $errors[] = "$basename: CREATE INDEX without CONCURRENTLY detected.\n"
+            ."  Use: CREATE INDEX CONCURRENTLY IF NOT EXISTS ... (outside any transaction block)\n"
+            ."  See: supabase/migrations/CONVENTIONS.md §1";
+    }
+
+    // ── Check 2: ADD CONSTRAINT FOREIGN KEY without NOT VALID ─────────────────
+    // Match each FK clause individually, stopping at the next ADD CONSTRAINT or semicolon.
+    // This prevents a later NOT VALID on a second FK from masking an earlier unsafe one.
+    if (preg_match_all(
+        '/ADD\s+CONSTRAINT\s+\S+\s+FOREIGN\s+KEY.*?(?=,\s*ADD\s+CONSTRAINT\b|;|\z)/is',
+        $content,
+        $fkMatches
+    )) {
+        foreach ($fkMatches[0] as $stmt) {
+            if (! preg_match('/\bNOT\s+VALID\b/i', $stmt)) {
+                $errors[] = "$basename: ADD CONSTRAINT FOREIGN KEY without NOT VALID detected.\n"
+                    ."  Use: ADD CONSTRAINT <name> FOREIGN KEY (...) REFERENCES ... NOT VALID\n"
+                    ."  Then: VALIDATE CONSTRAINT <name> in a separate transaction.\n"
+                    ."  See: supabase/migrations/CONVENTIONS.md §4";
+                break; // one error per file is enough
+            }
+        }
+    }
+
+    // ── Check 3: ADD CONSTRAINT CHECK without NOT VALID ───────────────────────
+    // Check constraints on populated tables need NOT VALID to avoid ACCESS EXCLUSIVE.
+    if (preg_match_all(
+        '/ADD\s+CONSTRAINT\s+\S+\s+CHECK\s*\(.*?(?=,\s*ADD\s+CONSTRAINT\b|;|\z)/is',
+        $content,
+        $checkMatches
+    )) {
+        foreach ($checkMatches[0] as $stmt) {
+            if (! preg_match('/\bNOT\s+VALID\b/i', $stmt)) {
+                $errors[] = "$basename: ADD CONSTRAINT CHECK without NOT VALID detected.\n"
+                    ."  Use: ADD CONSTRAINT <name> CHECK (...) NOT VALID\n"
+                    ."  Then: VALIDATE CONSTRAINT <name> in a separate transaction.\n"
+                    ."  See: supabase/migrations/CONVENTIONS.md §2";
+                break;
+            }
+        }
+    }
+
+    // ── Check 4: ALTER COLUMN SET NOT NULL ────────────────────────────────────
+    // Direct SET NOT NULL takes ACCESS EXCLUSIVE and scans every row under the lock.
+    // Use the four-step NOT VALID + VALIDATE CONSTRAINT + SET NOT NULL pattern instead.
+    if (preg_match('/\bALTER\s+COLUMN\s+\S+\s+SET\s+NOT\s+NULL\b/i', $content)) {
+        $errors[] = "$basename: ALTER COLUMN SET NOT NULL detected.\n"
+            ."  Use the four-step pattern: ADD CONSTRAINT ... NOT VALID → backfill → VALIDATE → SET NOT NULL.\n"
+            ."  See: supabase/migrations/CONVENTIONS.md §3";
+    }
+}
+
+if (! empty($errors)) {
+    fwrite(STDERR, "\nMigration safety lint FAILED — unsafe locking pattern(s) detected:\n\n");
+    foreach ($errors as $e) {
+        fwrite(STDERR, "  ✗ $e\n\n");
+    }
+    fwrite(STDERR, "These patterns cause write downtime on populated tables.\n");
+    fwrite(STDERR, "See supabase/migrations/CONVENTIONS.md for the safe alternatives.\n\n");
+    exit(1);
+}
+
+echo "Migration safety lint passed.\n";
