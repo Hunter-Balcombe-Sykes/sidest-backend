@@ -70,11 +70,26 @@ class StripeConnectController extends Controller
             ]
             : null;
 
+        // Phase 4 — surface both type-specific PMs + preference so the frontend can
+        // render PaymentMethodsManager (two side-by-side cards + primary toggle).
+        // Legacy `payout_method` + `masked_card` are preserved for back-compat.
+        $cardMasked = $pro->stripe_card_payment_method_id ? [
+            'brand' => $pro->stripe_card_brand,
+            'last4' => $pro->stripe_card_last4,
+        ] : null;
+        $becsMasked = $pro->stripe_becs_payment_method_id ? [
+            'bsb' => $pro->stripe_becs_bsb,
+            'last4' => $pro->stripe_becs_last4,
+        ] : null;
+
         return response()->json([
             'connect' => $connectStatus,
             'has_payment_method' => $hasPaymentMethod,
             'payout_method' => $pro->payout_method,
             'masked_card' => $maskedCard,
+            'card_payment_method' => $cardMasked,
+            'becs_payment_method' => $becsMasked,
+            'preferred_payout_method' => $pro->preferred_payout_method,
         ]);
     }
 
@@ -234,18 +249,46 @@ class StripeConnectController extends Controller
     }
 
     /**
-     * DELETE /stripe/payment-method
+     * DELETE /stripe/payment-method[?type=card|becs]
      * Detaches the brand's saved PaymentMethod from their v2 Account and clears the
-     * local cache columns.
+     * local cache columns. Phase 4: pass ?type=card|becs to remove only that PM and
+     * keep the other one. Without ?type, removes the primary (preferred or legacy).
      */
     public function removePaymentMethod(Request $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
         Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
 
-        $this->connectService->removeBrandPaymentMethod($pro);
+        $type = $request->query('type');
+        if ($type !== null && ! in_array($type, ['card', 'becs'], true)) {
+            return response()->json(['error' => 'invalid_type'], 422);
+        }
+
+        $this->connectService->removeBrandPaymentMethod($pro, $type);
 
         return response()->json(['status' => 'removed']);
+    }
+
+    /**
+     * PUT /stripe/payment-method/preference
+     * Sets the brand's preferred payout method (card | becs). The chosen type must
+     * already have a PM ID on file — controller catches the service exception and
+     * returns 422 with the underlying message.
+     */
+    public function setPaymentMethodPreference(\App\Http\Requests\Api\Professional\Stripe\PaymentPreferenceRequest $request): JsonResponse
+    {
+        $pro = $request->attributes->get('professional');
+        Gate::forUser($pro)->authorize('managePaymentMethod', $pro);
+
+        try {
+            $this->connectService->setBrandPreferredPayoutMethod($pro, (string) $request->input('method'));
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['status' => 'updated']);
     }
 
     /**

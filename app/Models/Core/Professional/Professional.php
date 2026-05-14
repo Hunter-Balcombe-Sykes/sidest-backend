@@ -83,6 +83,16 @@ class Professional extends BaseModel
         'stripe_commission_funding_mode',
         'payout_method',
 
+        // Phase 4 — multi-PM (BECS + card) with preferred selection. Legacy stripe_payment_method_*
+        // columns above continue to mirror the current preferred PM as a snapshot for back-compat.
+        'stripe_card_payment_method_id',
+        'stripe_card_brand',
+        'stripe_card_last4',
+        'stripe_becs_payment_method_id',
+        'stripe_becs_bsb',
+        'stripe_becs_last4',
+        'preferred_payout_method',
+
         // Account deletion lifecycle
         'deletion_token_hash',
         'deletion_requested_at',

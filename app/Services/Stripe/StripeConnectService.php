@@ -518,12 +518,34 @@ class StripeConnectService
 
         [$payoutMethod, $brandLabel, $last4] = $this->extractPaymentMethodDisplay($paymentMethod);
 
-        $brand->update([
+        // Phase 4 — multi-PM. Dual-write: type-specific columns are the new source of truth,
+        // legacy columns continue to mirror the most-recently-saved PM as a snapshot of the
+        // "primary" so old callers keep working. preferred_payout_method seeded from the
+        // first PM set up; user can override later via PUT /stripe/payment-method/preference.
+        $update = [
             'stripe_payment_method_id' => $paymentMethod->id,
             'stripe_payment_method_brand' => $brandLabel,
             'stripe_payment_method_last4' => $last4,
             'payout_method' => $payoutMethod,
-        ]);
+        ];
+
+        if ($payoutMethod === 'becs') {
+            $update['stripe_becs_payment_method_id'] = $paymentMethod->id;
+            $update['stripe_becs_bsb'] = $brandLabel;
+            $update['stripe_becs_last4'] = $last4;
+        } else {
+            $update['stripe_card_payment_method_id'] = $paymentMethod->id;
+            $update['stripe_card_brand'] = $brandLabel;
+            $update['stripe_card_last4'] = $last4;
+        }
+
+        // First PM sets the preference; subsequent sync calls don't override the user's
+        // explicit choice (changed via PUT /stripe/payment-method/preference).
+        if ($brand->preferred_payout_method === null) {
+            $update['preferred_payout_method'] = $payoutMethod;
+        }
+
+        $brand->update($update);
 
         return [
             'payment_method_id' => $paymentMethod->id,
@@ -532,27 +554,115 @@ class StripeConnectService
     }
 
     /**
+     * Phase 4 — set the brand's preferred payout method explicitly. Validates that the chosen
+     * type has a PM ID present; throws if not (the controller wraps that in a 422).
+     */
+    public function setBrandPreferredPayoutMethod(Professional $brand, string $method): void
+    {
+        if (! in_array($method, ['card', 'becs'], true)) {
+            throw new \InvalidArgumentException('Invalid payout method.');
+        }
+
+        $hasCard = ! empty($brand->stripe_card_payment_method_id);
+        $hasBecs = ! empty($brand->stripe_becs_payment_method_id);
+
+        if ($method === 'card' && ! $hasCard) {
+            throw new \RuntimeException('No card payment method on file.');
+        }
+        if ($method === 'becs' && ! $hasBecs) {
+            throw new \RuntimeException('No BECS direct debit on file.');
+        }
+
+        // Keep legacy columns in sync with the new preferred — old callers expect them.
+        $brand->update([
+            'preferred_payout_method' => $method,
+            'payout_method' => $method,
+            'stripe_payment_method_id' => $method === 'card'
+                ? $brand->stripe_card_payment_method_id
+                : $brand->stripe_becs_payment_method_id,
+            'stripe_payment_method_brand' => $method === 'card'
+                ? $brand->stripe_card_brand
+                : $brand->stripe_becs_bsb,
+            'stripe_payment_method_last4' => $method === 'card'
+                ? $brand->stripe_card_last4
+                : $brand->stripe_becs_last4,
+        ]);
+    }
+
+    /**
      * Detach the brand's saved PaymentMethod from the v2 Account and null the local
      * cache columns. Tolerant of "already detached" / 404 — the user state is what
      * matters; the PM is gone from Stripe one way or another.
      */
-    public function removeBrandPaymentMethod(Professional $brand): void
+    public function removeBrandPaymentMethod(Professional $brand, ?string $type = null): void
     {
-        $paymentMethodId = $brand->stripe_payment_method_id;
+        // Phase 4 — multi-PM removal. When $type is null we behave like the pre-multi-PM
+        // version and remove the primary (legacy stripe_payment_method_id). When $type is
+        // explicit, only that type's columns are cleared; the other PM stays in place.
+        if ($type === null) {
+            $type = $brand->preferred_payout_method ?? $brand->payout_method;
+        }
 
+        if ($type === 'becs') {
+            $becsId = $brand->stripe_becs_payment_method_id;
+            if ($becsId !== null) {
+                try {
+                    $this->stripe->paymentMethods->detach($becsId);
+                } catch (ApiErrorException) {
+                }
+            }
+            $newPrimary = $brand->stripe_card_payment_method_id;
+            $brand->update([
+                'stripe_becs_payment_method_id' => null,
+                'stripe_becs_bsb' => null,
+                'stripe_becs_last4' => null,
+                'preferred_payout_method' => $newPrimary ? 'card' : null,
+                'payout_method' => $newPrimary ? 'card' : null,
+                'stripe_payment_method_id' => $newPrimary,
+                'stripe_payment_method_brand' => $newPrimary ? $brand->stripe_card_brand : null,
+                'stripe_payment_method_last4' => $newPrimary ? $brand->stripe_card_last4 : null,
+            ]);
+
+            return;
+        }
+
+        if ($type === 'card') {
+            $cardId = $brand->stripe_card_payment_method_id;
+            if ($cardId !== null) {
+                try {
+                    $this->stripe->paymentMethods->detach($cardId);
+                } catch (ApiErrorException) {
+                }
+            }
+            $newPrimary = $brand->stripe_becs_payment_method_id;
+            $brand->update([
+                'stripe_card_payment_method_id' => null,
+                'stripe_card_brand' => null,
+                'stripe_card_last4' => null,
+                'preferred_payout_method' => $newPrimary ? 'becs' : null,
+                'payout_method' => $newPrimary ? 'becs' : null,
+                'stripe_payment_method_id' => $newPrimary,
+                'stripe_payment_method_brand' => $newPrimary ? $brand->stripe_becs_bsb : null,
+                'stripe_payment_method_last4' => $newPrimary ? $brand->stripe_becs_last4 : null,
+            ]);
+
+            return;
+        }
+
+        // Fallback — no type-specific path and no preference — clear legacy fields only.
+        $paymentMethodId = $brand->stripe_payment_method_id;
         if ($paymentMethodId !== null) {
             try {
                 $this->stripe->paymentMethods->detach($paymentMethodId);
             } catch (ApiErrorException) {
-                // PM already detached or never existed at Stripe — proceed with local cleanup.
             }
         }
-
         $brand->update([
             'stripe_payment_method_id' => null,
             'stripe_payment_method_brand' => null,
             'stripe_payment_method_last4' => null,
             'payout_method' => null,
+            'preferred_payout_method' => null,
         ]);
     }
 
@@ -561,7 +671,52 @@ class StripeConnectService
      */
     public function brandHasPaymentMethod(Professional $brand): bool
     {
-        return ! empty($brand->stripe_payment_method_id);
+        return ! empty($brand->stripe_payment_method_id)
+            || ! empty($brand->stripe_card_payment_method_id)
+            || ! empty($brand->stripe_becs_payment_method_id);
+    }
+
+    /**
+     * Phase 4 — resolve which PM to charge for a brand. Returns null when no PM is available.
+     *
+     * Selection order:
+     *   1. preferred_payout_method when set AND that type's id is present
+     *   2. BECS if becs_payment_method_id is present (default fallback — preferred ledger settlement)
+     *   3. card if card_payment_method_id is present
+     *   4. legacy stripe_payment_method_id + payout_method (rows not migrated yet)
+     *
+     * @return array{id: string, type: string}|null type is the Stripe payment_method_types value ('card' | 'au_becs_debit')
+     */
+    public function resolveBrandPaymentMethod(Professional $brand): ?array
+    {
+        $cardId = $brand->stripe_card_payment_method_id ?? null;
+        $becsId = $brand->stripe_becs_payment_method_id ?? null;
+        $preferred = $brand->preferred_payout_method ?? null;
+
+        if ($preferred === 'card' && $cardId) {
+            return ['id' => $cardId, 'type' => 'card'];
+        }
+        if ($preferred === 'becs' && $becsId) {
+            return ['id' => $becsId, 'type' => 'au_becs_debit'];
+        }
+
+        if ($becsId) {
+            return ['id' => $becsId, 'type' => 'au_becs_debit'];
+        }
+        if ($cardId) {
+            return ['id' => $cardId, 'type' => 'card'];
+        }
+
+        // Legacy fallback — rows from before the multi-PM migration land in this branch
+        // because the backfill writes type-specific columns alongside; this catches the
+        // sliver of rows whose backfill didn't run (e.g. tests, fresh installs).
+        if (! empty($brand->stripe_payment_method_id)) {
+            $type = ($brand->payout_method ?? null) === 'becs' ? 'au_becs_debit' : 'card';
+
+            return ['id' => $brand->stripe_payment_method_id, 'type' => $type];
+        }
+
+        return null;
     }
 
     /**
