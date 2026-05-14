@@ -202,9 +202,9 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
     - **Tier:** P1 (2 P1 + 1 P2) · **Effort:** ~1.5 days · **Closes:** 3 findings
     - **Why this slot:** largest blast radius (every public storefront page view); low-risk fix with established pattern.
 
-16. **Master Pattern 16 — External I/O outside critical sections** (Phase 4 Pattern 1)
-    - **Tier:** P1 (3 P1 + 2 P2) · **Effort:** ~2 days · **Closes:** 5 findings
-    - **Why this slot:** webhook + transaction-scope safety; ships correct functionality today but degrades under any concurrent load.
+16. **Master Pattern 16 — External I/O outside critical sections** (Phase 4 Pattern 1) — ✅ **Closed 2026-05-14** (commit `e6ac5658`)
+    - **Tier:** P1 (3 P1 + 2 P2) · **Effort:** ~2 days · **Closes:** 5 findings (DB-F#SCALE-3, DB-F#SCALE-4, DB-F#SCALE-5, DB-D#SCALE-2, DB-E#SCALE-1)
+    - **Why this slot:** webhook + transaction-scope safety; ships correct functionality today but degrades under any concurrent load. DB-D#SCALE-2 was auto-closed when the wallet model was removed (no residual `creditWalletFromCheckoutSession` in `StripeConnectService`).
 
 17. **Master Pattern 17 — Vendor API budget discipline** (Phase 4 Pattern 4)
     - **Tier:** P1 (2 P1 + 3 P2) · **Effort:** ~2 days · **Closes:** 5 findings
@@ -1274,12 +1274,12 @@ These three findings have the largest blast radius after Pattern 2 (every public
 
 ---
 
-## Master Pattern 16 — Move external I/O out of critical sections
+## ✅ Master Pattern 16 — Move external I/O out of critical sections
 
 **Original ID:** Phase 4 Pattern 1
 **Closes:** DB-F#SCALE-3, DB-F#SCALE-4, DB-F#SCALE-5, DB-D#SCALE-2, DB-E#SCALE-1
 **Tier:** P1 (3 P1 · 2 P2) · **Effort:** ~2 days
-**Status:** Open
+**Status:** ✅ Closed 2026-05-14 (commit `e6ac5658`)
 **Depends on:** none (DB-F#SCALE-5 shares the `EmbeddedSetupController` file with Master Pattern 11; bundle the diff)
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1299,35 +1299,35 @@ The fix shape is consistent across all five: shrink the critical section to the 
 
 ### What to do
 
-- [ ] **Step 1 — Dispatch `SyncPaymentMethodFromCheckoutSessionJob` from `StripeConnectWebhookController`** (`app/Http/Controllers/Api/Webhooks/StripeConnectWebhookController.php:163–181`).
+- [x] **Step 1 — Dispatch `SyncBrandPaymentMethodFromCheckoutSessionJob` from `StripeConnectWebhookController`** (`app/Http/Controllers/Api/Webhooks/StripeConnectWebhookController.php`). Shipped 2026-05-14 in commit `e6ac5658`. Job is `ShouldBeUnique` keyed by `checkout_session_id` and dispatches on the `integrations` queue with `tries=3`, `backoff=[5,15,30]`, `timeout=30`, and a `failed()` handler that `report()`s + logs. (Note: plan referenced legacy method name `syncPaymentMethodFromCheckoutSession`; current method is `syncBrandPaymentMethodFromCheckoutSession`.)
     - Replace the synchronous `$service->syncPaymentMethodFromCheckoutSession($professional, $session->id)` call inside the `match ($session->mode)` arm with `SyncPaymentMethodFromCheckoutSessionJob::dispatch($professional->id, $session->id)`.
     - Job class config: `$tries = 3`, `$backoff = [5, 15, 30]`, `$timeout = 30`, `failed(\Throwable $e)` handler that `report($e)` plus logs `professional_id` + `checkout_session_id` for ops follow-up. Place on the `integrations` queue (vendor I/O category).
     - Return `response()->json(['received' => true])` immediately after the existing `WebhookEvent` idempotency guard. Stripe's webhook deadline is now bounded by the controller, not by Stripe's own API.
     - Closes **DB-F#SCALE-4** (P1).
-- [ ] **Step 2 — Dispatch `PurgeAffiliateProductSelectionsJob` from `ShopifyAppUninstalledWebhookController`** (`app/Http/Controllers/Api/Webhooks/ShopifyAppUninstalledWebhookController.php:99–101`).
+- [x] **Step 2 — Dispatch `PurgeAffiliateProductSelectionsJob` from `ShopifyAppUninstalledWebhookController`** (`app/Http/Controllers/Api/Webhooks/ShopifyAppUninstalledWebhookController.php`). Shipped 2026-05-14 in commit `e6ac5658`. Job chunks deletes via `chunkById(500, …)->each->delete()`, is `ShouldBeUnique` keyed by `brand_professional_id` (uniqueFor=600s, covering the full 30/90/300s backoff window), and runs on the `integrations` queue.
     - Remove the inline `AffiliateProductSelection::query()->where('brand_professional_id', ...)->delete()` after `$integration->update(...)`.
     - Job class deletes in chunks: `AffiliateProductSelection::where('brand_professional_id', $brandId)->chunkById(500, fn ($chunk) => $chunk->each->delete())`. Per-chunk locks; full deletion still completes within seconds for 10K rows but no lock is held longer than 500-row batch.
     - Job config: `$tries = 3`, `$backoff = [30, 90, 300]`, `$timeout = 60`, `failed()` reports. Place on `integrations` queue.
     - Return `$this->success(['received' => true])` immediately.
     - Closes **DB-F#SCALE-3** (P1).
-- [ ] **Step 3 — Use `ProvisionBrandDnsJob` + create `ProvisionBrandDnsTxtJob`** for `EmbeddedSetupController` (`app/Http/Controllers/Api/Internal/EmbeddedSetupController.php` — `setupDomain()` lines 337–352, `provisionDomainTxt()` lines 371–385).
+- [x] **Step 3 — Use `ProvisionBrandDnsJob` + create `ProvisionBrandDnsTxtJob`** for `EmbeddedSetupController`. Shipped 2026-05-14 in commit `e6ac5658`. `setupDomain()` saves `oxygen_storefront_id` then dispatches the existing `ProvisionBrandDnsJob` (now hardened with `onQueue('integrations')`, `backoff=[10,30,60]`, `timeout=30`, `failed()` handler). `provisionDomainTxt()` dispatches the new `ProvisionBrandDnsTxtJob`. Both dispatches are debounced via `Cache::add("dns:provision:cname:{id}", true, 30)` / `Cache::add("dns:provision:txt:{id}:{sha1(value)}", true, 30)`. The `dns_status` column on `brand_store_settings` was deferred — the existing `domainStatus()` endpoint already reads from DB and the job latency is bounded by the existing DNS-propagation tolerance.
     - `setupDomain()`: replace `new CloudflareDnsService; $dns->upsertCname(...)` with `ProvisionBrandDnsJob::dispatch($professionalId)`. The local DB write of `oxygen_storefront_id` stays in-request (local-only, no I/O). **`ProvisionBrandDnsJob` already exists** and is correct for this use case — the wizard simply wasn't wired to it.
     - `provisionDomainTxt()`: create new `app/Jobs/Cloudflare/ProvisionBrandDnsTxtJob.php` wrapping `CloudflareDnsService::upsertTxt($recordName, $txtValue)`. Same retry/timeout/failed shape as `ProvisionBrandDnsJob`.
     - Add a per-brand debounce on each dispatch path: `Cache::add("dns:provision:{$professionalId}", true, 30)` returns false → skip dispatch. Mirrors the pattern in `ShopifyBulkOperationLock`.
     - Wizard UX: have the frontend poll `/embedded/domain-status` (reads from DB, not Cloudflare) for completion instead of awaiting the response. Surface DNS state via the existing `oxygen_storefront_id` + a new `dns_status` column on `brand_store_settings` (`pending` → `provisioned` → `verified`).
     - Closes **DB-F#SCALE-5** (P2).
-- [ ] **Step 4 — Close `DB::transaction` before Stripe refund in `StripeConnectService`** (`app/Services/Stripe/StripeConnectService.php` — `creditWalletFromCheckoutSession()`).
+- [x] **Step 4 — Close `DB::transaction` before Stripe refund in `StripeConnectService`** — **auto-closed 2026-05-14.** `creditWalletFromCheckoutSession()` no longer exists in the codebase — the wallet model and all wallet-related methods (refunds, top-ups, `wallet_movements` writes) were removed when Option A destination charges replaced the wallet flow. `grep -rn "creditWalletFromCheckoutSession\|wallet" app/Services/Stripe/` returns zero hits. Verified during Master Pattern 16 implementation.
     - Restructure the closure so the transaction body **only** loads the brand row with `lockForUpdate()`, reads `walletCurrency`, and returns either `(currency_matches: true, ...)` or `(currency_matches: false, payment_intent_id: ..., refund_metadata: [...])`. The transaction commits and releases the row lock at this point.
     - Outside the closure, branch on `currency_matches`. On mismatch, call `$this->stripe->refunds->create(...)` with the existing idempotency key.
     - On Stripe API failure post-release: log `Log::critical(...)` and `report($e)` so Nightwatch surfaces it; mark the `wallet_movements` row as `needs_manual_refund = true` (add column if not already present) so ops can action it. Mirror the manual-refund pattern from `CommissionPayoutService`.
     - Closes **DB-D#SCALE-2** (P1).
-- [ ] **Step 5 — Move R2 PUT outside `DB::transaction` in `ProfessionalDocumentController`** (`app/Http/Controllers/Api/Professional/ProfessionalDocumentController.php:85–148`).
+- [x] **Step 5 — Move R2 PUT outside `DB::transaction` in `ProfessionalDocumentController`**. Shipped 2026-05-14 in commit `e6ac5658`. Transaction now holds only the advisory lock + soft-delete of prior row + insert of new row with `path:''`; the R2 PUT and `$media->update(['path' => $path])` run post-commit, mirroring `BrandGalleryController::upload`. Catch branch additionally `restore()`s the prior soft-deleted row on R2 failure so flat-replace remains "atomic swap or no change" — a regression Opus review flagged and we closed in the same commit.
     - Reference implementation: `BrandGalleryController::upload()` already follows the correct pattern — review and mirror.
     - Inside the transaction: keep `pg_advisory_xact_lock`, the existing soft-delete of the prior document row, and the `SiteMedia` insert with `path: ''`. End the transaction here.
     - Outside the transaction: perform `Storage::disk($mediaDisk)->put($path, $stream, 'public')` and then `$media->update(['path' => $path])`. The empty-path row is the serialization token — the advisory lock has already released, but the row exists so concurrent flat-replace requests find it.
     - Keep the existing `$newUploadedPath` orphan-cleanup logic in the outer `catch` block; it remains correct (and arguably more useful) when the upload runs outside the transaction.
     - Closes **DB-E#SCALE-1** (P2).
-- [ ] **Step 6 — Add the existing-job + new-job sanity-check pattern to the team conventions.**
+- [x] **Step 6 — Add the existing-job + new-job sanity-check pattern to the team conventions.** Shipped 2026-05-14 in commit `e6ac5658`. One-line bullet added to `CLAUDE.md` "Patterns" list: "Queue jobs for vendor I/O — check for existing jobs before adding a new one."
     - DB-F#SCALE-5 highlighted that `ProvisionBrandDnsJob` already existed but a controller bypassed it. Phase 4's audit insight (DB-F closing remarks) calls this out as a recurring antipattern.
     - Add a one-line note to `CLAUDE.md` (or a `docs/conventions/queue-jobs.md` if one exists): "Before proposing a new queue job, `rg --files-with-matches "<vendor>Service" app/Jobs/` to confirm an analogous job doesn't already exist."
     - Not a code fix; an institutional one. Mark as `[ ]` for completeness.
