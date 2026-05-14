@@ -215,6 +215,35 @@ it('passes through on a valid token and stashes embedded_* attributes', function
         ]);
 });
 
+it('logs the post-INCR jti use-counter on each success so the distribution can be observed', function () {
+    // Raise the cap above the two replays this test performs so neither hits jti_replay.
+    config()->set('services.shopify.jti_max_uses', 25);
+
+    Log::spy();
+
+    // Reuse the same JTI twice within the 120s window; counter should climb 1 → 2.
+    $token = makeSessionToken();
+
+    getJson('/__test/shopify-session', ['Authorization' => "Bearer {$token}"])->assertOk();
+    getJson('/__test/shopify-session', ['Authorization' => "Bearer {$token}"])->assertOk();
+
+    Log::shouldHaveReceived('info')
+        ->withArgs(function (string $message, array $context) {
+            return $message === 'shopify.session.ok'
+                && ($context['uses'] ?? null) === 1
+                && ($context['shop'] ?? null) === TEST_SHOP;
+        })
+        ->once();
+
+    Log::shouldHaveReceived('info')
+        ->withArgs(function (string $message, array $context) {
+            return $message === 'shopify.session.ok'
+                && ($context['uses'] ?? null) === 2
+                && ($context['shop'] ?? null) === TEST_SHOP;
+        })
+        ->once();
+});
+
 it(':lenient mode passes through an unlinked shop without 404', function () {
     Route::middleware('shopify.session:lenient')
         ->get('/__test/shopify-session-lenient', fn (\Illuminate\Http\Request $r) => response()->json([
@@ -269,4 +298,46 @@ it('throws when SHOPIFY_API_SECRET and SHOPIFY_API_KEY are unset (deploy bug, no
 
     expect(fn () => getJson('/__test/shopify-session', ['Authorization' => 'Bearer xxx']))
         ->toThrow(\RuntimeException::class, 'Shopify session token middleware misconfigured');
+});
+
+it('restores JWT::$leeway after a successful request (no static leak into the rest of the request)', function () {
+    $sentinel = 42;
+    $previous = JWT::$leeway;
+    JWT::$leeway = $sentinel;
+
+    try {
+        $token = makeSessionToken();
+        getJson('/__test/shopify-session', ['Authorization' => "Bearer {$token}"])
+            ->assertOk();
+
+        expect(JWT::$leeway)->toBe($sentinel);
+    } finally {
+        JWT::$leeway = $previous;
+    }
+});
+
+it('restores JWT::$leeway after a rejected request (catch path must not leak the 10s drift)', function () {
+    $sentinel = 42;
+    $previous = JWT::$leeway;
+    JWT::$leeway = $sentinel;
+
+    try {
+        $bad = JWT::encode([
+            'iss' => 'https://'.TEST_SHOP.'/admin',
+            'dest' => 'https://'.TEST_SHOP,
+            'aud' => TEST_CLIENT_ID,
+            'sub' => 's',
+            'exp' => time() + 60,
+            'nbf' => time(),
+            'jti' => 'jti-leeway-restore',
+        ], 'wrong-secret-of-sufficient-length-bytes', 'HS256');
+
+        getJson('/__test/shopify-session', ['Authorization' => "Bearer {$bad}"])
+            ->assertStatus(401)
+            ->assertExactJson(['message' => 'auth_sig_invalid']);
+
+        expect(JWT::$leeway)->toBe($sentinel);
+    } finally {
+        JWT::$leeway = $previous;
+    }
 });

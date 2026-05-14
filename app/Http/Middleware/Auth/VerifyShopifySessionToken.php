@@ -102,13 +102,21 @@ class VerifyShopifySessionToken
             return $this->reject($request, 'token_missing', 401, $startedAt);
         }
 
+        // Save/restore $leeway around the decode. JWT::$leeway is a static
+        // (process-global within the request), so any other JWT::decode() call
+        // later in the same request — Supabase auth, queue worker context,
+        // tests — would silently inherit our 10s drift tolerance otherwise.
+        $previousLeeway = JWT::$leeway;
+        JWT::$leeway = self::CLOCK_LEEWAY_SECONDS;
+
         try {
-            JWT::$leeway = self::CLOCK_LEEWAY_SECONDS;
             $claims = (array) JWT::decode($token, new Key($secret, 'HS256'));
         } catch (\Throwable $e) {
             return $this->reject($request, 'sig_invalid', 401, $startedAt, [
                 'error_class' => class_basename($e),
             ]);
+        } finally {
+            JWT::$leeway = $previousLeeway;
         }
 
         $aud = (string) ($claims['aud'] ?? '');
@@ -166,6 +174,7 @@ class VerifyShopifySessionToken
             Log::info('shopify.session.ok', [
                 'shop' => $destHost,
                 'mode' => 'lenient',
+                'uses' => $uses,
                 'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
             ]);
 
@@ -181,8 +190,13 @@ class VerifyShopifySessionToken
 
         $request->attributes->set('embedded_professional_id', $professionalId);
 
+        // `uses` is the post-INCR JTI counter value (1 on first use, climbs with
+        // each Remix SSR loader sharing the same JWT). Logged on every success
+        // so we can plot the real-world distribution and tighten jti_max_uses
+        // (currently 25; the SSR fan-out justification predicts ≤6 per page).
         Log::info('shopify.session.ok', [
             'shop' => $destHost,
+            'uses' => $uses,
             'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
         ]);
 
