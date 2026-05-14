@@ -84,21 +84,3 @@ it('analytics summary cache key uses YmdH format matching the controller', funct
     expect($newKey)->not->toBe($controllerKey, 'Version bump should change the key');
     expect(Cache::get($newKey))->toBeNull('New versioned key should be empty after invalidation');
 });
-
-it('invalidateAnalytics deletes visit stat cache keys for last 90 days', function () {
-    $professionalId = (string) Str::uuid();
-    // Keys are single-day: start === end === the day itself.
-    $dayStr = Carbon::now()->subDays(1)->format('Ymd');
-
-    $visitKey = CacheKeyGenerator::analyticsVisits($professionalId, $dayStr, $dayStr);
-    $clickKey = CacheKeyGenerator::analyticsClicks($professionalId, $dayStr, $dayStr);
-
-    Cache::put($visitKey, ['total_visits' => 99], now()->addMinutes(5));
-    Cache::put($clickKey, ['total_clicks' => 42], now()->addMinutes(5));
-
-    $service = app(AnalyticsCacheService::class);
-    $service->invalidateAnalytics($professionalId);
-
-    expect(Cache::has($visitKey))->toBeFalse();
-    expect(Cache::has($clickKey))->toBeFalse();
-});

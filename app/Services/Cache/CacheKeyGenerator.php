@@ -11,9 +11,9 @@ namespace App\Services\Cache;
 // Methods carrying this assumption are annotated with "@multi-site: needs site_id".
 //
 // MULTI-SITE MIGRATION TASK (GS-4): Before launching multi-site, add a siteId segment to every method
-// annotated "@multi-site: needs site_id" (analyticsVisits, analyticsClicks, siteImagesViewVariants, and
-// any non-site-scoped professional lookup that aggregates across sites). Coordinate with a one-time global
-// cache flush at deploy so old professionalId-only keys orphan and TTL out naturally.
+// annotated "@multi-site: needs site_id" (siteImagesViewVariants, and any non-site-scoped professional
+// lookup that aggregates across sites). Coordinate with a one-time global cache flush at deploy so old
+// professionalId-only keys orphan and TTL out naturally.
 class CacheKeyGenerator
 {
     public static function publicSite(string $subdomain): string
@@ -117,18 +117,6 @@ class CacheKeyGenerator
         }
 
         return $variants;
-    }
-
-    // @multi-site: needs site_id — visits belong to a site, not just a professional
-    public static function analyticsVisits(string $professionalId, string $startDate, string $endDate): string
-    {
-        return "analytics:visits:{$professionalId}:{$startDate}:{$endDate}";
-    }
-
-    // @multi-site: needs site_id — clicks belong to a site, not just a professional
-    public static function analyticsClicks(string $professionalId, string $startDate, string $endDate): string
-    {
-        return "analytics:clicks:{$professionalId}:{$startDate}:{$endDate}";
     }
 
     public static function customerCount(string $professionalId): string

@@ -2,66 +2,14 @@
 
 namespace App\Services\Cache;
 
-use App\Models\Analytics\LinkClick;
-use App\Models\Analytics\SiteVisit;
-use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 
-// V2: Visit/click stats caching with version-token invalidation for bulk cache busting.
+// V2: Commerce-write fan-out for analytics caches. Bumps the per-professional version
+// token (atomically busting every windowed summary key) and issues targeted forgets
+// for affiliate projection variants, the embedded setup overview, and per-product
+// blocks. Replaces the legacy 90-day enumerate-and-delete loop.
 class AnalyticsCacheService
 {
-    public function __construct(private CacheLockService $cacheLock) {}
-
-    public function getVisitStats(string $professionalId, Carbon $startDate, Carbon $endDate): array
-    {
-        $cacheKey = CacheKeyGenerator::analyticsVisits(
-            $professionalId,
-            $startDate->format('Ymd'),
-            $endDate->format('Ymd')
-        );
-
-        return $this->cacheLock->rememberLocked($cacheKey, (int) config('partna.cache.ttls.analytics_short'), function () use ($professionalId, $startDate, $endDate) {
-            return SiteVisit::where('professional_id', $professionalId)
-                ->whereBetween('occurred_at', [$startDate, $endDate])
-                ->selectRaw('
-                    COUNT(*) as total_visits,
-                    COUNT(DISTINCT visitor_id) as unique_visitors,
-                    COUNT(DISTINCT DATE(occurred_at)) as days_with_visits,
-                    COUNT(DISTINCT country_code) as unique_countries,
-                    COUNT(DISTINCT device_type) as device_types
-                ')
-                ->first()
-                ?->toArray() ?? [
-                    'total_visits' => 0,
-                    'unique_visitors' => 0,
-                    'days_with_visits' => 0,
-                    'unique_countries' => 0,
-                    'device_types' => 0,
-                ];
-        });
-    }
-
-    public function getClickStats(string $professionalId, Carbon $startDate, Carbon $endDate): array
-    {
-        $cacheKey = CacheKeyGenerator::analyticsClicks(
-            $professionalId,
-            $startDate->format('Ymd'),
-            $endDate->format('Ymd')
-        );
-
-        return $this->cacheLock->rememberLocked($cacheKey, (int) config('partna.cache.ttls.analytics_short'), function () use ($professionalId, $startDate, $endDate) {
-            return LinkClick::where('professional_id', $professionalId)
-                ->whereBetween('occurred_at', [$startDate, $endDate])
-                ->selectRaw('COUNT(*) as total_clicks, COUNT(DISTINCT visitor_id) as unique_clickers, COUNT(DISTINCT link_block_id) as links_clicked')
-                ->first()
-                ?->toArray() ?? [
-                    'total_clicks' => 0,
-                    'unique_clickers' => 0,
-                    'links_clicked' => 0,
-                ];
-        });
-    }
-
     /**
      * Atomically invalidates every windowed cache variant for this professional
      * by incrementing the version token embedded in all analytics cache keys.
@@ -92,19 +40,6 @@ class AnalyticsCacheService
             Cache::forget(CacheKeyGenerator::affiliateProjections($professionalId, $w));
             Cache::forget(CacheKeyGenerator::affiliateProjections($professionalId, $w).':stale');
         }
-
-        // Delete the rolling 90-day window of visit and click stat keys.
-        // Each entry covers a single day (start === end === that day's date).
-        $keys = [];
-
-        for ($i = 0; $i < 90; $i++) {
-            $date = Carbon::now()->subDays($i)->format('Ymd');
-
-            $keys[] = CacheKeyGenerator::analyticsVisits($professionalId, $date, $date);
-            $keys[] = CacheKeyGenerator::analyticsClicks($professionalId, $date, $date);
-        }
-
-        Cache::deleteMultiple(array_values(array_unique($keys)));
 
         // Bust the embedded setup overview panel (affiliate count + commission
         // totals + recent sales) so brands see live numbers after any commerce write.
