@@ -662,6 +662,8 @@ class EmbeddedSetupController extends ApiController
             (string) $request->attributes->get('embedded_shop_domain', '')
         );
 
+        // Pre-lock read for flag computation only. The locked re-read inside
+        // the transaction below is what governs the metadata merge.
         $existing = ProfessionalIntegration::query()
             ->where('professional_id', $professionalId)
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
@@ -676,26 +678,6 @@ class EmbeddedSetupController extends ApiController
                 explode(',', (string) $data['scopes'])
             )));
         }
-
-        $metadata = array_merge($existingMetadata, [
-            'shop_domain' => $shopDomain,
-            'shop_id' => $data['shop_id'] ?? Arr::get($existingMetadata, 'shop_id'),
-            'scopes' => $scopesArray ?: Arr::get($existingMetadata, 'scopes', []),
-            'connected_at' => now()->toIso8601String(),
-            'webhook_registration_state' => 'queued',
-            'connected_via' => 'embedded_wizard',
-        ]);
-
-        // Clear disconnected_* — stamped by ShopifyAppUninstalledWebhookController
-        // on uninstall, never auto-cleared on reinstall. Without removal here,
-        // BrandStatusService::determine() keeps returning Disconnected (its
-        // first check), which traps the embedded app's wizard in a redirect
-        // loop (app.tsx loader: brand_status === 'disconnected' → needsReconnect
-        // → /shopify-setup, repeat). Both keys must be cleared — the uninstall
-        // webhook writes both `disconnected_at` (timestamp) and `disconnected_reason`
-        // ('app_uninstalled'); clearing only one used to leave the brand stuck.
-        unset($metadata['disconnected_at']);
-        unset($metadata['disconnected_reason']);
 
         // Dispatch jobs only on first provision OR when a previous provision appears
         // incomplete. Two incomplete signals:
@@ -724,6 +706,21 @@ class EmbeddedSetupController extends ApiController
             && $existing !== null
             && $existing->access_token === $data['access_token'];
 
+        // Short-circuit: on a true no-op refresh, return immediately. The Shopify
+        // shop.json validation below was already run the first time this token
+        // was persisted (and on every token-change refresh); re-validating on a
+        // page reload with the unchanged token adds a synchronous round-trip
+        // (~200–800ms, plus tail-latency outliers under Shopify load) to every
+        // embedded page load with no benefit — the existing access_token was
+        // already proven valid against this shop_domain at write time.
+        //
+        // The change-path validation below (PR #23) still runs on every distinct
+        // $data['access_token'], so revoked/rotated/cross-shop tokens are still
+        // rejected at the moment they would overwrite the stored credential.
+        if ($isNoOpRefresh) {
+            return $this->success(['provisioned' => true]);
+        }
+
         // Validate-before-store: the embedded app re-posts session.accessToken on
         // every load. Validate every persist against Shopify Admin API — invalid
         // tokens (rotated, revoked, scope-mismatch) and cross-shop mixups (shop A
@@ -731,6 +728,8 @@ class EmbeddedSetupController extends ApiController
         // working credential. Transient Shopify outages return valid=true so we
         // don't punish merchants for backend hiccups; only definitive 401 or
         // shop-domain-mismatch refuse.
+        // Run BEFORE the transaction so the lock is never held across the
+        // Shopify Admin API round-trip.
         $validation = $this->validateShopifyAccessToken($shopDomain, $data['access_token']);
         if (! $validation['valid']) {
             Log::warning('Shopify provision-integration: token rejected by Shopify; refusing to overwrite existing token.', [
@@ -751,18 +750,56 @@ class EmbeddedSetupController extends ApiController
             ], 422);
         }
 
-        $integration = ProfessionalIntegration::updateOrCreate(
-            [
-                'professional_id' => $professionalId,
-                'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
-            ],
-            [
-                'external_account_id' => $shopDomain,
-                'access_token' => $data['access_token'],
-                'last_catalog_sync_error' => null,
-                'provider_metadata' => $metadata,
-            ],
-        );
+        // The metadata read-merge-write must be atomic — without a row lock,
+        // two concurrent admin-page loads (multiple admin tabs, Remix SSR
+        // fan-out) both read $lockedMetadata, both array_merge their delta,
+        // and both write — second writer wins and the first writer's sibling
+        // keys vanish. The historic symptom was a lost `webhook_registration_state
+        // = 'registered'` reset to `queued`, which re-dispatched the full
+        // six-job setup pipeline unnecessarily on the next page load.
+        // Mirrors the pattern in EmbeddedConnectController::connect().
+        $integration = DB::transaction(function () use ($professionalId, $shopDomain, $data, $scopesArray) {
+            $locked = ProfessionalIntegration::query()
+                ->where('professional_id', $professionalId)
+                ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+                ->lockForUpdate()
+                ->first();
+
+            $lockedMetadata = is_array($locked?->provider_metadata) ? $locked->provider_metadata : [];
+
+            $metadata = array_merge($lockedMetadata, [
+                'shop_domain' => $shopDomain,
+                'shop_id' => $data['shop_id'] ?? Arr::get($lockedMetadata, 'shop_id'),
+                'scopes' => $scopesArray ?: Arr::get($lockedMetadata, 'scopes', []),
+                'connected_at' => now()->toIso8601String(),
+                'webhook_registration_state' => 'queued',
+                'connected_via' => 'embedded_wizard',
+            ]);
+
+            // Clear disconnected_* — stamped by ShopifyAppUninstalledWebhookController
+            // on uninstall, never auto-cleared on reinstall. Without removal here,
+            // BrandStatusService::determine() keeps returning Disconnected (its
+            // first check), which traps the embedded app's wizard in a redirect
+            // loop (app.tsx loader: brand_status === 'disconnected' → needsReconnect
+            // → /shopify-setup, repeat). Both keys must be cleared — the uninstall
+            // webhook writes both `disconnected_at` (timestamp) and `disconnected_reason`
+            // ('app_uninstalled'); clearing only one used to leave the brand stuck.
+            unset($metadata['disconnected_at']);
+            unset($metadata['disconnected_reason']);
+
+            return ProfessionalIntegration::updateOrCreate(
+                [
+                    'professional_id' => $professionalId,
+                    'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+                ],
+                [
+                    'external_account_id' => $shopDomain,
+                    'access_token' => $data['access_token'],
+                    'last_catalog_sync_error' => null,
+                    'provider_metadata' => $metadata,
+                ],
+            );
+        });
 
         BrandProfile::firstOrCreate(
             ['professional_id' => $professionalId],
@@ -802,13 +839,10 @@ class EmbeddedSetupController extends ApiController
             }
         }
 
-        // Skip cache invalidation + status sync on no-op token refreshes. Brand
-        // status can't have changed when nothing about the integration changed,
-        // and avoiding sync() saves ~8–12 cross-region DB queries per page load.
-        if (! $isNoOpRefresh) {
-            $this->cache->invalidateProfessional($professional);
-            app(BrandStatusService::class)->sync($professional);
-        }
+        // The no-op short-circuit above already returns before reaching this
+        // point, so cache + status sync always run for the write paths.
+        $this->cache->invalidateProfessional($professional);
+        app(BrandStatusService::class)->sync($professional);
 
         return $this->success(['provisioned' => true]);
     }

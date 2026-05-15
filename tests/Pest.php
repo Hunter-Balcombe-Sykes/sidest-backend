@@ -581,6 +581,7 @@ function setupProfessionalIntegrationsTable(): void
         status TEXT NULL,
         expires_at TEXT NULL,
         reconciled_through TEXT NULL,
+        last_catalog_sync_error TEXT NULL,
         created_at TEXT NULL,
         updated_at TEXT NULL
     )');
