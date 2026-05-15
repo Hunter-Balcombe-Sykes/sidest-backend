@@ -9,8 +9,10 @@ use App\Http\Controllers\Concerns\ResolvesSiteFromRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\CartEventRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\ClickRequest;
 use App\Http\Requests\Api\PublicSite\Analytics\PageviewRequest;
+use App\Http\Requests\Api\PublicSite\Analytics\SectionSeenRequest;
 use App\Models\Analytics\CartEvent;
 use App\Models\Analytics\LinkClick;
+use App\Models\Analytics\SectionView;
 use App\Models\Analytics\SiteVisit;
 use App\Models\Core\Site\Block;
 use App\Services\Cache\AnalyticsCacheService;
@@ -232,5 +234,97 @@ class AnalyticsController extends ApiController
         }
 
         return $this->success(['message' => 'Cart event recorded', 'event_id' => $event->id], 201);
+    }
+
+    public function sectionSeen(SectionSeenRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        $site = $this->resolveSiteFromData($data);
+
+        if (! $site) {
+            $statusCode = ! empty($data['site_id']) ? 422 : 404;
+
+            return $this->error('Site not found', $statusCode);
+        }
+
+        if (! $site->is_published) {
+            return $this->error('Site not found', 404);
+        }
+
+        if ($this->isBotUserAgent($request->userAgent())) {
+            return $this->success(['message' => 'Section view recorded'], 200);
+        }
+
+        // Optional block_id must belong to this site if provided.
+        $block = null;
+        if (! empty($data['block_id'])) {
+            $block = Block::where('id', $data['block_id'])
+                ->where('site_id', $site->id)
+                ->first();
+            if (! $block) {
+                return $this->error('Block not found or does not belong to this site', 404);
+            }
+        }
+
+        // Dedup: a session viewing the same section within 5 minutes is one engagement.
+        // Mirrors the click endpoint's 3-sec dedup but with a longer window because scroll
+        // back to a section is common.
+        $hasIdentifier = ! empty($data['visitor_id']) || ! empty($data['session_id']);
+        $view = null;
+        if ($hasIdentifier) {
+            $view = SectionView::where('site_id', $site->id)
+                ->where('section_key', $data['section_key'])
+                ->where(function ($q) use ($data): void {
+                    if (! empty($data['visitor_id'])) {
+                        $q->orWhere('visitor_id', $data['visitor_id']);
+                    }
+                    if (! empty($data['session_id'])) {
+                        $q->orWhere('session_id', $data['session_id']);
+                    }
+                })
+                ->where('occurred_at', '>=', now()->subMinutes(5))
+                ->first();
+        }
+
+        if (! $view) {
+            $rawReferrer = $data['referrer'] ?? $request->headers->get('referer');
+            $referrer = ($rawReferrer !== null && filter_var($rawReferrer, FILTER_VALIDATE_URL)) ? $rawReferrer : null;
+
+            $view = new SectionView([
+                'section_key' => $data['section_key'],
+                'block_id' => $block?->id,
+                'occurred_at' => now(),
+                'session_id' => $data['session_id'] ?? null,
+                'visitor_id' => $data['visitor_id'] ?? null,
+                'ip_hash' => $this->hashIp($request->ip()),
+                'user_agent' => $request->userAgent(),
+                'referrer' => $referrer,
+                'utm_source' => $data['utm_source'] ?? null,
+                'utm_medium' => $data['utm_medium'] ?? null,
+                'utm_campaign' => $data['utm_campaign'] ?? null,
+                'country_code' => $this->detectCountryCode($request),
+                'device_type' => $this->detectDeviceType($request->userAgent()),
+            ]);
+            $view->professional_id = $site->professional_id;
+            $view->site_id = $site->id;
+            $view->save();
+        }
+
+        try {
+            $this->analyticsCache->invalidateAnalytics($site->professional_id);
+        } catch (Throwable $e) {
+            report($e);
+            Log::warning('Analytics cache invalidation failed on section view', [
+                'site_id' => $site->id,
+                'section_key' => $data['section_key'],
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $this->success([
+            'message' => 'Section view recorded',
+            'view_id' => $view->id,
+        ], 201);
     }
 }

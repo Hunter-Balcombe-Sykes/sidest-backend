@@ -32,6 +32,7 @@ const POLICY_EXEMPT = [
     // API, gated by the parent Site/CommissionPolicy.
     \App\Models\Analytics\CartEvent::class,
     \App\Models\Analytics\LinkClick::class,
+    \App\Models\Analytics\SectionView::class,
     \App\Models\Analytics\SiteVisit::class,
 
     // Nested under CommissionPayout — gated transitively by CommissionPolicy.
