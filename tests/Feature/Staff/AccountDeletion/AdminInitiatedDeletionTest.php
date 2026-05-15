@@ -369,3 +369,47 @@ it('Stripe cancel-at-period-end is invoked on admin initiate', function () {
 
     expect($result['success'])->toBeTrue();
 });
+
+it('pseudonymises brand_profiles and all professionals PII fields when admin initiates erasure', function () {
+    $staff = makeAdminStaff();
+    $pro = makeActiveProfessional([
+        'public_contact_email' => 'public@example.com',
+        'public_contact_number' => '+61400999888',
+        'bio' => 'I am a real person',
+        'about' => '{"headline":"Some PII"}',
+    ]);
+
+    DB::connection('pgsql')->table('brand.brand_profiles')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $pro->id,
+        'abn' => '98 765 432 109',
+        'acn' => '987 654 321',
+        'legal_business_name' => 'Test Brand Pty Ltd',
+    ]);
+
+    $service = new AccountDeletionService;
+    $result = $service->adminInitiate(
+        professional: $pro,
+        staffActorId: $staff->id,
+        staffActorHandle: $staff->name,
+        reason: 'GDPR Article 17 — support ticket #DATA-1-test',
+        overrideObligations: false,
+        request: makeAdminRequest($staff),
+    );
+
+    expect($result['success'])->toBeTrue();
+
+    $pro->refresh();
+    expect($pro->public_contact_email)->toBeNull()
+        ->and($pro->public_contact_number)->toBeNull()
+        ->and($pro->bio)->toBeNull()
+        ->and($pro->about)->toBe([]);
+
+    $profile = DB::connection('pgsql')->table('brand.brand_profiles')
+        ->where('professional_id', $pro->id)
+        ->first();
+
+    expect($profile->abn)->toBeNull()
+        ->and($profile->acn)->toBeNull()
+        ->and($profile->legal_business_name)->toBeNull();
+});

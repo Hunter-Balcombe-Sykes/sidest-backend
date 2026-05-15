@@ -26,7 +26,7 @@ class AccountDeletionTestCase
 
         $conn = DB::connection('pgsql');
 
-        foreach (['core', 'commerce', 'notifications', 'billing', 'site'] as $schema) {
+        foreach (['core', 'brand', 'commerce', 'notifications', 'billing', 'site'] as $schema) {
             try {
                 $conn->statement("ATTACH DATABASE ':memory:' AS {$schema}");
             } catch (\Throwable) {
@@ -56,6 +56,10 @@ class AccountDeletionTestCase
             location_city TEXT,
             location_state TEXT,
             location_country TEXT,
+            public_contact_email TEXT,
+            public_contact_number TEXT,
+            about TEXT,
+            bio TEXT,
             created_at TEXT,
             updated_at TEXT,
             deleted_at TEXT
@@ -84,6 +88,18 @@ class AccountDeletionTestCase
             name TEXT,
             primary_email TEXT,
             phone TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )');
+
+        $conn->statement('CREATE TABLE IF NOT EXISTS brand.brand_profiles (
+            id TEXT PRIMARY KEY,
+            professional_id TEXT,
+            abn TEXT,
+            acn TEXT,
+            legal_business_name TEXT,
+            business_type TEXT,
+            brand_status TEXT DEFAULT "deactivated",
             created_at TEXT,
             updated_at TEXT
         )');

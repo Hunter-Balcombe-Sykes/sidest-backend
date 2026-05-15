@@ -204,26 +204,47 @@ class AccountDeletionService
     }
 
     /**
-     * One-way pseudonymisation of live PII columns. Called immediately after the
-     * EVENT_CONFIRMED / EVENT_ADMIN_INITIATED audit row is written so the snapshot
-     * captures the real email. The 30-day grace period only needs handle, display_name,
-     * and auth_user_id to keep the "undo deletion" recovery path working; the original
-     * email is preserved in core.professional_deletion_audit.professional_email_snapshot
-     * so support can re-identify the user if they email to cancel.
+     * One-way pseudonymisation of live PII columns across core.professionals and
+     * brand.brand_profiles. Both tables are updated atomically so we never leave
+     * brand-profile identifiers (ABN, legal name) live while the professional row
+     * is already scrubbed.
+     *
+     * The 30-day grace period only needs handle, display_name, and auth_user_id to
+     * keep the "undo deletion" recovery path working; the original email is preserved
+     * in core.professional_deletion_audit.professional_email_snapshot so support can
+     * re-identify the user if they email to cancel.
      */
     private function pseudonymiseAccountPii(Professional $professional): void
     {
-        $professional->forceFill([
-            'phone' => 'redacted',
-            'primary_email' => "deleted+{$professional->id}@partna.au",
-            'first_name' => 'Deleted',
-            'last_name' => null,
-            'location_street_address' => null,
-            'location_postcode' => null,
-            'location_city' => null,
-            'location_state' => null,
-            'location_country' => null,
-        ])->save();
+        DB::connection('pgsql')->transaction(function () use ($professional): void {
+            $professional->forceFill([
+                'phone' => 'redacted',
+                'primary_email' => "deleted+{$professional->id}@partna.au",
+                'first_name' => 'Deleted',
+                'last_name' => null,
+                'public_contact_email' => null,
+                'public_contact_number' => null,
+                'bio' => null,
+                'about' => (object) [], // empty JSON object — satisfies the jsonb_typeof = 'object' constraint
+                'location_street_address' => null,
+                'location_postcode' => null,
+                'location_city' => null,
+                'location_state' => null,
+                'location_country' => null,
+            ])->save();
+
+            // Scrub tax/legal identifiers from brand_profiles. ABN and ACN uniquely
+            // identify sole traders and companies under Australian law; legal_business_name
+            // is personally identifying for sole traders.
+            DB::connection('pgsql')
+                ->table('brand.brand_profiles')
+                ->where('professional_id', $professional->id)
+                ->update([
+                    'abn' => null,
+                    'acn' => null,
+                    'legal_business_name' => null,
+                ]);
+        });
     }
 
     /**

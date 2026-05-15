@@ -249,3 +249,49 @@ it('unpublishes the site immediately when deletion is confirmed', function () {
     expect((bool) $site->is_published)->toBeFalse()
         ->and($site->unpublished_at)->not->toBeNull();
 });
+
+it('pseudonymises brand_profiles PII (abn, acn, legal_business_name) at confirm time', function () {
+    $rawToken = 'raw-token-'.Str::random(54);
+    $pro = seedRequestedProfessional($rawToken);
+
+    DB::connection('pgsql')->table('brand.brand_profiles')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $pro->id,
+        'abn' => '12 345 678 901',
+        'acn' => '123 456 789',
+        'legal_business_name' => 'Jane Doe Pty Ltd',
+    ]);
+
+    $service = new AccountDeletionService;
+    $service->confirm($pro, $rawToken, Request::create('/', 'POST'));
+
+    $profile = DB::connection('pgsql')->table('brand.brand_profiles')
+        ->where('professional_id', $pro->id)
+        ->first();
+
+    expect($profile)->not->toBeNull()
+        ->and($profile->abn)->toBeNull()
+        ->and($profile->acn)->toBeNull()
+        ->and($profile->legal_business_name)->toBeNull();
+});
+
+it('pseudonymises professionals public_contact and about PII at confirm time', function () {
+    $rawToken = 'raw-token-'.Str::random(54);
+    $pro = seedRequestedProfessional($rawToken, [
+        'public_contact_email' => 'public@example.com',
+        'public_contact_number' => '+61400111222',
+        'about' => '{"headline":"Test bio"}',
+        'bio' => 'I am a real person',
+    ]);
+
+    $service = new AccountDeletionService;
+    $service->confirm($pro, $rawToken, Request::create('/', 'POST'));
+
+    $pro->refresh();
+
+    expect($pro->public_contact_email)->toBeNull()
+        ->and($pro->public_contact_number)->toBeNull()
+        ->and($pro->bio)->toBeNull();
+    // about cast as array — empty array after scrub
+    expect($pro->about)->toBe([]);
+});
