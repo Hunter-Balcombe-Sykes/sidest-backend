@@ -3,11 +3,17 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Requests\Api\Internal\Embedded\UpdateProductSettingsRequest;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Retail\BrandStoreSettings;
+use App\Services\Cache\CacheKeyGenerator;
+use App\Services\Cache\CacheLockService;
+use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 // Backs the sidest-product-settings Shopify admin UI extension.
@@ -19,9 +25,19 @@ use Illuminate\Support\Facades\Log;
 // token and injects embedded_professional_id into the request.
 class EmbeddedProductSettingsController extends ApiController
 {
+    public function __construct(
+        private readonly BrandCatalogService $catalog,
+        private readonly CacheLockService $cacheLock,
+    ) {}
+
     /**
      * GET — Return product metafields, collection membership, variant list,
      * and global settings the extension needs on mount.
+     *
+     * Cached per (brand, product) for 5 minutes via CacheLockService — single-
+     * flight + ±20% jitter + SWR. Busted by update() on every successful patch
+     * so the next mount sees the new value immediately. Mirrors the cache shape
+     * of EmbeddedProductAnalyticsController::show.
      *
      * @return JsonResponse {
      *                      active: bool,
@@ -53,63 +69,36 @@ class EmbeddedProductSettingsController extends ApiController
             return $this->error('No Shopify integration found.', 404);
         }
 
-        // Read metafields written by the brand catalog service
-        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
         $productId = $this->extractId($productGid);
+        $cacheKey = CacheKeyGenerator::embeddedProductSettings($professionalId, $productId);
 
-        // Single Admin API call — metafields and variants are fetched in one
-        // GraphQL query to avoid an extra round-trip.
-        $result = $this->fetchProductMetafields($integration, $productId);
-        $metafields = $result['metafields'];
-        $variants = $result['variants'];
+        // Int TTL (300s) — DateTimeInterface TTLs skip writeWithJitter's ±20%
+        // jitter. Bust on every successful update() so a save reflects in the
+        // very next mount instead of waiting up to 5 minutes.
+        $payload = $this->cacheLock->rememberLocked(
+            $cacheKey,
+            300,
+            fn () => $this->buildSettingsPayload($integration, $productGid, $productId, $professionalId),
+        );
 
-        // Check collection membership
-        $inFavourites = $this->isInCollection($metadata, 'favourites_collection_handle', $productGid, $integration);
-        $inDefault = $this->isInCollection($metadata, 'default_collection_handle', $productGid, $integration);
-
-        // Global settings
-        $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
-        $defaultCommissionRate = (float) ($storeSettings?->default_commission_rate ?? 15);
-        $globalCustomPhotosEnabled = (bool) Arr::get($metadata, 'custom_photos_enabled', false);
-
-        return $this->success([
-            'active' => $metafields['active'] ?? true,
-            'commission_override' => $metafields['commission_override'] ?? null,
-            'affiliate_discount_pct' => $metafields['affiliate_discount_pct'] ?? null,
-            'custom_photos_enabled' => $metafields['custom_photos_enabled'] ?? null,
-            'default_commission_rate' => $defaultCommissionRate,
-            'global_custom_photos_enabled' => $globalCustomPhotosEnabled,
-            'in_favourites_collection' => $inFavourites,
-            'in_default_collection' => $inDefault,
-            'variants' => $variants,
-        ]);
+        return $this->success($payload);
     }
 
     /**
      * PATCH — Save a single field change. The extension saves per-field
      * on change (no monolithic Save button).
      *
-     * Body: { product_gid: string, field: string, value: mixed }
-     *
-     * Supported fields:
-     *   - active (bool)
-     *   - commission_override (float|null)
-     *   - affiliate_discount_pct (float|null)
-     *   - custom_photos_enabled (bool|null)
-     *   - add_to_favourites (bool)
-     *   - add_to_default (bool)
-     *   - disabled_variant_gids (string[])
+     * Body validated by UpdateProductSettingsRequest:
+     *   - product_gid: shopify Product GID
+     *   - field: one of seven allowlisted keys
+     *   - value: per-field rules (numeric 0..100 / boolean / array of variant GIDs)
      */
-    public function update(Request $request): JsonResponse
+    public function update(UpdateProductSettingsRequest $request): JsonResponse
     {
         $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $productGid = (string) ($request->input('product_gid') ?? '');
-        $field = (string) ($request->input('field') ?? '');
+        $productGid = (string) $request->input('product_gid');
+        $field = (string) $request->input('field');
         $value = $request->input('value');
-
-        if ($productGid === '' || $field === '') {
-            return $this->error('product_gid and field are required.', 422);
-        }
 
         $integration = ProfessionalIntegration::query()
             ->where('professional_id', $professionalId)
@@ -135,8 +124,6 @@ class EmbeddedProductSettingsController extends ApiController
                 'add_to_default' => $this->toggleCollection(
                     $integration, $productGid, 'default_collection_handle', (bool) $value
                 ),
-
-                default => throw new \InvalidArgumentException("Unknown field: {$field}"),
             };
         } catch (\Throwable $e) {
             Log::error('Embedded product settings save failed.', [
@@ -149,6 +136,32 @@ class EmbeddedProductSettingsController extends ApiController
             return $this->error($e->getMessage(), 422);
         }
 
+        // Bust the settings cache (primary + SWR :stale twin) so the next mount
+        // sees the just-written value. Without this, save → reload would still
+        // serve the pre-write payload from cache for up to ~50 minutes (5m
+        // primary + 50m stale window).
+        $productId = $this->extractId($productGid);
+        $settingsKey = CacheKeyGenerator::embeddedProductSettings($professionalId, $productId);
+        Cache::forget($settingsKey);
+        Cache::forget($settingsKey.':stale');
+
+        // If the change touched the `active` flag, also bust the per-product
+        // active cache used by EmbeddedProductAnalyticsController::resolveActive.
+        // BrandCatalogService::bustCatalogCaches handles this when writes flow
+        // through saveProductMetafields, but this controller does its own raw
+        // GraphQL writes — so we mirror the bust here. (No :stale twin: that
+        // key is written by rememberLockedNullable.)
+        if ($field === 'active') {
+            Cache::forget(CacheKeyGenerator::embeddedProductActive($professionalId, $productId));
+        }
+
+        // If custom_photos_enabled changed at the per-product level, bust the
+        // brandProductCustomPhotos lookup so the affiliate-facing read sees the
+        // new value. Same rationale as above — bypassing BrandCatalogService.
+        if ($field === 'custom_photos_enabled') {
+            Cache::forget(CacheKeyGenerator::brandProductCustomPhotos($professionalId, $productGid));
+        }
+
         return $this->success(['message' => 'Saved.']);
     }
 
@@ -157,6 +170,48 @@ class EmbeddedProductSettingsController extends ApiController
     private function extractId(string $gid): string
     {
         return (string) preg_replace('#^gid://shopify/Product/#', '', $gid);
+    }
+
+    /**
+     * Assemble the full settings payload returned to the extension. Extracted
+     * from show() so rememberLocked()'s closure has a single, mockable seam.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildSettingsPayload(
+        ProfessionalIntegration $integration,
+        string $productGid,
+        string $productId,
+        string $professionalId,
+    ): array {
+        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+
+        // Single Admin API call — metafields and variants are fetched in one
+        // GraphQL query to avoid an extra round-trip.
+        $result = $this->fetchProductMetafields($integration, $productId);
+        $metafields = $result['metafields'];
+        $variants = $result['variants'];
+
+        // Check collection membership
+        $inFavourites = $this->isInCollection($metadata, 'favourites_collection_handle', $productGid, $integration);
+        $inDefault = $this->isInCollection($metadata, 'default_collection_handle', $productGid, $integration);
+
+        // Global settings
+        $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
+        $defaultCommissionRate = (float) ($storeSettings?->default_commission_rate ?? 15);
+        $globalCustomPhotosEnabled = (bool) Arr::get($metadata, 'custom_photos_enabled', false);
+
+        return [
+            'active' => $metafields['active'] ?? true,
+            'commission_override' => $metafields['commission_override'] ?? null,
+            'affiliate_discount_pct' => $metafields['affiliate_discount_pct'] ?? null,
+            'custom_photos_enabled' => $metafields['custom_photos_enabled'] ?? null,
+            'default_commission_rate' => $defaultCommissionRate,
+            'global_custom_photos_enabled' => $globalCustomPhotosEnabled,
+            'in_favourites_collection' => $inFavourites,
+            'in_default_collection' => $inDefault,
+            'variants' => $variants,
+        ];
     }
 
     /**
@@ -198,7 +253,7 @@ query productMetafields($id: ID!) {
 GRAPHQL;
 
         try {
-            $response = \Illuminate\Support\Facades\Http::timeout(15)
+            $response = Http::timeout(15)
                 ->acceptJson()
                 ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
                 ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
@@ -263,6 +318,13 @@ GRAPHQL;
     /**
      * Fetch variant list with per-variant sidest.enabled state.
      *
+     * Write-path helper used by saveVariantEnabledStates to compute which
+     * variants need their metafield flipped. On Shopify failure we MUST surface
+     * the error rather than swallow it — returning [] would let
+     * saveVariantEnabledStates believe the product has no variants and
+     * silently skip all writes, then update() would respond "Saved." while
+     * nothing changed. Re-throw so update()'s catch returns 422 instead.
+     *
      * @return array<int, array{gid: string, title: string, enabled: bool}>
      */
     private function fetchVariants(ProfessionalIntegration $integration, string $productId): array
@@ -272,7 +334,7 @@ GRAPHQL;
         $apiVersion = config('services.shopify.api_version', '2025-01');
 
         if ($shopDomain === '' || $adminToken === '') {
-            return [];
+            throw new \RuntimeException('Shopify integration is missing credentials.');
         }
 
         $query = <<<'GRAPHQL'
@@ -292,7 +354,7 @@ query productVariants($id: ID!) {
 GRAPHQL;
 
         try {
-            $response = \Illuminate\Support\Facades\Http::timeout(15)
+            $response = Http::timeout(15)
                 ->acceptJson()
                 ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
                 ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
@@ -300,7 +362,16 @@ GRAPHQL;
                     'variables' => ['id' => "gid://shopify/Product/{$productId}"],
                 ]);
 
+            if (! $response->successful()) {
+                throw new \RuntimeException("Shopify API returned {$response->status()}");
+            }
+
             $data = $response->json();
+            if (! empty(Arr::get($data, 'errors', []))) {
+                $first = Arr::get($data, 'errors.0.message', 'Unknown GraphQL error');
+                throw new \RuntimeException("Shopify GraphQL error: {$first}");
+            }
+
             $edges = Arr::get($data, 'data.product.variants.edges', []);
 
             if (! is_array($edges)) {
@@ -317,12 +388,27 @@ GRAPHQL;
                 ];
             }, $edges);
         } catch (\Throwable $e) {
-            return [];
+            Log::warning('Shopify Admin API exception fetching variants.', [
+                'shop_domain' => $shopDomain,
+                'product_id' => $productId,
+                'operation' => 'fetchVariants',
+                'error_class' => $e::class,
+                'error' => $e->getMessage(),
+            ]);
+
+            // Re-throw so saveVariantEnabledStates → update() returns 422
+            // instead of a false-success "Saved" UI.
+            throw $e;
         }
     }
 
     /**
      * Check if a product GID is a member of a Shopify collection.
+     *
+     * Read-path helper — returning false on Shopify failure is the safe
+     * default (the toggle will look "off" in the UI, which is recoverable),
+     * but we MUST log so the failure surfaces in monitoring instead of being
+     * a silent "always-false" for a particular brand+collection.
      */
     private function isInCollection(array $metadata, string $handleKey, string $productGid, ProfessionalIntegration $integration): bool
     {
@@ -354,7 +440,7 @@ query collectionProduct($handle: String!, $productId: ID!) {
 GRAPHQL;
 
         try {
-            $response = \Illuminate\Support\Facades\Http::timeout(10)
+            $response = Http::timeout(10)
                 ->acceptJson()
                 ->withHeaders(['X-Shopify-Storefront-Access-Token' => $storefrontToken])
                 ->post("https://{$shopDomain}/api/{$apiVersion}/graphql.json", [
@@ -369,7 +455,15 @@ GRAPHQL;
             $edges = Arr::get($data, 'data.collection.products.edges', []);
 
             return is_array($edges) && count($edges) > 0;
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            Log::warning('Shopify Storefront API exception checking collection membership.', [
+                'shop_domain' => $shopDomain,
+                'collection_handle' => $collectionHandle,
+                'product_gid' => $productGid,
+                'error_class' => $e::class,
+                'error' => $e->getMessage(),
+            ]);
+
             return false;
         }
     }
@@ -388,8 +482,6 @@ GRAPHQL;
             'disabled_variant_gids' => 'disabled_variant_gids',
             default => throw new \InvalidArgumentException("Unknown metafield: {$field}"),
         };
-
-        $ownerType = $field === 'disabled_variant_gids' ? 'PRODUCTVARIANT' : 'PRODUCT';
 
         // For disabled_variant_gids, we need to update individual variant metafields.
         // The value is an array of variant GIDs to disable; all others are enabled.
@@ -420,7 +512,7 @@ query findMetafield($ownerId: ID!, $namespace: String!, $key: String!) {
 }
 GRAPHQL;
 
-        $response = \Illuminate\Support\Facades\Http::timeout(15)
+        $response = Http::timeout(15)
             ->acceptJson()
             ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
             ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
@@ -465,15 +557,6 @@ GRAPHQL;
                 'type' => $type,
             ]];
         } else {
-            // Create new metafield
-            $mutation = <<<'GRAPHQL'
-mutation createMetafield($metafield: MetafieldInput!) {
-  metafieldDefinitionCreate(metafield: $metafield) {
-    metafieldDefinition { id }
-    userErrors { field message }
-  }
-}
-GRAPHQL;
             // For setting a metafield value, use the productSet mutation
             $mutation = <<<'GRAPHQL'
 mutation setProductMetafield($input: ProductInput!) {
@@ -494,7 +577,7 @@ GRAPHQL;
             ]];
         }
 
-        $result = \Illuminate\Support\Facades\Http::timeout(15)
+        $result = Http::timeout(15)
             ->acceptJson()
             ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
             ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
@@ -554,7 +637,7 @@ mutation setVariantMetafield($input: ProductVariantInput!) {
 }
 GRAPHQL;
 
-        \Illuminate\Support\Facades\Http::timeout(15)
+        Http::timeout(15)
             ->acceptJson()
             ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
             ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
@@ -573,6 +656,12 @@ GRAPHQL;
 
     /**
      * Add or remove a product from a manual Shopify collection.
+     *
+     * Collection-id resolution is delegated to BrandCatalogService::resolveCollectionGid,
+     * which already caches the (shop_domain, handle) → GID lookup with the same
+     * jitter/SWR helpers used elsewhere. Previously this method ran an inline
+     * uncached collection(handle:){id} query on every toggle, costing one
+     * Admin GraphQL call per click.
      */
     private function toggleCollection(ProfessionalIntegration $integration, string $productGid, string $handleKey, bool $add): void
     {
@@ -591,23 +680,7 @@ GRAPHQL;
             throw new \RuntimeException('Shopify integration is missing credentials.');
         }
 
-        // Resolve collection ID from handle
-        $query = <<<'GRAPHQL'
-query collectionId($handle: String!) {
-  collection(handle: $handle) { id }
-}
-GRAPHQL;
-
-        $response = \Illuminate\Support\Facades\Http::timeout(15)
-            ->acceptJson()
-            ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
-            ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
-                'query' => $query,
-                'variables' => ['handle' => $collectionHandle],
-            ]);
-
-        $data = $response->json();
-        $collectionId = Arr::get($data, 'data.collection.id');
+        $collectionId = $this->catalog->resolveCollectionGid($integration, (string) $collectionHandle);
 
         if (empty($collectionId)) {
             throw new \RuntimeException("Collection '{$collectionHandle}' not found on Shopify.");
@@ -631,7 +704,7 @@ mutation collectionRemoveProducts($id: ID!, $productIds: [ID!]!) {
 GRAPHQL;
         }
 
-        $result = \Illuminate\Support\Facades\Http::timeout(15)
+        $result = Http::timeout(15)
             ->acceptJson()
             ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
             ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [

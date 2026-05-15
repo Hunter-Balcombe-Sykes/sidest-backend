@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\Api\Internal\EmbeddedProductSettingsController;
+use App\Http\Requests\Api\Internal\Embedded\UpdateProductSettingsRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
 // Backs sidest-product-settings Shopify admin UI extension.
@@ -43,6 +45,23 @@ function seedEmbeddedShopifyIntegration(string $brandId, string $shopDomain, arr
 function makeProductSettingsRequest(string $brandId, array $query = [], array $body = [], string $method = 'GET'): Request
 {
     $request = Request::create('/internal/embedded/product-settings', $method, array_merge($query, $body));
+    $request->attributes->set('embedded_professional_id', $brandId);
+
+    return $request;
+}
+
+// PATCH /internal/embedded/product-settings is now type-hinted to
+// UpdateProductSettingsRequest (SEC-1). Direct controller-method tests must
+// construct that subclass — passing a plain Request TypeErrors before any
+// code in the controller runs.
+function makeProductSettingsUpdateRequest(string $brandId, array $body): UpdateProductSettingsRequest
+{
+    $request = UpdateProductSettingsRequest::create('/internal/embedded/product-settings', 'PATCH', $body);
+    // Set the validator so $request->validated() works the same as in the
+    // production middleware-resolved path. The framework normally does this
+    // inside ValidatesWhenResolved::validateResolved before the controller
+    // is invoked.
+    $request->setValidator(validator($request->all(), $request->rules()));
     $request->attributes->set('embedded_professional_id', $brandId);
 
     return $request;
@@ -123,12 +142,20 @@ it('parses metafields + variants from a single GraphQL fetch', function () {
 });
 
 it('returns 422 from update() when product_gid or field is missing', function () {
-    seedEmbeddedShopifyIntegration($this->brandId, $this->shopDomain);
+    // Validation now lives on UpdateProductSettingsRequest (SEC-1), so this
+    // 422 surfaces as a ValidationException at FormRequest-resolution time
+    // rather than from a controller short-circuit. We exercise the rules
+    // directly here — UpdateProductSettingsRequestValidationTest covers
+    // every rule branch in finer detail.
+    $req = UpdateProductSettingsRequest::create('/dummy', 'PATCH', [
+        'product_gid' => $this->productGid,
+        // 'field' missing on purpose
+    ]);
 
-    $request = makeProductSettingsRequest($this->brandId, [], ['product_gid' => $this->productGid], 'PATCH');
-    $response = $this->controller->update($request);
+    $v = Validator::make($req->all(), $req->rules());
 
-    expect($response->getStatusCode())->toBe(422);
+    expect($v->fails())->toBeTrue();
+    expect($v->errors()->has('field'))->toBeTrue();
 });
 
 it('saves a boolean metafield via Admin GraphQL with correct namespace/key/type', function () {
@@ -142,11 +169,11 @@ it('saves a boolean metafield via Admin GraphQL with correct namespace/key/type'
             ->push(['data' => ['productUpdate' => ['product' => ['id' => $this->productGid], 'userErrors' => []]]], 200),
     ]);
 
-    $request = makeProductSettingsRequest($this->brandId, [], [
+    $request = makeProductSettingsUpdateRequest($this->brandId, [
         'product_gid' => $this->productGid,
         'field' => 'active',
         'value' => false,
-    ], 'PATCH');
+    ]);
     $response = $this->controller->update($request);
 
     expect($response->getStatusCode())->toBe(200);
@@ -186,11 +213,11 @@ it('returns 422 when the saveMetafield mutation returns userErrors', function ()
             ], 200),
     ]);
 
-    $request = makeProductSettingsRequest($this->brandId, [], [
+    $request = makeProductSettingsUpdateRequest($this->brandId, [
         'product_gid' => $this->productGid,
         'field' => 'commission_override',
         'value' => 0.25,
-    ], 'PATCH');
+    ]);
     $response = $this->controller->update($request);
 
     expect($response->getStatusCode())->toBe(422);
@@ -201,11 +228,11 @@ it('rejects toggleCollection when the brand has no favourites collection handle'
     // Integration row exists but provider_metadata has no collection handle.
     seedEmbeddedShopifyIntegration($this->brandId, $this->shopDomain);
 
-    $request = makeProductSettingsRequest($this->brandId, [], [
+    $request = makeProductSettingsUpdateRequest($this->brandId, [
         'product_gid' => $this->productGid,
         'field' => 'add_to_favourites',
         'value' => true,
-    ], 'PATCH');
+    ]);
     $response = $this->controller->update($request);
 
     expect($response->getStatusCode())->toBe(422);
@@ -243,11 +270,11 @@ it('saves variant enabled states only for variants whose state actually changed'
             ->push(['data' => ['productVariantUpdate' => ['productVariant' => ['id' => 'gid://shopify/ProductVariant/2'], 'userErrors' => []]]], 200),
     ]);
 
-    $request = makeProductSettingsRequest($this->brandId, [], [
+    $request = makeProductSettingsUpdateRequest($this->brandId, [
         'product_gid' => $this->productGid,
         'field' => 'disabled_variant_gids',
         'value' => ['gid://shopify/ProductVariant/2'],
-    ], 'PATCH');
+    ]);
     $response = $this->controller->update($request);
 
     expect($response->getStatusCode())->toBe(200);
@@ -257,15 +284,17 @@ it('saves variant enabled states only for variants whose state actually changed'
 });
 
 it('returns 422 on an unknown field', function () {
-    seedEmbeddedShopifyIntegration($this->brandId, $this->shopDomain);
-
-    $request = makeProductSettingsRequest($this->brandId, [], [
+    // Unknown fields are now rejected at FormRequest validation (allowlist
+    // 'in:' rule) before the controller's match block runs. The validation
+    // layer is a stricter gate than the previous controller throw.
+    $req = UpdateProductSettingsRequest::create('/dummy', 'PATCH', [
         'product_gid' => $this->productGid,
         'field' => 'totally_made_up',
         'value' => 'whatever',
-    ], 'PATCH');
-    $response = $this->controller->update($request);
+    ]);
 
-    expect($response->getStatusCode())->toBe(422);
-    expect(json_decode($response->getContent(), true)['message'])->toContain('Unknown field');
+    $v = Validator::make($req->all(), $req->rules());
+
+    expect($v->fails())->toBeTrue();
+    expect($v->errors()->has('field'))->toBeTrue();
 });

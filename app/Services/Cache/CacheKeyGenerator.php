@@ -381,4 +381,16 @@ class CacheKeyGenerator
     {
         return "embedded:product-active:{$professionalId}:{$productId}";
     }
+
+    /**
+     * Per-product full settings payload shown in the embedded Shopify admin
+     * product-settings extension (metafields + variants + collection membership
+     * + global settings). Mirrors embeddedProductAnalytics in shape; busted by
+     * EmbeddedProductSettingsController on every successful patch so the next
+     * mount sees the new value within a request, not a 5-minute TTL.
+     */
+    public static function embeddedProductSettings(string $professionalId, string $productId): string
+    {
+        return "embedded:product-settings:{$professionalId}:{$productId}";
+    }
 }
