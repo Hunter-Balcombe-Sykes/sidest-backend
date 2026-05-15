@@ -316,14 +316,24 @@ class ProfessionalAnalyticsController extends ApiController
             }
 
             try {
-                // Top sections (total opens)
+                // Top sections (total opens) — block_type allowlist mirrors the
+                // ingest-side `partna.section_block_types` config so a block_type
+                // accepted on /public/analytics/clicks is also counted here.
+                $trackableSectionTypes = collect(config('partna.section_block_types', [
+                    'gallery', 'services', 'shop', 'booking',
+                ]))
+                    ->filter(fn ($type) => is_string($type) && trim($type) !== '')
+                    ->map(fn (string $type) => strtolower(trim($type)))
+                    ->values()
+                    ->all();
+
                 $topSections = DB::table('analytics.link_clicks as lc')
                     ->join('site.blocks as b', 'b.id', '=', 'lc.link_block_id')
                     ->where('lc.professional_id', $professional->id)
                     ->whereBetween('lc.occurred_at', [$from, $to])
                     ->whereNull('b.deleted_at')
                     ->whereRaw("LOWER(COALESCE(b.block_group, '')) = 'sections'")
-                    ->whereRaw("LOWER(COALESCE(b.block_type, '')) IN ('gallery', 'services', 'shop', 'booking')")
+                    ->whereIn(DB::raw("LOWER(COALESCE(b.block_type, ''))"), $trackableSectionTypes)
                     ->selectRaw("LOWER(COALESCE(b.block_type, '')) as section_key, COUNT(*) as clicks")
                     ->groupByRaw("LOWER(COALESCE(b.block_type, ''))")
                     ->orderByDesc('clicks')
@@ -335,7 +345,17 @@ class ProfessionalAnalyticsController extends ApiController
                             'services' => 'Services & Pricing',
                             'shop' => 'Shop',
                             'booking' => 'Booking',
-                            default => ucfirst($sectionKey),
+                            'bio' => 'About',
+                            'documents' => 'File Preview',
+                            'newsletter' => 'Newsletter',
+                            'experience' => 'Experience',
+                            'credentials' => 'Credentials',
+                            'contact' => 'Contact',
+                            'contacts_collection' => 'Contacts',
+                            'barbershop_info' => 'Barbershop Info',
+                            'countdown' => 'Countdown',
+                            'sitepage_analytics' => 'Sitepage Analytics',
+                            default => ucfirst(str_replace('_', ' ', $sectionKey)),
                         };
 
                         return [
