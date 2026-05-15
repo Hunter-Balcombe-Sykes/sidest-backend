@@ -150,7 +150,7 @@ Route::get('/public/config/integrations', [PublicConfigController::class, 'integ
 Route::post('/public/analytics/pageviews', [AnalyticsController::class, 'pageview'])
     ->middleware('throttle:analytics');
 Route::post('/public/analytics/clicks', [AnalyticsController::class, 'click'])
-    ->middleware('throttle:analytics');
+    ->middleware(['throttle:analytics', 'throttle:analytics-click']);
 Route::post('/public/analytics/cart-events', [AnalyticsController::class, 'cartEvent'])
     ->middleware('throttle:analytics');
 Route::post('/public/analytics/section-seen', [AnalyticsController::class, 'sectionSeen'])
