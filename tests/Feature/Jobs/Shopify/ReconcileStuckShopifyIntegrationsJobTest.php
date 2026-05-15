@@ -145,6 +145,36 @@ it('leaves a transient-outage integration untouched (5xx)', function () {
     expect($integration->provider_metadata['disconnected_at'] ?? null)->toBeNull();
 });
 
+it('heals on 4xx non-401 (shop suspended / deleted)', function (int $status) {
+    // 403 = shop suspended; 404 = shop deleted / URL changed. Previously the job
+    // lumped these in with 5xx as "transient" and never auto-healed — the
+    // controller's validateShopifyAccessToken classified them as
+    // unexpected_status_<code> and the job now matches.
+    Http::fake([
+        'brand-a.myshopify.com/*' => Http::response('', $status),
+    ]);
+
+    $proId = reconcileSeedIntegration([
+        'shopify_shop_domain' => 'brand-a.myshopify.com',
+        'access_token' => 'shpat_dead',
+    ]);
+
+    (new ReconcileStuckShopifyIntegrationsJob)->handle();
+
+    $integration = DB::table('core.professional_integrations')->where('professional_id', $proId)->first();
+    expect($integration->access_token)->toBeNull();
+
+    $meta = json_decode($integration->provider_metadata, true);
+    expect($meta['reconcile_detection_signal'])->toBe('unexpected_status_'.$status);
+    expect($meta['disconnected_at'])->not->toBeNull();
+
+    $brand = DB::table('brand.brand_profiles')->where('professional_id', $proId)->first();
+    expect($brand->brand_status)->toBe(BrandStatus::Disconnected->value);
+})->with([
+    'shop suspended' => 403,
+    'shop deleted' => 404,
+]);
+
 it('skips integrations already marked disconnected (no Admin API call)', function () {
     Http::fake();  // Catches any unexpected call as an empty 200, but we'll assert nothing was called.
 

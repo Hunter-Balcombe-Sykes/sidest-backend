@@ -251,6 +251,46 @@ it('PurgeAffiliateProductSelectionsJob deletes all selections for the given bran
     expect(AffiliateProductSelection::query()->where('brand_professional_id', $otherBrandId)->count())->toBe(1);
 });
 
+it('app/uninstalled — releases cache slot when transaction throws so Shopify retry can proceed', function () {
+    // Without releasing the cache key on failure, a thrown exception in the
+    // mutation path would leave the slot claimed for the TTL window (24h
+    // default), silently swallowing every subsequent Shopify retry of the
+    // same webhook delivery. Mirrors the HandlesShopifyWebhook trait's
+    // try/catch + Cache::forget pattern.
+    $proId = (string) Str::uuid();
+    DB::table('core.professional_integrations')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $proId,
+        'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+        'shopify_shop_domain' => 'brand-a.myshopify.com',
+        'access_token' => 'shpat_alive',
+        'provider_metadata' => json_encode([]),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    seedBrandProfile($proId);
+
+    $webhookId = 'wh_release_test_'.Str::random(8);
+    $cacheKey = 'shopify:webhook:app-uninstalled:'.$webhookId;
+    expect(Cache::has($cacheKey))->toBeFalse();
+
+    DB::shouldReceive('transaction')->once()->andThrow(new \RuntimeException('simulated db failure'));
+
+    $payload = uninstalledPayload();
+    $body = json_encode($payload);
+    $headers = [
+        'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test-shop-secret'),
+        'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
+        'X-Shopify-Webhook-Id' => $webhookId,
+    ];
+
+    $this->withoutExceptionHandling();
+    expect(fn () => $this->postJson('/api/webhooks/shopify/app-uninstalled', $payload, $headers))
+        ->toThrow(\RuntimeException::class);
+
+    expect(Cache::has($cacheKey))->toBeFalse();
+});
+
 it('app/uninstalled — unknown shop_domain returns 200 without side effects', function () {
     $payload = uninstalledPayload();
     $body = json_encode($payload);

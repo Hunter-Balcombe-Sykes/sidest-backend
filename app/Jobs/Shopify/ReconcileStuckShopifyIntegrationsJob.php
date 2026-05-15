@@ -115,9 +115,16 @@ class ReconcileStuckShopifyIntegrationsJob implements ShouldQueue
 
     /**
      * Mirrors EmbeddedSetupController::validateShopifyAccessToken — see that method
-     * for the full contract. Conservative on uncertain responses: any non-2xx/non-401
-     * is treated as transient so we never wrongly null a token on a Shopify bug or
-     * an intermediary's quirk.
+     * for the full contract. Classification:
+     *   401                       → revoked (heal).
+     *   5xx / network exception   → transient outage (leave alone).
+     *   other non-2xx (403, 404)  → unexpected_status_<code>, treated as a definitive
+     *                               client error and healed. 403 = shop suspended;
+     *                               404 = shop deleted / URL changed. The controller
+     *                               makes the same distinction; previously the job
+     *                               lumped these in with 5xx and never auto-healed.
+     *   2xx + matching domain     → healthy.
+     *   2xx + mismatched domain   → shop_domain_mismatch (heal).
      *
      * @return array{valid: bool, reason: ?string}
      */
@@ -151,8 +158,12 @@ class ReconcileStuckShopifyIntegrationsJob implements ShouldQueue
             return ['valid' => false, 'reason' => 'invalid_token'];
         }
 
-        if ($response->status() >= 500 || ! $response->successful()) {
+        if ($response->status() >= 500) {
             return ['valid' => true, 'reason' => 'transient_outage'];
+        }
+
+        if (! $response->successful()) {
+            return ['valid' => false, 'reason' => 'unexpected_status_'.$response->status()];
         }
 
         $body = $response->json();
