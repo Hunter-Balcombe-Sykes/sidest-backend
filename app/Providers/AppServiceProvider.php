@@ -44,6 +44,19 @@ class AppServiceProvider extends ServiceProvider
                 metrics: $app->make(\App\Services\Shopify\Client\ShopifyMetrics::class),
             );
         });
+
+        // Stripe SDK client — services that DI \Stripe\StripeClient (e.g.
+        // StripeTransactionFetcher, StripeBalanceService) need the API key
+        // configured on the instance the container hands them. Without this
+        // binding, every Stripe call from those services raises
+        // AuthenticationException which their try/catch silently swallows,
+        // surfacing as empty transactions / zero balance on the dashboard.
+        $this->app->singleton(\Stripe\StripeClient::class, function () {
+            return new \Stripe\StripeClient(array_filter([
+                'api_key' => config('services.stripe.secret_key'),
+                'stripe_version' => config('services.stripe.api_version'),
+            ]));
+        });
     }
 
     /**
