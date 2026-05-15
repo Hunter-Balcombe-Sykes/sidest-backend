@@ -1256,6 +1256,33 @@ function setupLinkClicksTable(): void
 }
 
 /**
+ * analytics.section_views — Phase 5 storefront section-seen events.
+ */
+function setupSectionViewsTable(): void
+{
+    attachTestSchemas();
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS analytics.section_views (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        site_id TEXT NULL,
+        block_id TEXT NULL,
+        section_key TEXT NOT NULL,
+        occurred_at TEXT NULL,
+        session_id TEXT NULL,
+        visitor_id TEXT NULL,
+        ip_hash TEXT NULL,
+        user_agent TEXT NULL,
+        referrer TEXT NULL,
+        utm_source TEXT NULL,
+        utm_medium TEXT NULL,
+        utm_campaign TEXT NULL,
+        country_code TEXT NULL,
+        device_type TEXT NULL,
+        created_at TEXT NULL
+    )');
+}
+
+/**
  * notifications.email_subscriptions — minimal columns for broadcast fan-out tests.
  */
 function setupEmailSubscriptionsTable(): void

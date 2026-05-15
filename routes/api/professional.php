@@ -186,6 +186,8 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         // View Analytics
         Route::get('/analytics', [ProfessionalAnalyticsController::class, 'summary']);
         Route::get('/analytics/shop', [ProfessionalAnalyticsController::class, 'shopSummary']);
+        // Phase 5 — unified brand + affiliate stats surface across six time windows.
+        Route::get('/stats', [\App\Http\Controllers\Api\Professional\Analytics\StatsController::class, 'index']);
 
         // Links
         Route::get('/links', [ProfessionalLinkBlockController::class, 'index']);

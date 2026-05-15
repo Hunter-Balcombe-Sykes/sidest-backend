@@ -153,6 +153,8 @@ Route::post('/public/analytics/clicks', [AnalyticsController::class, 'click'])
     ->middleware('throttle:analytics');
 Route::post('/public/analytics/cart-events', [AnalyticsController::class, 'cartEvent'])
     ->middleware('throttle:analytics');
+Route::post('/public/analytics/section-seen', [AnalyticsController::class, 'sectionSeen'])
+    ->middleware('throttle:analytics');
 
 Route::post('/public/subscribe', [PublicEmailSubscriptionController::class, 'subscribe'])
     ->middleware('throttle:public-site');
