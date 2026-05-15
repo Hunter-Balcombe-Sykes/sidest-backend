@@ -131,6 +131,19 @@ Schedule::job(new \App\Jobs\Stripe\ReconcileStuckPayoutsJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: reconcile-stuck-payouts');
     });
 
+// LIFE-1: Daily reconciliation for Shopify integrations whose app/uninstalled
+// webhook was lost. HEAD-checks the Admin API token for every connected
+// integration; on 401 or shop-domain mismatch, auto-heals to Disconnected.
+// 02:03 UTC chosen to avoid collision with the 02:00 stripe-reconcile slot.
+Schedule::job(new \App\Jobs\Shopify\ReconcileStuckShopifyIntegrationsJob)
+    ->dailyAt('02:03')
+    ->timezone('UTC')
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: reconcile-stuck-shopify-integrations');
+    });
+
 Schedule::command('partna:analytics:purge-raw-events')
     ->dailyAt('03:00')
     ->withoutOverlapping()

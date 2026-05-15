@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\BrandStatus;
 use App\Jobs\Shopify\PurgeAffiliateProductSelectionsJob;
 use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\ProfessionalIntegration;
@@ -17,6 +18,23 @@ beforeEach(function () {
     setupBrandProfilesTable();
     Config::set('services.shopify.webhook_secret', 'test-shop-secret');
 });
+
+/**
+ * Seed a brand_profiles row for the given professional. Without this, the
+ * controller's BrandProfile::update() silently no-ops on 0 rows, masking
+ * regressions on the authoritative brand_status transition.
+ */
+function seedBrandProfile(string $proId, string $status = 'shopify_linked'): void
+{
+    DB::table('brand.brand_profiles')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $proId,
+        'brand_status' => $status,
+        'setup_complete' => 1,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+}
 
 function uninstalledPayload(): array
 {
@@ -50,7 +68,7 @@ it('app/uninstalled — bad HMAC returns 401 and leaves integration intact', fun
     expect($row->access_token)->toBe('shpat_alive');
 });
 
-it('app/uninstalled — valid HMAC clears access_token and marks disconnected_reason', function () {
+it('app/uninstalled — valid HMAC clears access_token, transitions brand to disconnected, and marks disconnected_reason', function () {
     $proId = (string) Str::uuid();
     DB::table('core.professional_integrations')->insert([
         'id' => (string) Str::uuid(),
@@ -63,6 +81,7 @@ it('app/uninstalled — valid HMAC clears access_token and marks disconnected_re
         'created_at' => now(),
         'updated_at' => now(),
     ]);
+    seedBrandProfile($proId, 'shopify_configured');
 
     $payload = uninstalledPayload();
     $body = json_encode($payload);
@@ -81,6 +100,96 @@ it('app/uninstalled — valid HMAC clears access_token and marks disconnected_re
     expect($meta['webhooks_state'])->toBe('uninstalled');
     expect($meta['some_existing'])->toBe('value');  // Pre-existing keys preserved.
     expect($meta['disconnected_at'])->not->toBeNull();
+
+    // TEST-6: the authoritative state-machine write must actually happen — the
+    // BrandProfile::update path was previously untested because no brand_profiles
+    // row was seeded, so update(0 rows) was indistinguishable from a correct write.
+    $brandRow = DB::table('brand.brand_profiles')->where('professional_id', $proId)->first();
+    expect($brandRow->brand_status)->toBe(BrandStatus::Disconnected->value);
+    expect((int) $brandRow->setup_complete)->toBe(0);
+});
+
+it('app/uninstalled — duplicate delivery (same X-Shopify-Webhook-Id) is rejected by the cache dedup gate', function () {
+    // Bus::fake here only proves the job is not re-dispatched as a regression check;
+    // PurgeAffiliateProductSelectionsJob is ShouldBeUnique so the queue would dedup
+    // the job anyway — the controller dedup is what stops the rest of the mutation
+    // path (provider_metadata overwrite, brand_profile update, Log::info).
+    Bus::fake([PurgeAffiliateProductSelectionsJob::class]);
+
+    $proId = (string) Str::uuid();
+    DB::table('core.professional_integrations')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $proId,
+        'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+        'shopify_shop_domain' => 'brand-a.myshopify.com',
+        'access_token' => 'shpat_alive',
+        'provider_metadata' => json_encode([]),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    seedBrandProfile($proId);
+
+    $payload = uninstalledPayload();
+    $body = json_encode($payload);
+    $headers = [
+        'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test-shop-secret'),
+        'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
+        'X-Shopify-Webhook-Id' => 'wh_duplicate_test_001',
+    ];
+
+    // First delivery: processed. Asserting absence of duplicate key on the
+    // response — toMissing matches the cache-dedup pattern in HandlesShopifyWebhook.
+    // First delivery: processed. Asserting absence of duplicate key on the
+    // response — toMissing matches the cache-dedup pattern in HandlesShopifyWebhook.
+    $this->postJson('/api/webhooks/shopify/app-uninstalled', $payload, $headers)
+        ->assertOk()
+        ->assertJsonMissing(['duplicate' => true]);
+
+    // Second delivery: cache claim fails on Cache::add → controller short-circuits
+    // with duplicate=true marker (SEC-2 / LIFE-2). Without this gate, the second
+    // delivery re-runs the full mutation path and Log::info fires twice.
+    $this->postJson('/api/webhooks/shopify/app-uninstalled', $payload, $headers)
+        ->assertOk()
+        ->assertExactJson(['received' => true, 'duplicate' => true]);
+
+    Bus::assertDispatchedTimes(PurgeAffiliateProductSelectionsJob::class, 1);
+});
+
+it('app/uninstalled — second delivery after cache TTL expiry is still a no-op via disconnected_at guard', function () {
+    Bus::fake([PurgeAffiliateProductSelectionsJob::class]);
+
+    $proId = (string) Str::uuid();
+    DB::table('core.professional_integrations')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $proId,
+        'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+        'shopify_shop_domain' => 'brand-a.myshopify.com',
+        'access_token' => null,  // First delivery already cleared token.
+        'provider_metadata' => json_encode([
+            'disconnected_at' => '2026-05-14T00:00:00+00:00',
+            'disconnected_reason' => 'app_uninstalled',
+        ]),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    seedBrandProfile($proId, BrandStatus::Disconnected->value);
+
+    $payload = uninstalledPayload();
+    $body = json_encode($payload);
+
+    // No X-Shopify-Webhook-Id → cache dedup does not apply. The secondary guard
+    // (already-disconnected state) must short-circuit the handler.
+    $this->postJson('/api/webhooks/shopify/app-uninstalled', $payload, [
+        'X-Shopify-Hmac-SHA256' => signShopifyBody($body, 'test-shop-secret'),
+        'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
+    ])->assertOk();
+
+    // disconnected_at unchanged — the no-op path returns without overwriting state.
+    $row = DB::table('core.professional_integrations')->where('professional_id', $proId)->first();
+    $meta = json_decode($row->provider_metadata, true);
+    expect($meta['disconnected_at'])->toBe('2026-05-14T00:00:00+00:00');
+
+    Bus::assertNotDispatched(PurgeAffiliateProductSelectionsJob::class);
 });
 
 it('app/uninstalled — dispatches PurgeAffiliateProductSelectionsJob (Master Pattern 16)', function () {

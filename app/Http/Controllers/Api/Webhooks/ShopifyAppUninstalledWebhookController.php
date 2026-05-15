@@ -11,6 +11,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 // V2: Receives Shopify app/uninstalled webhooks. Clears access token and marks integration as disconnected.
@@ -22,14 +23,31 @@ class ShopifyAppUninstalledWebhookController extends ApiController
     {
         $rawBody = (string) $request->getContent();
         $signature = (string) $request->header('X-Shopify-Hmac-SHA256', '');
+        $webhookId = (string) $request->header('X-Shopify-Webhook-Id', '');
         $shopDomain = strtolower(trim((string) $request->header('X-Shopify-Shop-Domain', '')));
 
+        // 1. HMAC first — dedup state is never exposed without a valid signature.
+        //    Putting dedup or any state check before HMAC would let unauthenticated
+        //    callers probe whether a webhook ID is known.
         if (! $this->isValidShopifyHmac($rawBody, $signature)) {
             Log::warning('Shopify app/uninstalled webhook: invalid HMAC signature', [
                 'shop_domain' => $shopDomain,
             ]);
 
             return $this->error('invalid signature', 401);
+        }
+
+        // 2. Cache-backed dedup gate (SEC-2 / LIFE-2). Cache::add is atomic on Redis
+        //    (SETNX), so concurrent retries cannot both pass. Mirrors the canonical
+        //    pattern in HandlesShopifyWebhook — inlined here because this controller
+        //    pre-dates the trait and does inline mutations rather than dispatching a
+        //    job. X-Shopify-Webhook-Id is absent only for manual / test deliveries;
+        //    those fall through and rely on the secondary metadata guard below.
+        if ($webhookId !== '') {
+            $cacheKey = 'shopify:webhook:app-uninstalled:'.$webhookId;
+            if (! Cache::add($cacheKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
+                return $this->success(['received' => true, 'duplicate' => true]);
+            }
         }
 
         $integration = ProfessionalIntegration::query()
@@ -46,6 +64,13 @@ class ShopifyAppUninstalledWebhookController extends ApiController
         }
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
+
+        // 3. Secondary idempotency guard — durable across cache TTL expiry. Shopify's
+        //    retry window can exceed the cache TTL (24h default); if the second delivery
+        //    lands after expiry, the cache dedup misses but disconnected_at still wins.
+        if (! empty($metadata['disconnected_at'])) {
+            return $this->success(['received' => true, 'duplicate' => true]);
+        }
         $metadata['disconnected_at'] = now()->toIso8601String();
         $metadata['disconnected_reason'] = 'app_uninstalled';
         $metadata['webhook_registration_state'] = 'uninstalled';
