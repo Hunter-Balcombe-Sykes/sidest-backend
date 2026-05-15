@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Internal\EmbeddedSetupController;
 use App\Services\Cache\CacheKeyGenerator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 beforeEach(function () {
@@ -28,7 +29,10 @@ it('serves the overview payload from cache without hitting the database', functi
         60,
     );
 
-    DB::shouldReceive('table')->never();
+    // Spy proxies real DB calls, so an accidental cold-miss surfaces as a
+    // real missing-table failure (loud), not a Mockery expectation violation
+    // (silently misleading). We then assert table() was never invoked.
+    DB::spy();
 
     $request = Request::create('/internal/embedded/overview', 'GET');
     $request->attributes->set('embedded_professional_id', $this->professionalId);
@@ -37,4 +41,6 @@ it('serves the overview payload from cache without hitting the database', functi
     $data = json_decode($response->getContent(), true);
 
     expect($data)->toBe($cached);
+
+    DB::shouldNotHaveReceived('table');
 });
